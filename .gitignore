@@ -59,4 +59,8 @@ chroma_db/
 *.tmp
 *.bak
 *.swp
-.trae/
+
+# Development test scripts
+dev_test/
+
+references/
