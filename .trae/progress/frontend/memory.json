@@ -2,7 +2,7 @@
   "agent_id": "agent_1",
   "agent_name": "前端开发Agent",
   "created_at": "2026-03-27T00:00:00Z",
-  "last_updated": "2026-03-28T20:00:00Z",
+  "last_updated": "2026-03-28T23:00:00Z",
   "completed_task_ids": [
     "frontend_001",
     "frontend_002",
@@ -16,16 +16,21 @@
     "frontend_010",
     "frontend_011",
     "frontend_012",
+    "frontend_013",
     "frontend_014",
     "frontend_015",
-    "frontend_017"
-  ],
-  "current_task": null,
-  "pending_tasks": [
+    "frontend_016",
+    "frontend_017",
     "frontend_018",
     "frontend_019",
     "frontend_020",
     "frontend_021"
+  ],
+  "current_task": null,
+  "pending_tasks": [
+    "frontend_022",
+    "frontend_023",
+    "frontend_024"
   ],
   "key_decisions": [
     "使用React + TypeScript",
@@ -34,6 +39,7 @@
     "使用Zustand状态管理",
     "使用axios作为HTTP客户端",
     "配置Vite代理转发API请求",
-    "实现AI生成章节功能对接agents API"
+    "实现AI生成章节功能对接agents API",
+    "实现一致性检查和伏笔管理界面"
   ]
 }
