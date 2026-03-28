@@ -19,6 +19,7 @@ from app.rag import router as rag_router
 from app.agents import router as agents_router
 from app.generation import router as generation_router
 from app.consistency import router as consistency_router
+from app.workflows import router as workflows_router
 
 from app.auth.models import User
 from app.novels.models import Novel
@@ -71,6 +72,7 @@ app.include_router(rag_router, prefix="/api/v1")
 app.include_router(agents_router, prefix="/api/v1")
 app.include_router(generation_router, prefix="/api/v1")
 app.include_router(consistency_router, prefix="/api/v1")
+app.include_router(workflows_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():

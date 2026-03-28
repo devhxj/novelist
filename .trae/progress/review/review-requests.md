@@ -8,72 +8,59 @@
 ---
 
 ## 统计信息
-- **总请求数**: 14
+- **总请求数**: 16
 - **待处理**: 2
-- **已完成**: 12
+- **已完成**: 14
 
 ---
 
 ## 待处理请求
 
-### REQ-20260328-012
+### REQ-20260328-014
 
 **基本信息**
-- **请求ID**: REQ-20260328-012
-- **请求时间**: 2026-03-28T21:30:00Z
-- **请求Agent**: agent_2 (后端开发Agent)
-- **任务ID**: backend_011
+- **请求ID**: REQ-20260328-014
+- **请求时间**: 2026-03-28T23:00:00Z
+- **请求Agent**: agent_1 (前端开发Agent)
+- **任务ID**: frontend_018-021
 - **状态**: PENDING
 - **请求类型**: COMMIT
 
 **完成内容**
-1. ✅ 创建ConsistencyChecker服务检查角色、情节、时间线一致性
-2. ✅ 实现伏笔管理模型（Foreshadowing）追踪挖坑/填坑
-3. ✅ 角色一致性检查：性格、能力、关系前后矛盾检测
-4. ✅ 情节一致性检查：逻辑漏洞、因果关系检测
-5. ✅ 时间线一致性检查：事件时间顺序检测
-6. ✅ 伏笔状态检查：未解决伏笔追踪
-7. ✅ 集成LLM进行智能一致性分析
+1. ✅ 实现一致性检查界面（检查结果展示、问题标记、修改建议）
+2. ✅ 实现伏笔管理界面（列表、创建、解决、放弃）
+3. ✅ 创建consistency类型定义和服务
+4. ✅ 集成后端consistency API
+5. ✅ 更新路由配置
+
+**新增文件**
+- `frontend/src/types/consistency.ts` - 一致性检查类型定义
+- `frontend/src/services/consistencyService.ts` - 一致性检查API服务
+- `frontend/src/pages/consistency/ConsistencyCheck.tsx` - 一致性检查页面
+- `frontend/src/pages/consistency/ForeshadowingList.tsx` - 伏笔管理页面
 
 **修改文件**
-- `backend/app/foreshadowing/models.py` - 伏笔数据模型
-- `backend/app/foreshadowing/schemas.py` - Pydantic验证模型
-- `backend/app/foreshadowing/__init__.py`
-- `backend/app/core/consistency_checker.py` - 一致性检查服务
-- `backend/app/consistency/router.py` - API路由
-- `backend/app/consistency/__init__.py`
-- `backend/app/main.py` - 注册consistency路由
-- `backend/app/novels/models.py` - 添加foreshadowings关系
+- `frontend/src/routes.tsx` - 添加一致性检查路由
 
 **技术特性**
-- 四种一致性检查类型（角色、情节、时间线、伏笔）
-- 伏笔生命周期管理（创建、解决、放弃）
-- LLM智能分析角色和情节一致性
-- 问题严重程度分级（error/warning/info）
-- 伏笔统计和解决率计算
-
-**API端点**
-- POST /api/v1/consistency/novels/{novel_id}/check
-- GET /api/v1/consistency/novels/{novel_id}/foreshadowings
-- POST /api/v1/consistency/novels/{novel_id}/foreshadowings
-- GET/PUT /api/v1/consistency/foreshadowings/{id}
-- POST /api/v1/consistency/foreshadowings/{id}/resolve
-- POST /api/v1/consistency/foreshadowings/{id}/abandon
-- GET /api/v1/consistency/novels/{novel_id}/foreshadowings/unresolved
-- GET /api/v1/consistency/novels/{novel_id}/foreshadowings/statistics
+- 一致性检查类型选择（角色/情节/时间线/伏笔）
+- 检查结果可视化展示（统计、分类、详情）
+- 伏笔管理完整CRUD功能
+- 伏笔状态管理（未解决/已解决/已放弃）
+- 重要程度星级评分
+- 表单验证和错误处理
 
 **Commit建议**
 ```
-feat(backend): implement consistency check system
+feat(frontend): implement consistency check and foreshadowing management
 
-- Add ConsistencyChecker service for multi-type consistency validation
-- Add Foreshadowing model for tracking plot holes and resolutions
-- Implement character consistency check with LLM analysis
-- Implement plot consistency check for logic gaps
-- Implement timeline consistency check for event ordering
-- Implement foreshadowing status tracking
-- Add consistency and foreshadowing API endpoints
-- Integrate LLM for intelligent consistency analysis
+- Add consistency check interface with type selection
+- Add foreshadowing management (list, create, resolve, abandon)
+- Add consistency type definitions and API service
+- Integrate backend consistency API
+- Add visualization for check results (statistics, categories, details)
+- Add foreshadowing status management and importance rating
+- Add form validation and error handling
 ```
 
 **Review Agent填写**
@@ -84,53 +71,56 @@ feat(backend): implement consistency check system
 
 ---
 
-### REQ-20260328-011
+### REQ-20260328-013
 
 **基本信息**
-- **请求ID**: REQ-20260328-011
-- **请求时间**: 2026-03-28T20:00:00Z
-- **请求Agent**: agent_1 (前端开发Agent)
-- **任务ID**: frontend_009-017
+- **请求ID**: REQ-20260328-013
+- **请求时间**: 2026-03-28T22:30:00Z
+- **请求Agent**: agent_2 (后端开发Agent)
+- **任务ID**: backend_012
 - **状态**: PENDING
 - **请求类型**: COMMIT
 
 **完成内容**
-1. ✅ 实现小说编辑页面（支持修改标题、类型、简介、状态）
-2. ✅ 实现角色管理完整功能（列表、详情、创建）
-3. ✅ 实现章节管理完整功能（列表、详情、创建）
-4. ✅ 实现AI生成章节功能（对接agents API）
-5. ✅ 完善所有页面的错误处理和用户反馈
+1. ✅ 基于LangGraph实现章节生成工作流
+2. ✅ WorkflowState状态管理：上下文、生成内容、审核结果、一致性结果
+3. ✅ 工作流节点：准备上下文→生成内容→审核内容→一致性检查→保存章节→更新记忆
+4. ✅ 条件路由：审核不通过/一致性有问题时自动重试（最多3次）
+5. ✅ MemorySaver持久化工作流状态
+6. ✅ 异步后台任务执行
 
 **修改文件**
-- `frontend/src/pages/novel/NovelEdit.tsx` - 小说编辑页面
-- `frontend/src/pages/character/CharacterList.tsx` - 角色列表页面
-- `frontend/src/pages/character/CharacterDetail.tsx` - 角色详情页面
-- `frontend/src/pages/character/CharacterCreate.tsx` - 角色创建页面
-- `frontend/src/pages/chapter/ChapterList.tsx` - 章节列表页面
-- `frontend/src/pages/chapter/ChapterDetail.tsx` - 章节详情页面
-- `frontend/src/pages/chapter/ChapterCreate.tsx` - 章节创建页面
-- `frontend/src/pages/chapter/ChapterGenerate.tsx` - AI生成章节页面
+- `backend/app/workflows/langgraph_workflow.py` - LangGraph工作流实现
+- `backend/app/workflows/router.py` - 工作流API路由
+- `backend/app/workflows/__init__.py`
+- `backend/app/main.py` - 注册workflows路由
+- `requirements.txt` - 添加langgraph==0.0.20依赖
 
 **技术特性**
-- 完整的CRUD功能实现
-- 表单验证和错误处理
-- 加载状态和用户反馈
-- AI生成章节对接后端agents API
-- 支持生成参数配置（温度、字数、风格）
-- 生成内容预览和保存功能
+- StateGraph定义工作流状态和节点
+- 条件边实现动态路由
+- 工作流状态持久化
+- 集成WriterAgent和ReviewerAgent
+- 集成ConsistencyChecker
+- 自动重试机制
+
+**API端点**
+- POST /api/v1/workflows/novels/{novel_id}/chapters/{chapter_number}/generate
+- GET /api/v1/workflows/tasks/{task_id}/status
+- GET /api/v1/workflows/novels/{novel_id}/workflows
+- GET /api/v1/workflows/health
 
 **Commit建议**
 ```
-feat(frontend): implement CRUD interfaces and AI generation
+feat(backend): implement LangGraph workflow for chapter generation
 
-- Implement novel edit page with status management
-- Implement character management (list, detail, create)
-- Implement chapter management (list, detail, create)
-- Implement AI chapter generation with agents API integration
-- Add form validation and error handling
-- Add loading states and user feedback
-- Support generation parameters (temperature, tokens, style)
-- Add content preview and save functionality
+- Add ChapterWorkflow with StateGraph for multi-step generation
+- Implement workflow nodes: context prep, generation, review, consistency check
+- Add conditional routing for automatic revision on failure
+- Integrate WriterAgent, ReviewerAgent, ConsistencyChecker
+- Add MemorySaver for workflow state persistence
+- Support async background task execution
+- Add workflow API endpoints
 ```
 
 **Review Agent填写**
@@ -142,6 +132,22 @@ feat(frontend): implement CRUD interfaces and AI generation
 ---
 
 ## 已完成请求（历史记录）
+
+### REQ-20260328-012
+- **请求时间**: 2026-03-28T21:30:00Z
+- **请求Agent**: agent_2 (后端开发Agent)
+- **任务ID**: backend_011
+- **处理时间**: 2026-03-28T22:00:00Z
+- **结果**: APPROVED
+- **提交哈希**: 39774af
+
+### REQ-20260328-011
+- **请求时间**: 2026-03-28T20:00:00Z
+- **请求Agent**: agent_1 (前端开发Agent)
+- **任务ID**: frontend_009-017
+- **处理时间**: 2026-03-28T20:30:00Z
+- **结果**: APPROVED
+- **提交哈希**: 29c2410
 
 ### REQ-20260328-010
 - **请求时间**: 2026-03-28T19:30:00Z

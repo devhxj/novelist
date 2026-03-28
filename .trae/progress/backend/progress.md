@@ -18,8 +18,8 @@
 - MCP工具开发
 
 ## 当前任务
-- 任务ID: backend_012
-- 任务描述: 实现LangGraph工作流
+- 任务ID: backend_013
+- 任务描述: 实现情节规划系统
 - 状态: 待开始
 
 ## 任务列表
@@ -42,8 +42,8 @@
 
 ### 阶段3: Agent系统完善
 - [x] backend_011: 实现一致性检查系统 ✅ (2026-03-28)
-- [ ] backend_012: 实现LangGraph工作流 ← 当前任务
-- [ ] backend_013: 实现情节规划系统
+- [x] backend_012: 实现LangGraph工作流 ✅ (2026-03-28)
+- [ ] backend_013: 实现情节规划系统 ← 当前任务
 
 ### 阶段4: 高级功能开发
 - [ ] backend_014: 实现文本生成系统
@@ -205,6 +205,28 @@
   - POST /api/v1/consistency/foreshadowings/{foreshadowing_id}/abandon - 放弃伏笔
   - GET /api/v1/consistency/novels/{novel_id}/foreshadowings/unresolved - 获取未解决伏笔
   - GET /api/v1/consistency/novels/{novel_id}/foreshadowings/statistics - 获取伏笔统计
+
+### backend_012 - 实现LangGraph工作流
+- 完成时间: 2026-03-28
+- 关键成果:
+  - 基于LangGraph实现章节生成工作流
+  - WorkflowState状态管理：上下文、生成内容、审核结果、一致性结果
+  - 工作流节点：准备上下文→生成内容→审核内容→一致性检查→保存章节→更新记忆
+  - 条件路由：审核不通过/一致性有问题时自动重试（最多3次）
+  - MemorySaver持久化工作流状态
+  - 异步后台任务执行
+- 文件创建:
+  - backend/app/workflows/langgraph_workflow.py - LangGraph工作流实现
+  - backend/app/workflows/router.py - 工作流API路由
+  - backend/app/workflows/__init__.py
+- 文件修改:
+  - backend/app/main.py - 注册workflows路由
+  - requirements.txt - 添加langgraph==0.0.20依赖
+- API端点:
+  - POST /api/v1/workflows/novels/{novel_id}/chapters/{chapter_number}/generate - 工作流生成章节
+  - GET /api/v1/workflows/tasks/{task_id}/status - 获取工作流状态
+  - GET /api/v1/workflows/novels/{novel_id}/workflows - 获取工作流列表
+  - GET /api/v1/workflows/health - 健康检查
 
 ## 依赖关系
 - ✅ API接口文档: `.trae/documents/api-specification.md`
