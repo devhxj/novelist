@@ -8,13 +8,81 @@
 ---
 
 ## 统计信息
-- **总请求数**: 12
+- **总请求数**: 14
 - **待处理**: 2
-- **已完成**: 10
+- **已完成**: 12
 
 ---
 
 ## 待处理请求
+
+### REQ-20260328-012
+
+**基本信息**
+- **请求ID**: REQ-20260328-012
+- **请求时间**: 2026-03-28T21:30:00Z
+- **请求Agent**: agent_2 (后端开发Agent)
+- **任务ID**: backend_011
+- **状态**: PENDING
+- **请求类型**: COMMIT
+
+**完成内容**
+1. ✅ 创建ConsistencyChecker服务检查角色、情节、时间线一致性
+2. ✅ 实现伏笔管理模型（Foreshadowing）追踪挖坑/填坑
+3. ✅ 角色一致性检查：性格、能力、关系前后矛盾检测
+4. ✅ 情节一致性检查：逻辑漏洞、因果关系检测
+5. ✅ 时间线一致性检查：事件时间顺序检测
+6. ✅ 伏笔状态检查：未解决伏笔追踪
+7. ✅ 集成LLM进行智能一致性分析
+
+**修改文件**
+- `backend/app/foreshadowing/models.py` - 伏笔数据模型
+- `backend/app/foreshadowing/schemas.py` - Pydantic验证模型
+- `backend/app/foreshadowing/__init__.py`
+- `backend/app/core/consistency_checker.py` - 一致性检查服务
+- `backend/app/consistency/router.py` - API路由
+- `backend/app/consistency/__init__.py`
+- `backend/app/main.py` - 注册consistency路由
+- `backend/app/novels/models.py` - 添加foreshadowings关系
+
+**技术特性**
+- 四种一致性检查类型（角色、情节、时间线、伏笔）
+- 伏笔生命周期管理（创建、解决、放弃）
+- LLM智能分析角色和情节一致性
+- 问题严重程度分级（error/warning/info）
+- 伏笔统计和解决率计算
+
+**API端点**
+- POST /api/v1/consistency/novels/{novel_id}/check
+- GET /api/v1/consistency/novels/{novel_id}/foreshadowings
+- POST /api/v1/consistency/novels/{novel_id}/foreshadowings
+- GET/PUT /api/v1/consistency/foreshadowings/{id}
+- POST /api/v1/consistency/foreshadowings/{id}/resolve
+- POST /api/v1/consistency/foreshadowings/{id}/abandon
+- GET /api/v1/consistency/novels/{novel_id}/foreshadowings/unresolved
+- GET /api/v1/consistency/novels/{novel_id}/foreshadowings/statistics
+
+**Commit建议**
+```
+feat(backend): implement consistency check system
+
+- Add ConsistencyChecker service for multi-type consistency validation
+- Add Foreshadowing model for tracking plot holes and resolutions
+- Implement character consistency check with LLM analysis
+- Implement plot consistency check for logic gaps
+- Implement timeline consistency check for event ordering
+- Implement foreshadowing status tracking
+- Add consistency and foreshadowing API endpoints
+- Integrate LLM for intelligent consistency analysis
+```
+
+**Review Agent填写**
+- **处理时间**: 
+- **评审结果**: 
+- **修改建议**: 
+- **提交哈希**: 
+
+---
 
 ### REQ-20260328-011
 
@@ -73,67 +141,15 @@ feat(frontend): implement CRUD interfaces and AI generation
 
 ---
 
-### REQ-20260328-010
+## 已完成请求（历史记录）
 
-**基本信息**
-- **请求ID**: REQ-20260328-010
+### REQ-20260328-010
 - **请求时间**: 2026-03-28T19:30:00Z
 - **请求Agent**: agent_2 (后端开发Agent)
 - **任务ID**: backend_010
-- **状态**: PENDING
-- **请求类型**: COMMIT
-
-**完成内容**
-1. ✅ 实现章节生成完整流程
-2. ✅ 创建ChapterGenerationService
-3. ✅ 集成RAG和Agent系统
-4. ✅ 实现异步后台任务
-5. ✅ 任务状态持久化
-
-**新增文件**
-- `backend/app/core/chapter_generation.py` - 章节生成服务
-- `backend/app/generation/__init__.py` - 模块导出
-- `backend/app/generation/router.py` - API路由
-
-**修改文件**
-- `backend/app/main.py` - 注册generation路由
-
-**API接口**
-- POST /api/v1/generation/novels/{novel_id}/chapters/{chapter_number} - 生成章节
-- POST /api/v1/generation/novels/{novel_id}/chapters/{chapter_id}/regenerate - 重新生成
-- GET /api/v1/generation/novels/{novel_id}/tasks - 获取任务列表
-- GET /api/v1/generation/tasks/{task_id} - 获取任务状态
-
-**技术特性**
-- 异步后台任务生成章节
-- 自动构建上下文（前文摘要、角色、情节）
-- 集成RAG检索和Agent系统
-- 任务状态持久化追踪
-- 自动向量化索引生成内容
-- 支持章节重新生成
-
-**Commit建议**
-```
-feat(backend): implement chapter generation workflow
-
-- Add ChapterGenerationService for end-to-end generation
-- Integrate RAG context building
-- Integrate Agent system for content generation
-- Add async background task support
-- Add task status persistence
-- Auto-index generated content to vector store
-- Support chapter regeneration with feedback
-```
-
-**Review Agent填写**
-- **处理时间**: 
-- **评审结果**: 
-- **修改建议**: 
-- **提交哈希**: 
-
----
-
-## 已完成请求（历史记录）
+- **处理时间**: 2026-03-28T20:15:00Z
+- **结果**: APPROVED
+- **提交哈希**: fdcf565
 
 ### REQ-20260328-009
 - **请求时间**: 2026-03-28T19:00:00Z
@@ -147,60 +163,4 @@ feat(backend): implement chapter generation workflow
 - **请求Agent**: agent_2 (后端开发Agent)
 - **任务ID**: backend_009 + 重构
 - **处理时间**: 2026-03-28T18:45:00Z
-- **结果**: APPROVED
-
-### REQ-20260328-007
-- **请求时间**: 2026-03-28T18:00:00Z
-- **请求Agent**: agent_2 (后端开发Agent)
-- **任务ID**: backend_009
-- **处理时间**: 2026-03-28T18:15:00Z
-- **结果**: APPROVED
-
-### REQ-20260328-006
-- **请求时间**: 2026-03-28T17:30:00Z
-- **请求Agent**: agent_2 (后端开发Agent)
-- **任务ID**: backend_008 (优化)
-- **处理时间**: 2026-03-28T17:45:00Z
-- **结果**: APPROVED
-
-### REQ-20260328-005
-- **请求时间**: 2026-03-28T17:00:00Z
-- **请求Agent**: agent_2 (后端开发Agent)
-- **任务ID**: backend_008
-- **处理时间**: 2026-03-28T17:15:00Z
-- **结果**: APPROVED
-
-### REQ-20260328-004
-- **请求时间**: 2026-03-28T16:30:00Z
-- **请求Agent**: agent_2 (后端开发Agent)
-- **任务ID**: backend_007 (修复)
-- **处理时间**: 2026-03-28T16:45:00Z
-- **结果**: APPROVED
-
-### REQ-20260328-003
-- **请求时间**: 2026-03-28T15:00:00Z
-- **请求Agent**: agent_2 (后端开发Agent)
-- **任务ID**: backend_007
-- **处理时间**: 2026-03-28T16:00:00Z
-- **结果**: APPROVED
-
-### REQ-20260328-002
-- **请求时间**: 2026-03-28T14:00:00Z
-- **请求Agent**: agent_2 (后端开发Agent)
-- **任务ID**: backend_006 (修复)
-- **处理时间**: 2026-03-28T14:30:00Z
-- **结果**: APPROVED
-
-### REQ-20260328-001
-- **请求时间**: 2026-03-28T12:00:00Z
-- **请求Agent**: agent_2 (后端开发Agent)
-- **任务ID**: backend_006
-- **处理时间**: 2026-03-28T13:30:00Z
-- **结果**: NEEDS_IMPROVEMENT (已修复)
-
-### REQ-20260327-001
-- **请求时间**: 2026-03-27T22:00:00Z
-- **请求Agent**: agent_2 (后端开发Agent)
-- **任务ID**: backend_004, backend_005
-- **处理时间**: 2026-03-27T23:00:00Z
 - **结果**: APPROVED

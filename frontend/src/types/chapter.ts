@@ -42,4 +42,5 @@ export interface ChapterListParams {
   page_size?: number
   status?: ChapterStatus
   order?: 'asc' | 'desc'
+  search?: string
 }
