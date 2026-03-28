@@ -7,8 +7,9 @@ from typing import Optional
 
 from app.core.database import get_db
 from app.core.response import ApiResponse
-from app.core.exceptions import NotFoundException, UnauthorizedException
+from app.core.exceptions import NotFoundException
 from app.core.auth import get_current_user
+from app.core.dependencies import NovelOwner
 from app.auth.models import User
 from .models import Novel
 from .schemas import NovelCreate, NovelUpdate
@@ -101,21 +102,10 @@ def create_novel(
 
 
 @router.get("/{novel_id}")
-def get_novel(
-    novel_id: int, 
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+def get_novel(novel: NovelOwner):
     """
     获取小说详情
     """
-    novel = db.query(Novel).filter(Novel.id == novel_id).first()
-    if novel is None:
-        raise NotFoundException("小说")
-    
-    if novel.author_id != current_user.id:
-        raise UnauthorizedException("无权访问此小说")
-    
     return ApiResponse.success({
         "id": novel.id,
         "title": novel.title,
@@ -148,36 +138,28 @@ def get_novel(
 
 @router.put("/{novel_id}")
 def update_novel(
-    novel_id: int, 
-    novel: NovelUpdate, 
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    novel: NovelOwner,
+    novel_data: NovelUpdate,
+    db: Session = Depends(get_db)
 ):
     """
     更新小说
     """
-    db_novel = db.query(Novel).filter(Novel.id == novel_id).first()
-    if db_novel is None:
-        raise NotFoundException("小说")
-    
-    if db_novel.author_id != current_user.id:
-        raise UnauthorizedException("无权修改此小说")
-    
-    update_data = novel.dict(exclude_unset=True)
+    update_data = novel_data.dict(exclude_unset=True)
     for key, value in update_data.items():
-        setattr(db_novel, key, value)
+        setattr(novel, key, value)
     
     db.commit()
-    db.refresh(db_novel)
+    db.refresh(novel)
     
     return ApiResponse.success(
         {
-            "id": db_novel.id,
-            "title": db_novel.title,
-            "genre": db_novel.genre,
-            "description": db_novel.description,
-            "status": db_novel.status,
-            "updated_at": db_novel.updated_at
+            "id": novel.id,
+            "title": novel.title,
+            "genre": novel.genre,
+            "description": novel.description,
+            "status": novel.status,
+            "updated_at": novel.updated_at
         },
         message="小说更新成功"
     )
@@ -185,21 +167,13 @@ def update_novel(
 
 @router.delete("/{novel_id}")
 def delete_novel(
-    novel_id: int, 
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    novel: NovelOwner,
+    db: Session = Depends(get_db)
 ):
     """
     删除小说
     """
-    db_novel = db.query(Novel).filter(Novel.id == novel_id).first()
-    if db_novel is None:
-        raise NotFoundException("小说")
-    
-    if db_novel.author_id != current_user.id:
-        raise UnauthorizedException("无权删除此小说")
-    
-    db.delete(db_novel)
+    db.delete(novel)
     db.commit()
     
     return ApiResponse.success(message="小说删除成功")

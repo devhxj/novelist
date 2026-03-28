@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.response import ApiResponse
-from app.core.exceptions import NotFoundException, UnauthorizedException
+from app.core.exceptions import NotFoundException
 from app.core.auth import get_current_user
+from app.core.dependencies import NovelOwner
 from app.core.context_builder import ContextBuilder
 from app.auth.models import User
 from app.novels.models import Novel
@@ -25,22 +26,11 @@ router = APIRouter(prefix="/rag", tags=["rag"])
 logger = logging.getLogger(__name__)
 
 
-def check_novel_ownership(db: Session, novel_id: int, user_id: int) -> Novel:
-    """检查小说所有权"""
-    novel = db.query(Novel).filter(Novel.id == novel_id).first()
-    if novel is None:
-        raise NotFoundException("小说")
-    if novel.author_id != user_id:
-        raise UnauthorizedException("无权访问此小说")
-    return novel
-
-
 @router.post("/novels/{novel_id}/search")
 def search_context(
-    novel_id: int,
+    novel: NovelOwner,
     request: RAGQueryRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """
     RAG语义检索
@@ -50,11 +40,10 @@ def search_context(
     - top_k: 返回结果数量
     - include_chapters: 限定章节范围
     """
-    logger.info(f"User {current_user.id} searching novel {novel_id}")
-    check_novel_ownership(db, novel_id, current_user.id)
+    logger.info(f"Searching novel {novel.id}")
     
     try:
-        builder = ContextBuilder(db, novel_id)
+        builder = ContextBuilder(db, novel.id)
         
         filters = {}
         if request.include_chapters:
@@ -81,7 +70,7 @@ def search_context(
         context_content = "\n\n---\n\n".join([c.content for c in chunks])
         
         rag_context = RAGContext(
-            novel_id=novel_id,
+            novel_id=novel.id,
             context_type=request.context_type,
             query=request.query,
             context_content=context_content,
@@ -95,7 +84,7 @@ def search_context(
         
         return ApiResponse.success({
             "context_id": rag_context.id,
-            "novel_id": novel_id,
+            "novel_id": novel.id,
             "context_type": request.context_type,
             "query": request.query,
             "context_content": context_content,
@@ -115,10 +104,9 @@ def search_context(
 
 @router.post("/novels/{novel_id}/writing-context")
 def get_writing_context(
-    novel_id: int,
+    novel: NovelOwner,
     request: WritingContextRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """
     获取写作上下文
@@ -129,11 +117,10 @@ def get_writing_context(
     - include_characters: 包含角色信息
     - include_plot_events: 包含情节线索
     """
-    logger.info(f"User {current_user.id} getting writing context for chapter {request.chapter_id}")
-    check_novel_ownership(db, novel_id, current_user.id)
+    logger.info(f"Getting writing context for chapter {request.chapter_id}")
     
     try:
-        builder = ContextBuilder(db, novel_id)
+        builder = ContextBuilder(db, novel.id)
         
         context_data = builder.build_writing_context(
             chapter_id=request.chapter_id,
@@ -165,12 +152,11 @@ def get_writing_context(
 
 @router.get("/novels/{novel_id}/contexts")
 def get_context_history(
-    novel_id: int,
+    novel: NovelOwner,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     context_type: str = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """
     获取上下文历史
@@ -179,9 +165,7 @@ def get_context_history(
     - page_size: 每页数量 (1-100)
     - context_type: 上下文类型筛选
     """
-    check_novel_ownership(db, novel_id, current_user.id)
-    
-    query = db.query(RAGContext).filter(RAGContext.novel_id == novel_id)
+    query = db.query(RAGContext).filter(RAGContext.novel_id == novel.id)
     
     if context_type:
         query = query.filter(RAGContext.context_type == context_type)
@@ -215,7 +199,9 @@ def get_context_detail(
     if not context:
         raise NotFoundException("上下文")
     
-    check_novel_ownership(db, context.novel_id, current_user.id)
+    if context.novel.author_id != current_user.id:
+        from app.core.exceptions import UnauthorizedException
+        raise UnauthorizedException("无权访问此上下文")
     
     return ApiResponse.success({
         "id": context.id,

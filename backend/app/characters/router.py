@@ -7,8 +7,9 @@ from typing import Optional
 
 from app.core.database import get_db
 from app.core.response import ApiResponse
-from app.core.exceptions import NotFoundException, UnauthorizedException
+from app.core.exceptions import NotFoundException
 from app.core.auth import get_current_user
+from app.core.dependencies import NovelOwner
 from app.auth.models import User
 from app.novels.models import Novel
 from .models import Character
@@ -17,24 +18,13 @@ from .schemas import CharacterCreate, CharacterUpdate
 router = APIRouter(prefix="/characters", tags=["characters"])
 
 
-def check_novel_ownership(db: Session, novel_id: int, user_id: int) -> Novel:
-    """检查小说所有权"""
-    novel = db.query(Novel).filter(Novel.id == novel_id).first()
-    if novel is None:
-        raise NotFoundException("小说")
-    if novel.author_id != user_id:
-        raise UnauthorizedException("无权访问此小说")
-    return novel
-
-
 @router.get("/novel/{novel_id}")
 def get_characters_by_novel(
-    novel_id: int,
+    novel: NovelOwner,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     search: Optional[str] = Query(None, max_length=50),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """
     获取小说角色列表
@@ -44,9 +34,7 @@ def get_characters_by_novel(
     - page_size: 每页数量
     - search: 角色名搜索
     """
-    check_novel_ownership(db, novel_id, current_user.id)
-    
-    query = db.query(Character).filter(Character.novel_id == novel_id)
+    query = db.query(Character).filter(Character.novel_id == novel.id)
     
     if search:
         query = query.filter(Character.name.contains(search))
@@ -79,7 +67,12 @@ def create_character(
     """
     创建角色
     """
-    check_novel_ownership(db, character.novel_id, current_user.id)
+    novel = db.query(Novel).filter(Novel.id == character.novel_id).first()
+    if novel is None:
+        raise NotFoundException("小说")
+    if novel.author_id != current_user.id:
+        from app.core.exceptions import UnauthorizedException
+        raise UnauthorizedException("无权访问此小说")
     
     db_character = Character(**character.dict())
     db.add(db_character)
@@ -113,7 +106,9 @@ def get_character(
     if character is None:
         raise NotFoundException("角色")
     
-    check_novel_ownership(db, character.novel_id, current_user.id)
+    if character.novel.author_id != current_user.id:
+        from app.core.exceptions import UnauthorizedException
+        raise UnauthorizedException("无权访问此角色")
     
     return ApiResponse.success({
         "id": character.id,
@@ -144,7 +139,9 @@ def update_character(
     if db_character is None:
         raise NotFoundException("角色")
     
-    check_novel_ownership(db, db_character.novel_id, current_user.id)
+    if db_character.novel.author_id != current_user.id:
+        from app.core.exceptions import UnauthorizedException
+        raise UnauthorizedException("无权修改此角色")
     
     update_data = character.dict(exclude_unset=True)
     for key, value in update_data.items():
@@ -178,7 +175,9 @@ def delete_character(
     if db_character is None:
         raise NotFoundException("角色")
     
-    check_novel_ownership(db, db_character.novel_id, current_user.id)
+    if db_character.novel.author_id != current_user.id:
+        from app.core.exceptions import UnauthorizedException
+        raise UnauthorizedException("无权删除此角色")
     
     db.delete(db_character)
     db.commit()

@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.response import ApiResponse
-from app.core.exceptions import NotFoundException, UnauthorizedException
+from app.core.exceptions import NotFoundException
 from app.core.auth import get_current_user
+from app.core.dependencies import NovelOwner
 from app.core.vector_store import vector_store, VectorStoreError
 from app.auth.models import User
 from app.novels.models import Novel
@@ -20,16 +21,6 @@ from .schemas import MemorySearchRequest, MemoryIndexRequest
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 logger = logging.getLogger(__name__)
-
-
-def check_novel_ownership(db: Session, novel_id: int, user_id: int) -> Novel:
-    """检查小说所有权"""
-    novel = db.query(Novel).filter(Novel.id == novel_id).first()
-    if novel is None:
-        raise NotFoundException("小说")
-    if novel.author_id != user_id:
-        raise UnauthorizedException("无权访问此小说")
-    return novel
 
 
 def split_text_into_chunks(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
@@ -51,18 +42,16 @@ def split_text_into_chunks(text: str, chunk_size: int = 500, overlap: int = 50) 
 
 @router.post("/novels/{novel_id}/index")
 def index_novel_memory(
-    novel_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    novel: NovelOwner,
+    db: Session = Depends(get_db)
 ):
     """索引小说所有章节到向量存储"""
-    logger.info(f"User {current_user.id} indexing novel {novel_id}")
-    check_novel_ownership(db, novel_id, current_user.id)
+    logger.info(f"Indexing novel {novel.id}")
     
     try:
-        chapters = db.query(Chapter).filter(Chapter.novel_id == novel_id).all()
+        chapters = db.query(Chapter).filter(Chapter.novel_id == novel.id).all()
         if not chapters:
-            logger.info(f"Novel {novel_id} has no chapters to index")
+            logger.info(f"Novel {novel.id} has no chapters to index")
             return ApiResponse.success(
                 {"chapters_indexed": 0, "total_chunks": 0},
                 message="没有章节需要索引"
@@ -90,13 +79,13 @@ def index_novel_memory(
                 })
             
             if chunk_data:
-                vector_store.add_chunks(novel_id, chunk_data)
+                vector_store.add_chunks(novel.id, chunk_data)
                 total_chunks += len(chunk_data)
         
-        logger.info(f"Novel {novel_id} indexed: {len(chapters)} chapters, {total_chunks} chunks")
+        logger.info(f"Novel {novel.id} indexed: {len(chapters)} chapters, {total_chunks} chunks")
         return ApiResponse.success(
             {
-                "novel_id": novel_id,
+                "novel_id": novel.id,
                 "chapters_indexed": len(chapters),
                 "total_chunks": total_chunks
             },
@@ -104,7 +93,7 @@ def index_novel_memory(
         )
         
     except VectorStoreError as e:
-        logger.error(f"VectorStore error while indexing novel {novel_id}: {e}")
+        logger.error(f"VectorStore error while indexing novel {novel.id}: {e}")
         return ApiResponse.error(
             code="MEMORY_001",
             message=f"索引失败: {str(e)}",
@@ -114,20 +103,18 @@ def index_novel_memory(
 
 @router.post("/novels/{novel_id}/chapters/{chapter_id}/index")
 def index_chapter_memory(
-    novel_id: int,
+    novel: NovelOwner,
     chapter_id: int,
     request: MemoryIndexRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """索引单个章节到向量存储"""
-    logger.info(f"User {current_user.id} indexing chapter {chapter_id} of novel {novel_id}")
-    check_novel_ownership(db, novel_id, current_user.id)
+    logger.info(f"Indexing chapter {chapter_id} of novel {novel.id}")
     
     try:
         chapter = db.query(Chapter).filter(
             Chapter.id == chapter_id,
-            Chapter.novel_id == novel_id
+            Chapter.novel_id == novel.id
         ).first()
         if chapter is None:
             raise NotFoundException("章节")
@@ -139,7 +126,7 @@ def index_chapter_memory(
                 message="章节内容为空"
             )
         
-        vector_store.delete_chapter_chunks(novel_id, chapter_id)
+        vector_store.delete_chapter_chunks(novel.id, chapter_id)
         
         chunks = split_text_into_chunks(
             chapter.content, 
@@ -162,7 +149,7 @@ def index_chapter_memory(
             })
         
         if chunk_data:
-            vector_store.add_chunks(novel_id, chunk_data)
+            vector_store.add_chunks(novel.id, chunk_data)
         
         logger.info(f"Chapter {chapter_id} indexed: {len(chunk_data)} chunks")
         return ApiResponse.success(
@@ -185,20 +172,18 @@ def index_chapter_memory(
 
 @router.post("/novels/{novel_id}/search")
 def search_memory(
-    novel_id: int,
+    novel: NovelOwner,
     request: MemorySearchRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     """语义检索小说内容"""
-    logger.info(f"User {current_user.id} searching novel {novel_id}: '{request.query[:50]}...'")
-    check_novel_ownership(db, novel_id, current_user.id)
+    logger.info(f"Searching novel {novel.id}: '{request.query[:50]}...'")
     
     try:
         start_time = time.time()
         
         results = vector_store.search(
-            novel_id=novel_id,
+            novel_id=novel.id,
             query=request.query,
             top_k=request.top_k,
             filters=request.filters
@@ -217,7 +202,7 @@ def search_memory(
                 "metadata": result["metadata"]
             })
         
-        logger.info(f"Search completed for novel {novel_id}: {len(formatted_results)} results in {search_time:.3f}s")
+        logger.info(f"Search completed for novel {novel.id}: {len(formatted_results)} results in {search_time:.3f}s")
         return ApiResponse.success({
             "results": formatted_results,
             "total": len(formatted_results),
@@ -225,7 +210,7 @@ def search_memory(
         })
         
     except VectorStoreError as e:
-        logger.error(f"VectorStore error while searching novel {novel_id}: {e}")
+        logger.error(f"VectorStore error while searching novel {novel.id}: {e}")
         return ApiResponse.error(
             code="MEMORY_002",
             message=f"检索失败: {str(e)}",
@@ -235,26 +220,23 @@ def search_memory(
 
 @router.delete("/novels/{novel_id}/memory")
 def clear_novel_memory(
-    novel_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    novel: NovelOwner
 ):
     """清除小说的所有向量索引"""
-    logger.info(f"User {current_user.id} clearing memory for novel {novel_id}")
-    check_novel_ownership(db, novel_id, current_user.id)
+    logger.info(f"Clearing memory for novel {novel.id}")
     
     try:
-        success = vector_store.delete_collection(novel_id)
+        success = vector_store.delete_collection(novel.id)
         
         if success:
-            logger.info(f"Memory cleared for novel {novel_id}")
+            logger.info(f"Memory cleared for novel {novel.id}")
             return ApiResponse.success(message="记忆索引已清除")
         else:
-            logger.info(f"No memory found for novel {novel_id}")
+            logger.info(f"No memory found for novel {novel.id}")
             return ApiResponse.success(message="没有找到需要清除的索引")
             
     except VectorStoreError as e:
-        logger.error(f"VectorStore error while clearing memory for novel {novel_id}: {e}")
+        logger.error(f"VectorStore error while clearing memory for novel {novel.id}: {e}")
         return ApiResponse.error(
             code="MEMORY_003",
             message=f"清除失败: {str(e)}",
