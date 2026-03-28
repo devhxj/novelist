@@ -18,8 +18,8 @@
 - MCP工具开发
 
 ## 当前任务
-- 任务ID: backend_013
-- 任务描述: 实现情节规划系统
+- 任务ID: backend_014
+- 任务描述: 实现文本生成系统
 - 状态: 待开始
 
 ## 任务列表
@@ -40,23 +40,34 @@
 - [x] backend_010: 实现章节生成完整流程 ✅ (2026-03-28)
 - [x] backend_010_fix: 修复章节生成问题 ✅ (2026-03-28)
 
-### 阶段3: Agent系统完善
+### 阶段3: Agent系统完善 (已完成) ✅
 - [x] backend_011: 实现一致性检查系统 ✅ (2026-03-28)
 - [x] backend_012: 实现LangGraph工作流 ✅ (2026-03-28)
-- [ ] backend_013: 实现情节规划系统 ← 当前任务
+- [x] backend_013: 实现情节规划系统 ✅ (2026-03-28)
 
 ### 阶段4: 高级功能开发
-- [ ] backend_014: 实现文本生成系统
+- [ ] backend_014: 实现文本生成系统 ← 当前任务
 - [ ] backend_015: MCP工具 - 小说管理类
 - [ ] backend_016: MCP工具 - 记忆检索类
 - [ ] backend_017: MCP工具 - 一致性检查类
 
-### 阶段5: API完善
-- [ ] backend_018: 小说管理API（完善）
-- [ ] backend_019: 角色管理API（完善）
-- [ ] backend_020: 章节生成API
-- [ ] backend_021: 一致性检查API
-- [ ] backend_022: 记忆检索API
+### 阶段5: 性能优化与基础设施 (新增)
+- [ ] backend_018: Redis集成 - 缓存 + 分布式锁
+- [ ] backend_019: WebSocket实时通信 - 生成进度推送
+- [ ] backend_020: 知识图谱 - 角色关系 + 情节因果
+- [ ] backend_021: Prompt模板管理系统
+
+### 阶段6: 可选高级功能
+- [ ] backend_022: Celery任务队列（如需多实例部署）
+- [ ] backend_023: 向量数据库升级（Milvus/Weaviate）
+- [ ] backend_024: 消息队列RabbitMQ（如需复杂任务调度）
+
+### 阶段7: API完善
+- [ ] backend_025: 小说管理API（完善）
+- [ ] backend_026: 角色管理API（完善）
+- [ ] backend_027: 章节生成API
+- [ ] backend_028: 一致性检查API
+- [ ] backend_029: 记忆检索API
 
 ## 已完成任务
 
@@ -227,6 +238,39 @@
   - GET /api/v1/workflows/tasks/{task_id}/status - 获取工作流状态
   - GET /api/v1/workflows/novels/{novel_id}/workflows - 获取工作流列表
   - GET /api/v1/workflows/health - 健康检查
+
+### backend_013 - 实现情节规划系统
+- 完成时间: 2026-03-28
+- 关键成果:
+  - 实现PlotLine情节线模型管理多条情节线（主线/支线/角色线/背景线）
+  - 实现PlotNode情节节点模型管理关键情节节点（规划/进行中/完成/跳过）
+  - 实现PlotOutline情节大纲模型管理整体情节规划（四幕结构）
+  - 创建PlotPlanner服务提供情节规划功能
+  - 支持情节建议生成（基于LLM）
+  - 支持情节进度分析
+  - 支持章节情节节点关联
+- 文件创建:
+  - backend/app/planning/models.py - 情节规划数据模型
+  - backend/app/planning/schemas.py - Pydantic验证模型
+  - backend/app/planning/planner.py - 情节规划服务
+  - backend/app/planning/router.py - API路由
+  - backend/app/planning/__init__.py
+- 文件修改:
+  - backend/app/main.py - 注册planning路由
+  - backend/app/novels/models.py - 添加plot_lines/plot_nodes/plot_outline关系
+- API端点:
+  - GET /api/v1/planning/novels/{novel_id}/outline - 获取情节大纲
+  - POST /api/v1/planning/novels/{novel_id}/outline - 创建/更新情节大纲
+  - GET /api/v1/planning/novels/{novel_id}/plot-lines - 获取情节线列表
+  - POST /api/v1/planning/novels/{novel_id}/plot-lines - 创建情节线
+  - GET/PUT/DELETE /api/v1/planning/plot-lines/{plot_line_id} - 情节线CRUD
+  - GET /api/v1/planning/novels/{novel_id}/plot-nodes - 获取情节节点列表
+  - POST /api/v1/planning/novels/{novel_id}/plot-nodes - 创建情节节点
+  - GET/PUT/DELETE /api/v1/planning/plot-nodes/{node_id} - 情节节点CRUD
+  - POST /api/v1/planning/plot-nodes/{node_id}/complete - 标记节点完成
+  - POST /api/v1/planning/novels/{novel_id}/suggestions - 生成情节建议
+  - GET /api/v1/planning/novels/{novel_id}/progress - 获取情节进度
+  - GET /api/v1/planning/novels/{novel_id}/chapters/{chapter_number}/nodes - 获取章节情节节点
 
 ## 依赖关系
 - ✅ API接口文档: `.trae/documents/api-specification.md`

@@ -1,0 +1,404 @@
+"""
+情节规划服务 - 管理情节线、节点和大纲
+"""
+import logging
+from typing import Dict, Any, List, Optional
+from sqlalchemy.orm import Session
+from sqlalchemy import and_
+
+from app.planning.models import (
+    PlotLine, PlotNode, PlotOutline,
+    PlotLineType, PlotNodeStatus
+)
+from app.planning.schemas import (
+    PlotLineCreate, PlotLineUpdate,
+    PlotNodeCreate, PlotNodeUpdate,
+    PlotOutlineCreate, PlotOutlineUpdate
+)
+from app.core.llm_service import llm_service
+
+logger = logging.getLogger(__name__)
+
+
+class PlotPlanningService:
+    """情节规划服务"""
+    
+    def __init__(self, db: Session, novel_id: int):
+        self.db = db
+        self.novel_id = novel_id
+    
+    # ==================== 情节线管理 ====================
+    
+    def create_plot_line(self, data: PlotLineCreate) -> PlotLine:
+        """创建情节线"""
+        plot_line = PlotLine(
+            novel_id=self.novel_id,
+            name=data.name,
+            description=data.description,
+            line_type=data.line_type.value,
+            start_chapter=data.start_chapter,
+            end_chapter=data.end_chapter,
+            importance=data.importance,
+            metadata=data.metadata
+        )
+        self.db.add(plot_line)
+        self.db.commit()
+        self.db.refresh(plot_line)
+        return plot_line
+    
+    def get_plot_line(self, plot_line_id: int) -> Optional[PlotLine]:
+        """获取情节线"""
+        return self.db.query(PlotLine).filter(
+            PlotLine.id == plot_line_id,
+            PlotLine.novel_id == self.novel_id
+        ).first()
+    
+    def list_plot_lines(
+        self,
+        line_type: Optional[str] = None,
+        status: Optional[str] = None
+    ) -> List[PlotLine]:
+        """获取情节线列表"""
+        query = self.db.query(PlotLine).filter(
+            PlotLine.novel_id == self.novel_id
+        )
+        
+        if line_type:
+            query = query.filter(PlotLine.line_type == line_type)
+        if status:
+            query = query.filter(PlotLine.status == status)
+        
+        return query.order_by(PlotLine.importance.desc(), PlotLine.created_at).all()
+    
+    def update_plot_line(self, plot_line_id: int, data: PlotLineUpdate) -> Optional[PlotLine]:
+        """更新情节线"""
+        plot_line = self.get_plot_line(plot_line_id)
+        if not plot_line:
+            return None
+        
+        update_data = data.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            if key == "line_type" and value:
+                value = value.value
+            setattr(plot_line, key, value)
+        
+        self.db.commit()
+        self.db.refresh(plot_line)
+        return plot_line
+    
+    def delete_plot_line(self, plot_line_id: int) -> bool:
+        """删除情节线"""
+        plot_line = self.get_plot_line(plot_line_id)
+        if not plot_line:
+            return False
+        
+        self.db.delete(plot_line)
+        self.db.commit()
+        return True
+    
+    # ==================== 情节节点管理 ====================
+    
+    def create_plot_node(self, data: PlotNodeCreate) -> PlotNode:
+        """创建情节节点"""
+        plot_node = PlotNode(
+            plot_line_id=data.plot_line_id,
+            novel_id=self.novel_id,
+            title=data.title,
+            description=data.description,
+            chapter_number=data.chapter_number,
+            sequence=data.sequence,
+            characters_involved=data.characters_involved,
+            prerequisites=data.prerequisites,
+            consequences=data.consequences,
+            notes=data.notes,
+            metadata=data.metadata
+        )
+        self.db.add(plot_node)
+        self.db.commit()
+        self.db.refresh(plot_node)
+        return plot_node
+    
+    def get_plot_node(self, node_id: int) -> Optional[PlotNode]:
+        """获取情节节点"""
+        return self.db.query(PlotNode).filter(
+            PlotNode.id == node_id,
+            PlotNode.novel_id == self.novel_id
+        ).first()
+    
+    def list_plot_nodes(
+        self,
+        plot_line_id: Optional[int] = None,
+        chapter_number: Optional[int] = None,
+        status: Optional[str] = None
+    ) -> List[PlotNode]:
+        """获取情节节点列表"""
+        query = self.db.query(PlotNode).filter(
+            PlotNode.novel_id == self.novel_id
+        )
+        
+        if plot_line_id:
+            query = query.filter(PlotNode.plot_line_id == plot_line_id)
+        if chapter_number:
+            query = query.filter(PlotNode.chapter_number == chapter_number)
+        if status:
+            query = query.filter(PlotNode.status == status)
+        
+        return query.order_by(PlotNode.chapter_number, PlotNode.sequence).all()
+    
+    def update_plot_node(self, node_id: int, data: PlotNodeUpdate) -> Optional[PlotNode]:
+        """更新情节节点"""
+        plot_node = self.get_plot_node(node_id)
+        if not plot_node:
+            return None
+        
+        update_data = data.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            if key == "status" and value:
+                value = value.value
+            setattr(plot_node, key, value)
+        
+        self.db.commit()
+        self.db.refresh(plot_node)
+        return plot_node
+    
+    def delete_plot_node(self, node_id: int) -> bool:
+        """删除情节节点"""
+        plot_node = self.get_plot_node(node_id)
+        if not plot_node:
+            return False
+        
+        self.db.delete(plot_node)
+        self.db.commit()
+        return True
+    
+    def get_nodes_by_chapter(self, chapter_number: int) -> List[PlotNode]:
+        """获取指定章节的所有情节节点"""
+        return self.db.query(PlotNode).filter(
+            PlotNode.novel_id == self.novel_id,
+            PlotNode.chapter_number == chapter_number
+        ).order_by(PlotNode.sequence).all()
+    
+    def get_next_nodes(self, current_node_id: int) -> List[PlotNode]:
+        """获取下一个情节节点（基于前置依赖）"""
+        return self.db.query(PlotNode).filter(
+            PlotNode.novel_id == self.novel_id,
+            PlotNode.prerequisites.contains([current_node_id]),
+            PlotNode.status == PlotNodeStatus.PLANNED.value
+        ).all()
+    
+    # ==================== 情节大纲管理 ====================
+    
+    def create_or_update_outline(self, data: PlotOutlineCreate) -> PlotOutline:
+        """创建或更新情节大纲"""
+        outline = self.db.query(PlotOutline).filter(
+            PlotOutline.novel_id == self.novel_id
+        ).first()
+        
+        if outline:
+            update_data = data.model_dump(exclude_unset=True)
+            for key, value in update_data.items():
+                setattr(outline, key, value)
+        else:
+            outline = PlotOutline(
+                novel_id=self.novel_id,
+                **data.model_dump()
+            )
+            self.db.add(outline)
+        
+        self.db.commit()
+        self.db.refresh(outline)
+        return outline
+    
+    def get_outline(self) -> Optional[PlotOutline]:
+        """获取情节大纲"""
+        return self.db.query(PlotOutline).filter(
+            PlotOutline.novel_id == self.novel_id
+        ).first()
+    
+    def update_outline(self, data: PlotOutlineUpdate) -> Optional[PlotOutline]:
+        """更新情节大纲"""
+        outline = self.get_outline()
+        if not outline:
+            return None
+        
+        update_data = data.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(outline, key, value)
+        
+        self.db.commit()
+        self.db.refresh(outline)
+        return outline
+    
+    # ==================== 情节建议生成 ====================
+    
+    async def generate_plot_suggestions(
+        self,
+        chapter_number: int,
+        context: str,
+        plot_line_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        生成情节建议
+        
+        Args:
+            chapter_number: 目标章节号
+            context: 当前上下文
+            plot_line_id: 情节线ID（可选）
+            
+        Returns:
+            情节建议
+        """
+        outline = self.get_outline()
+        plot_lines = self.list_plot_lines()
+        
+        outline_info = ""
+        if outline:
+            outline_info = f"""
+故事前提: {outline.premise or '未设定'}
+主题: {outline.theme or '未设定'}
+开端: {outline.beginning or '未设定'}
+发展: {outline.middle or '未设定'}
+高潮: {outline.climax or '未设定'}
+结局: {outline.ending or '未设定'}
+"""
+        
+        plot_lines_info = ""
+        for pl in plot_lines[:5]:
+            nodes = self.db.query(PlotNode).filter(
+                PlotNode.plot_line_id == pl.id,
+                PlotNode.status != PlotNodeStatus.SKIPPED.value
+            ).order_by(PlotNode.sequence).limit(5).all()
+            
+            nodes_info = "\n".join([
+                f"  - 第{n.chapter_number or '?'}章: {n.title} ({n.status})"
+                for n in nodes
+            ])
+            
+            plot_lines_info += f"""
+情节线: {pl.name} ({pl.line_type})
+状态: {pl.status}
+节点:
+{nodes_info}
+"""
+        
+        target_plot_line = None
+        if plot_line_id:
+            target_plot_line = self.get_plot_line(plot_line_id)
+        
+        prompt = f"""请为以下小说生成第{chapter_number}章的情节建议。
+
+故事大纲:
+{outline_info}
+
+现有情节线:
+{plot_lines_info}
+
+当前上下文:
+{context[:2000]}
+
+{"目标情节线: " + target_plot_line.name if target_plot_line else ""}
+
+请提供:
+1. 本章应该推进的情节线
+2. 建议的情节节点（2-3个）
+3. 涉及的角色
+4. 潜在的冲突点
+5. 伏笔建议（如果有）
+
+以JSON格式返回:
+{{
+    "suggested_plot_line": "情节线名称",
+    "plot_nodes": [
+        {{
+            "title": "节点标题",
+            "description": "节点描述",
+            "characters_involved": ["角色1", "角色2"],
+            "conflict_points": ["冲突点"]
+        }}
+    ],
+    "foreshadowing_suggestions": [
+        {{
+            "type": "挖坑/填坑",
+            "content": "伏笔内容",
+            "importance": 1-5
+        }}
+    ],
+    "reasoning": "推理过程"
+}}
+
+只返回JSON，不要其他内容。"""
+
+        try:
+            result = await llm_service.generate_text(prompt)
+            
+            import json
+            try:
+                suggestions = json.loads(result)
+                return {
+                    "success": True,
+                    "chapter_number": chapter_number,
+                    "suggestions": suggestions
+                }
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse plot suggestions: {result[:200]}")
+                return {
+                    "success": False,
+                    "error": "无法解析情节建议",
+                    "raw_response": result[:500]
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to generate plot suggestions: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    # ==================== 情节进度分析 ====================
+    
+    def get_plot_progress(self) -> Dict[str, Any]:
+        """获取情节进度"""
+        plot_lines = self.list_plot_lines()
+        outline = self.get_outline()
+        
+        total_nodes = 0
+        completed_nodes = 0
+        in_progress_nodes = 0
+        
+        plot_line_progress = []
+        
+        for pl in plot_lines:
+            nodes = self.db.query(PlotNode).filter(
+                PlotNode.plot_line_id == pl.id
+            ).all()
+            
+            pl_completed = sum(1 for n in nodes if n.status == PlotNodeStatus.COMPLETED.value)
+            pl_in_progress = sum(1 for n in nodes if n.status == PlotNodeStatus.IN_PROGRESS.value)
+            pl_total = len(nodes)
+            
+            total_nodes += pl_total
+            completed_nodes += pl_completed
+            in_progress_nodes += pl_in_progress
+            
+            plot_line_progress.append({
+                "id": pl.id,
+                "name": pl.name,
+                "type": pl.line_type,
+                "total_nodes": pl_total,
+                "completed_nodes": pl_completed,
+                "in_progress_nodes": pl_in_progress,
+                "progress": round(pl_completed / pl_total * 100, 1) if pl_total > 0 else 0
+            })
+        
+        return {
+            "total_plot_lines": len(plot_lines),
+            "total_nodes": total_nodes,
+            "completed_nodes": completed_nodes,
+            "in_progress_nodes": in_progress_nodes,
+            "overall_progress": round(completed_nodes / total_nodes * 100, 1) if total_nodes > 0 else 0,
+            "plot_lines": plot_line_progress,
+            "outline": {
+                "current_chapter": outline.current_chapter if outline else 1,
+                "total_chapters": outline.total_chapters if outline else None
+            } if outline else None
+        }

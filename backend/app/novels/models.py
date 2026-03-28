@@ -26,6 +26,9 @@ class Novel(Base):
     chapters = relationship("Chapter", back_populates="novel")
     plot_events = relationship("PlotEvent", back_populates="novel")
     foreshadowings = relationship("Foreshadowing", back_populates="novel")
+    plot_lines = relationship("PlotLine", back_populates="novel", cascade="all, delete-orphan")
+    plot_nodes = relationship("PlotNode", back_populates="novel", cascade="all, delete-orphan")
+    plot_outline = relationship("PlotOutline", back_populates="novel", uselist=False, cascade="all, delete-orphan")
     
     __table_args__ = (
         Index('idx_novel_title_genre', 'title', 'genre'),
