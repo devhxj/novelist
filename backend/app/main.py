@@ -15,6 +15,7 @@ from app.characters import router as characters_router
 from app.chapters import router as chapters_router
 from app.plot_events import router as plot_events_router
 from app.memory import router as memory_router
+from app.rag import router as rag_router
 
 from app.auth.models import User
 from app.novels.models import Novel
@@ -22,6 +23,7 @@ from app.characters.models import Character
 from app.chapters.models import Chapter
 from app.plot_events.models import PlotEvent
 from app.memory.models import MemoryChunk
+from app.rag.models import RAGContext
 
 Base.metadata.create_all(bind=engine)
 
@@ -60,6 +62,7 @@ app.include_router(characters_router, prefix="/api/v1")
 app.include_router(chapters_router, prefix="/api/v1")
 app.include_router(plot_events_router, prefix="/api/v1")
 app.include_router(memory_router, prefix="/api/v1")
+app.include_router(rag_router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
