@@ -19,7 +19,7 @@ class MemoryChunk(Base):
     content: str = Column(Text, nullable=False)
     chunk_index: int = Column(Integer, nullable=False)
     embedding_id: Optional[str] = Column(String(100))
-    metadata: Optional[Dict[str, Any]] = Column(JSON)
+    chunk_metadata: Optional[Dict[str, Any]] = Column(JSON)
     relevance_score: Optional[float] = Column(Float)
     created_at: datetime = Column(TIMESTAMP, server_default=func.now())
     

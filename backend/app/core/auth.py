@@ -4,22 +4,18 @@
 from typing import Annotated
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.jwt import decode_token
-from app.core.database import get_db
 from app.auth.models import User
 
 security = HTTPBearer()
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ) -> User:
     """
-    从Token获取当前用户
+    从Token获取当前用户（直接从JWT解析，不查数据库）
     """
     token = credentials.credentials
     payload = decode_token(token)
@@ -49,7 +45,10 @@ async def get_current_user(
         )
     
     user_id = payload.get("sub")
-    if user_id is None:
+    username = payload.get("username")
+    email = payload.get("email")
+    
+    if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
@@ -61,24 +60,11 @@ async def get_current_user(
             }
         )
     
-    result = await db.execute(
-        select(User).where(User.id == int(user_id))
+    return User(
+        id=int(user_id),
+        username=username or "",
+        email=email or ""
     )
-    user = result.scalar_one_or_none()
-    
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "AUTH_002",
-                    "message": "用户不存在"
-                }
-            }
-        )
-    
-    return user
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]

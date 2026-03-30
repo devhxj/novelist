@@ -3,13 +3,11 @@ JWT工具类 - Token生成和验证
 """
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
-from passlib.context import CryptContext
+import bcrypt
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
@@ -21,12 +19,17 @@ REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
 def hash_password(password: str) -> str:
     """密码加密"""
-    return pwd_context.hash(password)
+    password_bytes = password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password_bytes, salt)
+    return hashed.decode('utf-8')
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """密码验证"""
-    return pwd_context.verify(plain_password, hashed_password)
+    password_bytes = plain_password.encode('utf-8')
+    hashed_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(password_bytes, hashed_bytes)
 
 
 def create_access_token(data: dict) -> str:
@@ -70,7 +73,9 @@ def create_tokens(user_id: int, username: str, email: str) -> dict:
         "email": email
     })
     refresh_token = create_refresh_token({
-        "sub": str(user_id)
+        "sub": str(user_id),
+        "username": username,
+        "email": email
     })
     return {
         "access_token": access_token,

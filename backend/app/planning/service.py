@@ -38,7 +38,7 @@ class PlotPlanningService:
             start_chapter=data.start_chapter,
             end_chapter=data.end_chapter,
             importance=data.importance,
-            metadata=data.metadata
+            extra_metadata=data.metadata
         )
         self.db.add(plot_line)
         await self.db.commit()
@@ -113,7 +113,7 @@ class PlotPlanningService:
             prerequisites=data.prerequisites,
             consequences=data.consequences,
             notes=data.notes,
-            metadata=data.metadata
+            extra_metadata=data.metadata
         )
         self.db.add(plot_node)
         await self.db.commit()

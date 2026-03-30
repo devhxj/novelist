@@ -43,7 +43,7 @@ class PlotLine(Base):
     importance: int = Column(Integer, default=1)
     status: str = Column(String(50), default="active")
     
-    metadata: Optional[Dict[str, Any]] = Column(JSON)
+    extra_metadata: Optional[Dict[str, Any]] = Column(JSON)
     
     created_at: datetime = Column(TIMESTAMP, server_default=func.now())
     updated_at: Optional[datetime] = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
@@ -77,7 +77,7 @@ class PlotNode(Base):
     consequences: Optional[Dict[str, Any]] = Column(JSON)
     
     notes: Optional[str] = Column(Text)
-    metadata: Optional[Dict[str, Any]] = Column(JSON)
+    extra_metadata: Optional[Dict[str, Any]] = Column(JSON)
     
     created_at: datetime = Column(TIMESTAMP, server_default=func.now())
     updated_at: Optional[datetime] = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
@@ -113,7 +113,7 @@ class PlotOutline(Base):
     current_chapter: int = Column(Integer, default=1)
     
     notes: Optional[str] = Column(Text)
-    metadata: Optional[Dict[str, Any]] = Column(JSON)
+    extra_metadata: Optional[Dict[str, Any]] = Column(JSON)
     
     created_at: datetime = Column(TIMESTAMP, server_default=func.now())
     updated_at: Optional[datetime] = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())

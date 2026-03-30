@@ -90,11 +90,15 @@ async def login(login_data: UserLogin, db: DBSession):
 
 
 @router.post("/refresh")
-async def refresh_token(refresh_token: str, db: DBSession):
+async def refresh_token(
+    refresh_token: str,
+    db: DBSession
+):
     """
     刷新Token
     
     - refresh_token: 刷新令牌
+    - db: 数据库会话
     """
     payload = decode_token(refresh_token)
     
@@ -120,22 +124,10 @@ async def refresh_token(refresh_token: str, db: DBSession):
             status_code=status.HTTP_401_UNAUTHORIZED
         )
     
-    result = await db.execute(
-        select(User).where(User.id == int(user_id))
-    )
-    user = result.scalar_one_or_none()
-    
-    if user is None:
-        return ApiResponse.error(
-            code="AUTH_002",
-            message="用户不存在",
-            status_code=status.HTTP_401_UNAUTHORIZED
-        )
-    
     new_access_token = create_access_token({
-        "sub": str(user.id),
-        "username": user.username,
-        "email": user.email
+        "sub": user_id,
+        "username": payload.get("username"),
+        "email": payload.get("email")
     })
     
     return ApiResponse.success({

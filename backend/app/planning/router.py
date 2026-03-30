@@ -9,7 +9,8 @@ from sqlalchemy import select
 from app.core.database import get_db, DBSession
 from app.core.response import ApiResponse
 from app.core.exceptions import NotFoundException, UnauthorizedException
-from app.core.dependencies import NovelOwner, CurrentUser
+from app.core.auth import CurrentUser
+from app.core.dependencies import NovelOwner
 from app.planning.planner import PlotPlanner
 from app.planning.models import PlotLine, PlotNode, PlotLineType, PlotNodeStatus
 from app.planning.schemas import (

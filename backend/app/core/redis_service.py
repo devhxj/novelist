@@ -6,11 +6,12 @@ import json
 import logging
 import asyncio
 from typing import Optional, Any, Dict, List, Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from functools import wraps
 import redis.asyncio as redis
 from redis.asyncio import Redis
 from redis.asyncio.lock import Lock
+from fastapi.encoders import jsonable_encoder
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,8 @@ class RedisService:
         """设置缓存"""
         try:
             full_key = f"{RedisConfig.CACHE_PREFIX}{key}"
-            serialized = json.dumps(value, ensure_ascii=False)
+            encoded_value = jsonable_encoder(value)
+            serialized = json.dumps(encoded_value, ensure_ascii=False)
             ttl = ttl or RedisConfig.CACHE_DEFAULT_TTL
             
             await self.client.setex(full_key, ttl, serialized)
@@ -208,6 +210,120 @@ class RedisService:
         except Exception as e:
             logger.error(f"Redis clear_pattern error: {e}")
             return 0
+    
+    async def zadd(
+        self, 
+        key: str, 
+        mapping: Dict[str, float],
+        ttl: Optional[int] = None
+    ) -> int:
+        """
+        添加有序集合成员
+        
+        Args:
+            key: 键名
+            mapping: {member: score} 映射
+            ttl: 过期时间
+            
+        Returns:
+            新增成员数量
+        """
+        try:
+            full_key = f"{RedisConfig.CACHE_PREFIX}{key}"
+            result = await self.client.zadd(full_key, mapping)
+            if ttl:
+                await self.client.expire(full_key, ttl)
+            return result
+        except Exception as e:
+            logger.error(f"Redis zadd error: {e}")
+            return 0
+    
+    async def zrem(self, key: str, *members) -> int:
+        """
+        移除有序集合成员
+        
+        Args:
+            key: 键名
+            members: 要移除的成员
+            
+        Returns:
+            移除成员数量
+        """
+        try:
+            full_key = f"{RedisConfig.CACHE_PREFIX}{key}"
+            return await self.client.zrem(full_key, *members)
+        except Exception as e:
+            logger.error(f"Redis zrem error: {e}")
+            return 0
+    
+    async def zrevrange(
+        self, 
+        key: str, 
+        start: int, 
+        stop: int,
+        withscores: bool = False
+    ) -> List:
+        """
+        获取有序集合指定范围成员（按分数降序）
+        
+        Args:
+            key: 键名
+            start: 起始位置
+            stop: 结束位置
+            withscores: 是否返回分数
+            
+        Returns:
+            成员列表
+        """
+        try:
+            full_key = f"{RedisConfig.CACHE_PREFIX}{key}"
+            return await self.client.zrevrange(full_key, start, stop, withscores)
+        except Exception as e:
+            logger.error(f"Redis zrevrange error: {e}")
+            return []
+    
+    async def zcard(self, key: str) -> int:
+        """
+        获取有序集合成员数量
+        
+        Args:
+            key: 键名
+            
+        Returns:
+            成员数量
+        """
+        try:
+            full_key = f"{RedisConfig.CACHE_PREFIX}{key}"
+            return await self.client.zcard(full_key)
+        except Exception as e:
+            logger.error(f"Redis zcard error: {e}")
+            return 0
+    
+    async def zrange(
+        self, 
+        key: str, 
+        start: int, 
+        stop: int,
+        withscores: bool = False
+    ) -> List:
+        """
+        获取有序集合指定范围成员（按分数升序）
+        
+        Args:
+            key: 键名
+            start: 起始位置
+            stop: 结束位置
+            withscores: 是否返回分数
+            
+        Returns:
+            成员列表
+        """
+        try:
+            full_key = f"{RedisConfig.CACHE_PREFIX}{key}"
+            return await self.client.zrange(full_key, start, stop, withscores)
+        except Exception as e:
+            logger.error(f"Redis zrange error: {e}")
+            return []
     
     def acquire_lock(
         self, 

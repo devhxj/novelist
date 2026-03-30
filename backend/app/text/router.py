@@ -1,5 +1,6 @@
 """
-文本生成API路由
+文本生成API路由 - 对话、描写、大纲、摘要、角色档案
+章节生成请使用WebSocket: ws://host/ws/generation
 """
 import logging
 from fastapi import APIRouter
@@ -11,31 +12,6 @@ from app.text.service import TextGenerator, GenerationType, GenerationConfig
 
 router = APIRouter(prefix="/text", tags=["text-generation"])
 logger = logging.getLogger(__name__)
-
-
-@router.post("/novels/{novel_id}/generate/chapter")
-async def generate_chapter(
-    novel: NovelOwner,
-    db: DBSession,
-    chapter_number: int,
-    target_length: int = 3000,
-    style: str = "narrative"
-):
-    """
-    生成章节
-    
-    - chapter_number: 章节号
-    - target_length: 目标字数
-    - style: 写作风格
-    """
-    generator = TextGenerator(db, novel.id)
-    result = await generator.generate_chapter(
-        chapter_number=chapter_number,
-        target_length=target_length,
-        style=style
-    )
-    
-    return ApiResponse.success(result)
 
 
 @router.post("/novels/{novel_id}/generate/dialogue")
@@ -163,49 +139,11 @@ async def generate_character_profile(
     return ApiResponse.success(result)
 
 
-@router.post("/novels/{novel_id}/generate/custom")
-async def generate_custom(
-    novel: NovelOwner,
-    db: DBSession,
-    prompt: str,
-    generation_type: str = "chapter",
-    style: str = "narrative",
-    target_length: int = 3000,
-    temperature: float = 0.8
-):
-    """
-    自定义生成
-    
-    - prompt: 自定义提示词
-    - generation_type: 生成类型
-    - style: 写作风格
-    - target_length: 目标字数
-    - temperature: 创造性程度 (0.0-1.0)
-    """
-    try:
-        gen_type = GenerationType(generation_type)
-    except ValueError:
-        gen_type = GenerationType.CHAPTER
-    
-    config = GenerationConfig(
-        generation_type=gen_type,
-        style=style,
-        target_length=target_length,
-        temperature=temperature
-    )
-    
-    generator = TextGenerator(db, novel.id)
-    result = await generator.generate(prompt=prompt, config=config)
-    
-    return ApiResponse.success(result)
-
-
 @router.get("/generation-types")
 def get_generation_types():
     """获取支持的生成类型"""
     return ApiResponse.success({
         "types": [
-            {"value": "chapter", "label": "章节生成"},
             {"value": "dialogue", "label": "对话生成"},
             {"value": "description", "label": "描写生成"},
             {"value": "outline", "label": "大纲生成"},
@@ -220,5 +158,6 @@ def get_generation_types():
             {"value": "dramatic", "label": "戏剧性"},
             {"value": "natural", "label": "自然"},
             {"value": "vivid", "label": "生动"}
-        ]
+        ],
+        "note": "章节生成请使用WebSocket: ws://host/ws/generation"
     })

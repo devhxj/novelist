@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.response import ApiResponse
 from app.core.exceptions import NotFoundException
-from app.core.auth import get_current_user
-from app.core.dependencies import NovelOwner, CurrentUser
+from app.core.auth import get_current_user, CurrentUser
+from app.core.dependencies import NovelOwner
 from .base import AgentTask, TaskType, TaskStatus
 from .coordinator import CoordinatorAgent
 from .writer import WriterAgent

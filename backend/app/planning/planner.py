@@ -119,7 +119,7 @@ class PlotPlanner:
             prerequisites=data.prerequisites,
             consequences=data.consequences,
             notes=data.notes,
-            metadata=data.metadata
+            extra_metadata=data.metadata
         )
         self.db.add(plot_node)
         await self.db.commit()

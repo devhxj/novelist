@@ -112,9 +112,12 @@ class TextGenerator:
             style=style
         )
         
-        context = await self.context_builder.build_chapter_context(
+        context = await self.context_builder.build_writing_context(
             chapter_number=chapter_number,
-            context_types=["previous_summary", "characters", "plot_hints", "relevant_memory"]
+            context_size=5,
+            include_previous_chapters=True,
+            include_characters=True,
+            include_plot_events=True
         )
         
         if additional_context:
@@ -123,6 +126,72 @@ class TextGenerator:
         prompt = f"请生成第{chapter_number}章，目标字数约{target_length}字。"
         
         return await self.generate(prompt, context, config)
+    
+    async def polish_chapter(
+        self,
+        chapter_id: int,
+        style: str = "narrative",
+        feedback: str = None
+    ) -> Dict[str, Any]:
+        """
+        润色已有章节
+        
+        Args:
+            chapter_id: 章节ID
+            style: 写作风格
+            feedback: 润色反馈/要求
+            
+        Returns:
+            润色结果
+        """
+        result = await self.db.execute(
+            select(Chapter).where(Chapter.id == chapter_id)
+        )
+        chapter = result.scalar_one_or_none()
+        
+        if not chapter:
+            return {"success": False, "error": "章节不存在"}
+        
+        config = GenerationConfig(
+            generation_type=GenerationType.CHAPTER,
+            style=style
+        )
+        
+        context = await self.context_builder.build_writing_context(
+            chapter_id=chapter_id,
+            context_size=5,
+            include_previous_chapters=True,
+            include_characters=True,
+            include_plot_events=True
+        )
+        
+        prompt = f"""请润色以下章节内容，保持原有的情节和人物设定，但提升文字质量和可读性。
+
+原文内容：
+{chapter.content}
+
+润色要求：
+- 写作风格: {style}
+- 保持字数相近
+- 提升文字流畅度
+- 增强场景描写
+- 优化对话表达
+"""
+        
+        if feedback:
+            prompt += f"\n额外要求: {feedback}"
+        
+        result = await self.generate(prompt, context, config)
+        
+        if result.get("success"):
+            return {
+                "success": True,
+                "content": result.get("content"),
+                "original_length": len(chapter.content or ""),
+                "new_length": len(result.get("content", ""))
+            }
+        else:
+            return result
     
     async def generate_dialogue(
         self,

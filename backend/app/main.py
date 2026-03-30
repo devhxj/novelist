@@ -20,12 +20,13 @@ from app.plot_events import router as plot_events_router
 from app.memory import router as memory_router
 from app.rag import router as rag_router
 from app.agents import router as agents_router
-from app.generation import router as generation_router
 from app.consistency import router as consistency_router
-from app.workflows import router as workflows_router
 from app.planning import router as planning_router
 from app.text import router as text_router
 from app.mcp import router as mcp_router
+from app.core.ws_router import router as ws_router
+from app.generation import router as generation_router
+from app.sessions import router as sessions_router
 
 from app.auth.models import User
 from app.novels.models import Novel
@@ -95,12 +96,13 @@ app.include_router(plot_events_router, prefix="/api/v1")
 app.include_router(memory_router, prefix="/api/v1")
 app.include_router(rag_router, prefix="/api/v1")
 app.include_router(agents_router, prefix="/api/v1")
-app.include_router(generation_router, prefix="/api/v1")
 app.include_router(consistency_router, prefix="/api/v1")
-app.include_router(workflows_router, prefix="/api/v1")
 app.include_router(planning_router, prefix="/api/v1")
 app.include_router(text_router, prefix="/api/v1")
 app.include_router(mcp_router, prefix="/api/v1")
+app.include_router(generation_router, prefix="/api/v1")
+app.include_router(sessions_router, prefix="/api/v1")
+app.include_router(ws_router)
 
 @app.get("/")
 async def root():

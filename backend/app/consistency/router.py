@@ -114,7 +114,7 @@ async def create_foreshadowing(
         created_chapter_id=data.created_chapter_id,
         foreshadowing_type=data.foreshadowing_type.value,
         importance=data.importance,
-        metadata=data.metadata
+        extra_metadata=data.metadata
     )
     
     db.add(foreshadowing)
@@ -182,7 +182,7 @@ async def update_foreshadowing(
     if data.importance is not None:
         foreshadowing.importance = data.importance
     if data.metadata is not None:
-        foreshadowing.metadata = data.metadata
+        foreshadowing.extra_metadata = data.metadata
     
     await db.commit()
     await db.refresh(foreshadowing)

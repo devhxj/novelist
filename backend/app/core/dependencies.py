@@ -8,15 +8,14 @@ from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.exceptions import NotFoundException, UnauthorizedException
-from app.core.auth import get_current_user
-from app.auth.models import User
+from app.core.auth import CurrentUser
 from app.novels.models import Novel
 
 
 async def check_novel_ownership(
     novel_id: Annotated[int, Path(..., description="小说ID")],
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db)
 ) -> Novel:
     """
     检查小说所有权 - 依赖注入版本

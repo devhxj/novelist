@@ -42,7 +42,7 @@ class Foreshadowing(Base):
     
     importance: int = Column(Integer, default=1)
     resolution_notes: Optional[str] = Column(Text)
-    metadata: Optional[Dict[str, Any]] = Column(JSON)
+    extra_metadata: Optional[Dict[str, Any]] = Column(JSON)
     
     created_at: datetime = Column(TIMESTAMP, server_default=func.now())
     resolved_at: Optional[datetime] = Column(TIMESTAMP)

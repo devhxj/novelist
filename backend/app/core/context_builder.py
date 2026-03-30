@@ -77,19 +77,47 @@ class ContextBuilder:
     
     async def build_writing_context(
         self,
-        chapter_id: int,
+        chapter_number: int = None,
+        chapter_id: int = None,
         context_size: int = 3000,
         include_previous_chapters: bool = True,
         include_characters: bool = True,
         include_plot_events: bool = True
     ) -> Dict[str, Any]:
-        """构建写作上下文"""
+        """
+        构建写作上下文
+        
+        Args:
+            chapter_number: 章节号（二选一）
+            chapter_id: 章节ID（二选一）
+            context_size: 上下文大小
+            include_previous_chapters: 是否包含前文摘要
+            include_characters: 是否包含角色信息
+            include_plot_events: 是否包含情节线索
+        """
         await self._init_novel()
+        
+        chapter = None
+        if chapter_number:
+            result = await self.db.execute(
+                select(Chapter).where(
+                    Chapter.novel_id == self.novel_id,
+                    Chapter.chapter_number == chapter_number
+                )
+            )
+            chapter = result.scalar_one_or_none()
+        elif chapter_id:
+            result = await self.db.execute(
+                select(Chapter).where(Chapter.id == chapter_id)
+            )
+            chapter = result.scalar_one_or_none()
+        
+        target_chapter_number = chapter.chapter_number if chapter else chapter_number
         
         cache_key = context_cache._get_key(
             "writing_context",
             novel_id=self.novel_id,
-            chapter_id=chapter_id,
+            chapter_number=target_chapter_number,
             context_size=context_size,
             include_previous=include_previous_chapters,
             include_chars=include_characters,
@@ -100,24 +128,17 @@ class ContextBuilder:
         if cached:
             return cached
         
-        logger.info(f"Building writing context for chapter {chapter_id}")
+        logger.info(f"Building writing context for chapter {target_chapter_number}")
         
         context_parts = []
-        result = await self.db.execute(
-            select(Chapter).where(Chapter.id == chapter_id)
-        )
-        chapter = result.scalar_one_or_none()
-        
-        if not chapter:
-            raise ValueError(f"Chapter {chapter_id} not found")
+        previous_summary = None
         
         context_parts.append(f"【小说标题】{self.novel.title}")
         if self.novel.description:
             context_parts.append(f"【小说简介】{self.novel.description}")
         
-        previous_summary = None
-        if include_previous_chapters:
-            previous_summary = await self._get_previous_chapters_summary(chapter.chapter_number)
+        if include_previous_chapters and target_chapter_number:
+            previous_summary = await self._get_previous_chapters_summary(target_chapter_number)
             if previous_summary:
                 context_parts.append(f"【前文摘要】\n{previous_summary}")
         
@@ -142,7 +163,7 @@ class ContextBuilder:
         logger.info(f"Context built: {len(full_context)} chars")
         
         result_data = {
-            "chapter_id": chapter_id,
+            "chapter_id": chapter.id if chapter else None,
             "novel_id": self.novel_id,
             "context": full_context,
             "previous_summary": previous_summary,

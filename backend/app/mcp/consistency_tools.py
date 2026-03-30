@@ -171,7 +171,7 @@ class ListUnresolvedPlotsTool(BaseMCPTool):
                 "created_chapter": created_chapter,
                 "created_at": fs.created_at.isoformat() if fs.created_at else None,
                 "days_pending": pending_days,
-                "metadata": fs.metadata
+                "metadata": fs.extra_metadata
             })
         
         return MCPToolResult(

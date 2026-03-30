@@ -151,9 +151,12 @@ class ChapterWorkflow:
             
             async with AsyncSessionLocal() as db:
                 builder = ContextBuilder(db, state["novel_id"])
-                context = await builder.build_chapter_context(
-                    chapter_number=state["chapter_number"],
-                    context_types=["previous_summary", "characters", "plot_hints", "relevant_memory"]
+                context = await builder.build_writing_context(
+                    chapter_id=state["chapter_number"],
+                    context_size=5,
+                    include_previous_chapters=True,
+                    include_characters=True,
+                    include_plot_events=True
                 )
                 
                 return {
