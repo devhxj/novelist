@@ -32,23 +32,26 @@ class CheckCharacterConsistencyTool(BaseMCPTool):
         "required": ["novel_id"]
     }
     
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self):
+        pass
     
-    async def execute(self, novel_id: int, chapter_ids: Optional[List[int]] = None, character_id: Optional[int] = None, **kwargs) -> MCPToolResult:
-        result = await self.db.execute(select(Novel).where(Novel.id == novel_id))
+    async def execute(
+        self, 
+        db: AsyncSession,
+        novel_id: int, chapter_ids: Optional[List[int]] = None, character_id: Optional[int] = None, **kwargs) -> MCPToolResult:
+        result = await db.execute(select(Novel).where(Novel.id == novel_id))
         novel = result.scalar_one_or_none()
         if not novel:
             return MCPToolResult(success=False, error=f"Novel not found: {novel_id}")
         
         try:
-            checker = ConsistencyChecker(self.db, novel_id)
+            checker = ConsistencyChecker(db, novel_id)
             
             query = select(Chapter).where(Chapter.novel_id == novel_id, Chapter.status == "completed")
             if chapter_ids:
                 query = query.where(Chapter.id.in_(chapter_ids))
             query = query.order_by(Chapter.chapter_number)
-            result = await self.db.execute(query)
+            result = await db.execute(query)
             chapters = result.scalars().all()
             
             issues = await checker.check_character_consistency(chapters)
@@ -80,23 +83,26 @@ class CheckPlotConsistencyTool(BaseMCPTool):
         "required": ["novel_id"]
     }
     
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self):
+        pass
     
-    async def execute(self, novel_id: int, chapter_ids: Optional[List[int]] = None, **kwargs) -> MCPToolResult:
-        result = await self.db.execute(select(Novel).where(Novel.id == novel_id))
+    async def execute(
+        self, 
+        db: AsyncSession,
+        novel_id: int, chapter_ids: Optional[List[int]] = None, **kwargs) -> MCPToolResult:
+        result = await db.execute(select(Novel).where(Novel.id == novel_id))
         novel = result.scalar_one_or_none()
         if not novel:
             return MCPToolResult(success=False, error=f"Novel not found: {novel_id}")
         
         try:
-            checker = ConsistencyChecker(self.db, novel_id)
+            checker = ConsistencyChecker(db, novel_id)
             
             query = select(Chapter).where(Chapter.novel_id == novel_id, Chapter.status == "completed")
             if chapter_ids:
                 query = query.where(Chapter.id.in_(chapter_ids))
             query = query.order_by(Chapter.chapter_number)
-            result = await self.db.execute(query)
+            result = await db.execute(query)
             chapters = result.scalars().all()
             
             issues = await checker.check_plot_consistency(chapters)
@@ -126,11 +132,14 @@ class ListUnresolvedPlotsTool(BaseMCPTool):
         "required": ["novel_id"]
     }
     
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self):
+        pass
     
-    async def execute(self, novel_id: int, min_importance: Optional[int] = None, days_pending: Optional[int] = None, **kwargs) -> MCPToolResult:
-        result = await self.db.execute(select(Novel).where(Novel.id == novel_id))
+    async def execute(
+        self, 
+        db: AsyncSession,
+        novel_id: int, min_importance: Optional[int] = None, days_pending: Optional[int] = None, **kwargs) -> MCPToolResult:
+        result = await db.execute(select(Novel).where(Novel.id == novel_id))
         novel = result.scalar_one_or_none()
         if not novel:
             return MCPToolResult(success=False, error=f"Novel not found: {novel_id}")
@@ -144,7 +153,7 @@ class ListUnresolvedPlotsTool(BaseMCPTool):
             query = query.where(Foreshadowing.importance >= min_importance)
         
         query = query.order_by(Foreshadowing.importance.desc(), Foreshadowing.created_at.desc())
-        result = await self.db.execute(query)
+        result = await db.execute(query)
         foreshadowings = result.scalars().all()
         
         result_list = []
@@ -156,7 +165,7 @@ class ListUnresolvedPlotsTool(BaseMCPTool):
             
             created_chapter = None
             if fs.created_chapter_id:
-                result = await self.db.execute(select(Chapter).where(Chapter.id == fs.created_chapter_id))
+                result = await db.execute(select(Chapter).where(Chapter.id == fs.created_chapter_id))
                 chapter = result.scalar_one_or_none()
                 if chapter:
                     created_chapter = {"id": chapter.id, "chapter_number": chapter.chapter_number, "title": chapter.title}
@@ -195,21 +204,24 @@ class GetForeshadowingStatusTool(BaseMCPTool):
         "required": ["novel_id"]
     }
     
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self):
+        pass
     
-    async def execute(self, novel_id: int, **kwargs) -> MCPToolResult:
-        result = await self.db.execute(select(Novel).where(Novel.id == novel_id))
+    async def execute(
+        self, 
+        db: AsyncSession,
+        novel_id: int, **kwargs) -> MCPToolResult:
+        result = await db.execute(select(Novel).where(Novel.id == novel_id))
         novel = result.scalar_one_or_none()
         if not novel:
             return MCPToolResult(success=False, error=f"Novel not found: {novel_id}")
         
-        total_result = await self.db.execute(
+        total_result = await db.execute(
             select(func.count()).where(Foreshadowing.novel_id == novel_id)
         )
         total = total_result.scalar()
         
-        unresolved_result = await self.db.execute(
+        unresolved_result = await db.execute(
             select(func.count()).where(
                 Foreshadowing.novel_id == novel_id,
                 Foreshadowing.status == ForeshadowingStatus.UNRESOLVED.value
@@ -217,7 +229,7 @@ class GetForeshadowingStatusTool(BaseMCPTool):
         )
         unresolved = unresolved_result.scalar()
         
-        resolved_result = await self.db.execute(
+        resolved_result = await db.execute(
             select(func.count()).where(
                 Foreshadowing.novel_id == novel_id,
                 Foreshadowing.status == ForeshadowingStatus.RESOLVED.value
@@ -225,7 +237,7 @@ class GetForeshadowingStatusTool(BaseMCPTool):
         )
         resolved = resolved_result.scalar()
         
-        abandoned_result = await self.db.execute(
+        abandoned_result = await db.execute(
             select(func.count()).where(
                 Foreshadowing.novel_id == novel_id,
                 Foreshadowing.status == ForeshadowingStatus.ABANDONED.value
@@ -233,7 +245,7 @@ class GetForeshadowingStatusTool(BaseMCPTool):
         )
         abandoned = abandoned_result.scalar()
         
-        high_importance_result = await self.db.execute(
+        high_importance_result = await db.execute(
             select(Foreshadowing).where(
                 Foreshadowing.novel_id == novel_id,
                 Foreshadowing.status == ForeshadowingStatus.UNRESOLVED.value,
@@ -244,14 +256,14 @@ class GetForeshadowingStatusTool(BaseMCPTool):
         
         by_type = {}
         for status in [ForeshadowingStatus.UNRESOLVED.value, ForeshadowingStatus.RESOLVED.value, ForeshadowingStatus.ABANDONED.value]:
-            count_result = await self.db.execute(
+            count_result = await db.execute(
                 select(func.count()).where(Foreshadowing.novel_id == novel_id, Foreshadowing.status == status)
             )
             by_type[status] = count_result.scalar()
         
         by_importance = {}
         for i in range(1, 6):
-            count_result = await self.db.execute(
+            count_result = await db.execute(
                 select(func.count()).where(Foreshadowing.novel_id == novel_id, Foreshadowing.importance == i)
             )
             by_importance[str(i)] = count_result.scalar()
@@ -296,17 +308,20 @@ class RunFullConsistencyCheckTool(BaseMCPTool):
         "required": ["novel_id"]
     }
     
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self):
+        pass
     
-    async def execute(self, novel_id: int, chapter_ids: Optional[List[int]] = None, check_types: Optional[List[str]] = None, **kwargs) -> MCPToolResult:
-        result = await self.db.execute(select(Novel).where(Novel.id == novel_id))
+    async def execute(
+        self, 
+        db: AsyncSession,
+        novel_id: int, chapter_ids: Optional[List[int]] = None, check_types: Optional[List[str]] = None, **kwargs) -> MCPToolResult:
+        result = await db.execute(select(Novel).where(Novel.id == novel_id))
         novel = result.scalar_one_or_none()
         if not novel:
             return MCPToolResult(success=False, error=f"Novel not found: {novel_id}")
         
         try:
-            checker = ConsistencyChecker(self.db, novel_id)
+            checker = ConsistencyChecker(db, novel_id)
             result = await checker.check_all(chapter_ids=chapter_ids, check_types=check_types)
             
             return MCPToolResult(
@@ -322,10 +337,10 @@ class ConsistencyCheckTools:
     """一致性检查工具集合"""
     
     @staticmethod
-    def register_all(db: AsyncSession, registry: MCPToolRegistry) -> None:
+    def register_all(registry: MCPToolRegistry) -> None:
         """注册所有一致性检查工具"""
-        registry.register(CheckCharacterConsistencyTool(db))
-        registry.register(CheckPlotConsistencyTool(db))
-        registry.register(ListUnresolvedPlotsTool(db))
-        registry.register(GetForeshadowingStatusTool(db))
-        registry.register(RunFullConsistencyCheckTool(db))
+        registry.register(CheckCharacterConsistencyTool())
+        registry.register(CheckPlotConsistencyTool())
+        registry.register(ListUnresolvedPlotsTool())
+        registry.register(GetForeshadowingStatusTool())
+        registry.register(RunFullConsistencyCheckTool())

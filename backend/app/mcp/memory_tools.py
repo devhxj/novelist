@@ -34,11 +34,14 @@ class SearchPlotMemoryTool(BaseMCPTool):
         "required": ["novel_id", "query"]
     }
     
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self):
+        pass
     
-    async def execute(self, novel_id: int, query: str, top_k: int = 10, chapter_ids: Optional[List[int]] = None, **kwargs) -> MCPToolResult:
-        result = await self.db.execute(select(Novel).where(Novel.id == novel_id))
+    async def execute(
+        self, 
+        db: AsyncSession,
+        novel_id: int, query: str, top_k: int = 10, chapter_ids: Optional[List[int]] = None, **kwargs) -> MCPToolResult:
+        result = await db.execute(select(Novel).where(Novel.id == novel_id))
         novel = result.scalar_one_or_none()
         if not novel:
             return MCPToolResult(success=False, error=f"Novel not found: {novel_id}")
@@ -86,16 +89,19 @@ class GetCharacterMemoryTool(BaseMCPTool):
         "required": ["novel_id", "character_id"]
     }
     
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self):
+        pass
     
-    async def execute(self, novel_id: int, character_id: int, include_plot_events: bool = True, **kwargs) -> MCPToolResult:
-        result = await self.db.execute(select(Novel).where(Novel.id == novel_id))
+    async def execute(
+        self, 
+        db: AsyncSession,
+        novel_id: int, character_id: int, include_plot_events: bool = True, **kwargs) -> MCPToolResult:
+        result = await db.execute(select(Novel).where(Novel.id == novel_id))
         novel = result.scalar_one_or_none()
         if not novel:
             return MCPToolResult(success=False, error=f"Novel not found: {novel_id}")
         
-        result = await self.db.execute(
+        result = await db.execute(
             select(Character).where(Character.id == character_id, Character.novel_id == novel_id)
         )
         character = result.scalar_one_or_none()
@@ -113,7 +119,7 @@ class GetCharacterMemoryTool(BaseMCPTool):
         }
         
         if include_plot_events:
-            result = await self.db.execute(
+            result = await db.execute(
                 select(PlotEvent).where(PlotEvent.novel_id == novel_id)
             )
             all_events = result.scalars().all()
@@ -167,11 +173,14 @@ class GetTimelineTool(BaseMCPTool):
         "required": ["novel_id"]
     }
     
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self):
+        pass
     
-    async def execute(self, novel_id: int, start_chapter: Optional[int] = None, end_chapter: Optional[int] = None, event_types: Optional[List[str]] = None, **kwargs) -> MCPToolResult:
-        result = await self.db.execute(select(Novel).where(Novel.id == novel_id))
+    async def execute(
+        self, 
+        db: AsyncSession,
+        novel_id: int, start_chapter: Optional[int] = None, end_chapter: Optional[int] = None, event_types: Optional[List[str]] = None, **kwargs) -> MCPToolResult:
+        result = await db.execute(select(Novel).where(Novel.id == novel_id))
         novel = result.scalar_one_or_none()
         if not novel:
             return MCPToolResult(success=False, error=f"Novel not found: {novel_id}")
@@ -179,14 +188,14 @@ class GetTimelineTool(BaseMCPTool):
         query = select(PlotEvent).where(PlotEvent.novel_id == novel_id)
         
         if start_chapter is not None:
-            result = await self.db.execute(
+            result = await db.execute(
                 select(Chapter.id).where(Chapter.novel_id == novel_id, Chapter.chapter_number >= start_chapter)
             )
             chapter_ids = [r[0] for r in result.fetchall()]
             query = query.where(PlotEvent.chapter_id.in_(chapter_ids))
         
         if end_chapter is not None:
-            result = await self.db.execute(
+            result = await db.execute(
                 select(Chapter.id).where(Chapter.novel_id == novel_id, Chapter.chapter_number <= end_chapter)
             )
             chapter_ids = [r[0] for r in result.fetchall()]
@@ -196,18 +205,18 @@ class GetTimelineTool(BaseMCPTool):
             query = query.where(PlotEvent.event_type.in_(event_types))
         
         query = query.order_by(PlotEvent.timeline)
-        result = await self.db.execute(query)
+        result = await db.execute(query)
         events = result.scalars().all()
         
         timeline = []
         for event in events:
-            result = await self.db.execute(select(Chapter).where(Chapter.id == event.chapter_id))
+            result = await db.execute(select(Chapter).where(Chapter.id == event.chapter_id))
             chapter = result.scalar_one_or_none()
             
             characters = []
             if event.characters_involved:
                 for char_id in event.characters_involved:
-                    result = await self.db.execute(select(Character).where(Character.id == char_id))
+                    result = await db.execute(select(Character).where(Character.id == char_id))
                     char = result.scalar_one_or_none()
                     if char:
                         characters.append({"id": char.id, "name": char.name})
@@ -246,16 +255,19 @@ class GetRecentContextTool(BaseMCPTool):
         "required": ["novel_id", "chapter_id"]
     }
     
-    def __init__(self, db: AsyncSession):
-        self.db = db
+    def __init__(self):
+        pass
     
-    async def execute(self, novel_id: int, chapter_id: int, window_size: int = 3, context_size: int = 3000, **kwargs) -> MCPToolResult:
-        result = await self.db.execute(select(Novel).where(Novel.id == novel_id))
+    async def execute(
+        self, 
+        db: AsyncSession,
+        novel_id: int, chapter_id: int, window_size: int = 3, context_size: int = 3000, **kwargs) -> MCPToolResult:
+        result = await db.execute(select(Novel).where(Novel.id == novel_id))
         novel = result.scalar_one_or_none()
         if not novel:
             return MCPToolResult(success=False, error=f"Novel not found: {novel_id}")
         
-        result = await self.db.execute(
+        result = await db.execute(
             select(Chapter).where(Chapter.id == chapter_id, Chapter.novel_id == novel_id)
         )
         chapter = result.scalar_one_or_none()
@@ -263,7 +275,7 @@ class GetRecentContextTool(BaseMCPTool):
             return MCPToolResult(success=False, error=f"Chapter not found: {chapter_id}")
         
         try:
-            context_builder = ContextBuilder(self.db, novel_id)
+            context_builder = ContextBuilder(db, novel_id)
             context = await context_builder.build_writing_context(
                 chapter_id=chapter_id,
                 context_size=context_size,
@@ -272,7 +284,7 @@ class GetRecentContextTool(BaseMCPTool):
                 include_plot_events=True
             )
             
-            result = await self.db.execute(
+            result = await db.execute(
                 select(Chapter)
                 .where(Chapter.novel_id == novel_id, Chapter.chapter_number < chapter.chapter_number, Chapter.status == "completed")
                 .order_by(Chapter.chapter_number.desc())
@@ -309,9 +321,9 @@ class MemoryRetrievalTools:
     """记忆检索工具集合"""
     
     @staticmethod
-    def register_all(db: AsyncSession, registry: MCPToolRegistry) -> None:
+    def register_all(registry: MCPToolRegistry) -> None:
         """注册所有记忆检索工具"""
-        registry.register(SearchPlotMemoryTool(db))
-        registry.register(GetCharacterMemoryTool(db))
-        registry.register(GetTimelineTool(db))
-        registry.register(GetRecentContextTool(db))
+        registry.register(SearchPlotMemoryTool())
+        registry.register(GetCharacterMemoryTool())
+        registry.register(GetTimelineTool())
+        registry.register(GetRecentContextTool())

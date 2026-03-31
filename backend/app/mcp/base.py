@@ -45,6 +45,17 @@ class BaseMCPTool(ABC):
             "category": self.category.value,
             "parameters_schema": self.parameters_schema
         }
+    
+    def to_openai_function(self) -> Dict[str, Any]:
+        """转换为OpenAI function calling格式"""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters_schema
+            }
+        }
 
 
 class MCPToolRegistry:
@@ -77,6 +88,10 @@ class MCPToolRegistry:
                 result[cat] = []
             result[cat].append(tool.get_info())
         return result
+    
+    def get_openai_functions(self) -> List[Dict[str, Any]]:
+        """获取所有工具的OpenAI function calling格式"""
+        return [tool.to_openai_function() for tool in self._tools.values()]
     
     async def execute(self, name: str, **kwargs) -> MCPToolResult:
         """执行工具"""

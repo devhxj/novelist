@@ -2,7 +2,7 @@
 MCP工具API路由
 提供MCP工具的HTTP接口
 """
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Body
 from typing import Optional, List
 
 from app.core.response import ApiResponse
@@ -14,6 +14,7 @@ from .base import MCPToolRegistry, MCPToolCategory
 from .novel_tools import NovelManagementTools
 from .memory_tools import MemoryRetrievalTools
 from .consistency_tools import ConsistencyCheckTools
+from .editing_tools import EditingTools
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 
@@ -24,6 +25,7 @@ def get_mcp_registry(db: DBSession) -> MCPToolRegistry:
     NovelManagementTools.register_all(db, registry)
     MemoryRetrievalTools.register_all(db, registry)
     ConsistencyCheckTools.register_all(db, registry)
+    EditingTools.register_all(db, registry)
     return registry
 
 
@@ -408,6 +410,134 @@ async def get_foreshadowing_status(
 ):
     registry = get_mcp_registry(db)
     result = await registry.execute("get_foreshadowing_status", novel_id=novel.id)
+    
+    if result.success:
+        return ApiResponse.success(result.data)
+    return ApiResponse.error("TOOL_ERROR", result.error or "Unknown error")
+
+
+@router.post("/chapters/{chapter_id}/read-for-edit")
+async def read_chapter_for_edit(
+    chapter_id: int,
+    db: DBSession,
+    current_user: CurrentUser,
+    include_line_numbers: bool = Query(True, description="是否包含行号")
+):
+    """
+    读取章节内容用于编辑
+    """
+    from app.chapters.models import Chapter
+    from app.core.exceptions import NotFoundException, UnauthorizedException
+    from sqlalchemy import select
+    
+    result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
+    chapter = result.scalar_one_or_none()
+    if not chapter:
+        raise NotFoundException("章节")
+    
+    result = await db.execute(select(Novel).where(Novel.id == chapter.novel_id))
+    novel = result.scalar_one_or_none()
+    if not novel or novel.author_id != current_user.id:
+        raise UnauthorizedException("无权访问此章节")
+    
+    registry = get_mcp_registry(db)
+    result = await registry.execute("read_chapter_for_edit", chapter_id=chapter_id, include_line_numbers=include_line_numbers)
+    
+    if result.success:
+        return ApiResponse.success(result.data)
+    return ApiResponse.error("TOOL_ERROR", result.error or "Unknown error")
+
+
+@router.post("/chapters/{chapter_id}/edit")
+async def edit_chapter_content(
+    chapter_id: int,
+    db: DBSession,
+    current_user: CurrentUser,
+    session_id: str = Body(..., description="会话ID"),
+    change_type: str = Body(..., description="变更类型: full_replace/partial_edit/insert/delete"),
+    new_content: str = Body(..., description="新内容"),
+    start_line: Optional[int] = Body(None, description="起始行号"),
+    end_line: Optional[int] = Body(None, description="结束行号"),
+    reason: Optional[str] = Body(None, description="修改原因")
+):
+    """
+    编辑章节内容，创建待确认的变更记录
+    """
+    from app.chapters.models import Chapter
+    from app.core.exceptions import NotFoundException, UnauthorizedException
+    from sqlalchemy import select
+    
+    result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
+    chapter = result.scalar_one_or_none()
+    if not chapter:
+        raise NotFoundException("章节")
+    
+    result = await db.execute(select(Novel).where(Novel.id == chapter.novel_id))
+    novel = result.scalar_one_or_none()
+    if not novel or novel.author_id != current_user.id:
+        raise UnauthorizedException("无权修改此章节")
+    
+    registry = get_mcp_registry(db)
+    result = await registry.execute(
+        "edit_chapter_content",
+        session_id=session_id,
+        chapter_id=chapter_id,
+        change_type=change_type,
+        new_content=new_content,
+        start_line=start_line,
+        end_line=end_line,
+        reason=reason
+    )
+    
+    if result.success:
+        return ApiResponse.success(result.data)
+    return ApiResponse.error("TOOL_ERROR", result.error or "Unknown error")
+
+
+@router.post("/novels/{novel_id}/chapters/create")
+async def create_new_chapter(
+    novel: NovelOwner,
+    db: DBSession,
+    current_user: CurrentUser,
+    chapter_number: int = Body(..., description="章节号"),
+    title: Optional[str] = Body(None, description="章节标题"),
+    content: Optional[str] = Body(None, description="章节内容")
+):
+    """
+    创建新章节
+    """
+    registry = get_mcp_registry(db)
+    result = await registry.execute(
+        "create_new_chapter",
+        novel_id=novel.id,
+        chapter_number=chapter_number,
+        title=title,
+        content=content
+    )
+    
+    if result.success:
+        return ApiResponse.success(result.data)
+    return ApiResponse.error("TOOL_ERROR", result.error or "Unknown error")
+
+
+@router.get("/changes/pending")
+async def get_pending_changes(
+    db: DBSession,
+    current_user: CurrentUser,
+    chapter_id: Optional[int] = Query(None, description="章节ID"),
+    session_id: Optional[str] = Query(None, description="会话ID"),
+    limit: int = Query(10, ge=1, le=50, description="返回数量限制")
+):
+    """
+    获取待确认的变更列表
+    """
+    registry = get_mcp_registry(db)
+    result = await registry.execute(
+        "get_pending_changes",
+        chapter_id=chapter_id,
+        session_id=session_id,
+        limit=limit
+    )
     
     if result.success:
         return ApiResponse.success(result.data)

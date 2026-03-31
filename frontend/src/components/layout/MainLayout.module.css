@@ -63,3 +63,8 @@
   border-radius: 8px;
   min-height: 280px;
 }
+
+.layoutFullscreen {
+  height: 100vh;
+  overflow: hidden;
+}

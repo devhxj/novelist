@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Card, Input, Button, Select, message, Spin, Typography, Space, Tag, Progress, Empty, List, Popconfirm, Tooltip, Modal, Form, Divider } from 'antd'
-import { SendOutlined, PlusOutlined, DeleteOutlined, ClearOutlined, CompressOutlined, EditOutlined } from '@ant-design/icons'
+import { SendOutlined, PlusOutlined, DeleteOutlined, ClearOutlined, CompressOutlined, EditOutlined, FormOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { wsGenerationService } from '@/services/wsGenerationService'
 import { sessionApi } from '@/services/sessionService'
@@ -222,6 +222,8 @@ function ChatPage() {
   const [streamingContent, setStreamingContent] = useState('')
   const [createModalVisible, setCreateModalVisible] = useState(false)
   const [contextModalVisible, setContextModalVisible] = useState(false)
+  const [editingTitleSessionId, setEditingTitleSessionId] = useState<string | null>(null)
+  const [editingTitleValue, setEditingTitleValue] = useState('')
 
   useEffect(() => {
     loadModels()
@@ -286,7 +288,7 @@ function ChatPage() {
       wsGenerationService.onMessage(handleWSMessage)
     } catch (error) {
       console.error('WebSocket connection failed:', error)
-      message.warning('WebSocket连接失败，部分功能可能不可用')
+      // 不显示 warning，让重连机制处理
     }
   }
 
@@ -326,15 +328,30 @@ function ChatPage() {
       case 'chat_completed':
         setIsStreaming(false)
         setStreamingContent('')
-        setMessages(prev => [
-          ...prev,
-          {
-            id: msg.message_id,
-            role: 'assistant',
-            content: msg.content,
-            timestamp: new Date(),
-          },
-        ])
+        setMessages(prev => {
+          const newMessages = [
+            ...prev,
+            {
+              id: msg.message_id,
+              role: 'assistant' as const,
+              content: msg.content,
+              timestamp: new Date(),
+            },
+          ]
+          if (prev.length === 0 && currentSession && !currentSession.title) {
+            sessionApi.autoGenerateTitle(currentSession.id)
+              .then(titleResponse => {
+                if (titleResponse.success) {
+                  setCurrentSession(s => s ? { ...s, title: titleResponse.data.title } : null)
+                  setSessions(sessions => sessions.map(s => 
+                    s.id === currentSession.id ? { ...s, title: titleResponse.data.title } : s
+                  ))
+                }
+              })
+              .catch(() => console.error('Failed to auto-generate title'))
+          }
+          return newMessages
+        })
         break
 
       case 'chat_failed':
@@ -347,7 +364,7 @@ function ChatPage() {
         message.warning(`任务被拒绝: ${msg.reason}`)
         break
     }
-  }, [])
+  }, [currentSession])
 
   const createSession = async (level: SessionLevel, chapterNumber?: number, model?: LLMModel) => {
     try {
@@ -459,6 +476,53 @@ function ChatPage() {
     }
   }
 
+  const getSessionDisplayName = (session: Session): string => {
+    if (session.title) return session.title
+    return session.display_name
+  }
+
+  const startEditTitle = (session: Session, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setEditingTitleSessionId(session.id)
+    setEditingTitleValue(session.title || session.display_name)
+  }
+
+  const cancelEditTitle = () => {
+    setEditingTitleSessionId(null)
+    setEditingTitleValue('')
+  }
+
+  const saveTitle = async (sessionId: string) => {
+    if (!editingTitleValue.trim()) {
+      message.warning('标题不能为空')
+      return
+    }
+    try {
+      const response = await sessionApi.updateTitle(sessionId, { title: editingTitleValue.trim() })
+      if (response.success) {
+        message.success('标题已更新')
+        setSessions(prev => prev.map(s => 
+          s.id === sessionId ? { ...s, title: editingTitleValue.trim() } : s
+        ))
+        if (currentSession?.id === sessionId) {
+          setCurrentSession(prev => prev ? { ...prev, title: editingTitleValue.trim() } : null)
+        }
+        setEditingTitleSessionId(null)
+        setEditingTitleValue('')
+      }
+    } catch (error) {
+      message.error(getErrorMessage(error))
+    }
+  }
+
+  const handleTitleKeyPress = (e: React.KeyboardEvent, sessionId: string) => {
+    if (e.key === 'Enter') {
+      saveTitle(sessionId)
+    } else if (e.key === 'Escape') {
+      cancelEditTitle()
+    }
+  }
+
   const sendMessage = async () => {
     if (!inputValue.trim()) return
     if (!currentSession && !isConnected) {
@@ -474,6 +538,8 @@ function ChatPage() {
     }
     setMessages(prev => [...prev, userMessage])
     setInputValue('')
+
+    const shouldAutoGenerateTitle = currentSession && !currentSession.title && messages.length === 0
 
     try {
       if (isConnected) {
@@ -494,6 +560,19 @@ function ChatPage() {
               timestamp: new Date(),
             },
           ])
+          if (shouldAutoGenerateTitle) {
+            try {
+              const titleResponse = await sessionApi.autoGenerateTitle(currentSession.id)
+              if (titleResponse.success) {
+                setCurrentSession(prev => prev ? { ...prev, title: titleResponse.data.title } : null)
+                setSessions(prev => prev.map(s => 
+                  s.id === currentSession.id ? { ...s, title: titleResponse.data.title } : s
+                ))
+              }
+            } catch {
+              console.error('Failed to auto-generate title')
+            }
+          }
         }
       }
     } catch (error) {
@@ -564,9 +643,33 @@ function ChatPage() {
                   onClick={() => loadSession(session.id)}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <Text ellipsis style={{ display: 'block' }}>
-                      {session.display_name}
-                    </Text>
+                    {editingTitleSessionId === session.id ? (
+                      <Input
+                        size="small"
+                        value={editingTitleValue}
+                        onChange={(e) => setEditingTitleValue(e.target.value)}
+                        onKeyPress={(e) => handleTitleKeyPress(e, session.id)}
+                        onBlur={() => saveTitle(session.id)}
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ marginBottom: 4 }}
+                      />
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Text ellipsis style={{ flex: 1 }}>
+                          {getSessionDisplayName(session)}
+                        </Text>
+                        <Tooltip title="编辑标题">
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<FormOutlined />}
+                            onClick={(e) => startEditTitle(session, e)}
+                            style={{ padding: '0 4px' }}
+                          />
+                        </Tooltip>
+                      </div>
+                    )}
                     <Space size="small">
                       <Text type="secondary" style={{ fontSize: 12 }}>
                         {session.stats.message_count}条
@@ -613,7 +716,7 @@ function ChatPage() {
           currentSession ? (
             <Space>
               {getLevelTag(currentSession.level)}
-              <Text>{currentSession.display_name}</Text>
+              <Text>{getSessionDisplayName(currentSession)}</Text>
               <Tooltip title={`Token使用率: ${currentSession.stats.usage_ratio.toFixed(1)}%`}>
                 <Progress
                   percent={currentSession.stats.usage_ratio}

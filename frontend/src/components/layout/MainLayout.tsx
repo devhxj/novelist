@@ -15,6 +15,8 @@ function MainLayout() {
     return <Navigate to="/login" replace />
   }
 
+  const isEditorPage = location.pathname.includes('/editor')
+
   const menuItems = [
     {
       key: '/novels',
@@ -32,6 +34,14 @@ function MainLayout() {
       return '/novels'
     }
     return path
+  }
+
+  if (isEditorPage) {
+    return (
+      <Layout className={styles.layoutFullscreen}>
+        <Outlet />
+      </Layout>
+    )
   }
 
   return (

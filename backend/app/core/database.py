@@ -25,7 +25,6 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 async def get_async_session() -> AsyncSession:
-    """获取异步会话的上下文管理器"""
     async with AsyncSessionLocal() as session:
         yield session
 
@@ -41,6 +40,18 @@ async def get_db():
 
 
 async def init_db():
+    from app.auth.models import User
+    from app.novels.models import Novel
+    from app.characters.models import Character
+    from app.chapters.models import Chapter
+    from app.plot_events.models import PlotEvent
+    from app.memory.models import MemoryChunk
+    from app.rag.models import RAGContext
+    from app.agents.models import AgentTaskRecord
+    from app.foreshadowing.models import Foreshadowing
+    from app.planning.models import PlotLine, PlotNode, PlotOutline
+    from app.editor.models import EditSession, EditChange
+    
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

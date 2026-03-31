@@ -7,6 +7,10 @@ export const chapterApi = {
     return apiClient.get(`/chapters/novel/${novelId}`, { params })
   },
 
+  getNextChapterNumber: async (novelId: number): Promise<ApiResponse<{ next_chapter_number: number; message: string }>> => {
+    return apiClient.get(`/chapters/novel/${novelId}/next-number`)
+  },
+
   getChapter: async (chapterId: number): Promise<ApiResponse<ChapterDetail>> => {
     return apiClient.get(`/chapters/${chapterId}`)
   },

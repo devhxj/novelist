@@ -70,6 +70,27 @@ backend/
 
 ## 开发规范
 
+### 异步优先原则
+**所有IO操作必须使用异步**：
+- 数据库操作：使用 `AsyncSession`，`await db.execute()`
+- Redis操作：使用 `redis.asyncio`，所有方法都是 `async`
+- HTTP请求：使用 `httpx.AsyncClient`
+- 文件IO：使用 `aiofiles` 或 `asyncio.to_thread()`
+- 外部API调用：必须 `await`
+
+```python
+# 正确示例
+result = await db.execute(select(Novel))
+cached = await redis_service.get(key)
+async with httpx.AsyncClient() as client:
+    response = await client.get(url)
+
+# 错误示例（禁止）
+result = db.query(Novel)  # 同步查询
+cached = redis_client.get(key)  # 同步Redis
+response = requests.get(url)  # 同步HTTP
+```
+
 ### 新增模块
 1. 在 `app/` 下创建模块目录
 2. 创建 `models.py`, `schemas.py`, `router.py`, `__init__.py`

@@ -44,8 +44,10 @@ export interface Session {
   session_id: string
   level: SessionLevel
   display_name: string
+  title?: string
   novel_id?: number
   chapter_number?: number
+  chapter_number_end?: number
   model: LLMModel
   stats: SessionStats
   novel_context?: NovelContext
@@ -53,6 +55,16 @@ export interface Session {
   created_at: string
   updated_at: string
   expires_at: string
+}
+
+export interface UpdateTitleRequest {
+  title: string
+}
+
+export interface AutoGenerateTitleResponse {
+  title: string
+  auto_generated: boolean
+  message: string
 }
 
 export interface CreateSessionRequest {
@@ -158,5 +170,13 @@ export const sessionApi = {
 
   getStats: async (sessionId: string): Promise<ApiResponse<SessionStatsResponse>> => {
     return apiClient.get(`/sessions/${sessionId}/stats`)
+  },
+
+  updateTitle: async (sessionId: string, data: UpdateTitleRequest): Promise<ApiResponse<Session>> => {
+    return apiClient.put(`/sessions/${sessionId}/title`, data)
+  },
+
+  autoGenerateTitle: async (sessionId: string): Promise<ApiResponse<AutoGenerateTitleResponse>> => {
+    return apiClient.post(`/sessions/${sessionId}/title/auto-generate`)
   },
 }

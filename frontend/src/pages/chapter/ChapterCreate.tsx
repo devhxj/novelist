@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Form, Input, Button, Card, message, InputNumber } from 'antd'
 import { useNavigate, useParams } from 'react-router-dom'
 import { chapterApi } from '@/services/chapterService'
@@ -13,9 +13,19 @@ function ChapterCreatePage() {
   const { novelId } = useParams<{ novelId: string }>()
   const [form] = Form.useForm<ChapterCreate>()
 
+  useEffect(() => {
+    if (!novelId) return
+    const nid = parseInt(novelId)
+    chapterApi.getNextChapterNumber(nid).then(res => {
+      if (res.success) {
+        form.setFieldsValue({ chapter_number: res.data.next_chapter_number })
+      }
+    }).catch(() => {})
+  }, [novelId, form])
+
   const onFinish = async (values: ChapterCreate) => {
     if (!novelId) return
-    
+
     setLoading(true)
     try {
       const response = await chapterApi.createChapter(parseInt(novelId), values)
@@ -43,7 +53,7 @@ function ChapterCreatePage() {
           name="chapter_number"
           rules={[{ required: true, message: '请输入章节编号' }]}
         >
-          <InputNumber min={1} style={{ width: '100%' }} placeholder="请输入章节编号" />
+          <InputNumber min={1} style={{ width: '100%' }} placeholder="自动获取下一个章节号" />
         </Form.Item>
 
         <Form.Item

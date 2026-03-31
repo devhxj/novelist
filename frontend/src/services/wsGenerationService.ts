@@ -177,15 +177,25 @@ export class WebSocketGenerationService {
   private reconnectDelay = 1000
   private messageHandlers: Set<WSMessageHandler> = new Set()
   private novelId: number | null = null
+  private isConnecting = false
+  private shouldReconnect = true
 
   connect(novelId?: number): Promise<void> {
     this.novelId = novelId || null
+    this.shouldReconnect = true
     return new Promise((resolve, reject) => {
       const token = useAuthStore.getState().accessToken
       if (!token) {
         reject(new Error('No authentication token'))
         return
       }
+
+      if (this.isConnecting) {
+        resolve()
+        return
+      }
+
+      this.isConnecting = true
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const host = window.location.host
@@ -199,6 +209,7 @@ export class WebSocketGenerationService {
       this.ws.onopen = () => {
         console.log('WebSocket connected')
         this.reconnectAttempts = 0
+        this.isConnecting = false
         resolve()
       }
 
@@ -213,28 +224,40 @@ export class WebSocketGenerationService {
 
       this.ws.onerror = (error) => {
         console.error('WebSocket error:', error)
-        reject(error)
+        this.isConnecting = false
       }
 
       this.ws.onclose = (event) => {
         console.log('WebSocket closed:', event.code, event.reason)
-        if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
+        this.isConnecting = false
+        if (this.shouldReconnect && event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
           this.reconnectAttempts++
+          const delay = Math.min(this.reconnectDelay * this.reconnectAttempts, 10000)
+          console.log(`WebSocket reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
           setTimeout(() => {
-            this.connect(this.novelId || undefined)
-          }, this.reconnectDelay * this.reconnectAttempts)
+            this.connect(this.novelId || undefined).catch(() => {})
+          }, delay)
+        } else if (event.code === 1000) {
+          console.log('WebSocket disconnected by user')
+        } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          console.error('WebSocket max reconnect attempts reached')
         }
       }
     })
   }
 
   disconnect() {
+    this.shouldReconnect = false
+    this.reconnectAttempts = this.maxReconnectAttempts
     if (this.ws) {
-      this.ws.close(1000, 'User disconnected')
+      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+        this.ws.close(1000, 'User disconnected')
+      }
       this.ws = null
     }
     this.messageHandlers.clear()
     this.novelId = null
+    this.isConnecting = false
   }
 
   onMessage(handler: WSMessageHandler): () => void {

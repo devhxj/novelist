@@ -6,6 +6,7 @@ from .base import BaseMCPTool, MCPToolRegistry, MCPToolResult, MCPToolCategory
 from .novel_tools import NovelManagementTools
 from .memory_tools import MemoryRetrievalTools
 from .consistency_tools import ConsistencyCheckTools
+from .editing_tools import EditingTools
 
 from .router import router
 
@@ -17,5 +18,6 @@ __all__ = [
     "NovelManagementTools",
     "MemoryRetrievalTools",
     "ConsistencyCheckTools",
+    "EditingTools",
     "router",
 ]

@@ -1,7 +1,7 @@
 """
 章节管理模块 - API路由
 """
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from typing import Optional
@@ -10,13 +10,38 @@ from app.core.response import ApiResponse
 from app.core.database import DBSession
 from app.core.auth import CurrentUser
 from app.core.dependencies import NovelOwner
-from app.core.exceptions import NotFoundException, UnauthorizedException
+from app.core.exceptions import NotFoundException, UnauthorizedException, BadRequestException
 from app.core.redis_service import redis_service
 from app.novels.models import Novel
 from .models import Chapter
-from .schemas import ChapterCreate, ChapterUpdate
+from .schemas import ChapterCreate, ChapterUpdate, NextChapterNumberResponse
 
 router = APIRouter(prefix="/chapters", tags=["chapters"])
+
+
+@router.get("/novel/{novel_id}/next-number", response_model=NextChapterNumberResponse)
+async def get_next_chapter_number(
+    novel: NovelOwner,
+    db: DBSession
+):
+    """
+    获取下一个可用的章节号
+    
+    返回当前最大章节号 + 1，如果没有章节则返回 1
+    """
+    result = await db.execute(
+        select(func.max(Chapter.chapter_number)).where(
+            Chapter.novel_id == novel.id
+        )
+    )
+    max_chapter = result.scalar()
+    
+    next_number = (max_chapter or 0) + 1
+    
+    return NextChapterNumberResponse(
+        next_chapter_number=next_number,
+        message=f"下一个可用章节号为第{next_number}章"
+    )
 
 
 @router.get("/novel/{novel_id}")
@@ -66,7 +91,7 @@ async def get_chapters_by_novel(
             "novel_id": ch.novel_id,
             "chapter_number": ch.chapter_number,
             "title": ch.title,
-            "word_count": len(ch.content or ""),
+            "word_count": ch.word_count or len(ch.content or ""),
             "status": ch.status,
             "summary": ch.summary,
             "created_at": ch.created_at,
@@ -88,6 +113,9 @@ async def create_chapter(
 ):
     """
     创建章节
+    
+    - chapter_number: 可选，不传则自动获取下一个章节号
+    - 会检查章节号是否已存在，防止重复
     """
     result = await db.execute(
         select(Novel).where(Novel.id == chapter.novel_id)
@@ -99,7 +127,34 @@ async def create_chapter(
     if novel.author_id != current_user.id:
         raise UnauthorizedException("无权访问此小说")
     
-    db_chapter = Chapter(**chapter.model_dump())
+    if chapter.chapter_number is None:
+        max_result = await db.execute(
+            select(func.max(Chapter.chapter_number)).where(
+                Chapter.novel_id == chapter.novel_id
+            )
+        )
+        max_chapter = max_result.scalar()
+        chapter_number = (max_chapter or 0) + 1
+    else:
+        chapter_number = chapter.chapter_number
+    
+    existing = await db.execute(
+        select(Chapter).where(
+            Chapter.novel_id == chapter.novel_id,
+            Chapter.chapter_number == chapter_number
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise BadRequestException(f"第{chapter_number}章已存在，请选择其他章节号")
+    
+    db_chapter = Chapter(
+        novel_id=chapter.novel_id,
+        chapter_number=chapter_number,
+        title=chapter.title or f"第{chapter_number}章",
+        content=chapter.content,
+        summary=chapter.summary,
+        word_count=len(chapter.content) if chapter.content else 0
+    )
     db.add(db_chapter)
     await db.commit()
     await db.refresh(db_chapter)
@@ -115,10 +170,10 @@ async def create_chapter(
             "content": db_chapter.content,
             "summary": db_chapter.summary,
             "status": db_chapter.status,
-            "word_count": len(db_chapter.content or ""),
+            "word_count": db_chapter.word_count,
             "created_at": db_chapter.created_at
         },
-        message="章节创建成功"
+        message=f"第{chapter_number}章创建成功"
     )
 
 
@@ -160,7 +215,7 @@ async def get_chapter(
         "content": chapter.content,
         "summary": chapter.summary,
         "status": chapter.status,
-        "word_count": len(chapter.content or ""),
+        "word_count": chapter.word_count or len(chapter.content or ""),
         "created_at": chapter.created_at,
         "updated_at": chapter.updated_at,
         "novel": {
@@ -209,6 +264,9 @@ async def update_chapter(
     for key, value in update_data.items():
         setattr(db_chapter, key, value)
     
+    if chapter.content is not None:
+        db_chapter.word_count = len(chapter.content)
+    
     await db.commit()
     await db.refresh(db_chapter)
     
@@ -218,11 +276,12 @@ async def update_chapter(
     return ApiResponse.success(
         {
             "id": db_chapter.id,
+            "chapter_number": db_chapter.chapter_number,
             "title": db_chapter.title,
             "content": db_chapter.content,
             "summary": db_chapter.summary,
             "status": db_chapter.status,
-            "word_count": len(db_chapter.content or ""),
+            "word_count": db_chapter.word_count,
             "updated_at": db_chapter.updated_at
         },
         message="章节更新成功"
@@ -252,6 +311,7 @@ async def delete_chapter(
         raise UnauthorizedException("无权删除此章节")
     
     novel_id = db_chapter.novel_id
+    chapter_number = db_chapter.chapter_number
     
     await db.delete(db_chapter)
     await db.commit()
@@ -259,4 +319,7 @@ async def delete_chapter(
     await redis_service.delete(f"chapter:{chapter_id}:detail")
     await redis_service.clear_pattern(f"novel:{novel_id}:chapters:*")
     
-    return ApiResponse.success(message="章节删除成功")
+    return ApiResponse.success(
+        {"chapter_number": chapter_number},
+        message=f"第{chapter_number}章已删除"
+    )

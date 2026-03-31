@@ -21,19 +21,14 @@ class GetNovelSummaryTool(BaseMCPTool):
     category = MCPToolCategory.NOVEL_MANAGEMENT
     parameters_schema = {
         "type": "object",
-        "properties": {
-            "novel_id": {
-                "type": "integer",
-                "description": "小说ID"
-            }
-        },
-        "required": ["novel_id"]
+        "properties": {},
+        "required": []
     }
     
     def __init__(self, db: AsyncSession):
         self.db = db
     
-    async def execute(self, novel_id: int, **kwargs) -> MCPToolResult:
+    async def execute(self, novel_id: int = 0, **kwargs) -> MCPToolResult:
         result = await self.db.execute(
             select(Novel)
             .options(selectinload(Novel.chapters), selectinload(Novel.characters))
@@ -77,15 +72,11 @@ class GetChapterListTool(BaseMCPTool):
     """获取章节列表"""
     
     name = "get_chapter_list"
-    description = "获取小说的章节列表，支持分页和状态筛选"
+    description = "获取小说的章节列表，支持分页和状态筛选。无需提供novel_id，会自动获取当前小说的章节。"
     category = MCPToolCategory.NOVEL_MANAGEMENT
     parameters_schema = {
         "type": "object",
         "properties": {
-            "novel_id": {
-                "type": "integer",
-                "description": "小说ID"
-            },
             "status": {
                 "type": "string",
                 "enum": ["draft", "completed"],
@@ -102,7 +93,7 @@ class GetChapterListTool(BaseMCPTool):
                 "description": "每页数量"
             }
         },
-        "required": ["novel_id"]
+        "required": []
     }
     
     def __init__(self, db: AsyncSession):
@@ -110,7 +101,7 @@ class GetChapterListTool(BaseMCPTool):
     
     async def execute(
         self, 
-        novel_id: int, 
+        novel_id: int = 0,
         status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
@@ -172,14 +163,18 @@ class GetChapterContentTool(BaseMCPTool):
     """获取章节内容"""
     
     name = "get_chapter_content"
-    description = "获取指定章节的完整内容"
+    description = "获取指定章节的完整内容。可以通过章节号或章节ID获取。如果不提供chapter_id，则返回第一章的内容。"
     category = MCPToolCategory.NOVEL_MANAGEMENT
     parameters_schema = {
         "type": "object",
         "properties": {
             "chapter_id": {
                 "type": "integer",
-                "description": "章节ID"
+                "description": "章节ID（可选，不提供则返回第一章）"
+            },
+            "chapter_number": {
+                "type": "integer",
+                "description": "章节号（可选）"
             },
             "include_summary": {
                 "type": "boolean",
@@ -187,7 +182,7 @@ class GetChapterContentTool(BaseMCPTool):
                 "description": "是否包含摘要"
             }
         },
-        "required": ["chapter_id"]
+        "required": []
     }
     
     def __init__(self, db: AsyncSession):
@@ -195,19 +190,31 @@ class GetChapterContentTool(BaseMCPTool):
     
     async def execute(
         self, 
-        chapter_id: int, 
+        chapter_id: Optional[int] = None,
+        chapter_number: Optional[int] = None,
         include_summary: bool = True,
+        novel_id: int = 0,
         **kwargs
     ) -> MCPToolResult:
-        result = await self.db.execute(
-            select(Chapter).where(Chapter.id == chapter_id)
-        )
-        chapter = result.scalar_one_or_none()
+        if not chapter_id and not chapter_number:
+            result = await self.db.execute(
+                select(Chapter).where(Chapter.novel_id == novel_id).order_by(Chapter.chapter_number).limit(1)
+            )
+            chapter = result.scalar_one_or_none()
+        else:
+            query = select(Chapter).where(Chapter.novel_id == novel_id)
+            if chapter_id:
+                query = query.where(Chapter.id == chapter_id)
+            elif chapter_number:
+                query = query.where(Chapter.chapter_number == chapter_number)
+            
+            result = await self.db.execute(query)
+            chapter = result.scalar_one_or_none()
         
         if not chapter:
             return MCPToolResult(
                 success=False,
-                error=f"Chapter not found: {chapter_id}"
+                error=f"Chapter not found"
             )
         
         data = {
@@ -236,23 +243,22 @@ class GetNovelProgressTool(BaseMCPTool):
     """获取小说进度"""
     
     name = "get_novel_progress"
-    description = "获取小说的写作进度，包括章节完成情况、字数统计、角色数量等"
+    description = "获取小说的写作进度，包括章节完成情况、字数统计、角色数量等。无需提供novel_id。"
     category = MCPToolCategory.NOVEL_MANAGEMENT
     parameters_schema = {
         "type": "object",
-        "properties": {
-            "novel_id": {
-                "type": "integer",
-                "description": "小说ID"
-            }
-        },
-        "required": ["novel_id"]
+        "properties": {},
+        "required": []
     }
     
     def __init__(self, db: AsyncSession):
         self.db = db
     
-    async def execute(self, novel_id: int, **kwargs) -> MCPToolResult:
+    async def execute(self, novel_id: int = 0, **kwargs) -> MCPToolResult:
+        novel_id = novel_id or kwargs.get("novel_id", 0)
+        if not novel_id:
+            return MCPToolResult(success=False, error="novel_id is required")
+        
         result = await self.db.execute(
             select(Novel)
             .options(
@@ -326,21 +332,17 @@ class GetCharacterListTool(BaseMCPTool):
     """获取角色列表"""
     
     name = "get_character_list"
-    description = "获取小说的角色列表"
+    description = "获取小说的角色列表。无需提供novel_id。"
     category = MCPToolCategory.NOVEL_MANAGEMENT
     parameters_schema = {
         "type": "object",
         "properties": {
-            "novel_id": {
-                "type": "integer",
-                "description": "小说ID"
-            },
             "search": {
                 "type": "string",
                 "description": "角色名搜索（可选）"
             }
         },
-        "required": ["novel_id"]
+        "required": []
     }
     
     def __init__(self, db: AsyncSession):
@@ -348,10 +350,14 @@ class GetCharacterListTool(BaseMCPTool):
     
     async def execute(
         self, 
-        novel_id: int, 
+        novel_id: int = 0,
         search: Optional[str] = None,
         **kwargs
     ) -> MCPToolResult:
+        novel_id = novel_id or kwargs.get("novel_id", 0)
+        if not novel_id:
+            return MCPToolResult(success=False, error="novel_id is required")
+        
         result = await self.db.execute(
             select(Novel).where(Novel.id == novel_id)
         )

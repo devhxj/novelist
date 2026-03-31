@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Card, Descriptions, Tag, Button, Space, message, Divider, Row, Col } from 'antd'
-import { FileTextOutlined, UserOutlined, ThunderboltOutlined, BulbOutlined, ToolOutlined, CheckCircleOutlined, BarChartOutlined, EditOutlined, MessageOutlined } from '@ant-design/icons'
+import { FileTextOutlined, UserOutlined, BulbOutlined, ToolOutlined, CheckCircleOutlined, BarChartOutlined, EditOutlined, RocketOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import { novelApi } from '@/services/novelService'
 import { getErrorMessage } from '@/types/error'
@@ -82,8 +82,17 @@ function NovelDetailPage() {
       </Descriptions>
 
       <Divider>功能入口</Divider>
-      
+
       <Row gutter={[16, 16]}>
+        <Col span={6}>
+          <Card hoverable onClick={() => navigate(`/novels/${id}/editor`)} style={{ borderColor: '#007acc' }}>
+            <Card.Meta
+              avatar={<RocketOutlined style={{ fontSize: 24, color: '#007acc' }} />}
+              title="开始创作"
+              description="AI IDE 创作工作台"
+            />
+          </Card>
+        </Col>
         <Col span={6}>
           <Card hoverable onClick={() => navigate(`/novels/${id}/chapters`)}>
             <Card.Meta
@@ -99,33 +108,6 @@ function NovelDetailPage() {
               avatar={<UserOutlined style={{ fontSize: 24, color: '#52c41a' }} />}
               title="角色管理"
               description="管理小说角色信息"
-            />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card hoverable onClick={() => navigate(`/novels/${id}/text-generation`)}>
-            <Card.Meta
-              avatar={<FileTextOutlined style={{ fontSize: 24, color: '#722ed1' }} />}
-              title="文本生成"
-              description="AI辅助文本生成工具"
-            />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card hoverable onClick={() => navigate(`/novels/${id}/chat`)}>
-            <Card.Meta
-              avatar={<MessageOutlined style={{ fontSize: 24, color: '#1890ff' }} />}
-              title="AI对话"
-              description="多轮对话创作助手"
-            />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card hoverable onClick={() => navigate(`/novels/${id}/chapters`)}>
-            <Card.Meta
-              avatar={<ThunderboltOutlined style={{ fontSize: 24, color: '#faad14' }} />}
-              title="章节生成"
-              description="AI自动生成章节"
             />
           </Card>
         </Col>

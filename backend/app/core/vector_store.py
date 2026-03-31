@@ -6,6 +6,10 @@ import logging
 import asyncio
 from typing import List, Dict, Any, Optional
 
+os.environ.setdefault("HF_HUB_OFFLINE", "0")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "0")
+os.environ.setdefault("HF_ENDPOINT", os.getenv("HF_ENDPOINT", "https://hf-mirror.com"))
+
 import chromadb
 from chromadb.utils import embedding_functions
 
@@ -40,6 +44,7 @@ class VectorStore:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
+            cls._instance._embedding_function = None
         return cls._instance
     
     def __init__(self):
@@ -47,32 +52,44 @@ class VectorStore:
             return
         
         try:
-            VectorStoreConfig.validate()
-            
             self.persist_directory = VectorStoreConfig.CHROMA_PERSIST_DIR
             os.makedirs(self.persist_directory, exist_ok=True)
             logger.info(f"ChromaDB persist directory: {self.persist_directory}")
             
             self.client = chromadb.PersistentClient(path=self.persist_directory)
             
-            if VectorStoreConfig.USE_OPENAI_EMBEDDING:
-                logger.info(f"Using OpenAI embedding model: {VectorStoreConfig.EMBEDDING_MODEL}")
-                self.embedding_function = embedding_functions.OpenAIEmbeddingFunction(
-                    api_key=VectorStoreConfig.OPENAI_API_KEY,
-                    model_name=VectorStoreConfig.EMBEDDING_MODEL
-                )
-            else:
-                logger.info(f"Using SentenceTransformer embedding model: {VectorStoreConfig.EMBEDDING_MODEL}")
-                self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-                    model_name=VectorStoreConfig.EMBEDDING_MODEL
-                )
-            
             self._initialized = True
-            logger.info("VectorStore initialized successfully")
+            logger.info("VectorStore initialized (embedding model lazy-loaded)")
             
         except Exception as e:
             logger.error(f"Failed to initialize VectorStore: {e}")
             raise VectorStoreError(f"VectorStore initialization failed: {e}")
+    
+    @property
+    def embedding_function(self):
+        """懒加载embedding模型 - 只在第一次使用时加载"""
+        if self._embedding_function is None:
+            self._load_embedding_model()
+        return self._embedding_function
+    
+    def _load_embedding_model(self):
+        """加载embedding模型"""
+        try:
+            if VectorStoreConfig.USE_OPENAI_EMBEDDING:
+                logger.info(f"Using OpenAI embedding model: {VectorStoreConfig.EMBEDDING_MODEL}")
+                self._embedding_function = embedding_functions.OpenAIEmbeddingFunction(
+                    api_key=VectorStoreConfig.OPENAI_API_KEY,
+                    model_name=VectorStoreConfig.EMBEDDING_MODEL
+                )
+            else:
+                logger.info(f"Loading SentenceTransformer model: {VectorStoreConfig.EMBEDDING_MODEL}")
+                self._embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+                    model_name=VectorStoreConfig.EMBEDDING_MODEL
+                )
+            logger.info("Embedding model loaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to load embedding model: {e}")
+            raise VectorStoreError(f"Embedding model load failed: {e}")
     
     def get_or_create_collection(self, novel_id: int):
         """获取或创建小说的向量集合"""
