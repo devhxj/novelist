@@ -8,6 +8,7 @@ from .memory_tools import MemoryRetrievalTools
 from .consistency_tools import ConsistencyCheckTools
 from .editing_tools import EditingTools
 
+from .registry import get_mcp_registry
 from .router import router
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "MemoryRetrievalTools",
     "ConsistencyCheckTools",
     "EditingTools",
+    "get_mcp_registry",
     "router",
 ]

@@ -91,6 +91,8 @@ class EditSessionManager:
     ) -> EditChange:
         """应用变更到副本（事务性操作）"""
         old_working_content = edit_session.working_content or ""
+        edit_session_db_id = edit_session.id
+        edit_session_public_id = edit_session.edit_session_id
         
         try:
             if change_type == "full_replace":
@@ -127,7 +129,7 @@ class EditSessionManager:
             edit_session.change_count += hunks_count
             
             change = EditChange(
-                edit_session_id=edit_session.id,
+                edit_session_id=edit_session_db_id,
                 change_type=change_type,
                 source=source,
                 old_content=old_working_content,
@@ -141,12 +143,11 @@ class EditSessionManager:
             self.db.add(change)
             await self.db.commit()
             
-            logger.info(f"Applied change to edit session {edit_session.edit_session_id}, added {hunks_count} hunks")
+            logger.info(f"Applied change to edit session {edit_session_public_id}, added {hunks_count} hunks")
             return change
             
         except Exception as e:
             await self.db.rollback()
-            edit_session.working_content = old_working_content
             logger.error(f"Failed to apply change, rolled back: {e}")
             raise
     

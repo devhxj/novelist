@@ -114,7 +114,7 @@ class TextGenerator:
         
         context = await self.context_builder.build_writing_context(
             chapter_number=chapter_number,
-            context_size=5,
+            context_size=3000,
             include_previous_chapters=True,
             include_characters=True,
             include_plot_events=True
@@ -159,7 +159,7 @@ class TextGenerator:
         
         context = await self.context_builder.build_writing_context(
             chapter_id=chapter_id,
-            context_size=5,
+            context_size=3000,
             include_previous_chapters=True,
             include_characters=True,
             include_plot_events=True

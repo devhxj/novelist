@@ -45,7 +45,9 @@ class ChapterGenerationService:
         chapter_number: int,
         target_length: int = 3000,
         style: str = "narrative",
-        additional_context: Optional[Dict[str, Any]] = None
+        additional_context: Optional[Dict[str, Any]] = None,
+        agent_role: Optional[str] = None,
+        model: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         生成章节完整流程
@@ -71,7 +73,9 @@ class ChapterGenerationService:
                 parameters={
                     "chapter_number": chapter_number,
                     "target_length": target_length,
-                    "style": style
+                    "style": style,
+                    "agent_role": agent_role,
+                    "model": model
                 },
                 context=context
             )

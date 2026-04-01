@@ -35,6 +35,8 @@ from app.core.prompt_templates import (
 from app.chapters.models import Chapter
 from app.novels.models import Novel
 from app.editor.service import get_edit_session_manager
+from app.mcp.registry import get_mcp_registry
+from app.workflows.langgraph_workflow import ChapterWorkflow, LANGGRAPH_AVAILABLE
 
 router = APIRouter(tags=["websocket"])
 logger = logging.getLogger(__name__)
@@ -50,21 +52,6 @@ async def get_user_from_token(token: str) -> Optional[int]:
     except Exception:
         pass
     return None
-
-
-def get_mcp_registry(db):
-    from app.mcp.base import MCPToolRegistry
-    from app.mcp.novel_tools import NovelManagementTools
-    from app.mcp.memory_tools import MemoryRetrievalTools
-    from app.mcp.consistency_tools import ConsistencyCheckTools
-    from app.mcp.editing_tools import EditingTools
-    
-    registry = MCPToolRegistry()
-    NovelManagementTools.register_all(db, registry)
-    MemoryRetrievalTools.register_all(db, registry)
-    ConsistencyCheckTools.register_all(db, registry)
-    EditingTools.register_all(db, registry)
-    return registry
 
 
 @router.websocket("/ws/chat")
@@ -253,6 +240,9 @@ async def _handle_create_session(websocket, data, user_id, novel_id):
         chapter_context=chapter_context,
         model=model
     )
+    if not session.title:
+        base_title = novel_context.title if novel_context else ""
+        session.title = f"{base_title} 对话" if base_title else "新对话"
     session.edit_mode = edit_mode
     session.current_chapter_id = current_chapter_id
     await session_manager.save_session(session)
@@ -262,6 +252,8 @@ async def _handle_create_session(websocket, data, user_id, novel_id):
         "session_id": session.session_id,
         "scope": scope.to_dict(),
         "display_name": scope.get_display_name(),
+        "title": session.title,
+        "subtitle": session.get_subtitle(),
         "model": model,
         "edit_mode": edit_mode,
         "current_chapter_id": current_chapter_id,
@@ -296,8 +288,10 @@ async def _handle_load_session(websocket, data, user_id):
         "session_id": session.session_id,
         "scope": session.scope.to_dict(),
         "display_name": session.get_display_name(),
+        "title": session.title,
+        "subtitle": session.get_subtitle(),
         "message_count": session.get_message_count(),
-        "recent_messages": [m.to_dict() for m in session.messages[-10:]],
+        "recent_messages": [m.to_dict() for m in session.messages[-30:]],
         "timestamp": datetime.now().isoformat()
     }, websocket)
     
@@ -322,6 +316,7 @@ async def _handle_list_sessions(websocket, user_id, novel_id, data):
                 "scope": s.scope.to_dict(),
                 "display_name": s.get_display_name(),
                 "title": s.title,
+                "subtitle": s.get_subtitle(),
                 "message_count": s.get_message_count(),
                 "updated_at": s.updated_at.isoformat()
             }
@@ -340,6 +335,7 @@ async def _handle_change_scope(websocket, session, data, novel_id):
     )
     
     session.scope = new_scope
+    session.subtitle = new_scope.get_display_name()
     
     async with AsyncSessionLocal() as db:
         if new_scope.type == ScopeType.CHAPTER and new_scope.chapter_start:
@@ -356,6 +352,8 @@ async def _handle_change_scope(websocket, session, data, novel_id):
         "session_id": session.session_id,
         "scope": new_scope.to_dict(),
         "display_name": new_scope.get_display_name(),
+        "title": session.title,
+        "subtitle": session.get_subtitle(),
         "timestamp": datetime.now().isoformat()
     }, websocket)
 
@@ -561,7 +559,26 @@ async def _run_chat_with_tools(
         session_manager.add_message(session, MessageRole.USER, user_message)
         
         async with AsyncSessionLocal() as db:
-            registry = get_mcp_registry(db)
+            registry = get_mcp_registry()
+            extra_context = ""
+            try:
+                if session_manager.compressor.should_compress(session) and session_manager.config.enable_auto_summary:
+                    summary_prompt = session_manager.compressor._generate_summary_prompt(session.messages)
+                    summary = await llm_service.generate_text(
+                        prompt=summary_prompt,
+                        system_prompt="你是对话摘要助手，请提炼关键信息与设定。"
+                    )
+                    session_manager.compress_session(session, summary=summary)
+                context_builder = ContextBuilder(db, novel_id)
+                retrieved = await context_builder.search_relevant_context(query=user_message, top_k=5)
+                if retrieved:
+                    formatted = "\n".join(
+                        f"- {item.get('content','')[:200]}"
+                        for item in retrieved
+                    )
+                    extra_context = f"【相关记忆检索】\n{formatted}"
+            except Exception:
+                extra_context = ""
             all_tools = registry.get_openai_functions() if tools_enabled else None
             
             if all_tools and edit_mode != EditMode.AGENT:
@@ -576,99 +593,275 @@ async def _run_chat_with_tools(
             system_prompt = EditModeConfig.get_system_prompt(edit_mode)
             
             full_response = ""
+            loop_count = 0
             
-            async for event in llm_service.chat_stream_with_tools(
-                messages=session_manager.get_messages_for_api(session),
-                model=session.model,
-                tools=tools,
-                system_prompt=system_prompt
-            ):
-                if not task_flags.get(task_id):
-                    logger.info(f"Task {task_id} cancelled")
-                    return
-                
-                if event["type"] == "content":
-                    chunk = event["content"]
-                    full_response += chunk
+            tool_cache: Dict[str, Dict[str, Any]] = {}
+            disabled_tools: set[str] = set()
+            failed_tool_keys: Dict[str, int] = {}
+            max_tool_retries = 3
+            while loop_count < 50:
+                tool_outputs: List[Dict[str, Any]] = []
+                if tools:
+                    tools = [t for t in tools if t["function"]["name"] not in disabled_tools]
+                async for event in llm_service.chat_stream_with_tools(
+                    messages=session_manager.get_messages_for_api(session, extra_context=extra_context),
+                    model=session.model,
+                    tools=tools,
+                    system_prompt=system_prompt
+                ):
+                    if not task_flags.get(task_id):
+                        logger.info(f"Task {task_id} cancelled")
+                        return
                     
-                    await ws_manager.send_personal_message({
-                        "type": "content_chunk",
-                        "task_id": task_id,
-                        "chunk": chunk,
-                        "accumulated_length": len(full_response),
-                        "timestamp": datetime.now().isoformat()
-                    }, websocket)
-                
-                elif event["type"] == "tool_call_start":
-                    tool_name = event.get("tool_name", "unknown")
+                    if event["type"] == "content":
+                        chunk = event["content"]
+                        full_response += chunk
+                        
+                        await ws_manager.send_personal_message({
+                            "type": "content_chunk",
+                            "task_id": task_id,
+                            "chunk": chunk,
+                            "accumulated_length": len(full_response),
+                            "timestamp": datetime.now().isoformat()
+                        }, websocket)
                     
-                    logger.info(f"Tool call started: {tool_name}")
-                    
-                    if not EditModeConfig.can_use_tool(edit_mode, tool_name):
-                        logger.warning(f"Tool {tool_name} not allowed in mode {edit_mode.value}")
+                    elif event["type"] == "tool_call_start":
+                        tool_name = event.get("tool_name", "unknown")
+                        tool_id = event.get("tool_id")
+                        
+                        logger.info(f"Tool call started: {tool_name}")
+                        if not tool_name:
+                            continue
+                        
+                        if not EditModeConfig.can_use_tool(edit_mode, tool_name):
+                            logger.warning(f"Tool {tool_name} not allowed in mode {edit_mode.value}")
+                            await ws_manager.send_personal_message({
+                                "type": "tool_call",
+                                "task_id": task_id,
+                                "tool_name": tool_name,
+                                "status": "rejected",
+                                "error": f"当前模式({edit_mode.value})不允许使用此工具",
+                                "timestamp": datetime.now().isoformat()
+                            }, websocket)
+                            continue
+                        
                         await ws_manager.send_personal_message({
                             "type": "tool_call",
                             "task_id": task_id,
                             "tool_name": tool_name,
-                            "status": "rejected",
-                            "error": f"当前模式({edit_mode.value})不允许使用此工具",
+                            "tool_id": tool_id,
+                            "status": "executing",
                             "timestamp": datetime.now().isoformat()
                         }, websocket)
-                        continue
                     
-                    await ws_manager.send_personal_message({
-                        "type": "tool_call",
-                        "task_id": task_id,
-                        "tool_name": tool_name,
-                        "status": "executing",
-                        "timestamp": datetime.now().isoformat()
-                    }, websocket)
-                
-                elif event["type"] == "tool_call_end":
-                    tool_name = event.get("tool_name", "unknown")
-                    arguments = event.get("arguments", {})
-                    
-                    logger.info(f"Tool call end: {tool_name}, args: {arguments}")
-                    
-                    if not EditModeConfig.can_use_tool(edit_mode, tool_name):
-                        logger.warning(f"Tool {tool_name} not allowed in mode {edit_mode.value}")
-                        continue
-                    
-                    if tools_enabled and tool_name:
-                        clean_args = {k: v for k, v in arguments.items() if k not in ('session_id', 'novel_id', 'chapter_id')}
+                    elif event["type"] == "tool_call_end":
+                        tool_name = event.get("tool_name", "unknown")
+                        tool_id = event.get("tool_id")
+                        arguments = event.get("arguments", {})
                         
-                        if session.current_chapter_id and 'chapter_id' not in arguments:
-                            clean_args['chapter_id'] = session.current_chapter_id
+                        logger.info(f"Tool call end: {tool_name}, args: {arguments}")
+                        if not tool_name:
+                            continue
                         
-                        tool_result = await registry.execute(
-                            tool_name,
-                            session_id=session.session_id,
-                            novel_id=novel_id,
-                            **clean_args
-                        )
+                        if not EditModeConfig.can_use_tool(edit_mode, tool_name):
+                            logger.warning(f"Tool {tool_name} not allowed in mode {edit_mode.value}")
+                            result_payload = {"success": False, "error": f"当前模式({edit_mode.value})不允许使用此工具"}
+                            await ws_manager.send_personal_message({
+                                "type": "tool_result",
+                                "task_id": task_id,
+                                "tool_name": tool_name,
+                                "tool_id": tool_id,
+                                "result": result_payload,
+                                "timestamp": datetime.now().isoformat()
+                            }, websocket)
+                            await ws_manager.send_personal_message({
+                                "type": "tool_call",
+                                "task_id": task_id,
+                                "tool_name": tool_name,
+                                "tool_id": tool_id,
+                                "status": "completed",
+                                "timestamp": datetime.now().isoformat()
+                            }, websocket)
+                            tool_outputs.append({
+                                "tool": tool_name,
+                                "tool_id": tool_id,
+                                "arguments": arguments,
+                                "result": result_payload
+                            })
+                            continue
                         
-                        logger.info(f"Tool result: success={tool_result.success}")
-                        
-                        await ws_manager.send_personal_message({
-                            "type": "tool_result",
-                            "task_id": task_id,
-                            "tool_name": tool_name,
-                            "result": tool_result.model_dump(),
-                            "timestamp": datetime.now().isoformat()
-                        }, websocket)
-                        
-                        if tool_result.metadata and tool_result.metadata.get("requires_user_confirmation"):
-                            edit_session_id = tool_result.metadata.get("edit_session_id")
-                            if edit_session_id:
+                        if tools_enabled and tool_name:
+                            clean_args = {k: v for k, v in arguments.items() if k not in ('session_id', 'novel_id')}
+                            
+                            if session.current_chapter_id and 'chapter_id' not in arguments:
+                                clean_args['chapter_id'] = session.current_chapter_id
+                            elif tool_name in {"start_edit_session", "read_chapter_for_edit", "get_edit_status", "edit_chapter_content"} and 'chapter_id' not in arguments:
+                                chapter_id = None
+                                if session.scope.type == ScopeType.CHAPTER and session.scope.chapter_start:
+                                    result = await db.execute(
+                                        select(Chapter).where(
+                                            Chapter.novel_id == novel_id,
+                                            Chapter.chapter_number == session.scope.chapter_start
+                                        )
+                                    )
+                                    chapter = result.scalar_one_or_none()
+                                    if chapter:
+                                        chapter_id = chapter.id
+                                if not chapter_id:
+                                    result = await db.execute(
+                                        select(Chapter)
+                                        .where(Chapter.novel_id == novel_id)
+                                        .order_by(Chapter.chapter_number.desc())
+                                        .limit(1)
+                                    )
+                                    chapter = result.scalar_one_or_none()
+                                    if chapter:
+                                        chapter_id = chapter.id
+                                if chapter_id:
+                                    clean_args["chapter_id"] = chapter_id
+                            
+                            cache_key = f"{tool_name}:{json.dumps(clean_args, ensure_ascii=False, sort_keys=True)}"
+                            cached = tool_cache.get(cache_key)
+                            if cached:
+                                tool_result_payload = cached
+                            else:
+                                tool_result = await registry.execute(
+                                    tool_name,
+                                    db=db,
+                                    user_id=session.user_id,
+                                    session_id=session.session_id,
+                                    novel_id=novel_id,
+                                    **clean_args
+                                )
+                                tool_result_payload = tool_result.model_dump()
+                                if tool_result_payload.get("success"):
+                                    tool_cache[cache_key] = tool_result_payload
+                            
+                            logger.info(f"Tool result payload: {tool_result_payload}")
+                            
+                            metadata = tool_result_payload.get("metadata") or {}
+                            data_payload = tool_result_payload.get("data") or {}
+                            
+                            await ws_manager.send_personal_message({
+                                "type": "tool_result",
+                                "task_id": task_id,
+                                "tool_name": tool_name,
+                                "tool_id": tool_id,
+                                "result": tool_result_payload,
+                                "timestamp": datetime.now().isoformat()
+                            }, websocket)
+                            await ws_manager.send_personal_message({
+                                "type": "tool_call",
+                                "task_id": task_id,
+                                "tool_name": tool_name,
+                                "status": "completed",
+                                "tool_id": tool_id,
+                                "timestamp": datetime.now().isoformat()
+                            }, websocket)
+                            
+                            tool_outputs.append({
+                                "tool": tool_name,
+                                "tool_id": tool_id,
+                                "arguments": clean_args,
+                                "result": tool_result_payload
+                            })
+                            
+                            if not tool_result_payload.get("success"):
+                                failed_tool_keys[cache_key] = failed_tool_keys.get(cache_key, 0) + 1
+                                error_message = tool_result_payload.get("error", "未知错误")
+                                session_manager.add_message(
+                                    session,
+                                    MessageRole.SYSTEM,
+                                    f"工具 {tool_name} 失败：{error_message}。请修正参数后重试。"
+                                )
+                                if failed_tool_keys[cache_key] >= max_tool_retries:
+                                    disabled_tools.add(tool_name)
+                                    session_manager.add_message(
+                                        session,
+                                        MessageRole.SYSTEM,
+                                        f"工具 {tool_name} 连续失败 {max_tool_retries} 次，暂停调用。请改用其他工具或继续正文。"
+                                    )
+                            else:
+                                if cache_key in failed_tool_keys:
+                                    failed_tool_keys.pop(cache_key, None)
+                            
+                            if tool_name == "start_edit_session" and tool_result_payload.get("success") and not session.metadata.get("edit_session_hint_sent"):
                                 await ws_manager.send_personal_message({
-                                    "type": "edit_pending",
+                                    "type": "edit_started",
                                     "task_id": task_id,
-                                    "edit_session_id": edit_session_id,
-                                    "change_count": tool_result.data.get("change_count", 0),
+                                    "tool_name": tool_name,
+                                    "chapter_id": data_payload.get("chapter_id") or clean_args.get("chapter_id"),
+                                    "edit_session_id": data_payload.get("edit_session_id") or metadata.get("edit_session_id"),
+                                    "working_content": data_payload.get("working_content", ""),
+                                    "original_content": data_payload.get("original_content", ""),
+                                    "change_count": data_payload.get("change_count", 0),
                                     "timestamp": datetime.now().isoformat()
                                 }, websocket)
+                                session_manager.add_message(
+                                    session,
+                                    MessageRole.SYSTEM,
+                                    "已创建编辑会话。请直接调用 apply_edit 写入正文内容，避免重复 start_edit_session。"
+                                )
+                                session.metadata["edit_session_hint_sent"] = True
+                            
+                            if tool_result_payload.get("success") and data_payload.get("working_content") is not None:
+                                await ws_manager.send_personal_message({
+                                    "type": "edit_preview",
+                                    "task_id": task_id,
+                                    "tool_name": tool_name,
+                                    "chapter_id": data_payload.get("chapter_id") or clean_args.get("chapter_id"),
+                                    "edit_session_id": data_payload.get("edit_session_id") or metadata.get("edit_session_id"),
+                                    "working_content": data_payload.get("working_content"),
+                                    "change_count": data_payload.get("change_count", 0),
+                                    "diff": data_payload.get("diff", {}),
+                                    "timestamp": datetime.now().isoformat()
+                                }, websocket)
+                            if metadata.get("requires_user_confirmation"):
+                                edit_session_id = metadata.get("edit_session_id")
+                                if edit_session_id:
+                                    await ws_manager.send_personal_message({
+                                        "type": "edit_pending",
+                                        "task_id": task_id,
+                                        "edit_session_id": edit_session_id,
+                                        "change_count": (tool_result_payload.get("data") or {}).get("change_count", 0),
+                                        "timestamp": datetime.now().isoformat()
+                                    }, websocket)
+                
+                if tool_outputs and tools_enabled:
+                    if full_response:
+                        session_manager.add_message(session, MessageRole.ASSISTANT, full_response)
+                        full_response = ""
+                    for item in tool_outputs:
+                        tool_call_payload = [{
+                            "id": item.get("tool_id") or f"call_{item['tool']}",
+                            "type": "function",
+                            "function": {
+                                "name": item["tool"],
+                                "arguments": json.dumps(item.get("arguments", {}), ensure_ascii=False)
+                            }
+                        }]
+                        session_manager.add_message(
+                            session,
+                            MessageRole.ASSISTANT,
+                            "",
+                            metadata={"tool_calls": tool_call_payload}
+                        )
+                        session_manager.add_message(
+                            session,
+                            MessageRole.TOOL,
+                            json.dumps(item["result"], ensure_ascii=False),
+                            metadata={
+                                "tool_call_id": item.get("tool_id") or f"call_{item['tool']}",
+                                "tool_name": item["tool"]
+                            }
+                        )
+                    loop_count += 1
+                    continue
+                
+                break
             
-            session_manager.add_message(session, MessageRole.ASSISTANT, full_response)
+            if full_response:
+                session_manager.add_message(session, MessageRole.ASSISTANT, full_response)
             await session_manager.save_session(session)
             
             logger.info(f"Chat task {task_id} completed")
@@ -773,6 +966,7 @@ async def _generate_chapter_ws(
     style = params.get("style", "narrative")
     model = params.get("model")
     user_prompt = params.get("user_prompt")
+    context_size = params.get("context_size", 3000)
     
     if chapter_number is None:
         result = await db.execute(
@@ -785,7 +979,7 @@ async def _generate_chapter_ws(
     
     context_data = await context_builder.build_writing_context(
         chapter_number=chapter_number,
-        context_size=5,
+        context_size=context_size,
         include_previous_chapters=True,
         include_characters=True,
         include_plot_events=True
@@ -797,6 +991,71 @@ async def _generate_chapter_ws(
     )
     
     if not task_flags.get(task_id):
+        return
+    
+    use_langgraph = params.get("use_langgraph", False)
+    if use_langgraph:
+        if not LANGGRAPH_AVAILABLE:
+            await ws_manager.send_personal_message(
+                GenerationProgress.failed(task_id, "LangGraph不可用"),
+                websocket
+            )
+            return
+        workflow = ChapterWorkflow()
+        workflow_result = await workflow.run(
+            task_id=task_id,
+            novel_id=novel_id,
+            chapter_number=chapter_number,
+            target_length=target_length,
+            style=style,
+            context=context_data,
+            model=model,
+            agent_role=params.get("agent_role"),
+            context_size=context_size
+        )
+        if not workflow_result.get("success"):
+            await ws_manager.send_personal_message(
+                GenerationProgress.failed(task_id, workflow_result.get("error", "工作流失败")),
+                websocket
+            )
+            return
+        generated = workflow_result.get("generated_content", "")
+        review_result = workflow_result.get("review_result") or {}
+        consistency_result = workflow_result.get("consistency_result") or {}
+        await ws_manager.send_personal_message(
+            GenerationProgress.review_result(
+                task_id,
+                review_result.get("approved", True),
+                review_result.get("score", 0),
+                review_result.get("issues", [])
+            ),
+            websocket
+        )
+        await ws_manager.send_personal_message(
+            GenerationProgress.consistency_check(
+                task_id,
+                consistency_result.get("passed", True),
+                consistency_result.get("issues", [])
+            ),
+            websocket
+        )
+        chapter_result = await db.execute(
+            select(Chapter).where(
+                Chapter.novel_id == novel_id,
+                Chapter.chapter_number == chapter_number
+            )
+        )
+        saved = chapter_result.scalar_one_or_none()
+        await ws_manager.send_personal_message(
+            GenerationProgress.completed(
+                task_id,
+                saved.id if saved else None,
+                chapter_number,
+                generated,
+                len(generated)
+            ),
+            websocket
+        )
         return
     
     system_prompt = get_system_prompt(GenerationType.CHAPTER, style)

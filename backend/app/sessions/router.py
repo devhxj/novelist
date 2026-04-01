@@ -33,7 +33,8 @@ async def create_session(
     chapter_start: Optional[int] = Body(None, description="起始章节号"),
     chapter_end: Optional[int] = Body(None, description="结束章节号"),
     model: str = Body("deepseek-chat", description="LLM模型"),
-    title: Optional[str] = Body(None, description="会话标题")
+    title: Optional[str] = Body(None, description="会话标题"),
+    subtitle: Optional[str] = Body(None, description="会话副标题")
 ):
     """
     创建新会话
@@ -121,6 +122,12 @@ async def create_session(
     
     if title:
         session.title = title[:50]
+    elif not session.title:
+        base_title = novel.title or ""
+        session.title = f"{base_title} 对话" if base_title else "新对话"
+    if subtitle:
+        session.subtitle = subtitle[:50]
+        session.metadata["subtitle"] = session.subtitle
     
     await session_manager.save_session(session)
     
@@ -128,6 +135,8 @@ async def create_session(
         "session_id": session.session_id,
         "scope": scope.to_dict(),
         "display_name": scope.get_display_name(),
+        "title": session.title,
+        "subtitle": session.get_subtitle(),
         "novel_id": novel_id,
         "model": model,
         "created_at": session.created_at.isoformat(),
@@ -172,6 +181,7 @@ async def list_sessions(
                 "scope": s.scope.to_dict(),
                 "display_name": s.get_display_name(),
                 "title": s.title,
+                "subtitle": s.get_subtitle(),
                 "novel_id": s.novel_id,
                 "message_count": s.get_message_count(),
                 "model": s.model,
@@ -208,6 +218,7 @@ async def get_session(
         "scope": session.scope.to_dict(),
         "display_name": session.get_display_name(),
         "title": session.title,
+        "subtitle": session.get_subtitle(),
         "novel_id": session.novel_id,
         "messages": [m.to_dict() for m in session.messages],
         "summary": session.summary,
@@ -297,6 +308,7 @@ async def update_session_scope(
     )
     
     session.scope = new_scope
+    session.subtitle = new_scope.get_display_name()
     
     from app.chapters.models import Chapter
     from sqlalchemy import select
@@ -325,6 +337,8 @@ async def update_session_scope(
         "session_id": session.session_id,
         "scope": new_scope.to_dict(),
         "display_name": new_scope.get_display_name(),
+        "title": session.title,
+        "subtitle": session.get_subtitle(),
         "message": "作用域已更新"
     })
 
@@ -333,7 +347,8 @@ async def update_session_scope(
 async def update_session_title(
     user: CurrentUser,
     session_id: str,
-    title: str = Body(..., embed=True, description="会话标题")
+    title: str = Body(..., embed=True, description="会话标题"),
+    subtitle: Optional[str] = Body(None, embed=True, description="会话副标题")
 ):
     """更新会话标题"""
     session = await session_manager.load_session(session_id)
@@ -345,12 +360,16 @@ async def update_session_title(
         return ApiResponse.error(code="FORBIDDEN", message="无权操作此会话", status_code=403)
     
     session.title = title[:50]
+    if subtitle is not None:
+        session.subtitle = subtitle[:50]
+        session.metadata["subtitle"] = session.subtitle
     session.updated_at = datetime.now()
     await session_manager.save_session(session)
     
     return ApiResponse.success({
         "message": "标题已更新",
         "title": session.title,
+        "subtitle": session.get_subtitle(),
         "display_name": session.get_display_name()
     })
 

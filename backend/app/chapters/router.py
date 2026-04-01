@@ -12,6 +12,8 @@ from app.core.auth import CurrentUser
 from app.core.dependencies import NovelOwner
 from app.core.exceptions import NotFoundException, UnauthorizedException, BadRequestException
 from app.core.redis_service import redis_service
+from app.editor.service import get_edit_session_manager
+from app.editor.models import ChangeSource
 from app.novels.models import Novel
 from .models import Chapter
 from .schemas import ChapterCreate, ChapterUpdate, NextChapterNumberResponse
@@ -242,7 +244,9 @@ async def update_chapter(
     chapter_id: int, 
     chapter: ChapterUpdate, 
     db: DBSession,
-    current_user: CurrentUser
+    current_user: CurrentUser,
+    collaborative: bool = Query(False, description="是否与AI协作编辑副本"),
+    session_id: Optional[str] = Query(None, description="协作编辑会话ID")
 ):
     """
     更新章节
@@ -261,6 +265,35 @@ async def update_chapter(
         raise UnauthorizedException("无权修改此章节")
     
     update_data = chapter.model_dump(exclude_unset=True)
+    manager = get_edit_session_manager(db)
+    edit_session = await manager.get_edit_session(chapter_id)
+    
+    if edit_session or collaborative:
+        if "content" not in update_data or chapter.content is None:
+            raise BadRequestException("协作编辑需要提供content")
+        if not edit_session:
+            if not session_id:
+                raise BadRequestException("协作编辑需要session_id")
+            edit_session = await manager.create_edit_session(chapter_id, session_id)
+        await manager.apply_change(
+            edit_session=edit_session,
+            change_type="full_replace",
+            new_content=chapter.content,
+            source=ChangeSource.USER
+        )
+        diff_data = await manager.get_diff(edit_session.edit_session_id)
+        return ApiResponse.success(
+            {
+                "edit_session_id": edit_session.edit_session_id,
+                "chapter_id": chapter_id,
+                "change_count": edit_session.change_count,
+                "working_content": edit_session.working_content,
+                "diff": diff_data.get("diff", {}),
+                "message": "已在副本中应用修改，等待确认"
+            },
+            message="副本更新成功"
+        )
+    
     for key, value in update_data.items():
         setattr(db_chapter, key, value)
     

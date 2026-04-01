@@ -20,7 +20,7 @@ class CheckCharacterConsistencyTool(BaseMCPTool):
     """检查角色一致性"""
     
     name = "check_character_consistency"
-    description = "检查小说中角色的性格、能力、关系是否前后一致"
+    description = "检查小说中角色的性格、能力、关系是否前后一致。无需传novel_id，系统会注入当前小说ID。"
     category = MCPToolCategory.CONSISTENCY_CHECK
     parameters_schema = {
         "type": "object",
@@ -36,13 +36,20 @@ class CheckCharacterConsistencyTool(BaseMCPTool):
         pass
     
     async def execute(
-        self, 
+        self,
         db: AsyncSession,
-        novel_id: int, chapter_ids: Optional[List[int]] = None, character_id: Optional[int] = None, **kwargs) -> MCPToolResult:
+        novel_id: int,
+        chapter_ids: Optional[List[int]] = None,
+        character_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        **kwargs
+    ) -> MCPToolResult:
         result = await db.execute(select(Novel).where(Novel.id == novel_id))
         novel = result.scalar_one_or_none()
         if not novel:
             return MCPToolResult(success=False, error=f"Novel not found: {novel_id}")
+        if user_id and novel.author_id != user_id:
+            return MCPToolResult(success=False, error="无权访问此小说")
         
         try:
             checker = ConsistencyChecker(db, novel_id)
@@ -72,7 +79,7 @@ class CheckPlotConsistencyTool(BaseMCPTool):
     """检查情节一致性"""
     
     name = "check_plot_consistency"
-    description = "检查小说情节发展的逻辑性、因果关系是否合理"
+    description = "检查小说情节发展的逻辑性、因果关系是否合理。无需传novel_id，系统会注入当前小说ID。"
     category = MCPToolCategory.CONSISTENCY_CHECK
     parameters_schema = {
         "type": "object",
@@ -87,13 +94,19 @@ class CheckPlotConsistencyTool(BaseMCPTool):
         pass
     
     async def execute(
-        self, 
+        self,
         db: AsyncSession,
-        novel_id: int, chapter_ids: Optional[List[int]] = None, **kwargs) -> MCPToolResult:
+        novel_id: int,
+        chapter_ids: Optional[List[int]] = None,
+        user_id: Optional[int] = None,
+        **kwargs
+    ) -> MCPToolResult:
         result = await db.execute(select(Novel).where(Novel.id == novel_id))
         novel = result.scalar_one_or_none()
         if not novel:
             return MCPToolResult(success=False, error=f"Novel not found: {novel_id}")
+        if user_id and novel.author_id != user_id:
+            return MCPToolResult(success=False, error="无权访问此小说")
         
         try:
             checker = ConsistencyChecker(db, novel_id)
@@ -120,7 +133,7 @@ class ListUnresolvedPlotsTool(BaseMCPTool):
     """列出未解决的伏笔"""
     
     name = "list_unresolved_plots"
-    description = "列出小说中所有未解决的伏笔（挖坑未填）"
+    description = "列出小说中所有未解决的伏笔（挖坑未填）。无需传novel_id，系统会注入当前小说ID。"
     category = MCPToolCategory.CONSISTENCY_CHECK
     parameters_schema = {
         "type": "object",
@@ -136,13 +149,20 @@ class ListUnresolvedPlotsTool(BaseMCPTool):
         pass
     
     async def execute(
-        self, 
+        self,
         db: AsyncSession,
-        novel_id: int, min_importance: Optional[int] = None, days_pending: Optional[int] = None, **kwargs) -> MCPToolResult:
+        novel_id: int,
+        min_importance: Optional[int] = None,
+        days_pending: Optional[int] = None,
+        user_id: Optional[int] = None,
+        **kwargs
+    ) -> MCPToolResult:
         result = await db.execute(select(Novel).where(Novel.id == novel_id))
         novel = result.scalar_one_or_none()
         if not novel:
             return MCPToolResult(success=False, error=f"Novel not found: {novel_id}")
+        if user_id and novel.author_id != user_id:
+            return MCPToolResult(success=False, error="无权访问此小说")
         
         query = select(Foreshadowing).where(
             Foreshadowing.novel_id == novel_id,
@@ -194,7 +214,7 @@ class GetForeshadowingStatusTool(BaseMCPTool):
     """获取伏笔状态"""
     
     name = "get_foreshadowing_status"
-    description = "获取小说伏笔的整体状态统计和详情"
+    description = "获取小说伏笔的整体状态统计和详情。无需传novel_id，系统会注入当前小说ID。"
     category = MCPToolCategory.CONSISTENCY_CHECK
     parameters_schema = {
         "type": "object",
@@ -208,13 +228,18 @@ class GetForeshadowingStatusTool(BaseMCPTool):
         pass
     
     async def execute(
-        self, 
+        self,
         db: AsyncSession,
-        novel_id: int, **kwargs) -> MCPToolResult:
+        novel_id: int,
+        user_id: Optional[int] = None,
+        **kwargs
+    ) -> MCPToolResult:
         result = await db.execute(select(Novel).where(Novel.id == novel_id))
         novel = result.scalar_one_or_none()
         if not novel:
             return MCPToolResult(success=False, error=f"Novel not found: {novel_id}")
+        if user_id and novel.author_id != user_id:
+            return MCPToolResult(success=False, error="无权访问此小说")
         
         total_result = await db.execute(
             select(func.count()).where(Foreshadowing.novel_id == novel_id)
@@ -312,13 +337,20 @@ class RunFullConsistencyCheckTool(BaseMCPTool):
         pass
     
     async def execute(
-        self, 
+        self,
         db: AsyncSession,
-        novel_id: int, chapter_ids: Optional[List[int]] = None, check_types: Optional[List[str]] = None, **kwargs) -> MCPToolResult:
+        novel_id: int,
+        chapter_ids: Optional[List[int]] = None,
+        check_types: Optional[List[str]] = None,
+        user_id: Optional[int] = None,
+        **kwargs
+    ) -> MCPToolResult:
         result = await db.execute(select(Novel).where(Novel.id == novel_id))
         novel = result.scalar_one_or_none()
         if not novel:
             return MCPToolResult(success=False, error=f"Novel not found: {novel_id}")
+        if user_id and novel.author_id != user_id:
+            return MCPToolResult(success=False, error="无权访问此小说")
         
         try:
             checker = ConsistencyChecker(db, novel_id)

@@ -35,6 +35,9 @@ class WorkflowState(TypedDict):
     chapter_number: int
     target_length: int
     style: str
+    model: Optional[str]
+    agent_role: Optional[str]
+    context_size: int
     
     context: Dict[str, Any]
     generated_content: Optional[str]
@@ -57,7 +60,10 @@ def create_initial_state(
     chapter_number: int,
     target_length: int = 3000,
     style: str = "narrative",
-    context: Dict[str, Any] = None
+    context: Dict[str, Any] = None,
+    model: Optional[str] = None,
+    agent_role: Optional[str] = None,
+    context_size: int = 3000
 ) -> WorkflowState:
     """创建初始状态"""
     now = datetime.now().isoformat()
@@ -67,6 +73,9 @@ def create_initial_state(
         chapter_number=chapter_number,
         target_length=target_length,
         style=style,
+        model=model,
+        agent_role=agent_role,
+        context_size=context_size,
         context=context or {},
         generated_content=None,
         review_result=None,
@@ -152,8 +161,8 @@ class ChapterWorkflow:
             async with AsyncSessionLocal() as db:
                 builder = ContextBuilder(db, state["novel_id"])
                 context = await builder.build_writing_context(
-                    chapter_id=state["chapter_number"],
-                    context_size=5,
+                    chapter_number=state["chapter_number"],
+                    context_size=state.get("context_size", 3000),
                     include_previous_chapters=True,
                     include_characters=True,
                     include_plot_events=True
@@ -185,7 +194,9 @@ class ChapterWorkflow:
                 parameters={
                     "chapter_number": state["chapter_number"],
                     "target_length": state["target_length"],
-                    "style": state["style"]
+                    "style": state["style"],
+                    "model": state.get("model"),
+                    "agent_role": state.get("agent_role")
                 },
                 context=state["context"]
             )
@@ -451,7 +462,10 @@ class ChapterWorkflow:
         chapter_number: int,
         target_length: int = 3000,
         style: str = "narrative",
-        context: Dict[str, Any] = None
+        context: Dict[str, Any] = None,
+        model: Optional[str] = None,
+        agent_role: Optional[str] = None,
+        context_size: int = 3000
     ) -> Dict[str, Any]:
         """
         运行工作流
@@ -473,7 +487,10 @@ class ChapterWorkflow:
             chapter_number=chapter_number,
             target_length=target_length,
             style=style,
-            context=context
+            context=context,
+            model=model,
+            agent_role=agent_role,
+            context_size=context_size
         )
         
         config = {"configurable": {"thread_id": task_id}}

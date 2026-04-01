@@ -10,6 +10,21 @@ from .base import BaseAgent, AgentTask, AgentResult, AgentRole, TaskType, TaskSt
 logger = logging.getLogger(__name__)
 
 
+ROLE_ALIASES = {
+    "writer": AgentRole.WRITER.value,
+    "写作专家": AgentRole.WRITER.value,
+    "写手": AgentRole.WRITER.value,
+    "作者": AgentRole.WRITER.value,
+    "reviewer": AgentRole.REVIEWER.value,
+    "审稿专家": AgentRole.REVIEWER.value,
+    "审核专家": AgentRole.REVIEWER.value,
+    "审阅专家": AgentRole.REVIEWER.value,
+    "review": AgentRole.REVIEWER.value,
+    "coordinator": AgentRole.COORDINATOR.value,
+    "主控": AgentRole.COORDINATOR.value,
+}
+
+
 class CoordinatorAgent(BaseAgent):
     """主控Agent - 负责任务调度和协调"""
     
@@ -33,7 +48,7 @@ class CoordinatorAgent(BaseAgent):
         self.log_task_start(task)
         
         try:
-            suitable_agent = self._find_suitable_agent(task.task_type)
+            suitable_agent = self._find_suitable_agent(task)
             
             if not suitable_agent:
                 return self.create_result(
@@ -63,10 +78,21 @@ class CoordinatorAgent(BaseAgent):
                 error=str(e)
             )
     
-    def _find_suitable_agent(self, task_type: TaskType) -> Optional[BaseAgent]:
+    def _find_suitable_agent(self, task: AgentTask) -> Optional[BaseAgent]:
         """找到能处理该任务的Agent"""
+        agent_id = task.parameters.get("agent_id")
+        agent_role = task.parameters.get("agent_role")
+        normalized_role = ROLE_ALIASES.get(agent_role, agent_role) if agent_role else None
+        if agent_id and agent_id in self.agents:
+            agent = self.agents[agent_id]
+            if agent.can_handle(task.task_type):
+                return agent
+        if normalized_role:
+            for agent in self.agents.values():
+                if agent.role.value == normalized_role and agent.can_handle(task.task_type):
+                    return agent
         for agent in self.agents.values():
-            if agent.can_handle(task_type):
+            if agent.can_handle(task.task_type):
                 return agent
         return None
     

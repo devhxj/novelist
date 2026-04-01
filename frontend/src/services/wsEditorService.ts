@@ -1,6 +1,7 @@
 import { useAuthStore } from '@/stores/authStore'
 
 export type ScopeType = 'novel' | 'chapters' | 'chapter'
+export type EditMode = 'agent' | 'review' | 'plan'
 
 export interface Scope {
   type: ScopeType
@@ -37,6 +38,7 @@ export interface CreateSessionMsg {
   type: 'create_session'
   scope: Scope
   model?: string
+  edit_mode?: EditMode
 }
 
 export interface LoadSessionMsg {
@@ -117,6 +119,8 @@ export interface SessionCreatedMsg {
   session_id: string
   scope: Scope
   display_name: string
+  edit_mode: EditMode
+  model: string
 }
 
 export interface SessionLoadedMsg {
@@ -125,7 +129,22 @@ export interface SessionLoadedMsg {
   scope: Scope
   display_name: string
   message_count: number
-  recent_messages: Array<{ role: string; content: string; message_id?: string; created_at?: string }>
+  recent_messages: Array<{
+    role: string
+    content: string
+    message_id?: string
+    created_at?: string
+    metadata?: {
+      tool_calls?: string | Array<{
+        id: string
+        function?: {
+          name: string
+          arguments: string
+        }
+        name?: string
+      }>
+    }
+  }>
 }
 
 export interface SessionListMsg {
@@ -184,6 +203,11 @@ export interface SessionEndedMsg {
   message: string
 }
 
+export interface TaskCancelledMsg {
+  type: 'task_cancelled'
+  task_id: string
+}
+
 export interface DiffData {
   change_type: string
   hunks: DiffHunk[]
@@ -206,6 +230,44 @@ export interface DiffChange {
   line_number: number
 }
 
+export interface EditPreviewMsg {
+  type: 'edit_preview'
+  task_id: string
+  tool_name: string
+  chapter_id: number
+  edit_session_id: string
+  working_content: string
+  change_count: number
+  diff: {
+    change_type: string
+    hunks: Array<{
+      old_start: number
+      old_lines: number
+      new_start: number
+      new_lines: number
+      changes: Array<{
+        type: string
+        content: string
+        line_number: number
+      }>
+    }>
+    old_content: string
+    new_content: string
+    summary: {
+      additions: number
+      deletions: number
+      hunks: number
+    }
+  }
+}
+
+export interface EditPendingMsg {
+  type: 'edit_pending'
+  task_id: string
+  edit_session_id: string
+  change_count: number
+}
+
 export type ServerMsg =
   | EditStartedMsg
   | EditAppliedMsg
@@ -221,6 +283,9 @@ export type ServerMsg =
   | ChapterContentMsg
   | ErrorMsg
   | SessionEndedMsg
+  | TaskCancelledMsg
+  | EditPreviewMsg
+  | EditPendingMsg
 
 export type MsgHandler = (msg: ServerMsg) => void
 
@@ -324,8 +389,8 @@ export class WsEditorService {
     return this.send({ type: 'reject_edit', edit_session_id: editSessionId })
   }
 
-  createSession(scope: Scope, model?: string): boolean {
-    return this.send({ type: 'create_session', scope, model })
+  createSession(scope: Scope, model?: string, editMode?: EditMode): boolean {
+    return this.send({ type: 'create_session', scope, model, edit_mode: editMode })
   }
 
   loadSession(sessionId: string): boolean {

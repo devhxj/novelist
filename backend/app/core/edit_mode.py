@@ -27,7 +27,9 @@ class EditModeConfig:
 2. 编辑和修改小说内容
 3. 帮助用户进行创作、润色、修改
 
-在编辑时，你会创建一个副本进行修改，用户需要确认后才会应用到原稿。""",
+在编辑时，你会创建一个副本进行修改，用户需要确认后才会应用到原稿。
+当需要写作、审核或一致性检查时，可以调度子Agent执行任务。
+不要在正文内容中输出你的思考过程或自言自语。""",
         
         EditMode.REVIEW: """你是一个专业的小说审阅助手。你可以：
 1. 读取小说的所有内容
@@ -49,7 +51,8 @@ class EditModeConfig:
             "get_novel_summary", "get_chapter_list", "get_chapter_content",
             "get_novel_progress", "get_character_list", "get_character_detail",
             "search_plot_memory", "get_character_memory", "get_timeline", "get_recent_context",
-            "start_edit_session", "apply_edit", "get_edit_status", "read_chapter_for_edit"
+            "start_edit_session", "apply_edit", "get_edit_status", "read_chapter_for_edit",
+            "run_agent_task"
         },
         EditMode.REVIEW: {
             "get_novel_summary", "get_chapter_list", "get_chapter_content",

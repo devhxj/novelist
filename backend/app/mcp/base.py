@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from enum import Enum
+from jsonschema import validate, ValidationError
 
 
 class MCPToolResult(BaseModel):
@@ -31,6 +32,7 @@ class BaseMCPTool(ABC):
     description: str
     category: MCPToolCategory
     parameters_schema: Dict[str, Any]
+    expose_to_llm: bool = True
     
     @abstractmethod
     async def execute(self, **kwargs) -> MCPToolResult:
@@ -91,7 +93,19 @@ class MCPToolRegistry:
     
     def get_openai_functions(self) -> List[Dict[str, Any]]:
         """获取所有工具的OpenAI function calling格式"""
-        return [tool.to_openai_function() for tool in self._tools.values()]
+        return [
+            tool.to_openai_function()
+            for tool in self._tools.values()
+            if getattr(tool, "expose_to_llm", True)
+        ]
+    
+    def _validate_params(self, tool: BaseMCPTool, params: Dict[str, Any]) -> Optional[str]:
+        schema = tool.parameters_schema or {"type": "object"}
+        try:
+            validate(instance=params, schema=schema)
+        except ValidationError as e:
+            return str(e)
+        return None
     
     async def execute(self, name: str, **kwargs) -> MCPToolResult:
         """执行工具"""
@@ -101,6 +115,10 @@ class MCPToolRegistry:
                 success=False,
                 error=f"Tool not found: {name}"
             )
+        validation_params = {k: v for k, v in kwargs.items() if k != "db"}
+        validation_error = self._validate_params(tool, validation_params)
+        if validation_error:
+            return MCPToolResult(success=False, error=validation_error)
         try:
             return await tool.execute(**kwargs)
         except Exception as e:

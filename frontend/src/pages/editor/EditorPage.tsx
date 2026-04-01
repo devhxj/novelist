@@ -23,13 +23,16 @@ import { wsEditorService } from '@/services/wsEditorService'
 import { editorApi } from '@/services/editorService'
 import { chapterApi } from '@/services/chapterService'
 import type {
-  ServerMsg, Scope, ScopeType, DiffData,
+  ServerMsg, Scope, ScopeType, DiffData, EditMode,
   SessionCreatedMsg, SessionListMsg, ContentChunkMsg,
   ToolCallMsg,
   EditStartedMsg, EditAppliedMsg, EditAcceptedMsg, EditRejectedMsg,
   ErrorMsg,
   SessionLoadedMsg,
+  EditPreviewMsg,
+  EditPendingMsg,
 } from '@/services/wsEditorService'
+import { Markdown } from '@/components/Markdown'
 import styles from './EditorPage.module.css'
 
 interface ChapterInfo {
@@ -59,6 +62,7 @@ interface ToolCallInfo {
   tool_name: string
   status: 'executing' | 'completed' | 'failed'
   result?: unknown
+  message_id?: string
 }
 
 const SCOPE_OPTIONS: Array<{ value: ScopeType; label: string }> = [
@@ -70,6 +74,13 @@ const SCOPE_OPTIONS: Array<{ value: ScopeType; label: string }> = [
 const MODEL_OPTIONS = [
   { value: 'deepseek-chat', label: 'DeepSeek Chat' },
   { value: 'deepseek-reasoner', label: 'DeepSeek Reasoner' },
+  { value: 'glm-4.7-flash', label: 'GLM-4.7 Flash' },
+]
+
+const EDIT_MODE_OPTIONS: Array<{ value: EditMode; label: string; desc: string }> = [
+  { value: 'agent', label: '智能助手', desc: '可读可写，帮助创作修改' },
+  { value: 'review', label: '审阅模式', desc: '只读，提供审阅意见' },
+  { value: 'plan', label: '规划模式', desc: '只读，创建写作大纲' },
 ]
 
 const TOOL_GROUPS = [
@@ -93,6 +104,7 @@ export default function EditorPage() {
   const [connected, setConnected] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
   const [selectedModel, setSelectedModel] = useState('deepseek-chat')
+  const [selectedEditMode, setSelectedEditMode] = useState<EditMode>('agent')
   const [enabledTools, setEnabledTools] = useState<Set<string>>(new Set(['editing', 'memory', 'consistency', 'novel']))
 
   const [chapters, setChapters] = useState<ChapterInfo[]>([])
@@ -120,6 +132,10 @@ export default function EditorPage() {
   const [toolCalls, setToolCalls] = useState<ToolCallInfo[]>([])
   const [inputValue, setInputValue] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
+  const lastMessageIdRef = useRef<string | null>(null)
+  const shouldCreateNewMessageRef = useRef(false)
 
   const [createChapterModal, setCreateChapterModal] = useState(false)
   const [newChapterTitle, setNewChapterTitle] = useState('')
@@ -127,8 +143,6 @@ export default function EditorPage() {
   const [creatingChapter, setCreatingChapter] = useState(false)
   const pendingMessageRef = useRef<string | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!novelId) return
@@ -154,7 +168,9 @@ export default function EditorPage() {
   }, [novelId])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
+    }
   }, [chatMessages, toolCalls])
 
   const handleMsg = useCallback((msg: ServerMsg) => {
@@ -164,6 +180,7 @@ export default function EditorPage() {
         const m = msg as SessionCreatedMsg
         setCurrentSessionId(m.session_id)
         setCurrentScope(m.scope)
+        if (m.edit_mode) setSelectedEditMode(m.edit_mode)
         wsEditorService.listSessions()
         if (pendingMessageRef.current) {
           wsEditorService.chat(m.session_id, pendingMessageRef.current, true)
@@ -181,25 +198,55 @@ export default function EditorPage() {
         console.log('[EditorPage] session_loaded:', m.session_id, 'messages:', m.recent_messages?.length)
         setCurrentScope(m.scope)
         if (m.recent_messages && m.recent_messages.length > 0) {
-          const history: ChatMessage[] = m.recent_messages.map((msg, i) => ({
-            id: msg.message_id || `hist_${i}`,
-            role: msg.role as 'user' | 'assistant',
-            content: msg.content,
-          }))
+          const history: ChatMessage[] = []
+          const historyToolCalls: ToolCallInfo[] = []
+          
+          m.recent_messages.forEach((msg, i) => {
+            const msgId = msg.message_id || `hist_${i}`
+            
+            if (msg.role === 'assistant' && msg.metadata?.tool_calls) {
+              const toolCalls = Array.isArray(msg.metadata.tool_calls) 
+                ? msg.metadata.tool_calls 
+                : JSON.parse(msg.metadata.tool_calls || '[]')
+              
+              toolCalls.forEach((tc: any) => {
+                historyToolCalls.push({
+                  tool_name: tc.function?.name || tc.name || 'unknown',
+                  status: 'completed',
+                  message_id: msgId,
+                })
+              })
+            }
+            
+            if (msg.content) {
+              history.push({
+                id: msgId,
+                role: msg.role as 'user' | 'assistant',
+                content: msg.content,
+              })
+            }
+          })
+          
           setChatMessages(history)
+          setToolCalls(historyToolCalls)
         } else {
           setChatMessages([])
+          setToolCalls([])
         }
         break
       }
       case 'chat_started': {
+        const m = msg as { type: 'chat_started'; task_id?: string }
         setIsStreaming(true)
-        setChatMessages(prev => [...prev, {
+        if (m.task_id) setCurrentTaskId(m.task_id)
+        const newMsg = {
           id: `stream_${Date.now()}`,
-          role: 'assistant',
+          role: 'assistant' as const,
           content: '',
           isStreaming: true,
-        }])
+        }
+        lastMessageIdRef.current = newMsg.id
+        setChatMessages(prev => [...prev, newMsg])
         break
       }
       case 'content_chunk': {
@@ -207,8 +254,28 @@ export default function EditorPage() {
         setChatMessages(prev => {
           const updated = [...prev]
           const last = updated[updated.length - 1]
-          if (last && last.isStreaming) {
+          
+          if (shouldCreateNewMessageRef.current) {
+            shouldCreateNewMessageRef.current = false
+            const newMsg = {
+              id: `stream_${Date.now()}`,
+              role: 'assistant' as const,
+              content: m.chunk,
+              isStreaming: true,
+            }
+            lastMessageIdRef.current = newMsg.id
+            updated.push(newMsg)
+          } else if (last && last.isStreaming) {
             updated[updated.length - 1] = { ...last, content: last.content + m.chunk }
+          } else {
+            const newMsg = {
+              id: `stream_${Date.now()}`,
+              role: 'assistant' as const,
+              content: m.chunk,
+              isStreaming: true,
+            }
+            lastMessageIdRef.current = newMsg.id
+            updated.push(newMsg)
           }
           return updated
         })
@@ -229,12 +296,33 @@ export default function EditorPage() {
       case 'tool_call': {
         const m = msg as ToolCallMsg
         setToolCalls(prev => {
-          const idx = prev.findIndex(t => t.tool_name === m.tool_name && t.status === 'executing')
+          const idx = prev.findIndex(t => {
+            const match = t.tool_name === m.tool_name && t.status === 'executing'
+            return match
+          })
           if (idx >= 0) {
-            return prev.map((t, i) => i === idx ? { ...t, status: m.status, result: m.result } : t)
+            return prev.map((t, i) => i === idx ? { ...t, status: m.status as 'completed' } : t)
           }
-          return [...prev, { tool_name: m.tool_name, status: m.status, result: m.result }]
+          const newToolCall: ToolCallInfo = { 
+            tool_name: m.tool_name, 
+            status: m.status as 'executing' | 'completed', 
+            message_id: lastMessageIdRef.current || undefined 
+          }
+          return [...prev, newToolCall]
         })
+        if (m.status === 'completed') {
+          setChatMessages(prev => {
+            const updated = [...prev]
+            const last = updated[updated.length - 1]
+            if (last && last.isStreaming) {
+              updated[updated.length - 1] = { ...last, isStreaming: false, id: `msg_${Date.now()}` }
+            }
+            return updated
+          })
+          shouldCreateNewMessageRef.current = true
+          const newMsgId = `tool_${Date.now()}`
+          lastMessageIdRef.current = newMsgId
+        }
         break
       }
       case 'edit_started': {
@@ -245,6 +333,22 @@ export default function EditorPage() {
         setChangeCount(m.change_count)
         setHasActiveEdit(true)
         setShowDiff(false)
+        break
+      }
+      case 'edit_preview': {
+        const m = msg as EditPreviewMsg
+        setOriginalContent(m.diff?.old_content || originalContent)
+        setWorkingContent(m.working_content)
+        setChangeCount(m.change_count)
+        if (m.diff) {
+          setDiffData(m.diff as unknown as DiffData)
+        }
+        break
+      }
+      case 'edit_pending': {
+        const m = msg as EditPendingMsg
+        setEditSessionId(m.edit_session_id)
+        setChangeCount(m.change_count)
         break
       }
       case 'edit_applied': {
@@ -265,10 +369,7 @@ export default function EditorPage() {
         setChangeCount(0)
         setChapterWordCount(m.word_count)
         if (selectedChapterId) {
-          const ch = chapters.find(c => c.id === selectedChapterId)
-          if (ch) {
-            setChapters(prev => prev.map(c => c.id === selectedChapterId ? { ...c, word_count: m.word_count } : c))
-          }
+          setChapters(prev => prev.map(c => c.id === selectedChapterId ? { ...c, word_count: m.word_count } : c))
         }
         break
       }
@@ -286,10 +387,23 @@ export default function EditorPage() {
       case 'error': {
         const m = msg as ErrorMsg
         message.error(m.error)
+        setIsStreaming(false)
+        break
+      }
+      case 'task_cancelled': {
+        setIsStreaming(false)
+        setChatMessages(prev => {
+          const updated = [...prev]
+          const last = updated[updated.length - 1]
+          if (last && last.isStreaming) {
+            updated[updated.length - 1] = { ...last, isStreaming: false, id: `msg_${Date.now()}` }
+          }
+          return updated
+        })
         break
       }
     }
-  }, [selectedChapterId, chapters])
+  }, [selectedChapterId])
 
   useEffect(() => {
     const unsub = wsEditorService.onMessage(handleMsg)
@@ -392,9 +506,21 @@ export default function EditorPage() {
     setCurrentScope(newScope)
   }
 
+  const handleStop = () => {
+    if (currentTaskId) {
+      wsEditorService.cancelTask(currentTaskId)
+      setCurrentTaskId(null)
+    }
+    setIsStreaming(false)
+  }
+
   const sendMessage = () => {
     if (!inputValue.trim()) return
-    if (isStreaming) return
+
+    if (isStreaming) {
+      handleStop()
+      return
+    }
 
     const msg = inputValue.trim()
     const userMsg: ChatMessage = {
@@ -413,7 +539,7 @@ export default function EditorPage() {
         if (scopeChapterEnd) scope.chapter_end = scopeChapterEnd
       }
       pendingMessageRef.current = msg
-      const sent = wsEditorService.createSession(scope, selectedModel)
+      const sent = wsEditorService.createSession(scope, selectedModel, selectedEditMode)
       if (!sent) {
         message.error('WebSocket 未连接')
         setChatMessages(prev => prev.filter(m => m.id !== userMsg.id))
@@ -432,7 +558,11 @@ export default function EditorPage() {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      sendMessage()
+      if (isStreaming) {
+        handleStop()
+      } else {
+        sendMessage()
+      }
     }
   }
 
@@ -548,17 +678,6 @@ export default function EditorPage() {
                 </>
               ) : (
                 <>
-                  <button className={styles.newSessionBtn} onClick={() => {
-                    const scope: Scope = { ...currentScope }
-                    if (scope.type === 'chapter' && scopeChapterStart) scope.chapter_start = scopeChapterStart
-                    else if (scope.type === 'chapters') {
-                      if (scopeChapterStart) scope.chapter_start = scopeChapterStart
-                      if (scopeChapterEnd) scope.chapter_end = scopeChapterEnd
-                    }
-                    wsEditorService.createSession(scope, selectedModel)
-                  }}>
-                    <PlusOutlined /> 新建对话
-                  </button>
                   {sessions.map(s => (
                     <div
                       key={s.session_id}
@@ -584,13 +703,13 @@ export default function EditorPage() {
                 </>
               )}
             </div>
+            <button
+              className={`${styles.collapseBtn} ${sidebarCollapsed ? styles.collapseBtnCollapsed : ''}`}
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            >
+              {sidebarCollapsed ? <RightOutlined /> : <LeftOutlined />}
+            </button>
           </div>
-          <button
-            className={`${styles.collapseBtn} ${sidebarCollapsed ? styles.collapseBtnCollapsed : ''}`}
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          >
-            {sidebarCollapsed ? <RightOutlined /> : <LeftOutlined />}
-          </button>
         </div>
 
         <div className={styles.centerEditor}>
@@ -757,9 +876,20 @@ export default function EditorPage() {
                 options={MODEL_OPTIONS}
               />
             </div>
+            <div className={styles.scopeRow} style={{ marginTop: 4 }}>
+              <Select
+                size="small"
+                value={selectedEditMode}
+                onChange={setSelectedEditMode}
+                style={{ flex: 1 }}
+                popupMatchSelectWidth={false}
+                variant="borderless"
+                options={EDIT_MODE_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
+              />
+            </div>
           </div>
 
-          <div className={styles.chatMessages}>
+          <div className={styles.chatMessages} ref={chatContainerRef}>
             {chatMessages.length === 0 && !isStreaming && (
               <div className={styles.emptyChat}>
                 <MessageOutlined className={styles.emptyChatIcon} />
@@ -767,40 +897,44 @@ export default function EditorPage() {
                 <div style={{ fontSize: 12 }}>AI 可以帮你修改章节内容</div>
               </div>
             )}
-            {chatMessages.map(msg => (
-              <div
-                key={msg.id}
-                className={`${styles.chatMsg} ${msg.role === 'user' ? styles.chatMsgUser : msg.isStreaming ? styles.chatMsgStreaming : styles.chatMsgAssistant}`}
-              >
-                {msg.content}
-              </div>
-            ))}
-            {toolCalls.map((tc, i) => (
-              <div key={`tool_${i}`} className={styles.toolCallCard}>
-                <div className={styles.toolCallName}>
-                  <SettingOutlined style={{ marginRight: 4 }} />
-                  {tc.tool_name}
+            {chatMessages.map((msg) => {
+              const toolsAfterMsg = toolCalls.filter(tc => tc.message_id === msg.id)
+              
+              return (
+                <div key={msg.id}>
+                  <div
+                    className={`${styles.chatMsg} ${msg.role === 'user' ? styles.chatMsgUser : msg.isStreaming ? styles.chatMsgStreaming : styles.chatMsgAssistant}`}
+                  >
+                    <Markdown>{msg.content}</Markdown>
+                  </div>
+                  {toolsAfterMsg.map((tc, i) => (
+                    <div key={`tool_${tc.tool_name}_${i}`} className={styles.toolCallCard}>
+                      <div className={styles.toolCallName}>
+                        <SettingOutlined style={{ marginRight: 4 }} />
+                        {tc.tool_name}
+                      </div>
+                      <div className={styles.toolCallStatus}>
+                        {tc.status === 'executing' && (
+                          <span className={styles.toolCallExecuting}>
+                            <LoadingOutlined spin style={{ marginRight: 4 }} /> 执行中...
+                          </span>
+                        )}
+                        {tc.status === 'completed' && (
+                          <span className={styles.toolCallCompleted}>
+                            <CheckCircleOutlined style={{ marginRight: 4 }} /> 已完成
+                          </span>
+                        )}
+                        {tc.status === 'failed' && (
+                          <span className={styles.toolCallFailed}>
+                            <CloseCircleOutlined style={{ marginRight: 4 }} /> 失败
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div className={styles.toolCallStatus}>
-                  {tc.status === 'executing' && (
-                    <span className={styles.toolCallExecuting}>
-                      <LoadingOutlined spin style={{ marginRight: 4 }} /> 执行中...
-                    </span>
-                  )}
-                  {tc.status === 'completed' && (
-                    <span className={styles.toolCallCompleted}>
-                      <CheckCircleOutlined style={{ marginRight: 4 }} /> 已完成
-                    </span>
-                  )}
-                  {tc.status === 'failed' && (
-                    <span className={styles.toolCallFailed}>
-                      <CloseCircleOutlined style={{ marginRight: 4 }} /> 失败
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-            <div ref={messagesEndRef} />
+              )
+            })}
           </div>
 
           <div className={styles.chatInput}>
@@ -829,8 +963,7 @@ export default function EditorPage() {
                 value={inputValue}
                 onChange={e => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="输入消息... (Enter 发送)"
-                disabled={isStreaming}
+                placeholder={isStreaming ? "按 Enter 停止生成..." : "输入消息... (Enter 发送)"}
                 rows={1}
                 onInput={e => {
                   const target = e.target as HTMLTextAreaElement
@@ -839,11 +972,15 @@ export default function EditorPage() {
                 }}
               />
               <button
-                className={styles.sendBtn}
-                onClick={sendMessage}
-                disabled={!inputValue.trim() || isStreaming}
+                className={`${styles.sendBtn} ${isStreaming ? styles.stopBtn : ''}`}
+                onClick={isStreaming ? handleStop : sendMessage}
+                disabled={!isStreaming && !inputValue.trim()}
               >
-                <ArrowLeftOutlined style={{ transform: 'rotate(-45deg)' }} />
+                {isStreaming ? (
+                  <span style={{ fontSize: 12 }}>■</span>
+                ) : (
+                  <ArrowLeftOutlined style={{ transform: 'rotate(-45deg)' }} />
+                )}
               </button>
             </div>
           </div>

@@ -350,7 +350,7 @@ async def _generate_chapter_http(
     context_builder = ContextBuilder(db, novel_id)
     context_data = await context_builder.build_writing_context(
         chapter_number=chapter_number,
-        context_size=5,
+        context_size=params.get("context_size", 3000),
         include_previous_chapters=True,
         include_characters=True,
         include_plot_events=True

@@ -114,8 +114,16 @@ class Message:
             metadata=data.get("metadata", {})
         )
     
-    def to_api_format(self) -> Dict[str, str]:
-        return {"role": self.role.value, "content": self.content}
+    def to_api_format(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"role": self.role.value, "content": self.content}
+        if self.role == MessageRole.ASSISTANT and self.metadata.get("tool_calls"):
+            payload["tool_calls"] = self.metadata["tool_calls"]
+        if self.role == MessageRole.TOOL:
+            if self.metadata.get("tool_call_id"):
+                payload["tool_call_id"] = self.metadata["tool_call_id"]
+            if self.metadata.get("tool_name"):
+                payload["name"] = self.metadata["tool_name"]
+        return payload
 
 
 @dataclass
@@ -284,6 +292,8 @@ class Session:
     model: str = "deepseek-chat"
     edit_mode: str = "agent"
     chapter_ids: List[int] = field(default_factory=list)
+    subtitle: str = ""
+    current_chapter_id: Optional[int] = None
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -292,6 +302,7 @@ class Session:
             "novel_id": self.novel_id,
             "scope": self.scope.to_dict(),
             "title": self.title,
+            "subtitle": self.subtitle,
             "messages": [m.to_dict() for m in self.messages],
             "summary": self.summary,
             "novel_context": self.novel_context.to_dict() if self.novel_context else None,
@@ -337,6 +348,7 @@ class Session:
             novel_id=data.get("novel_id"),
             scope=scope,
             title=data.get("title", ""),
+            subtitle=data.get("subtitle", "") or data.get("metadata", {}).get("subtitle", ""),
             messages=[Message.from_dict(m) for m in data.get("messages", [])],
             summary=data.get("summary"),
             novel_context=novel_context,
@@ -363,6 +375,11 @@ class Session:
     def get_display_name(self) -> str:
         if self.title:
             return self.title
+        return self.scope.get_display_name()
+
+    def get_subtitle(self) -> str:
+        if self.subtitle:
+            return self.subtitle
         return self.scope.get_display_name()
 
 
@@ -472,6 +489,9 @@ class SessionManager:
             metadata={"created_from": "session_manager"}
         )
         
+        session.subtitle = scope.get_display_name()
+        session.metadata["subtitle"] = session.subtitle
+        
         if system_prompt:
             session.messages.append(Message(
                 role=MessageRole.SYSTEM,
@@ -501,6 +521,11 @@ class SessionManager:
         )
         session.messages.append(message)
         session.updated_at = datetime.now()
+        if role == MessageRole.USER:
+            normalized = content.strip().splitlines()[0] if content else ""
+            if normalized:
+                if not session.title or session.title in {"新对话"} or session.title.endswith(" 对话"):
+                    session.title = normalized[:30]
         return message
     
     def build_context_prompt(self, session: Session) -> str:
@@ -520,11 +545,14 @@ class SessionManager:
     def get_messages_for_api(
         self,
         session: Session,
-        include_context: bool = True
+        include_context: bool = True,
+        extra_context: Optional[str] = None
     ) -> List[Dict[str, str]]:
         messages = []
         if include_context:
             context_prompt = self.build_context_prompt(session)
+            if extra_context:
+                context_prompt = f"{context_prompt}\n\n{extra_context}" if context_prompt else extra_context
             if context_prompt:
                 messages.append({
                     "role": "system",
@@ -532,9 +560,25 @@ class SessionManager:
                 })
         for msg in session.messages:
             messages.append(msg.to_api_format())
+        
+        max_tokens = self.config.max_tokens
+        if max_tokens:
+            total = 0
+            trimmed = []
+            for msg in reversed(messages):
+                tokens = self.compressor.estimate_tokens(msg["content"])
+                if total + tokens > max_tokens and msg["role"] != MessageRole.SYSTEM.value:
+                    continue
+                trimmed.append(msg)
+                total += tokens
+            messages = list(reversed(trimmed))
         return messages
     
     async def save_session(self, session: Session):
+        if session.subtitle:
+            session.metadata["subtitle"] = session.subtitle
+        elif session.metadata.get("subtitle"):
+            session.subtitle = session.metadata.get("subtitle", "")
         if self._storage:
             await self._storage.save(session)
         logger.debug(f"Session {session.session_id} saved")
@@ -573,6 +617,8 @@ class SessionManager:
             "session_id": session.session_id,
             "scope": session.scope.to_dict(),
             "display_name": session.get_display_name(),
+            "title": session.title,
+            "subtitle": session.get_subtitle(),
             "novel_id": session.novel_id,
             "message_count": session.get_message_count(),
             "token_count": token_count,

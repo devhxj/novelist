@@ -58,8 +58,11 @@ class VectorStore:
             
             self.client = chromadb.PersistentClient(path=self.persist_directory)
             
+            # 启动时立即加载 embedding 模型，不懒加载
+            self._load_embedding_model()
+            
             self._initialized = True
-            logger.info("VectorStore initialized (embedding model lazy-loaded)")
+            logger.info("VectorStore initialized (embedding model loaded at startup)")
             
         except Exception as e:
             logger.error(f"Failed to initialize VectorStore: {e}")
@@ -67,9 +70,7 @@ class VectorStore:
     
     @property
     def embedding_function(self):
-        """懒加载embedding模型 - 只在第一次使用时加载"""
-        if self._embedding_function is None:
-            self._load_embedding_model()
+        """获取 embedding 模型（已在启动时加载）"""
         return self._embedding_function
     
     def _load_embedding_model(self):

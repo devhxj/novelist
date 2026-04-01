@@ -10,24 +10,10 @@ from app.core.database import DBSession
 from app.core.auth import CurrentUser
 from app.core.dependencies import NovelOwner
 from app.novels.models import Novel
-from .base import MCPToolRegistry, MCPToolCategory
-from .novel_tools import NovelManagementTools
-from .memory_tools import MemoryRetrievalTools
-from .consistency_tools import ConsistencyCheckTools
-from .editing_tools import EditingTools
+from .base import MCPToolCategory
+from .registry import get_mcp_registry
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
-
-
-def get_mcp_registry(db: DBSession) -> MCPToolRegistry:
-    """获取MCP工具注册表实例"""
-    registry = MCPToolRegistry()
-    NovelManagementTools.register_all(db, registry)
-    MemoryRetrievalTools.register_all(db, registry)
-    ConsistencyCheckTools.register_all(db, registry)
-    EditingTools.register_all(db, registry)
-    return registry
-
 
 @router.get("/tools")
 async def list_tools(
@@ -40,7 +26,7 @@ async def list_tools(
     
     - category: 可选的分类筛选 (novel_management/memory_retrieval/consistency_check/writing_assistant)
     """
-    registry = get_mcp_registry(db)
+    registry = get_mcp_registry()
     cat = None
     if category:
         try:
@@ -61,7 +47,7 @@ async def list_categories(
     """
     按分类列出所有工具
     """
-    registry = get_mcp_registry(db)
+    registry = get_mcp_registry()
     result = registry.list_by_category()
     
     return ApiResponse.success(result)
@@ -76,7 +62,7 @@ async def get_tool_info(
     """
     获取指定工具的详细信息
     """
-    registry = get_mcp_registry(db)
+    registry = get_mcp_registry()
     tool = registry.get(tool_name)
     if not tool:
         return ApiResponse.error("NOT_FOUND", f"Tool not found: {tool_name}")
@@ -96,8 +82,8 @@ async def execute_tool(
     
     - params: 工具参数，根据不同工具有不同的参数要求
     """
-    registry = get_mcp_registry(db)
-    result = await registry.execute(tool_name, **params)
+    registry = get_mcp_registry()
+    result = await registry.execute(tool_name, db=db, user_id=current_user.id, **params)
     
     return ApiResponse.success(
         {"success": result.success, "data": result.data, "error": result.error, "metadata": result.metadata},
@@ -111,8 +97,8 @@ async def get_novel_summary(
     db: DBSession,
     current_user: CurrentUser
 ):
-    registry = get_mcp_registry(db)
-    result = await registry.execute("get_novel_summary", novel_id=novel.id)
+    registry = get_mcp_registry()
+    result = await registry.execute("get_novel_summary", db=db, user_id=current_user.id, novel_id=novel.id)
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -128,8 +114,16 @@ async def get_chapter_list(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100)
 ):
-    registry = get_mcp_registry(db)
-    result = await registry.execute("get_chapter_list", novel_id=novel.id, status=status, page=page, page_size=page_size)
+    registry = get_mcp_registry()
+    result = await registry.execute(
+        "get_chapter_list",
+        db=db,
+        user_id=current_user.id,
+        novel_id=novel.id,
+        status=status,
+        page=page,
+        page_size=page_size
+    )
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -157,8 +151,15 @@ async def get_chapter_content(
     if not novel or novel.author_id != current_user.id:
         raise UnauthorizedException("无权访问此章节")
     
-    registry = get_mcp_registry(db)
-    result = await registry.execute("get_chapter_content", chapter_id=chapter_id, include_summary=include_summary)
+    registry = get_mcp_registry()
+    result = await registry.execute(
+        "get_chapter_content",
+        db=db,
+        user_id=current_user.id,
+        novel_id=chapter.novel_id,
+        chapter_id=chapter_id,
+        include_summary=include_summary
+    )
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -171,8 +172,8 @@ async def get_novel_progress(
     db: DBSession,
     current_user: CurrentUser
 ):
-    registry = get_mcp_registry(db)
-    result = await registry.execute("get_novel_progress", novel_id=novel.id)
+    registry = get_mcp_registry()
+    result = await registry.execute("get_novel_progress", db=db, user_id=current_user.id, novel_id=novel.id)
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -186,8 +187,14 @@ async def get_character_list(
     current_user: CurrentUser,
     search: Optional[str] = Query(None)
 ):
-    registry = get_mcp_registry(db)
-    result = await registry.execute("get_character_list", novel_id=novel.id, search=search)
+    registry = get_mcp_registry()
+    result = await registry.execute(
+        "get_character_list",
+        db=db,
+        user_id=current_user.id,
+        novel_id=novel.id,
+        search=search
+    )
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -214,8 +221,13 @@ async def get_character_detail(
     if not novel or novel.author_id != current_user.id:
         raise UnauthorizedException("无权访问此角色")
     
-    registry = get_mcp_registry(db)
-    result = await registry.execute("get_character_detail", character_id=character_id)
+    registry = get_mcp_registry()
+    result = await registry.execute(
+        "get_character_detail",
+        db=db,
+        user_id=current_user.id,
+        character_id=character_id
+    )
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -235,8 +247,16 @@ async def search_plot_memory(
     if chapter_ids:
         ids = [int(x.strip()) for x in chapter_ids.split(",") if x.strip().isdigit()]
     
-    registry = get_mcp_registry(db)
-    result = await registry.execute("search_plot_memory", novel_id=novel.id, query=query, top_k=top_k, chapter_ids=ids)
+    registry = get_mcp_registry()
+    result = await registry.execute(
+        "search_plot_memory",
+        db=db,
+        user_id=current_user.id,
+        novel_id=novel.id,
+        query=query,
+        top_k=top_k,
+        chapter_ids=ids
+    )
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -264,8 +284,15 @@ async def get_character_memory(
     if not novel or novel.author_id != current_user.id:
         raise UnauthorizedException("无权访问此角色")
     
-    registry = get_mcp_registry(db)
-    result = await registry.execute("get_character_memory", novel_id=novel.id, character_id=character_id, include_plot_events=include_plot_events)
+    registry = get_mcp_registry()
+    result = await registry.execute(
+        "get_character_memory",
+        db=db,
+        user_id=current_user.id,
+        novel_id=novel.id,
+        character_id=character_id,
+        include_plot_events=include_plot_events
+    )
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -285,8 +312,16 @@ async def get_timeline(
     if event_types:
         types = [x.strip() for x in event_types.split(",") if x.strip()]
     
-    registry = get_mcp_registry(db)
-    result = await registry.execute("get_timeline", novel_id=novel.id, start_chapter=start_chapter, end_chapter=end_chapter, event_types=types)
+    registry = get_mcp_registry()
+    result = await registry.execute(
+        "get_timeline",
+        db=db,
+        user_id=current_user.id,
+        novel_id=novel.id,
+        start_chapter=start_chapter,
+        end_chapter=end_chapter,
+        event_types=types
+    )
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -315,8 +350,16 @@ async def get_recent_context(
     if not novel or novel.author_id != current_user.id:
         raise UnauthorizedException("无权访问此章节")
     
-    registry = get_mcp_registry(db)
-    result = await registry.execute("get_recent_context", novel_id=novel.id, chapter_id=chapter_id, window_size=window_size, context_size=context_size)
+    registry = get_mcp_registry()
+    result = await registry.execute(
+        "get_recent_context",
+        db=db,
+        user_id=current_user.id,
+        novel_id=novel.id,
+        chapter_id=chapter_id,
+        window_size=window_size,
+        context_size=context_size
+    )
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -335,8 +378,15 @@ async def check_character_consistency(
     if chapter_ids:
         ids = [int(x.strip()) for x in chapter_ids.split(",") if x.strip().isdigit()]
     
-    registry = get_mcp_registry(db)
-    result = await registry.execute("check_character_consistency", novel_id=novel.id, chapter_ids=ids, character_id=character_id)
+    registry = get_mcp_registry()
+    result = await registry.execute(
+        "check_character_consistency",
+        db=db,
+        user_id=current_user.id,
+        novel_id=novel.id,
+        chapter_ids=ids,
+        character_id=character_id
+    )
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -354,8 +404,14 @@ async def check_plot_consistency(
     if chapter_ids:
         ids = [int(x.strip()) for x in chapter_ids.split(",") if x.strip().isdigit()]
     
-    registry = get_mcp_registry(db)
-    result = await registry.execute("check_plot_consistency", novel_id=novel.id, chapter_ids=ids)
+    registry = get_mcp_registry()
+    result = await registry.execute(
+        "check_plot_consistency",
+        db=db,
+        user_id=current_user.id,
+        novel_id=novel.id,
+        chapter_ids=ids
+    )
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -378,8 +434,15 @@ async def run_full_consistency_check(
     if check_types:
         types = [x.strip() for x in check_types.split(",") if x.strip()]
     
-    registry = get_mcp_registry(db)
-    result = await registry.execute("run_full_consistency_check", novel_id=novel.id, chapter_ids=ids, check_types=types)
+    registry = get_mcp_registry()
+    result = await registry.execute(
+        "run_full_consistency_check",
+        db=db,
+        user_id=current_user.id,
+        novel_id=novel.id,
+        chapter_ids=ids,
+        check_types=types
+    )
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -394,8 +457,15 @@ async def list_unresolved_plots(
     min_importance: Optional[int] = Query(None, ge=1, le=5, description="最小重要程度"),
     days_pending: Optional[int] = Query(None, ge=1, description="挂起天数筛选")
 ):
-    registry = get_mcp_registry(db)
-    result = await registry.execute("list_unresolved_plots", novel_id=novel.id, min_importance=min_importance, days_pending=days_pending)
+    registry = get_mcp_registry()
+    result = await registry.execute(
+        "list_unresolved_plots",
+        db=db,
+        user_id=current_user.id,
+        novel_id=novel.id,
+        min_importance=min_importance,
+        days_pending=days_pending
+    )
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -408,8 +478,8 @@ async def get_foreshadowing_status(
     db: DBSession,
     current_user: CurrentUser
 ):
-    registry = get_mcp_registry(db)
-    result = await registry.execute("get_foreshadowing_status", novel_id=novel.id)
+    registry = get_mcp_registry()
+    result = await registry.execute("get_foreshadowing_status", db=db, user_id=current_user.id, novel_id=novel.id)
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -440,8 +510,14 @@ async def read_chapter_for_edit(
     if not novel or novel.author_id != current_user.id:
         raise UnauthorizedException("无权访问此章节")
     
-    registry = get_mcp_registry(db)
-    result = await registry.execute("read_chapter_for_edit", chapter_id=chapter_id, include_line_numbers=include_line_numbers)
+    registry = get_mcp_registry()
+    result = await registry.execute(
+        "read_chapter_for_edit",
+        db=db,
+        user_id=current_user.id,
+        chapter_id=chapter_id,
+        include_line_numbers=include_line_numbers
+    )
     
     if result.success:
         return ApiResponse.success(result.data)
@@ -477,9 +553,11 @@ async def edit_chapter_content(
     if not novel or novel.author_id != current_user.id:
         raise UnauthorizedException("无权修改此章节")
     
-    registry = get_mcp_registry(db)
+    registry = get_mcp_registry()
     result = await registry.execute(
         "edit_chapter_content",
+        db=db,
+        user_id=current_user.id,
         session_id=session_id,
         chapter_id=chapter_id,
         change_type=change_type,
@@ -506,9 +584,11 @@ async def create_new_chapter(
     """
     创建新章节
     """
-    registry = get_mcp_registry(db)
+    registry = get_mcp_registry()
     result = await registry.execute(
         "create_new_chapter",
+        db=db,
+        user_id=current_user.id,
         novel_id=novel.id,
         chapter_number=chapter_number,
         title=title,
@@ -531,9 +611,11 @@ async def get_pending_changes(
     """
     获取待确认的变更列表
     """
-    registry = get_mcp_registry(db)
+    registry = get_mcp_registry()
     result = await registry.execute(
         "get_pending_changes",
+        db=db,
+        user_id=current_user.id,
         chapter_id=chapter_id,
         session_id=session_id,
         limit=limit

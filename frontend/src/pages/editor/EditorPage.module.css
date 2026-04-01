@@ -111,6 +111,7 @@
   flex: 1;
   display: flex;
   overflow: hidden;
+  min-height: 0;
 }
 
 .leftSidebar {
@@ -122,6 +123,7 @@
   flex-shrink: 0;
   overflow: hidden;
   transition: width 0.2s ease;
+  position: relative;
 }
 
 .leftSidebarCollapsed {
@@ -332,6 +334,7 @@
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  min-height: 0;
 }
 
 .editorHeader {
@@ -462,6 +465,7 @@
   flex-direction: column;
   flex-shrink: 0;
   overflow: hidden;
+  min-height: 0;
 }
 
 .editorPageDark .rightChat {
@@ -492,6 +496,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
 }
 
 .chatMessages::-webkit-scrollbar {
@@ -774,6 +779,18 @@
   color: #6a6a6a;
 }
 
+.stopBtn {
+  background: #ff4d4f;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.stopBtn:hover {
+  background: #ff7875;
+}
+
 .emptyEditor {
   flex: 1;
   display: flex;
@@ -818,7 +835,7 @@
 
 .collapseBtn {
   position: absolute;
-  left: 260px;
+  right: -16px;
   top: 50%;
   transform: translateY(-50%);
   z-index: 10;
@@ -834,7 +851,7 @@
   justify-content: center;
   color: #999999;
   font-size: 10px;
-  transition: left 0.2s ease, background 0.15s;
+  transition: right 0.2s ease, background 0.15s;
 }
 
 .collapseBtn:hover {
@@ -843,7 +860,7 @@
 }
 
 .collapseBtnCollapsed {
-  left: 0;
+  right: 0;
 }
 
 .editorPageDark .collapseBtn {

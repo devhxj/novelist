@@ -35,16 +35,27 @@ async def create_task(
     novel: NovelOwner,
     task_type: str,
     chapter_id: int = None,
-    parameters: dict = None
+    parameters: dict = None,
+    agent_role: str = None,
+    agent_id: str = None,
+    model: str = None
 ):
     """创建Agent任务"""
     try:
+        task_parameters = parameters or {}
+        if agent_role:
+            task_parameters["agent_role"] = agent_role
+        if agent_id:
+            task_parameters["agent_id"] = agent_id
+        if model:
+            task_parameters["model"] = model
+        
         task = AgentTask(
             task_id=f"task_{novel.id}_{task_type}_{chapter_id or 'general'}",
             task_type=TaskType(task_type),
             novel_id=novel.id,
             chapter_id=chapter_id,
-            parameters=parameters or {}
+            parameters=task_parameters
         )
         
         result = await coordinator.execute(task)

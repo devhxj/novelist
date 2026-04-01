@@ -4,6 +4,7 @@
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey, Index
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -70,7 +71,7 @@ class ChatMessage(Base):
     session_id = Column(Integer, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     
     role = Column(String(16), nullable=False, index=True)
-    content = Column(Text, nullable=False)
+    content = Column(Text().with_variant(mysql.MEDIUMTEXT(), 'mysql'), nullable=False)
     
     token_count = Column(Integer, default=0)
     importance = Column(Integer, default=50)

@@ -23,6 +23,7 @@ from app.agents import router as agents_router
 from app.consistency import router as consistency_router
 from app.planning import router as planning_router
 from app.mcp import router as mcp_router
+from app.mcp.server import get_mcp_transport
 from app.core.ws_chat import router as ws_chat_router
 from app.generation import router as generation_router
 from app.sessions import router as sessions_router
@@ -106,6 +107,7 @@ app.include_router(generation_router, prefix="/api/v1")
 app.include_router(sessions_router, prefix="/api/v1")
 app.include_router(editor_router, prefix="/api/v1")
 app.include_router(ws_chat_router)
+app.mount("/mcp", get_mcp_transport())
 
 
 @app.get("/")

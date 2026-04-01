@@ -1,5 +1,5 @@
 """
-LLM服务 - DeepSeek API集成
+LLM 服务 - 支持 DeepSeek 和 GLM 多模型
 支持多模型选择、流式输出、多轮对话、会话管理、工具调用
 """
 import os
@@ -28,10 +28,15 @@ class LLMConfig:
     temperature: float = float(os.getenv("DEEPSEEK_TEMPERATURE", "0.7"))
     timeout: int = int(os.getenv("DEEPSEEK_TIMEOUT", "120"))
     
+    # GLM 配置
+    glm_api_key: str = os.getenv("GLM_API_KEY", "")
+    glm_api_base: str = os.getenv("GLM_API_BASE", "https://open.bigmodel.cn/api/paas/v4")
+    glm_model: str = os.getenv("GLM_MODEL", "glm-4-flash")
+    
     @classmethod
     def validate(cls):
-        if not cls.api_key:
-            raise ValueError("DEEPSEEK_API_KEY is required")
+        if not cls.api_key and not cls.glm_api_key:
+            raise ValueError("DEEPSEEK_API_KEY or GLM_API_KEY is required")
 
 
 class LLMService:
@@ -55,7 +60,19 @@ class LLMService:
         
         self._initialized = True
         
-        logger.info(f"LLM Service initialized, default model: {self.config.default_model}")
+        logger.info(f"LLM Service initialized, default model: {self.config.default_model}, GLM model: {self.config.glm_model}")
+    
+    def _get_model_config(self, model: Optional[str] = None) -> tuple[str, str, str]:
+        """获取模型配置 (api_base, api_key, model)"""
+        if not model:
+            model = self.config.default_model
+        
+        # GLM 模型 - GLM API 端点已经是 /api/paas/v4，不需要再加 /v1
+        if model.startswith("glm") or model == self.config.glm_model:
+            return self.config.glm_api_base, self.config.glm_api_key, self.config.glm_model
+        
+        # DeepSeek 模型
+        return self.config.api_base, self.config.api_key, model
     
     async def chat_completion(
         self,
@@ -66,12 +83,16 @@ class LLMService:
         stream: bool = False,
         tools: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
-        url = f"{self.config.api_base}/v1/chat/completions"
+        api_base, api_key, selected_model = self._get_model_config(model)
         
-        selected_model = model or self.config.default_model
+        # GLM API 路径是 /api/paas/v4/chat/completions，DeepSeek 是 /v1/chat/completions
+        if selected_model.startswith("glm"):
+            url = f"{api_base}/chat/completions"
+        else:
+            url = f"{api_base}/v1/chat/completions"
         
         headers = {
-            "Authorization": f"Bearer {self.config.api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         
@@ -169,12 +190,20 @@ class LLMService:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None
     ) -> AsyncGenerator[str, None]:
-        url = f"{self.config.api_base}/v1/chat/completions"
-        
         selected_model = model or self.config.default_model
         
+        # GLM API 路径不同
+        if selected_model.startswith("glm"):
+            api_base = self.config.glm_api_base
+            api_key = self.config.glm_api_key
+            url = f"{api_base}/chat/completions"
+        else:
+            api_base = self.config.api_base
+            api_key = self.config.api_key
+            url = f"{api_base}/v1/chat/completions"
+        
         headers = {
-            "Authorization": f"Bearer {self.config.api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         
@@ -260,11 +289,20 @@ class LLMService:
         model: Optional[str],
         temperature: Optional[float]
     ) -> AsyncGenerator[str, None]:
-        url = f"{self.config.api_base}/v1/chat/completions"
         selected_model = model or self.config.default_model
         
+        # GLM API 路径不同
+        if selected_model.startswith("glm"):
+            api_base = self.config.glm_api_base
+            api_key = self.config.glm_api_key
+            url = f"{api_base}/chat/completions"
+        else:
+            api_base = self.config.api_base
+            api_key = self.config.api_key
+            url = f"{api_base}/v1/chat/completions"
+        
         headers = {
-            "Authorization": f"Bearer {self.config.api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         
@@ -326,17 +364,25 @@ class LLMService:
             {"type": "tool_call_arguments", "arguments": {...}} - 工具参数
             {"type": "tool_call_end"} - 工具调用结束
         """
-        url = f"{self.config.api_base}/v1/chat/completions"
-        selected_model = model or self.config.default_model
+        api_base, api_key, selected_model = self._get_model_config(model)
+        
+        # GLM API 路径不同
+        if selected_model.startswith("glm"):
+            url = f"{api_base}/chat/completions"
+        else:
+            url = f"{api_base}/v1/chat/completions"
         
         headers = {
-            "Authorization": f"Bearer {self.config.api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         
         api_messages = messages
         if system_prompt:
             api_messages = [{"role": "system", "content": system_prompt}] + messages
+        
+        logger.info(f"Sending to API: model={selected_model}, messages={len(api_messages)}, tools={len(tools) if tools else 0}")
+        logger.debug(f"Messages: {api_messages[:3]}")  # 只记录前 3 条
         
         payload = {
             "model": selected_model,

@@ -15,7 +15,8 @@ class WriterAgent(BaseAgent):
     
     SYSTEM_PROMPT = """你是一位专业的小说作家，擅长创作引人入胜的故事。
 你的写作风格流畅自然，善于刻画人物性格，构建紧张的情节冲突。
-请根据提供的上下文和要求，创作高质量的章节内容。"""
+请严格遵循任务要求、风格、语气和章节目标。
+如果任务中给出明确写作指令、提纲、修订意见或重点场景，必须优先执行。"""
     
     def __init__(self, agent_id: str = "writer_001"):
         super().__init__(agent_id, AgentRole.WRITER)
@@ -62,6 +63,12 @@ class WriterAgent(BaseAgent):
         chapter_number = parameters.get("chapter_number", 1)
         target_length = parameters.get("target_length", 3000)
         style = parameters.get("style", "narrative")
+        model = parameters.get("model")
+        writing_task = parameters.get("writing_task", "")
+        tone = parameters.get("tone", "")
+        outline = parameters.get("outline", "")
+        revision = parameters.get("revision", False)
+        issues = parameters.get("issues", [])
         
         previous_summary = context.get("previous_summary", "")
         characters = context.get("characters", [])
@@ -71,6 +78,11 @@ class WriterAgent(BaseAgent):
             chapter_number=chapter_number,
             target_length=target_length,
             style=style,
+            writing_task=writing_task,
+            tone=tone,
+            outline=outline,
+            revision=revision,
+            issues=issues,
             previous_summary=previous_summary,
             characters=characters,
             plot_hints=plot_hints
@@ -82,6 +94,7 @@ class WriterAgent(BaseAgent):
             generated_content = await llm_service.generate_text(
                 prompt=prompt,
                 system_prompt=self.SYSTEM_PROMPT,
+                model=model,
                 temperature=0.8,
                 max_tokens=4096
             )
@@ -163,6 +176,11 @@ class WriterAgent(BaseAgent):
         chapter_number: int,
         target_length: int,
         style: str,
+        writing_task: str,
+        tone: str,
+        outline: str,
+        revision: bool,
+        issues: list,
         previous_summary: str,
         characters: list,
         plot_hints: list
@@ -176,8 +194,18 @@ class WriterAgent(BaseAgent):
 - 保持与前文的一致性
 - 注意角色性格的连贯性
 - 情节要有张力和吸引力
-
+- 输出正文，不要输出解释
 """
+        if tone:
+            prompt += f"- 语气要求：{tone}\n"
+        if writing_task:
+            prompt += f"- 核心任务：{writing_task}\n"
+        if outline:
+            prompt += f"\n【章节提纲】\n{outline}\n"
+        if revision and issues:
+            prompt += "\n【修订要求】\n"
+            for issue in issues:
+                prompt += f"- {issue}\n"
         
         if previous_summary:
             prompt += f"\n【前文摘要】\n{previous_summary}\n"
