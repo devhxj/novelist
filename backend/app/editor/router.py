@@ -183,7 +183,8 @@ async def accept_edit_session(
         "change_count": result["change_count"],
         "word_count": result["word_count"],
         "summary": result.get("summary"),
-        "message": f"已接受 {result['change_count']} 处变更"
+        "already_processed": result.get("already_processed", False),
+        "message": "编辑会话此前已被接受" if result.get("already_processed") else f"已接受 {result['change_count']} 处变更"
     })
 
 
@@ -229,7 +230,8 @@ async def reject_edit_session(
     return ApiResponse.success({
         "edit_session_id": edit_session_id,
         "chapter_id": result["chapter_id"],
-        "message": "已拒绝所有变更，回退到原版本"
+        "already_processed": result.get("already_processed", False),
+        "message": "编辑会话此前已被拒绝" if result.get("already_processed") else "已拒绝所有变更，回退到原版本"
     })
 
 
@@ -305,6 +307,7 @@ async def get_chapter_edit_status(
         return ApiResponse.success({
             "has_active_edit": True,
             "edit_session_id": edit_session.edit_session_id,
+            "latest_pending_edit_session_id": edit_session.edit_session_id,
             "status": edit_session.status,
             "change_count": edit_session.change_count,
             "working_content": edit_session.working_content,
@@ -315,6 +318,7 @@ async def get_chapter_edit_status(
     
     return ApiResponse.success({
         "has_active_edit": False,
+        "latest_pending_edit_session_id": None,
         "chapter_content": chapter.content,
         "message": "当前没有活动的编辑会话"
     })
@@ -355,6 +359,7 @@ async def get_chapter_for_editor(
         "status": chapter.status,
         "has_active_edit": edit_session is not None,
         "edit_session_id": edit_session.edit_session_id if edit_session else None,
+        "latest_pending_edit_session_id": edit_session.edit_session_id if edit_session else None,
         "working_content": edit_session.working_content if edit_session else None,
         "change_count": edit_session.change_count if edit_session else 0
     })

@@ -36,24 +36,28 @@ export interface AcceptEditResponse {
   chapter_id: number
   change_count: number
   word_count: number
+  already_processed?: boolean
   message: string
 }
 
 export interface RejectEditResponse {
   edit_session_id: string
   chapter_id: number
+  already_processed?: boolean
   message: string
 }
 
 export interface ChapterEditStatus {
   has_active_edit: boolean
   edit_session_id?: string
+  latest_pending_edit_session_id?: string | null
   status?: string
   change_count?: number
   working_content?: string
   original_content?: string
   diff?: Record<string, unknown>
   chapter_content?: string
+  created_from_ws_session?: string
   message?: string
 }
 
@@ -66,6 +70,7 @@ export interface ChapterForEditor {
   status: string
   has_active_edit: boolean
   edit_session_id: string | null
+  latest_pending_edit_session_id: string | null
   working_content: string | null
   change_count: number
 }

@@ -26,12 +26,14 @@ export interface ApplyEditMsg {
 
 export interface AcceptEditMsg {
   type: 'accept_edit'
-  edit_session_id: string
+  edit_session_id?: string
+  chapter_id?: number
 }
 
 export interface RejectEditMsg {
   type: 'reject_edit'
-  edit_session_id: string
+  edit_session_id?: string
+  chapter_id?: number
 }
 
 export interface CreateSessionMsg {
@@ -83,35 +85,45 @@ export type ClientMsg =
 export interface EditStartedMsg {
   type: 'edit_started'
   edit_session_id: string
+  latest_pending_edit_session_id?: string | null
   chapter_id: number
   original_content: string
   working_content: string
   change_count: number
+  timestamp?: string
 }
 
 export interface EditAppliedMsg {
   type: 'edit_applied'
   edit_session_id: string
+  latest_pending_edit_session_id?: string | null
+  chapter_id?: number
   change_count: number
   working_content: string
   diff: DiffData
+  timestamp?: string
 }
 
 export interface EditAcceptedMsg {
   type: 'edit_accepted'
   edit_session_id: string
   chapter_id: number
+  latest_pending_edit_session_id?: string | null
   change_count: number
   word_count: number
+  already_processed?: boolean
   message: string
+  timestamp?: string
 }
 
 export interface EditRejectedMsg {
   type: 'edit_rejected'
   edit_session_id: string
   chapter_id: number
+  latest_pending_edit_session_id?: string | null
+  already_processed?: boolean
   message: string
-  original_content: string
+  timestamp?: string
 }
 
 export interface SessionCreatedMsg {
@@ -168,21 +180,32 @@ export interface ContentChunkMsg {
 
 export interface ToolCallMsg {
   type: 'tool_call'
+  task_id?: string
   tool_name: string
-  status: 'executing' | 'completed' | 'failed'
-  result?: unknown
+  tool_id?: string
+  status: 'executing' | 'completed' | 'failed' | 'rejected'
+  display_text?: string
+  activity_kind?: 'general' | 'browse' | 'view' | 'edit' | 'write' | 'create' | 'memory' | 'review' | 'plan'
+  chapter_id?: number
+  chapter_number?: number
+  chapter_title?: string
+  error?: string
+  timestamp?: string
 }
 
 export interface ChatStartedMsg {
   type: 'chat_started'
-  message_id: string
+  task_id?: string
+  session_id?: string
+  timestamp?: string
 }
 
 export interface ChatCompletedMsg {
   type: 'chat_completed'
   session_id: string
-  message_id?: string
-  content?: string
+  task_id?: string
+  message_count?: number
+  timestamp?: string
 }
 
 export interface ChapterContentMsg {
@@ -195,6 +218,10 @@ export interface ChapterContentMsg {
 export interface ErrorMsg {
   type: 'error'
   error: string
+  edit_session_id?: string
+  chapter_id?: number
+  latest_pending_edit_session_id?: string | null
+  timestamp?: string
 }
 
 export interface SessionEndedMsg {
@@ -261,11 +288,37 @@ export interface EditPreviewMsg {
   }
 }
 
+export interface EditStreamMsg {
+  type: 'edit_stream'
+  task_id: string
+  tool_name: string
+  chapter_id?: number
+  edit_session_id?: string
+  working_content: string
+  timestamp?: string
+}
+
+export interface ChapterStreamMsg {
+  type: 'chapter_stream'
+  task_id: string
+  tool_name: string
+  chapter_id: number
+  chapter_number: number
+  chapter_title?: string
+  chunk: string
+  content: string
+  word_count: number
+  timestamp?: string
+}
+
 export interface EditPendingMsg {
   type: 'edit_pending'
   task_id: string
   edit_session_id: string
+  latest_pending_edit_session_id?: string | null
+  chapter_id?: number
   change_count: number
+  timestamp?: string
 }
 
 export type ServerMsg =
@@ -286,6 +339,8 @@ export type ServerMsg =
   | TaskCancelledMsg
   | EditPreviewMsg
   | EditPendingMsg
+  | EditStreamMsg
+  | ChapterStreamMsg
 
 export type MsgHandler = (msg: ServerMsg) => void
 
@@ -381,12 +436,20 @@ export class WsEditorService {
     })
   }
 
-  acceptEdit(editSessionId: string): boolean {
-    return this.send({ type: 'accept_edit', edit_session_id: editSessionId })
+  acceptEdit(editSessionId?: string | null, chapterId?: number | null): boolean {
+    return this.send({
+      type: 'accept_edit',
+      edit_session_id: editSessionId || undefined,
+      chapter_id: chapterId || undefined,
+    })
   }
 
-  rejectEdit(editSessionId: string): boolean {
-    return this.send({ type: 'reject_edit', edit_session_id: editSessionId })
+  rejectEdit(editSessionId?: string | null, chapterId?: number | null): boolean {
+    return this.send({
+      type: 'reject_edit',
+      edit_session_id: editSessionId || undefined,
+      chapter_id: chapterId || undefined,
+    })
   }
 
   createSession(scope: Scope, model?: string, editMode?: EditMode): boolean {

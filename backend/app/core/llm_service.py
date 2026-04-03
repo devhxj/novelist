@@ -19,6 +19,37 @@ from app.core.session_storage import session_storage
 logger = logging.getLogger(__name__)
 
 
+class LLMServiceError(Exception):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int = 502,
+        provider: Optional[str] = None,
+        retryable: bool = False,
+        details: Optional[Dict[str, Any]] = None
+    ):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+        self.provider = provider
+        self.retryable = retryable
+        self.details = details or {}
+
+
+def _provider_name(model: str) -> str:
+    return "GLM" if model.startswith("glm") else "DeepSeek"
+
+
+def _extract_error_message(payload: Dict[str, Any]) -> Optional[str]:
+    error = payload.get("error")
+    if isinstance(error, dict):
+        return error.get("message") or error.get("code")
+    if isinstance(error, str):
+        return error
+    return payload.get("message")
+
+
 @dataclass
 class LLMConfig:
     api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
@@ -73,6 +104,92 @@ class LLMService:
         
         # DeepSeek 模型
         return self.config.api_base, self.config.api_key, model
+
+    def _build_llm_error(
+        self,
+        *,
+        selected_model: str,
+        status_code: Optional[int] = None,
+        response_text: Optional[str] = None,
+        response_json: Optional[Dict[str, Any]] = None,
+        request_error: Optional[Exception] = None
+    ) -> LLMServiceError:
+        provider = _provider_name(selected_model)
+        upstream_message = _extract_error_message(response_json or {})
+
+        if request_error is not None:
+            return LLMServiceError(
+                "AI 服务暂时连接不上，请稍后再试。",
+                status_code=503,
+                provider=provider,
+                retryable=True,
+                details={"reason": str(request_error)}
+            )
+
+        if status_code == 400:
+            return LLMServiceError(
+                "这次请求暂时没法处理，请缩短内容或分步操作后再试。",
+                status_code=400,
+                provider=provider,
+                retryable=False,
+                details={"upstream_status": status_code, "upstream_message": upstream_message, "response_text": response_text}
+            )
+        if status_code == 401:
+            return LLMServiceError(
+                "AI 服务当前不可用，请稍后再试。",
+                status_code=502,
+                provider=provider,
+                retryable=False,
+                details={"upstream_status": status_code, "upstream_message": upstream_message}
+            )
+        if status_code == 403:
+            return LLMServiceError(
+                "AI 服务当前不可用，请稍后再试。",
+                status_code=502,
+                provider=provider,
+                retryable=False,
+                details={"upstream_status": status_code, "upstream_message": upstream_message}
+            )
+        if status_code == 404:
+            return LLMServiceError(
+                "AI 服务当前不可用，请稍后再试。",
+                status_code=502,
+                provider=provider,
+                retryable=False,
+                details={"upstream_status": status_code, "upstream_message": upstream_message}
+            )
+        if status_code == 408:
+            return LLMServiceError(
+                "AI 响应超时了，请稍后再试。",
+                status_code=504,
+                provider=provider,
+                retryable=True,
+                details={"upstream_status": status_code, "upstream_message": upstream_message}
+            )
+        if status_code == 429:
+            return LLMServiceError(
+                "当前请求有点多，请稍等一下再试。",
+                status_code=429,
+                provider=provider,
+                retryable=True,
+                details={"upstream_status": status_code, "upstream_message": upstream_message}
+            )
+        if status_code is not None and status_code >= 500:
+            return LLMServiceError(
+                "AI 服务暂时开小差了，请稍后再试。",
+                status_code=502,
+                provider=provider,
+                retryable=True,
+                details={"upstream_status": status_code, "upstream_message": upstream_message}
+            )
+
+        return LLMServiceError(
+            "AI 服务暂时不可用，请稍后再试。",
+            status_code=502,
+            provider=provider,
+            retryable=False,
+            details={"upstream_status": status_code, "upstream_message": upstream_message, "response_text": response_text}
+        )
     
     async def chat_completion(
         self,
@@ -111,7 +228,18 @@ class LLMService:
             logger.debug(f"Calling LLM API: model={selected_model}, messages={len(messages)}")
             
             response = await self.client.post(url, json=payload, headers=headers)
-            response.raise_for_status()
+            if response.is_error:
+                response_json = None
+                try:
+                    response_json = response.json()
+                except Exception:
+                    response_json = None
+                raise self._build_llm_error(
+                    selected_model=selected_model,
+                    status_code=response.status_code,
+                    response_text=response.text,
+                    response_json=response_json
+                )
             
             result = response.json()
             
@@ -136,17 +264,24 @@ class LLMService:
                     "error": "Unexpected API response format"
                 }
                 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error calling LLM API: {e}")
+        except LLMServiceError as e:
+            logger.error(f"LLM API error calling {selected_model}: {e.message}, details={e.details}")
             return {
                 "success": False,
-                "error": f"HTTP error: {e.response.status_code}"
+                "error": e.message,
+                "status_code": e.status_code,
+                "provider": e.provider,
+                "retryable": e.retryable
             }
         except httpx.RequestError as e:
+            llm_error = self._build_llm_error(selected_model=selected_model, request_error=e)
             logger.error(f"Request error calling LLM API: {e}")
             return {
                 "success": False,
-                "error": f"Request error: {str(e)}"
+                "error": llm_error.message,
+                "status_code": llm_error.status_code,
+                "provider": llm_error.provider,
+                "retryable": llm_error.retryable
             }
         except Exception as e:
             logger.error(f"Unexpected error calling LLM API: {e}")
@@ -179,8 +314,12 @@ class LLMService:
         
         if result["success"]:
             return result["content"]
-        else:
-            raise Exception(f"LLM generation failed: {result.get('error', 'Unknown error')}")
+        raise LLMServiceError(
+            result.get("error", "LLM generation failed"),
+            status_code=result.get("status_code", 502),
+            provider=result.get("provider"),
+            retryable=result.get("retryable", False)
+        )
     
     async def generate_stream(
         self,
@@ -224,7 +363,19 @@ class LLMService:
         
         try:
             async with self.client.stream("POST", url, json=payload, headers=headers) as response:
-                response.raise_for_status()
+                if response.is_error:
+                    response_json = None
+                    response_text = await response.aread()
+                    try:
+                        response_json = json.loads(response_text.decode("utf-8"))
+                    except Exception:
+                        response_json = None
+                    raise self._build_llm_error(
+                        selected_model=selected_model,
+                        status_code=response.status_code,
+                        response_text=response_text.decode("utf-8", errors="ignore"),
+                        response_json=response_json
+                    )
                 
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):
@@ -242,9 +393,14 @@ class LLMService:
                         except json.JSONDecodeError:
                             continue
                             
+        except LLMServiceError:
+            raise
+        except httpx.RequestError as e:
+            logger.error(f"Stream generation request error: {e}")
+            raise self._build_llm_error(selected_model=selected_model, request_error=e) from e
         except Exception as e:
             logger.error(f"Stream generation error: {e}")
-            raise
+            raise LLMServiceError("生成服务暂时不可用，请稍后再试。", status_code=502, provider=_provider_name(selected_model)) from e
     
     async def chat_with_session(
         self,
@@ -318,7 +474,19 @@ class LLMService:
         
         try:
             async with self.client.stream("POST", url, json=payload, headers=headers) as response:
-                response.raise_for_status()
+                if response.is_error:
+                    response_json = None
+                    response_text = await response.aread()
+                    try:
+                        response_json = json.loads(response_text.decode("utf-8"))
+                    except Exception:
+                        response_json = None
+                    raise self._build_llm_error(
+                        selected_model=selected_model,
+                        status_code=response.status_code,
+                        response_text=response_text.decode("utf-8", errors="ignore"),
+                        response_json=response_json
+                    )
                 
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):
@@ -447,6 +615,12 @@ class LLMService:
                                     
                                     if tc.get("function", {}).get("arguments"):
                                         current_tool_calls[idx]["arguments"] += tc["function"]["arguments"]
+                                        yield {
+                                            "type": "tool_call_arguments",
+                                            "tool_name": current_tool_calls[idx]["name"],
+                                            "tool_id": current_tool_calls[idx]["id"],
+                                            "arguments_text": current_tool_calls[idx]["arguments"]
+                                        }
                                         
                         except json.JSONDecodeError:
                             continue
@@ -468,9 +642,14 @@ class LLMService:
             if not current_tool_calls and full_content:
                 pass
             
+        except LLMServiceError:
+            raise
+        except httpx.RequestError as e:
+            logger.error(f"Chat stream with tools request error: {e}")
+            raise self._build_llm_error(selected_model=selected_model, request_error=e) from e
         except Exception as e:
             logger.error(f"Chat stream with tools error: {e}")
-            raise
+            raise LLMServiceError("对话服务暂时不可用，请稍后再试。", status_code=502, provider=_provider_name(selected_model)) from e
     
     async def _generate_summary(self, session: Session) -> str:
         messages_to_summarize = [

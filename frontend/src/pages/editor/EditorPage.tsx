@@ -18,6 +18,12 @@ import {
   BgColorsOutlined,
   EditOutlined,
   SaveOutlined,
+  EyeOutlined,
+  FileAddOutlined,
+  BookOutlined,
+  HighlightOutlined,
+  BranchesOutlined,
+  ReadOutlined,
 } from '@ant-design/icons'
 import { wsEditorService } from '@/services/wsEditorService'
 import { editorApi } from '@/services/editorService'
@@ -31,6 +37,7 @@ import type {
   SessionLoadedMsg,
   EditPreviewMsg,
   EditPendingMsg,
+  ChapterStreamMsg,
 } from '@/services/wsEditorService'
 import { Markdown } from '@/components/Markdown'
 import styles from './EditorPage.module.css'
@@ -56,13 +63,24 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   isStreaming?: boolean
+  taskId?: string
+  timestamp?: number
+  kind?: 'message' | 'tool'
 }
 
 interface ToolCallInfo {
   tool_name: string
-  status: 'executing' | 'completed' | 'failed'
-  result?: unknown
-  message_id?: string
+  status: 'executing' | 'completed' | 'failed' | 'rejected'
+  tool_id?: string
+  task_id?: string
+  display_text?: string
+  activity_kind?: 'general' | 'browse' | 'view' | 'edit' | 'write' | 'create' | 'memory' | 'review' | 'plan'
+  chapter_id?: number
+  chapter_number?: number
+  chapter_title?: string
+  error?: string
+  timestamp?: string
+  order: number
 }
 
 const SCOPE_OPTIONS: Array<{ value: ScopeType; label: string }> = [
@@ -83,17 +101,56 @@ const EDIT_MODE_OPTIONS: Array<{ value: EditMode; label: string; desc: string }>
   { value: 'plan', label: '规划模式', desc: '只读，创建写作大纲' },
 ]
 
-const TOOL_GROUPS = [
-  { key: 'editing', label: '编辑工具' },
-  { key: 'memory', label: '记忆检索' },
-  { key: 'consistency', label: '一致性检查' },
-  { key: 'novel', label: '小说信息' },
-]
-
 function getScopeLabel(scope: Scope): string {
   if (scope.type === 'novel') return '整本小说'
   if (scope.type === 'chapter') return `第${scope.chapter_start}章`
   return `第${scope.chapter_start}-${scope.chapter_end}章`
+}
+
+function getToolDisplayName(toolName: string, chapterNumber?: number, chapterTitle?: string): string {
+  const chapterLabel = chapterNumber
+    ? `第${chapterNumber}章${chapterTitle ? ` ${chapterTitle}` : ''}`
+    : chapterTitle || ''
+
+  const mapping: Record<string, string> = {
+    get_chapter_list: '查看章节目录',
+    read_chapter_for_edit: chapterLabel ? `查看 ${chapterLabel}` : '查看章节内容',
+    read_chapter: chapterLabel ? `查看 ${chapterLabel}` : '查看章节内容',
+    start_edit_session: chapterLabel ? `准备修改 ${chapterLabel}` : '准备修改章节',
+    get_edit_status: chapterLabel ? `查看 ${chapterLabel} 的修改进度` : '查看修改进度',
+    edit_chapter_content: chapterLabel ? `正在修改 ${chapterLabel}` : '正在修改章节',
+    create_new_chapter: chapterLabel ? `创建 ${chapterLabel}` : '创建新章节',
+    generate_chapter_draft: chapterLabel ? `正在撰写 ${chapterLabel}` : '正在撰写章节',
+    get_creative_profile: '查看长期创作规则',
+    update_creative_profile: '更新长期创作规则',
+    search_memory: '查找前文设定和记忆',
+    get_recent_context: '回看最近创作上下文',
+    run_agent_task: '调用协作助手',
+  }
+
+  return mapping[toolName] || '处理创作任务'
+}
+
+function getActivityVisual(activityKind?: ToolCallInfo['activity_kind']) {
+  switch (activityKind) {
+    case 'view':
+    case 'browse':
+      return { icon: <EyeOutlined />, badge: '查看中' }
+    case 'create':
+      return { icon: <FileAddOutlined />, badge: '创建中' }
+    case 'write':
+      return { icon: <EditOutlined />, badge: '写作中' }
+    case 'edit':
+      return { icon: <HighlightOutlined />, badge: '修改中' }
+    case 'memory':
+      return { icon: <BookOutlined />, badge: '回看中' }
+    case 'review':
+      return { icon: <ReadOutlined />, badge: '检查中' }
+    case 'plan':
+      return { icon: <BranchesOutlined />, badge: '规划中' }
+    default:
+      return { icon: <SettingOutlined />, badge: '处理中' }
+  }
 }
 
 export default function EditorPage() {
@@ -105,7 +162,6 @@ export default function EditorPage() {
   const [darkMode, setDarkMode] = useState(false)
   const [selectedModel, setSelectedModel] = useState('deepseek-chat')
   const [selectedEditMode, setSelectedEditMode] = useState<EditMode>('agent')
-  const [enabledTools, setEnabledTools] = useState<Set<string>>(new Set(['editing', 'memory', 'consistency', 'novel']))
 
   const [chapters, setChapters] = useState<ChapterInfo[]>([])
   const [selectedChapterId, setSelectedChapterId] = useState<number | null>(null)
@@ -114,11 +170,13 @@ export default function EditorPage() {
   const [workingContent, setWorkingContent] = useState('')
   const [chapterWordCount, setChapterWordCount] = useState(0)
   const [editSessionId, setEditSessionId] = useState<string | null>(null)
+  const [latestPendingEditSessionId, setLatestPendingEditSessionId] = useState<string | null>(null)
   const [changeCount, setChangeCount] = useState(0)
   const [hasActiveEdit, setHasActiveEdit] = useState(false)
   const [showDiff, setShowDiff] = useState(false)
   const [diffData, setDiffData] = useState<DiffData | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [editNotice, setEditNotice] = useState<string>('')
 
   const [leftTab, setLeftTab] = useState<'chapters' | 'sessions'>('chapters')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -134,15 +192,17 @@ export default function EditorPage() {
   const [isStreaming, setIsStreaming] = useState(false)
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
-  const lastMessageIdRef = useRef<string | null>(null)
-  const shouldCreateNewMessageRef = useRef(false)
 
   const [createChapterModal, setCreateChapterModal] = useState(false)
   const [newChapterTitle, setNewChapterTitle] = useState('')
   const [newChapterNumber, setNewChapterNumber] = useState<number | null>(null)
   const [creatingChapter, setCreatingChapter] = useState(false)
   const pendingMessageRef = useRef<string | null>(null)
+  const pendingInterruptMessageRef = useRef<string | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const timelineOrderRef = useRef(0)
+  const shouldBreakAssistantSegmentRef = useRef(false)
+  const [streamingChapterMeta, setStreamingChapterMeta] = useState<{ id: number; chapterNumber: number; title: string } | null>(null)
 
   useEffect(() => {
     if (!novelId) return
@@ -172,6 +232,40 @@ export default function EditorPage() {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
     }
   }, [chatMessages, toolCalls])
+
+  const refreshChapterList = useCallback(async () => {
+    if (!novelId) return
+    try {
+      const res = await chapterApi.getChapters(parseInt(novelId), { page_size: 100 })
+      if (res.success) {
+        setChapters(res.data.items || [])
+      }
+    } catch {
+      // noop
+    }
+  }, [novelId])
+
+  const refreshSelectedChapter = useCallback(async (chapterId: number) => {
+    try {
+      const res = await editorApi.getChapterForEditor(chapterId)
+      if (!res.success) return
+
+      const data = res.data
+      setChapterWordCount(data.word_count)
+      setOriginalContent(data.content)
+      setWorkingContent(data.working_content || data.content)
+      setEditSessionId(data.edit_session_id)
+      setLatestPendingEditSessionId(data.latest_pending_edit_session_id)
+      setHasActiveEdit(data.has_active_edit)
+      setChangeCount(data.change_count)
+      if (!data.has_active_edit) {
+        setShowDiff(false)
+        setDiffData(null)
+      }
+    } catch {
+      // noop
+    }
+  }, [])
 
   const handleMsg = useCallback((msg: ServerMsg) => {
     console.log('[EditorPage] handleMsg:', msg.type)
@@ -212,8 +306,10 @@ export default function EditorPage() {
               toolCalls.forEach((tc: any) => {
                 historyToolCalls.push({
                   tool_name: tc.function?.name || tc.name || 'unknown',
+                  display_text: getToolDisplayName(tc.function?.name || tc.name || 'unknown'),
                   status: 'completed',
-                  message_id: msgId,
+                  task_id: msgId,
+                  order: timelineOrderRef.current++,
                 })
               })
             }
@@ -223,6 +319,7 @@ export default function EditorPage() {
                 id: msgId,
                 role: msg.role as 'user' | 'assistant',
                 content: msg.content,
+                timestamp: timelineOrderRef.current++,
               })
             }
           })
@@ -239,104 +336,194 @@ export default function EditorPage() {
         const m = msg as { type: 'chat_started'; task_id?: string }
         setIsStreaming(true)
         if (m.task_id) setCurrentTaskId(m.task_id)
+        shouldBreakAssistantSegmentRef.current = false
         const newMsg = {
-          id: `stream_${Date.now()}`,
+          id: m.task_id || `stream_${Date.now()}`,
           role: 'assistant' as const,
           content: '',
           isStreaming: true,
+          taskId: m.task_id,
+          timestamp: timelineOrderRef.current++,
         }
-        lastMessageIdRef.current = newMsg.id
         setChatMessages(prev => [...prev, newMsg])
         break
       }
       case 'content_chunk': {
         const m = msg as ContentChunkMsg
         setChatMessages(prev => {
-          const updated = [...prev]
-          const last = updated[updated.length - 1]
-          
-          if (shouldCreateNewMessageRef.current) {
-            shouldCreateNewMessageRef.current = false
-            const newMsg = {
-              id: `stream_${Date.now()}`,
-              role: 'assistant' as const,
-              content: m.chunk,
-              isStreaming: true,
-            }
-            lastMessageIdRef.current = newMsg.id
-            updated.push(newMsg)
-          } else if (last && last.isStreaming) {
-            updated[updated.length - 1] = { ...last, content: last.content + m.chunk }
-          } else {
-            const newMsg = {
-              id: `stream_${Date.now()}`,
-              role: 'assistant' as const,
-              content: m.chunk,
-              isStreaming: true,
-            }
-            lastMessageIdRef.current = newMsg.id
-            updated.push(newMsg)
+          const taskId = m.task_id || currentTaskId || undefined
+          const existingIndex = shouldBreakAssistantSegmentRef.current
+            ? -1
+            : prev.findIndex(item => item.taskId === taskId && item.role === 'assistant' && item.isStreaming)
+          if (existingIndex >= 0) {
+            return prev.map((item, index) => index === existingIndex
+              ? { ...item, content: item.content + m.chunk, isStreaming: true }
+              : item)
           }
-          return updated
+          shouldBreakAssistantSegmentRef.current = false
+          return [
+            ...prev,
+            {
+              id: taskId || `stream_${Date.now()}`,
+              role: 'assistant' as const,
+              content: m.chunk,
+              isStreaming: true,
+              taskId,
+              timestamp: timelineOrderRef.current++,
+            },
+          ]
         })
         break
       }
       case 'chat_completed': {
         setIsStreaming(false)
+        setCurrentTaskId(null)
+        shouldBreakAssistantSegmentRef.current = false
         setChatMessages(prev => {
-          const updated = [...prev]
-          const last = updated[updated.length - 1]
-          if (last && last.isStreaming) {
-            updated[updated.length - 1] = { ...last, isStreaming: false, id: `msg_${Date.now()}` }
-          }
-          return updated
+          return prev.map(item => item.taskId === msg.task_id
+            ? { ...item, isStreaming: false }
+            : item)
         })
+        void refreshChapterList()
+        if (streamingChapterMeta?.id) {
+          void refreshSelectedChapter(streamingChapterMeta.id)
+          setStreamingChapterMeta(null)
+        }
+        if (pendingInterruptMessageRef.current) {
+          const nextMessage = pendingInterruptMessageRef.current
+          pendingInterruptMessageRef.current = null
+          dispatchMessage(nextMessage)
+        }
         break
       }
       case 'tool_call': {
         const m = msg as ToolCallMsg
         setToolCalls(prev => {
-          const idx = prev.findIndex(t => {
-            const match = t.tool_name === m.tool_name && t.status === 'executing'
-            return match
-          })
-          if (idx >= 0) {
-            return prev.map((t, i) => i === idx ? { ...t, status: m.status as 'completed' } : t)
+          const idx = prev.findIndex(t => (
+            (m.tool_id && t.tool_id === m.tool_id) ||
+            (!m.tool_id && t.task_id === m.task_id && t.tool_name === m.tool_name && t.status === 'executing')
+          ))
+        if (idx >= 0) {
+          return prev.map((t, i) => i === idx ? {
+              ...t,
+              status: m.status,
+              task_id: m.task_id || t.task_id,
+              display_text: m.display_text || t.display_text,
+              activity_kind: m.activity_kind || t.activity_kind,
+              chapter_id: m.chapter_id ?? t.chapter_id,
+              chapter_number: m.chapter_number ?? t.chapter_number,
+              chapter_title: m.chapter_title ?? t.chapter_title,
+              error: m.error,
+              tool_id: m.tool_id || t.tool_id,
+              timestamp: m.timestamp || t.timestamp,
+            } : t)
           }
           const newToolCall: ToolCallInfo = { 
             tool_name: m.tool_name, 
-            status: m.status as 'executing' | 'completed', 
-            message_id: lastMessageIdRef.current || undefined 
+            task_id: m.task_id,
+            status: m.status,
+            tool_id: m.tool_id,
+            display_text: m.display_text || getToolDisplayName(m.tool_name, m.chapter_number, m.chapter_title),
+            activity_kind: m.activity_kind,
+            chapter_id: m.chapter_id,
+            chapter_number: m.chapter_number,
+            chapter_title: m.chapter_title,
+            error: m.error,
+            timestamp: m.timestamp,
+            order: timelineOrderRef.current++,
           }
-          return [...prev, newToolCall]
+          return [...prev, newToolCall].slice(-20)
         })
-        if (m.status === 'completed') {
-          setChatMessages(prev => {
-            const updated = [...prev]
-            const last = updated[updated.length - 1]
-            if (last && last.isStreaming) {
-              updated[updated.length - 1] = { ...last, isStreaming: false, id: `msg_${Date.now()}` }
-            }
-            return updated
-          })
-          shouldCreateNewMessageRef.current = true
-          const newMsgId = `tool_${Date.now()}`
-          lastMessageIdRef.current = newMsgId
+        setChatMessages(prev => prev.map(item =>
+          item.taskId === m.task_id && item.isStreaming
+            ? { ...item, isStreaming: false }
+            : item
+        ))
+        if (m.status === 'completed' && (m.tool_name === 'create_new_chapter' || m.tool_name === 'generate_chapter_draft' || m.tool_name === 'get_chapter_list')) {
+          void refreshChapterList()
         }
+        if (m.status === 'completed' && m.chapter_id && (m.activity_kind === 'edit' || m.activity_kind === 'write')) {
+          void revealChapterFromTool(m.chapter_id)
+        } else if (m.status === 'completed' && m.chapter_number && (m.activity_kind === 'edit' || m.activity_kind === 'write')) {
+          void revealChapterByNumber(m.chapter_number)
+        }
+        if (m.tool_name === 'generate_chapter_draft' && m.status === 'executing') {
+          setEditNotice('AI 正在撰写章节，正文会实时出现在中间编辑区。')
+        }
+        if (m.tool_name === 'generate_chapter_draft' && (m.status === 'failed' || m.status === 'rejected')) {
+          setStreamingChapterMeta(null)
+          setEditNotice('这次章节写作没有完成，已保留当前真实章节状态。')
+          void refreshChapterList()
+        }
+        if (m.status === 'executing' || m.status === 'completed' || m.status === 'failed' || m.status === 'rejected') {
+          shouldBreakAssistantSegmentRef.current = true
+        }
+        if ((m.tool_name === 'apply_edit' || m.tool_name === 'start_edit_session') && (m.status === 'failed' || m.status === 'rejected')) {
+          setEditNotice('这次 AI 修改没有完成，正文没有被自动改动。')
+          if (selectedChapterId) {
+            void refreshSelectedChapter(selectedChapterId)
+          }
+        }
+        break
+      }
+      case 'chapter_stream': {
+        const m = msg as ChapterStreamMsg
+        if (selectedChapterId !== m.chapter_id) {
+          setSelectedChapterId(m.chapter_id)
+          setShowDiff(false)
+          setDiffData(null)
+          setHasActiveEdit(false)
+          setEditSessionId(null)
+          setLatestPendingEditSessionId(null)
+          setChangeCount(0)
+          void refreshChapterList()
+        }
+        setStreamingChapterMeta({
+          id: m.chapter_id,
+          chapterNumber: m.chapter_number,
+          title: m.chapter_title || `第${m.chapter_number}章`,
+        })
+        setOriginalContent('')
+        setWorkingContent(m.content)
+        setChapterWordCount(m.word_count)
+        setEditNotice('AI 正在撰写正文，你可以实时看到内容生成。')
+        break
+      }
+      case 'edit_stream': {
+        const m = msg as { type: 'edit_stream'; chapter_id?: number; edit_session_id?: string; working_content: string }
+        if (m.chapter_id && selectedChapterId !== m.chapter_id) {
+          void revealChapterFromTool(m.chapter_id)
+        }
+        if (m.edit_session_id) {
+          setEditSessionId(prev => prev || m.edit_session_id || null)
+          setLatestPendingEditSessionId(prev => prev || m.edit_session_id || null)
+        }
+        setHasActiveEdit(true)
+        setShowDiff(false)
+        setWorkingContent(m.working_content)
+        setEditNotice('AI 正在修改副本内容，你可以实时看到改动。')
         break
       }
       case 'edit_started': {
         const m = msg as EditStartedMsg
+        if (m.chapter_id && selectedChapterId !== m.chapter_id) {
+          void revealChapterFromTool(m.chapter_id)
+        }
         setEditSessionId(m.edit_session_id)
+        setLatestPendingEditSessionId(m.latest_pending_edit_session_id || m.edit_session_id)
         setOriginalContent(m.original_content)
         setWorkingContent(m.working_content)
         setChangeCount(m.change_count)
         setHasActiveEdit(true)
         setShowDiff(false)
+        setEditNotice('AI 已创建可确认的编辑副本，修改不会直接覆盖正文。')
         break
       }
       case 'edit_preview': {
         const m = msg as EditPreviewMsg
+        if (m.chapter_id && selectedChapterId !== m.chapter_id) {
+          void revealChapterFromTool(m.chapter_id)
+        }
         setOriginalContent(m.diff?.old_content || originalContent)
         setWorkingContent(m.working_content)
         setChangeCount(m.change_count)
@@ -347,16 +534,31 @@ export default function EditorPage() {
       }
       case 'edit_pending': {
         const m = msg as EditPendingMsg
+        if (m.chapter_id && selectedChapterId !== m.chapter_id) {
+          void revealChapterFromTool(m.chapter_id)
+        }
         setEditSessionId(m.edit_session_id)
+        setLatestPendingEditSessionId(m.latest_pending_edit_session_id || m.edit_session_id)
         setChangeCount(m.change_count)
+        if (m.chapter_id && selectedChapterId === m.chapter_id) {
+          setHasActiveEdit(true)
+        }
+        setEditNotice('当前章节存在待确认修改，稍后回来也可以再确认。')
         break
       }
       case 'edit_applied': {
         const m = msg as EditAppliedMsg
+        if (m.chapter_id && selectedChapterId !== m.chapter_id) {
+          void revealChapterFromTool(m.chapter_id)
+        }
+        setEditSessionId(m.edit_session_id)
+        setLatestPendingEditSessionId(m.latest_pending_edit_session_id || m.edit_session_id)
         setWorkingContent(m.working_content)
         setChangeCount(m.change_count)
         setDiffData(m.diff as DiffData)
+        setHasActiveEdit(true)
         setShowDiff(true)
+        setEditNotice('修改已应用到副本，可以直接在差异视图里确认或拒绝。')
         break
       }
       case 'edit_accepted': {
@@ -364,46 +566,68 @@ export default function EditorPage() {
         message.success(m.message)
         setHasActiveEdit(false)
         setEditSessionId(null)
+        setLatestPendingEditSessionId(m.latest_pending_edit_session_id || null)
         setShowDiff(false)
         setDiffData(null)
         setChangeCount(0)
         setChapterWordCount(m.word_count)
+        setEditNotice(m.already_processed ? '这份修改之前已经接受过了。' : '修改已合并到正文。')
         if (selectedChapterId) {
           setChapters(prev => prev.map(c => c.id === selectedChapterId ? { ...c, word_count: m.word_count } : c))
+          void refreshSelectedChapter(selectedChapterId)
         }
         break
       }
       case 'edit_rejected': {
         const m = msg as EditRejectedMsg
         message.info(m.message)
-        setWorkingContent(m.original_content)
         setHasActiveEdit(false)
         setEditSessionId(null)
+        setLatestPendingEditSessionId(m.latest_pending_edit_session_id || null)
         setShowDiff(false)
         setDiffData(null)
         setChangeCount(0)
+        setEditNotice(m.already_processed ? '这份修改之前已经拒绝过了。' : '副本修改已撤销，正文保持原样。')
+        if (selectedChapterId) {
+          void refreshSelectedChapter(selectedChapterId)
+        }
         break
       }
       case 'error': {
         const m = msg as ErrorMsg
+        if (typeof m.latest_pending_edit_session_id !== 'undefined') {
+          setLatestPendingEditSessionId(m.latest_pending_edit_session_id)
+        }
+        if (m.edit_session_id) {
+          setEditSessionId(m.edit_session_id)
+        }
         message.error(m.error)
         setIsStreaming(false)
+        setCurrentTaskId(null)
+        setStreamingChapterMeta(null)
+        shouldBreakAssistantSegmentRef.current = false
+        if (pendingInterruptMessageRef.current) {
+          const nextMessage = pendingInterruptMessageRef.current
+          pendingInterruptMessageRef.current = null
+          dispatchMessage(nextMessage)
+        }
         break
       }
       case 'task_cancelled': {
         setIsStreaming(false)
-        setChatMessages(prev => {
-          const updated = [...prev]
-          const last = updated[updated.length - 1]
-          if (last && last.isStreaming) {
-            updated[updated.length - 1] = { ...last, isStreaming: false, id: `msg_${Date.now()}` }
-          }
-          return updated
-        })
+        setCurrentTaskId(null)
+        setStreamingChapterMeta(null)
+        shouldBreakAssistantSegmentRef.current = false
+        setChatMessages(prev => prev.map(item => item.taskId === currentTaskId ? { ...item, isStreaming: false } : item))
+        if (pendingInterruptMessageRef.current) {
+          const nextMessage = pendingInterruptMessageRef.current
+          pendingInterruptMessageRef.current = null
+          dispatchMessage(nextMessage)
+        }
         break
       }
     }
-  }, [selectedChapterId])
+  }, [currentTaskId, dispatchMessage, originalContent, refreshChapterList, refreshSelectedChapter, selectedChapterId, streamingChapterMeta])
 
   useEffect(() => {
     const unsub = wsEditorService.onMessage(handleMsg)
@@ -416,8 +640,10 @@ export default function EditorPage() {
 
   const selectChapter = async (chapterId: number) => {
     setSelectedChapterId(chapterId)
+    setStreamingChapterMeta(null)
     setShowDiff(false)
     setDiffData(null)
+    setEditNotice('')
 
     try {
       const res = await editorApi.getChapterForEditor(chapterId)
@@ -428,12 +654,15 @@ export default function EditorPage() {
           setOriginalContent(data.content)
           setWorkingContent(data.working_content)
           setEditSessionId(data.edit_session_id)
+          setLatestPendingEditSessionId(data.latest_pending_edit_session_id)
           setHasActiveEdit(true)
           setChangeCount(data.change_count)
+          setEditNotice('这章有待确认副本，你可以现在确认，也可以晚点回来处理。')
         } else {
           setOriginalContent(data.content)
           setWorkingContent(data.content)
           setEditSessionId(null)
+          setLatestPendingEditSessionId(data.latest_pending_edit_session_id)
           setHasActiveEdit(false)
           setChangeCount(0)
         }
@@ -445,8 +674,64 @@ export default function EditorPage() {
         setWorkingContent(res.data.content || '')
         setChapterWordCount(res.data.word_count || 0)
         setEditSessionId(null)
+        setLatestPendingEditSessionId(null)
         setHasActiveEdit(false)
       }
+    }
+  }
+
+  async function revealChapterFromTool(chapterId?: number | null) {
+    if (!chapterId) return
+    await refreshChapterList()
+    if (selectedChapterId !== chapterId) {
+      await selectChapter(chapterId)
+      return
+    }
+    await refreshSelectedChapter(chapterId)
+  }
+
+  async function revealChapterByNumber(chapterNumber?: number | null) {
+    if (!chapterNumber || !novelId) return
+    const res = await chapterApi.getChapters(parseInt(novelId), { page_size: 100 })
+    if (!res.success) return
+    const items = res.data.items || []
+    setChapters(items)
+    const matched = items.find(ch => ch.chapter_number === chapterNumber)
+    if (matched) {
+      await selectChapter(matched.id)
+    }
+  }
+
+  function dispatchMessage(msg: string) {
+    const userMsg: ChatMessage = {
+      id: `user_${Date.now()}`,
+      role: 'user',
+      content: msg,
+      timestamp: timelineOrderRef.current++,
+    }
+    setChatMessages(prev => [...prev, userMsg])
+
+    if (!currentSessionId) {
+      const scope: Scope = { ...currentScope }
+      if (scope.type === 'chapter' && scopeChapterStart) scope.chapter_start = scopeChapterStart
+      else if (scope.type === 'chapters') {
+        if (scopeChapterStart) scope.chapter_start = scopeChapterStart
+        if (scopeChapterEnd) scope.chapter_end = scopeChapterEnd
+      }
+      pendingMessageRef.current = msg
+      const sent = wsEditorService.createSession(scope, selectedModel, selectedEditMode)
+      if (!sent) {
+        message.error('WebSocket 未连接')
+        setChatMessages(prev => prev.filter(m => m.id !== userMsg.id))
+        pendingMessageRef.current = null
+      }
+      return
+    }
+
+    const sent = wsEditorService.chat(currentSessionId, msg, true)
+    if (!sent) {
+      message.error('WebSocket 未连接')
+      setChatMessages(prev => prev.filter(m => m.id !== userMsg.id))
     }
   }
 
@@ -480,14 +765,14 @@ export default function EditorPage() {
   }
 
   const acceptEdit = () => {
-    if (editSessionId) {
-      wsEditorService.acceptEdit(editSessionId)
+    if (editSessionId || latestPendingEditSessionId || selectedChapterId) {
+      wsEditorService.acceptEdit(latestPendingEditSessionId || editSessionId, selectedChapterId)
     }
   }
 
   const rejectEdit = () => {
-    if (editSessionId) {
-      wsEditorService.rejectEdit(editSessionId)
+    if (editSessionId || latestPendingEditSessionId || selectedChapterId) {
+      wsEditorService.rejectEdit(latestPendingEditSessionId || editSessionId, selectedChapterId)
     }
   }
 
@@ -509,60 +794,28 @@ export default function EditorPage() {
   const handleStop = () => {
     if (currentTaskId) {
       wsEditorService.cancelTask(currentTaskId)
-      setCurrentTaskId(null)
     }
-    setIsStreaming(false)
   }
 
   const sendMessage = () => {
     if (!inputValue.trim()) return
 
+    const msg = inputValue.trim()
+    setInputValue('')
+
     if (isStreaming) {
+      pendingInterruptMessageRef.current = msg
       handleStop()
       return
     }
 
-    const msg = inputValue.trim()
-    const userMsg: ChatMessage = {
-      id: `user_${Date.now()}`,
-      role: 'user',
-      content: msg,
-    }
-    setChatMessages(prev => [...prev, userMsg])
-    setInputValue('')
-
-    if (!currentSessionId) {
-      const scope: Scope = { ...currentScope }
-      if (scope.type === 'chapter' && scopeChapterStart) scope.chapter_start = scopeChapterStart
-      else if (scope.type === 'chapters') {
-        if (scopeChapterStart) scope.chapter_start = scopeChapterStart
-        if (scopeChapterEnd) scope.chapter_end = scopeChapterEnd
-      }
-      pendingMessageRef.current = msg
-      const sent = wsEditorService.createSession(scope, selectedModel, selectedEditMode)
-      if (!sent) {
-        message.error('WebSocket 未连接')
-        setChatMessages(prev => prev.filter(m => m.id !== userMsg.id))
-        pendingMessageRef.current = null
-      }
-      return
-    }
-
-    const sent = wsEditorService.chat(currentSessionId, msg, true)
-    if (!sent) {
-      message.error('WebSocket 未连接')
-      setChatMessages(prev => prev.filter(m => m.id !== userMsg.id))
-    }
+    dispatchMessage(msg)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (isStreaming) {
-        handleStop()
-      } else {
-        sendMessage()
-      }
+      sendMessage()
     }
   }
 
@@ -595,9 +848,7 @@ export default function EditorPage() {
       if (res.success) {
         message.success('章节创建成功')
         setCreateChapterModal(false)
-        chapterApi.getChapters(parseInt(novelId), { page_size: 100 }).then(r => {
-          if (r.success) setChapters(r.data.items || [])
-        }).catch(() => {})
+        void refreshChapterList()
         selectChapter(res.data.id)
       }
     } catch {
@@ -608,7 +859,19 @@ export default function EditorPage() {
   }
 
   const selectedChapter = chapters.find(c => c.id === selectedChapterId)
+  const activeChapterMeta = selectedChapter
+    ? { chapterNumber: selectedChapter.chapter_number, title: selectedChapter.title }
+    : streamingChapterMeta
+      ? { chapterNumber: streamingChapterMeta.chapterNumber, title: streamingChapterMeta.title }
+      : null
   const theme = darkMode ? 'vs-dark' : 'light'
+  const activePendingSessionId = latestPendingEditSessionId || editSessionId
+  const hasPendingChanges = changeCount > 0 || workingContent !== originalContent
+  const hasPendingReview = Boolean(activePendingSessionId || hasActiveEdit) && hasPendingChanges
+  const timelineItems = [
+    ...chatMessages.map(item => ({ type: 'message' as const, order: item.timestamp || 0, item })),
+    ...toolCalls.map(item => ({ type: 'tool' as const, order: item.order, item })),
+  ].sort((a, b) => a.order - b.order)
 
   return (
     <div className={`${styles.editorPage} ${darkMode ? styles.editorPageDark : ''}`}>
@@ -713,25 +976,35 @@ export default function EditorPage() {
         </div>
 
         <div className={styles.centerEditor}>
-          {selectedChapter ? (
+          {activeChapterMeta ? (
             <>
               <div className={styles.editorHeader}>
-                <span className={styles.editorFileName}>
-                  第{selectedChapter.chapter_number}章 {selectedChapter.title}
-                </span>
-                <span className={styles.editorWordCount}>
-                  {chapterWordCount.toLocaleString()} 字
-                </span>
+                <div className={styles.editorMeta}>
+                  <span className={styles.editorFileName}>
+                    {`第${activeChapterMeta.chapterNumber}章 ${activeChapterMeta.title}`}
+                  </span>
+                  <div className={styles.editorFacts}>
+                    <span className={styles.editorWordCount}>
+                      {`${chapterWordCount.toLocaleString()} 字`}
+                    </span>
+                    <span className={`${styles.chapterPill} ${hasPendingReview ? styles.chapterPillPending : ''}`}>
+                      {streamingChapterMeta ? 'AI 正在写作' : hasPendingReview ? '有待确认修改' : '正文已同步'}
+                    </span>
+                    <span className={styles.chapterPill}>
+                      {selectedEditMode === 'agent' ? '协作创作' : selectedEditMode === 'review' ? '审阅模式' : '规划模式'}
+                    </span>
+                  </div>
+                </div>
                 {isSaving && (
                   <span style={{ fontSize: 11, color: '#faad14' }}>
                     <SaveOutlined style={{ marginRight: 2 }} /> 保存中...
                   </span>
                 )}
-                {hasActiveEdit && changeCount > 0 && (
+                {selectedChapter && hasPendingReview && (
                   <div className={styles.diffActions}>
                     <span className={styles.diffSummary}>
                       {changeCount} 处改动
-                      {diffData && (
+                      {diffData && diffData.summary && (
                         <>
                           {' '}
                           <span className={styles.diffAdditions}>+{diffData.summary.additions}</span>
@@ -756,8 +1029,23 @@ export default function EditorPage() {
                   </div>
                 )}
               </div>
+              {(editNotice || hasPendingReview) && (
+                <div className={styles.editNoticeBar}>
+                  <div>
+                    <div className={styles.editNoticeTitle}>副本编辑机制</div>
+                    <div className={styles.editNoticeText}>
+                      {editNotice || 'AI 的修改会先进入副本，只有你确认后才会写回正文。'}
+                    </div>
+                  </div>
+                  {activePendingSessionId && (
+                    <span className={styles.editSessionBadge}>
+                      {activePendingSessionId}
+                    </span>
+                  )}
+                </div>
+              )}
               <div className={styles.editorContainer}>
-                {showDiff && hasActiveEdit ? (
+                {selectedChapter && showDiff && hasPendingReview ? (
                   <DiffEditor
                     height="100%"
                     language="markdown"
@@ -769,7 +1057,9 @@ export default function EditorPage() {
                       minimap: { enabled: false },
                       lineNumbers: 'on',
                       scrollBeyondLastLine: false,
-                      fontSize: 14,
+                      fontSize: 17,
+                      lineHeight: 30,
+                      fontFamily: "'LXGW WenKai Screen', 'Noto Serif SC', 'Source Han Serif SC', serif",
                       wordWrap: 'on',
                       renderSideBySide: true,
                       enableSplitViewResizing: true,
@@ -784,11 +1074,13 @@ export default function EditorPage() {
                     onChange={handleEditorChange}
                     onMount={handleEditorMount}
                     options={{
-                      readOnly: false,
+                      readOnly: Boolean(streamingChapterMeta),
                       minimap: { enabled: false },
                       lineNumbers: 'on',
                       scrollBeyondLastLine: false,
-                      fontSize: 14,
+                      fontSize: 17,
+                      lineHeight: 30,
+                      fontFamily: "'LXGW WenKai Screen', 'Noto Serif SC', 'Source Han Serif SC', serif",
                       wordWrap: 'on',
                       automaticLayout: true,
                     }}
@@ -805,90 +1097,6 @@ export default function EditorPage() {
         </div>
 
         <div className={styles.rightChat}>
-          <div className={styles.chatScope}>
-            <div className={styles.scopeLabel}>对话作用域</div>
-            <div className={styles.scopeRow}>
-              <Select
-                size="small"
-                value={currentScope.type}
-                onChange={handleScopeTypeChange}
-                style={{ flex: 1 }}
-                popupMatchSelectWidth={false}
-                variant="borderless"
-                options={SCOPE_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
-              />
-              {currentScope.type === 'chapter' && (
-                <Select
-                  size="small"
-                  value={scopeChapterStart}
-                  onChange={v => {
-                    setScopeChapterStart(v)
-                    setCurrentScope({ type: 'chapter', chapter_start: v })
-                  }}
-                  style={{ width: 120 }}
-                  placeholder="选择章节"
-                  variant="borderless"
-                  popupMatchSelectWidth={false}
-                  options={chapters.map(ch => ({
-                    value: ch.chapter_number,
-                    label: `第${ch.chapter_number}章`,
-                  }))}
-                />
-              )}
-              {currentScope.type === 'chapters' && (
-                <>
-                  <Select
-                    size="small"
-                    value={scopeChapterStart}
-                    onChange={v => setScopeChapterStart(v)}
-                    style={{ width: 90 }}
-                    placeholder="起始"
-                    variant="borderless"
-                    options={chapters.map(ch => ({
-                      value: ch.chapter_number,
-                      label: `第${ch.chapter_number}章`,
-                    }))}
-                  />
-                  <span className={styles.scopeDash}>-</span>
-                  <Select
-                    size="small"
-                    value={scopeChapterEnd}
-                    onChange={v => setScopeChapterEnd(v)}
-                    style={{ width: 90 }}
-                    placeholder="结束"
-                    variant="borderless"
-                    options={chapters.map(ch => ({
-                      value: ch.chapter_number,
-                      label: `第${ch.chapter_number}章`,
-                    }))}
-                  />
-                </>
-              )}
-            </div>
-            <div className={styles.scopeRow} style={{ marginTop: 4 }}>
-              <Select
-                size="small"
-                value={selectedModel}
-                onChange={setSelectedModel}
-                style={{ flex: 1 }}
-                popupMatchSelectWidth={false}
-                variant="borderless"
-                options={MODEL_OPTIONS}
-              />
-            </div>
-            <div className={styles.scopeRow} style={{ marginTop: 4 }}>
-              <Select
-                size="small"
-                value={selectedEditMode}
-                onChange={setSelectedEditMode}
-                style={{ flex: 1 }}
-                popupMatchSelectWidth={false}
-                variant="borderless"
-                options={EDIT_MODE_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
-              />
-            </div>
-          </div>
-
           <div className={styles.chatMessages} ref={chatContainerRef}>
             {chatMessages.length === 0 && !isStreaming && (
               <div className={styles.emptyChat}>
@@ -897,91 +1105,160 @@ export default function EditorPage() {
                 <div style={{ fontSize: 12 }}>AI 可以帮你修改章节内容</div>
               </div>
             )}
-            {chatMessages.map((msg) => {
-              const toolsAfterMsg = toolCalls.filter(tc => tc.message_id === msg.id)
-              
-              return (
-                <div key={msg.id}>
-                  <div
-                    className={`${styles.chatMsg} ${msg.role === 'user' ? styles.chatMsgUser : msg.isStreaming ? styles.chatMsgStreaming : styles.chatMsgAssistant}`}
-                  >
-                    <Markdown>{msg.content}</Markdown>
-                  </div>
-                  {toolsAfterMsg.map((tc, i) => (
-                    <div key={`tool_${tc.tool_name}_${i}`} className={styles.toolCallCard}>
-                      <div className={styles.toolCallName}>
-                        <SettingOutlined style={{ marginRight: 4 }} />
-                        {tc.tool_name}
-                      </div>
-                      <div className={styles.toolCallStatus}>
-                        {tc.status === 'executing' && (
-                          <span className={styles.toolCallExecuting}>
-                            <LoadingOutlined spin style={{ marginRight: 4 }} /> 执行中...
-                          </span>
-                        )}
-                        {tc.status === 'completed' && (
-                          <span className={styles.toolCallCompleted}>
-                            <CheckCircleOutlined style={{ marginRight: 4 }} /> 已完成
-                          </span>
-                        )}
-                        {tc.status === 'failed' && (
-                          <span className={styles.toolCallFailed}>
-                            <CloseCircleOutlined style={{ marginRight: 4 }} /> 失败
-                          </span>
-                        )}
-                      </div>
+            {timelineItems.map((entry) => {
+              if (entry.type === 'message') {
+                const msg = entry.item as ChatMessage
+                return (
+                  <div key={msg.id} className={styles.chatEntry}>
+                    <div
+                      className={`${styles.chatMsg} ${msg.role === 'user' ? styles.chatMsgUser : msg.isStreaming ? styles.chatMsgStreaming : styles.chatMsgAssistant}`}
+                    >
+                      <Markdown>{msg.content}</Markdown>
                     </div>
-                  ))}
+                  </div>
+                )
+              }
+
+              const activity = entry.item as ToolCallInfo
+              const activityKey = activity.tool_id || `${activity.task_id || 'no_task'}_${activity.tool_name}_${activity.order || activity.timestamp || Date.now()}`
+              const visual = getActivityVisual(activity.activity_kind)
+              return (
+                <div key={activityKey} className={styles.toolInlineWrap}>
+                  <div className={`${styles.activityCard} ${activity.status === 'executing' ? styles.activityCardActive : ''}`}>
+                    <div className={styles.activityIconWrap}>
+                      <span className={styles.activityIcon}>{visual.icon}</span>
+                      {activity.status === 'executing' && <span className={styles.activityPulse} />}
+                    </div>
+                    <div className={styles.activityBody}>
+                      <div className={styles.activityLine}>
+                        <span className={styles.activityName}>
+                          {activity.display_text || getToolDisplayName(activity.tool_name, activity.chapter_number, activity.chapter_title)}
+                        </span>
+                        <span className={`${styles.activityState} ${activity.status === 'executing' ? styles.activityStateRunning : activity.status === 'completed' ? styles.activityStateDone : styles.activityStateFailed}`}>
+                          {activity.status === 'executing' && <LoadingOutlined spin />}
+                          {activity.status === 'completed' && <CheckCircleOutlined />}
+                          {(activity.status === 'failed' || activity.status === 'rejected') && <CloseCircleOutlined />}
+                          {activity.status === 'executing' ? visual.badge : activity.status === 'completed' ? '已完成' : '未完成'}
+                        </span>
+                      </div>
+                      {(activity.chapter_number || activity.chapter_title) && (
+                        <div className={styles.activityMeta}>
+                          {activity.chapter_number ? `第${activity.chapter_number}章` : ''}
+                          {activity.chapter_title ? ` · ${activity.chapter_title}` : ''}
+                        </div>
+                      )}
+                      {activity.error && <div className={styles.activityError}>{activity.error}</div>}
+                    </div>
+                  </div>
                 </div>
               )
             })}
           </div>
 
           <div className={styles.chatInput}>
-            <div className={styles.toolBar}>
-              {TOOL_GROUPS.map(group => (
-                <button
-                  key={group.key}
-                  className={`${styles.toolTag} ${enabledTools.has(group.key) ? styles.toolTagActive : ''}`}
-                  onClick={() => {
-                    setEnabledTools(prev => {
-                      const next = new Set(prev)
-                      if (next.has(group.key)) next.delete(group.key)
-                      else next.add(group.key)
-                      return next
-                    })
-                  }}
-                >
-                  {enabledTools.has(group.key) ? <CheckOutlined style={{ fontSize: 10, marginRight: 2 }} /> : null}
-                  {group.label}
-                </button>
-              ))}
-            </div>
             <div className={styles.inputRow}>
               <textarea
                 className={styles.chatTextArea}
                 value={inputValue}
                 onChange={e => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={isStreaming ? "按 Enter 停止生成..." : "输入消息... (Enter 发送)"}
-                rows={1}
+                placeholder={isStreaming ? "继续输入并发送，会自动打断上一轮并接着聊" : "描述你要写什么、改什么，或者直接和 AI 讨论剧情与设定"}
+                rows={2}
                 onInput={e => {
                   const target = e.target as HTMLTextAreaElement
                   target.style.height = 'auto'
-                  target.style.height = Math.min(target.scrollHeight, 120) + 'px'
+                  target.style.height = Math.min(target.scrollHeight, 180) + 'px'
                 }}
               />
               <button
                 className={`${styles.sendBtn} ${isStreaming ? styles.stopBtn : ''}`}
-                onClick={isStreaming ? handleStop : sendMessage}
+                onClick={inputValue.trim() ? sendMessage : isStreaming ? handleStop : sendMessage}
                 disabled={!isStreaming && !inputValue.trim()}
               >
-                {isStreaming ? (
+                {isStreaming && !inputValue.trim() ? (
                   <span style={{ fontSize: 12 }}>■</span>
                 ) : (
                   <ArrowLeftOutlined style={{ transform: 'rotate(-45deg)' }} />
                 )}
               </button>
+            </div>
+            <div className={styles.chatControls}>
+              <div className={styles.controlChip}>
+                <span className={styles.controlLabel}>模型</span>
+                <Select
+                  size="small"
+                  value={selectedModel}
+                  onChange={setSelectedModel}
+                  className={styles.chatControlSelect}
+                  popupMatchSelectWidth={false}
+                  options={MODEL_OPTIONS}
+                />
+              </div>
+              <div className={styles.controlChip}>
+                <span className={styles.controlLabel}>作用域</span>
+                <Select
+                  size="small"
+                  value={currentScope.type}
+                  onChange={handleScopeTypeChange}
+                  className={styles.chatControlSelect}
+                  popupMatchSelectWidth={false}
+                  options={SCOPE_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
+                />
+                {currentScope.type === 'chapter' && (
+                  <Select
+                    size="small"
+                    value={scopeChapterStart}
+                    onChange={v => {
+                      setScopeChapterStart(v)
+                      setCurrentScope({ type: 'chapter', chapter_start: v })
+                    }}
+                    className={styles.chatControlCompact}
+                    placeholder="章节"
+                    popupMatchSelectWidth={false}
+                    options={chapters.map(ch => ({
+                      value: ch.chapter_number,
+                      label: `第${ch.chapter_number}章`,
+                    }))}
+                  />
+                )}
+                {currentScope.type === 'chapters' && (
+                  <>
+                    <Select
+                      size="small"
+                      value={scopeChapterStart}
+                      onChange={v => setScopeChapterStart(v)}
+                      className={styles.chatControlCompact}
+                      placeholder="起始"
+                      options={chapters.map(ch => ({
+                        value: ch.chapter_number,
+                        label: `第${ch.chapter_number}章`,
+                      }))}
+                    />
+                    <Select
+                      size="small"
+                      value={scopeChapterEnd}
+                      onChange={v => setScopeChapterEnd(v)}
+                      className={styles.chatControlCompact}
+                      placeholder="结束"
+                      options={chapters.map(ch => ({
+                        value: ch.chapter_number,
+                        label: `第${ch.chapter_number}章`,
+                      }))}
+                    />
+                  </>
+                )}
+              </div>
+              <div className={styles.controlChip}>
+                <span className={styles.controlLabel}>模式</span>
+                <Select
+                  size="small"
+                  value={selectedEditMode}
+                  onChange={setSelectedEditMode}
+                  className={styles.chatControlSelect}
+                  popupMatchSelectWidth={false}
+                  options={EDIT_MODE_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
+                />
+              </div>
             </div>
           </div>
         </div>

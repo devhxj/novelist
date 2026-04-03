@@ -4,13 +4,15 @@ FastAPI主应用 - AI IDE风格小说创作系统
 """
 from contextlib import asynccontextmanager
 import logging
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.database import init_db
 from app.core.redis_service import redis_service
 from app.core.exceptions import APIException
+from app.core.llm_service import LLMServiceError
 
 from app.auth.router import router as auth_router
 from app.novels.router import router as novels_router
@@ -57,6 +59,12 @@ async def lifespan(app: FastAPI):
     
     yield
     
+    try:
+        from app.core.vector_store import vector_store
+        vector_store.close()
+    except Exception as e:
+        logger.warning(f"VectorStore shutdown cleanup failed: {e}")
+
     await redis_service.disconnect()
 
 
@@ -87,6 +95,64 @@ async def api_exception_handler(request: Request, exc: APIException):
             "error": {
                 "code": exc.code,
                 "message": exc.message
+            }
+        }
+    )
+
+
+@app.exception_handler(LLMServiceError)
+async def llm_service_exception_handler(request: Request, exc: LLMServiceError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "error": {
+                "code": "LLM_UPSTREAM_ERROR",
+                "message": exc.message
+            }
+        }
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "error": {
+                "code": "HTTP_ERROR",
+                "message": str(exc.detail)
+            }
+        }
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "error": {
+                "code": "REQUEST_VALIDATION_ERROR",
+                "message": "请求参数不合法，请检查输入内容。",
+                "details": exc.errors()
+            }
+        }
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled server error: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": {
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": "服务器处理请求时出现异常，请稍后重试。"
             }
         }
     )

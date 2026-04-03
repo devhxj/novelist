@@ -4,11 +4,13 @@
 import os
 import logging
 import asyncio
+import gc
 from typing import List, Dict, Any, Optional
 
 os.environ.setdefault("HF_HUB_OFFLINE", "0")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "0")
 os.environ.setdefault("HF_ENDPOINT", os.getenv("HF_ENDPOINT", "https://hf-mirror.com"))
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import chromadb
 from chromadb.utils import embedding_functions
@@ -236,6 +238,37 @@ class VectorStore:
             start = end - overlap
         
         return chunks
+
+    def close(self):
+        """尽量释放向量存储和 embedding 相关资源"""
+        try:
+            embedding_function = getattr(self, "_embedding_function", None)
+            model = getattr(embedding_function, "_model", None) if embedding_function else None
+
+            for obj in (model, embedding_function, getattr(self, "client", None)):
+                if not obj:
+                    continue
+                for method_name in ("close", "shutdown", "stop", "stop_multi_process_pool"):
+                    method = getattr(obj, method_name, None)
+                    if callable(method):
+                        try:
+                            method()
+                        except TypeError:
+                            try:
+                                method(None)
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+
+            self._embedding_function = None
+            if hasattr(self, "client"):
+                self.client = None
+
+            gc.collect()
+            logger.info("VectorStore resources released")
+        except Exception as e:
+            logger.warning(f"Failed to fully release VectorStore resources: {e}")
 
 
 vector_store = VectorStore()

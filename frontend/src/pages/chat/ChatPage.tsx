@@ -22,6 +22,32 @@ interface ChatMessage {
   timestamp: Date
 }
 
+type TimelineItemType = 'user' | 'assistant' | 'tool' | 'assistant_final'
+
+interface ToolCallInfo {
+  tool_name: string
+  status: 'executing' | 'completed' | 'failed' | 'rejected'
+  tool_id?: string
+  error?: string
+  timestamp: string
+}
+
+interface TimelineItem {
+  id: string
+  type: TimelineItemType
+  content?: string
+  tool_calls?: ToolCallInfo[]
+  timestamp: Date
+  parent_id?: string
+  task_id?: string
+}
+
+function scopeToLevel(scope?: { type?: string }): SessionLevel {
+  if (scope?.type === 'chapter') return 'chapter'
+  if (scope?.type === 'novel') return 'novel'
+  return 'free'
+}
+
 interface CreateSessionModalProps {
   visible: boolean
   novelId?: number
@@ -215,6 +241,7 @@ function ChatPage() {
   const [currentSession, setCurrentSession] = useState<Session | null>(null)
   const [sessions, setSessions] = useState<Session[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([])
   const [inputValue, setInputValue] = useState('')
   const [selectedModel, setSelectedModel] = useState<LLMModel>('deepseek-chat')
   const [temperature, setTemperature] = useState(0.7)
@@ -237,7 +264,7 @@ function ChatPage() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages, streamingContent])
+  }, [messages, streamingContent, timelineItems])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -298,60 +325,118 @@ function ChatPage() {
         setCurrentSession({
           id: msg.session_id,
           session_id: msg.session_id,
-          level: msg.level,
+          level: scopeToLevel(msg.scope),
           display_name: msg.display_name,
-          novel_id: msg.novel_id,
-          chapter_number: msg.chapter_number,
-          model: 'deepseek-chat',
-          stats: { message_count: 0, token_count: 0, context_window: 131072, usage_ratio: msg.context_usage, should_compress: false },
+          title: msg.title,
+          novel_id: novelId ? parseInt(novelId) : undefined,
+          chapter_number: msg.scope?.chapter_start,
+          model: (msg.model as LLMModel) || 'deepseek-chat',
+          stats: { message_count: 0, token_count: 0, context_window: 131072, usage_ratio: 0, should_compress: false },
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         })
-        message.success(`会话创建成功: ${msg.display_name}`)
+        message.success(`会话创建成功: ${msg.title || msg.display_name}`)
         loadSessions()
         break
 
       case 'session_loaded':
-        message.success(`会话加载成功，共${msg.message_count}条消息`)
+        setCurrentSession(prev => prev ? {
+          ...prev,
+          id: msg.session_id,
+          session_id: msg.session_id,
+          level: scopeToLevel(msg.scope),
+          display_name: msg.display_name,
+          title: msg.title || prev.title,
+          chapter_number: msg.scope?.chapter_start,
+        } : prev)
+        if (msg.recent_messages) {
+          const history = msg.recent_messages
+            .filter(item => item.role === 'user' || item.role === 'assistant')
+            .map((item, index) => ({
+              id: item.message_id || `ws_hist_${index}`,
+              role: item.role as 'user' | 'assistant',
+              content: item.content,
+              timestamp: item.created_at ? new Date(item.created_at) : new Date(),
+            }))
+          setMessages(history)
+          setTimelineItems(history.map(item => ({
+            id: item.id,
+            type: item.role === 'user' ? 'user' : 'assistant_final',
+            content: item.content,
+            timestamp: item.timestamp,
+            task_id: item.id,
+          })))
+        }
         break
 
       case 'chat_started':
         setIsStreaming(true)
         setStreamingContent('')
+        // 创建AI初始回复时间线项目
+        const taskId = msg.task_id
+        setTimelineItems(prev => {
+          // 检查是否已经有AI回复项目（用于同一任务）
+          const existingAiIndex = prev.findIndex(item => item.task_id === taskId && item.type === 'assistant');
+          if (existingAiIndex >= 0) {
+            return prev;
+          }
+          const newItem: TimelineItem = {
+            id: `assistant_${taskId}`,
+            type: 'assistant',
+            content: '思考中...',
+            task_id: taskId,
+            timestamp: new Date()
+          };
+          return [...prev, newItem];
+        });
         break
 
-      case 'chat_chunk':
+      case 'content_chunk':
+        setTimelineItems(prev => {
+          return prev.map(item => {
+            if (item.task_id === msg.task_id && item.type === 'assistant') {
+              return {
+                ...item,
+                content: (item.content || '') + msg.chunk
+              };
+            }
+            return item;
+          });
+        });
         setStreamingContent(prev => prev + msg.chunk)
         break
 
       case 'chat_completed':
         setIsStreaming(false)
         setStreamingContent('')
+        let completedContent = ''
+        setTimelineItems(prev => {
+          const updated = prev.map(item => {
+            if (item.task_id === msg.task_id && item.type === 'assistant') {
+              completedContent = item.content || ''
+              return {
+                ...item,
+                type: 'assistant_final' as TimelineItemType
+              };
+            }
+            return item;
+          });
+          return updated;
+        });
         setMessages(prev => {
-          const newMessages = [
+          if (!completedContent.trim()) return prev
+          return [
             ...prev,
             {
-              id: msg.message_id,
-              role: 'assistant' as const,
-              content: msg.content,
+              id: `assistant_${msg.task_id || Date.now()}`,
+              role: 'assistant',
+              content: completedContent,
               timestamp: new Date(),
             },
           ]
-          if (prev.length === 0 && currentSession && !currentSession.title) {
-            sessionApi.autoGenerateTitle(currentSession.id)
-              .then(titleResponse => {
-                if (titleResponse.success) {
-                  setCurrentSession(s => s ? { ...s, title: titleResponse.data.title } : null)
-                  setSessions(sessions => sessions.map(s => 
-                    s.id === currentSession.id ? { ...s, title: titleResponse.data.title } : s
-                  ))
-                }
-              })
-              .catch(() => console.error('Failed to auto-generate title'))
-          }
-          return newMessages
         })
+        loadSessions()
         break
 
       case 'chat_failed':
@@ -360,8 +445,167 @@ function ChatPage() {
         message.error(`对话失败: ${msg.error}`)
         break
 
+      case 'tool_call':
+        // 处理工具调用消息
+        console.log('收到工具调用消息:', msg);
+        setTimelineItems(prev => {
+          // 查找是否有对应的任务时间线项目
+          const existingIndex = prev.findIndex(item => item.task_id === msg.task_id && item.type === 'tool');
+
+          if (existingIndex >= 0) {
+            // 更新现有的工具调用项目
+            const updated = [...prev];
+            const existingItem = updated[existingIndex];
+
+            // 确保tool_calls数组存在
+            if (!existingItem.tool_calls) {
+              existingItem.tool_calls = [];
+            }
+
+            // 查找是否有相同的工具调用（通过tool_id或tool_name）
+            let toolCallIndex = -1;
+            if (msg.tool_id) {
+              toolCallIndex = existingItem.tool_calls.findIndex(tc => tc.tool_id === msg.tool_id);
+            }
+            // 如果没找到，尝试通过工具名查找（针对没有tool_id的情况）
+            if (toolCallIndex < 0 && msg.tool_name) {
+              toolCallIndex = existingItem.tool_calls.findIndex(tc => tc.tool_name === msg.tool_name);
+            }
+
+            if (toolCallIndex >= 0) {
+              // 更新现有的工具调用
+              const existingToolCall = existingItem.tool_calls[toolCallIndex];
+              existingItem.tool_calls[toolCallIndex] = {
+                ...existingToolCall,
+                status: msg.status,
+                error: msg.error || existingToolCall.error,
+                timestamp: msg.timestamp || existingToolCall.timestamp,
+                tool_id: msg.tool_id || existingToolCall.tool_id,
+                tool_name: msg.tool_name || existingToolCall.tool_name
+              };
+              console.log('更新现有工具调用:', existingItem.tool_calls[toolCallIndex]);
+            } else {
+              // 添加新的工具调用
+              const newToolCall: ToolCallInfo = {
+                tool_name: msg.tool_name,
+                status: msg.status,
+                tool_id: msg.tool_id,
+                error: msg.error,
+                timestamp: msg.timestamp
+              };
+              existingItem.tool_calls.push(newToolCall);
+              console.log('添加新工具调用到现有项目:', newToolCall);
+            }
+
+            // 不更新时间戳，保持原始创建时间以便排序稳定
+            // existingItem.timestamp = new Date(msg.timestamp);
+
+            return updated;
+          } else {
+            // 创建新的工具调用项目
+            const newItem: TimelineItem = {
+              id: `tool_${msg.task_id}_${Date.now()}`,
+              type: 'tool',
+              task_id: msg.task_id,
+              timestamp: new Date(msg.timestamp),
+              tool_calls: [{
+                tool_name: msg.tool_name,
+                status: msg.status,
+                tool_id: msg.tool_id,
+                error: msg.error,
+                timestamp: msg.timestamp
+              }]
+            };
+            console.log('创建新的工具调用项目:', newItem);
+            return [...prev, newItem];
+          }
+        });
+        break
+
+      case 'generation_started':
+        message.info(`生成任务开始: ${msg.generation_type}`)
+        // 创建生成任务时间线项目
+        setTimelineItems(prev => {
+          const newItem: TimelineItem = {
+            id: `gen_${msg.task_id}`,
+            type: 'assistant',
+            content: `开始生成${msg.generation_type}...`,
+            task_id: msg.task_id,
+            timestamp: new Date()
+          };
+          return [...prev, newItem];
+        });
+        break
+
+      case 'generation_progress':
+        // 更新生成进度
+        setTimelineItems(prev => prev.map(item => {
+          if (item.task_id === msg.task_id && item.type === 'assistant') {
+            return {
+              ...item,
+              content: `${msg.step}: ${msg.progress}%${msg.message ? ` - ${msg.message}` : ''}`
+            };
+          }
+          return item;
+        }));
+        break
+
+      case 'generation_completed':
+        message.success(`生成完成: ${msg.word_count}字`)
+        // 更新生成结果
+        setTimelineItems(prev => prev.map(item => {
+          if (item.task_id === msg.task_id && item.type === 'assistant') {
+            return {
+              ...item,
+              type: 'assistant_final',
+              content: msg.content
+            };
+          }
+          return item;
+        }));
+        break
+
+      case 'generation_failed':
+        message.error(`生成失败: ${msg.error}`)
+        // 更新失败状态
+        setTimelineItems(prev => prev.map(item => {
+          if (item.task_id === msg.task_id && item.type === 'assistant') {
+            return {
+              ...item,
+              type: 'assistant_final',
+              content: `生成失败: ${msg.error}`
+            };
+          }
+          return item;
+        }));
+        break
+
       case 'generation_rejected':
         message.warning(`任务被拒绝: ${msg.reason}`)
+        break
+
+      case 'task_cancelled':
+        message.info(`任务已取消: ${msg.task_id}`)
+        // 只清理AI回复项目，保留工具调用记录
+        setTimelineItems(prev => prev.filter(item => {
+          if (item.task_id === msg.task_id) {
+            // 保留工具调用记录，只移除AI回复
+            return item.type === 'tool'
+          }
+          return true
+        }))
+        break
+
+      case 'edit_started':
+        message.success('AI 已创建待确认的编辑副本')
+        break
+
+      case 'edit_preview':
+        message.info('已生成编辑预览，可前往编辑工作台查看并确认')
+        break
+
+      case 'error':
+        message.error(`错误: ${msg.error}`)
         break
     }
   }, [currentSession])
@@ -411,6 +655,29 @@ function ChatPage() {
             timestamp: new Date(m.created_at),
           }))
         setMessages(chatMessages)
+
+        // 将消息转换为时间线项目
+        const timelineItems: TimelineItem[] = []
+        chatMessages.forEach((msg) => {
+          if (msg.role === 'user') {
+            timelineItems.push({
+              id: msg.id,
+              type: 'user',
+              content: msg.content,
+              timestamp: msg.timestamp,
+              task_id: msg.id
+            })
+          } else if (msg.role === 'assistant') {
+            timelineItems.push({
+              id: msg.id,
+              type: 'assistant_final',
+              content: msg.content,
+              timestamp: msg.timestamp,
+              task_id: msg.id
+            })
+          }
+        })
+        setTimelineItems(timelineItems)
       }
     } catch (error) {
       message.error(getErrorMessage(error))
@@ -525,8 +792,8 @@ function ChatPage() {
 
   const sendMessage = async () => {
     if (!inputValue.trim()) return
-    if (!currentSession && !isConnected) {
-      message.warning('请先创建会话')
+    if (!currentSession) {
+      message.warning('请先创建或选择一个会话')
       return
     }
 
@@ -537,6 +804,15 @@ function ChatPage() {
       timestamp: new Date(),
     }
     setMessages(prev => [...prev, userMessage])
+    // 添加用户时间线项目
+    const userTimelineItem: TimelineItem = {
+      id: userMessage.id,
+      type: 'user',
+      content: inputValue.trim(),
+      timestamp: new Date(),
+      task_id: userMessage.id
+    };
+    setTimelineItems(prev => [...prev, userTimelineItem]);
     setInputValue('')
 
     const shouldAutoGenerateTitle = currentSession && !currentSession.title && messages.length === 0
@@ -611,7 +887,13 @@ function ChatPage() {
   }, {} as Record<SessionLevel, Session[]>)
 
   return (
-    <div style={{ height: 'calc(100vh - 120px)', display: 'flex', gap: 16 }}>
+    <div style={{
+      height: 'calc(100vh - 120px)',
+      display: 'flex',
+      gap: 18,
+      padding: '8px 4px',
+      background: 'radial-gradient(circle at top left, rgba(255,229,180,0.22), transparent 28%), linear-gradient(180deg, #fbf8f2 0%, #f4efe7 100%)',
+    }}>
       <Card
         title="会话列表"
         extra={
@@ -624,7 +906,16 @@ function ChatPage() {
             新建
           </Button>
         }
-        style={{ width: 300, display: 'flex', flexDirection: 'column' }}
+        style={{
+          width: 320,
+          display: 'flex',
+          flexDirection: 'column',
+          borderRadius: 20,
+          border: '1px solid rgba(120, 95, 70, 0.12)',
+          boxShadow: '0 18px 40px rgba(102, 76, 45, 0.08)',
+          background: 'rgba(255,255,255,0.72)',
+          backdropFilter: 'blur(18px)',
+        }}
         styles={{ body: { flex: 1, overflow: 'auto', padding: 8 } }}
       >
         {Object.entries(groupedSessions).map(([level, levelSessions]) => (
@@ -710,7 +1001,16 @@ function ChatPage() {
       </Card>
 
       <Card
-        style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          borderRadius: 24,
+          border: '1px solid rgba(120, 95, 70, 0.12)',
+          boxShadow: '0 20px 48px rgba(102, 76, 45, 0.1)',
+          background: 'rgba(255,255,255,0.78)',
+          backdropFilter: 'blur(20px)',
+        }}
         styles={{ body: { flex: 1, display: 'flex', flexDirection: 'column', padding: 0 } }}
         title={
           currentSession ? (
@@ -755,7 +1055,7 @@ function ChatPage() {
         {!currentSession ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Empty
-              description="选择或创建一个会话开始对话"
+              description="创建一个创作会话，像和搭档讨论一样推进情节、风格和章节修改"
               image={Empty.PRESENTED_IMAGE_SIMPLE}
             >
               <Button type="primary" onClick={() => setCreateModalVisible(true)}>
@@ -765,43 +1065,147 @@ function ChatPage() {
           </div>
         ) : (
           <>
-            <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  style={{
-                    marginBottom: 16,
-                    display: 'flex',
-                    justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                  }}
-                >
-                  <Card
-                    size="small"
-                    style={{
-                      maxWidth: '80%',
-                      backgroundColor: msg.role === 'user' ? '#e6f7ff' : '#f5f5f5',
-                    }}
-                  >
-                    <Text style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</Text>
-                  </Card>
-                </div>
-              ))}
-              {isStreaming && streamingContent && (
-                <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-start' }}>
-                  <Card size="small" style={{ maxWidth: '80%', backgroundColor: '#f5f5f5' }}>
-                    <Text style={{ whiteSpace: 'pre-wrap' }}>{streamingContent}</Text>
-                  </Card>
-                </div>
-              )}
-              {isStreaming && !streamingContent && (
-                <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-start' }}>
-                  <Spin size="small" />
-                </div>
-              )}
+            <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
+              {[...timelineItems].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()).map((item) => {
+                if (item.type === 'user') {
+                  return (
+                    <div
+                      key={item.id}
+                      style={{
+                        marginBottom: 16,
+                        display: 'flex',
+                        justifyContent: 'flex-end',
+                      }}
+                    >
+                      <Card
+                        size="small"
+                        style={{
+                          maxWidth: '80%',
+                          background: 'linear-gradient(135deg, #fff2cf 0%, #ffe3b3 100%)',
+                          border: '1px solid rgba(204, 146, 58, 0.22)',
+                          borderRadius: 18,
+                          boxShadow: '0 12px 24px rgba(171, 123, 47, 0.08)',
+                        }}
+                      >
+                        <Text style={{ whiteSpace: 'pre-wrap' }}>{item.content}</Text>
+                        <div style={{ fontSize: '11px', color: '#8c8c8c', marginTop: 4, textAlign: 'right' }}>
+                          {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </Card>
+                    </div>
+                  )
+                } else if (item.type === 'assistant' || item.type === 'assistant_final') {
+                  return (
+                    <div
+                      key={item.id}
+                      style={{
+                        marginBottom: 16,
+                        display: 'flex',
+                        justifyContent: 'flex-start',
+                      }}
+                    >
+                      <Card
+                        size="small"
+                        style={{
+                          maxWidth: '80%',
+                          background: 'linear-gradient(180deg, #ffffff 0%, #faf6ef 100%)',
+                          border: '1px solid rgba(120, 95, 70, 0.12)',
+                          borderRadius: 18,
+                          boxShadow: '0 12px 24px rgba(120, 95, 70, 0.08)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                          <div style={{ color: '#9b5c18', fontWeight: 'bold' }}>AI</div>
+                          <div style={{ flex: 1 }}>
+                            <Text style={{ whiteSpace: 'pre-wrap' }}>{item.content}</Text>
+                            {item.type === 'assistant' && !item.content && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#8c8c8c' }}>
+                                <Spin size="small" />
+                                <Text type="secondary" style={{ fontSize: '12px' }}>思考中...</Text>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#8c8c8c', marginTop: 4, textAlign: 'right' }}>
+                          {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </Card>
+                    </div>
+                  )
+                } else if (item.type === 'tool') {
+                  return (
+                    <div
+                      key={item.id}
+                      style={{
+                        marginBottom: 16,
+                        display: 'flex',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Card
+                        size="small"
+                        style={{
+                          maxWidth: '90%',
+                          background: 'linear-gradient(180deg, #fffaf0 0%, #fff3d8 100%)',
+                          border: '1px solid rgba(222, 176, 87, 0.32)',
+                          borderRadius: 18,
+                        }}
+                      >
+                        <div style={{ marginBottom: 8 }}>
+                            <Text strong style={{ color: '#b06a16' }}>
+                              工具协作
+                            </Text>
+                        </div>
+                        {item.tool_calls?.map((tool, index) => (
+                          <div
+                            key={tool.tool_id || index}
+                            style={{
+                              padding: '8px 12px',
+                              backgroundColor: '#fff',
+                              border: '1px solid #ffd591',
+                              borderRadius: 4,
+                              marginBottom: 8,
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                <Text strong>{tool.tool_name}</Text>
+                                <Text type="secondary" style={{ marginLeft: 8, fontSize: '12px' }}>
+                                  {tool.timestamp ? new Date(tool.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                </Text>
+                              </div>
+                              <div>
+                                {tool.status === 'executing' && (
+                                  <Tag color="processing" icon={<Spin size="small" />}>执行中</Tag>
+                                )}
+                                {tool.status === 'completed' && (
+                                  <Tag color="success">完成</Tag>
+                                )}
+                                {tool.status === 'failed' && (
+                                  <Tag color="error">失败</Tag>
+                                )}
+                                {tool.status === 'rejected' && (
+                                  <Tag color="warning">拒绝</Tag>
+                                )}
+                              </div>
+                            </div>
+                            {tool.error && (
+                              <div style={{ marginTop: 4 }}>
+                                <Text type="danger" style={{ fontSize: '12px' }}>错误: {tool.error}</Text>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </Card>
+                    </div>
+                  )
+                }
+                return null
+              })}
               <div ref={messagesEndRef} />
             </div>
 
-            <div style={{ padding: 16, borderTop: '1px solid #f0f0f0' }}>
+            <div style={{ padding: 18, borderTop: '1px solid rgba(120, 95, 70, 0.1)', background: 'rgba(255, 250, 244, 0.7)' }}>
               <Space style={{ marginBottom: 8 }}>
                 <Select
                   value={selectedModel}
@@ -832,9 +1236,9 @@ function ChatPage() {
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder="输入消息... (Enter发送, Shift+Enter换行)"
+                  placeholder="直接描述你的创作意图、长期风格偏好，或者让 AI 帮你续写、审阅、修改"
                   autoSize={{ minRows: 1, maxRows: 4 }}
-                  style={{ flex: 1 }}
+                  style={{ flex: 1, borderRadius: 14, background: 'rgba(255,255,255,0.85)' }}
                   disabled={isStreaming}
                 />
                 <Button

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from sqlalchemy.exc import IntegrityError
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from app.novels.models import Novel, NovelCreativeProfile
@@ -826,8 +827,16 @@ class CreateNewChapterTool(BaseMCPTool):
         existing = await db.execute(
             select(Chapter).where(Chapter.novel_id == novel_id, Chapter.chapter_number == chapter_number)
         )
-        if existing.scalar_one_or_none():
-            return MCPToolResult(success=False, error="章节号已存在")
+        existing_chapter = existing.scalar_one_or_none()
+        if existing_chapter:
+            data = existing_chapter.to_dict()
+            data["reused_existing"] = True
+            data["message"] = "章节已存在，已返回现有章节"
+            return MCPToolResult(
+                success=True,
+                data=data,
+                metadata={"tool": self.name, "novel_id": novel_id, "chapter_id": existing_chapter.id, "reused_existing": True}
+            )
         
         chapter = Chapter(
             novel_id=novel_id,
@@ -838,13 +847,32 @@ class CreateNewChapterTool(BaseMCPTool):
             word_count=len(content or "")
         )
         db.add(chapter)
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            existing_after_conflict = await db.execute(
+                select(Chapter).where(Chapter.novel_id == novel_id, Chapter.chapter_number == chapter_number)
+            )
+            conflicted_chapter = existing_after_conflict.scalar_one_or_none()
+            if conflicted_chapter:
+                data = conflicted_chapter.to_dict()
+                data["reused_existing"] = True
+                data["message"] = "章节已存在，已返回现有章节"
+                return MCPToolResult(
+                    success=True,
+                    data=data,
+                    metadata={"tool": self.name, "novel_id": novel_id, "chapter_id": conflicted_chapter.id, "reused_existing": True}
+                )
+            raise
         await db.refresh(chapter)
-        
+
+        data = chapter.to_dict()
+        data["reused_existing"] = False
         return MCPToolResult(
             success=True,
-            data=chapter.to_dict(),
-            metadata={"tool": self.name, "novel_id": novel_id, "chapter_id": chapter.id}
+            data=data,
+            metadata={"tool": self.name, "novel_id": novel_id, "chapter_id": chapter.id, "reused_existing": False}
         )
 
 

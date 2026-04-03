@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from enum import Enum
 from jsonschema import validate, ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class MCPToolResult(BaseModel):
@@ -135,6 +136,12 @@ class MCPToolRegistry:
         try:
             return await tool.execute(**kwargs)
         except Exception as e:
+            db = kwargs.get("db")
+            if isinstance(db, AsyncSession):
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
             return MCPToolResult(
                 success=False,
                 error=str(e)

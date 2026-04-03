@@ -180,9 +180,6 @@ class EditSessionManager:
         if not edit_session:
             raise ValueError(f"Edit session {edit_session_id} not found")
 
-        if edit_session.status != EditSessionStatus.PENDING:
-            raise ValueError("编辑会话已结束，不能接受")
-
         result = await self.db.execute(
             select(Chapter).where(Chapter.id == edit_session.chapter_id)
         )
@@ -190,7 +187,22 @@ class EditSessionManager:
         
         if not chapter:
             raise ValueError(f"Chapter {edit_session.chapter_id} not found")
-        
+
+        if edit_session.status == EditSessionStatus.ACCEPTED:
+            return {
+                "edit_session_id": edit_session_id,
+                "chapter_id": edit_session.chapter_id,
+                "status": "accepted",
+                "change_count": edit_session.change_count,
+                "final_content": chapter.content,
+                "word_count": chapter.word_count or 0,
+                "summary": chapter.summary,
+                "already_processed": True
+            }
+
+        if edit_session.status == EditSessionStatus.REJECTED:
+            raise ValueError("编辑会话已被拒绝，不能再接受")
+
         chapter.content = edit_session.working_content
         chapter.word_count = len(edit_session.working_content) if edit_session.working_content else 0
         chapter.summary = await self._generate_chapter_summary(edit_session.working_content or "")
@@ -212,7 +224,8 @@ class EditSessionManager:
             "change_count": edit_session.change_count,
             "final_content": edit_session.working_content,
             "word_count": chapter.word_count,
-            "summary": chapter.summary
+            "summary": chapter.summary,
+            "already_processed": False
         }
     
     async def reject_edit_session(
@@ -230,8 +243,18 @@ class EditSessionManager:
         if not edit_session:
             raise ValueError(f"Edit session {edit_session_id} not found")
 
-        if edit_session.status != EditSessionStatus.PENDING:
-            raise ValueError("编辑会话已结束，不能拒绝")
+        if edit_session.status == EditSessionStatus.REJECTED:
+            return {
+                "edit_session_id": edit_session_id,
+                "chapter_id": edit_session.chapter_id,
+                "status": "rejected",
+                "change_count": edit_session.change_count,
+                "original_content": edit_session.original_content,
+                "already_processed": True
+            }
+
+        if edit_session.status == EditSessionStatus.ACCEPTED:
+            raise ValueError("编辑会话已被接受，不能再拒绝")
         
         edit_session.status = EditSessionStatus.REJECTED
         edit_session.rejected_at = datetime.now()
@@ -245,7 +268,8 @@ class EditSessionManager:
             "chapter_id": edit_session.chapter_id,
             "status": "rejected",
             "change_count": edit_session.change_count,
-            "original_content": edit_session.original_content
+            "original_content": edit_session.original_content,
+            "already_processed": False
         }
     
     async def get_diff(

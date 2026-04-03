@@ -127,6 +127,7 @@ def build_chapter_prompt(
     author_intent: Optional[str] = None,
     scene_goal: Optional[str] = None,
     chapter_outline: Optional[str] = None,
+    tone: Optional[str] = None,
     must_keep: Optional[List[str]] = None,
     must_avoid: Optional[List[str]] = None,
     key_events: Optional[List[str]] = None,
@@ -170,6 +171,9 @@ def build_chapter_prompt(
     
     if chapter_outline:
         parts.append(f"\n【章节大纲】\n{chapter_outline}")
+    
+    if tone:
+        parts.append(f"\n【语调氛围】\n{tone}")
     
     if key_events:
         events_str = "\n".join(f"- {event}" for event in key_events)

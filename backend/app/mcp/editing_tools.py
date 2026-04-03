@@ -407,6 +407,7 @@ class GetEditStatusTool(BaseMCPTool):
                     data={
                         "has_active_edit": True,
                         "edit_session_id": edit_session.edit_session_id,
+                        "latest_pending_edit_session_id": edit_session.edit_session_id,
                         "status": edit_session.status,
                         "change_count": edit_session.change_count,
                         "working_content": edit_session.working_content,
@@ -433,6 +434,7 @@ class GetEditStatusTool(BaseMCPTool):
                 success=True,
                 data={
                     "has_active_edit": False,
+                    "latest_pending_edit_session_id": None,
                     "chapter_content": chapter.content if chapter else "",
                     "message": "当前没有活动的编辑会话"
                 }

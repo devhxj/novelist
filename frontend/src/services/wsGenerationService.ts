@@ -7,10 +7,9 @@ export type LLMModel = 'deepseek-chat' | 'deepseek-reasoner'
 
 export interface CreateSessionMessage {
   type: 'create_session'
-  level: SessionLevel
-  novel_id?: number
-  chapter_number?: number
+  scope: Scope
   model?: LLMModel
+  edit_mode?: 'agent'
 }
 
 export interface LoadSessionMessage {
@@ -21,44 +20,61 @@ export interface LoadSessionMessage {
 export interface ChatMessage {
   type: 'chat'
   message: string
-  model?: LLMModel
-  temperature?: number
+  tools_enabled?: boolean
 }
 
-export interface StartGenerationMessage {
-  type: 'start_generation'
+export interface GenerateMessage {
+  type: 'generate'
   generation_type: GenerationType
   params: Record<string, unknown>
   use_langgraph?: boolean
 }
 
-export interface CancelGenerationMessage {
-  type: 'cancel_generation'
+export interface CancelMessage {
+  type: 'cancel'
   task_id: string
+}
+
+export interface Scope {
+  type: string
+  chapter_start?: number
+  chapter_end?: number
 }
 
 export interface SessionCreatedMessage {
   type: 'session_created'
   session_id: string
-  level: SessionLevel
+  scope: Scope
   display_name: string
-  novel_id?: number
-  chapter_number?: number
-  context_usage: number
+  title?: string
+  subtitle?: string
+  model?: string
+  edit_mode?: string
+  current_chapter_id?: number
+  timestamp: string
 }
 
 export interface SessionLoadedMessage {
   type: 'session_loaded'
   session_id: string
-  level: SessionLevel
+  scope: Scope
   display_name: string
+  title?: string
+  subtitle?: string
   message_count: number
-  context_usage: number
+  recent_messages?: Array<{
+    role: string
+    content: string
+    message_id?: string
+    created_at?: string
+  }>
 }
 
 export interface ChatStartedMessage {
   type: 'chat_started'
-  message_id: string
+  task_id: string
+  session_id?: string
+  timestamp?: string
 }
 
 export interface ChatChunkMessage {
@@ -70,10 +86,10 @@ export interface ChatChunkMessage {
 
 export interface ChatCompletedMessage {
   type: 'chat_completed'
-  message_id: string
-  content: string
-  word_count: number
-  context_usage: number
+  task_id?: string
+  session_id: string
+  message_count?: number
+  timestamp?: string
 }
 
 export interface ChatFailedMessage {
@@ -140,21 +156,70 @@ export interface GenerationRejectedMessage {
   max_tasks: number
 }
 
-export type WSMessage = 
+export interface ToolCallMessage {
+  type: 'tool_call'
+  task_id: string
+  tool_name: string
+  status: 'executing' | 'completed' | 'failed' | 'rejected'
+  tool_id?: string
+  error?: string
+  timestamp: string
+}
+
+export interface TaskCancelledMessage {
+  type: 'task_cancelled'
+  task_id: string
+  timestamp: string
+}
+
+export interface EditStartedMessage {
+  type: 'edit_started'
+  task_id: string
+  tool_name: string
+  chapter_id?: number
+  edit_session_id?: string
+  working_content?: string
+  original_content?: string
+  change_count?: number
+  timestamp: string
+}
+
+export interface EditPreviewMessage {
+  type: 'edit_preview'
+  task_id: string
+  tool_name: string
+  chapter_id?: number
+  edit_session_id?: string
+  working_content?: string
+  timestamp: string
+}
+
+export interface ErrorMessage {
+  type: 'error'
+  error: string
+  timestamp: string
+}
+
+export type WSMessage =
   | SessionCreatedMessage
   | SessionLoadedMessage
   | ChatStartedMessage
   | ChatChunkMessage
   | ChatCompletedMessage
   | ChatFailedMessage
-  | GenerationStartedMessage 
-  | GenerationProgressMessage 
-  | ContentChunkMessage 
-  | ReviewResultMessage 
-  | ConsistencyCheckMessage 
-  | GenerationCompletedMessage 
+  | GenerationStartedMessage
+  | GenerationProgressMessage
+  | ContentChunkMessage
+  | ReviewResultMessage
+  | ConsistencyCheckMessage
+  | GenerationCompletedMessage
   | GenerationFailedMessage
   | GenerationRejectedMessage
+  | ToolCallMessage
+  | TaskCancelledMessage
+  | EditStartedMessage
+  | EditPreviewMessage
+  | ErrorMessage
 
 export type WSMessageHandler = (message: WSMessage) => void
 
@@ -199,7 +264,7 @@ export class WebSocketGenerationService {
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const host = window.location.host
-      let wsUrl = `${protocol}//${host}/ws/generation?token=${token}`
+      let wsUrl = `${protocol}//${host}/ws/chat?token=${token}`
       if (novelId) {
         wsUrl += `&novel_id=${novelId}`
       }
@@ -267,17 +332,19 @@ export class WebSocketGenerationService {
     }
   }
 
-  createSession(level: SessionLevel, novelId?: number, chapterNumber?: number, model?: LLMModel) {
+  createSession(level: SessionLevel, _novelId?: number, chapterNumber?: number, model?: LLMModel) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected')
     }
 
     const message: CreateSessionMessage = {
       type: 'create_session',
-      level,
-      novel_id: novelId,
-      chapter_number: chapterNumber,
+      scope: {
+        type: level === 'free' ? 'novel' : level,
+        chapter_start: level === 'chapter' ? chapterNumber : undefined,
+      },
       model,
+      edit_mode: 'agent',
     }
 
     this.ws.send(JSON.stringify(message))
@@ -296,7 +363,7 @@ export class WebSocketGenerationService {
     this.ws.send(JSON.stringify(message))
   }
 
-  chat(message: string, model?: LLMModel, temperature?: number) {
+  chat(message: string, _model?: LLMModel, _temperature?: number) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected')
     }
@@ -304,8 +371,7 @@ export class WebSocketGenerationService {
     const chatMsg: ChatMessage = {
       type: 'chat',
       message,
-      model,
-      temperature,
+      tools_enabled: true,
     }
 
     this.ws.send(JSON.stringify(chatMsg))
@@ -316,8 +382,8 @@ export class WebSocketGenerationService {
       throw new Error('WebSocket not connected')
     }
 
-    const message: StartGenerationMessage = {
-      type: 'start_generation',
+    const message: GenerateMessage = {
+      type: 'generate',
       generation_type: generationType,
       params,
       use_langgraph: useLanggraph,
@@ -331,8 +397,8 @@ export class WebSocketGenerationService {
       throw new Error('WebSocket not connected')
     }
 
-    const message: CancelGenerationMessage = {
-      type: 'cancel_generation',
+    const message: CancelMessage = {
+      type: 'cancel',
       task_id: taskId,
     }
 
