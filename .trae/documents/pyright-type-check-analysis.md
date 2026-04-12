@@ -500,7 +500,59 @@ id: int = Column(Integer)  # type: ignore[assignment]
 
 ### 长期改进建议
 
-#### 1. 渐进式迁移到 SQLAlchemy 2.0 风格
+#### 1. ✅ **迁移到 SQLAlchemy 2.0 注解风格 (推荐执行)**
+
+**重要更新**: 经过评估，**强烈推荐将所有 Model 文件迁移到 SQLAlchemy 2.0 的 `Mapped` + `mapped_column` 风格**。
+
+**原因**:
+- 可以消除 **200 个类型错误** (占 Model 文件错误的 100%)
+- 提升代码的类型安全性和 IDE 支持
+- 这是 SQLAlchemy 官方推荐的现代写法
+- 改造成本可控 (预估 2.5-3 小时)
+
+**需要迁移的文件 (13 个)**:
+
+| 文件 | 错误数 | 复杂度 |
+|-----|--------|--------|
+| planning/models.py | 43 | 🔴 高 |
+| novels/models.py | 30 | 🟡 中 |
+| timeline/models.py | 24 | 🔴 高 |
+| characters/models.py | 23 | 🔴 高 |
+| locations/models.py | 15 | 🟡 中 |
+| agents/models.py | 14 | 🟡 中 |
+| chapters/models.py | 10 | 🟢 低 |
+| memory/models.py | 10 | 🟢 低 |
+| plot_events/models.py | 9 | 🟢 低 |
+| rag/models.py | 9 | 🟢 低 |
+| auth/models.py | 5 | 🟢 低 |
+| editor/models.py | 5 | 🟢 低 |
+| chat/models.py | 3 | 🟢 低 |
+| **总计** | **200** | - |
+
+**迁移示例**:
+```python
+# ❌ 旧风格
+from sqlalchemy import Column, Integer, String, ForeignKey
+
+class User(Base):
+    id: int = Column(Integer, primary_key=True)
+    name: str = Column(String(100))
+
+# ✅ 新风格 (SQLAlchemy 2.0)
+from sqlalchemy.orm import Mapped, mapped_column
+
+class User(Base):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+```
+
+**详细迁移计划和步骤**: 见 [pyright-fix-tasks.md](./pyright-fix-tasks.md) 的 **任务 5** 部分
+
+**预期效果**: 迁移后，918 个错误将减少到 ~718 个（消除所有 Model 文件的 AssignmentType 错误）
+
+---
+
+#### 2. 渐进式迁移到 SQLAlchemy 2.0 风格 (已升级为推荐任务)
 
 对于新建的 Model 文件，使用现代注解:
 
@@ -517,9 +569,9 @@ class Novel(Base):
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 ```
 
-**不要大规模重构现有代码**，除非有充足的时间和测试覆盖。
+**✅ 现在建议**: 不仅新代码使用此风格，**现有 13 个 Model 文件也应该迁移**（见任务 5）
 
-#### 2. 改进查询构建习惯
+#### 3. 改进查询构建习惯 (可选)
 
 虽然现有的 `and`/`or` 用法在运行时没问题，但对于复杂查询可以考虑:
 
@@ -606,26 +658,56 @@ grep -oP '^  /home/nianhe/projects/todo/[^\:]+' pyright_output.txt | \
 ### 关键发现
 
 1. **918 个错误中，只有约 8% (72-77 个) 是需要立即修复的真正 bug**
-2. **其余 92% 是 SQLAlchemy 与 Python 类型系统的兼容性问题**
-3. **最严重的未定义变量问题集中在少数几个文件**
+2. **Model 文件有 200 个错误可以通过迁移到 SQLAlchemy 2.0 风格消除**
+3. **其余约 640 个是 SQLAlchemy 查询模式与 Python 类型系统的兼容性问题**
+4. **最严重的未定义变量问题集中在少数几个文件**
 
 ### 推荐行动
 
-✅ **立即执行**:
+✅ **立即执行 (P0 - 真正 bug 修复)**:
 - 修复 17 个未定义变量错误 (防止运行时崩溃)
 - 修复 25 个函数调用参数错误 (确保功能正常)
-- 修复其他明显的类型错误
+- 修复其他明显的类型错误 (~30个)
+- **预估时间**: 2.5-3 小时
+- **预期结果**: 错误数从 918 → ~840
+
+🔄 **推荐执行 (P2 - SQLAlchemy 2.0 迁移)**:
+- 迁移 13 个 Model 文件到 `Mapped` + `mapped_column` 风格
+- **消除 200 个 AssignmentType 错误**
+- 提升代码质量和 IDE 支持
+- **预估时间**: 2.5-3 小时
+- **预期结果**: 错误数从 ~840 → ~640
 
 ⚠️ **可选优化**:
-- 调整 pyrightconfig.json 降低误报噪音
-- 新代码采用 SQLAlchemy 2.0 注解风格
+- 调整 pyrightconfig.json 降低剩余误报噪音
+- 改进查询构建习惯（使用 and_/or_ 函数）
 
 ❌ **不建议**:
-- 大规模重构现有 Model 文件以消除 Column 类型警告
-- 强制修改所有 where() 子句的写法
+- 强制修改所有 where() 子句的写法（收益低，成本高）
+
+### 完整修复路线图
+
+```
+当前状态: 918 errors
+    ↓
+阶段 1: P0 bug 修复 (2.5-3h)
+    ↓
+中间状态: ~840 errors (消除 72-77 个真正bug)
+    ↓
+阶段 2: SQLAlchemy 2.0 迁移 (2.5-3h) ← 新增推荐任务
+    ↓
+目标状态: ~640 errors (消除 200 个Model文件错误)
+    ↓
+可选: 配置优化 (30min)
+    ↓
+最终状态: ~640 errors (全部为可接受的SQLAlchemy特性误报)
+```
 
 ---
 
-**文档版本**: 1.0
+**文档版本**: 1.1
 **最后更新**: 2026-04-12
-**下次审查建议**: 修复完 P0 问题后重新运行 pyright 确认
+**下次审查建议**: 
+1. 修复完 P0 问题后重新运行 pyright 确认
+2. 完成 SQLAlchemy 2.0 迁移后再运行一次完整检查
+3. 详细迁移计划见 [pyright-fix-tasks.md](./pyright-fix-tasks.md)

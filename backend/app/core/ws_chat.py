@@ -1685,8 +1685,12 @@ async def _run_chat_with_tools(
                     history_messages = session_manager.get_messages_for_api(session, include_context=False)
                     full_messages = (
                         prefix_messages +
-                        history_messages +
-                        [{"role": "user", "content": enhanced_user_content}]
+                        history_messages
+                    )
+                    logger.info(
+                        f"Loop {loop_count + 1}: rebuilt full_messages with "
+                        f"{len(full_messages)} messages (last 3 roles: "
+                        f"{[m.get('role', '?') for m in full_messages[-3:]]})"
                     )
                     
                     current_pattern = "|".join(sorted(f"{item['tool']}:{json.dumps(item.get('arguments', {}), ensure_ascii=False, sort_keys=True)[:100]}" for item in tool_outputs))
