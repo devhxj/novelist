@@ -1,12 +1,22 @@
 """
 小说管理模块 - 数据库模型
 """
+from __future__ import annotations
+
 from sqlalchemy import String, Text, Integer, Index, func, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, TYPE_CHECKING
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.characters.models import Character
+    from app.chapters.models import Chapter
+    from app.plot_events.models import PlotEvent
+    from app.planning.models import PlotLine, PlotNode, PlotOutline
+    from app.timeline.models import TimelineEntry
+    from app.locations.models import Location
 
 
 class Novel(Base):

@@ -83,7 +83,7 @@ async def get_timeline_entry(
     service = TimelineService(db, novel.id)
     entry = await service.get_entry(entry_id)
     if not entry:
-        return ApiResponse.error(f"条目 {entry_id} 不存在", 404)
+        return ApiResponse.error(code="ENTRY_NOT_FOUND", message=f"条目 {entry_id} 不存在", status_code=404)
     return ApiResponse.success(TimelineEntryResponse.model_validate(entry))
 
 
@@ -98,7 +98,7 @@ async def update_timeline_entry(
     service = TimelineService(db, novel.id)
     entry = await service.update_entry(entry_id, data, editor="user")
     if not entry:
-        return ApiResponse.error(f"条目 {entry_id} 不存在", 404)
+        return ApiResponse.error(code="ENTRY_NOT_FOUND", message=f"条目 {entry_id} 不存在", status_code=404)
     return ApiResponse.success(TimelineEntryResponse.model_validate(entry))
 
 
@@ -113,7 +113,7 @@ async def update_entry_status(
     service = TimelineService(db, novel.id)
     entry = await service.resolve_entry(entry_id, data)
     if not entry:
-        return ApiResponse.error(f"条目 {entry_id} 不存在", 404)
+        return ApiResponse.error(code="ENTRY_NOT_FOUND", message=f"条目 {entry_id} 不存在", status_code=404)
     return ApiResponse.success(TimelineEntryResponse.model_validate(entry))
 
 
@@ -127,7 +127,7 @@ async def delete_timeline_entry(
     service = TimelineService(db, novel.id)
     success = await service.delete_entry(entry_id)
     if not success:
-        return ApiResponse.error(f"条目 {entry_id} 不存在", 404)
+        return ApiResponse.error(code="ENTRY_NOT_FOUND", message=f"条目 {entry_id} 不存在", status_code=404)
     return ApiResponse.success({"message": "条目已删除"})
 
 
@@ -144,7 +144,7 @@ async def get_timeline_context(
     total_available = len(entries)
     truncated = False
     if entries and hasattr(service, '_last_total'):
-        truncated = total_available < service._last_total
+        truncated = total_available < getattr(service, '_last_total', total_available)  # type: ignore[attr-defined]
     return ApiResponse.success(TimelineContextResponse(
         entries=[TimelineEntryResponse.model_validate(e) for e in entries],
         total_available=total_available,
@@ -169,7 +169,7 @@ async def trigger_auto_extract(
     )
     chapter = result.scalar_one_or_none()
     if not chapter:
-        return ApiResponse.error("章节不存在", 404)
+        return ApiResponse.error(code="CHAPTER_NOT_FOUND", message="章节不存在", status_code=404)
 
     post_processor = ChapterPostProcessor(db, novel.id)
     structured_info = post_processor._extract_structured_info(chapter.content or "")

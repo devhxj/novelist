@@ -1,13 +1,18 @@
 """
 情节规划模块 - 数据库模型
 """
+from __future__ import annotations
+
 from sqlalchemy import String, Text, Integer, ForeignKey, JSON, Index, func, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 import enum
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.novels.models import Novel
 
 
 class PlotLineType(str, enum.Enum):

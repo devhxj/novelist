@@ -2,13 +2,19 @@
 故事时间线模块 - 数据库模型
 TimelineEntry: 统一的时间线条目，替代分散的 Foreshadowing 系统
 """
+from __future__ import annotations
+
 from sqlalchemy import String, Text, Integer, ForeignKey, JSON, Index, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, TYPE_CHECKING
 import enum
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.novels.models import Novel
+    from app.chapters.models import Chapter
 
 
 class TimelineEntryCategory(str, enum.Enum):
