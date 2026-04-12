@@ -3,9 +3,9 @@
 """
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey, Index
+from sqlalchemy import String, Text, DateTime, JSON, ForeignKey, Index
 from sqlalchemy.dialects import mysql
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
@@ -13,35 +13,35 @@ from app.core.database import Base
 class ChatSession(Base):
     """聊天会话 - 永久存储"""
     __tablename__ = "chat_sessions"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(String(64), unique=True, nullable=False, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    novel_id = Column(Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=True, index=True)
-    
-    scope_type = Column(String(16), default="novel", index=True)
-    chapter_start = Column(Integer, nullable=True)
-    chapter_end = Column(Integer, nullable=True)
-    
-    title = Column(String(100), nullable=True)
-    model = Column(String(32), default="deepseek-chat")
-    
-    summary = Column(Text, nullable=True)
-    novel_context = Column(JSON, nullable=True)
-    chapter_context = Column(JSON, nullable=True)
-    pending_changes = Column(JSON, default=list)
-    extra_metadata = Column(JSON, nullable=True)
-    
-    created_at = Column(DateTime, default=datetime.now, index=True)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
-    
-    messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan", order_by="ChatMessage.created_at")
-    
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    novel_id: Mapped[Optional[int]] = mapped_column(ForeignKey("novels.id", ondelete="CASCADE"), nullable=True, index=True)
+
+    scope_type: Mapped[str] = mapped_column(String(16), default="novel", index=True)
+    chapter_start: Mapped[Optional[int]] = mapped_column(nullable=True)
+    chapter_end: Mapped[Optional[int]] = mapped_column(nullable=True)
+
+    title: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    model: Mapped[str] = mapped_column(String(32), default="deepseek-chat")
+
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    novel_context: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    chapter_context: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    pending_changes: Mapped[Optional[List]] = mapped_column(JSON, default=list)
+    extra_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
+
+    messages: Mapped[list["ChatMessage"]] = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan", order_by="ChatMessage.created_at")
+
     __table_args__ = (
         Index('idx_chat_session_user_novel', 'user_id', 'novel_id'),
         Index('idx_chat_session_user_updated', 'user_id', 'updated_at'),
     )
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
@@ -66,25 +66,25 @@ class ChatSession(Base):
 class ChatMessage(Base):
     """聊天消息 - 永久存储"""
     __tablename__ = "chat_messages"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(Integer, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
-    
-    role = Column(String(16), nullable=False, index=True)
-    content = Column(Text().with_variant(mysql.MEDIUMTEXT(), 'mysql'), nullable=False)
-    
-    token_count = Column(Integer, default=0)
-    importance = Column(Integer, default=50)
-    extra_metadata = Column(JSON, nullable=True)
-    
-    created_at = Column(DateTime, default=datetime.now, index=True)
-    
-    session = relationship("ChatSession", back_populates="messages")
-    
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    role: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    content: Mapped[str] = mapped_column(Text().with_variant(mysql.MEDIUMTEXT(), 'mysql'), nullable=False)
+
+    token_count: Mapped[int] = mapped_column(default=0)
+    importance: Mapped[int] = mapped_column(default=50)
+    extra_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
+
+    session: Mapped["ChatSession"] = relationship(back_populates="messages")
+
     __table_args__ = (
         Index('idx_chat_message_session_created', 'session_id', 'created_at'),
     )
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
