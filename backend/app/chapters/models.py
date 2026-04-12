@@ -1,8 +1,8 @@
 """
 章节管理模块 - 数据库模型
 """
-from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, ForeignKey, UniqueConstraint, Index, func
-from sqlalchemy.orm import relationship
+from sqlalchemy import String, Text, Integer, ForeignKey, UniqueConstraint, Index, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 from typing import Optional, List
 
@@ -12,27 +12,27 @@ from app.core.database import Base
 class Chapter(Base):
     """章节模型 - 存储小说章节内容"""
     __tablename__ = "chapters"
-    
-    id: int = Column(Integer, primary_key=True, autoincrement=True)
-    novel_id: int = Column(Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=False, index=True)
-    chapter_number: int = Column(Integer, nullable=False)
-    title: Optional[str] = Column(String(255))
-    content: Optional[str] = Column(Text)
-    summary: Optional[str] = Column(Text)
-    status: str = Column(String(50), default='draft', index=True)
-    word_count: int = Column(Integer, default=0)
-    created_at: datetime = Column(TIMESTAMP, server_default=func.now())
-    updated_at: Optional[datetime] = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
-    
-    novel = relationship("Novel", back_populates="chapters")
-    plot_events = relationship("PlotEvent", back_populates="chapter")
-    edit_sessions = relationship("EditSession", back_populates="chapter", cascade="all, delete-orphan")
-    
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    novel_id: Mapped[int] = mapped_column(ForeignKey("novels.id", ondelete="CASCADE"), nullable=False, index=True)
+    chapter_number: Mapped[int] = mapped_column(nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(String(255))
+    content: Mapped[Optional[str]] = mapped_column(Text)
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(50), default='draft', index=True)
+    word_count: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+    novel: Mapped["Novel"] = relationship(back_populates="chapters")
+    plot_events: Mapped[list["PlotEvent"]] = relationship(back_populates="chapter")
+    edit_sessions: Mapped[list["EditSession"]] = relationship(back_populates="chapter", cascade="all, delete-orphan")
+
     __table_args__ = (
         UniqueConstraint('novel_id', 'chapter_number', name='uk_novel_chapter'),
         Index('idx_chapter_novel_number', 'novel_id', 'chapter_number'),
     )
-    
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
