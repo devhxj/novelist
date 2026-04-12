@@ -364,7 +364,7 @@ class TimelineService:
         foreshadowing_items = structured_info.get("foreshadowing_items", [])
         for item_text in foreshadowing_items:
             parsed = self._parse_foreshadowing_text(item_text)
-            entry_data = TimelineEntryCreate(
+            entry = await self._upsert_auto_entry(
                 category=TimelineEntryCategory.FORESHADOWING,
                 title=parsed.get("title", item_text[:50]),
                 description=parsed.get("description", item_text),
@@ -376,16 +376,14 @@ class TimelineService:
                 target_chapter=None,
                 time_horizon=TimeHorizon.UNDEFINED,
                 importance=3,
-                source="ai_generated",
-                source_chapter_id=chapter_id,
+                chapter_id=chapter_id,
             )
-            entry = await self.add_entry(entry_data)
             created_entries.append(entry)
 
         next_plan = structured_info.get("next_chapter_plan")
         if next_plan:
             detail = {"plan_type": "next_chapter", "raw_plan": next_plan}
-            entry_data = TimelineEntryCreate(
+            entry = await self._upsert_auto_entry(
                 category=TimelineEntryCategory.CHAPTER_PLAN,
                 title=f"第{chapter_number + 1}章安排",
                 description=next_plan,
@@ -393,16 +391,14 @@ class TimelineService:
                 target_chapter=chapter_number + 1,
                 time_horizon=TimeHorizon.NEXT,
                 importance=4,
-                source="ai_generated",
-                source_chapter_id=chapter_id,
+                chapter_id=chapter_id,
             )
-            entry = await self.add_entry(entry_data)
             created_entries.append(entry)
 
         near_term_plans = structured_info.get("near_term_plans", [])
         for i, plan_text in enumerate(near_term_plans):
             target = chapter_number + 2 + i
-            entry_data = TimelineEntryCreate(
+            entry = await self._upsert_auto_entry(
                 category=TimelineEntryCategory.CHAPTER_PLAN,
                 title=f"近期规划-{target}章方向",
                 description=plan_text,
@@ -410,32 +406,96 @@ class TimelineService:
                 target_chapter=target,
                 time_horizon=TimeHorizon.NEAR_TERM,
                 importance=3,
-                source="ai_generated",
-                source_chapter_id=chapter_id,
+                chapter_id=chapter_id,
             )
-            entry = await self.add_entry(entry_data)
             created_entries.append(entry)
 
         long_term_direction = structured_info.get("long_term_direction")
         if long_term_direction:
-            entry_data = TimelineEntryCreate(
+            entry = await self._upsert_auto_entry(
                 category=TimelineEntryCategory.CHAPTER_PLAN,
                 title=f"远期方向（源自第{chapter_number}章）",
                 description=long_term_direction,
-                detail_json={"plan_type": "long_term"},
+                detail_json={"plan_type": "long_term", "raw_plan": long_term_direction},
                 target_chapter=None,
                 time_horizon=TimeHorizon.LONG_TERM,
                 importance=2,
-                source="ai_generated",
-                source_chapter_id=chapter_id,
+                chapter_id=chapter_id,
             )
-            entry = await self.add_entry(entry_data)
             created_entries.append(entry)
 
         logger.info(
             f"Auto-extracted {len(created_entries)} timeline entries from chapter {chapter_number}"
         )
         return created_entries
+
+    async def _upsert_auto_entry(
+        self,
+        *,
+        category: TimelineEntryCategory,
+        title: str,
+        description: str,
+        detail_json: Optional[Dict[str, Any]],
+        target_chapter: Optional[int],
+        time_horizon: TimeHorizon,
+        importance: int,
+        chapter_id: int,
+    ) -> TimelineEntry:
+        existing = await self._find_similar_active_entry(
+            category=category.value,
+            title=title,
+            target_chapter=target_chapter
+        )
+        if existing:
+            updated = await self.update_entry(
+                existing.id,
+                TimelineEntryUpdate(
+                    description=description,
+                    detail_json=detail_json,
+                    target_chapter=target_chapter,
+                    time_horizon=time_horizon.value if time_horizon else None,
+                    importance=max(existing.importance, importance),
+                ),
+                editor="ai"
+            )
+            return updated or existing
+
+        return await self.add_entry(TimelineEntryCreate(
+            category=category,
+            title=title,
+            description=description,
+            detail_json=detail_json,
+            target_chapter=target_chapter,
+            time_horizon=time_horizon,
+            importance=importance,
+            source="ai_generated",
+            source_chapter_id=chapter_id,
+        ))
+
+    async def _find_similar_active_entry(
+        self,
+        *,
+        category: str,
+        title: str,
+        target_chapter: Optional[int]
+    ) -> Optional[TimelineEntry]:
+        result = await self.db.execute(
+            select(TimelineEntry)
+            .where(
+                TimelineEntry.novel_id == self.novel_id,
+                TimelineEntry.category == category,
+                TimelineEntry.title == title,
+                TimelineEntry.target_chapter == target_chapter,
+                TimelineEntry.status.in_([
+                    TimelineEntryStatus.PENDING.value,
+                    TimelineEntryStatus.ACTIVE.value,
+                    TimelineEntryStatus.DEFERRED.value,
+                ])
+            )
+            .order_by(TimelineEntry.updated_at.desc().nulls_last(), TimelineEntry.id.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     def _parse_foreshadowing_text(self, text: str) -> Dict[str, str]:
         result = {"title": "", "description": text, "type": "plot", "expected_resolution": ""}

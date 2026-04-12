@@ -23,7 +23,7 @@ from app.core.vector_store import vector_store
 from app.agents.base import AgentTask, AgentResult, TaskType
 from app.agents.writer import WriterAgent
 from app.agents.reviewer import ReviewerAgent
-from app.core.llm_service import llm_service
+from app.core.chapter_summary import generate_chapter_summary
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +61,11 @@ def create_initial_state(
     chapter_number: int,
     target_length: int = 3000,
     style: str = "narrative",
-    context: Dict[str, Any] = None,
+    context: Optional[Dict[str, Any]] = None,
     model: Optional[str] = None,
     agent_role: Optional[str] = None,
     context_size: int = 3000,
-    extra_parameters: Dict[str, Any] = None
+    extra_parameters: Optional[Dict[str, Any]] = None
 ) -> WorkflowState:
     """创建初始状态"""
     now = datetime.now().isoformat()
@@ -99,7 +99,8 @@ class ChapterWorkflow:
     def __init__(self):
         if not LANGGRAPH_AVAILABLE:
             raise ImportError("LangGraph is not installed. Please install it with: pip install langgraph")
-        
+        assert MemorySaver is not None
+
         self.writer_agent = WriterAgent()
         self.reviewer_agent = ReviewerAgent()
         self.memory_saver = MemorySaver()
@@ -107,6 +108,8 @@ class ChapterWorkflow:
     
     def _build_graph(self):
         """构建工作流图"""
+        assert StateGraph is not None
+        assert END is not None
         workflow = StateGraph(WorkflowState)
         
         workflow.add_node("prepare_context", self._prepare_context_node)
@@ -163,13 +166,30 @@ class ChapterWorkflow:
             
             async with AsyncSessionLocal() as db:
                 builder = ContextBuilder(db, state["novel_id"])
-                context = await builder.build_writing_context(
+                story_brief = await builder.build_story_brief(
                     chapter_number=state["chapter_number"],
                     context_size=state.get("context_size", 3000),
-                    include_previous_chapters=True,
-                    include_characters=True,
-                    include_plot_events=True
+                    additional_context=state.get("extra_parameters") or {},
                 )
+                layered_context = story_brief.get("layered_context", {})
+                context = {
+                    "previous_summary": layered_context.get("previous_summary"),
+                    "characters": layered_context.get("characters", []),
+                    "plot_hints": layered_context.get("plot_hints", []),
+                    "story_outline": story_brief.get("outline", {}),
+                    "active_plot_lines": story_brief.get("active_plot_lines", []),
+                    "upcoming_plot_nodes": story_brief.get("upcoming_plot_nodes", []),
+                    "due_plot_nodes": story_brief.get("due_plot_nodes", []),
+                    "timeline_entries": story_brief.get("timeline_entries", []),
+                    "priority_timeline_entries": story_brief.get("priority_timeline_entries", []),
+                    "unresolved_foreshadowings": story_brief.get("foreshadowing_entries", []),
+                    "due_foreshadowings": story_brief.get("due_foreshadowing_entries", []),
+                    "retrieved_memory": story_brief.get("retrieved_memory", []),
+                    "prewrite_recommendations": story_brief.get("prewrite_recommendations", []),
+                    "chapter_mission": story_brief.get("chapter_mission", {}),
+                    "story_brief": story_brief.get("brief_text", ""),
+                    "author_preferences": story_brief.get("creative_profile", {}),
+                }
                 incoming_context = state.get("context") or {}
                 merged_context = {**context, **incoming_context}
                 
@@ -317,6 +337,7 @@ class ChapterWorkflow:
         try:
             from app.core.database import AsyncSessionLocal
             from app.chapters.models import Chapter
+            from app.core.chapter_post_processor import ChapterPostProcessor
             
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
@@ -326,28 +347,44 @@ class ChapterWorkflow:
                     )
                 )
                 chapter = result.scalar_one_or_none()
-                summary = await self._generate_chapter_summary(state["generated_content"] or "")
+                generated_content = state["generated_content"] or ""
                 
                 if chapter:
-                    chapter.content = state["generated_content"]
-                    chapter.summary = summary
+                    chapter.content = generated_content
                     chapter.status = "completed"
-                    chapter.word_count = len(state["generated_content"])
+                    chapter.word_count = len(generated_content)
                     chapter.updated_at = datetime.now()
                     await db.commit()
+                    await db.refresh(chapter)
                 else:
                     chapter = Chapter(
                         novel_id=state["novel_id"],
                         chapter_number=state["chapter_number"],
                         title=f"第{state['chapter_number']}章",
-                        content=state["generated_content"],
-                        summary=summary,
+                        content=generated_content,
+                        summary=None,
                         status="completed",
-                        word_count=len(state["generated_content"])
+                        word_count=len(generated_content)
                     )
                     db.add(chapter)
                     await db.commit()
                     await db.refresh(chapter)
+
+                post_processor = ChapterPostProcessor(db, state["novel_id"])
+                try:
+                    process_result = await post_processor.process(
+                        content=chapter.content or "",
+                        chapter_number=chapter.chapter_number,
+                        chapter_id=chapter.id,
+                        model=state.get("model")
+                    )
+                    chapter.content = process_result.get("final_content", chapter.content)
+                    chapter.word_count = len(chapter.content or "")
+                except Exception as exc:
+                    logger.warning(f"Workflow chapter post-processing failed: {exc}")
+
+                chapter.summary = await self._generate_chapter_summary(chapter.content or "")
+                await db.commit()
                 
                 return {
                     "status": "chapter_saved",
@@ -380,21 +417,13 @@ class ChapterWorkflow:
                 chapter = result.scalar_one_or_none()
                 
                 if chapter and chapter.content:
-                    chunks = vector_store.split_text(chapter.content)
-                    chunk_data = [
-                        {
-                            "id": f"{chapter.id}_{i}",
-                            "content": chunk,
-                            "chapter_id": chapter.id,
-                            "chunk_type": "content",
-                            "chunk_index": i,
-                            "metadata": {
-                                "chapter_number": chapter.chapter_number,
-                                "chapter_title": chapter.title
-                            }
-                        }
-                        for i, chunk in enumerate(chunks)
-                    ]
+                    chunk_data = vector_store.build_chapter_chunks(
+                        chapter_id=chapter.id,
+                        chapter_number=chapter.chapter_number,
+                        chapter_title=chapter.title,
+                        content=chapter.content,
+                        summary=chapter.summary,
+                    )
                     
                     if chunk_data:
                         vector_store.delete_chapter_chunks(state["novel_id"], chapter.id)
@@ -446,7 +475,7 @@ class ChapterWorkflow:
         if state.get("error"):
             return "revise"
         
-        review_result = state.get("review_result", {})
+        review_result = state.get("review_result") or {}
         if not review_result.get("approved", False):
             if state["iteration"] < state["max_iterations"]:
                 return "revise"
@@ -458,7 +487,7 @@ class ChapterWorkflow:
         if state.get("error"):
             return "revise"
         
-        consistency_result = state.get("consistency_result", {})
+        consistency_result = state.get("consistency_result") or {}
         issues = consistency_result.get("issues", [])
         
         has_critical_errors = any(
@@ -478,24 +507,7 @@ class ChapterWorkflow:
         return "retry"
 
     async def _generate_chapter_summary(self, content: str) -> Optional[str]:
-        if not content or len(content.strip()) < 200:
-            return content[:200] if content else None
-
-        prompt = (
-            "请为以下小说章节生成一段120字以内的剧情摘要，"
-            "突出关键事件、人物变化和后续伏笔，不要评论。\n\n"
-            f"{content[:4000]}"
-        )
-        try:
-            summary = await llm_service.generate_text(
-                prompt=prompt,
-                system_prompt="你是长篇小说章节摘要助手。",
-                max_tokens=200
-            )
-            return summary.strip()
-        except Exception as e:
-            logger.warning(f"Failed to generate chapter summary in workflow: {e}")
-            return content[:200]
+        return await generate_chapter_summary(content)
     
     async def run(
         self,
@@ -504,11 +516,11 @@ class ChapterWorkflow:
         chapter_number: int,
         target_length: int = 3000,
         style: str = "narrative",
-        context: Dict[str, Any] = None,
+        context: Optional[Dict[str, Any]] = None,
         model: Optional[str] = None,
         agent_role: Optional[str] = None,
         context_size: int = 3000,
-        extra_parameters: Dict[str, Any] = None
+        extra_parameters: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         运行工作流

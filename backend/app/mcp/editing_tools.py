@@ -565,13 +565,30 @@ class RunAgentTaskTool(BaseMCPTool):
                 if chapter:
                     task_parameters.setdefault("chapter_number", chapter.chapter_number)
                     context_builder = ContextBuilder(db, novel_id)
-                    context = await context_builder.build_writing_context(
-                        chapter_id=chapter_id,
+                    story_brief = await context_builder.build_story_brief(
+                        chapter_number=chapter.chapter_number,
                         context_size=3000,
-                        include_previous_chapters=True,
-                        include_characters=True,
-                        include_plot_events=True
+                        additional_context=task_parameters
                     )
+                    layered_context = story_brief.get("layered_context", {})
+                    context = {
+                        "previous_summary": layered_context.get("previous_summary"),
+                        "characters": layered_context.get("characters", []),
+                        "plot_hints": layered_context.get("plot_hints", []),
+                        "story_outline": story_brief.get("outline", {}),
+                        "active_plot_lines": story_brief.get("active_plot_lines", []),
+                        "upcoming_plot_nodes": story_brief.get("upcoming_plot_nodes", []),
+                        "due_plot_nodes": story_brief.get("due_plot_nodes", []),
+                        "timeline_entries": story_brief.get("timeline_entries", []),
+                        "priority_timeline_entries": story_brief.get("priority_timeline_entries", []),
+                        "unresolved_foreshadowings": story_brief.get("foreshadowing_entries", []),
+                        "due_foreshadowings": story_brief.get("due_foreshadowing_entries", []),
+                        "retrieved_memory": story_brief.get("retrieved_memory", []),
+                        "prewrite_recommendations": story_brief.get("prewrite_recommendations", []),
+                        "chapter_mission": story_brief.get("chapter_mission", {}),
+                        "story_brief": story_brief.get("brief_text", ""),
+                        "author_preferences": story_brief.get("creative_profile", {}),
+                    }
             if normalized_type == "check_consistency":
                 checker = ConsistencyChecker(db, novel_id)
                 context["consistency_result"] = await checker.check_all(

@@ -169,6 +169,42 @@ async def get_writing_characters(
 
 
 @mcp.tool()
+async def prepare_story_brief(
+    novel_id: int,
+    chapter_number: int,
+    context_size: int = 3600,
+    retrieval_top_k: int = 3,
+    ctx: Context|None = None
+) -> dict:
+    return await _execute_tool(
+        "prepare_story_brief",
+        ctx,
+        novel_id=novel_id,
+        chapter_number=chapter_number,
+        context_size=context_size,
+        retrieval_top_k=retrieval_top_k
+    )
+
+
+@mcp.tool()
+async def search_story_memory(
+    novel_id: int,
+    query: str,
+    top_k: int = 5,
+    min_relevance_score: float = 0.35,
+    ctx: Context = None
+) -> dict:
+    return await _execute_tool(
+        "search_story_memory",
+        ctx,
+        novel_id=novel_id,
+        query=query,
+        top_k=top_k,
+        min_relevance_score=min_relevance_score
+    )
+
+
+@mcp.tool()
 async def create_character(
     novel_id: int,
     name: str,
@@ -177,8 +213,8 @@ async def create_character(
     ctx: Context = None
 ) -> dict:
     import json as _json
-    _personality = json.loads(personality) if personality else None
-    _abilities = json.loads(abilities) if abilities else None
+    _personality = _json.loads(personality) if personality else None
+    _abilities = _json.loads(abilities) if abilities else None
     return await _execute_tool(
         "create_character", ctx,
         novel_id=novel_id, name=name,
@@ -193,11 +229,11 @@ async def update_character(
     name: Optional[str] = None,
     personality: Optional[str] = None,
     abilities: Optional[str] = None,
-    ctx: Context = None
+    ctx: Context|None = None
 ) -> dict:
     import json as _json
-    _personality = json.loads(personality) if personality else None
-    _abilities = json.loads(abilities) if abilities else None
+    _personality = _json.loads(personality) if personality else None
+    _abilities = _json.loads(abilities) if abilities else None
     return await _execute_tool(
         "update_character", ctx,
         novel_id=novel_id, character_id=character_id,

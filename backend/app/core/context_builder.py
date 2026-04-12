@@ -9,13 +9,14 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from app.core.vector_store import vector_store, VectorStoreError
-from app.novels.models import Novel
+from app.novels.models import Novel, NovelCreativeProfile
 from app.chapters.models import Chapter
 from app.characters.models import Character
 from app.plot_events.models import PlotEvent
+from app.planning.models import PlotOutline, PlotLine, PlotNode, PlotNodeStatus
+from app.timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryStatus
 
 logger = logging.getLogger(__name__)
 
@@ -359,6 +360,111 @@ class ContextBuilder:
         }
         
         return result_data
+
+    async def build_story_brief(
+        self,
+        chapter_number: int,
+        *,
+        context_size: int = 3600,
+        additional_context: Optional[Dict[str, Any]] = None,
+        retrieval_top_k: int = 3
+    ) -> Dict[str, Any]:
+        """
+        构建统一的写前 StoryBrief。
+
+        目标：
+        1. 明确区分 Plot / Timeline / Foreshadowing 三个层次
+        2. 为创作前提供“先理解再下笔”的结构化 brief
+        3. 让缓存稳定块尽可能固定，只把动态检索结果放在末尾
+        """
+        additional_context = additional_context or {}
+        layered_context = await self.build_writing_context(
+            chapter_number=chapter_number,
+            context_size=context_size,
+            include_previous_chapters=True,
+            include_characters=True,
+            include_plot_events=True
+        )
+
+        await self._init_novel()
+
+        outline = await self._get_outline_summary()
+        creative_profile = await self._get_creative_profile_summary()
+        active_plot_lines = await self._get_active_plot_lines(chapter_number)
+        due_plot_nodes, upcoming_plot_nodes = await self._get_plot_nodes_for_brief(chapter_number)
+        timeline_context = await self._get_timeline_entries_for_brief(chapter_number)
+        foreshadowing_context = await self._get_foreshadowing_entries_for_brief(chapter_number)
+        recent_chapters = await self._get_recent_chapter_cards(chapter_number, limit=5)
+        retrieval_queries = self._build_memory_queries(
+            chapter_number=chapter_number,
+            due_plot_nodes=due_plot_nodes,
+            timeline_entries=timeline_context["entries"],
+            foreshadowing_entries=foreshadowing_context["entries"],
+            additional_context=additional_context
+        )
+        retrieved_memory = await self._retrieve_memory_cards(retrieval_queries, top_k=retrieval_top_k)
+
+        chapter_mission = {
+            "must_resolve_foreshadowing_ids": [
+                item["id"] for item in foreshadowing_context["due_entries"][:2]
+            ],
+            "should_advance_plot_node_ids": [
+                item["id"] for item in due_plot_nodes[:3]
+            ],
+            "must_respect_timeline_ids": [
+                item["id"] for item in timeline_context["priority_entries"][:3]
+            ],
+            "should_introduce_new_foreshadowing": bool(
+                not foreshadowing_context["due_entries"]
+                and chapter_number >= 3
+                and active_plot_lines
+            ),
+        }
+
+        recommendations = self._build_prewrite_recommendations(
+            chapter_number=chapter_number,
+            due_plot_nodes=due_plot_nodes,
+            timeline_entries=timeline_context["priority_entries"],
+            foreshadowing_entries=foreshadowing_context["due_entries"],
+            chapter_mission=chapter_mission
+        )
+
+        brief_text = self._format_story_brief_text(
+            chapter_number=chapter_number,
+            layered_context=layered_context,
+            outline=outline,
+            creative_profile=creative_profile,
+            active_plot_lines=active_plot_lines,
+            due_plot_nodes=due_plot_nodes,
+            upcoming_plot_nodes=upcoming_plot_nodes,
+            timeline_context=timeline_context,
+            foreshadowing_context=foreshadowing_context,
+            recent_chapters=recent_chapters,
+            retrieval_cards=retrieved_memory,
+            recommendations=recommendations,
+            additional_context=additional_context
+        )
+
+        return {
+            "chapter_number": chapter_number,
+            "novel_id": self.novel_id,
+            "brief_text": brief_text,
+            "outline": outline,
+            "creative_profile": creative_profile,
+            "recent_chapters": recent_chapters,
+            "active_plot_lines": active_plot_lines,
+            "due_plot_nodes": due_plot_nodes,
+            "upcoming_plot_nodes": upcoming_plot_nodes,
+            "timeline_entries": timeline_context["entries"],
+            "priority_timeline_entries": timeline_context["priority_entries"],
+            "foreshadowing_entries": foreshadowing_context["entries"],
+            "due_foreshadowing_entries": foreshadowing_context["due_entries"],
+            "retrieved_memory": retrieved_memory,
+            "retrieval_queries": retrieval_queries,
+            "chapter_mission": chapter_mission,
+            "prewrite_recommendations": recommendations,
+            "layered_context": layered_context,
+        }
     
     def _smart_truncate_by_layers(
         self,
@@ -572,6 +678,446 @@ class ContextBuilder:
                 summaries.append(f"第{ch.chapter_number}章: {ch.content[:200]}...")
         
         return "\n".join(summaries) if summaries else None
+
+    async def _get_recent_chapter_cards(
+        self,
+        current_chapter_num: int,
+        limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        result = await self.db.execute(
+            select(Chapter)
+            .where(
+                Chapter.novel_id == self.novel_id,
+                Chapter.chapter_number < current_chapter_num,
+                Chapter.status == "completed"
+            )
+            .order_by(Chapter.chapter_number.desc())
+            .limit(limit)
+        )
+        chapters = list(result.scalars().all())
+        cards: List[Dict[str, Any]] = []
+        for chapter in reversed(chapters):
+            cards.append({
+                "id": chapter.id,
+                "chapter_number": chapter.chapter_number,
+                "title": chapter.title,
+                "summary": chapter.summary or (chapter.content or "")[:180],
+            })
+        return cards
+
+    async def _get_outline_summary(self) -> Dict[str, Any]:
+        result = await self.db.execute(
+            select(PlotOutline).where(PlotOutline.novel_id == self.novel_id)
+        )
+        outline = result.scalar_one_or_none()
+        if not outline:
+            return {}
+        return {
+            "premise": outline.premise,
+            "theme": outline.theme,
+            "beginning": outline.beginning,
+            "middle": outline.middle,
+            "climax": outline.climax,
+            "ending": outline.ending,
+            "current_chapter": outline.current_chapter,
+            "total_chapters": outline.total_chapters,
+        }
+
+    async def _get_creative_profile_summary(self) -> Dict[str, Any]:
+        result = await self.db.execute(
+            select(NovelCreativeProfile).where(NovelCreativeProfile.novel_id == self.novel_id)
+        )
+        profile = result.scalar_one_or_none()
+        if not profile:
+            return {}
+        extra_metadata = profile.extra_metadata or {}
+        return {
+            "author_intent": profile.author_intent,
+            "preferred_tone": profile.preferred_tone,
+            "scene_planning_notes": profile.scene_planning_notes,
+            "must_keep": profile.must_keep or [],
+            "must_avoid": profile.must_avoid or [],
+            "long_term_goals": profile.long_term_goals or [],
+            "llm_brief": extra_metadata.get("llm_brief", ""),
+        }
+
+    async def _get_active_plot_lines(self, chapter_number: int) -> List[Dict[str, Any]]:
+        result = await self.db.execute(
+            select(PlotLine)
+            .where(PlotLine.novel_id == self.novel_id, PlotLine.status == "active")
+            .order_by(PlotLine.importance.desc(), PlotLine.updated_at.desc())
+            .limit(6)
+        )
+        lines = list(result.scalars().all())
+        return [
+            {
+                "id": line.id,
+                "name": line.name,
+                "description": line.description,
+                "line_type": line.line_type,
+                "importance": line.importance,
+                "start_chapter": line.start_chapter,
+                "end_chapter": line.end_chapter,
+                "is_current_window": (
+                    (line.start_chapter is None or line.start_chapter <= chapter_number)
+                    and (line.end_chapter is None or line.end_chapter >= chapter_number)
+                )
+            }
+            for line in lines
+        ]
+
+    async def _get_plot_nodes_for_brief(
+        self,
+        chapter_number: int
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        result = await self.db.execute(
+            select(PlotNode)
+            .where(
+                PlotNode.novel_id == self.novel_id,
+                PlotNode.status.in_([
+                    PlotNodeStatus.PLANNED.value,
+                    PlotNodeStatus.IN_PROGRESS.value
+                ])
+            )
+            .order_by(PlotNode.chapter_number.asc().nulls_last(), PlotNode.sequence.asc())
+            .limit(12)
+        )
+        nodes = list(result.scalars().all())
+        due_nodes: List[Dict[str, Any]] = []
+        upcoming_nodes: List[Dict[str, Any]] = []
+        for node in nodes:
+            item = {
+                "id": node.id,
+                "title": node.title,
+                "description": node.description,
+                "chapter_number": node.chapter_number,
+                "status": node.status,
+                "notes": node.notes,
+                "priority_hint": "current"
+                if node.chapter_number is not None and node.chapter_number <= chapter_number
+                else "next"
+            }
+            if node.chapter_number is not None and node.chapter_number <= chapter_number + 1:
+                due_nodes.append(item)
+            else:
+                upcoming_nodes.append(item)
+        return due_nodes[:5], upcoming_nodes[:5]
+
+    async def _get_timeline_entries_for_brief(self, chapter_number: int) -> Dict[str, Any]:
+        result = await self.db.execute(
+            select(TimelineEntry)
+            .where(
+                TimelineEntry.novel_id == self.novel_id,
+                TimelineEntry.category.in_([
+                    TimelineEntryCategory.CHAPTER_PLAN.value,
+                    TimelineEntryCategory.USER_DIRECTIVE.value,
+                    TimelineEntryCategory.PLOT_NODE.value,
+                ]),
+                TimelineEntry.status.in_([
+                    TimelineEntryStatus.PENDING.value,
+                    TimelineEntryStatus.ACTIVE.value,
+                    TimelineEntryStatus.DEFERRED.value,
+                ])
+            )
+            .order_by(TimelineEntry.target_chapter.asc().nulls_last(), TimelineEntry.importance.desc())
+            .limit(12)
+        )
+        entries = list(result.scalars().all())
+        serialized = []
+        priority_entries = []
+        for entry in entries:
+            item = {
+                "id": entry.id,
+                "category": entry.category,
+                "title": entry.title,
+                "description": entry.description,
+                "target_chapter": entry.target_chapter,
+                "importance": entry.importance,
+                "status": entry.status,
+                "time_horizon": entry.time_horizon,
+            }
+            serialized.append(item)
+            if entry.target_chapter is None or entry.target_chapter <= chapter_number + 1:
+                priority_entries.append(item)
+        return {
+            "entries": serialized,
+            "priority_entries": priority_entries[:6],
+        }
+
+    async def _get_foreshadowing_entries_for_brief(self, chapter_number: int) -> Dict[str, Any]:
+        result = await self.db.execute(
+            select(TimelineEntry)
+            .where(
+                TimelineEntry.novel_id == self.novel_id,
+                TimelineEntry.category == TimelineEntryCategory.FORESHADOWING.value,
+                TimelineEntry.status.in_([
+                    TimelineEntryStatus.PENDING.value,
+                    TimelineEntryStatus.ACTIVE.value,
+                    TimelineEntryStatus.DEFERRED.value,
+                ])
+            )
+            .order_by(TimelineEntry.importance.desc(), TimelineEntry.created_at.asc())
+            .limit(12)
+        )
+        entries = list(result.scalars().all())
+        source_chapter_ids = [
+            entry.source_chapter_id for entry in entries
+            if entry.source_chapter_id is not None
+        ]
+        source_chapter_map: Dict[int, int] = {}
+        if source_chapter_ids:
+            chapter_result = await self.db.execute(
+                select(Chapter.id, Chapter.chapter_number)
+                .where(Chapter.id.in_(source_chapter_ids))
+            )
+            source_chapter_map = {
+                int(chapter_id): int(chapter_number)
+                for chapter_id, chapter_number in chapter_result.all()
+                if chapter_id is not None and chapter_number is not None
+            }
+        serialized = []
+        due_entries = []
+        for entry in entries:
+            source_chapter_num = source_chapter_map.get(entry.source_chapter_id or 0)
+            item = {
+                "id": entry.id,
+                "title": entry.title,
+                "description": entry.description,
+                "importance": entry.importance,
+                "status": entry.status,
+                "target_chapter": entry.target_chapter,
+                "source_chapter_number": source_chapter_num,
+            }
+            serialized.append(item)
+            overdue_by_age = (
+                source_chapter_num is not None
+                and chapter_number - source_chapter_num >= 3
+            )
+            due_by_target = entry.target_chapter is not None and entry.target_chapter <= chapter_number + 1
+            if overdue_by_age or due_by_target:
+                due_entries.append(item)
+        return {
+            "entries": serialized,
+            "due_entries": due_entries[:6],
+        }
+
+    def _build_memory_queries(
+        self,
+        *,
+        chapter_number: int,
+        due_plot_nodes: List[Dict[str, Any]],
+        timeline_entries: List[Dict[str, Any]],
+        foreshadowing_entries: List[Dict[str, Any]],
+        additional_context: Dict[str, Any]
+    ) -> List[str]:
+        queries: List[str] = []
+        explicit_query = str(additional_context.get("memory_query", "")).strip()
+        if explicit_query:
+            queries.append(explicit_query)
+        for node in due_plot_nodes[:2]:
+            title = str(node.get("title", "")).strip()
+            if title:
+                queries.append(f"{title} 前文铺垫与相关场景")
+        for item in foreshadowing_entries[:2]:
+            title = str(item.get("title", "")).strip()
+            if title:
+                queries.append(f"{title} 埋设与回收线索")
+        for item in timeline_entries[:1]:
+            title = str(item.get("title", "")).strip()
+            if title:
+                queries.append(f"{title} 相关章节内容")
+
+        unique_queries: List[str] = []
+        seen: set[str] = set()
+        for query in queries:
+            normalized = query.strip()
+            if normalized and normalized not in seen:
+                unique_queries.append(normalized)
+                seen.add(normalized)
+        if not unique_queries:
+            unique_queries.append(f"第{chapter_number}章最近关键事件")
+        return unique_queries[:4]
+
+    async def _retrieve_memory_cards(
+        self,
+        queries: List[str],
+        top_k: int = 3
+    ) -> List[Dict[str, Any]]:
+        cards: List[Dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for query in queries:
+            hits = await self.search_relevant_context(query=query, top_k=top_k, min_relevance_score=0.35)
+            for hit in hits:
+                chunk_id = str(hit.get("chunk_id", ""))
+                if not chunk_id or chunk_id in seen_ids:
+                    continue
+                seen_ids.add(chunk_id)
+                cards.append({
+                    "query": query,
+                    "chunk_id": chunk_id,
+                    "content": hit.get("content", ""),
+                    "source_type": hit.get("source_type", "content"),
+                    "source_id": hit.get("source_id"),
+                    "relevance_score": hit.get("relevance_score", 0),
+                })
+        return cards[:8]
+
+    def _build_prewrite_recommendations(
+        self,
+        *,
+        chapter_number: int,
+        due_plot_nodes: List[Dict[str, Any]],
+        timeline_entries: List[Dict[str, Any]],
+        foreshadowing_entries: List[Dict[str, Any]],
+        chapter_mission: Dict[str, Any]
+    ) -> List[str]:
+        recommendations: List[str] = []
+        if foreshadowing_entries:
+            top = foreshadowing_entries[0]
+            recommendations.append(
+                f"优先判断本章是否该回收伏笔“{top['title']}”，避免长期悬置。"
+            )
+        if due_plot_nodes:
+            top = due_plot_nodes[0]
+            recommendations.append(
+                f"本章至少推进一个 Plot 节点，首选“{top['title']}”。"
+            )
+        if timeline_entries:
+            top = timeline_entries[0]
+            recommendations.append(
+                f"本章要遵守 Timeline 安排“{top['title']}”，它属于章节安排/用户指令，不等同于伏笔。"
+            )
+        if chapter_mission.get("should_introduce_new_foreshadowing"):
+            recommendations.append(
+                "若本章没有自然的旧伏笔回收点，可顺势埋下一个与当前主线直接相关的新伏笔。"
+            )
+        if not recommendations:
+            recommendations.append(
+                f"第{chapter_number}章以稳态推进为主：承接前文、推进当前弧线，并避免无目的扩写。"
+            )
+        return recommendations[:5]
+
+    def _format_story_brief_text(
+        self,
+        *,
+        chapter_number: int,
+        layered_context: Dict[str, Any],
+        outline: Dict[str, Any],
+        creative_profile: Dict[str, Any],
+        active_plot_lines: List[Dict[str, Any]],
+        due_plot_nodes: List[Dict[str, Any]],
+        upcoming_plot_nodes: List[Dict[str, Any]],
+        timeline_context: Dict[str, Any],
+        foreshadowing_context: Dict[str, Any],
+        recent_chapters: List[Dict[str, Any]],
+        retrieval_cards: List[Dict[str, Any]],
+        recommendations: List[str],
+        additional_context: Dict[str, Any]
+    ) -> str:
+        parts: List[str] = [f"【StoryBrief｜第{chapter_number}章写前认知】"]
+
+        if creative_profile:
+            parts.append("\n【长期创作规则】")
+            llm_brief = creative_profile.get("llm_brief")
+            if llm_brief:
+                parts.append(llm_brief)
+            else:
+                if creative_profile.get("author_intent"):
+                    parts.append(f"- 本书意图：{creative_profile['author_intent']}")
+                if creative_profile.get("preferred_tone"):
+                    parts.append(f"- 默认语气：{creative_profile['preferred_tone']}")
+                for item in creative_profile.get("must_keep", [])[:6]:
+                    parts.append(f"- 必须保留：{item}")
+                for item in creative_profile.get("must_avoid", [])[:6]:
+                    parts.append(f"- 必须避免：{item}")
+
+        if outline:
+            parts.append("\n【整体方向】")
+            for label, key in (
+                ("故事前提", "premise"),
+                ("主题", "theme"),
+                ("中段方向", "middle"),
+                ("高潮目标", "climax"),
+                ("结局方向", "ending"),
+            ):
+                value = str(outline.get(key, "") or "").strip()
+                if value:
+                    parts.append(f"- {label}：{value}")
+
+        if recent_chapters:
+            parts.append("\n【最近章节记忆】")
+            for chapter in recent_chapters[-3:]:
+                parts.append(
+                    f"- 第{chapter['chapter_number']}章：{str(chapter.get('summary', '')).strip()[:120]}"
+                )
+
+        if active_plot_lines:
+            parts.append("\n【Plot｜宏观情节骨架】")
+            parts.append("说明：Plot 是故事结构主线/支线，要回答“本章推进哪条线、推进到哪一步”。")
+            for item in active_plot_lines[:4]:
+                parts.append(
+                    f"- {item['name']}（{item['line_type']}，重要度{item['importance']}）：{str(item.get('description', '')).strip()[:100]}"
+                )
+        if due_plot_nodes:
+            parts.append("\n【Plot Nodes｜本章应优先推进】")
+            for item in due_plot_nodes[:4]:
+                chapter_hint = f" 预定章节:{item['chapter_number']}" if item.get("chapter_number") else ""
+                parts.append(
+                    f"- {item['title']}（状态:{item['status']}{chapter_hint}）：{str(item.get('description', '')).strip()[:100]}"
+                )
+        elif upcoming_plot_nodes:
+            parts.append("\n【Plot Nodes｜后续可推进】")
+            for item in upcoming_plot_nodes[:3]:
+                parts.append(
+                    f"- {item['title']}：{str(item.get('description', '')).strip()[:100]}"
+                )
+
+        if timeline_context["priority_entries"] or timeline_context["entries"]:
+            parts.append("\n【Timeline｜章节安排/用户指令/里程碑】")
+            parts.append("说明：Timeline 是安排和约束，不等同于伏笔；它回答“本章近期必须记得做什么”。")
+            for item in (timeline_context["priority_entries"] or timeline_context["entries"])[:4]:
+                target = f"，目标章:{item['target_chapter']}" if item.get("target_chapter") else ""
+                parts.append(
+                    f"- [{item['category']}] {item['title']}（重要度{item['importance']}{target}）：{str(item.get('description', '')).strip()[:100]}"
+                )
+
+        if foreshadowing_context["entries"]:
+            parts.append("\n【Foreshadowing｜伏笔与回收】")
+            parts.append("说明：Foreshadowing 是已埋下但尚未回收的钩子，回答“这章要不要收一条，或顺势再埋一条”。")
+            for item in foreshadowing_context["entries"][:5]:
+                due_flag = "，建议本章处理" if any(d["id"] == item["id"] for d in foreshadowing_context["due_entries"]) else ""
+                source = f"，来源第{item['source_chapter_number']}章" if item.get("source_chapter_number") else ""
+                parts.append(
+                    f"- {item['title']}（重要度{item['importance']}{source}{due_flag}）：{str(item.get('description', '')).strip()[:100]}"
+                )
+
+        if retrieval_cards:
+            parts.append("\n【按需检索到的记忆片段】")
+            for item in retrieval_cards[:5]:
+                parts.append(
+                    f"- 查询“{item['query']}”命中[{item['source_type']}]：{str(item['content']).strip()[:120]}"
+                )
+
+        if layered_context.get("characters"):
+            parts.append("\n【角色速览】")
+            for char in layered_context["characters"][:6]:
+                name = char.get("name", "未知")
+                personality = char.get("personality") or {}
+                traits = personality.get("traits", []) if isinstance(personality, dict) else []
+                trait_text = f"（{', '.join(map(str, traits[:3]))}）" if traits else ""
+                parts.append(f"- {name}{trait_text}")
+
+        if recommendations:
+            parts.append("\n【写前检查清单】")
+            for item in recommendations:
+                parts.append(f"- {item}")
+
+        user_mission = str(additional_context.get("user_prompt", "") or "").strip()
+        if user_mission:
+            parts.append("\n【本轮用户明确要求】")
+            parts.append(user_mission)
+
+        return "\n".join(parts)
     
     async def _get_characters_context(self) -> Optional[str]:
         """获取角色上下文（原始版本，保持兼容性）"""
@@ -763,4 +1309,3 @@ class ContextBuilder:
         except Exception as exc:
             logger.warning(f"Relation network context injection failed (non-fatal): {exc}")
             return None
-

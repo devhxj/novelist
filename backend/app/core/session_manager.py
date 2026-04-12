@@ -434,7 +434,7 @@ class ContextCompressor:
         if summary_text:
             session.summary = summary_text
         elif older_messages and not session.summary:
-            session.summary = self._generate_summary_prompt(older_messages)
+            session.summary = self._build_fallback_summary(older_messages)
         new_messages = system_messages + important_messages + recent_messages
         session.messages = new_messages
         session.updated_at = datetime.now()
@@ -447,12 +447,22 @@ class ContextCompressor:
         )
         return session
     
-    def _generate_summary_prompt(self, messages: List[Message]) -> str:
+    def build_summary_request_prompt(self, messages: List[Message]) -> str:
         content = "\n".join([
             f"[{m.role.value}]: {m.content[:200]}..."
             for m in messages[-5:]
         ])
         return f"[历史对话摘要]\n{content}"
+
+    def _build_fallback_summary(self, messages: List[Message]) -> str:
+        lines: List[str] = ["【历史对话压缩摘要】"]
+        for message in messages[-8:]:
+            snippet = (message.content or "").strip().replace("\n", " ")
+            if not snippet:
+                continue
+            role = message.role.value
+            lines.append(f"- {role}: {snippet[:120]}")
+        return "\n".join(lines[:9])
 
 
 class SessionManager:

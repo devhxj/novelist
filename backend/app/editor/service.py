@@ -11,8 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.editor.models import EditSession, EditSessionStatus, EditChange, ChangeSource
 from app.core.diff_engine import diff_engine, DiffChangeType
 from app.chapters.models import Chapter
-from app.core.llm_service import llm_service
 from app.core.vector_store import vector_store
+from app.core.chapter_summary import generate_chapter_summary
+from app.core.chapter_post_processor import ChapterPostProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -205,9 +206,22 @@ class EditSessionManager:
 
         chapter.content = edit_session.working_content
         chapter.word_count = len(edit_session.working_content) if edit_session.working_content else 0
-        chapter.summary = await self._generate_chapter_summary(edit_session.working_content or "")
         chapter.status = "completed" if (edit_session.working_content or "").strip() else chapter.status
         chapter.updated_at = datetime.now()
+
+        post_processor = ChapterPostProcessor(self.db, chapter.novel_id)
+        try:
+            process_result = await post_processor.process(
+                content=chapter.content or "",
+                chapter_number=chapter.chapter_number,
+                chapter_id=chapter.id,
+            )
+            chapter.content = process_result.get("final_content", chapter.content)
+            chapter.word_count = len(chapter.content or "")
+        except Exception as exc:
+            logger.warning(f"Failed to post-process accepted edit session {edit_session_id}: {exc}")
+
+        chapter.summary = await self._generate_chapter_summary(chapter.content or "")
 
         edit_session.status = EditSessionStatus.ACCEPTED
         edit_session.accepted_at = datetime.now()
@@ -301,24 +315,7 @@ class EditSessionManager:
         }
 
     async def _generate_chapter_summary(self, content: str) -> Optional[str]:
-        if not content or len(content.strip()) < 200:
-            return content[:200] if content else None
-
-        prompt = (
-            "请为以下小说章节生成一段120字以内的剧情摘要，"
-            "只保留关键情节推进、人物变化和伏笔，不要评价。\n\n"
-            f"{content[:4000]}"
-        )
-        try:
-            summary = await llm_service.generate_text(
-                prompt=prompt,
-                system_prompt="你是长篇小说章节摘要助手。",
-                max_tokens=200
-            )
-            return summary.strip()
-        except Exception as e:
-            logger.warning(f"Failed to generate summary for edited chapter: {e}")
-            return content[:200]
+        return await generate_chapter_summary(content)
 
     async def _refresh_chapter_memory(self, chapter: Chapter) -> None:
         try:
@@ -326,21 +323,13 @@ class EditSessionManager:
             content = chapter.content or ""
             if not content.strip():
                 return
-            chunks = vector_store.split_text(content)
-            chunk_data = [
-                {
-                    "id": f"{chapter.id}_{i}",
-                    "content": chunk,
-                    "chapter_id": chapter.id,
-                    "chunk_type": "content",
-                    "chunk_index": i,
-                    "metadata": {
-                        "chapter_number": chapter.chapter_number,
-                        "chapter_title": chapter.title
-                    }
-                }
-                for i, chunk in enumerate(chunks)
-            ]
+            chunk_data = vector_store.build_chapter_chunks(
+                chapter_id=chapter.id,
+                chapter_number=chapter.chapter_number,
+                chapter_title=chapter.title,
+                content=content,
+                summary=chapter.summary,
+            )
             if chunk_data:
                 vector_store.add_chunks(chapter.novel_id, chunk_data)
         except Exception as e:

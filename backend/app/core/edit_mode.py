@@ -2,7 +2,7 @@
 编辑模式系统 - 控制AI的权限级别
 """
 from enum import Enum
-from typing import Optional, List, Set
+from typing import Optional, List, Set, Dict
 
 
 class EditMode(str, Enum):
@@ -64,6 +64,10 @@ class EditModeConfig:
 5. 编辑是副本机制，用户需确认后才生效
 
 【故事时间线管理】
+时间线采用双轨维护：
+- 在 AI IDE 对话创作中，以模型主动调用 get_timeline_context / add_timeline_entry / update_timeline_entry / resolve_timeline_entry 为主
+- 在直接章节生成或模型漏记时，后端会做章节后处理作为兜底，自动提取新伏笔、下章安排并尝试回收已解决伏笔
+这意味着：后端兜底不会替代 MCP 能力，而是避免遗漏
 1. 生成章节前应调用 get_timeline_context 了解当前有哪些待处理的伏笔、规划、用户指令
 2. 章节生成完成后，如果你在本章埋下了新的伏笔、有后续安排、或需要更新规划，应主动调用 add_timeline_entry 或 update_timeline_entry 记录到时间线
 3. 不要在正文末尾输出伏笔/规划等结构化信息，所有时间线维护通过工具完成
@@ -110,7 +114,7 @@ class EditModeConfig:
             "get_creative_profile", "update_creative_profile",
             "get_novel_progress", "get_character_list", "get_character_detail", "get_writing_characters",
             "create_character", "update_character",
-            "search_plot_memory", "get_character_memory", "get_timeline", "get_recent_context",
+            "search_plot_memory", "search_story_memory", "prepare_story_brief", "get_character_memory", "get_timeline", "get_recent_context",
             "start_edit_session", "apply_edit", "get_edit_status", "read_chapter_for_edit",
             "run_agent_task",
             "get_story_timeline", "add_timeline_entry", "update_timeline_entry",
@@ -124,12 +128,12 @@ class EditModeConfig:
         EditMode.REVIEW: {
             "get_novel_summary", "get_chapter_list", "get_chapter_content", "get_creative_profile",
             "get_novel_progress", "get_character_list", "get_character_detail",
-            "search_plot_memory", "get_character_memory", "get_timeline", "get_recent_context"
+            "search_plot_memory", "search_story_memory", "prepare_story_brief", "get_character_memory", "get_timeline", "get_recent_context"
         },
         EditMode.PLAN: {
             "get_novel_summary", "get_chapter_list", "get_chapter_content", "get_creative_profile",
             "get_novel_progress", "get_character_list", "get_character_detail",
-            "search_plot_memory", "get_character_memory", "get_timeline", "get_recent_context"
+            "search_plot_memory", "search_story_memory", "prepare_story_brief", "get_character_memory", "get_timeline", "get_recent_context"
         }
     }
     
@@ -137,6 +141,89 @@ class EditModeConfig:
         EditMode.AGENT: True,
         EditMode.REVIEW: False,
         EditMode.PLAN: False
+    }
+
+    MODE_LLM_PRIMARY_TOOLS: dict[EditMode, List[str]] = {
+        EditMode.AGENT: [
+            "get_creative_profile",
+            "update_creative_profile",
+            "get_novel_summary",
+            "get_chapter_list",
+            "get_chapter_content",
+            "prepare_story_brief",
+            "get_writing_characters",
+            "get_character_detail",
+            "search_story_memory",
+            "get_timeline_context",
+            "get_story_timeline",
+            "run_review",
+            "generate_chapter_draft",
+            "read_chapter_for_edit",
+            "start_edit_session",
+            "apply_edit",
+            "get_edit_status",
+            "add_timeline_entry",
+            "update_timeline_entry",
+            "resolve_timeline_entry",
+            "update_character_relationship",
+            "get_pending_changes",
+        ],
+        EditMode.REVIEW: [
+            "get_novel_summary",
+            "get_chapter_list",
+            "get_chapter_content",
+            "get_creative_profile",
+            "prepare_story_brief",
+            "get_writing_characters",
+            "get_character_detail",
+            "search_story_memory",
+            "get_timeline_context",
+            "get_story_timeline",
+            "run_review",
+        ],
+        EditMode.PLAN: [
+            "get_novel_summary",
+            "get_chapter_list",
+            "get_chapter_content",
+            "get_creative_profile",
+            "prepare_story_brief",
+            "get_writing_characters",
+            "search_story_memory",
+            "get_story_timeline",
+            "get_timeline_context",
+        ],
+    }
+
+    TOOL_BUNDLES: Dict[str, Set[str]] = {
+        "editing": {
+            "get_chapter_list", "get_chapter_content", "read_chapter_for_edit",
+            "start_edit_session", "apply_edit", "get_edit_status", "get_pending_changes",
+        },
+        "characters": {
+            "get_character_list", "get_character_detail", "get_writing_characters",
+            "create_character", "update_character", "get_character_memory",
+            "get_character_network", "get_character_relationships", "update_character_relationship",
+        },
+        "locations": {
+            "get_location_list", "get_location_detail", "create_location",
+            "update_location", "delete_location",
+        },
+        "timeline": {
+            "prepare_story_brief", "get_story_timeline", "get_timeline_context", "get_timeline",
+            "add_timeline_entry", "update_timeline_entry", "resolve_timeline_entry", "run_review",
+        },
+        "generation": {
+            "create_new_chapter", "generate_chapter_draft", "prepare_story_brief",
+            "search_story_memory", "run_agent_task",
+        },
+    }
+
+    TOOL_BUNDLE_CUES: Dict[str, tuple[str, ...]] = {
+        "editing": ("修改", "改写", "润色", "重写", "编辑", "替换", "局部改", "apply_edit", "副本"),
+        "characters": ("角色", "人物", "关系", "师徒", "敌对", "盟友", "恋人", "创建角色"),
+        "locations": ("地点", "场景", "地图", "城市", "房间", "森林", "宫殿", "地点设定"),
+        "timeline": ("伏笔", "时间线", "规划", "大纲", "安排", "下章", "长期", "回收", "设定检查"),
+        "generation": ("写", "续写", "生成", "创建章节", "新章节", "草稿", "扩写", "补写"),
     }
     
     @classmethod
@@ -165,3 +252,49 @@ class EditModeConfig:
         """过滤出当前模式允许使用的工具"""
         allowed = cls.MODE_ALLOWED_TOOLS.get(mode, set())
         return [t for t in all_tools if t in allowed]
+
+    @classmethod
+    def get_llm_primary_tools(cls, mode: EditMode) -> List[str]:
+        """
+        给 LLM 的主工具子集。
+
+        目的：
+        - 减少创作时的工具噪声
+        - 提高工具前缀稳定性与缓存命中率
+        - 保留完整后端能力，但默认只暴露高频编排工具
+        """
+        allowed = cls.MODE_ALLOWED_TOOLS.get(mode, set())
+        primary = cls.MODE_LLM_PRIMARY_TOOLS.get(mode, [])
+        return [name for name in primary if name in allowed]
+
+    @classmethod
+    def get_llm_tools_for_message(cls, mode: EditMode, user_message: str = "") -> List[str]:
+        """
+        给当前这轮消息挑选工具集。
+
+        设计目标：
+        - 默认使用更稳定的主工具集，优化缓存
+        - 当用户明确进入 AI IDE 深水区操作时，自动补齐相关工具能力
+        - 不丢失原有“可直接读取、直接改、局部改、维护设定”的核心体验
+        """
+        allowed = cls.MODE_ALLOWED_TOOLS.get(mode, set())
+        selected = set(cls.get_llm_primary_tools(mode))
+        text = (user_message or "").strip()
+
+        if text:
+            for bundle_name, cues in cls.TOOL_BUNDLE_CUES.items():
+                if any(cue in text for cue in cues):
+                    selected.update(cls.TOOL_BUNDLES.get(bundle_name, set()))
+
+        if mode == EditMode.AGENT and any(cue in text for cue in ("工具", "mcp", "全部能力", "像ide", "像 agent", "像coding agent")):
+            selected.update(allowed)
+
+        # 保证编辑核心链路始终可达
+        if mode == EditMode.AGENT:
+            selected.update(cls.TOOL_BUNDLES["editing"])
+
+        ordered_primary = cls.MODE_LLM_PRIMARY_TOOLS.get(mode, [])
+        ordered_extra = sorted(name for name in selected if name not in ordered_primary)
+        return [name for name in ordered_primary if name in selected and name in allowed] + [
+            name for name in ordered_extra if name in allowed
+        ]

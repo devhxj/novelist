@@ -239,6 +239,74 @@ class VectorStore:
         
         return chunks
 
+    def build_chapter_chunks(
+        self,
+        *,
+        chapter_id: int,
+        chapter_number: Optional[int],
+        chapter_title: Optional[str],
+        content: str,
+        summary: Optional[str] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+        chunk_size: int = 500,
+        overlap: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        为章节构建更适合小说检索的多层记忆块。
+
+        包含：
+        - summary: 高密度剧情摘要，适合回忆“发生了什么”
+        - chapter_brief: 章节标题 + 摘要/开头，适合模糊记忆搜索
+        - content: 原始正文切块，适合精确回溯细节
+        """
+        clean_content = (content or "").strip()
+        summary_text = (summary or "").strip()
+        title = (chapter_title or f"第{chapter_number}章").strip()
+        base_metadata = {
+            "chapter_number": chapter_number,
+            "chapter_title": title,
+            **(extra_metadata or {})
+        }
+
+        chunks: List[Dict[str, Any]] = []
+        if summary_text:
+            chunks.append({
+                "id": f"{chapter_id}_summary",
+                "content": summary_text,
+                "chapter_id": chapter_id,
+                "chunk_type": "summary",
+                "chunk_index": 0,
+                "metadata": base_metadata,
+            })
+
+        chapter_brief_parts = [title]
+        if summary_text:
+            chapter_brief_parts.append(summary_text)
+        if clean_content:
+            chapter_brief_parts.append(clean_content[:280])
+        chapter_brief = "\n".join(part for part in chapter_brief_parts if part).strip()
+        if chapter_brief:
+            chunks.append({
+                "id": f"{chapter_id}_brief",
+                "content": chapter_brief,
+                "chapter_id": chapter_id,
+                "chunk_type": "chapter_brief",
+                "chunk_index": 0,
+                "metadata": base_metadata,
+            })
+
+        for i, chunk in enumerate(self.split_text(clean_content, chunk_size=chunk_size, overlap=overlap)):
+            chunks.append({
+                "id": f"{chapter_id}_{i}",
+                "content": chunk,
+                "chapter_id": chapter_id,
+                "chunk_type": "content",
+                "chunk_index": i,
+                "metadata": base_metadata,
+            })
+
+        return chunks
+
     def close(self):
         """尽量释放向量存储和 embedding 相关资源"""
         try:

@@ -193,6 +193,8 @@ _TOOL_SYNC_NAMES = {
     "get_creative_profile": "查看创作规则",
     "update_creative_profile": "设置创作规则",
     "search_plot_memory": "搜索情节内容",
+    "search_story_memory": "搜索故事记忆",
+    "prepare_story_brief": "构建写前认知",
     "get_recent_context": "获取写作上下文",
     "get_character_memory": "回顾角色经历",
     "get_timeline": "查看情节时间线",
@@ -238,6 +240,8 @@ _TOOL_SYNC_KINDS = {
     "get_creative_profile": "memory",
     "update_creative_profile": "memory",
     "search_plot_memory": "browse",
+    "search_story_memory": "memory",
+    "prepare_story_brief": "memory",
     "get_recent_context": "memory",
     "get_character_memory": "memory",
     "get_timeline": "view",
@@ -533,17 +537,11 @@ async def _execute_streaming_chapter_draft(
 
     service = ChapterGenerationService(db, novel_id)
     chapter.content = full_content
-    chapter.summary = await service._generate_chapter_summary(full_content)
     chapter.status = "completed"
     chapter.word_count = len(full_content)
     chapter.updated_at = datetime.now()
     await db.commit()
     await db.refresh(chapter)
-
-    try:
-        await service._update_chapter_memory(chapter.id)
-    except Exception as exc:
-        logger.warning(f"Failed to update chapter memory after streamed generation: {exc}")
 
     from app.core.chapter_post_processor import ChapterPostProcessor
     try:
@@ -556,8 +554,11 @@ async def _execute_streaming_chapter_draft(
         )
         if process_result.get("was_truncated"):
             chapter.content = process_result["final_content"]
-            chapter.word_count = len(chapter.content)
-            await db.commit()
+        else:
+            chapter.content = process_result.get("final_content", chapter.content)
+        chapter.word_count = len(chapter.content)
+        chapter.summary = await service._generate_chapter_summary(chapter.content)
+        await db.commit()
         logger.info(
             f"Chapter {chapter.chapter_number} post-process completed: "
             f"truncated={process_result['was_truncated']}, "
@@ -565,6 +566,13 @@ async def _execute_streaming_chapter_draft(
         )
     except Exception as exc:
         logger.warning(f"Chapter post-processing failed (non-fatal): {exc}")
+        chapter.summary = await service._generate_chapter_summary(chapter.content)
+        await db.commit()
+
+    try:
+        await service._update_chapter_memory(chapter.id)
+    except Exception as exc:
+        logger.warning(f"Failed to update chapter memory after streamed generation: {exc}")
 
     return {
         "success": True,
@@ -1179,7 +1187,7 @@ async def _run_chat_with_tools(
             
             try:
                 if session_manager.compressor.should_compress(session) and session_manager.config.enable_auto_summary:
-                    summary_prompt = session_manager.compressor._generate_summary_prompt(session.messages)
+                    summary_prompt = session_manager.compressor.build_summary_request_prompt(session.messages)
                     summary = await llm_service.generate_text(
                         prompt=summary_prompt,
                         system_prompt="你是对话摘要助手，请提炼关键信息与设定。"
@@ -1222,21 +1230,31 @@ async def _run_chat_with_tools(
                 conditional_reminders = []
             
             all_tools = registry.get_openai_functions() if tools_enabled else None
-            tools = all_tools  # ✅ 修复：统一变量名
+            if all_tools:
+                selected_tool_names = EditModeConfig.get_llm_tools_for_message(edit_mode, user_message)
+                order_map = {name: idx for idx, name in enumerate(selected_tool_names)}
+                tools = [
+                    tool for tool in all_tools
+                    if tool.get("function", {}).get("name") in order_map
+                ]
+                tools.sort(key=lambda tool: order_map.get(tool.get("function", {}).get("name", ""), 999))
+            else:
+                tools = None
             
             base_system_prompt = EditModeConfig.get_system_prompt(edit_mode)
             
-            prefix_messages = []
-            prefix_messages.append({"role": "system", "content": base_system_prompt})
-            
+            system_sections = [base_system_prompt]
             if creative_profile_text:
-                prefix_messages.append({"role": "system", "content": creative_profile_text})
-            
+                system_sections.append(creative_profile_text)
             if conditional_reminders:
-                reminder_text = "\n\n".join(
-                    f"【本轮额外提醒】\n{reminder}" for reminder in conditional_reminders
+                reminder_text = "\n".join(
+                    f"- {reminder}" for reminder in conditional_reminders
                 )
-                prefix_messages.append({"role": "system", "content": reminder_text})
+                system_sections.append(f"【本轮额外提醒】\n{reminder_text}")
+            prefix_messages = [{
+                "role": "system",
+                "content": "\n\n".join(section for section in system_sections if section).strip()
+            }]
             
             history_messages = session_manager.get_messages_for_api(session, include_context=False)
             

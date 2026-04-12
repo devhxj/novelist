@@ -1,0 +1,20 @@
+{
+  "include": [
+    "backend/app"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "database/scripts",
+    "dev_test",
+    "frontend",
+    "venv"
+  ],
+  "extraPaths": [
+    "backend"
+  ],
+  "venvPath": ".",
+  "venv": "venv",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false
+}

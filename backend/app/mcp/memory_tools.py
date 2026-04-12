@@ -5,13 +5,10 @@
 from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-from datetime import datetime
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from app.core.vector_store import vector_store, VectorStoreError
 from app.core.context_builder import ContextBuilder
-from app.novels.models import Novel
 from app.chapters.models import Chapter
 from app.characters.models import Character
 from app.plot_events.models import PlotEvent
@@ -76,6 +73,60 @@ class SearchPlotMemoryTool(BaseMCPTool):
                 metadata={"tool": self.name, "novel_id": novel_id}
             )
         except VectorStoreError as e:
+            return MCPToolResult(success=False, error=f"Search failed: {str(e)}")
+
+
+class SearchStoryMemoryTool(BaseMCPTool):
+    """搜索故事记忆（聚合入口）"""
+
+    name = "search_story_memory"
+    description = (
+        "搜索与当前创作最相关的故事记忆。"
+        "这是给 LLM 用的高层检索入口，会优先返回更适合写作的片段。无需传novel_id。"
+        "\n适用场景：写新章前回忆某个伏笔、某个情节节点、某个人物最近发生过什么。"
+    )
+    category = MCPToolCategory.MEMORY_RETRIEVAL
+    parameters_schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "检索问题或关键词"},
+            "top_k": {"type": "integer", "default": 5, "description": "返回结果数"},
+            "min_relevance_score": {"type": "number", "default": 0.35, "description": "最低相关度阈值"}
+        },
+        "required": ["query"]
+    }
+
+    async def execute(
+        self,
+        db: AsyncSession,
+        novel_id: int,
+        user_id: int,
+        query: str,
+        top_k: int = 5,
+        min_relevance_score: float = 0.35,
+        **kwargs
+    ) -> MCPToolResult:
+        novel = await verify_novel_ownership(db, novel_id, user_id)
+        if not novel:
+            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
+
+        try:
+            builder = ContextBuilder(db, novel_id)
+            results = await builder.search_relevant_context(
+                query=query,
+                top_k=top_k,
+                min_relevance_score=min_relevance_score
+            )
+            return MCPToolResult(
+                success=True,
+                data={
+                    "query": query,
+                    "results": results,
+                    "total": len(results)
+                },
+                metadata={"tool": self.name, "novel_id": novel_id}
+            )
+        except Exception as e:
             return MCPToolResult(success=False, error=f"Search failed: {str(e)}")
 
 
@@ -345,6 +396,56 @@ class GetRecentContextTool(BaseMCPTool):
             return MCPToolResult(success=False, error=f"Failed to build context: {str(e)}")
 
 
+class PrepareStoryBriefTool(BaseMCPTool):
+    """构建写前 StoryBrief"""
+
+    name = "prepare_story_brief"
+    description = (
+        "为指定章节构建写前 StoryBrief。"
+        "会明确区分 Plot（情节骨架）、Timeline（近期安排/用户指令）、Foreshadowing（伏笔钩子）。无需传novel_id。"
+        "\n适用场景：正式创作前先快速建立全局认知，确认本章该推进什么、回收什么、是否需要埋新伏笔。"
+    )
+    category = MCPToolCategory.MEMORY_RETRIEVAL
+    parameters_schema = {
+        "type": "object",
+        "properties": {
+            "chapter_number": {"type": "integer", "description": "目标章节号"},
+            "context_size": {"type": "integer", "default": 3600, "description": "上下文大小"},
+            "retrieval_top_k": {"type": "integer", "default": 3, "description": "每个检索问题返回数量"}
+        },
+        "required": ["chapter_number"]
+    }
+
+    async def execute(
+        self,
+        db: AsyncSession,
+        novel_id: int,
+        user_id: int,
+        chapter_number: int,
+        context_size: int = 3600,
+        retrieval_top_k: int = 3,
+        **kwargs
+    ) -> MCPToolResult:
+        novel = await verify_novel_ownership(db, novel_id, user_id)
+        if not novel:
+            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
+
+        try:
+            builder = ContextBuilder(db, novel_id)
+            brief = await builder.build_story_brief(
+                chapter_number=chapter_number,
+                context_size=context_size,
+                retrieval_top_k=retrieval_top_k
+            )
+            return MCPToolResult(
+                success=True,
+                data=brief,
+                metadata={"tool": self.name, "novel_id": novel_id, "chapter_number": chapter_number}
+            )
+        except Exception as e:
+            return MCPToolResult(success=False, error=f"Failed to build StoryBrief: {str(e)}")
+
+
 class MemoryRetrievalTools:
     """记忆检索工具集合"""
     
@@ -352,6 +453,8 @@ class MemoryRetrievalTools:
     def register_all(registry: MCPToolRegistry) -> None:
         """注册所有记忆检索工具"""
         registry.register(SearchPlotMemoryTool())
+        registry.register(SearchStoryMemoryTool())
         registry.register(GetCharacterMemoryTool())
         registry.register(GetTimelineTool())
         registry.register(GetRecentContextTool())
+        registry.register(PrepareStoryBriefTool())

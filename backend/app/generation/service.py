@@ -2,22 +2,19 @@
 章节生成服务 - 整合RAG、Memory、Agent系统
 """
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.context_builder import ContextBuilder
+from app.core.chapter_post_processor import ChapterPostProcessor
 from app.agents.base import AgentTask, TaskType
 from app.agents.factory import create_default_coordinator
-from app.novels.models import Novel, NovelCreativeProfile
+from app.novels.models import Novel
 from app.chapters.models import Chapter
-from app.characters.models import Character
-from app.plot_events.models import PlotEvent
-from app.timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryStatus
-from app.planning.models import PlotOutline, PlotLine, PlotNode, PlotNodeStatus
 from app.workflows.langgraph_workflow import ChapterWorkflow, LANGGRAPH_AVAILABLE
-from app.core.llm_service import llm_service
+from app.core.chapter_summary import generate_chapter_summary
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +61,11 @@ class ChapterGenerationService:
         logger.info(f"Starting chapter {chapter_number} generation for novel {self.novel_id}")
         
         try:
-            context = await self._prepare_context(chapter_number, additional_context)
+            context = await self._prepare_context(
+                chapter_number,
+                additional_context,
+                context_size=context_size
+            )
             should_use_workflow = LANGGRAPH_AVAILABLE if use_workflow is None else use_workflow
             extra_parameters = self._build_generation_parameters(additional_context)
 
@@ -84,7 +85,7 @@ class ChapterGenerationService:
                 )
                 if workflow_result.get("success"):
                     chapter = await self._get_chapter(chapter_number)
-                    generated_content = workflow_result.get("generated_content", "")
+                    generated_content = chapter.content if chapter else workflow_result.get("generated_content", "")
                     return {
                         "success": True,
                         "chapter_id": chapter.id if chapter else None,
@@ -153,164 +154,45 @@ class ChapterGenerationService:
     async def _prepare_context(
         self,
         chapter_number: int,
-        additional_context: Optional[Dict[str, Any]] = None
+        additional_context: Optional[Dict[str, Any]] = None,
+        context_size: int = 3600
     ) -> Dict[str, Any]:
-        """准备生成上下文"""
+        """准备生成上下文（统一走 StoryBrief）"""
         logger.info(f"Preparing context for chapter {chapter_number}")
-        
-        context = {}
-        
-        result = await self.db.execute(
-            select(Chapter).where(
-                Chapter.novel_id == self.novel_id,
-                Chapter.chapter_number < chapter_number
-            ).order_by(Chapter.chapter_number.desc()).limit(3)
+        story_brief = await self.context_builder.build_story_brief(
+            chapter_number=chapter_number,
+            context_size=context_size,
+            additional_context=additional_context or {},
+            retrieval_top_k=3,
         )
-        previous_chapters = list(result.scalars().all())
-        
-        if previous_chapters:
-            summaries = []
-            for ch in reversed(previous_chapters):
-                if ch.summary:
-                    summaries.append(f"第{ch.chapter_number}章: {ch.summary}")
-                elif ch.content:
-                    summaries.append(f"第{ch.chapter_number}章: {ch.content[:200]}...")
-            context["previous_summary"] = "\n".join(summaries)
-        
-        result = await self.db.execute(
-            select(Character).where(Character.novel_id == self.novel_id)
-        )
-        characters = list(result.scalars().all())
-        context["characters"] = [
-            {
-                "id": char.id,
-                "name": char.name,
-                "personality": char.personality,
-                "abilities": char.abilities
-            }
-            for char in characters
-        ]
-        
-        result = await self.db.execute(
-            select(PlotEvent).where(
-                PlotEvent.novel_id == self.novel_id
-            ).order_by(PlotEvent.created_at.desc()).limit(10)
-        )
-        plot_events = list(result.scalars().all())
-        context["plot_hints"] = [
-            {
-                "id": event.id,
-                "type": event.event_type,
-                "description": event.description
-            }
-            for event in plot_events
-        ]
 
-        outline_result = await self.db.execute(
-            select(PlotOutline).where(PlotOutline.novel_id == self.novel_id)
-        )
-        outline = outline_result.scalar_one_or_none()
-        if outline:
-            context["story_outline"] = {
-                "premise": outline.premise,
-                "theme": outline.theme,
-                "beginning": outline.beginning,
-                "middle": outline.middle,
-                "climax": outline.climax,
-                "ending": outline.ending,
-                "current_chapter": outline.current_chapter,
-                "total_chapters": outline.total_chapters,
-            }
+        layered_context = story_brief.get("layered_context", {})
+        context: Dict[str, Any] = {
+            "previous_summary": layered_context.get("previous_summary"),
+            "characters": layered_context.get("characters", []),
+            "plot_hints": layered_context.get("plot_hints", []),
+            "story_outline": story_brief.get("outline", {}),
+            "active_plot_lines": story_brief.get("active_plot_lines", []),
+            "upcoming_plot_nodes": story_brief.get("upcoming_plot_nodes", []),
+            "due_plot_nodes": story_brief.get("due_plot_nodes", []),
+            "timeline_entries": story_brief.get("timeline_entries", []),
+            "priority_timeline_entries": story_brief.get("priority_timeline_entries", []),
+            "unresolved_foreshadowings": story_brief.get("foreshadowing_entries", []),
+            "due_foreshadowings": story_brief.get("due_foreshadowing_entries", []),
+            "retrieved_memory": story_brief.get("retrieved_memory", []),
+            "prewrite_recommendations": story_brief.get("prewrite_recommendations", []),
+            "chapter_mission": story_brief.get("chapter_mission", {}),
+            "story_brief": story_brief.get("brief_text", ""),
+            "author_preferences": story_brief.get("creative_profile", {}),
+        }
 
-        active_lines_result = await self.db.execute(
-            select(PlotLine)
-            .where(PlotLine.novel_id == self.novel_id, PlotLine.status == "active")
-            .order_by(PlotLine.importance.desc(), PlotLine.updated_at.desc())
-            .limit(5)
-        )
-        active_lines = list(active_lines_result.scalars().all())
-        context["active_plot_lines"] = [
-            {
-                "id": line.id,
-                "name": line.name,
-                "description": line.description,
-                "line_type": line.line_type,
-                "importance": line.importance
-            }
-            for line in active_lines
-        ]
-
-        upcoming_nodes_result = await self.db.execute(
-            select(PlotNode)
-            .where(
-                PlotNode.novel_id == self.novel_id,
-                PlotNode.status.in_([PlotNodeStatus.PLANNED.value, PlotNodeStatus.IN_PROGRESS.value]),
-                ((PlotNode.chapter_number == None) | (PlotNode.chapter_number >= chapter_number))
-            )
-            .order_by(PlotNode.chapter_number.asc(), PlotNode.sequence.asc())
-            .limit(5)
-        )
-        upcoming_nodes = list(upcoming_nodes_result.scalars().all())
-        context["upcoming_plot_nodes"] = [
-            {
-                "id": node.id,
-                "title": node.title,
-                "description": node.description,
-                "chapter_number": node.chapter_number,
-                "status": node.status,
-                "notes": node.notes
-            }
-            for node in upcoming_nodes
-        ]
-
-        from app.timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryStatus
-
-        unresolved_result = await self.db.execute(
-            select(TimelineEntry)
-            .where(
-                TimelineEntry.novel_id == self.novel_id,
-                TimelineEntry.category == TimelineEntryCategory.FORESHADOWING.value,
-                TimelineEntry.status.in_([
-                    TimelineEntryStatus.PENDING.value,
-                    TimelineEntryStatus.ACTIVE.value,
-                ])
-            )
-            .order_by(TimelineEntry.importance.desc(), TimelineEntry.created_at.desc())
-            .limit(8)
-        )
-        unresolved = list(unresolved_result.scalars().all())
-        context["unresolved_foreshadowings"] = [
-            {
-                "id": fs.id,
-                "title": fs.title,
-                "description": fs.description,
-                "importance": fs.importance,
-                "source_chapter_id": fs.source_chapter_id
-            }
-            for fs in unresolved
-        ]
-
+        active_lines = story_brief.get("active_plot_lines", [])
         if active_lines:
             context["current_arc_summary"] = "；".join(
-                f"{line.name}: {line.description or ''}".strip()
+                f"{line['name']}: {line.get('description') or ''}".strip()
                 for line in active_lines[:3]
             )
 
-        profile_result = await self.db.execute(
-            select(NovelCreativeProfile).where(NovelCreativeProfile.novel_id == self.novel_id)
-        )
-        creative_profile = profile_result.scalar_one_or_none()
-        if creative_profile:
-            context["author_preferences"] = {
-                "author_intent": creative_profile.author_intent,
-                "preferred_tone": creative_profile.preferred_tone,
-                "collaboration_style": creative_profile.collaboration_style,
-                "scene_planning_notes": creative_profile.scene_planning_notes,
-                "must_keep": creative_profile.must_keep or [],
-                "must_avoid": creative_profile.must_avoid or [],
-                "long_term_goals": creative_profile.long_term_goals or [],
-            }
-        
         if additional_context:
             key_events = additional_context.get("key_events")
             if key_events:
@@ -320,7 +202,7 @@ class ChapterGenerationService:
                     for item in key_events
                 )
             context.update(additional_context)
-        
+
         return context
 
     def _build_generation_parameters(self, additional_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -359,27 +241,45 @@ class ChapterGenerationService:
         
         if existing:
             existing.content = content
-            existing.summary = await self._generate_chapter_summary(content)
             existing.status = "completed"
             existing.word_count = len(content)
             existing.updated_at = datetime.now()
             await self.db.commit()
             await self.db.refresh(existing)
-            return existing
+            chapter = existing
         else:
             chapter = Chapter(
                 novel_id=self.novel_id,
                 chapter_number=chapter_number,
                 title=f"第{chapter_number}章",
                 content=content,
-                summary=await self._generate_chapter_summary(content),
+                summary=None,
                 status="completed",
                 word_count=len(content)
             )
             self.db.add(chapter)
             await self.db.commit()
             await self.db.refresh(chapter)
-            return chapter
+
+        post_processor = ChapterPostProcessor(self.db, self.novel_id)
+        try:
+            process_result = await post_processor.process(
+                content=chapter.content or "",
+                chapter_number=chapter.chapter_number,
+                chapter_id=chapter.id
+            )
+            chapter.content = process_result.get("final_content", chapter.content)
+            chapter.word_count = len(chapter.content or "")
+            chapter.summary = await self._generate_chapter_summary(chapter.content or "")
+            await self.db.commit()
+            await self.db.refresh(chapter)
+        except Exception as exc:
+            logger.warning(f"Chapter post-processing failed for chapter {chapter.id}: {exc}")
+            chapter.summary = await self._generate_chapter_summary(chapter.content or "")
+            await self.db.commit()
+            await self.db.refresh(chapter)
+
+        return chapter
     
     async def _update_chapter_memory(self, chapter_id: int) -> Dict[str, Any]:
         task = AgentTask(
@@ -404,24 +304,7 @@ class ChapterGenerationService:
         return result.scalar_one_or_none()
 
     async def _generate_chapter_summary(self, content: str) -> Optional[str]:
-        if not content or len(content.strip()) < 200:
-            return content[:200] if content else None
-
-        prompt = (
-            "请为以下小说章节生成一段120字以内的剧情摘要，"
-            "只保留关键情节推进、人物变化和伏笔，不要评价。\n\n"
-            f"{content[:4000]}"
-        )
-        try:
-            summary = await llm_service.generate_text(
-                prompt=prompt,
-                system_prompt="你是长篇小说章节摘要助手。",
-                max_tokens=200
-            )
-            return summary.strip()
-        except Exception as e:
-            logger.warning(f"Failed to generate chapter summary: {e}")
-            return content[:200]
+        return await generate_chapter_summary(content)
     
     async def regenerate_chapter(
         self,

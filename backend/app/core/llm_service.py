@@ -38,9 +38,16 @@ class PromptCacheMonitor:
     
     def compute_prefix_hash(self, messages: List[Dict], tools: Optional[List] = None) -> str:
         """计算消息前缀的hash（用于识别是否命中缓存）"""
+        tool_names = []
+        if tools:
+            for tool in tools:
+                if isinstance(tool, dict):
+                    name = (((tool.get("function") or {}).get("name")) or "")
+                    if name:
+                        tool_names.append(name)
         prefix_data = {
-            "messages": json.dumps(messages[:3], ensure_ascii=False, sort_keys=True) if messages else "",
-            "tools_count": len(tools) if tools else 0,
+            "messages": json.dumps(messages[:4], ensure_ascii=False, sort_keys=True) if messages else "",
+            "tools": tool_names,
             "model": ""
         }
         return hashlib.md5(json.dumps(prefix_data, sort_keys=True).encode()).hexdigest()[:12]

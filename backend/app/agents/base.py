@@ -125,10 +125,10 @@ class BaseAgent(ABC):
         self,
         task: AgentTask,
         success: bool,
-        result: Dict[str, Any] = None,
-        error: str = None,
-        suggestions: List[str] = None,
-        next_actions: List[Dict[str, Any]] = None
+        result: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+        suggestions: Optional[List[str]] = None,
+        next_actions: Optional[List[Dict[str, Any]]] = None
     ) -> AgentResult:
         """创建执行结果"""
         return AgentResult(

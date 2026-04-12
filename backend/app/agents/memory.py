@@ -89,21 +89,13 @@ class MemoryAgent(BaseAgent):
                 )
 
             vector_store.delete_chapter_chunks(task.novel_id, chapter.id)
-            chunks = vector_store.split_text(content)
-            chunk_data = [
-                {
-                    "id": f"{chapter.id}_{i}",
-                    "content": chunk,
-                    "chapter_id": chapter.id,
-                    "chunk_type": "content",
-                    "chunk_index": i,
-                    "metadata": {
-                        "chapter_number": chapter.chapter_number,
-                        "chapter_title": chapter.title
-                    }
-                }
-                for i, chunk in enumerate(chunks)
-            ]
+            chunk_data = vector_store.build_chapter_chunks(
+                chapter_id=chapter.id,
+                chapter_number=chapter.chapter_number,
+                chapter_title=chapter.title,
+                content=content,
+                summary=chapter.summary,
+            )
 
             if chunk_data:
                 vector_store.add_chunks(task.novel_id, chunk_data)

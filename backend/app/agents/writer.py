@@ -80,7 +80,15 @@ class WriterAgent(BaseAgent):
         story_outline = context.get("story_outline", {})
         active_plot_lines = context.get("active_plot_lines", [])
         upcoming_plot_nodes = context.get("upcoming_plot_nodes", [])
+        due_plot_nodes = context.get("due_plot_nodes", [])
+        timeline_entries = context.get("timeline_entries", [])
+        priority_timeline_entries = context.get("priority_timeline_entries", [])
         unresolved_foreshadowings = context.get("unresolved_foreshadowings", [])
+        due_foreshadowings = context.get("due_foreshadowings", [])
+        retrieved_memory = context.get("retrieved_memory", [])
+        prewrite_recommendations = context.get("prewrite_recommendations", [])
+        chapter_mission = context.get("chapter_mission", {})
+        story_brief = context.get("story_brief", "")
         current_arc_summary = context.get("current_arc_summary", "")
         author_preferences = context.get("author_preferences", {})
         
@@ -102,8 +110,16 @@ class WriterAgent(BaseAgent):
             plot_hints=plot_hints,
             story_outline=story_outline,
             active_plot_lines=active_plot_lines,
+            due_plot_nodes=due_plot_nodes,
             upcoming_plot_nodes=upcoming_plot_nodes,
+            timeline_entries=timeline_entries,
+            priority_timeline_entries=priority_timeline_entries,
             unresolved_foreshadowings=unresolved_foreshadowings,
+            due_foreshadowings=due_foreshadowings,
+            retrieved_memory=retrieved_memory,
+            prewrite_recommendations=prewrite_recommendations,
+            chapter_mission=chapter_mission,
+            story_brief=story_brief,
             current_arc_summary=current_arc_summary,
             author_preferences=author_preferences
         )
@@ -210,8 +226,16 @@ class WriterAgent(BaseAgent):
         plot_hints: list,
         story_outline: dict,
         active_plot_lines: list,
+        due_plot_nodes: list,
         upcoming_plot_nodes: list,
+        timeline_entries: list,
+        priority_timeline_entries: list,
         unresolved_foreshadowings: list,
+        due_foreshadowings: list,
+        retrieved_memory: list,
+        prewrite_recommendations: list,
+        chapter_mission: dict,
+        story_brief: str,
         current_arc_summary: str,
         author_preferences: dict
     ) -> str:
@@ -237,6 +261,12 @@ class WriterAgent(BaseAgent):
             prompt += f"\n【作者意图】\n{author_intent}\n"
         if outline:
             prompt += f"\n【章节提纲】\n{outline}\n"
+        if story_brief:
+            prompt += (
+                "\n【写前 StoryBrief】\n"
+                "以下信息已经按 Plot / Timeline / Foreshadowing 区分整理，请先理解再下笔：\n"
+                f"{story_brief}\n"
+            )
         if must_keep:
             prompt += "\n【必须保留/实现】\n"
             for item in must_keep:
@@ -304,20 +334,66 @@ class WriterAgent(BaseAgent):
                 prompt += f"- {hint.get('description', '')}\n"
 
         if active_plot_lines:
-            prompt += "\n【当前活跃情节线】\n"
+            prompt += "\n【Plot｜当前活跃情节线】\n"
             for line in active_plot_lines[:5]:
                 prompt += f"- {line.get('name', '')}: {line.get('description', '')}\n"
 
+        if due_plot_nodes:
+            prompt += "\n【Plot Nodes｜本章优先推进】\n"
+            for node in due_plot_nodes[:5]:
+                prompt += f"- {node.get('title', '')}: {node.get('description', '')}\n"
+
         if upcoming_plot_nodes:
-            prompt += "\n【待推进情节节点】\n"
+            prompt += "\n【Plot Nodes｜后续可推进】\n"
             for node in upcoming_plot_nodes[:5]:
                 prompt += f"- {node.get('title', '')}: {node.get('description', '')}\n"
 
+        if priority_timeline_entries or timeline_entries:
+            prompt += (
+                "\n【Timeline｜章节安排与用户指令】\n"
+                "注意：这里是近期安排、写作约束和里程碑，不等同于伏笔。\n"
+            )
+            for item in (priority_timeline_entries or timeline_entries)[:5]:
+                target = f"（目标章:{item.get('target_chapter')}）" if item.get("target_chapter") else ""
+                prompt += f"- [{item.get('category', '')}] {item.get('title', '')}{target}: {item.get('description', '')}\n"
+
         if unresolved_foreshadowings:
-            prompt += "\n【未解决伏笔】\n"
+            prompt += (
+                "\n【Foreshadowing｜未解决伏笔】\n"
+                "注意：伏笔是等待未来回收的钩子，不等同于整体 Plot 规划。\n"
+            )
             for item in unresolved_foreshadowings[:5]:
                 prompt += f"- {item.get('title', '')}: {item.get('description', '')}\n"
-        
+
+        if due_foreshadowings:
+            prompt += "\n【Foreshadowing｜本章建议优先处理】\n"
+            for item in due_foreshadowings[:5]:
+                prompt += f"- {item.get('title', '')}: {item.get('description', '')}\n"
+
+        if chapter_mission:
+            prompt += "\n【本章任务分配】\n"
+            if chapter_mission.get("must_resolve_foreshadowing_ids"):
+                prompt += "- 优先考虑回收至少一个已到期伏笔。\n"
+            if chapter_mission.get("should_advance_plot_node_ids"):
+                prompt += "- 本章必须实质推进当前 Plot 节点，不能只做气氛铺垫。\n"
+            if chapter_mission.get("must_respect_timeline_ids"):
+                prompt += "- 本章要落实近期 Timeline 安排或用户指令。\n"
+            if chapter_mission.get("should_introduce_new_foreshadowing"):
+                prompt += "- 若剧情自然允许，可埋一个与主线直接相关的新伏笔。\n"
+
+        if prewrite_recommendations:
+            prompt += "\n【写前检查清单】\n"
+            for item in prewrite_recommendations[:5]:
+                prompt += f"- {item}\n"
+
+        if retrieved_memory:
+            prompt += "\n【检索到的前文记忆片段】\n"
+            for item in retrieved_memory[:5]:
+                prompt += (
+                    f"- [{item.get('source_type', 'content')}] "
+                    f"{str(item.get('content', ''))[:180]}\n"
+                )
+
         prompt += "\n请开始创作本章内容："
         
         return prompt

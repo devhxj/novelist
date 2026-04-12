@@ -20,25 +20,6 @@ from .schemas import MemorySearchRequest, MemoryIndexRequest
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 logger = logging.getLogger(__name__)
-
-
-def split_text_into_chunks(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
-    """将文本分割成重叠的块"""
-    if not text:
-        return []
-    
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = start + chunk_size
-        chunk = text[start:end]
-        if chunk.strip():
-            chunks.append(chunk.strip())
-        start = end - overlap
-    
-    return chunks
-
-
 @router.post("/novels/{novel_id}/index")
 async def index_novel_memory(
     novel: NovelOwner,
@@ -65,21 +46,13 @@ async def index_novel_memory(
             if not chapter.content:
                 continue
             
-            chunks = split_text_into_chunks(chapter.content)
-            
-            chunk_data = []
-            for i, chunk_content in enumerate(chunks):
-                chunk_data.append({
-                    "id": f"{chapter.id}_{i}",
-                    "content": chunk_content,
-                    "chapter_id": chapter.id,
-                    "chunk_type": "content",
-                    "chunk_index": i,
-                    "metadata": {
-                        "chapter_number": chapter.chapter_number,
-                        "chapter_title": chapter.title
-                    }
-                })
+            chunk_data = vector_store.build_chapter_chunks(
+                chapter_id=chapter.id,
+                chapter_number=chapter.chapter_number,
+                chapter_title=chapter.title,
+                content=chapter.content,
+                summary=chapter.summary,
+            )
             
             if chunk_data:
                 vector_store.add_chunks(novel.id, chunk_data)
@@ -135,25 +108,15 @@ async def index_chapter_memory(
         
         vector_store.delete_chapter_chunks(novel.id, chapter_id)
         
-        chunks = split_text_into_chunks(
-            chapter.content, 
+        chunk_data = vector_store.build_chapter_chunks(
+            chapter_id=chapter.id,
+            chapter_number=chapter.chapter_number,
+            chapter_title=chapter.title,
+            content=chapter.content,
+            summary=chapter.summary,
             chunk_size=request.chunk_size,
             overlap=request.overlap
         )
-        
-        chunk_data = []
-        for i, chunk_content in enumerate(chunks):
-            chunk_data.append({
-                "id": f"{chapter.id}_{i}",
-                "content": chunk_content,
-                "chapter_id": chapter.id,
-                "chunk_type": "content",
-                "chunk_index": i,
-                "metadata": {
-                    "chapter_number": chapter.chapter_number,
-                    "chapter_title": chapter.title
-                }
-            })
         
         if chunk_data:
             vector_store.add_chunks(novel.id, chunk_data)
