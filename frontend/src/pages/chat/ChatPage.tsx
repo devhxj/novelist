@@ -471,6 +471,49 @@ function ChatPage() {
           break;
         }
 
+        if (msg.status === 'executing') {
+          setTimelineItems(prev => {
+            let updated = [...prev];
+            
+            const currentAssistantIndex = updated.findIndex(
+              item => item.task_id === msg.task_id && item.type === 'assistant'
+            );
+            
+            if (currentAssistantIndex >= 0) {
+              const currentAssistant = updated[currentAssistantIndex];
+              
+              if (currentAssistant.content && currentAssistant.content !== '思考中...') {
+                updated[currentAssistantIndex] = {
+                  ...currentAssistant,
+                  type: 'assistant_final' as TimelineItemType
+                };
+                
+                const newRoundAssistant: TimelineItem = {
+                  id: `assistant_${msg.task_id}_round_${Date.now()}`,
+                  type: 'assistant',
+                  content: '',
+                  task_id: msg.task_id,
+                  timestamp: new Date()
+                };
+                
+                const toolItemIndex = updated.findIndex(
+                  item => item.task_id === msg.task_id && item.type === 'tool'
+                );
+                
+                if (toolItemIndex >= 0) {
+                  updated.splice(toolItemIndex, 0, newRoundAssistant);
+                } else {
+                  updated.push(newRoundAssistant);
+                }
+                
+                return updated;
+              }
+            }
+            
+            return updated;
+          });
+        }
+
         setTimelineItems(prev => {
           // 查找是否有对应的任务时间线项目
           const existingIndex = prev.findIndex(item => item.task_id === msg.task_id && item.type === 'tool');
