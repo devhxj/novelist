@@ -1,15 +1,15 @@
 """
 记忆管理模块 - Pydantic Schemas
 """
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Any
 from datetime import datetime
 
 
 class MemorySearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=500)
     search_type: str = Field(default="semantic")
-    filters: Optional[Dict[str, Any]] = None
+    filters: dict[str, Any] | None = None
     top_k: int = Field(default=10, ge=1, le=50)
 
 
@@ -17,16 +17,15 @@ class MemoryChunkResponse(BaseModel):
     id: int
     type: str
     content: str
-    chapter_id: Optional[int] = None
+    chapter_id: int | None = None
     relevance_score: float
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MemorySearchResponse(BaseModel):
-    results: List[MemoryChunkResponse]
+    results: list[MemoryChunkResponse]
     total: int
     search_time: float
 

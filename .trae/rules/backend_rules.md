@@ -105,3 +105,88 @@ response = requests.get(url)  # 同步HTTP
 - 使用类型注解
 - 遵循PEP 8规范
 - 函数和类添加docstring
+
+## Pydantic Schemas 规范（必须遵守）
+
+### 类型注解现代化（Python 3.10+）
+**必须**使用现代类型注解语法，禁止使用旧式写法：
+
+```python
+# ✅ 正确 - 现代写法（必须使用）
+def process_data(items: list[str] | None) -> dict[str, Any]:
+    ...
+
+# ❌ 错误 - 旧式写法（禁止使用）
+from typing import Optional, List, Dict
+def process_data(items: Optional[List[str]]) -> Dict[str, Any]:
+    ...
+```
+
+**转换规则：**
+- `Optional[X]` → `X | None`
+- `List[X]` → `list[X]`
+- `Dict[K, V]` → `dict[K, V]`
+- 仅在需要 `Any` 时才从 `typing` 导入，其他情况不导入 `Optional`, `List`, `Dict`
+
+### Field 默认值规范
+**必须**显式使用 `default=` 参数：
+
+```python
+# ✅ 正确 - 必须使用 default=
+class UserCreate(BaseModel):
+    name: str = Field(..., min_length=1)
+    age: int | None = Field(default=None)
+    role: str = Field(default="user")
+
+# ❌ 错误 - 禁止省略 default=
+class UserCreate(BaseModel):
+    name: str = Field(..., min_length=1)
+    age: int | None = Field(None)  # 缺少 default=
+    role: str = Field("user")      # 缺少 default=
+```
+
+**特殊说明：**
+- `Field(...)` 用于必需字段（required fields），这是正确的
+- 所有有默认值的字段**必须**写成 `Field(default=value)`
+- 原来没有默认值的字段保持不变
+
+### Model Config 规范
+**必须**使用 Pydantic v2 的 `model_config` 写法：
+
+```python
+# ✅ 正确 - Pydantic v2 写法（必须使用）
+from pydantic import BaseModel, ConfigDict
+
+class UserResponse(BaseModel):
+    id: int
+    name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+# ❌ 错误 - Pydantic v1 写法（已废弃）
+class UserResponse(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+```
+
+### 导入规范
+```python
+# ✅ 正确的导入方式
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Any  # 仅在需要时导入
+
+# ❌ 错误 - 不要导入不需要的类型
+from typing import Optional, List, Dict, Any  # Optional/List/Dict 已被现代语法替代
+```
+
+### 检查清单
+创建或修改 schemas.py 文件时，必须确保：
+- [ ] 所有类型注解使用 `X | None` 而非 `Optional[X]`
+- [ ] 所有集合类型使用 `list[X]`, `dict[K,V]` 而非 `List[X]`, `Dict[K,V]`
+- [ ] 所有带默认值的 Field 使用 `Field(default=value)` 格式
+- [ ] Model 配置使用 `model_config = ConfigDict()` 而非 `class Config:`
+- [ ] 运行 `pyright` 检查确保无类型错误
+- [ ] 不从 `typing` 导入 `Optional`, `List`, `Dict`（除非必要）

@@ -1,27 +1,26 @@
 """
 章节管理模块 - Pydantic Schemas
 """
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 
 
 class ChapterBase(BaseModel):
-    title: Optional[str] = None
-    content: Optional[str] = None
-    summary: Optional[str] = None
+    title: str | None = None
+    content: str | None = None
+    summary: str | None = None
 
 
 class ChapterCreate(ChapterBase):
     novel_id: int
-    chapter_number: Optional[int] = Field(None, description="章节号，不传则自动获取下一个")
+    chapter_number: int | None = Field(default=None, description="章节号，不传则自动获取下一个")
 
 
 class ChapterUpdate(BaseModel):
-    title: Optional[str] = None
-    content: Optional[str] = None
-    summary: Optional[str] = None
-    status: Optional[str] = None
+    title: str | None = None
+    content: str | None = None
+    summary: str | None = None
+    status: str | None = None
 
 
 class ChapterResponse(ChapterBase):
@@ -31,10 +30,9 @@ class ChapterResponse(ChapterBase):
     status: str
     word_count: int
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class NextChapterNumberResponse(BaseModel):

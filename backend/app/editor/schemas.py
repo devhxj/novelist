@@ -2,8 +2,8 @@
 文本编辑模块 - Pydantic验证模型
 """
 from datetime import datetime
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from typing import Any
+from pydantic import BaseModel, Field, ConfigDict
 from enum import Enum
 
 
@@ -25,9 +25,9 @@ class TextChangeCreate(BaseModel):
     chapter_id: int = Field(..., description="章节ID")
     change_type: ChangeTypeEnum = Field(..., description="变更类型")
     new_content: str = Field(..., description="新内容")
-    start_line: Optional[int] = Field(None, description="起始行号（部分编辑时）")
-    end_line: Optional[int] = Field(None, description="结束行号（部分编辑时）")
-    reason: Optional[str] = Field(None, description="变更原因")
+    start_line: int | None = Field(default=None, description="起始行号（部分编辑时）")
+    end_line: int | None = Field(default=None, description="结束行号（部分编辑时）")
+    reason: str | None = Field(default=None, description="变更原因")
 
 
 class DiffHunkSchema(BaseModel):
@@ -35,15 +35,15 @@ class DiffHunkSchema(BaseModel):
     old_lines: int
     new_start: int
     new_lines: int
-    changes: List[Dict[str, Any]]
+    changes: list[dict[str, Any]]
 
 
 class DiffDataSchema(BaseModel):
     change_type: str
-    hunks: List[DiffHunkSchema]
+    hunks: list[DiffHunkSchema]
     old_content: str
     new_content: str
-    summary: Dict[str, int]
+    summary: dict[str, int]
 
 
 class TextChangeResponse(BaseModel):
@@ -51,22 +51,21 @@ class TextChangeResponse(BaseModel):
     session_id: str
     chapter_id: int
     change_type: str
-    diff_data: Optional[DiffDataSchema] = None
-    old_content: Optional[str] = None
-    new_content: Optional[str] = None
-    start_line: Optional[int] = None
-    end_line: Optional[int] = None
+    diff_data: DiffDataSchema | None = None
+    old_content: str | None = None
+    new_content: str | None = None
+    start_line: int | None = None
+    end_line: int | None = None
     status: str
-    reason: Optional[str] = None
+    reason: str | None = None
     created_at: datetime
-    resolved_at: Optional[datetime] = None
+    resolved_at: datetime | None = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TextChangeListResponse(BaseModel):
-    changes: List[TextChangeResponse]
+    changes: list[TextChangeResponse]
     total: int
     pending_count: int
 

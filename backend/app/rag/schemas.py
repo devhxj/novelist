@@ -1,8 +1,8 @@
 """
 RAG检索模块 - Pydantic Schemas
 """
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Any
 from datetime import datetime
 
 
@@ -10,31 +10,30 @@ class RAGQueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000)
     context_type: str = Field(default="writing")
     top_k: int = Field(default=5, ge=1, le=20)
-    include_chapters: Optional[List[int]] = None
-    include_characters: Optional[List[int]] = None
+    include_chapters: list[int] | None = None
+    include_characters: list[int] | None = None
 
 
 class RAGContextChunk(BaseModel):
     chunk_id: str
     content: str
     source_type: str
-    source_id: Optional[int] = None
+    source_id: int | None = None
     relevance_score: float
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
 
 class RAGContextResponse(BaseModel):
     context_id: int
     novel_id: int
     context_type: str
-    query: Optional[str] = None
+    query: str | None = None
     context_content: str
-    chunks: List[RAGContextChunk]
+    chunks: list[RAGContextChunk]
     total_chunks: int
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WritingContextRequest(BaseModel):
@@ -49,7 +48,7 @@ class WritingContextResponse(BaseModel):
     chapter_id: int
     novel_id: int
     context: str
-    previous_summary: Optional[str] = None
-    characters: List[Dict[str, Any]]
-    plot_hints: List[Dict[str, Any]]
+    previous_summary: str | None = None
+    characters: list[dict[str, Any]]
+    plot_hints: list[dict[str, Any]]
     context_length: int

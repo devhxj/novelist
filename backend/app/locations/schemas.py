@@ -1,8 +1,8 @@
 """
 地点管理模块 - Pydantic验证模型
 """
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from typing import Any
+from pydantic import BaseModel, Field, ConfigDict
 from enum import Enum
 from datetime import datetime
 
@@ -29,13 +29,13 @@ class LocationType(str, Enum):
 class LocationBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     location_type: LocationType = Field(default=LocationType.OTHER)
-    description: Optional[str] = None
-    geo_info: Optional[Dict[str, Any]] = None
-    related_characters: Optional[List[int]] = None
-    tags: Optional[List[str]] = None
-    parent_location_id: Optional[int] = None
-    first_appearance_chapter_id: Optional[int] = None
-    extra_metadata: Optional[Dict[str, Any]] = None
+    description: str | None = None
+    geo_info: dict[str, Any] | None = None
+    related_characters: list[int] | None = None
+    tags: list[str] | None = None
+    parent_location_id: int | None = None
+    first_appearance_chapter_id: int | None = None
+    extra_metadata: dict[str, Any] | None = None
 
 
 class LocationCreate(LocationBase):
@@ -43,32 +43,31 @@ class LocationCreate(LocationBase):
 
 
 class LocationUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=200)
-    location_type: Optional[LocationType] = None
-    description: Optional[str] = None
-    geo_info: Optional[Dict[str, Any]] = None
-    related_characters: Optional[List[int]] = None
-    tags: Optional[List[str]] = None
-    parent_location_id: Optional[int] = None
-    extra_metadata: Optional[Dict[str, Any]] = None
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    location_type: LocationType | None = None
+    description: str | None = None
+    geo_info: dict[str, Any] | None = None
+    related_characters: list[int] | None = None
+    tags: list[str] | None = None
+    parent_location_id: int | None = None
+    extra_metadata: dict[str, Any] | None = None
 
 
 class LocationResponse(LocationBase):
     id: int
     novel_id: int
-    related_chapters: Optional[List[int]] = None
-    parent_name: Optional[str] = None
-    children_count: Optional[int] = 0
+    related_chapters: list[int] | None = None
+    parent_name: str | None = None
+    children_count: int | None = 0
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LocationNetworkResponse(BaseModel):
     """地点网络响应（层级结构）"""
-    nodes: List[Dict[str, Any]]
-    edges: List[Dict[str, Any]]
+    nodes: list[dict[str, Any]]
+    edges: list[dict[str, Any]]
     total_nodes: int
-    root_locations: List[Dict[str, Any]]
+    root_locations: list[dict[str, Any]]
