@@ -3,7 +3,8 @@
 注意：accept_edit和reject_edit是用户操作，不暴露给AI
 """
 from contextvars import ContextVar
-from typing import Any, Dict, List, Optional
+from typing import Any
+import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -13,10 +14,141 @@ from app.novels.models import Novel
 from app.chapters.models import Chapter
 from app.editor.service import get_edit_session_manager
 from app.editor.models import EditSession, EditSessionStatus, EditChange
-from app.core.context_builder import ContextBuilder
 from app.core.permissions import verify_novel_ownership
+from app.core.diff_engine import diff_engine
 
 _subagent_running_var: ContextVar[bool] = ContextVar("_subagent_running_var", default=False)
+
+
+def _build_agent_task_id(prefix: str = "task") -> str:
+    return f"{prefix}_{uuid.uuid4().hex}"
+
+
+def _normalize_subagent_task_type(task_type: str) -> str:
+    type_aliases = {
+        "write": "write_chapter",
+        "writing": "write_chapter",
+        "generate": "write_chapter",
+        "generate_chapter": "write_chapter",
+        "review_chapter": "review",
+        "check_consistency": "review",
+        "manage_foreshadowing": "review",
+        "review": "review",
+        "memory": "update_memory",
+    }
+    return type_aliases.get(task_type, task_type)
+
+
+async def _execute_subagent_task(
+    *,
+    db: AsyncSession,
+    user_id: int,
+    task_type: str,
+    novel_id: int,
+    chapter_id: int | None = None,
+    instruction: str | None = None,
+    parameters: dict[str, Any] | None = None,
+    agent_role: str | None = None,
+    agent_id: str | None = None,
+    model: str | None = None,
+) -> MCPToolResult:
+    if _subagent_running_var.get():
+        return MCPToolResult(
+            success=False,
+            error="子Agent不允许启动子Agent，避免无限递归",
+        )
+
+    normalized_type = _normalize_subagent_task_type(task_type)
+    novel = await verify_novel_ownership(db, novel_id, user_id)
+    if not novel:
+        return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
+
+    from app.agents.registry import get_agent_for_task, get_all_specs
+    from app.agents.context_provider import build_subagent_context
+    from app.agents.base import AgentTask, TaskType, SubAgentReport
+
+    registry_entry = get_agent_for_task(normalized_type)
+    if not registry_entry:
+        available = list(get_all_specs().keys())
+        return MCPToolResult(
+            success=False,
+            error=f"未知的任务类型 '{task_type}'，可用类型: {', '.join(available)}",
+        )
+
+    agent_cls, spec = registry_entry
+    if spec.requires_chapter_id and not chapter_id:
+        return MCPToolResult(
+            success=False,
+            error=f"任务类型 '{normalized_type}' 需要 chapter_id 参数",
+        )
+
+    task_parameters = dict(parameters or {})
+    if instruction:
+        task_parameters.setdefault("instruction", instruction)
+    if model:
+        task_parameters["model"] = model
+    if agent_role:
+        task_parameters["agent_role"] = agent_role
+    if agent_id:
+        task_parameters["agent_id"] = agent_id
+
+    registry_to_task_type = {
+        "write_chapter": TaskType.GENERATE_CHAPTER,
+        "review": TaskType.REVIEW_CHAPTER,
+        "update_memory": TaskType.UPDATE_MEMORY,
+    }
+
+    try:
+        context = await build_subagent_context(
+            db=db,
+            novel_id=novel_id,
+            spec=spec,
+            chapter_id=chapter_id,
+            instruction=instruction,
+            extra_parameters=task_parameters,
+        )
+
+        task = AgentTask(
+            task_id=_build_agent_task_id("sub"),
+            task_type=registry_to_task_type.get(normalized_type, TaskType.GENERATE_CHAPTER),
+            novel_id=novel_id,
+            chapter_id=chapter_id,
+            parameters=task_parameters,
+            context=context,
+        )
+
+        agent_factory = agent_cls
+        token = _subagent_running_var.set(True)
+        try:
+            agent = agent_factory()  # type: ignore[call-arg]
+            result = await agent.execute(task)
+        finally:
+            _subagent_running_var.reset(token)
+
+        report = SubAgentReport(
+            task_type=normalized_type,
+            success=result.success,
+            summary=result.result.get("summary", "任务完成") if result.success else f"任务失败: {result.error}",
+            key_findings=result.result.get("key_findings", []) if result.success else [],
+            suggestions=result.suggestions,
+            data=result.result,
+            error=result.error,
+        )
+
+        report_data = report.to_dict()
+        report_data["capability_profile"] = {
+            "allowed_tools": spec.allowed_tools,
+            "allowed_resources": spec.allowed_resources,
+            "allow_subagent_spawn": spec.allow_subagent_spawn,
+        }
+
+        return MCPToolResult(
+            success=report.success,
+            data=report_data,
+            error=report.error,
+        )
+    except Exception as e:
+        return MCPToolResult(success=False, error=f"子Agent执行失败: {str(e)}")
 
 
 class StartEditSessionTool(BaseMCPTool):
@@ -44,7 +176,7 @@ class StartEditSessionTool(BaseMCPTool):
         db: AsyncSession,
         novel_id: int,
         user_id: int,
-        chapter_id: Optional[int] = None,
+        chapter_id: int | None = None,
         session_id: str = "",
         **kwargs
     ) -> MCPToolResult:
@@ -251,8 +383,7 @@ class ApplyEditTool(BaseMCPTool):
 
                 restored_content = snapshots[snapshot_key]
                 if dry_run:
-                    from app.core.diff_engine import DiffEngine
-                    diff_result = DiffEngine.compute_diff(edit_session.working_content or "", restored_content)
+                    diff_result = diff_engine.compute_diff(edit_session.working_content or "", restored_content)
                     return MCPToolResult(
                         success=True,
                         data={
@@ -312,8 +443,7 @@ class ApplyEditTool(BaseMCPTool):
                     total_replacements += replace_count
 
                 if dry_run:
-                    from app.core.diff_engine import DiffEngine as DE2
-                    diff_result = DE2.compute_diff(edit_session.working_content or "", working)
+                    diff_result = diff_engine.compute_diff(edit_session.working_content or "", working)
                     return MCPToolResult(
                         success=True,
                         data={
@@ -384,7 +514,7 @@ class ApplyEditTool(BaseMCPTool):
                     )
                     if error_msg:
                         return MCPToolResult(success=False, error=error_msg)
-                    diff_result = DiffEngine.compute_diff(working, new_working)
+                    diff_result = diff_engine.compute_diff(working, new_working)
                     return MCPToolResult(
                         success=True,
                         data={
@@ -447,7 +577,7 @@ class ApplyEditTool(BaseMCPTool):
             await manager.apply_change(
                 edit_session=edit_session,
                 change_type="partial_edit" if change_type in ("partial_edit", "line_range_replace") else change_type,
-                new_content=new_content,
+                new_content=new_content or "",
                 start_line=effective_start_line,
                 end_line=effective_end_line,
                 reason=reason
@@ -526,9 +656,9 @@ class EditChapterContentTool(BaseMCPTool):
         chapter_id: int,
         change_type: str,
         new_content: str,
-        start_line: Optional[int] = None,
-        end_line: Optional[int] = None,
-        reason: Optional[str] = None,
+        start_line: int | None = None,
+        end_line: int | None = None,
+        reason: str | None = None,
         **kwargs
     ) -> MCPToolResult:
         try:
@@ -677,7 +807,7 @@ class RunAgentTaskTool(BaseMCPTool):
     """执行Agent任务"""
     
     name = "run_agent_task"
-    description = "由主Agent调度子Agent执行任务（写作/审核/一致性/规划）。task_type可选：generate_chapter/review_chapter/check_consistency/update_memory/plan_plot/manage_foreshadowing，也支持别名 writing/write/review/consistency/memory/plan/foreshadowing。"
+    description = "兼容旧接口。内部统一转发到 run_subagent，并应用子Agent能力边界。建议新调用统一使用 run_subagent。"
     category = MCPToolCategory.WRITING_ASSISTANT
     parameters_schema = {
         "type": "object",
@@ -693,6 +823,10 @@ class RunAgentTaskTool(BaseMCPTool):
             "chapter_id": {
                 "type": "integer",
                 "description": "章节ID（可选）"
+            },
+            "instruction": {
+                "type": "string",
+                "description": "给子Agent的额外指令"
             },
             "parameters": {
                 "type": "object",
@@ -720,111 +854,26 @@ class RunAgentTaskTool(BaseMCPTool):
         user_id: int,
         task_type: str,
         novel_id: int,
-        chapter_id: Optional[int] = None,
-        parameters: Optional[Dict[str, Any]] = None,
-        agent_role: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        model: Optional[str] = None,
+        chapter_id: int | None = None,
+        instruction: str | None = None,
+        parameters: dict[str, Any] | None = None,
+        agent_role: str | None = None,
+        agent_id: str | None = None,
+        model: str | None = None,
         **kwargs
     ) -> MCPToolResult:
-        try:
-            task_type_map = {
-                "writing": "generate_chapter",
-                "write": "generate_chapter",
-                "review": "review_chapter",
-                "consistency": "check_consistency",
-                "memory": "update_memory",
-                "plan": "plan_plot",
-                "foreshadowing": "manage_foreshadowing"
-            }
-            normalized_type = task_type_map.get(task_type, task_type)
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-            
-            from app.agents.base import AgentTask, TaskType, AgentRole
-            from app.agents.reviewer import ReviewerAgent
-            from app.agents.memory import MemoryAgent
-            from app.consistency.service import ConsistencyChecker
-            
-            task_parameters = parameters or {}
-            if model:
-                task_parameters["model"] = model
-            if agent_role:
-                task_parameters["agent_role"] = agent_role
-            if agent_id:
-                task_parameters["agent_id"] = agent_id
-            
-            context: Dict[str, Any] = {}
-            if chapter_id:
-                chapter_result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
-                chapter = chapter_result.scalar_one_or_none()
-                if chapter:
-                    task_parameters.setdefault("chapter_number", chapter.chapter_number)
-                    context_builder = ContextBuilder(db, novel_id)
-                    story_brief = await context_builder.build_story_brief(
-                        chapter_number=chapter.chapter_number,
-                        context_size=3000,
-                        additional_context=task_parameters
-                    )
-                    layered_context = story_brief.get("layered_context", {})
-                    context = {
-                        "previous_summary": layered_context.get("previous_summary"),
-                        "characters": layered_context.get("characters", []),
-                        "plot_hints": layered_context.get("plot_hints", []),
-                        "story_outline": story_brief.get("outline", {}),
-                        "active_plot_lines": story_brief.get("active_plot_lines", []),
-                        "upcoming_plot_nodes": story_brief.get("upcoming_plot_nodes", []),
-                        "due_plot_nodes": story_brief.get("due_plot_nodes", []),
-                        "timeline_entries": story_brief.get("timeline_entries", []),
-                        "priority_timeline_entries": story_brief.get("priority_timeline_entries", []),
-                        "unresolved_foreshadowings": story_brief.get("foreshadowing_entries", []),
-                        "due_foreshadowings": story_brief.get("due_foreshadowing_entries", []),
-                        "retrieved_memory": story_brief.get("retrieved_memory", []),
-                        "prewrite_recommendations": story_brief.get("prewrite_recommendations", []),
-                        "chapter_mission": story_brief.get("chapter_mission", {}),
-                        "story_brief": story_brief.get("brief_text", ""),
-                        "author_preferences": story_brief.get("creative_profile", {}),
-                    }
-            if normalized_type == "check_consistency":
-                checker = ConsistencyChecker(db, novel_id)
-                context["consistency_result"] = await checker.check_all(
-                    chapter_ids=[chapter_id] if chapter_id else None,
-                    check_types=task_parameters.get("check_types")
-                )
-            
-            task = AgentTask(
-                task_id=f"task_{novel_id}_{task_type}_{chapter_id or 'general'}",
-                task_type=TaskType(normalized_type),
-                novel_id=novel_id,
-                chapter_id=chapter_id,
-                parameters=task_parameters,
-                context=context
-            )
-            
-            if normalized_type in ("review_chapter", "check_consistency", "manage_foreshadowing"):
-                agent = ReviewerAgent()
-                result = await agent.execute(task)
-            elif normalized_type == "update_memory":
-                agent = MemoryAgent()
-                result = await agent.execute(task)
-            else:
-                from app.agents.factory import create_default_coordinator
-                coordinator = create_default_coordinator()
-                result = await coordinator.execute(task)
-            
-            return MCPToolResult(
-                success=result.success,
-                data=result.to_dict(),
-                error=result.error
-            )
-        except ValueError:
-            return MCPToolResult(
-                success=False,
-                error="无效的task_type，可用: generate_chapter, review_chapter, check_consistency, update_memory, plan_plot, manage_foreshadowing"
-            )
-        except Exception as e:
-            return MCPToolResult(success=False, error=str(e))
+        return await _execute_subagent_task(
+            db=db,
+            user_id=user_id,
+            task_type=task_type,
+            novel_id=novel_id,
+            chapter_id=chapter_id,
+            instruction=instruction,
+            parameters=parameters,
+            agent_role=agent_role,
+            agent_id=agent_id,
+            model=model,
+        )
 
 
 class RunSubagentTool(BaseMCPTool):
@@ -858,115 +907,53 @@ class RunSubagentTool(BaseMCPTool):
             "parameters": {
                 "type": "object",
                 "description": "任务特定参数（可选，如 model、style、target_length 等）"
-            }
+            },
+            "novel_id": {
+                "type": "integer",
+                "description": "小说ID"
+            },
+            "agent_role": {
+                "type": "string",
+                "description": "指定Agent角色（可选）"
+            },
+            "agent_id": {
+                "type": "string",
+                "description": "指定Agent ID（可选）"
+            },
+            "model": {
+                "type": "string",
+                "description": "指定模型（可选）"
+            },
         },
-        "required": ["task_type"]
+        "required": ["task_type", "novel_id"]
     }
 
-    async def execute(self, **kwargs) -> MCPToolResult:
-        if _subagent_running_var.get():
-            return MCPToolResult(
-                success=False,
-                error="子Agent不允许启动子Agent，避免无限递归"
-            )
-
-        task_type = str(kwargs.get("task_type", ""))
-        chapter_id = kwargs.get("chapter_id")
-        instruction = kwargs.get("instruction")
-        parameters = kwargs.get("parameters", {})
-        novel_id = kwargs.get("novel_id")
-        db = kwargs.get("db")
-
-        if not novel_id or not db:
-            return MCPToolResult(success=False, error="novel_id and db are required")
-
-        from app.agents.registry import get_agent_for_task, get_all_specs
-        from app.agents.context_provider import build_subagent_context
-        from app.agents.base import AgentTask, TaskType, SubAgentReport
-        import uuid
-
-        TYPE_ALIASES = {
-            "write": "write_chapter",
-            "writing": "write_chapter",
-            "generate": "write_chapter",
-            "generate_chapter": "write_chapter",
-            "review_chapter": "review",
-            "check_consistency": "review",
-            "manage_foreshadowing": "review",
-            "review": "review",
-            "memory": "update_memory",
-        }
-
-        REGISTRY_TO_TASK_TYPE = {
-            "write_chapter": TaskType.GENERATE_CHAPTER,
-            "review": TaskType.REVIEW_CHAPTER,
-            "update_memory": TaskType.UPDATE_MEMORY,
-        }
-
-        normalized_type = TYPE_ALIASES.get(task_type, task_type)
-
-        entry = get_agent_for_task(normalized_type)
-        if not entry:
-            available = list(get_all_specs().keys())
-            return MCPToolResult(
-                success=False,
-                error=f"未知的任务类型 '{task_type}'，可用类型: {', '.join(available)}"
-            )
-
-        agent_cls, spec = entry
-
-        if spec.requires_chapter_id and not chapter_id:
-            return MCPToolResult(
-                success=False,
-                error=f"任务类型 '{normalized_type}' 需要 chapter_id 参数"
-            )
-
-        try:
-            context = await build_subagent_context(
-                db=db,
-                novel_id=novel_id,
-                spec=spec,
-                chapter_id=chapter_id,
-                instruction=instruction,
-                extra_parameters=parameters,
-            )
-
-            task_type_enum = REGISTRY_TO_TASK_TYPE.get(normalized_type, TaskType.GENERATE_CHAPTER)
-
-            task = AgentTask(
-                task_id=f"sub_{uuid.uuid4().hex[:12]}",
-                task_type=task_type_enum,
-                novel_id=novel_id,
-                chapter_id=chapter_id,
-                parameters=parameters,
-                context=context,
-            )
-
-            agent = agent_cls()
-            token = _subagent_running_var.set(True)
-            try:
-                result = await agent.execute(task)
-            finally:
-                _subagent_running_var.reset(token)
-
-            report = SubAgentReport(
-                task_type=normalized_type,
-                success=result.success,
-                summary=result.result.get("summary", "任务完成") if result.success else f"任务失败: {result.error}",
-                key_findings=result.result.get("key_findings", []) if result.success else [],
-                suggestions=result.suggestions,
-                data=result.result,
-                error=result.error,
-            )
-
-            return MCPToolResult(
-                success=report.success,
-                data=report.to_dict(),
-                error=report.error,
-            )
-
-        except Exception as e:
-            return MCPToolResult(success=False, error=f"子Agent执行失败: {str(e)}")
+    async def execute(
+        self,
+        db: AsyncSession,
+        user_id: int,
+        task_type: str,
+        novel_id: int,
+        chapter_id: int | None = None,
+        instruction: str | None = None,
+        parameters: dict[str, Any] | None = None,
+        agent_role: str | None = None,
+        agent_id: str | None = None,
+        model: str | None = None,
+        **kwargs,
+    ) -> MCPToolResult:
+        return await _execute_subagent_task(
+            db=db,
+            user_id=user_id,
+            task_type=task_type,
+            novel_id=novel_id,
+            chapter_id=chapter_id,
+            instruction=instruction,
+            parameters=parameters,
+            agent_role=agent_role,
+            agent_id=agent_id,
+            model=model,
+        )
 
 
 class GetPendingChangesTool(BaseMCPTool):

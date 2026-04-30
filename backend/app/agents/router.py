@@ -2,6 +2,7 @@
 Agent系统API路由
 """
 import logging
+import uuid
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func
 
@@ -34,11 +35,11 @@ async def get_agent_status(
 async def create_task(
     novel: NovelOwner,
     task_type: str,
-    chapter_id: int = None,
-    parameters: dict = None,
-    agent_role: str = None,
-    agent_id: str = None,
-    model: str = None
+    chapter_id: int | None = None,
+    parameters: dict[str, object] | None = None,
+    agent_role: str | None = None,
+    agent_id: str | None = None,
+    model: str | None = None,
 ):
     """创建Agent任务"""
     try:
@@ -51,7 +52,7 @@ async def create_task(
             task_parameters["model"] = model
         
         task = AgentTask(
-            task_id=f"task_{novel.id}_{task_type}_{chapter_id or 'general'}",
+            task_id=f"task_{uuid.uuid4().hex}",
             task_type=TaskType(task_type),
             novel_id=novel.id,
             chapter_id=chapter_id,

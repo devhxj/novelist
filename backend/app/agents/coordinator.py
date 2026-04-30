@@ -2,8 +2,9 @@
 主控Agent - 负责任务调度和协调
 """
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Any
 from datetime import datetime, timezone
+import uuid
 
 from .base import BaseAgent, AgentTask, AgentResult, AgentRole, TaskType, TaskStatus
 from app.core.database import AsyncSessionLocal
@@ -31,9 +32,9 @@ class CoordinatorAgent(BaseAgent):
     
     def __init__(self, agent_id: str = "coordinator_001"):
         super().__init__(agent_id, AgentRole.COORDINATOR)
-        self.agents: Dict[str, BaseAgent] = {}
-        self.task_queue: List[AgentTask] = []
-        self.completed_tasks: Dict[str, AgentResult] = {}
+        self.agents: dict[str, BaseAgent] = {}
+        self.task_queue: list[AgentTask] = []
+        self.completed_tasks: dict[str, AgentResult] = {}
         self.max_auto_depth = 8
     
     def register_agent(self, agent: BaseAgent):
@@ -100,7 +101,7 @@ class CoordinatorAgent(BaseAgent):
         await self._save_task_record(task, result=result)
 
         if result.success and result.next_actions:
-            subtask_results: List[Dict[str, Any]] = []
+            subtask_results: list[dict[str, Any]] = []
             for action in result.next_actions:
                 next_task = self._build_next_task(action, task)
                 if not next_task:
@@ -119,8 +120,8 @@ class CoordinatorAgent(BaseAgent):
     async def _save_task_record(
         self,
         task: AgentTask,
-        result: Optional[AgentResult] = None,
-        error: Optional[str] = None
+        result: AgentResult | None = None,
+        error: str | None = None
     ) -> None:
         try:
             from .models import AgentTaskRecord
@@ -177,7 +178,7 @@ class CoordinatorAgent(BaseAgent):
         except Exception as persist_error:
             self.logger.warning(f"Failed to persist task {task.task_id}: {persist_error}")
     
-    def _find_suitable_agent(self, task: AgentTask) -> Optional[BaseAgent]:
+    def _find_suitable_agent(self, task: AgentTask) -> BaseAgent | None:
         """找到能处理该任务的Agent"""
         agent_id = task.parameters.get("agent_id")
         agent_role = task.parameters.get("agent_role")
@@ -195,15 +196,17 @@ class CoordinatorAgent(BaseAgent):
                 return agent
         return None
     
-    def _build_next_task(self, action: Dict[str, Any], parent_task: AgentTask) -> Optional[AgentTask]:
+    def _build_next_task(self, action: dict[str, Any], parent_task: AgentTask) -> AgentTask | None:
         """构建后续任务"""
         action_type = action.get("type")
 
         if action_type != "create_task":
             return None
 
+        unique_suffix = action.get("suffix") or uuid.uuid4().hex[:8]
+
         return AgentTask(
-                task_id=f"{parent_task.task_id}_{action.get('suffix', 'next')}",
+                task_id=f"{parent_task.task_id}_{unique_suffix}",
                 task_type=TaskType(action.get("task_type")),
                 novel_id=parent_task.novel_id,
                 chapter_id=action.get("chapter_id", parent_task.chapter_id),
@@ -214,7 +217,7 @@ class CoordinatorAgent(BaseAgent):
                 depth=parent_task.depth + 1
             )
     
-    def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
+    def get_task_status(self, task_id: str) -> dict[str, Any] | None:
         """获取任务状态"""
         if task_id in self.completed_tasks:
             return self.completed_tasks[task_id].to_dict()
@@ -225,11 +228,11 @@ class CoordinatorAgent(BaseAgent):
         
         return None
     
-    def get_pending_tasks(self) -> List[Dict[str, Any]]:
+    def get_pending_tasks(self) -> list[dict[str, Any]]:
         """获取待处理任务"""
         return [task.to_dict() for task in self.task_queue if task.status == TaskStatus.PENDING]
     
-    def get_agent_status(self) -> Dict[str, Any]:
+    def get_agent_status(self) -> dict[str, Any]:
         """获取所有Agent状态"""
         return {
             "coordinator_id": self.agent_id,

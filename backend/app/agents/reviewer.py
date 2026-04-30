@@ -16,8 +16,13 @@ from .base import BaseAgent, AgentTask, AgentResult, AgentRole, TaskType, SubAge
 from .registry import register_agent
 from app.core.database import AsyncSessionLocal
 from app.consistency.service import ConsistencyChecker
-from app.timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryStatus, TimeHorizon
-from app.timeline.schemas import TimelineEntryCreate, TimelineEntryResolve
+from app.timeline.models import TimelineEntry, TimelineEntryStatus
+from app.timeline.schemas import (
+    TimelineEntryCreate,
+    TimelineEntryResolve,
+    TimelineEntryCategory as TimelineEntryCategorySchema,
+    TimeHorizon as TimeHorizonSchema,
+)
 from app.chapters.models import Chapter
 
 logger = logging.getLogger(__name__)
@@ -28,7 +33,28 @@ REVIEW_SPEC = SubAgentSpec(
     description="全量审核章节质量，包含规则初筛、LLM语义深审、角色/情节/时间线一致性检查、伏笔管理",
     system_prompt="你是一位严格的小说编辑审核员，负责全面检查章节质量、角色一致性、情节连贯性和伏笔管理。",
     required_context_keys=["chapter_content", "chapter_info"],
-    optional_context_keys=["characters", "previous_summary", "consistency_result"],
+    optional_context_keys=[
+        "characters",
+        "previous_summary",
+        "consistency_result",
+        "active_plot_lines",
+        "unresolved_foreshadowings",
+    ],
+    allowed_tools=[
+        "get_chapter_content",
+        "get_character_list",
+        "get_character_detail",
+        "list_timeline_entries",
+        "get_timeline_context",
+        "get_plot_events",
+        "get_pending_changes",
+        "read_chapter_for_edit",
+    ],
+    allowed_resources=[
+        "novel://{novel_id}/summary",
+        "chapter://{chapter_id}",
+        "novel://{novel_id}/characters",
+    ],
     requires_chapter_id=True,
     result_description="返回审核评分、问题列表、一致性报告和改进建议",
 )
@@ -184,14 +210,12 @@ class ReviewerAgent(BaseAgent):
                 active_plot_lines=active_plot_lines,
             )
 
-            response = await llm_service.generate_text(
+            return await llm_service.generate_json(
                 prompt=prompt,
                 system_prompt=REVIEW_SYSTEM_PROMPT,
                 temperature=0.3,
                 max_tokens=1024,
             )
-
-            return self._parse_llm_review_response(response)
 
         except Exception as e:
             self.logger.warning(f"LLM review failed, falling back to rule-only: {e}")
@@ -328,7 +352,7 @@ class ReviewerAgent(BaseAgent):
         async with AsyncSessionLocal() as db:
             query = select(TimelineEntry).where(
                 TimelineEntry.novel_id == task.novel_id,
-                TimelineEntry.category == TimelineEntryCategory.FORESHADOWING.value,
+                TimelineEntry.category == "foreshadowing",
             )
             if status:
                 query = query.where(TimelineEntry.status == status)
@@ -373,7 +397,7 @@ class ReviewerAgent(BaseAgent):
                     return {"error": "source_chapter_id 无效或不属于当前小说"}
 
             entry_data = TimelineEntryCreate(
-                category=TimelineEntryCategory.FORESHADOWING,
+                category=TimelineEntryCategorySchema.FORESHADOWING,
                 title=title,
                 description=parameters.get("description"),
                 detail_json={
@@ -381,7 +405,7 @@ class ReviewerAgent(BaseAgent):
                     "expected_resolution": "",
                 },
                 target_chapter=None,
-                time_horizon=TimeHorizon.UNDEFINED,
+                time_horizon=TimeHorizonSchema.UNDEFINED,
                 importance=parameters.get("importance", 3),
                 source="ai_generated",
                 source_chapter_id=source_chapter_id,
@@ -445,11 +469,12 @@ class ReviewerAgent(BaseAgent):
             await db.commit()
             await db.refresh(entry)
 
+            resolved_at = entry.resolved_at
             return {
                 "id": entry.id,
                 "title": entry.title,
                 "status": entry.status,
                 "resolved_chapter_id": entry.resolved_chapter_id,
                 "resolution_notes": entry.detail_json.get("resolution_notes") if entry.detail_json else None,
-                "resolved_at": entry.resolved_at.isoformat() if entry.resolved_at else None
+                "resolved_at": resolved_at.isoformat() if resolved_at else None
             }

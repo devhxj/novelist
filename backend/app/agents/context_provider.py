@@ -95,6 +95,27 @@ async def _get_story_brief(db: AsyncSession, novel_id: int, chapter_id: int | No
         return None
 
 
+async def _build_story_brief_snapshot(
+    db: AsyncSession,
+    novel_id: int,
+    chapter_id: int | None,
+) -> dict[str, Any]:
+    from app.core.context_builder import ContextBuilder
+
+    builder = ContextBuilder(db, novel_id)
+    chapter_number = 1
+    if chapter_id:
+        ch_result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
+        chapter = ch_result.scalar_one_or_none()
+        if chapter:
+            chapter_number = chapter.chapter_number
+
+    return await builder.build_story_brief(
+        chapter_number=chapter_number,
+        context_size=3000,
+    )
+
+
 @register_context_builder("previous_summary")
 async def _get_previous_summary(db: AsyncSession, novel_id: int, chapter_id: int | None) -> str | None:
     if not chapter_id:
@@ -130,6 +151,30 @@ async def _get_layered_context(db: AsyncSession, novel_id: int, chapter_id: int 
     except Exception as e:
         logger.warning(f"Failed to build layered context: {e}")
         return {}
+
+
+@register_context_builder("active_plot_lines")
+async def _get_active_plot_lines(db: AsyncSession, novel_id: int, chapter_id: int | None) -> list[dict[str, Any]]:
+    try:
+        story_brief = await _build_story_brief_snapshot(db, novel_id, chapter_id)
+        return story_brief.get("active_plot_lines", [])
+    except Exception as e:
+        logger.warning(f"Failed to load active plot lines: {e}")
+        return []
+
+
+@register_context_builder("unresolved_foreshadowings")
+async def _get_unresolved_foreshadowings(
+    db: AsyncSession,
+    novel_id: int,
+    chapter_id: int | None,
+) -> list[dict[str, Any]]:
+    try:
+        story_brief = await _build_story_brief_snapshot(db, novel_id, chapter_id)
+        return story_brief.get("foreshadowing_entries", [])
+    except Exception as e:
+        logger.warning(f"Failed to load unresolved foreshadowings: {e}")
+        return []
 
 
 @register_context_builder("consistency_result")

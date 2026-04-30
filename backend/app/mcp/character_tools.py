@@ -13,6 +13,7 @@ from app.characters.schemas import (
 )
 from app.characters.service import CharacterService
 from app.core.permissions import verify_novel_ownership
+from app.mcp.novel_tools import _invalidate_character_cache
 
 
 class GetCharacterNetworkTool(BaseMCPTool):
@@ -182,6 +183,7 @@ class UpdateCharacterRelationTool(BaseMCPTool):
                     established_chapter_id=established_chapter_id,
                 )
                 old_rel, new_rel = await service.evolve_relation(relation_id, evolve_data)
+                await _invalidate_character_cache(novel_id)
                 return MCPToolResult(
                     success=True,
                     data={
@@ -221,6 +223,7 @@ class UpdateCharacterRelationTool(BaseMCPTool):
                 relation = await service.update_relation(relation_id, update_data)
                 if not relation:
                     return MCPToolResult(success=False, error=f"关系 {relation_id} 不存在或不属于当前小说")
+                await _invalidate_character_cache(novel_id)
                 return MCPToolResult(
                     success=True,
                     data={
@@ -247,6 +250,7 @@ class UpdateCharacterRelationTool(BaseMCPTool):
                     established_chapter_id=established_chapter_id,
                 )
                 relation = await service.add_relation(create_data)
+                await _invalidate_character_cache(novel_id)
                 return MCPToolResult(
                     success=True,
                     data={

@@ -3,7 +3,7 @@ MCP工具API路由
 提供MCP工具的HTTP接口
 """
 from fastapi import APIRouter, Query, Body
-from typing import Optional, List
+from typing import Optional
 
 from app.core.response import ApiResponse
 from app.core.database import DBSession
@@ -12,6 +12,7 @@ from app.core.dependencies import NovelOwner
 from app.novels.models import Novel
 from .base import MCPToolCategory
 from .registry import get_mcp_registry
+from app.agents.registry import get_agent_for_task, get_all_specs
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/mcp", tags=["mcp"])
 async def list_tools(
     db: DBSession,
     current_user: CurrentUserDep,
-    category: Optional[str] = Query(None, description="工具分类筛选")
+    category: str | None = Query(None, description="工具分类筛选")
 ):
     """
     列出所有可用的MCP工具
@@ -51,6 +52,37 @@ async def list_categories(
     result = registry.list_by_category()
     
     return ApiResponse.success(result)
+
+
+@router.get("/tools/subagents/{task_type}")
+async def list_subagent_tools(
+    task_type: str,
+    db: DBSession,
+    current_user: CurrentUserDep
+):
+    """列出某个子Agent允许使用的工具和资源范围"""
+    entry = get_agent_for_task(task_type)
+    if not entry:
+        available = list(get_all_specs().keys())
+        return ApiResponse.error(
+            "NOT_FOUND",
+            f"Unknown subagent task type: {task_type}",
+            details={"available_task_types": available},
+            status_code=404,
+        )
+
+    _, spec = entry
+    registry = get_mcp_registry()
+    return ApiResponse.success(
+        {
+            "task_type": task_type,
+            "display_name": spec.display_name,
+            "allowed_tools": registry.list_tools(allowed_names=spec.allowed_tools),
+            "allowed_tool_names": spec.allowed_tools,
+            "allowed_resources": spec.allowed_resources,
+            "allow_subagent_spawn": spec.allow_subagent_spawn,
+        }
+    )
 
 
 @router.get("/tools/{tool_name}")

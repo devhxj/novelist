@@ -332,7 +332,8 @@ class LLMService:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         stream: bool = False,
-        tools: Optional[List[Dict[str, Any]]] = None
+        tools: Optional[List[Dict[str, Any]]] = None,
+        response_format: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         api_base, api_key, selected_model = self._get_model_config(model)
         
@@ -357,6 +358,9 @@ class LLMService:
         
         if tools:
             payload["tools"] = tools
+        
+        if response_format:
+            payload["response_format"] = response_format
         
         _apply_reasoning_params(payload, selected_model)
         
@@ -437,7 +441,8 @@ class LLMService:
         system_prompt: Optional[str] = None,
         model: Optional[str] = None,
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        response_format: Optional[Dict[str, Any]] = None
     ) -> str:
         messages = []
         
@@ -450,13 +455,52 @@ class LLMService:
             messages=messages,
             model=model,
             temperature=temperature,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
+            response_format=response_format
         )
         
         if result["success"]:
             return result["content"]
         raise LLMServiceError(
             result.get("error", "LLM generation failed"),
+            status_code=result.get("status_code", 502),
+            provider=result.get("provider"),
+            retryable=result.get("retryable", False)
+        )
+
+    async def generate_json(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: float = 0.3,
+        max_tokens: int = 1024
+    ) -> Dict[str, Any]:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        result = await self.chat_completion(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"}
+        )
+
+        if result["success"]:
+            content = result["content"]
+            try:
+                start = content.find("{")
+                end = content.rfind("}") + 1
+                if start >= 0 and end > start:
+                    return json.loads(content[start:end])
+            except json.JSONDecodeError:
+                pass
+            return {}
+        raise LLMServiceError(
+            result.get("error", "LLM JSON generation failed"),
             status_code=result.get("status_code", 502),
             provider=result.get("provider"),
             retryable=result.get("retryable", False)

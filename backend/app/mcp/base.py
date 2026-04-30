@@ -3,7 +3,7 @@ MCP工具基类和注册表
 定义MCP工具的标准接口和注册机制
 """
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any
 from pydantic import BaseModel
 from enum import Enum
 from jsonschema import validate, ValidationError
@@ -13,9 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 class MCPToolResult(BaseModel):
     """MCP工具执行结果"""
     success: bool
-    data: Optional[Any] = None
-    error: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    data: Any | None = None
+    error: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class MCPToolCategory(str, Enum):
@@ -32,7 +32,7 @@ class BaseMCPTool(ABC):
     name: str
     description: str
     category: MCPToolCategory
-    parameters_schema: Dict[str, Any]
+    parameters_schema: dict[str, Any]
     expose_to_llm: bool = True
     
     @abstractmethod
@@ -40,7 +40,7 @@ class BaseMCPTool(ABC):
         """执行工具"""
         pass
     
-    def get_info(self) -> Dict[str, Any]:
+    def get_info(self) -> dict[str, Any]:
         """获取工具信息"""
         return {
             "name": self.name,
@@ -49,11 +49,13 @@ class BaseMCPTool(ABC):
             "parameters_schema": self.parameters_schema
         }
     
-    def to_openai_function(self) -> Dict[str, Any]:
+    def to_openai_function(self) -> dict[str, Any]:
         """转换为OpenAI function calling格式"""
-        parameters = dict(self.parameters_schema or {"type": "object"})
-        properties = dict(parameters.get("properties") or {})
-        required = list(parameters.get("required") or [])
+        parameters: dict[str, Any] = (self.parameters_schema or {"type": "object"}).copy()
+        raw_properties = parameters.get("properties")
+        properties = raw_properties.copy() if isinstance(raw_properties, dict) else {}
+        raw_required = parameters.get("required")
+        required = list(raw_required) if isinstance(raw_required, list) else []
 
         if (
             "novel_id" in properties
@@ -78,42 +80,57 @@ class MCPToolRegistry:
     """MCP工具注册表 - 实例化模式"""
     
     def __init__(self):
-        self._tools: Dict[str, BaseMCPTool] = {}
+        self._tools: dict[str, BaseMCPTool] = {}
     
     def register(self, tool: BaseMCPTool) -> None:
         """注册工具"""
         self._tools[tool.name] = tool
     
-    def get(self, name: str) -> Optional[BaseMCPTool]:
+    def get(self, name: str) -> BaseMCPTool | None:
         """获取工具"""
         return self._tools.get(name)
-    
-    def list_tools(self, category: Optional[MCPToolCategory] = None) -> List[Dict[str, Any]]:
-        """列出所有工具"""
+
+    def _filter_tools(
+        self,
+        category: MCPToolCategory | None = None,
+        allowed_names: list[str] | None = None,
+    ) -> list[BaseMCPTool]:
         tools = list(self._tools.values())
         if category:
-            tools = [t for t in tools if t.category == category]
+            tools = [tool for tool in tools if tool.category == category]
+        if allowed_names is not None:
+            allowed_set = set(allowed_names)
+            tools = [tool for tool in tools if tool.name in allowed_set]
+        return tools
+
+    def list_tools(
+        self,
+        category: MCPToolCategory | None = None,
+        allowed_names: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """列出所有工具"""
+        tools = self._filter_tools(category=category, allowed_names=allowed_names)
         return [t.get_info() for t in tools]
-    
-    def list_by_category(self) -> Dict[str, List[Dict[str, Any]]]:
+
+    def list_by_category(self, allowed_names: list[str] | None = None) -> dict[str, list[dict[str, Any]]]:
         """按分类列出工具"""
-        result = {}
-        for tool in self._tools.values():
+        result: dict[str, list[dict[str, Any]]] = {}
+        for tool in self._filter_tools(allowed_names=allowed_names):
             cat = tool.category.value
             if cat not in result:
                 result[cat] = []
             result[cat].append(tool.get_info())
         return result
-    
-    def get_openai_functions(self) -> List[Dict[str, Any]]:
+
+    def get_openai_functions(self, allowed_names: list[str] | None = None) -> list[dict[str, Any]]:
         """获取所有工具的OpenAI function calling格式"""
         return [
             tool.to_openai_function()
-            for tool in self._tools.values()
+            for tool in self._filter_tools(allowed_names=allowed_names)
             if getattr(tool, "expose_to_llm", True)
         ]
-    
-    def _validate_params(self, tool: BaseMCPTool, params: Dict[str, Any]) -> Optional[str]:
+
+    def _validate_params(self, tool: BaseMCPTool, params: dict[str, Any]) -> str | None:
         schema = tool.parameters_schema or {"type": "object"}
         try:
             validate(instance=params, schema=schema)

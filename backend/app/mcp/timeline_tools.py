@@ -18,6 +18,7 @@ from app.timeline.schemas import (
     TimelineEntryUpdate,
     TimelineEntryResolve,
 )
+from app.mcp.novel_tools import _invalidate_novel_cache
 from app.timeline.service import TimelineService
 from app.core.permissions import verify_novel_ownership
 
@@ -182,6 +183,7 @@ class AddTimelineEntryTool(BaseMCPTool):
 
             results = await asyncio.gather(*[_add_single(op) for op in entries])
             success_count = sum(1 for r in results if r.get("success"))
+            await _invalidate_novel_cache(novel_id)
             return MCPToolResult(
                 success=success_count > 0,
                 data={
@@ -277,6 +279,7 @@ class UpdateTimelineEntryTool(BaseMCPTool):
             entry = await service.update_entry(entry_id, data, editor="ai")
             if not entry:
                 return MCPToolResult(success=False, error=f"条目 {entry_id} 不存在")
+            await _invalidate_novel_cache(novel_id)
             return MCPToolResult(
                 success=True,
                 data=_entry_to_dict(entry),
@@ -330,6 +333,7 @@ class ResolveTimelineEntryTool(BaseMCPTool):
             entry = await service.resolve_entry(entry_id, data)
             if not entry:
                 return MCPToolResult(success=False, error=f"条目 {entry_id} 不存在")
+            await _invalidate_novel_cache(novel_id)
             return MCPToolResult(
                 success=True,
                 data=_entry_to_dict(entry),

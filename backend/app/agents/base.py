@@ -3,7 +3,7 @@ Agent基类和核心数据结构
 """
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
+from typing import Any
 from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -46,8 +46,11 @@ class SubAgentSpec:
     display_name: str
     description: str
     system_prompt: str
-    required_context_keys: List[str] = field(default_factory=list)
-    optional_context_keys: List[str] = field(default_factory=list)
+    required_context_keys: list[str] = field(default_factory=list)
+    optional_context_keys: list[str] = field(default_factory=list)
+    allowed_tools: list[str] = field(default_factory=list)
+    allowed_resources: list[str] = field(default_factory=list)
+    allow_subagent_spawn: bool = False
     requires_chapter_id: bool = False
     result_description: str = ""
 
@@ -58,12 +61,12 @@ class SubAgentReport:
     task_type: str
     success: bool
     summary: str
-    key_findings: List[str] = field(default_factory=list)
-    suggestions: List[str] = field(default_factory=list)
-    data: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    key_findings: list[str] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)
+    data: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_type": self.task_type,
             "success": self.success,
@@ -81,17 +84,17 @@ class AgentTask:
     task_id: str
     task_type: TaskType
     novel_id: int
-    chapter_id: Optional[int] = None
-    parameters: Dict[str, Any] = field(default_factory=dict)
-    context: Dict[str, Any] = field(default_factory=dict)
-    parent_task_id: Optional[str] = None
-    root_task_id: Optional[str] = None
+    chapter_id: int | None = None
+    parameters: dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
+    parent_task_id: str | None = None
+    root_task_id: str | None = None
     depth: int = 0
     status: TaskStatus = TaskStatus.PENDING
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "task_type": self.task_type.value,
@@ -114,13 +117,13 @@ class AgentResult:
     task_id: str
     agent_id: str
     success: bool
-    result: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
-    suggestions: List[str] = field(default_factory=list)
-    next_actions: List[Dict[str, Any]] = field(default_factory=list)
+    result: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    suggestions: list[str] = field(default_factory=list)
+    next_actions: list[dict[str, Any]] = field(default_factory=list)
     completed_at: datetime = field(default_factory=datetime.now)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "agent_id": self.agent_id,
@@ -162,10 +165,10 @@ class BaseAgent(ABC):
         self,
         task: AgentTask,
         success: bool,
-        result: Optional[Dict[str, Any]] = None,
-        error: Optional[str] = None,
-        suggestions: Optional[List[str]] = None,
-        next_actions: Optional[List[Dict[str, Any]]] = None
+        result: dict[str, Any] | None = None,
+        error: str | None = None,
+        suggestions: list[str] | None = None,
+        next_actions: list[dict[str, Any]] | None = None
     ) -> AgentResult:
         """创建执行结果"""
         return AgentResult(
