@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
-from typing import Annotated
+from typing import Annotated, AsyncGenerator
 from fastapi import Depends
 import os
 from dotenv import load_dotenv
@@ -25,14 +25,14 @@ AsyncSessionLocal = async_sessionmaker(
     expire_on_commit=False
 )
 
-async def get_async_session() -> AsyncSession:
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         yield session
 
 Base = declarative_base()
 
 
-async def get_db():
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
             yield session

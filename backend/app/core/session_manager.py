@@ -69,6 +69,8 @@ class SessionScope:
         if self.type == ScopeType.NOVEL:
             return []
         elif self.type == ScopeType.CHAPTERS:
+            if self.chapter_start is None or self.chapter_end is None:
+                return []
             return list(range(self.chapter_start, self.chapter_end + 1))
         elif self.type == ScopeType.CHAPTER:
             return [self.chapter_start] if self.chapter_start else []
@@ -78,6 +80,8 @@ class SessionScope:
         if self.type == ScopeType.NOVEL:
             return True
         elif self.type == ScopeType.CHAPTERS:
+            if self.chapter_start is None or self.chapter_end is None:
+                return False
             return self.chapter_start <= chapter_number <= self.chapter_end
         elif self.type == ScopeType.CHAPTER:
             return chapter_number == self.chapter_start
@@ -232,6 +236,18 @@ class ModelContextConfig:
 
 
 MODEL_CONFIGS: Dict[str, ModelContextConfig] = {
+    "deepseek-v4-flash": ModelContextConfig(
+        name="deepseek-v4-flash",
+        context_window=1048576,
+        max_output_tokens=65536,
+        description="DeepSeek-V4-Flash - 1M上下文窗口"
+    ),
+    "deepseek-v4-pro": ModelContextConfig(
+        name="deepseek-v4-pro",
+        context_window=1048576,
+        max_output_tokens=65536,
+        description="DeepSeek-V4-Pro - 1M上下文窗口"
+    ),
     "deepseek-chat": ModelContextConfig(
         name="deepseek-chat",
         context_window=1048576,
@@ -261,7 +277,7 @@ class SessionConfig:
     
     @classmethod
     def for_model(cls, model: str) -> "SessionConfig":
-        model_config = MODEL_CONFIGS.get(model, MODEL_CONFIGS["deepseek-chat"])
+        model_config = MODEL_CONFIGS.get(model, MODEL_CONFIGS["deepseek-v4-flash"])
         context_window = model_config.context_window
         return cls(
             max_messages=200,
@@ -291,7 +307,7 @@ class Session:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    model: str = "deepseek-chat"
+    model: str = "deepseek-v4-flash"
     edit_mode: str = "agent"
     chapter_ids: List[int] = field(default_factory=list)
     subtitle: str = ""
@@ -359,7 +375,7 @@ class Session:
             created_at=datetime.fromisoformat(data["created_at"]),
             updated_at=datetime.fromisoformat(data["updated_at"]),
             metadata=data.get("metadata", {}),
-            model=data.get("model", "deepseek-chat"),
+            model=data.get("model", "deepseek-v4-flash"),
             edit_mode=data.get("edit_mode", "agent"),
             current_chapter_id=data.get("current_chapter_id")
         )
@@ -371,7 +387,7 @@ class Session:
         return len(self.messages)
     
     def get_context_usage_ratio(self) -> float:
-        model_config = MODEL_CONFIGS.get(self.model, MODEL_CONFIGS["deepseek-chat"])
+        model_config = MODEL_CONFIGS.get(self.model, MODEL_CONFIGS["deepseek-v4-flash"])
         return self.get_token_count() / model_config.context_window
     
     def get_display_name(self) -> str:
@@ -542,7 +558,7 @@ class ContextCompressor:
 
 
 class SessionManager:
-    def __init__(self, config: SessionConfig = None):
+    def __init__(self, config: SessionConfig | None = None):
         self.config = config or SessionConfig()
         self.compressor = ContextCompressor(self.config)
         self._storage = None
@@ -558,7 +574,8 @@ class SessionManager:
         novel_context: Optional[NovelContext] = None,
         chapter_context: Optional[ChapterContext] = None,
         system_prompt: Optional[str] = None,
-        model: str = "deepseek-chat"
+        model: str = "deepseek-v4-flash",
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Session:
         if scope is None:
             scope = SessionScope(type=ScopeType.NOVEL)
@@ -579,7 +596,7 @@ class SessionManager:
             novel_context=novel_context,
             chapter_context=chapter_context,
             model=model,
-            metadata={"created_from": "session_manager"}
+            metadata={"created_from": "session_manager", **(metadata or {})}
         )
         
         session.subtitle = scope.get_display_name()
@@ -784,7 +801,7 @@ class SessionManager:
         return self.compressor.compress(session, summary)
     
     def get_session_stats(self, session: Session) -> Dict[str, Any]:
-        model_config = MODEL_CONFIGS.get(session.model, MODEL_CONFIGS["deepseek-chat"])
+        model_config = MODEL_CONFIGS.get(session.model, MODEL_CONFIGS["deepseek-v4-flash"])
         token_count = session.get_token_count()
         return {
             "session_id": session.session_id,

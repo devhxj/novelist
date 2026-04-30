@@ -9,7 +9,6 @@
 """
 from typing import Any, Dict, List, Optional
 from enum import Enum
-import asyncio
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from app.timeline.models import TimelineEntry
@@ -96,12 +95,12 @@ class GetStoryTimelineTool(BaseMCPTool):
 
 
 class AddTimelineEntryTool(BaseMCPTool):
-    """添加时间线条目（支持并行批量）"""
+    """添加时间线条目（单事务批量写入）"""
 
     name = "add_timeline_entry"
     description = (
         "向故事时间线中添加一条或多条新条目。可以添加伏笔/钩子、章节规划、用户指令等。"
-        "无需传novel_id，系统会注入当前小说ID。所有条目会并行执行以提升效率。"
+        "无需传novel_id，系统会注入当前小说ID。所有条目会在同一事务内顺序写入，保证一致性。"
         "\n适用场景：章节生成后自动提取伏笔和规划、用户通过对话要求记录某个想法或安排时调用。"
         "\n分类说明："
         "- foreshadowing: 本章埋下的伏笔/钩子（待后续章节回收）"
@@ -115,7 +114,7 @@ class AddTimelineEntryTool(BaseMCPTool):
         "properties": {
             "entries": {
                 "type": "array",
-                "description": "要添加的条目列表（1-6个），系统会并行执行",
+                "description": "要添加的条目列表（1-6个），系统会顺序执行并一次性提交",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -176,13 +175,19 @@ class AddTimelineEntryTool(BaseMCPTool):
                         related_entry_ids=op.get("related_entry_ids"),
                         tags=op.get("tags"),
                     )
-                    entry = await service.add_entry(data)
+                    entry = await service.add_entry(data, auto_commit=False)
                     return {"success": True, "data": _entry_to_dict(entry)}
                 except Exception as e:
                     return {"success": False, "error": str(e)}
 
-            results = await asyncio.gather(*[_add_single(op) for op in entries])
+            results = []
+            for op in entries:
+                results.append(await _add_single(op))
             success_count = sum(1 for r in results if r.get("success"))
+            if success_count > 0:
+                await db.commit()
+            else:
+                await db.rollback()
             await _invalidate_novel_cache(novel_id)
             return MCPToolResult(
                 success=success_count > 0,
@@ -194,6 +199,7 @@ class AddTimelineEntryTool(BaseMCPTool):
                 metadata={"tool": self.name, "novel_id": novel_id}
             )
         except Exception as e:
+            await db.rollback()
             return MCPToolResult(success=False, error=f"添加时间线条目失败: {str(e)}")
 
 
@@ -430,4 +436,3 @@ def register_timeline_tools(registry: MCPToolRegistry):
     registry.register(UpdateTimelineEntryTool())
     registry.register(ResolveTimelineEntryTool())
     registry.register(GetTimelineContextTool())
-

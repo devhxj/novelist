@@ -1,6 +1,7 @@
 """
 文本编辑服务 - 副本编辑机制
 """
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -245,8 +246,15 @@ class EditSessionManager:
         edit_session.accepted_at = datetime.now(timezone.utc)
         
         await self.db.commit()
-        await self._refresh_chapter_memory(chapter)
-        await self._invalidate_cache(chapter)
+        chapter_snapshot = {
+            "id": chapter.id,
+            "novel_id": chapter.novel_id,
+            "chapter_number": chapter.chapter_number,
+            "title": chapter.title,
+            "content": chapter.content or "",
+            "summary": chapter.summary,
+        }
+        asyncio.create_task(self._post_accept_refresh(chapter_snapshot))
         
         logger.info(f"Accepted edit session {edit_session_id}, {edit_session.change_count} changes")
         
@@ -336,32 +344,36 @@ class EditSessionManager:
     async def _generate_chapter_summary(self, content: str) -> Optional[str]:
         return await generate_chapter_summary(content)
 
-    async def _refresh_chapter_memory(self, chapter: Chapter) -> None:
+    async def _post_accept_refresh(self, chapter_snapshot: Dict[str, Any]) -> None:
         try:
-            vector_store.delete_chapter_chunks(chapter.novel_id, chapter.id)
-            content = chapter.content or ""
-            if not content.strip():
-                return
-            chunk_data = vector_store.build_chapter_chunks(
-                chapter_id=chapter.id,
-                chapter_number=chapter.chapter_number,
-                chapter_title=chapter.title,
-                content=content,
-                summary=chapter.summary,
-            )
-            if chunk_data:
-                vector_store.add_chunks(chapter.novel_id, chunk_data)
-        except Exception as e:
-            logger.warning(f"Failed to refresh chapter memory after accept edit: {e}")
+            await self._refresh_chapter_memory(chapter_snapshot)
+        except Exception as exc:
+            logger.warning("Failed to refresh chapter memory after accept edit: %s", exc)
+        try:
+            await self._invalidate_cache(chapter_snapshot)
+        except Exception as exc:
+            logger.warning("Failed to invalidate cache after accept edit: %s", exc)
 
-    async def _invalidate_cache(self, chapter: Chapter) -> None:
-        try:
-            from app.core.redis_service import redis_service
-            await redis_service.delete(f"chapter:{chapter.id}:detail")
-            await redis_service.clear_pattern(f"novel:{chapter.novel_id}:chapters:*")
-            await redis_service.delete(f"novel:{chapter.novel_id}:detail")
-        except Exception as e:
-            logger.warning(f"Failed to invalidate cache after accept edit: {e}")
+    async def _refresh_chapter_memory(self, chapter: Dict[str, Any]) -> None:
+        vector_store.delete_chapter_chunks(chapter["novel_id"], chapter["id"])
+        content = chapter["content"]
+        if not content.strip():
+            return
+        chunk_data = vector_store.build_chapter_chunks(
+            chapter_id=chapter["id"],
+            chapter_number=chapter["chapter_number"],
+            chapter_title=chapter.get("title"),
+            content=content,
+            summary=chapter.get("summary"),
+        )
+        if chunk_data:
+            vector_store.add_chunks(chapter["novel_id"], chunk_data)
+
+    async def _invalidate_cache(self, chapter: Dict[str, Any]) -> None:
+        from app.core.redis_service import redis_service
+        await redis_service.delete(f"chapter:{chapter['id']}:detail")
+        await redis_service.clear_pattern(f"novel:{chapter['novel_id']}:chapters:*")
+        await redis_service.delete(f"novel:{chapter['novel_id']}:detail")
 
 
 def get_edit_session_manager(db: AsyncSession) -> EditSessionManager:

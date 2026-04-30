@@ -22,7 +22,7 @@ class SessionStorage:
     KEY_PREFIX = "session:"
     USER_SESSIONS_PREFIX = "user_sessions:"
     
-    def __init__(self, config: SessionConfig = None):
+    def __init__(self, config: SessionConfig | None = None):
         self.config = config or SessionConfig()
         self.cache_ttl = 3600
     

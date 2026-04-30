@@ -1,4 +1,5 @@
 from __future__ import annotations
+# pyright: reportArgumentType=false, reportCallIssue=false
 
 from typing import Any, Optional, List
 
@@ -623,10 +624,11 @@ async def read_chapter_for_edit(chapter_id: int, ctx: Context) -> dict:
 
 
 @mcp.tool()
-async def run_agent_task(
+async def run_subagent(
     task_type: str,
     novel_id: int,
     chapter_id: Optional[int] = None,
+    instruction: Optional[str] = None,
     parameters: Optional[dict] = None,
     agent_role: Optional[str] = None,
     agent_id: Optional[str] = None,
@@ -634,11 +636,12 @@ async def run_agent_task(
     ctx: Context = None
 ) -> dict:
     return await _execute_tool(
-        "run_agent_task",
+        "run_subagent",
         ctx,
         task_type=task_type,
         novel_id=novel_id,
         chapter_id=chapter_id,
+        instruction=instruction,
         parameters=parameters,
         agent_role=agent_role,
         agent_id=agent_id,

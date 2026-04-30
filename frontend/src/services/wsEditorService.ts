@@ -2,6 +2,7 @@ import { useAuthStore } from '@/stores/authStore'
 
 export type ScopeType = 'novel' | 'chapters' | 'chapter'
 export type EditMode = 'agent' | 'review' | 'plan'
+export type ReasoningEffort = 'high' | 'max'
 
 export interface Scope {
   type: ScopeType
@@ -41,6 +42,7 @@ export interface CreateSessionMsg {
   scope: Scope
   model?: string
   edit_mode?: EditMode
+  reasoning_effort?: ReasoningEffort
 }
 
 export interface LoadSessionMsg {
@@ -133,6 +135,7 @@ export interface SessionCreatedMsg {
   display_name: string
   edit_mode: EditMode
   model: string
+  reasoning_effort?: ReasoningEffort
 }
 
 export interface SessionLoadedMsg {
@@ -197,11 +200,19 @@ export interface ToolCallMsg {
   tool_name: string
   tool_id?: string
   status: 'executing' | 'completed' | 'failed' | 'rejected'
+  phase?: 'selected' | 'executing' | 'completed' | 'failed'
   display_text?: string
   activity_kind?: 'general' | 'browse' | 'view' | 'edit' | 'write' | 'create' | 'memory' | 'review' | 'plan'
   chapter_id?: number
   chapter_number?: number
   chapter_title?: string
+  arguments?: Record<string, unknown>
+  result_summary?: {
+    success?: boolean
+    error?: string | null
+    metadata?: Record<string, unknown>
+    data_keys?: string[]
+  }
   error?: string
   timestamp?: string
 }
@@ -467,8 +478,8 @@ export class WsEditorService {
     })
   }
 
-  createSession(scope: Scope, model?: string, editMode?: EditMode): boolean {
-    return this.send({ type: 'create_session', scope, model, edit_mode: editMode })
+  createSession(scope: Scope, model?: string, editMode?: EditMode, reasoningEffort?: ReasoningEffort): boolean {
+    return this.send({ type: 'create_session', scope, model, edit_mode: editMode, reasoning_effort: reasoningEffort })
   }
 
   loadSession(sessionId: string): boolean {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import Editor, { DiffEditor, type OnMount } from '@monaco-editor/react'
+import Editor, { type OnMount } from '@monaco-editor/react'
 import { Select, Tooltip, message, Modal, Input } from 'antd'
 import {
   ArrowLeftOutlined,
@@ -42,6 +42,7 @@ import type {
   EditPreviewMsg,
   EditPendingMsg,
   ChapterStreamMsg,
+  ReasoningEffort,
 } from '@/services/wsEditorService'
 import { Markdown } from '@/components/Markdown'
 import styles from './EditorPage.module.css'
@@ -79,11 +80,19 @@ interface ToolCallInfo {
   status: 'executing' | 'completed' | 'failed' | 'rejected'
   tool_id?: string
   task_id?: string
+  phase?: 'selected' | 'executing' | 'completed' | 'failed'
   display_text?: string
   activity_kind?: 'general' | 'browse' | 'view' | 'edit' | 'write' | 'create' | 'memory' | 'review' | 'plan'
   chapter_id?: number
   chapter_number?: number
   chapter_title?: string
+  arguments?: Record<string, unknown>
+  result_summary?: {
+    success?: boolean
+    error?: string | null
+    metadata?: Record<string, unknown>
+    data_keys?: string[]
+  }
   error?: string
   timestamp?: string
   order: number
@@ -96,12 +105,19 @@ const SCOPE_OPTIONS: Array<{ value: ScopeType; label: string }> = [
 ]
 
 const MODEL_OPTIONS = [
-  { value: 'deepseek-chat', label: 'DeepSeek Chat' },
-  { value: 'deepseek-reasoner', label: 'DeepSeek Reasoner' },
+  { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+  { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
+  { value: 'deepseek-chat', label: 'DeepSeek Chat (兼容)' },
+  { value: 'deepseek-reasoner', label: 'DeepSeek Reasoner (兼容)' },
   { value: 'qwen-max', label: 'Qwen Max (阿里)' },
   { value: 'qwen-plus', label: 'Qwen Plus (阿里)' },
   { value: 'qwq', label: 'QwQ 推理 (阿里)' },
   { value: 'glm-4.7-flash', label: 'GLM-4.7 Flash' },
+]
+
+const REASONING_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
+  { value: 'high', label: '高' },
+  { value: 'max', label: '最大' },
 ]
 
 const EDIT_MODE_OPTIONS: Array<{ value: EditMode; label: string; desc: string }> = [
@@ -179,6 +195,38 @@ function getActivityVisual(activityKind?: ToolCallInfo['activity_kind']) {
   }
 }
 
+function InlineDiffPreview({ diff }: { diff: DiffData }) {
+  return (
+    <div className={styles.inlineDiffPane}>
+      {diff.hunks.map((hunk, hunkIndex) => (
+        <div key={`hunk_${hunkIndex}`} className={styles.inlineDiffHunk}>
+          <div className={styles.inlineDiffHeader}>
+            变更块 {hunkIndex + 1} · 原第 {hunk.old_start} 行 / 新第 {hunk.new_start} 行
+          </div>
+          {hunk.changes.map((change, changeIndex) => (
+            <div
+              key={`change_${hunkIndex}_${changeIndex}`}
+              className={
+                change.type === 'insert'
+                  ? styles.inlineDiffInsert
+                  : change.type === 'delete'
+                    ? styles.inlineDiffDelete
+                    : styles.inlineDiffContext
+              }
+            >
+              <span className={styles.inlineDiffMarker}>
+                {change.type === 'insert' ? '+' : change.type === 'delete' ? '-' : ' '}
+              </span>
+              <span className={styles.inlineDiffLineNo}>{change.line_number}</span>
+              <pre className={styles.inlineDiffContent}>{change.content || ' '}</pre>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function EditorPage() {
   const { novelId } = useParams<{ novelId: string }>()
   const navigate = useNavigate()
@@ -186,7 +234,8 @@ export default function EditorPage() {
 
   const [connected, setConnected] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
-  const [selectedModel, setSelectedModel] = useState('deepseek-chat')
+  const [selectedModel, setSelectedModel] = useState('deepseek-v4-flash')
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('max')
   const [selectedEditMode, setSelectedEditMode] = useState<EditMode>('agent')
 
   const [chapters, setChapters] = useState<ChapterInfo[]>([])
@@ -202,6 +251,7 @@ export default function EditorPage() {
   const [showDiff, setShowDiff] = useState(false)
   const [diffData, setDiffData] = useState<DiffData | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [isApplyingEdit, setIsApplyingEdit] = useState(false)
   const [editNotice, setEditNotice] = useState<string>('')
 
   const [leftTab, setLeftTab] = useState<'chapters' | 'sessions'>('chapters')
@@ -301,6 +351,8 @@ export default function EditorPage() {
         setCurrentSessionId(m.session_id)
         setCurrentScope(m.scope)
         if (m.edit_mode) setSelectedEditMode(m.edit_mode)
+        if (m.model) setSelectedModel(m.model)
+        if (m.reasoning_effort) setReasoningEffort(m.reasoning_effort)
         wsEditorService.listSessions()
         if (pendingMessageRef.current) {
           wsEditorService.chat(m.session_id, pendingMessageRef.current, true)
@@ -460,11 +512,14 @@ export default function EditorPage() {
               ...t,
               status: m.status,
               task_id: m.task_id || t.task_id,
+              phase: m.phase || t.phase,
               display_text: m.display_text || t.display_text,
               activity_kind: m.activity_kind || t.activity_kind,
               chapter_id: m.chapter_id ?? t.chapter_id,
               chapter_number: m.chapter_number ?? t.chapter_number,
               chapter_title: m.chapter_title ?? t.chapter_title,
+              arguments: m.arguments || t.arguments,
+              result_summary: m.result_summary || t.result_summary,
               error: m.error,
               tool_id: m.tool_id || t.tool_id,
               timestamp: m.timestamp || t.timestamp,
@@ -475,11 +530,14 @@ export default function EditorPage() {
             task_id: m.task_id,
             status: m.status,
             tool_id: m.tool_id,
+            phase: m.phase,
             display_text: m.display_text || getToolDisplayName(m.tool_name, m.chapter_number, m.chapter_title),
             activity_kind: m.activity_kind,
             chapter_id: m.chapter_id,
             chapter_number: m.chapter_number,
             chapter_title: m.chapter_title,
+            arguments: m.arguments,
+            result_summary: m.result_summary,
             error: m.error,
             timestamp: m.timestamp,
             order: timelineOrderRef.current++,
@@ -499,12 +557,9 @@ export default function EditorPage() {
         } else if (m.status === 'completed' && m.chapter_number && (m.activity_kind === 'edit' || m.activity_kind === 'write')) {
           void revealChapterByNumber(m.chapter_number)
         }
-        if (m.tool_name === 'generate_chapter_draft' && m.status === 'executing') {
-          setEditNotice('AI 正在撰写章节，正文会实时出现在中间编辑区。')
-        }
         if (m.tool_name === 'generate_chapter_draft' && (m.status === 'failed' || m.status === 'rejected')) {
           setStreamingChapterMeta(null)
-          setEditNotice('这次章节写作没有完成，已保留当前真实章节状态。')
+          setEditNotice('这次章节写作没有完成，正文保持原样。')
           void refreshChapterList()
         }
         if (m.status === 'executing' || m.status === 'completed' || m.status === 'failed' || m.status === 'rejected') {
@@ -538,7 +593,6 @@ export default function EditorPage() {
         setOriginalContent('')
         setWorkingContent(m.content)
         setChapterWordCount(m.word_count)
-        setEditNotice('AI 正在撰写正文，你可以实时看到内容生成。')
         break
       }
       case 'edit_stream': {
@@ -553,7 +607,6 @@ export default function EditorPage() {
         setHasActiveEdit(true)
         setShowDiff(false)
         setWorkingContent(m.working_content)
-        setEditNotice('AI 正在修改副本内容，你可以实时看到改动。')
         break
       }
       case 'edit_started': {
@@ -568,7 +621,6 @@ export default function EditorPage() {
         setChangeCount(m.change_count)
         setHasActiveEdit(true)
         setShowDiff(false)
-        setEditNotice('AI 已创建可确认的编辑副本，修改不会直接覆盖正文。')
         break
       }
       case 'edit_preview': {
@@ -610,12 +662,13 @@ export default function EditorPage() {
         setDiffData(m.diff as DiffData)
         setHasActiveEdit(true)
         setShowDiff(true)
-        setEditNotice('修改已应用到副本，可以直接在差异视图里确认或拒绝。')
+        setEditNotice('副本已更新，可以直接确认或拒绝。')
         break
       }
       case 'edit_accepted': {
         const m = msg as EditAcceptedMsg
         message.success(m.message)
+        setIsApplyingEdit(false)
         setHasActiveEdit(false)
         setEditSessionId(null)
         setLatestPendingEditSessionId(m.latest_pending_edit_session_id || null)
@@ -633,6 +686,7 @@ export default function EditorPage() {
       case 'edit_rejected': {
         const m = msg as EditRejectedMsg
         message.info(m.message)
+        setIsApplyingEdit(false)
         setHasActiveEdit(false)
         setEditSessionId(null)
         setLatestPendingEditSessionId(m.latest_pending_edit_session_id || null)
@@ -647,6 +701,7 @@ export default function EditorPage() {
       }
       case 'error': {
         const m = msg as ErrorMsg
+        setIsApplyingEdit(false)
         if (typeof m.latest_pending_edit_session_id !== 'undefined') {
           setLatestPendingEditSessionId(m.latest_pending_edit_session_id)
         }
@@ -667,6 +722,7 @@ export default function EditorPage() {
       }
       case 'task_cancelled': {
         setIsStreaming(false)
+        setIsApplyingEdit(false)
         setCurrentTaskId(null)
         setStreamingChapterMeta(null)
         shouldBreakAssistantSegmentRef.current = false
@@ -771,7 +827,7 @@ export default function EditorPage() {
         if (scopeChapterEnd) scope.chapter_end = scopeChapterEnd
       }
       pendingMessageRef.current = msg
-      const sent = wsEditorService.createSession(scope, selectedModel, selectedEditMode)
+      const sent = wsEditorService.createSession(scope, selectedModel, selectedEditMode, reasoningEffort)
       if (!sent) {
         message.error('WebSocket 未连接')
         setChatMessages(prev => prev.filter(m => m.id !== userMsg.id))
@@ -818,6 +874,7 @@ export default function EditorPage() {
 
   const acceptEdit = () => {
     if (editSessionId || latestPendingEditSessionId || selectedChapterId) {
+      setIsApplyingEdit(true)
       wsEditorService.acceptEdit(latestPendingEditSessionId || editSessionId, selectedChapterId)
     }
   }
@@ -1130,10 +1187,10 @@ function buildConversationTurns(
                     >
                       {showDiff ? <EditOutlined /> : 'Diff'}
                     </button>
-                    <button className={styles.btnAccept} onClick={acceptEdit}>
-                      <CheckOutlined /> 接受
+                    <button className={styles.btnAccept} onClick={acceptEdit} disabled={isApplyingEdit}>
+                      {isApplyingEdit ? <LoadingOutlined spin /> : <CheckOutlined />} 接受
                     </button>
-                    <button className={styles.btnReject} onClick={rejectEdit}>
+                    <button className={styles.btnReject} onClick={rejectEdit} disabled={isApplyingEdit}>
                       <CloseOutlined /> 拒绝
                     </button>
                   </div>
@@ -1144,7 +1201,7 @@ function buildConversationTurns(
                   <div>
                     <div className={styles.editNoticeTitle}>副本编辑机制</div>
                     <div className={styles.editNoticeText}>
-                      {editNotice || 'AI 的修改会先进入副本，只有你确认后才会写回正文。'}
+                      {editNotice || 'AI 的修改先进入副本，确认后再写回正文。'}
                     </div>
                   </div>
                   {activePendingSessionId && (
@@ -1156,25 +1213,27 @@ function buildConversationTurns(
               )}
               <div className={styles.editorContainer}>
                 {selectedChapter && showDiff && hasPendingReview ? (
-                  <DiffEditor
-                    height="100%"
-                    language="markdown"
-                    theme={theme}
-                    original={originalContent}
-                    modified={workingContent}
-                    options={{
-                      readOnly: true,
-                      minimap: { enabled: false },
-                      lineNumbers: 'on',
-                      scrollBeyondLastLine: false,
-                      fontSize: 17,
-                      lineHeight: 30,
-                      fontFamily: "'LXGW WenKai Screen', 'Noto Serif SC', 'Source Han Serif SC', serif",
-                      wordWrap: 'on',
-                      renderSideBySide: true,
-                      enableSplitViewResizing: true,
-                    }}
-                  />
+                  diffData ? (
+                    <InlineDiffPreview diff={diffData} />
+                  ) : (
+                    <Editor
+                      height="100%"
+                      language="markdown"
+                      theme={theme}
+                      value={workingContent}
+                      options={{
+                        readOnly: true,
+                        minimap: { enabled: false },
+                        lineNumbers: 'on',
+                        scrollBeyondLastLine: false,
+                        fontSize: 17,
+                        lineHeight: 30,
+                        fontFamily: "'LXGW WenKai Screen', 'Noto Serif SC', 'Source Han Serif SC', serif",
+                        wordWrap: 'on',
+                        automaticLayout: true,
+                      }}
+                    />
+                  )
                 ) : (
                   <Editor
                     height="100%"
@@ -1338,6 +1397,19 @@ function buildConversationTurns(
                   options={MODEL_OPTIONS}
                 />
               </div>
+              {(selectedModel.startsWith('deepseek-v4') || selectedModel === 'deepseek-reasoner') && (
+                <div className={styles.controlChip}>
+                  <span className={styles.controlLabel}>推理强度</span>
+                  <Select
+                    size="small"
+                    value={reasoningEffort}
+                    onChange={setReasoningEffort}
+                    className={styles.chatControlCompact}
+                    popupMatchSelectWidth={false}
+                    options={REASONING_OPTIONS}
+                  />
+                </div>
+              )}
               <div className={styles.controlChip}>
                 <span className={styles.controlLabel}>作用域</span>
                 <Select

@@ -803,79 +803,6 @@ class GetEditStatusTool(BaseMCPTool):
             return MCPToolResult(success=False, error=str(e))
 
 
-class RunAgentTaskTool(BaseMCPTool):
-    """执行Agent任务"""
-    
-    name = "run_agent_task"
-    description = "兼容旧接口。内部统一转发到 run_subagent，并应用子Agent能力边界。建议新调用统一使用 run_subagent。"
-    category = MCPToolCategory.WRITING_ASSISTANT
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "task_type": {
-                "type": "string",
-                "description": "任务类型"
-            },
-            "novel_id": {
-                "type": "integer",
-                "description": "小说ID"
-            },
-            "chapter_id": {
-                "type": "integer",
-                "description": "章节ID（可选）"
-            },
-            "instruction": {
-                "type": "string",
-                "description": "给子Agent的额外指令"
-            },
-            "parameters": {
-                "type": "object",
-                "description": "任务参数"
-            },
-            "agent_role": {
-                "type": "string",
-                "description": "指定Agent角色（可选）"
-            },
-            "agent_id": {
-                "type": "string",
-                "description": "指定Agent ID（可选）"
-            },
-            "model": {
-                "type": "string",
-                "description": "指定模型（可选）"
-            }
-        },
-        "required": ["task_type", "novel_id"]
-    }
-    
-    async def execute(
-        self,
-        db: AsyncSession,
-        user_id: int,
-        task_type: str,
-        novel_id: int,
-        chapter_id: int | None = None,
-        instruction: str | None = None,
-        parameters: dict[str, Any] | None = None,
-        agent_role: str | None = None,
-        agent_id: str | None = None,
-        model: str | None = None,
-        **kwargs
-    ) -> MCPToolResult:
-        return await _execute_subagent_task(
-            db=db,
-            user_id=user_id,
-            task_type=task_type,
-            novel_id=novel_id,
-            chapter_id=chapter_id,
-            instruction=instruction,
-            parameters=parameters,
-            agent_role=agent_role,
-            agent_id=agent_id,
-            model=model,
-        )
-
-
 class RunSubagentTool(BaseMCPTool):
     """调度子Agent执行专业任务"""
 
@@ -1106,7 +1033,6 @@ class EditingTools:
         registry.register(ApplyEditTool())
         registry.register(EditChapterContentTool())
         registry.register(GetEditStatusTool())
-        registry.register(RunAgentTaskTool())
         registry.register(RunSubagentTool())
         registry.register(GetPendingChangesTool())
         registry.register(ReadChapterForEditTool())

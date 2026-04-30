@@ -19,6 +19,8 @@ class GenerationType(str, Enum):
 
 class LLMModel(str, Enum):
     """LLM模型"""
+    DEEPSEEK_V4_FLASH = "deepseek-v4-flash"
+    DEEPSEEK_V4_PRO = "deepseek-v4-pro"
     DEEPSEEK_CHAT = "deepseek-chat"
     DEEPSEEK_REASONER = "deepseek-reasoner"
 
@@ -316,14 +318,24 @@ def get_available_models() -> List[Dict[str, str]]:
     """获取可用的LLM模型列表"""
     return [
         {
+            "value": LLMModel.DEEPSEEK_V4_FLASH.value,
+            "label": "DeepSeek V4 Flash",
+            "description": "官方推荐的高速低成本模型，支持 1M 上下文和工具调用"
+        },
+        {
+            "value": LLMModel.DEEPSEEK_V4_PRO.value,
+            "label": "DeepSeek V4 Pro",
+            "description": "官方旗舰模型，适合复杂推理、Agent 编排和高难写作任务"
+        },
+        {
             "value": LLMModel.DEEPSEEK_CHAT.value,
-            "label": "DeepSeek Chat",
-            "description": "通用对话模型，适合日常对话和文本生成"
+            "label": "DeepSeek Chat（兼容）",
+            "description": "兼容旧模型 ID，官方将于 2026-07-24 退役"
         },
         {
             "value": LLMModel.DEEPSEEK_REASONER.value,
-            "label": "DeepSeek Reasoner",
-            "description": "推理增强模型，适合复杂推理和创意写作"
+            "label": "DeepSeek Reasoner（兼容）",
+            "description": "兼容旧思考模型 ID，官方将于 2026-07-24 退役"
         }
     ]
 

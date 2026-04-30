@@ -95,7 +95,12 @@ class TimelineService:
         )
         return result.scalar_one_or_none()
 
-    async def add_entry(self, data: TimelineEntryCreate) -> TimelineEntry:
+    async def add_entry(
+        self,
+        data: TimelineEntryCreate,
+        *,
+        auto_commit: bool = True
+    ) -> TimelineEntry:
         entry = TimelineEntry(
             novel_id=self.novel_id,
             category=data.category.value,
@@ -113,8 +118,10 @@ class TimelineService:
             last_editor=data.source,
         )
         self.db.add(entry)
-        await self.db.commit()
-        await self.db.refresh(entry)
+        await self.db.flush()
+        if auto_commit:
+            await self.db.commit()
+            await self.db.refresh(entry)
         logger.info(f"Timeline entry created: id={entry.id}, category={entry.category}, title={entry.title}")
         return entry
 

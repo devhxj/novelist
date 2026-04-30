@@ -285,7 +285,7 @@ const toolDisplayMap: Record<string, ToolDisplayInfo> = {
     userAction: '正在查看当前的编辑状态…',
   },
 
-  run_agent_task: {
+  run_subagent: {
     displayName: '调度AI子任务',
     displayDescription: '由主AI调度专门的子AI来执行特定任务，如写作、审核、一致性检查、记忆更新等',
     icon: <RobotOutlined />,

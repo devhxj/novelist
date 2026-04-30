@@ -219,7 +219,7 @@ _TOOL_SYNC_NAMES = {
     "get_character_network": "查看人物关系图",
     "get_character_relationships": "查看角色关系详情",
     "update_character_relationship": "更新人物关系",
-    "run_agent_task": "调度AI子任务",
+    "run_subagent": "调度AI子任务",
     "get_pending_changes": "查看待确认修改",
 }
 
@@ -266,7 +266,7 @@ _TOOL_SYNC_KINDS = {
     "get_character_network": "view",
     "get_character_relationships": "view",
     "update_character_relationship": "edit",
-    "run_agent_task": "plan",
+    "run_subagent": "plan",
     "get_pending_changes": "view",
 }
 
@@ -355,7 +355,7 @@ async def _build_tool_call_presentation(
         "get_character_network": ("查看人物关系图", "view"),
         "get_character_relationships": ("查看角色关系详情", "view"),
         "update_character_relationship": ("更新人物关系", "edit"),
-        "run_agent_task": ("调度AI子任务", "plan"),
+        "run_subagent": ("调度AI子任务", "plan"),
         "start_edit_session": ("开始安全编辑", "edit"),
         "read_chapter_for_edit": ("读取待编辑原文", "view"),
         "get_pending_changes": ("查看待确认修改", "view"),
@@ -363,12 +363,14 @@ async def _build_tool_call_presentation(
 
     if tool_name in _TOOL_BASE_NAMES:
         base_text, activity_kind = _TOOL_BASE_NAMES[tool_name]
-    elif tool_name == "run_agent_task":
+    elif tool_name == "run_subagent":
         task_type = arguments.get("task_type")
-        if task_type == "check_consistency":
+        if task_type == "review":
             base_text, activity_kind = "检查剧情一致性", "review"
-        elif task_type == "manage_foreshadowing":
-            base_text, activity_kind = "整理伏笔线索", "review"
+        elif task_type == "update_memory":
+            base_text, activity_kind = "更新故事记忆", "memory"
+        elif task_type == "write_chapter":
+            base_text, activity_kind = "调度写作子任务", "write"
 
     is_active = status == "executing"
     display_text = f"正在{base_text}" if is_active else base_text
@@ -472,6 +474,7 @@ async def _execute_streaming_chapter_draft(
     target_length = arguments.get("target_length", 3000)
     style = arguments.get("style", "narrative")
     model = arguments.get("model")
+    reasoning_effort = arguments.get("reasoning_effort") or session.metadata.get("reasoning_effort")
     context_builder = ContextBuilder(db, novel_id)
     context_data = await context_builder.build_writing_context(
         chapter_number=chapter.chapter_number,
@@ -502,7 +505,8 @@ async def _execute_streaming_chapter_draft(
         async for chunk in llm_service.generate_stream(
             prompt=user_prompt,
             system_prompt=system_prompt,
-            model=model
+            model=model,
+            reasoning_effort=reasoning_effort,
         ):
             if not task_flags.get(task_id):
                 raise asyncio.CancelledError()
@@ -545,7 +549,7 @@ async def _execute_streaming_chapter_draft(
     try:
         post_processor = ChapterPostProcessor(db, novel_id)
         process_result = await post_processor.process(
-            content=chapter.content,
+            content=chapter.content or "",
             chapter_number=chapter.chapter_number,
             chapter_id=chapter.id,
             model=model
@@ -554,8 +558,8 @@ async def _execute_streaming_chapter_draft(
             chapter.content = process_result["final_content"]
         else:
             chapter.content = process_result.get("final_content", chapter.content)
-        chapter.word_count = len(chapter.content)
-        chapter.summary = await service._generate_chapter_summary(chapter.content)
+        chapter.word_count = len(chapter.content or "")
+        chapter.summary = await service._generate_chapter_summary(chapter.content or "")
         await db.commit()
         logger.info(
             f"Chapter {chapter.chapter_number} post-process completed: "
@@ -564,7 +568,7 @@ async def _execute_streaming_chapter_draft(
         )
     except Exception as exc:
         logger.warning(f"Chapter post-processing failed (non-fatal): {exc}")
-        chapter.summary = await service._generate_chapter_summary(chapter.content)
+        chapter.summary = await service._generate_chapter_summary(chapter.content or "")
         await db.commit()
 
     try:
@@ -758,8 +762,9 @@ async def _handle_create_session(websocket, data, user_id, novel_id):
         chapter_start=scope_data.get("chapter_start"),
         chapter_end=scope_data.get("chapter_end")
     )
-    model = data.get("model", "deepseek-chat")
+    model = data.get("model", "deepseek-v4-flash")
     edit_mode = data.get("edit_mode", "agent")
+    reasoning_effort = data.get("reasoning_effort")
     
     async with AsyncSessionLocal() as db:
         novel_context = await _build_novel_context(db, novel_id)
@@ -783,7 +788,8 @@ async def _handle_create_session(websocket, data, user_id, novel_id):
         scope=scope,
         novel_context=novel_context,
         chapter_context=chapter_context,
-        model=model
+        model=model,
+        metadata={"reasoning_effort": reasoning_effort} if reasoning_effort else None,
     )
     if not session.title:
         base_title = novel_context.title if novel_context else ""
@@ -801,7 +807,9 @@ async def _handle_create_session(websocket, data, user_id, novel_id):
         "subtitle": session.get_subtitle(),
         "model": model,
         "edit_mode": edit_mode,
+        "reasoning_effort": reasoning_effort,
         "current_chapter_id": current_chapter_id,
+        "stats": session_manager.get_session_stats(session),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }, websocket)
     
@@ -836,6 +844,7 @@ async def _handle_load_session(websocket, data, user_id):
         "title": session.title,
         "subtitle": session.get_subtitle(),
         "message_count": session.get_message_count(),
+        "stats": session_manager.get_session_stats(session),
         "recent_messages": [
             m.to_dict()
             for m in session.messages
@@ -1298,7 +1307,8 @@ async def _run_chat_with_tools(
                     messages=full_messages,
                     model=session.model,
                     tools=tools,
-                    system_prompt=None
+                    system_prompt=None,
+                    reasoning_effort=session.metadata.get("reasoning_effort"),
                 ):
                     if not task_flags.get(task_id):
                         logger.info(f"Task {task_id} cancelled")
@@ -1378,6 +1388,7 @@ async def _run_chat_with_tools(
                             "tool_name": tool_name,
                             "tool_id": tool_id,
                             "status": "executing",
+                            "phase": "selected",
                             "display_text": f"正在{_sync_tool_display_name(tool_name)}",
                             "activity_kind": _TOOL_SYNC_KINDS.get(tool_name, "general"),
                             "timestamp": datetime.now(timezone.utc).isoformat()
@@ -1472,6 +1483,8 @@ async def _run_chat_with_tools(
                                 "tool_name": tool_name,
                                 "tool_id": tool_id,
                                 "status": "executing",
+                                "phase": "executing",
+                                "arguments": clean_args,
                                 **presentation,
                                 "timestamp": datetime.now(timezone.utc).isoformat()
                             }, websocket)
@@ -1523,6 +1536,14 @@ async def _run_chat_with_tools(
                                 "tool_name": tool_name,
                                 "status": "completed" if tool_result_payload.get("success") else "failed",
                                 "tool_id": tool_id,
+                                "phase": "completed" if tool_result_payload.get("success") else "failed",
+                                "arguments": clean_args,
+                                "result_summary": {
+                                    "success": tool_result_payload.get("success"),
+                                    "error": tool_result_payload.get("error"),
+                                    "metadata": metadata,
+                                    "data_keys": list(data_payload.keys()) if isinstance(data_payload, dict) else [],
+                                },
                                 **presentation,
                                 "error": tool_result_payload.get("error"),
                                 "timestamp": datetime.now(timezone.utc).isoformat()

@@ -156,6 +156,7 @@ def _extract_error_message(payload: Dict[str, Any]) -> Optional[str]:
 
 _REASONING_MODELS = {
     "deepseek-reasoner", "deepseek-r1",
+    "deepseek-v4-pro", "deepseek-v4-flash",
     "o1", "o1-mini", "o1-preview", "o3", "o3-mini",
     "qwq", "qwen-qwq", "qwen3-235b-a22b",
 }
@@ -163,25 +164,45 @@ _REASONING_MODELS = {
 _QWEN_MODELS = {"qwq", "qwen-qwq", "qwen3", "qwen3-235b-a22b", "qwen-plus", "qwen-turbo", "qwen-max", "qwen-long"}
 
 
-def _apply_reasoning_params(payload: Dict[str, Any], model: str) -> None:
+def _apply_reasoning_params(
+    payload: Dict[str, Any],
+    model: str,
+    *,
+    thinking_enabled: bool | None = None,
+    reasoning_effort: str | None = None
+) -> None:
     model_lower = model.lower()
     is_reasoning = any(r in model_lower for r in _REASONING_MODELS)
-    if not is_reasoning and "reasoner" not in model_lower:
+    if thinking_enabled is not None and "deepseek" in model_lower:
+        payload["thinking"] = {"type": "enabled" if thinking_enabled else "disabled"}
+
+    if not is_reasoning and "reasoner" not in model_lower and thinking_enabled is None:
         return
+
+    normalized_effort = None
+    if reasoning_effort in {"high", "max"}:
+        normalized_effort = reasoning_effort
+    elif reasoning_effort in {"low", "medium"}:
+        normalized_effort = "high"
+    elif reasoning_effort == "xhigh":
+        normalized_effort = "max"
+
     if any(q in model_lower for q in _QWEN_MODELS):
         payload["enable_thinking"] = True
         payload["extra_body"] = {"enable_thinking": True}
+    elif "deepseek-v4" in model_lower:
+        payload["reasoning_effort"] = normalized_effort or "high"
     elif "deepseek" in model_lower or "reasoner" in model_lower:
-        payload["reasoning_effort"] = "medium"
+        payload["reasoning_effort"] = normalized_effort or "high"
     else:
-        payload["reasoning_effort"] = "medium"
+        payload["reasoning_effort"] = normalized_effort or "high"
 
 
 @dataclass
 class LLMConfig:
     api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     api_base: str = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com")
-    default_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    default_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
     max_tokens: int = int(os.getenv("DEEPSEEK_MAX_TOKENS", "4096"))
     temperature: float = float(os.getenv("DEEPSEEK_TEMPERATURE", "0.7"))
     timeout: int = int(os.getenv("DEEPSEEK_TIMEOUT", "120"))
@@ -333,7 +354,9 @@ class LLMService:
         max_tokens: Optional[int] = None,
         stream: bool = False,
         tools: Optional[List[Dict[str, Any]]] = None,
-        response_format: Optional[Dict[str, Any]] = None
+        response_format: Optional[Dict[str, Any]] = None,
+        reasoning_effort: str | None = None,
+        thinking_enabled: bool | None = None,
     ) -> Dict[str, Any]:
         api_base, api_key, selected_model = self._get_model_config(model)
         
@@ -362,7 +385,12 @@ class LLMService:
         if response_format:
             payload["response_format"] = response_format
         
-        _apply_reasoning_params(payload, selected_model)
+        _apply_reasoning_params(
+            payload,
+            selected_model,
+            thinking_enabled=thinking_enabled,
+            reasoning_effort=reasoning_effort,
+        )
         
         prefix_hash = cache_monitor.compute_prefix_hash(messages, tools)
         
@@ -442,7 +470,9 @@ class LLMService:
         model: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        response_format: Optional[Dict[str, Any]] = None
+        response_format: Optional[Dict[str, Any]] = None,
+        reasoning_effort: str | None = None,
+        thinking_enabled: bool | None = None,
     ) -> str:
         messages = []
         
@@ -456,7 +486,9 @@ class LLMService:
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
-            response_format=response_format
+            response_format=response_format,
+            reasoning_effort=reasoning_effort,
+            thinking_enabled=thinking_enabled,
         )
         
         if result["success"]:
@@ -512,7 +544,9 @@ class LLMService:
         system_prompt: Optional[str] = None,
         model: Optional[str] = None,
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        reasoning_effort: str | None = None,
+        thinking_enabled: bool | None = None,
     ) -> AsyncGenerator[str, None]:
         selected_model = model or self.config.default_model
         
@@ -544,7 +578,12 @@ class LLMService:
             "stream": True
         }
         
-        _apply_reasoning_params(payload, selected_model)
+        _apply_reasoning_params(
+            payload,
+            selected_model,
+            thinking_enabled=thinking_enabled,
+            reasoning_effort=reasoning_effort,
+        )
         
         logger.debug(f"Starting stream generation: model={selected_model}")
         
@@ -574,10 +613,6 @@ class LLMService:
                             chunk = json.loads(data)
                             if "choices" in chunk and len(chunk["choices"]) > 0:
                                 delta = chunk["choices"][0].get("delta", {})
-                                
-                                reasoning = delta.get("reasoning_content") or delta.get("reasoning", "")
-                                if reasoning:
-                                    yield {"type": "thinking", "content": reasoning}
                                 
                                 content = delta.get("content", "")
                                 if content:
@@ -713,7 +748,9 @@ class LLMService:
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: Optional[float] = None,
         max_tool_iterations: int = 5,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        reasoning_effort: str | None = None,
+        thinking_enabled: bool | None = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         支持工具调用的流式对话
@@ -758,7 +795,12 @@ class LLMService:
         if tools:
             payload["tools"] = tools
         
-        _apply_reasoning_params(payload, selected_model)
+        _apply_reasoning_params(
+            payload,
+            selected_model,
+            thinking_enabled=thinking_enabled,
+            reasoning_effort=reasoning_effort,
+        )
         
         full_content = ""
         current_tool_calls = []

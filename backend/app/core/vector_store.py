@@ -1,6 +1,7 @@
 """
 向量存储服务 - ChromaDB集成
 """
+# pyright: reportArgumentType=false, reportOptionalMemberAccess=false, reportOptionalSubscript=false
 import os
 import logging
 import asyncio
@@ -74,6 +75,35 @@ class VectorStore:
     def embedding_function(self):
         """获取 embedding 模型（已在启动时加载）"""
         return self._embedding_function
+
+    def _get_embedding_signature(self) -> str:
+        if VectorStoreConfig.USE_OPENAI_EMBEDDING:
+            return f"openai:{VectorStoreConfig.EMBEDDING_MODEL}"
+        return f"sentence-transformer:{VectorStoreConfig.EMBEDDING_MODEL}"
+
+    def _create_collection(self, novel_id: int):
+        collection_name = f"novel_{novel_id}"
+        return self.client.get_or_create_collection(
+            name=collection_name,
+            embedding_function=self.embedding_function,
+            metadata={
+                "novel_id": novel_id,
+                "embedding_model": VectorStoreConfig.EMBEDDING_MODEL,
+                "embedding_signature": self._get_embedding_signature(),
+            }
+        )
+
+    def _recreate_collection(self, novel_id: int):
+        collection_name = f"novel_{novel_id}"
+        logger.warning(
+            "Recreating Chroma collection %s because the embedding configuration changed or became incompatible",
+            collection_name,
+        )
+        try:
+            self.client.delete_collection(collection_name)
+        except Exception as exc:
+            logger.warning("Failed to delete stale collection %s: %s", collection_name, exc)
+        return self._create_collection(novel_id)
     
     def _load_embedding_model(self):
         """加载embedding模型"""
@@ -98,16 +128,21 @@ class VectorStore:
         """获取或创建小说的向量集合"""
         try:
             collection_name = f"novel_{novel_id}"
-            collection = self.client.get_or_create_collection(
-                name=collection_name,
-                embedding_function=self.embedding_function,
-                metadata={"novel_id": novel_id}
-            )
+            collection = self._create_collection(novel_id)
+            metadata = collection.metadata or {}
+            stored_signature = metadata.get("embedding_signature")
+            current_signature = self._get_embedding_signature()
+            if stored_signature and stored_signature != current_signature:
+                collection = self._recreate_collection(novel_id)
             logger.debug(f"Got/created collection: {collection_name}")
             return collection
         except Exception as e:
             logger.error(f"Failed to get/create collection for novel {novel_id}: {e}")
             raise VectorStoreError(f"Collection operation failed: {e}")
+
+    def _is_dimension_mismatch(self, error: Exception) -> bool:
+        message = str(error)
+        return "Embedding dimension" in message and "collection dimensionality" in message
     
     def add_chunks(
         self, 
@@ -140,6 +175,22 @@ class VectorStore:
             return len(chunks)
             
         except Exception as e:
+            if self._is_dimension_mismatch(e):
+                collection = self._recreate_collection(novel_id)
+                ids = [f"chunk_{chunk['id']}" for chunk in chunks]
+                documents = [chunk['content'] for chunk in chunks]
+                metadatas = [
+                    {
+                        "chapter_id": chunk.get('chapter_id'),
+                        "chunk_type": chunk.get('chunk_type', 'content'),
+                        "chunk_index": chunk.get('chunk_index', 0),
+                        **chunk.get('metadata', {})
+                    }
+                    for chunk in chunks
+                ]
+                collection.add(ids=ids, documents=documents, metadatas=metadatas)
+                logger.info("Rebuilt collection for novel %s after dimension mismatch and added %s chunks", novel_id, len(chunks))
+                return len(chunks)
             logger.error(f"Failed to add chunks to novel {novel_id}: {e}")
             raise VectorStoreError(f"Add chunks failed: {e}")
     
@@ -188,6 +239,10 @@ class VectorStore:
             return formatted_results
             
         except Exception as e:
+            if self._is_dimension_mismatch(e):
+                self._recreate_collection(novel_id)
+                logger.warning("Reset collection for novel %s after search-time dimension mismatch; returning empty results", novel_id)
+                return []
             logger.error(f"Search failed for novel {novel_id}: {e}")
             raise VectorStoreError(f"Search failed: {e}")
     
@@ -209,6 +264,10 @@ class VectorStore:
             return deleted_count
             
         except Exception as e:
+            if self._is_dimension_mismatch(e):
+                self._recreate_collection(novel_id)
+                logger.warning("Reset collection for novel %s after delete-time dimension mismatch", novel_id)
+                return 0
             logger.error(f"Failed to delete chapter chunks: {e}")
             raise VectorStoreError(f"Delete chapter chunks failed: {e}")
     

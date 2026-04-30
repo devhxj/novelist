@@ -109,7 +109,7 @@ class GenerationProgress:
         }
     
     @staticmethod
-    def progress(task_id: str, step: str, progress: int, message: str = None) -> dict:
+    def progress(task_id: str, step: str, progress: int, message: str | None = None) -> dict:
         return {
             "type": "generation_progress",
             "task_id": task_id,
@@ -130,7 +130,7 @@ class GenerationProgress:
         }
     
     @staticmethod
-    def completed(task_id: str, chapter_id: int, chapter_number: int, 
+    def completed(task_id: str, chapter_id: int | None, chapter_number: int | None,
                   content: str, word_count: int) -> dict:
         return {
             "type": "generation_completed",
@@ -144,7 +144,7 @@ class GenerationProgress:
         }
     
     @staticmethod
-    def failed(task_id: str, error: str, step: str = None) -> dict:
+    def failed(task_id: str, error: str, step: str | None = None) -> dict:
         return {
             "type": "generation_failed",
             "task_id": task_id,
@@ -154,8 +154,8 @@ class GenerationProgress:
         }
     
     @staticmethod
-    def review_result(task_id: str, approved: bool, score: float, 
-                      issues: list = None) -> dict:
+    def review_result(task_id: str, approved: bool, score: float,
+                      issues: list | None = None) -> dict:
         return {
             "type": "review_result",
             "task_id": task_id,
@@ -166,7 +166,7 @@ class GenerationProgress:
         }
     
     @staticmethod
-    def consistency_check(task_id: str, passed: bool, issues: list = None) -> dict:
+    def consistency_check(task_id: str, passed: bool, issues: list | None = None) -> dict:
         return {
             "type": "consistency_check",
             "task_id": task_id,

@@ -6,7 +6,7 @@ import asyncio
 import logging
 import hashlib
 from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, case
 
@@ -39,7 +39,7 @@ class ContextCache:
         """获取缓存"""
         if key in self._cache:
             timestamp = self._timestamps.get(key)
-            if timestamp and datetime.now(timezone.utc) - timestamp < timedelta(seconds=self._ttl):
+            if timestamp and datetime.now() - timestamp < timedelta(seconds=self._ttl):
                 logger.debug(f"Cache hit: {key[:8]}")
                 return self._cache[key]
             else:
@@ -50,7 +50,7 @@ class ContextCache:
     def set(self, key: str, value: Any, novel_id: int | None = None):
         """设置缓存"""
         self._cache[key] = value
-        self._timestamps[key] = datetime.now(timezone.utc)
+        self._timestamps[key] = datetime.now()
         if novel_id is not None:
             if novel_id not in self._novel_keys:
                 self._novel_keys[novel_id] = set()

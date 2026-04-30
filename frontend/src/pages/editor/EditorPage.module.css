@@ -465,6 +465,12 @@
   border-color: #95de64;
 }
 
+.btnAccept:disabled,
+.btnReject:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .editorPageDark .btnAccept {
   background: #1e4620;
   color: #89d185;
@@ -513,6 +519,81 @@
 
 .editorPageDark .editorContainer {
   background: rgba(17, 22, 31, 0.92);
+}
+
+.inlineDiffPane {
+  height: 100%;
+  overflow: auto;
+  padding: 18px 18px 32px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  background: rgba(255, 252, 247, 0.86);
+}
+
+.editorPageDark .inlineDiffPane {
+  background: rgba(17, 22, 31, 0.96);
+}
+
+.inlineDiffHunk {
+  border: 1px solid rgba(113, 132, 164, 0.16);
+  border-radius: 16px;
+  overflow: hidden;
+  margin-bottom: 16px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.editorPageDark .inlineDiffHunk {
+  background: rgba(22, 29, 40, 0.96);
+  border-color: rgba(102, 130, 166, 0.2);
+}
+
+.inlineDiffHeader {
+  padding: 10px 14px;
+  font-size: 12px;
+  color: #6a7687;
+  background: rgba(70, 98, 138, 0.06);
+  border-bottom: 1px solid rgba(113, 132, 164, 0.14);
+}
+
+.editorPageDark .inlineDiffHeader {
+  color: #b8c7db;
+  background: rgba(70, 98, 138, 0.12);
+  border-bottom-color: rgba(102, 130, 166, 0.18);
+}
+
+.inlineDiffInsert,
+.inlineDiffDelete,
+.inlineDiffContext {
+  display: grid;
+  grid-template-columns: 24px 48px 1fr;
+  align-items: start;
+  gap: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.inlineDiffInsert {
+  background: rgba(82, 196, 26, 0.08);
+}
+
+.inlineDiffDelete {
+  background: rgba(255, 77, 79, 0.08);
+}
+
+.inlineDiffMarker {
+  font-weight: 700;
+}
+
+.inlineDiffLineNo {
+  color: #8a93a2;
+  text-align: right;
+}
+
+.inlineDiffContent {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
 }
 
 .editNoticeBar {
@@ -787,6 +868,39 @@
   font-size: 12px;
   line-height: 1.45;
   color: #c14c42;
+}
+
+.activityDetails {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.activityChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(70, 98, 138, 0.08);
+  color: #556780;
+  font-size: 11px;
+}
+
+.editorPageDark .activityChip {
+  background: rgba(101, 133, 173, 0.16);
+  color: #c9d6e7;
+}
+
+.activityResult {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #556780;
+}
+
+.editorPageDark .activityResult {
+  color: #c1cfdf;
 }
 
 .activityEmpty {

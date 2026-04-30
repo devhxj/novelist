@@ -117,7 +117,7 @@ class EditModeConfig:
             "create_character", "update_character",
             "search_plot_memory", "search_story_memory", "prepare_story_brief", "get_character_memory", "get_timeline", "get_recent_context",
             "start_edit_session", "apply_edit", "get_edit_status", "read_chapter_for_edit",
-            "run_agent_task", "run_subagent",
+            "run_subagent",
             "get_story_timeline", "add_timeline_entry", "update_timeline_entry",
             "resolve_timeline_entry", "get_timeline_context",
             "run_review",
@@ -216,7 +216,7 @@ class EditModeConfig:
         },
         "generation": {
             "create_new_chapter", "generate_chapter_draft", "prepare_story_brief",
-            "search_story_memory", "run_agent_task", "run_subagent",
+            "search_story_memory", "run_subagent",
         },
     }
 

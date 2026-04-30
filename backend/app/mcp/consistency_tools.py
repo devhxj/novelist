@@ -28,7 +28,7 @@
 from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, case
-from datetime import datetime, timezone
+from datetime import datetime
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from app.novels.models import Novel
@@ -173,7 +173,7 @@ class RunReviewTool(BaseMCPTool):
 
         result_list = []
         for entry in entries:
-            pending_days = (datetime.now(timezone.utc) - entry.created_at).days if entry.created_at else 0
+            pending_days = (datetime.now() - entry.created_at).days if entry.created_at else 0
             source_chapter = None
             if entry.source_chapter_id:
                 ch_result = await db.execute(select(Chapter).where(Chapter.id == entry.source_chapter_id))
@@ -236,7 +236,7 @@ class RunReviewTool(BaseMCPTool):
         hp_result = await db.execute(high_priority_query)
         high_priority_items = [
             {"id": e.id, "title": e.title, "importance": e.importance,
-             "days_pending": (datetime.now(timezone.utc) - e.created_at).days if e.created_at else 0}
+             "days_pending": (datetime.now() - e.created_at).days if e.created_at else 0}
             for e in hp_result.scalars().all()
         ]
 

@@ -1,9 +1,17 @@
 import { useAuthStore } from '@/stores/authStore'
-import type { SessionLevel } from './sessionService'
+import type { SessionLevel, SessionStats } from './sessionService'
 
 export type GenerationType = 'chapter' | 'dialogue' | 'description' | 'outline' | 'summary' | 'character_profile' | 'chat'
 export type GenerationStyle = 'narrative' | 'descriptive' | 'dialogue' | 'poetic' | 'dramatic' | 'natural' | 'vivid'
-export type LLMModel = 'deepseek-chat' | 'deepseek-reasoner'
+export type LLMModel =
+  | 'deepseek-v4-flash'
+  | 'deepseek-v4-pro'
+  | 'deepseek-chat'
+  | 'deepseek-reasoner'
+  | 'qwen-max'
+  | 'qwen-plus'
+  | 'qwq'
+  | 'glm-4.7-flash'
 
 export interface CreateSessionMessage {
   type: 'create_session'
@@ -51,6 +59,7 @@ export interface SessionCreatedMessage {
   model?: string
   edit_mode?: string
   current_chapter_id?: number
+  stats?: SessionStats
   timestamp: string
 }
 
@@ -62,6 +71,7 @@ export interface SessionLoadedMessage {
   title?: string
   subtitle?: string
   message_count: number
+  stats?: SessionStats
   recent_messages?: Array<{
     role: string
     content: string
@@ -174,7 +184,20 @@ export interface ToolCallMessage {
   task_id: string
   tool_name: string
   status: 'executing' | 'completed' | 'failed' | 'rejected' | 'loop_detected'
+  phase?: 'selected' | 'executing' | 'completed' | 'failed'
   tool_id?: string
+  display_text?: string
+  activity_kind?: 'general' | 'browse' | 'view' | 'edit' | 'write' | 'create' | 'memory' | 'review' | 'plan'
+  chapter_id?: number
+  chapter_number?: number
+  chapter_title?: string
+  arguments?: Record<string, unknown>
+  result_summary?: {
+    success?: boolean
+    error?: string | null
+    metadata?: Record<string, unknown>
+    data_keys?: string[]
+  }
   error?: string
   message?: string
   timestamp: string
