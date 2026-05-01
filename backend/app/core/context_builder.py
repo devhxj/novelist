@@ -14,7 +14,6 @@ from app.core.vector_store import vector_store, VectorStoreError
 from app.novels.models import Novel, NovelCreativeProfile
 from app.chapters.models import Chapter
 from app.characters.models import Character
-from app.plot_events.models import PlotEvent
 from app.planning.models import PlotOutline, PlotLine, PlotNode, PlotNodeStatus
 from app.timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryStatus
 
@@ -250,10 +249,6 @@ class ContextBuilder:
         tag_config = self.LAYER_CONFIG[ContextLayer.DYNAMIC]
         parts = [f"<{tag_config['tag']}>"]
         
-        plot_context = await self._get_plot_events_context_sorted()
-        if plot_context:
-            parts.append(plot_context)
-        
         timeline_context = await self._get_timeline_context(target_chapter_number)
         if timeline_context:
             parts.append(timeline_context)
@@ -270,24 +265,22 @@ class ContextBuilder:
         context_size: int = 3000,
         include_previous_chapters: bool = True,
         include_characters: bool = True,
-        include_plot_events: bool = True
     ) -> Dict[str, Any]:
         """
         构建写作上下文 - 分层缓存优化版
-        
+
         层级构造顺序（由静到动）：
         1. Layer 1 (Static): 小说标题、简介
         2. Layer 2 (Stable): 角色信息、人物关系网络
         3. Layer 3 (Sliding): 前文摘要
-        4. Layer 4 (Dynamic): 情节线索、故事时间线
-        
+        4. Layer 4 (Dynamic): 故事时间线
+
         Args:
             chapter_number: 章节号（二选一）
             chapter_id: 章节ID（二选一）
             context_size: 上下文大小
             include_previous_chapters: 是否包含前文摘要
             include_characters: 是否包含角色信息
-            include_plot_events: 是否包含情节线索
         """
         await self._init_novel()
         
@@ -319,9 +312,8 @@ class ContextBuilder:
         
         if include_previous_chapters and target_chapter_number:
             layer_tasks["sliding"] = self._fetch_layer_sliding(target_chapter_number)
-        
-        if include_plot_events:
-            layer_tasks["dynamic"] = self._fetch_layer_dynamic(target_chapter_number)
+
+        layer_tasks["dynamic"] = self._fetch_layer_dynamic(target_chapter_number)
         
         layer_results = await asyncio.gather(*layer_tasks.values(), return_exceptions=True)
         
@@ -397,7 +389,6 @@ class ContextBuilder:
             context_size=context_size,
             include_previous_chapters=True,
             include_characters=True,
-            include_plot_events=True
         )
 
         await self._init_novel()
@@ -1197,48 +1188,6 @@ class ContextBuilder:
             char_info.append(info)
         
         return "\n".join(char_info)
-    
-    async def _get_plot_events_context(self) -> Optional[str]:
-        """获取情节事件上下文（原始版本）"""
-        result = await self.db.execute(
-            select(PlotEvent).where(
-                PlotEvent.novel_id == self.novel_id
-            ).order_by(PlotEvent.timeline).limit(10)
-        )
-        events = result.scalars().all()
-        
-        if not events:
-            return None
-        
-        event_info = []
-        for event in events:
-            info = f"- [{event.event_type or '事件'}] {event.description}"
-            event_info.append(info)
-        
-        return "\n".join(event_info)
-    
-    async def _get_plot_events_context_sorted(self) -> Optional[str]:
-        """
-        获取情节事件上下文（排序版本）
-        按timeline和ID排序以确保缓存键稳定
-        """
-        result = await self.db.execute(
-            select(PlotEvent).where(
-                PlotEvent.novel_id == self.novel_id
-            ).order_by(PlotEvent.timeline.asc(), PlotEvent.id.asc()).limit(10)
-        )
-        events = result.scalars().all()
-        
-        if not events:
-            return None
-        
-        event_info = []
-        for event in events:
-            info = f"- [{event.event_type or '事件'}] {event.description}"
-            event_info.append(info)
-        
-        return "\n".join(event_info)
-    
     async def _get_characters_list(self) -> List[Dict[str, Any]]:
         """获取角色列表"""
         result = await self.db.execute(
@@ -1257,22 +1206,23 @@ class ContextBuilder:
         ]
     
     async def _get_plot_hints(self) -> List[Dict[str, Any]]:
-        """获取情节提示"""
+        """获取情节提示（从 TimelineEntry 的活跃条目中提取）"""
         result = await self.db.execute(
-            select(PlotEvent).where(
-                PlotEvent.novel_id == self.novel_id
-            ).order_by(PlotEvent.created_at.desc()).limit(5)
+            select(TimelineEntry).where(
+                TimelineEntry.novel_id == self.novel_id,
+                TimelineEntry.status.in_(["pending", "active"])
+            ).order_by(TimelineEntry.importance.desc(), TimelineEntry.id.desc()).limit(5)
         )
-        events = result.scalars().all()
-        
+        entries = result.scalars().all()
+
         return [
             {
-                "id": event.id,
-                "type": event.event_type,
-                "description": event.description,
-                "chapter_id": event.chapter_id
+                "id": entry.id,
+                "type": entry.category,
+                "description": entry.title + (f": {entry.description}" if entry.description else ""),
+                "chapter_id": entry.source_chapter_id
             }
-            for event in events
+            for entry in entries
         ]
     
     async def _get_timeline_context(self, current_chapter: Optional[int] = None) -> Optional[str]:

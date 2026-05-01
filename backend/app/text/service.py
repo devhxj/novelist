@@ -119,9 +119,8 @@ class TextGenerator:
             context_size=3000,
             include_previous_chapters=True,
             include_characters=True,
-            include_plot_events=True
         )
-        
+
         if additional_context:
             context.update(additional_context)
         
@@ -164,9 +163,8 @@ class TextGenerator:
             context_size=3000,
             include_previous_chapters=True,
             include_characters=True,
-            include_plot_events=True
         )
-        
+
         prompt = f"""请润色以下章节内容，保持原有的情节和人物设定，但提升文字质量和可读性。
 
 原文内容：

@@ -1,5 +1,3 @@
-import type { PlotEvent } from './plotEvent'
-
 export type ChapterStatus = 'draft' | 'completed'
 
 export interface Chapter {
@@ -20,7 +18,6 @@ export interface ChapterDetail extends Chapter {
     id: number
     title: string
   }
-  plot_events?: PlotEvent[]
 }
 
 export interface ChapterCreate {

@@ -110,34 +110,11 @@ export interface CharacterMemoryResult {
   character_id: number
   character_name: string
   personality: Record<string, any>
-  plot_events: {
-    chapter_id: number
-    chapter_number: number
-    event_type: string
-    description: string
-  }[]
   related_content: {
     content: string
     chapter_id: number
     relevance: number
   }[]
-}
-
-export interface TimelineResult {
-  events: {
-    id: number
-    chapter_id: number
-    chapter_number: number
-    event_type: string
-    description: string
-    characters_involved: number[]
-    timeline: string
-  }[]
-  total: number
-  chapter_range: {
-    start: number | null
-    end: number | null
-  }
 }
 
 export interface RecentContextResult {

@@ -55,7 +55,6 @@ No test suite exists. No pytest config, no test files, no test dependencies in r
 - `novels/` — Novel CRUD and profile management
 - `characters/` — Character creation, profiles, relationships
 - `chapters/` — Chapter content management
-- `plot_events/` — Plot event tracking
 - `timeline/` — Timeline entry management
 - `locations/` — Location management (full CRUD module)
 - `memory/` — Long-term memory for narrative consistency

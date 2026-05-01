@@ -320,7 +320,6 @@ async def search_plot_memory(
 async def get_character_memory(
     novel_id: int,
     character_id: int,
-    include_plot_events: bool = True,
     ctx: Context = None
 ) -> dict:
     return await _execute_tool(
@@ -328,25 +327,6 @@ async def get_character_memory(
         ctx,
         novel_id=novel_id,
         character_id=character_id,
-        include_plot_events=include_plot_events
-    )
-
-
-@mcp.tool()
-async def get_timeline(
-    novel_id: int,
-    start_chapter: Optional[int] = None,
-    end_chapter: Optional[int] = None,
-    event_types: Optional[List[str]] = None,
-    ctx: Context = None
-) -> dict:
-    return await _execute_tool(
-        "get_timeline",
-        ctx,
-        novel_id=novel_id,
-        start_chapter=start_chapter,
-        end_chapter=end_chapter,
-        event_types=event_types
     )
 
 

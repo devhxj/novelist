@@ -300,22 +300,21 @@ async def get_character_memory(
     character_id: int,
     db: DBSession,
     current_user: CurrentUserDep,
-    include_plot_events: bool = Query(True, description="是否包含情节事件")
 ):
     from app.characters.models import Character
     from app.core.exceptions import NotFoundException, UnauthorizedException
     from sqlalchemy import select
-    
+
     result = await db.execute(select(Character).where(Character.id == character_id))
     character = result.scalar_one_or_none()
     if not character:
         raise NotFoundException("角色")
-    
+
     result = await db.execute(select(Novel).where(Novel.id == character.novel_id))
     novel = result.scalar_one_or_none()
     if not novel or novel.author_id != current_user.id:
         raise UnauthorizedException("无权访问此角色")
-    
+
     registry = get_mcp_registry()
     result = await registry.execute(
         "get_character_memory",
@@ -323,38 +322,8 @@ async def get_character_memory(
         user_id=current_user.id,
         novel_id=novel.id,
         character_id=character_id,
-        include_plot_events=include_plot_events
     )
-    
-    if result.success:
-        return ApiResponse.success(result.data)
-    return ApiResponse.error("TOOL_ERROR", result.error or "Unknown error")
 
-
-@router.post("/novels/{novel_id}/timeline")
-async def get_timeline(
-    novel: NovelOwner,
-    db: DBSession,
-    current_user: CurrentUserDep,
-    start_chapter: Optional[int] = Query(None, description="起始章节号"),
-    end_chapter: Optional[int] = Query(None, description="结束章节号"),
-    event_types: Optional[str] = Query(None, description="事件类型，逗号分隔")
-):
-    types = None
-    if event_types:
-        types = [x.strip() for x in event_types.split(",") if x.strip()]
-    
-    registry = get_mcp_registry()
-    result = await registry.execute(
-        "get_timeline",
-        db=db,
-        user_id=current_user.id,
-        novel_id=novel.id,
-        start_chapter=start_chapter,
-        end_chapter=end_chapter,
-        event_types=types
-    )
-    
     if result.success:
         return ApiResponse.success(result.data)
     return ApiResponse.error("TOOL_ERROR", result.error or "Unknown error")

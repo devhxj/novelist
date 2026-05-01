@@ -23,7 +23,6 @@ from app.novels.router import router as novels_router
 from app.characters.router import router as characters_router
 from app.locations.router import router as locations_router
 from app.chapters.router import router as chapters_router
-from app.plot_events.router import router as plot_events_router
 from app.memory.router import router as memory_router
 from app.rag.router import router as rag_router
 from app.agents.router import router as agents_router
@@ -41,7 +40,6 @@ from app.auth.models import User
 from app.novels.models import Novel
 from app.characters.models import Character
 from app.chapters.models import Chapter
-from app.plot_events.models import PlotEvent
 from app.memory.models import MemoryChunk
 from app.rag.models import RAGContext
 from app.agents.models import AgentTaskRecord
@@ -190,7 +188,6 @@ app.include_router(novels_router, prefix="/api/v1")
 app.include_router(characters_router, prefix="/api/v1")
 app.include_router(locations_router, prefix="/api/v1")
 app.include_router(chapters_router, prefix="/api/v1")
-app.include_router(plot_events_router, prefix="/api/v1")
 app.include_router(memory_router, prefix="/api/v1")
 app.include_router(rag_router, prefix="/api/v1")
 app.include_router(agents_router, prefix="/api/v1")

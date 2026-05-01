@@ -12,7 +12,6 @@ import type {
   CharacterDetailResult,
   MemorySearchResult,
   CharacterMemoryResult,
-  TimelineResult,
   RecentContextResult,
   ConsistencyCheckResult,
   ForeshadowingStatusResult,
@@ -86,26 +85,8 @@ export const mcpApi = {
 
   getCharacterMemory: async (
     characterId: number,
-    includePlotEvents?: boolean
   ): Promise<ApiResponse<CharacterMemoryResult>> => {
-    return apiClient.post(`/mcp/characters/${characterId}/memory`, null, {
-      params: { include_plot_events: includePlotEvents ?? true },
-    })
-  },
-
-  getTimeline: async (
-    novelId: number,
-    startChapter?: number,
-    endChapter?: number,
-    eventTypes?: string[]
-  ): Promise<ApiResponse<TimelineResult>> => {
-    return apiClient.post(`/mcp/novels/${novelId}/timeline`, null, {
-      params: {
-        start_chapter: startChapter,
-        end_chapter: endChapter,
-        event_types: eventTypes?.join(','),
-      },
-    })
+    return apiClient.post(`/mcp/characters/${characterId}/memory`)
   },
 
   getRecentContext: async (

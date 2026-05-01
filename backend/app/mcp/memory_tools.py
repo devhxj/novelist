@@ -12,7 +12,6 @@ from app.core.context_builder import ContextBuilder
 from app.core.text_utils import count_words
 from app.chapters.models import Chapter
 from app.characters.models import Character
-from app.plot_events.models import PlotEvent
 from app.core.permissions import verify_novel_ownership
 
 
@@ -139,10 +138,9 @@ class GetCharacterMemoryTool(BaseMCPTool):
     description = (
         "获取指定角色在小说中的所有相关信息和出场记录（动态信息）。"
         "无需传novel_id，系统会注入当前小说ID。"
-        "\n与 get_character_detail 不同，此工具不仅返回静态档案，还返回该角色参与的情节事件、相关正文片段。"
+        "\n与 get_character_detail 不同，此工具不仅返回静态档案，还返回该角色相关的正文片段。"
         "\n适用场景：写某个角色的戏份前调用，了解他/她最近做了什么、经历了什么。"
-        "\n参数说明：character_id 为必填项，需先从 get_character_list 获取；"
-        "include_plot_events 控制是否包含该角色参与的情节事件列表。"
+        "\n参数说明：character_id 为必填项，需先从 get_character_list 获取。"
         "\n💡 提示：get_writing_characters 已包含各角色的最近动态，可优先使用。"
     )
     category = MCPToolCategory.MEMORY_RETRIEVAL
@@ -151,34 +149,32 @@ class GetCharacterMemoryTool(BaseMCPTool):
         "properties": {
             "novel_id": {"type": "integer", "description": "小说ID"},
             "character_id": {"type": "integer", "description": "角色ID"},
-            "include_plot_events": {"type": "boolean", "default": True, "description": "是否包含角色参与的情节事件"}
         },
         "required": ["novel_id", "character_id"]
     }
-    
+
     def __init__(self):
         pass
-    
+
     async def execute(
         self,
         db: AsyncSession,
         novel_id: int,
         user_id: int,
         character_id: int,
-        include_plot_events: bool = True,
         **kwargs
     ) -> MCPToolResult:
         novel = await verify_novel_ownership(db, novel_id, user_id)
         if not novel:
             return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-        
+
         result = await db.execute(
             select(Character).where(Character.id == character_id, Character.novel_id == novel_id)
         )
         character = result.scalar_one_or_none()
         if not character:
             return MCPToolResult(success=False, error=f"Character not found: {character_id}")
-        
+
         memory = {
             "character": {
                 "id": character.id,
@@ -188,29 +184,7 @@ class GetCharacterMemoryTool(BaseMCPTool):
                 "relationships": character.relationships
             }
         }
-        
-        if include_plot_events:
-            result = await db.execute(
-                select(PlotEvent).where(PlotEvent.novel_id == novel_id)
-            )
-            all_events = result.scalars().all()
-            
-            character_events = []
-            for event in all_events:
-                involved = event.characters_involved or []
-                if character_id in involved:
-                    character_events.append({
-                        "id": event.id,
-                        "event_type": event.event_type,
-                        "description": event.description,
-                        "chapter_id": event.chapter_id,
-                        "timeline": event.timeline.isoformat() if event.timeline else None,
-                        "consequences": event.consequences
-                    })
-            
-            memory["plot_events"] = character_events
-            memory["event_count"] = len(character_events)
-        
+
         try:
             search_results = await vector_store.search(novel_id=novel_id, query=character.name, top_k=5)
             memory["relevant_content"] = [
@@ -224,108 +198,6 @@ class GetCharacterMemoryTool(BaseMCPTool):
             success=True,
             data=memory,
             metadata={"tool": self.name, "novel_id": novel_id, "character_id": character_id}
-        )
-
-
-class GetTimelineTool(BaseMCPTool):
-    """获取时间线"""
-    
-    name = "get_timeline"
-    description = "获取小说的情节时间线，按时间顺序排列事件"
-    category = MCPToolCategory.MEMORY_RETRIEVAL
-    expose_to_llm = False
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "novel_id": {"type": "integer", "description": "小说ID"},
-            "start_chapter": {"type": "integer", "description": "起始章节号（可选）"},
-            "end_chapter": {"type": "integer", "description": "结束章节号（可选）"},
-            "event_types": {"type": "array", "items": {"type": "string"}, "description": "事件类型筛选（可选）"}
-        },
-        "required": ["novel_id"]
-    }
-    
-    def __init__(self):
-        pass
-    
-    async def execute(
-        self,
-        db: AsyncSession,
-        novel_id: int,
-        user_id: int,
-        start_chapter: Optional[int] = None,
-        end_chapter: Optional[int] = None,
-        event_types: Optional[List[str]] = None,
-        **kwargs
-    ) -> MCPToolResult:
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-        
-        query = select(PlotEvent).where(PlotEvent.novel_id == novel_id)
-        
-        if start_chapter is not None:
-            result = await db.execute(
-                select(Chapter.id).where(Chapter.novel_id == novel_id, Chapter.chapter_number >= start_chapter)
-            )
-            chapter_ids = [r[0] for r in result.fetchall()]
-            query = query.where(PlotEvent.chapter_id.in_(chapter_ids))
-        
-        if end_chapter is not None:
-            result = await db.execute(
-                select(Chapter.id).where(Chapter.novel_id == novel_id, Chapter.chapter_number <= end_chapter)
-            )
-            chapter_ids = [r[0] for r in result.fetchall()]
-            query = query.where(PlotEvent.chapter_id.in_(chapter_ids))
-        
-        if event_types:
-            query = query.where(PlotEvent.event_type.in_(event_types))
-        
-        query = query.order_by(PlotEvent.timeline)
-        result = await db.execute(query)
-        events = result.scalars().all()
-        
-        chapter_ids = {e.chapter_id for e in events if e.chapter_id}
-        char_ids = set()
-        for e in events:
-            if e.characters_involved:
-                char_ids.update(e.characters_involved)
-        
-        chapter_map = {}
-        if chapter_ids:
-            ch_result = await db.execute(select(Chapter).where(Chapter.id.in_(chapter_ids)))
-            chapter_map = {ch.id: ch for ch in ch_result.scalars().all()}
-        
-        character_map = {}
-        if char_ids:
-            char_result = await db.execute(select(Character).where(Character.id.in_(char_ids)))
-            character_map = {c.id: c for c in char_result.scalars().all()}
-        
-        timeline = []
-        for event in events:
-            chapter = chapter_map.get(event.chapter_id) if event.chapter_id else None
-            
-            characters = []
-            if event.characters_involved:
-                for char_id in event.characters_involved:
-                    char = character_map.get(char_id)
-                    if char:
-                        characters.append({"id": char.id, "name": char.name})
-            
-            timeline.append({
-                "id": event.id,
-                "event_type": event.event_type,
-                "description": event.description,
-                "chapter": {"id": chapter.id if chapter else None, "chapter_number": chapter.chapter_number if chapter else None, "title": chapter.title if chapter else None},
-                "characters_involved": characters,
-                "timeline": event.timeline.isoformat() if event.timeline else None,
-                "consequences": event.consequences
-            })
-        
-        return MCPToolResult(
-            success=True,
-            data={"novel_id": novel_id, "timeline": timeline, "total_events": len(timeline), "filters": {"start_chapter": start_chapter, "end_chapter": end_chapter, "event_types": event_types}},
-            metadata={"tool": self.name, "novel_id": novel_id}
         )
 
 
@@ -378,7 +250,6 @@ class GetRecentContextTool(BaseMCPTool):
                 context_size=context_size,
                 include_previous_chapters=True,
                 include_characters=True,
-                include_plot_events=True
             )
             
             result = await db.execute(
@@ -473,6 +344,5 @@ class MemoryRetrievalTools:
         registry.register(SearchPlotMemoryTool())
         registry.register(SearchStoryMemoryTool())
         registry.register(GetCharacterMemoryTool())
-        registry.register(GetTimelineTool())
         registry.register(GetRecentContextTool())
         registry.register(PrepareStoryBriefTool())

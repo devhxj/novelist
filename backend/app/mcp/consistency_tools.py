@@ -2,12 +2,11 @@
 审查类MCP工具（整合版）
 
 架构说明（重要）：
-本系统有4层故事数据架构，工具按层归属：
+本系统有3层故事数据架构，工具按层归属：
 
   Layer 1: PlotOutline     → 整体大纲（premise/三幕结构）
   Layer 2: PlotLine+Node   → 情节线规划（main/sub/character/background线+节点）
-  Layer 3: PlotEvent       → 已发生的历史事件（通过 get_timeline 查询）
-  Layer 4: TimelineEntry   → 规划追踪（替代旧的独立 Foreshadowing 模块）
+  Layer 3: TimelineEntry   → 故事追踪（伏笔、情节里程碑、章节规划、用户指令）
            └─ category=foreshadowing: 伏笔/钩子（待回收）
            └─ category=plot_node:      情节里程碑
            └─ category=chapter_plan:  章节写作计划
@@ -15,7 +14,7 @@
 
 关键区分：
 - "plots" 指 Layer 2 的 PlotLine/PlotNode 系统（独立情节规划结构）
-- "foreshadowing" 指 Layer 4 TimelineEntry 的 foreshadowing 分类（伏笔管理）
+- "foreshadowing" 指 Layer 3 TimelineEntry 的 foreshadowing 分类（伏笔管理）
 - 两者是完全独立的系统，不要混淆！
 
 工具映射：
@@ -34,7 +33,6 @@ from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from app.novels.models import Novel
 from app.chapters.models import Chapter
 from app.characters.models import Character
-from app.plot_events.models import PlotEvent
 from app.timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryStatus
 from app.consistency.service import ConsistencyChecker
 from app.core.permissions import verify_novel_ownership

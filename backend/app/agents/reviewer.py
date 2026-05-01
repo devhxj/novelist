@@ -45,7 +45,6 @@ REVIEW_SPEC = SubAgentSpec(
         "get_character_detail",
         "list_timeline_entries",
         "get_timeline_context",
-        "get_plot_events",
     ],
     allowed_resources=[
         "novel://{novel_id}/summary",
@@ -246,8 +245,6 @@ class ReviewerAgent(BaseAgent):
                 consistency_issues.extend(await self._check_character_consistency(task))
             if "plot" in check_types:
                 consistency_issues.extend(await self._check_plot_consistency(task))
-            if "timeline" in check_types:
-                consistency_issues.extend(await self._check_timeline_consistency(task))
             summary = {
                 "total_issues": len(consistency_issues)
             }
@@ -329,14 +326,6 @@ class ReviewerAgent(BaseAgent):
             checker = ConsistencyChecker(db, task.novel_id)
             chapters = await checker._get_chapters([task.chapter_id] if task.chapter_id else None)
             issues = await checker.check_plot_consistency(chapters)
-            return [issue.model_dump() for issue in issues]
-
-    async def _check_timeline_consistency(self, task: AgentTask) -> List[Dict[str, Any]]:
-        """检查时间线一致性"""
-        async with AsyncSessionLocal() as db:
-            checker = ConsistencyChecker(db, task.novel_id)
-            chapters = await checker._get_chapters([task.chapter_id] if task.chapter_id else None)
-            issues = await checker.check_timeline_consistency(chapters)
             return [issue.model_dump() for issue in issues]
 
     async def _list_foreshadowing(self, task: AgentTask) -> List[Dict[str, Any]] | Dict[str, Any]:

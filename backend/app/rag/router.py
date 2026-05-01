@@ -112,19 +112,17 @@ async def get_writing_context(
     - context_size: 上下文大小限制
     - include_previous_chapters: 包含前文摘要
     - include_characters: 包含角色信息
-    - include_plot_events: 包含情节线索
     """
     logger.info(f"Getting writing context for chapter {request.chapter_id}")
-    
+
     try:
         builder = ContextBuilder(db, novel.id)
-        
+
         context_data = await builder.build_writing_context(
             chapter_id=request.chapter_id,
             context_size=request.context_size,
             include_previous_chapters=request.include_previous_chapters,
             include_characters=request.include_characters,
-            include_plot_events=request.include_plot_events
         )
         
         logger.info(f"Writing context built: {context_data['context_length']} chars")

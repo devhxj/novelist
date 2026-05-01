@@ -25,7 +25,6 @@ class Chapter(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(server_default=func.now(), onupdate=func.now())
 
     novel: Mapped["Novel"] = relationship(back_populates="chapters")
-    plot_events: Mapped[list["PlotEvent"]] = relationship(back_populates="chapter")
     edit_sessions: Mapped[list["EditSession"]] = relationship(back_populates="chapter", cascade="all, delete-orphan")
 
     __table_args__ = (

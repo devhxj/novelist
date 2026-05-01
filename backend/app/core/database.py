@@ -46,7 +46,6 @@ async def init_db():
     from app.characters.models import Character, CharacterRelation
     from app.locations.models import Location
     from app.chapters.models import Chapter
-    from app.plot_events.models import PlotEvent
     from app.memory.models import MemoryChunk
     from app.rag.models import RAGContext
     from app.agents.models import AgentTaskRecord

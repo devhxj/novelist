@@ -13,7 +13,6 @@ from app.core.database import Base
 if TYPE_CHECKING:
     from app.characters.models import Character
     from app.chapters.models import Chapter
-    from app.plot_events.models import PlotEvent
     from app.planning.models import PlotLine, PlotNode, PlotOutline
     from app.timeline.models import TimelineEntry
     from app.locations.models import Location
@@ -34,7 +33,6 @@ class Novel(Base):
 
     characters: Mapped[list["Character"]] = relationship(back_populates="novel")
     chapters: Mapped[list["Chapter"]] = relationship(back_populates="novel")
-    plot_events: Mapped[list["PlotEvent"]] = relationship(back_populates="novel")
     plot_lines: Mapped[list["PlotLine"]] = relationship(back_populates="novel", cascade="all, delete-orphan")
     plot_nodes: Mapped[list["PlotNode"]] = relationship(back_populates="novel", cascade="all, delete-orphan")
     plot_outline: Mapped["PlotOutline"] = relationship(back_populates="novel", uselist=False, cascade="all, delete-orphan")

@@ -12,7 +12,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.insert(0, project_root)
 
 from backend.app.core.database import engine, Base
-from backend.app.models.models import Novel, Character, Chapter, PlotEvent
+from backend.app.models.models import Novel, Character, Chapter
 
 def init_db():
     """初始化数据库，创建所有表"""

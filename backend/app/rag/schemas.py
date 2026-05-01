@@ -41,7 +41,6 @@ class WritingContextRequest(BaseModel):
     context_size: int = Field(default=3000, ge=500, le=10000)
     include_previous_chapters: bool = True
     include_characters: bool = True
-    include_plot_events: bool = True
 
 
 class WritingContextResponse(BaseModel):

@@ -15,7 +15,6 @@ from datetime import datetime, timezone
 from app.novels.models import Novel
 from app.chapters.models import Chapter
 from app.characters.models import Character
-from app.plot_events.models import PlotEvent
 from app.timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryStatus
 from app.consistency.schemas import ConsistencyIssue
 from app.core.llm_service import LLMService
@@ -113,10 +112,6 @@ class ConsistencyChecker:
         if "plot" in check_types:
             plot_issues = await self.check_plot_consistency(chapters)
             all_issues.extend(plot_issues)
-        
-        if "timeline" in check_types:
-            timeline_issues = await self.check_timeline_consistency(chapters)
-            all_issues.extend(timeline_issues)
         
         if "foreshadowing" in check_types:
             foreshadowing_issues = await self.check_foreshadowing_status()
@@ -277,45 +272,27 @@ class ConsistencyChecker:
     async def check_plot_consistency(self, chapters: List[Chapter]) -> List[ConsistencyIssue]:
         """
         检查情节一致性
-        
+
         检查内容:
         - 情节发展是否合理
         - 是否有逻辑漏洞
         - 事件因果关系是否清晰
         """
         issues: List[ConsistencyIssue] = []
-        
+
         if len(chapters) < 2:
             return issues
-        
-        result = await self.db.execute(
-            select(PlotEvent)
-            .where(PlotEvent.novel_id == self.novel_id)
-            .order_by(PlotEvent.created_at)
-        )
-        plot_events = result.scalars().all()
-        
-        if not plot_events:
-            return issues
-        
-        events_summary = "\n".join([
-            f"- 第{event.chapter_id}章: {event.event_type} - {event.description}"
-            for event in plot_events[-10:]
-        ])
-        
+
         recent_chapters = chapters[-3:]
         chapter_contents = []
         for chapter in recent_chapters:
             if chapter.content:
                 chapter_contents.append(f"第{chapter.chapter_number}章:\n{chapter.content[:1500]}")
-        
+
         if not chapter_contents:
             return issues
-        
-        prompt = f"""请检查以下章节内容的情节一致性问题。
 
-情节事件记录:
-{events_summary}
+        prompt = f"""请检查以下章节内容的情节一致性问题。
 
 近期章节内容:
 {chr(10).join(chapter_contents)}
@@ -342,7 +319,7 @@ class ConsistencyChecker:
 
         try:
             data = await self._call_llm_with_retry(prompt)
-            
+
             if data:
                 for item in data.get("issues", []):
                     issue = self._issue(
@@ -357,66 +334,12 @@ class ConsistencyChecker:
                     )
                     if issue:
                         issues.append(issue)
-                
+
         except Exception as e:
             logger.error(f"Plot consistency check failed: {e}")
-        
+
         return issues
-    
-    async def check_timeline_consistency(self, chapters: List[Chapter]) -> List[ConsistencyIssue]:
-        """
-        检查时间线一致性
-        
-        检查内容:
-        - 时间顺序是否合理
-        - 事件时间跨度是否矛盾
-        """
-        issues: List[ConsistencyIssue] = []
-        
-        result = await self.db.execute(
-            select(PlotEvent)
-            .where(PlotEvent.novel_id == self.novel_id)
-            .order_by(PlotEvent.timeline)
-        )
-        plot_events = result.scalars().all()
-        
-        if len(plot_events) < 2:
-            return issues
-        
-        for i in range(1, len(plot_events)):
-            prev_event = plot_events[i-1]
-            curr_event = plot_events[i]
-            
-            if prev_event.timeline and curr_event.timeline:
-                if prev_event.timeline > curr_event.timeline:
-                    prev_result = await self.db.execute(
-                        select(Chapter).where(Chapter.id == prev_event.chapter_id)
-                    )
-                    prev_chapter = prev_result.scalar_one_or_none()
-                    
-                    curr_result = await self.db.execute(
-                        select(Chapter).where(Chapter.id == curr_event.chapter_id)
-                    )
-                    curr_chapter = curr_result.scalar_one_or_none()
-                    
-                    if prev_chapter and curr_chapter and prev_chapter.chapter_number <= curr_chapter.chapter_number:
-                        issue = self._issue(
-                            issue_type="timeline",
-                            severity="error",
-                            chapter_id=curr_event.chapter_id,
-                            chapter_number=curr_chapter.chapter_number if curr_chapter else None,
-                            description=f"时间线顺序错误: 事件'{curr_event.description}'的时间早于前一事件'{prev_event.description}'",
-                            details={
-                                "prev_event_id": prev_event.id,
-                                "curr_event_id": curr_event.id
-                            },
-                            suggestion="请检查并修正事件的时间标记"
-                        )
-                        if issue:
-                            issues.append(issue)
-        
-        return issues
-    
+
     async def check_foreshadowing_status(self) -> List[ConsistencyIssue]:
         """
         检查伏笔状态（通过时间线系统查询）

@@ -346,8 +346,7 @@ class GetNovelProgressTool(BaseMCPTool):
             select(Novel)
             .options(
                 selectinload(Novel.chapters),
-                selectinload(Novel.characters),
-                selectinload(Novel.plot_events)
+                selectinload(Novel.characters)
             )
             .where(Novel.id == novel_id)
         )
@@ -355,7 +354,6 @@ class GetNovelProgressTool(BaseMCPTool):
         
         chapters = novel.chapters
         characters = novel.characters
-        plot_events = novel.plot_events
         
         total_chapters = len(chapters)
         completed_chapters = len([ch for ch in chapters if ch.status == "completed"])
@@ -391,9 +389,6 @@ class GetNovelProgressTool(BaseMCPTool):
             },
             "characters": {
                 "total": len(characters)
-            },
-            "plot_events": {
-                "total": len(plot_events)
             },
             "latest_chapter": latest_chapter
         }
@@ -966,32 +961,25 @@ class GetWritingCharactersTool(BaseMCPTool):
         recent_events_summary = ""
         if include_recent_events and characters:
             try:
-                from app.plot_events.models import PlotEvent
-                char_ids = [c.id for c in characters]
-                event_result = await db.execute(
-                    select(PlotEvent)
-                    .where(PlotEvent.novel_id == novel_id)
-                    .order_by(PlotEvent.timeline.desc())
-                    .limit(20)
+                from app.timeline.models import TimelineEntry
+                entry_result = await db.execute(
+                    select(TimelineEntry)
+                    .where(TimelineEntry.novel_id == novel_id)
+                    .order_by(TimelineEntry.updated_at.desc())
+                    .limit(10)
                 )
-                all_events = event_result.scalars().all()
-                relevant_events = [
-                    e for e in all_events
-                    if e.characters_involved and any(cid in (e.characters_involved or []) for cid in char_ids)
-                ]
-                if relevant_events:
+                recent_entries = entry_result.scalars().all()
+                if recent_entries:
                     event_lines = []
-                    for ev in relevant_events[:10]:
-                        involved_names = [
-                            char_id_map[cid].name
-                            for cid in (ev.characters_involved or [])
-                            if cid in char_id_map
-                        ]
-                        line = f"[{ev.event_type}] {'、'.join(involved_names)} — {ev.description}"
+                    for entry in recent_entries:
+                        status_label = {"pending": "待办", "active": "进行中", "completed": "已完成", "resolved": "已回收"}.get(entry.status, entry.status)
+                        line = f"[{entry.category}/{status_label}] {entry.title}"
+                        if entry.description:
+                            line += f" — {entry.description[:50]}"
                         event_lines.append(line)
                     recent_events_summary = "\n".join(event_lines)
                 else:
-                    recent_events_summary = "暂无相关事件记录。"
+                    recent_events_summary = "暂无追踪记录。"
             except Exception:
                 recent_events_summary = ""
 

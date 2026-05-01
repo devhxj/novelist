@@ -484,7 +484,6 @@ async def _execute_streaming_edit_chapter(
             context_size=arguments.get("context_size", 3000),
             include_previous_chapters=True,
             include_characters=True,
-            include_plot_events=True
         )
         system_prompt = get_system_prompt(GenerationType.CHAPTER, style)
         user_prompt = build_chapter_prompt(
@@ -1936,9 +1935,8 @@ async def _generate_chapter_ws(
         context_size=context_size,
         include_previous_chapters=True,
         include_characters=True,
-        include_plot_events=True
     )
-    
+
     await ws_manager.send_personal_message(
         GenerationProgress.progress(task_id, "generating", 20, "开始生成章节"),
         websocket

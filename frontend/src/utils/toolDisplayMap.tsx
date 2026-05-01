@@ -2,7 +2,7 @@ import {
   BookOutlined, UnorderedListOutlined,
   ReadOutlined, BarChartOutlined, SettingOutlined, EditOutlined,
   TeamOutlined, UserOutlined, PlusCircleOutlined, ThunderboltOutlined,
-  SearchOutlined, HistoryOutlined, LineChartOutlined, CompassOutlined,
+  SearchOutlined, HistoryOutlined, CompassOutlined,
   CheckSquareOutlined, BugOutlined, AlertOutlined, ExperimentOutlined,
   RobotOutlined,
   PushpinOutlined, AimOutlined, BulbOutlined,
@@ -162,14 +162,6 @@ const toolDisplayMap: Record<string, ToolDisplayInfo> = {
     icon: <HistoryOutlined />,
     color: '#eb2f96',
     userAction: '正在回忆这位角色的经历…',
-  },
-
-  get_timeline: {
-    displayName: '查看情节时间线',
-    displayDescription: '按时间顺序查看小说中发生的事件脉络，了解故事的因果发展链条',
-    icon: <LineChartOutlined />,
-    color: '#eb2f96',
-    userAction: '正在梳理事件时间线…',
   },
 
   get_recent_context: {

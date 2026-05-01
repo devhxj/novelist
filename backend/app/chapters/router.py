@@ -201,7 +201,6 @@ async def get_chapter(
         select(Chapter)
         .options(
             selectinload(Chapter.novel),
-            selectinload(Chapter.plot_events)
         )
         .where(Chapter.id == chapter_id)
     )
@@ -228,14 +227,6 @@ async def get_chapter(
             "id": chapter.novel.id,
             "title": chapter.novel.title
         },
-        "plot_events": [
-            {
-                "id": pe.id,
-                "event_type": pe.event_type,
-                "description": pe.description
-            }
-            for pe in chapter.plot_events
-        ]
     }
     
     await redis_service.set(cache_key, data, ttl=300)
