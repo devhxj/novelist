@@ -2,19 +2,13 @@
 会话管理核心模块 - AI IDE风格
 
 核心概念：
-1. SessionScope - 会话作用域（整本小说/章节范围/单章节）
-2. Session - 会话对象，包含对话历史和待确认变更
-3. TextChange - 文本变更记录，支持diff
-
-会话作用域类型：
-- novel: 整本小说
-- chapters: 章节范围（第X章到第Y章）
-- chapter: 单章节
+1. Session - 会话对象，包含对话历史和待确认变更
+2. TextChange - 文本变更记录，支持diff
 """
 import logging
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
@@ -27,65 +21,6 @@ class MessageRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
     TOOL = "tool"
-
-
-class ScopeType(str, Enum):
-    NOVEL = "novel"
-    CHAPTERS = "chapters"
-    CHAPTER = "chapter"
-
-
-@dataclass
-class SessionScope:
-    type: ScopeType = ScopeType.NOVEL
-    chapter_start: Optional[int] = None
-    chapter_end: Optional[int] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "type": self.type.value,
-            "chapter_start": self.chapter_start,
-            "chapter_end": self.chapter_end
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "SessionScope":
-        return cls(
-            type=ScopeType(data.get("type", "novel")),
-            chapter_start=data.get("chapter_start"),
-            chapter_end=data.get("chapter_end")
-        )
-    
-    def get_display_name(self) -> str:
-        if self.type == ScopeType.NOVEL:
-            return "整本小说"
-        elif self.type == ScopeType.CHAPTERS:
-            return f"第{self.chapter_start}-{self.chapter_end}章"
-        elif self.type == ScopeType.CHAPTER:
-            return f"第{self.chapter_start}章"
-        return "未知作用域"
-    
-    def get_chapter_range(self) -> List[int]:
-        if self.type == ScopeType.NOVEL:
-            return []
-        elif self.type == ScopeType.CHAPTERS:
-            if self.chapter_start is None or self.chapter_end is None:
-                return []
-            return list(range(self.chapter_start, self.chapter_end + 1))
-        elif self.type == ScopeType.CHAPTER:
-            return [self.chapter_start] if self.chapter_start else []
-        return []
-    
-    def includes_chapter(self, chapter_number: int) -> bool:
-        if self.type == ScopeType.NOVEL:
-            return True
-        elif self.type == ScopeType.CHAPTERS:
-            if self.chapter_start is None or self.chapter_end is None:
-                return False
-            return self.chapter_start <= chapter_number <= self.chapter_end
-        elif self.type == ScopeType.CHAPTER:
-            return chapter_number == self.chapter_start
-        return False
 
 
 @dataclass
@@ -304,7 +239,6 @@ class Session:
     session_id: str
     user_id: int
     novel_id: Optional[int] = None
-    scope: SessionScope = field(default_factory=lambda: SessionScope(type=ScopeType.NOVEL))
     title: str = ""
     messages: List[Message] = field(default_factory=list)
     summary: Optional[str] = None
@@ -325,7 +259,6 @@ class Session:
             "session_id": self.session_id,
             "user_id": self.user_id,
             "novel_id": self.novel_id,
-            "scope": self.scope.to_dict(),
             "title": self.title,
             "subtitle": self.subtitle,
             "messages": [m.to_dict() for m in self.messages],
@@ -343,35 +276,18 @@ class Session:
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Session":
-        scope_data = data.get("scope", {})
-        if isinstance(scope_data.get("type"), str):
-            scope = SessionScope.from_dict(scope_data)
-        else:
-            level = data.get("level", "free")
-            if level == "chapter":
-                scope = SessionScope(
-                    type=ScopeType.CHAPTER,
-                    chapter_start=data.get("chapter_number"),
-                    chapter_end=data.get("chapter_number_end")
-                )
-            elif level == "novel":
-                scope = SessionScope(type=ScopeType.NOVEL)
-            else:
-                scope = SessionScope(type=ScopeType.NOVEL)
-        
         novel_context = None
         if data.get("novel_context"):
             novel_context = NovelContext.from_dict(data["novel_context"])
-        
+
         chapter_context = None
         if data.get("chapter_context"):
             chapter_context = ChapterContext.from_dict(data["chapter_context"])
-        
+
         return cls(
             session_id=data["session_id"],
             user_id=data["user_id"],
             novel_id=data.get("novel_id"),
-            scope=scope,
             title=data.get("title", ""),
             subtitle=data.get("subtitle", "") or data.get("metadata", {}).get("subtitle", ""),
             messages=[Message.from_dict(m) for m in data.get("messages", [])],
@@ -398,14 +314,10 @@ class Session:
         return self.get_token_count() / model_config.context_window
     
     def get_display_name(self) -> str:
-        if self.title:
-            return self.title
-        return self.scope.get_display_name()
+        return self.title or "新对话"
 
     def get_subtitle(self) -> str:
-        if self.subtitle:
-            return self.subtitle
-        return self.scope.get_display_name()
+        return self.subtitle or ""
 
 
 class ContextCompressor:
@@ -577,38 +489,24 @@ class SessionManager:
         self,
         user_id: int,
         novel_id: Optional[int] = None,
-        scope: Optional[SessionScope] = None,
         novel_context: Optional[NovelContext] = None,
         chapter_context: Optional[ChapterContext] = None,
         system_prompt: Optional[str] = None,
         model: str = "deepseek-v4-flash",
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Session:
-        if scope is None:
-            scope = SessionScope(type=ScopeType.NOVEL)
-        
-        scope_suffix = ""
-        if scope.type == ScopeType.CHAPTER:
-            scope_suffix = f"_ch{scope.chapter_start}"
-        elif scope.type == ScopeType.CHAPTERS:
-            scope_suffix = f"_ch{scope.chapter_start}-{scope.chapter_end}"
-        
-        session_id = f"sess_{user_id}{scope_suffix}_{uuid.uuid4().hex[:8]}"
-        
+        session_id = f"sess_{user_id}_{uuid.uuid4().hex[:8]}"
+
         session = Session(
             session_id=session_id,
             user_id=user_id,
             novel_id=novel_id,
-            scope=scope,
             novel_context=novel_context,
             chapter_context=chapter_context,
             model=model,
             metadata={"created_from": "session_manager", **(metadata or {})}
         )
-        
-        session.subtitle = scope.get_display_name()
-        session.metadata["subtitle"] = session.subtitle
-        
+
         if system_prompt:
             session.messages.append(Message(
                 role=MessageRole.SYSTEM,
@@ -616,8 +514,8 @@ class SessionManager:
                 importance=1.0,
                 token_count=self.compressor.estimate_tokens(system_prompt)
             ))
-        
-        logger.info(f"Created session: {session_id}, scope: {scope.get_display_name()}")
+
+        logger.info(f"Created session: {session_id}")
         return session
     
     def add_message(
@@ -794,10 +692,9 @@ class SessionManager:
         self,
         user_id: int,
         novel_id: Optional[int] = None,
-        scope_type: Optional[ScopeType] = None
     ) -> List[Session]:
         if self._storage:
-            return await self._storage.list_by_user(user_id, novel_id, scope_type)
+            return await self._storage.list_by_user(user_id, novel_id)
         return []
     
     def compress_session(
@@ -812,7 +709,6 @@ class SessionManager:
         token_count = session.get_token_count()
         return {
             "session_id": session.session_id,
-            "scope": session.scope.to_dict(),
             "display_name": session.get_display_name(),
             "title": session.title,
             "subtitle": session.get_subtitle(),

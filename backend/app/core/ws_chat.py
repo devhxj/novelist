@@ -16,8 +16,8 @@ from app.core.auth import decode_token
 from app.core.llm_service import llm_service, LLMServiceError
 from app.core.exceptions import BusinessError, SystemError, ConflictException
 from app.core.session_manager import (
-    Session, SessionManager, SessionConfig, MessageRole,
-    SessionScope, ScopeType, NovelContext, ChapterContext,
+    Session, MessageRole,
+    NovelContext, ChapterContext,
     session_manager
 )
 from app.core.session_storage import session_storage
@@ -650,16 +650,11 @@ async def websocket_chat(
                 elif message_type == "list_sessions":
                     await _handle_list_sessions(websocket, user_id, novel_id, data)
                 
-                elif message_type == "change_scope":
-                    if current_session:
-                        await _handle_change_scope(websocket, current_session, data, novel_id)
-                
                 elif message_type == "chat":
                     if not current_session:
                         current_session = session_manager.create_session(
                             user_id=user_id,
                             novel_id=novel_id,
-                            scope=SessionScope(type=ScopeType.NOVEL)
                         )
                         await session_manager.save_session(current_session)
                     
@@ -756,38 +751,17 @@ async def websocket_chat(
 
 
 async def _handle_create_session(websocket, data, user_id, novel_id):
-    scope_data = data.get("scope", {})
-    scope = SessionScope(
-        type=ScopeType(scope_data.get("type", "novel")),
-        chapter_start=scope_data.get("chapter_start"),
-        chapter_end=scope_data.get("chapter_end")
-    )
     model = data.get("model", "deepseek-v4-flash")
     edit_mode = data.get("edit_mode", "agent")
     reasoning_effort = data.get("reasoning_effort")
-    
+
     async with AsyncSessionLocal() as db:
         novel_context = await _build_novel_context(db, novel_id)
-        chapter_context = None
-        current_chapter_id = None
-        if scope.type == ScopeType.CHAPTER and scope.chapter_start:
-            chapter_context = await _build_chapter_context(db, novel_id, scope.chapter_start)
-            result = await db.execute(
-                select(Chapter).where(
-                    Chapter.novel_id == novel_id,
-                    Chapter.chapter_number == scope.chapter_start
-                )
-            )
-            chapter = result.scalar_one_or_none()
-            if chapter:
-                current_chapter_id = chapter.id
-    
+
     session = session_manager.create_session(
         user_id=user_id,
         novel_id=novel_id,
-        scope=scope,
         novel_context=novel_context,
-        chapter_context=chapter_context,
         model=model,
         metadata={"reasoning_effort": reasoning_effort} if reasoning_effort else None,
     )
@@ -795,24 +769,21 @@ async def _handle_create_session(websocket, data, user_id, novel_id):
         base_title = novel_context.title if novel_context else ""
         session.title = f"{base_title} 对话" if base_title else "新对话"
     session.edit_mode = edit_mode
-    session.current_chapter_id = current_chapter_id
     await session_manager.save_session(session)
-    
+
     await ws_manager.send_personal_message({
         "type": "session_created",
         "session_id": session.session_id,
-        "scope": scope.to_dict(),
-        "display_name": scope.get_display_name(),
+        "display_name": session.get_display_name(),
         "title": session.title,
         "subtitle": session.get_subtitle(),
         "model": model,
         "edit_mode": edit_mode,
         "reasoning_effort": reasoning_effort,
-        "current_chapter_id": current_chapter_id,
         "stats": session_manager.get_session_stats(session),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }, websocket)
-    
+
     return session
 
 
@@ -839,7 +810,6 @@ async def _handle_load_session(websocket, data, user_id):
     await ws_manager.send_personal_message({
         "type": "session_loaded",
         "session_id": session.session_id,
-        "scope": session.scope.to_dict(),
         "display_name": session.get_display_name(),
         "title": session.title,
         "subtitle": session.get_subtitle(),
@@ -857,21 +827,16 @@ async def _handle_load_session(websocket, data, user_id):
 
 
 async def _handle_list_sessions(websocket, user_id, novel_id, data):
-    scope_type = data.get("scope_type")
-    scope_enum = ScopeType(scope_type) if scope_type else None
-    
     sessions = await session_manager.list_user_sessions(
         user_id=user_id,
         novel_id=novel_id,
-        scope_type=scope_enum
     )
-    
+
     await ws_manager.send_personal_message({
         "type": "sessions_list",
         "sessions": [
             {
                 "session_id": s.session_id,
-                "scope": s.scope.to_dict(),
                 "display_name": s.get_display_name(),
                 "title": s.title,
                 "subtitle": s.get_subtitle(),
@@ -880,38 +845,6 @@ async def _handle_list_sessions(websocket, user_id, novel_id, data):
             }
             for s in sessions
         ],
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }, websocket)
-
-
-async def _handle_change_scope(websocket, session, data, novel_id):
-    scope_data = data.get("scope", {})
-    new_scope = SessionScope(
-        type=ScopeType(scope_data.get("type", "novel")),
-        chapter_start=scope_data.get("chapter_start"),
-        chapter_end=scope_data.get("chapter_end")
-    )
-    
-    session.scope = new_scope
-    session.subtitle = new_scope.get_display_name()
-    
-    async with AsyncSessionLocal() as db:
-        if new_scope.type == ScopeType.CHAPTER and new_scope.chapter_start:
-            session.chapter_context = await _build_chapter_context(
-                db, novel_id, new_scope.chapter_start
-            )
-        else:
-            session.chapter_context = None
-    
-    await session_manager.save_session(session)
-    
-    await ws_manager.send_personal_message({
-        "type": "scope_changed",
-        "session_id": session.session_id,
-        "scope": new_scope.to_dict(),
-        "display_name": new_scope.get_display_name(),
-        "title": session.title,
-        "subtitle": session.get_subtitle(),
         "timestamp": datetime.now(timezone.utc).isoformat()
     }, websocket)
 
@@ -1443,29 +1376,15 @@ async def _run_chat_with_tools(
                             if session.current_chapter_id and 'chapter_id' not in arguments:
                                 clean_args['chapter_id'] = session.current_chapter_id
                             elif tool_name in {"edit_chapter"} and 'chapter_id' not in arguments:
-                                chapter_id = None
-                                if session.scope.type == ScopeType.CHAPTER and session.scope.chapter_start:
-                                    result = await db.execute(
-                                        select(Chapter).where(
-                                            Chapter.novel_id == novel_id,
-                                            Chapter.chapter_number == session.scope.chapter_start
-                                        )
-                                    )
-                                    chapter = result.scalar_one_or_none()
-                                    if chapter:
-                                        chapter_id = chapter.id
-                                if not chapter_id:
-                                    result = await db.execute(
-                                        select(Chapter)
-                                        .where(Chapter.novel_id == novel_id)
-                                        .order_by(Chapter.chapter_number.desc())
-                                        .limit(1)
-                                    )
-                                    chapter = result.scalar_one_or_none()
-                                    if chapter:
-                                        chapter_id = chapter.id
-                                if chapter_id:
-                                    clean_args["chapter_id"] = chapter_id
+                                result = await db.execute(
+                                    select(Chapter)
+                                    .where(Chapter.novel_id == novel_id)
+                                    .order_by(Chapter.chapter_number.desc())
+                                    .limit(1)
+                                )
+                                chapter = result.scalar_one_or_none()
+                                if chapter:
+                                    clean_args["chapter_id"] = chapter.id
                             
                             cache_key = f"{tool_name}:{json.dumps(clean_args, ensure_ascii=False, sort_keys=True)}"
                             presentation = await _build_tool_call_presentation(db, novel_id, tool_name, clean_args)

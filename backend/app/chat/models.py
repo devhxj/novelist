@@ -19,10 +19,6 @@ class ChatSession(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     novel_id: Mapped[Optional[int]] = mapped_column(ForeignKey("novels.id", ondelete="CASCADE"), nullable=True, index=True)
 
-    scope_type: Mapped[str] = mapped_column(String(16), default="novel", index=True)
-    chapter_start: Mapped[Optional[int]] = mapped_column(nullable=True)
-    chapter_end: Mapped[Optional[int]] = mapped_column(nullable=True)
-
     title: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     model: Mapped[str] = mapped_column(String(32), default="deepseek-v4-flash")
 
@@ -48,9 +44,6 @@ class ChatSession(Base):
             "session_id": self.session_id,
             "user_id": self.user_id,
             "novel_id": self.novel_id,
-            "scope_type": self.scope_type,
-            "chapter_start": self.chapter_start,
-            "chapter_end": self.chapter_end,
             "title": self.title,
             "model": self.model,
             "summary": self.summary,

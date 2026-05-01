@@ -1,14 +1,7 @@
 import { useAuthStore } from '@/stores/authStore'
 
-export type ScopeType = 'novel' | 'chapters' | 'chapter'
 export type EditMode = 'agent' | 'review' | 'plan'
 export type ReasoningEffort = 'high' | 'max'
-
-export interface Scope {
-  type: ScopeType
-  chapter_start?: number
-  chapter_end?: number
-}
 
 export interface StartEditMsg {
   type: 'start_edit'
@@ -39,7 +32,6 @@ export interface RejectEditMsg {
 
 export interface CreateSessionMsg {
   type: 'create_session'
-  scope: Scope
   model?: string
   edit_mode?: EditMode
   reasoning_effort?: ReasoningEffort
@@ -52,7 +44,6 @@ export interface LoadSessionMsg {
 
 export interface ListSessionsMsg {
   type: 'list_sessions'
-  scope_type?: ScopeType
 }
 
 export interface ChatMsg {
@@ -131,7 +122,6 @@ export interface EditRejectedMsg {
 export interface SessionCreatedMsg {
   type: 'session_created'
   session_id: string
-  scope: Scope
   display_name: string
   edit_mode: EditMode
   model: string
@@ -141,7 +131,6 @@ export interface SessionCreatedMsg {
 export interface SessionLoadedMsg {
   type: 'session_loaded'
   session_id: string
-  scope: Scope
   display_name: string
   message_count: number
   recent_messages: Array<{
@@ -167,7 +156,6 @@ export interface SessionListMsg {
   type: 'sessions_list'
   sessions: Array<{
     session_id: string
-    scope: Scope
     display_name: string
     title?: string
     message_count: number
@@ -486,16 +474,16 @@ export class WsEditorService {
     })
   }
 
-  createSession(scope: Scope, model?: string, editMode?: EditMode, reasoningEffort?: ReasoningEffort): boolean {
-    return this.send({ type: 'create_session', scope, model, edit_mode: editMode, reasoning_effort: reasoningEffort })
+  createSession(model?: string, editMode?: EditMode, reasoningEffort?: ReasoningEffort): boolean {
+    return this.send({ type: 'create_session', model, edit_mode: editMode, reasoning_effort: reasoningEffort })
   }
 
   loadSession(sessionId: string): boolean {
     return this.send({ type: 'load_session', session_id: sessionId })
   }
 
-  listSessions(scopeType?: ScopeType): boolean {
-    return this.send({ type: 'list_sessions', scope_type: scopeType })
+  listSessions(): boolean {
+    return this.send({ type: 'list_sessions' })
   }
 
   chat(sessionId: string, message: string, toolsEnabled = true): boolean {

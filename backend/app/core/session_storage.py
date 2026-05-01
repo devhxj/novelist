@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from app.core.redis_service import redis_service
 from app.core.database import AsyncSessionLocal
-from app.core.session_manager import Session, SessionConfig, ScopeType, Message, MessageRole, NovelContext, ChapterContext, SessionScope
+from app.core.session_manager import Session, SessionConfig, Message, MessageRole, NovelContext, ChapterContext
 from app.chat.models import ChatSession as DBChatSession, ChatMessage as DBChatMessage
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
@@ -30,15 +30,10 @@ class SessionStorage:
         return f"{self.KEY_PREFIX}{session_id}"
     
     def _get_user_sessions_key(
-        self, 
-        user_id: int, 
+        self,
+        user_id: int,
         novel_id: Optional[int] = None,
-        scope_type: Optional[ScopeType] = None
     ) -> str:
-        if scope_type:
-            if novel_id:
-                return f"{self.USER_SESSIONS_PREFIX}{user_id}:novel:{novel_id}:scope:{scope_type.value}"
-            return f"{self.USER_SESSIONS_PREFIX}{user_id}:scope:{scope_type.value}"
         if novel_id:
             return f"{self.USER_SESSIONS_PREFIX}{user_id}:novel:{novel_id}"
         return f"{self.USER_SESSIONS_PREFIX}{user_id}"
@@ -85,12 +80,6 @@ class SessionStorage:
             if session.user_id:
                 user_key = self._get_user_sessions_key(session.user_id, session.novel_id)
                 await redis_service.zrem(user_key, session_id)
-                
-                if session.scope and session.scope.type:
-                    scope_key = self._get_user_sessions_key(
-                        session.user_id, session.novel_id, session.scope.type
-                    )
-                    await redis_service.zrem(scope_key, session_id)
             
             logger.info(f"Session deleted: {session_id}")
             return True
@@ -102,12 +91,11 @@ class SessionStorage:
         self,
         user_id: int,
         novel_id: Optional[int] = None,
-        scope_type: Optional[ScopeType] = None,
         limit: int = 20
     ) -> List[Session]:
         """列出用户会话"""
         try:
-            sessions = await self._list_from_db(user_id, novel_id, scope_type, limit)
+            sessions = await self._list_from_db(user_id, novel_id, limit)
             for session in sessions:
                 await self._save_to_cache(session)
             return sessions
@@ -137,14 +125,13 @@ class SessionStorage:
             return False
     
     async def get_session_count(
-        self, 
-        user_id: int, 
+        self,
+        user_id: int,
         novel_id: Optional[int] = None,
-        scope_type: Optional[ScopeType] = None
     ) -> int:
         """获取会话数量"""
         try:
-            return await self._count_from_db(user_id, novel_id, scope_type)
+            return await self._count_from_db(user_id, novel_id)
         except Exception as e:
             logger.error(f"Failed to get session count: {e}")
             return 0
@@ -191,16 +178,6 @@ class SessionStorage:
                 {session.session_id: datetime.now(timezone.utc).timestamp()},
                 ttl=self.cache_ttl
             )
-            
-            if session.scope and session.scope.type:
-                scope_key = self._get_user_sessions_key(
-                    session.user_id, session.novel_id, session.scope.type
-                )
-                await redis_service.zadd(
-                    scope_key,
-                    {session.session_id: datetime.now(timezone.utc).timestamp()},
-                    ttl=self.cache_ttl
-                )
             return True
         except Exception as e:
             logger.warning(f"Failed to update user sessions index: {e}")
@@ -216,9 +193,6 @@ class SessionStorage:
                 db_session = result.scalar_one_or_none()
                 
                 if db_session:
-                    db_session.scope_type = session.scope.type.value
-                    db_session.chapter_start = session.scope.chapter_start
-                    db_session.chapter_end = session.scope.chapter_end
                     db_session.title = session.title
                     db_session.model = session.model
                     db_session.summary = session.summary
@@ -231,9 +205,6 @@ class SessionStorage:
                         session_id=session.session_id,
                         user_id=session.user_id,
                         novel_id=session.novel_id,
-                        scope_type=session.scope.type.value,
-                        chapter_start=session.scope.chapter_start,
-                        chapter_end=session.scope.chapter_end,
                         title=session.title,
                         model=session.model,
                         summary=session.summary,
@@ -307,7 +278,6 @@ class SessionStorage:
         self,
         user_id: int,
         novel_id: Optional[int] = None,
-        scope_type: Optional[ScopeType] = None,
         limit: int = 20
     ) -> List[Session]:
         """从数据库列出会话"""
@@ -316,13 +286,10 @@ class SessionStorage:
                 query = select(DBChatSession).options(
                     selectinload(DBChatSession.messages)
                 ).where(DBChatSession.user_id == user_id)
-                
+
                 if novel_id:
                     query = query.where(DBChatSession.novel_id == novel_id)
-                
-                if scope_type:
-                    query = query.where(DBChatSession.scope_type == scope_type.value)
-                
+
                 query = query.order_by(DBChatSession.updated_at.desc()).limit(limit)
                 
                 result = await db.execute(query)
@@ -349,18 +316,14 @@ class SessionStorage:
         self,
         user_id: int,
         novel_id: Optional[int] = None,
-        scope_type: Optional[ScopeType] = None
     ) -> int:
         """从数据库统计数量"""
         try:
             async with AsyncSessionLocal() as db:
                 query = select(DBChatSession).where(DBChatSession.user_id == user_id)
-                
+
                 if novel_id:
                     query = query.where(DBChatSession.novel_id == novel_id)
-                
-                if scope_type:
-                    query = query.where(DBChatSession.scope_type == scope_type.value)
                 
                 result = await db.execute(query)
                 return len(result.scalars().all())
@@ -370,12 +333,6 @@ class SessionStorage:
     
     def _db_to_session(self, db_session: DBChatSession) -> Session:
         """数据库模型转Session对象"""
-        scope = SessionScope(
-            type=ScopeType(db_session.scope_type),
-            chapter_start=db_session.chapter_start,
-            chapter_end=db_session.chapter_end
-        )
-        
         novel_context = None
         if db_session.novel_context:
             novel_context = NovelContext.from_dict(db_session.novel_context)
@@ -399,7 +356,6 @@ class SessionStorage:
             session_id=db_session.session_id,
             user_id=db_session.user_id,
             novel_id=db_session.novel_id,
-            scope=scope,
             title=db_session.title or "",
             messages=messages,
             summary=db_session.summary,

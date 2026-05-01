@@ -1,6 +1,5 @@
 """
 会话管理API路由 - AI IDE风格
-支持会话作用域：整本小说/章节范围/单章节
 """
 import logging
 from datetime import datetime, timezone
@@ -11,12 +10,11 @@ from app.core.response import ApiResponse
 from app.core.database import DBSession
 from app.core.auth import CurrentUserDep
 from app.core.session_manager import (
-    Session, SessionManager, SessionConfig, MessageRole,
-    SessionScope, ScopeType, NovelContext, ChapterContext,
+    Session, MessageRole,
+    NovelContext, ChapterContext,
     session_manager
 )
 from app.core.session_storage import session_storage
-from app.core.llm_service import llm_service
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 logger = logging.getLogger(__name__)
@@ -29,97 +27,36 @@ async def create_session(
     user: CurrentUserDep,
     db: DBSession,
     novel_id: int = Body(..., description="小说ID"),
-    scope_type: str = Body("novel", description="作用域类型: novel/chapters/chapter"),
-    chapter_start: Optional[int] = Body(None, description="起始章节号"),
-    chapter_end: Optional[int] = Body(None, description="结束章节号"),
     model: str = Body("deepseek-v4-flash", description="LLM模型"),
     title: Optional[str] = Body(None, description="会话标题"),
-    subtitle: Optional[str] = Body(None, description="会话副标题")
+    subtitle: Optional[str] = Body(None, description="会话副标题"),
 ):
-    """
-    创建新会话
-    
-    作用域类型：
-    - novel: 整本小说
-    - chapters: 章节范围（需要chapter_start和chapter_end）
-    - chapter: 单章节（需要chapter_start）
-    """
-    try:
-        scope_type_enum = ScopeType(scope_type)
-    except ValueError:
-        return ApiResponse.error(
-            code="INVALID_SCOPE_TYPE", 
-            message=f"无效的作用域类型: {scope_type}，可选值: novel, chapters, chapter", 
-            status_code=400
-        )
-    
-    if scope_type_enum == ScopeType.CHAPTER and not chapter_start:
-        return ApiResponse.error(
-            code="MISSING_CHAPTER", 
-            message="单章节作用域需要指定chapter_start", 
-            status_code=400
-        )
-    
-    if scope_type_enum == ScopeType.CHAPTERS and (not chapter_start or not chapter_end):
-        return ApiResponse.error(
-            code="MISSING_CHAPTER_RANGE", 
-            message="章节范围作用域需要指定chapter_start和chapter_end", 
-            status_code=400
-        )
-    
-    scope = SessionScope(
-        type=scope_type_enum,
-        chapter_start=chapter_start,
-        chapter_end=chapter_end if scope_type_enum == ScopeType.CHAPTERS else chapter_start
-    )
-    
+    """创建新会话"""
     from app.novels.models import Novel
-    from app.chapters.models import Chapter
     from sqlalchemy import select
-    
-    novel_context = None
-    chapter_context = None
-    
+
     result = await db.execute(select(Novel).where(Novel.id == novel_id))
     novel = result.scalar_one_or_none()
-    
+
     if not novel:
         return ApiResponse.error(code="NOVEL_NOT_FOUND", message="小说不存在", status_code=404)
-    
+
     if novel.author_id != user.id:
         return ApiResponse.error(code="FORBIDDEN", message="无权访问此小说", status_code=403)
-    
+
     novel_context = NovelContext(
         title=novel.title or "",
         description=novel.description or "",
-        genre=novel.genre or ""
+        genre=novel.genre or "",
     )
-    
-    if scope_type_enum in [ScopeType.CHAPTER, ScopeType.CHAPTERS] and chapter_start:
-        chapter_result = await db.execute(
-            select(Chapter).where(
-                Chapter.novel_id == novel_id,
-                Chapter.chapter_number == chapter_start
-            )
-        )
-        chapter = chapter_result.scalar_one_or_none()
-        
-        if chapter:
-            chapter_context = ChapterContext(
-                chapter_number=chapter.chapter_number,
-                chapter_title=chapter.title or "",
-                previous_summary=chapter.summary or ""
-            )
-    
+
     session = session_manager.create_session(
         user_id=user.id,
         novel_id=novel_id,
-        scope=scope,
         novel_context=novel_context,
-        chapter_context=chapter_context,
-        model=model
+        model=model,
     )
-    
+
     if title:
         session.title = title[:50]
     elif not session.title:
@@ -128,19 +65,18 @@ async def create_session(
     if subtitle:
         session.subtitle = subtitle[:50]
         session.metadata["subtitle"] = session.subtitle
-    
+
     await session_manager.save_session(session)
-    
+
     return ApiResponse.success({
         "session_id": session.session_id,
-        "scope": scope.to_dict(),
-        "display_name": scope.get_display_name(),
+        "display_name": session.get_display_name(),
         "title": session.title,
         "subtitle": session.get_subtitle(),
         "novel_id": novel_id,
         "model": model,
         "created_at": session.created_at.isoformat(),
-        "message": "会话创建成功"
+        "message": "会话创建成功",
     })
 
 
@@ -148,37 +84,18 @@ async def create_session(
 async def list_sessions(
     user: CurrentUserDep,
     novel_id: Optional[int] = Query(None, description="按小说ID过滤"),
-    scope_type: Optional[str] = Query(None, description="按作用域类型过滤"),
-    limit: int = Query(20, ge=1, le=100)
+    limit: int = Query(20, ge=1, le=100),
 ):
-    """
-    列出用户会话
-    
-    - novel_id: 按小说ID过滤
-    - scope_type: 按作用域类型过滤 (novel/chapters/chapter)
-    """
-    scope_enum = None
-    if scope_type:
-        try:
-            scope_enum = ScopeType(scope_type)
-        except ValueError:
-            return ApiResponse.error(
-                code="INVALID_SCOPE_TYPE", 
-                message=f"无效的作用域类型: {scope_type}", 
-                status_code=400
-            )
-    
+    """列出用户会话"""
     sessions = await session_manager.list_user_sessions(
         user_id=user.id,
         novel_id=novel_id,
-        scope_type=scope_enum
     )
-    
+
     return ApiResponse.success({
         "sessions": [
             {
                 "session_id": s.session_id,
-                "scope": s.scope.to_dict(),
                 "display_name": s.get_display_name(),
                 "title": s.title,
                 "subtitle": s.get_subtitle(),
@@ -188,11 +105,11 @@ async def list_sessions(
                 "pending_changes": len(s.pending_changes),
                 "created_at": s.created_at.isoformat(),
                 "updated_at": s.updated_at.isoformat(),
-                "preview": s.messages[-1].content[:100] if s.messages else ""
+                "preview": s.messages[-1].content[:100] if s.messages else "",
             }
             for s in sessions[:limit]
         ],
-        "total": len(sessions)
+        "total": len(sessions),
     })
 
 
@@ -215,7 +132,6 @@ async def get_session(
     return ApiResponse.success({
         "session_id": session.session_id,
         "user_id": session.user_id,
-        "scope": session.scope.to_dict(),
         "display_name": session.get_display_name(),
         "title": session.title,
         "subtitle": session.get_subtitle(),
@@ -251,7 +167,6 @@ async def get_messages(
     
     return ApiResponse.success({
         "session_id": session.session_id,
-        "scope": session.scope.to_dict(),
         "messages": [m.to_dict() for m in messages],
         "total": len(session.messages),
         "limit": limit,
@@ -276,71 +191,6 @@ async def delete_session(
     await session_manager.delete_session(session_id)
     
     return ApiResponse.success({"message": "会话已删除"})
-
-
-@router.put("/{session_id}/scope")
-async def update_session_scope(
-    user: CurrentUserDep,
-    db: DBSession,
-    session_id: str,
-    scope_type: str = Body(..., description="作用域类型"),
-    chapter_start: Optional[int] = Body(None, description="起始章节号"),
-    chapter_end: Optional[int] = Body(None, description="结束章节号")
-):
-    """更新会话作用域"""
-    session = await session_manager.load_session(session_id)
-    
-    if not session:
-        return ApiResponse.error(code="SESSION_NOT_FOUND", message="会话不存在", status_code=404)
-    
-    if session.user_id != user.id:
-        return ApiResponse.error(code="FORBIDDEN", message="无权操作此会话", status_code=403)
-    
-    try:
-        scope_enum = ScopeType(scope_type)
-    except ValueError:
-        return ApiResponse.error(code="INVALID_SCOPE_TYPE", message=f"无效的作用域类型: {scope_type}", status_code=400)
-    
-    new_scope = SessionScope(
-        type=scope_enum,
-        chapter_start=chapter_start,
-        chapter_end=chapter_end if scope_enum == ScopeType.CHAPTERS else chapter_start
-    )
-    
-    session.scope = new_scope
-    session.subtitle = new_scope.get_display_name()
-    
-    from app.chapters.models import Chapter
-    from sqlalchemy import select
-    
-    if scope_enum in [ScopeType.CHAPTER, ScopeType.CHAPTERS] and chapter_start and session.novel_id:
-        chapter_result = await db.execute(
-            select(Chapter).where(
-                Chapter.novel_id == session.novel_id,
-                Chapter.chapter_number == chapter_start
-            )
-        )
-        chapter = chapter_result.scalar_one_or_none()
-        
-        if chapter:
-            session.chapter_context = ChapterContext(
-                chapter_number=chapter.chapter_number,
-                chapter_title=chapter.title or "",
-                previous_summary=chapter.summary or ""
-            )
-    else:
-        session.chapter_context = None
-    
-    await session_manager.save_session(session)
-    
-    return ApiResponse.success({
-        "session_id": session.session_id,
-        "scope": new_scope.to_dict(),
-        "display_name": new_scope.get_display_name(),
-        "title": session.title,
-        "subtitle": session.get_subtitle(),
-        "message": "作用域已更新"
-    })
 
 
 @router.put("/{session_id}/title")
