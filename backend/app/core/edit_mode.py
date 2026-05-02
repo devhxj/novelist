@@ -1,28 +1,16 @@
 """
-编辑模式系统 - 控制AI的权限级别
+编辑模式系统 - 统一使用 AGENT 模式
 """
 from enum import Enum
 from typing import List, Set, Dict
 
 
 class EditMode(str, Enum):
-    """编辑模式"""
+    """编辑模式（仅保留 AGENT）"""
     AGENT = "agent"
-    REVIEW = "review"
-    PLAN = "plan"
 
 
-class EditModeConfig:
-    """编辑模式配置"""
-    
-    MODE_DESCRIPTIONS = {
-        EditMode.AGENT: "智能助手模式：AI可以读取和编辑小说内容，帮助您进行创作和修改。",
-        EditMode.REVIEW: "审阅模式：AI只能读取小说内容，提供审阅意见，不能进行任何修改。",
-        EditMode.PLAN: "规划模式：AI只能读取小说内容并创建写作大纲/规划，不能修改原稿。"
-    }
-    
-    MODE_SYSTEM_PROMPTS = {
-        EditMode.AGENT: """你是一个专业的小说创作助手。你可以：
+AGENT_SYSTEM_PROMPT = """你是一个专业的小说创作助手。你可以：
 1. 读取小说的所有内容（章节、角色、情节等）
 2. 编辑和修改小说内容
 3. 帮助用户进行创作、润色、修改
@@ -86,23 +74,20 @@ class EditModeConfig:
   - scope="plot"：检查情节逻辑（因果关系、时间线、逻辑漏洞等）
   - scope="foreshadowing"：查看未回收的伏笔/钩子
   - scope="full"：全面体检（角色+情节+时间线+伏笔）
-- 建议在完成重要章节写作或用户要求审阅时主动调用 run_review(scope='full')。""",
-        
-        EditMode.REVIEW: """你是一个专业的小说审阅助手。你可以：
-1. 读取小说的所有内容
-2. 提供审阅意见、改进建议
-3. 指出问题、分析情节、评价人物
+- 建议在完成重要章节写作或用户要求审阅时主动调用 run_review(scope='full')。"""
 
-注意：你**不能**修改任何小说内容，只能提供审阅意见。""",
-        
-        EditMode.PLAN: """你是一个专业的小说规划助手。你可以：
-1. 读取小说的所有内容
-2. 创建写作大纲、情节规划
-3. 设计章节结构、人物发展路线
 
-注意：你**不能**修改原稿内容，只能创建规划和大纲。你的输出应该是一个结构化的规划文档。"""
+class EditModeConfig:
+    """编辑模式配置（统一 AGENT 模式）"""
+
+    MODE_DESCRIPTIONS = {
+        EditMode.AGENT: "智能助手模式：AI可以读取和编辑小说内容，帮助您进行创作和修改。",
     }
-    
+
+    MODE_SYSTEM_PROMPTS = {
+        EditMode.AGENT: AGENT_SYSTEM_PROMPT,
+    }
+
     MODE_ALLOWED_TOOLS: dict[EditMode, Set[str]] = {
         EditMode.AGENT: {
             "get_novel_info", "get_chapter_list", "get_chapter_content", "create_new_chapter",
@@ -117,24 +102,10 @@ class EditModeConfig:
             "get_locations", "create_location", "update_location", "delete_location",
             "get_story_arcs", "add_story_arc", "update_story_arc",
         },
-        EditMode.REVIEW: {
-            "get_novel_info", "get_chapter_list", "get_chapter_content", "get_creative_profile",
-            "get_characters",
-            "search_story_memory",
-            "get_timeline", "run_review",
-        },
-        EditMode.PLAN: {
-            "get_novel_info", "get_chapter_list", "get_chapter_content", "get_creative_profile",
-            "get_characters",
-            "search_story_memory",
-            "get_timeline",
-        }
     }
-    
+
     MODE_CAN_EDIT: dict[EditMode, bool] = {
         EditMode.AGENT: True,
-        EditMode.REVIEW: False,
-        EditMode.PLAN: False
     }
 
     MODE_LLM_PRIMARY_TOOLS: dict[EditMode, List[str]] = {
@@ -153,25 +124,6 @@ class EditModeConfig:
             "update_timeline_entry",
             "update_character_relationship",
             "run_subagent",
-        ],
-        EditMode.REVIEW: [
-            "get_novel_info",
-            "get_chapter_list",
-            "get_chapter_content",
-            "get_creative_profile",
-            "get_characters",
-            "search_story_memory",
-            "get_timeline",
-            "run_review",
-        ],
-        EditMode.PLAN: [
-            "get_novel_info",
-            "get_chapter_list",
-            "get_chapter_content",
-            "get_creative_profile",
-            "get_characters",
-            "search_story_memory",
-            "get_timeline",
         ],
     }
 
@@ -206,36 +158,34 @@ class EditModeConfig:
         "timeline": ("伏笔", "时间线", "规划", "大纲", "安排", "下章", "长期", "回收", "设定检查"),
         "generation": ("写", "续写", "生成", "创建章节", "新章节", "扩写", "补写"),
     }
-    
-    @classmethod
-    def can_use_tool(cls, mode: EditMode, tool_name: str) -> bool:
-        """检查指定模式下是否可以使用某个工具"""
-        allowed = cls.MODE_ALLOWED_TOOLS.get(mode, set())
-        return tool_name in allowed
-    
-    @classmethod
-    def can_edit(cls, mode: EditMode) -> bool:
-        """检查指定模式下是否可以编辑"""
-        return cls.MODE_CAN_EDIT.get(mode, False)
-    
-    @classmethod
-    def get_system_prompt(cls, mode: EditMode) -> str:
-        """获取指定模式的系统提示词"""
-        return cls.MODE_SYSTEM_PROMPTS.get(mode, cls.MODE_SYSTEM_PROMPTS[EditMode.AGENT])
-    
-    @classmethod
-    def get_description(cls, mode: EditMode) -> str:
-        """获取指定模式的描述"""
-        return cls.MODE_DESCRIPTIONS.get(mode, "")
-    
-    @classmethod
-    def filter_tools(cls, mode: EditMode, all_tools: List[str]) -> List[str]:
-        """过滤出当前模式允许使用的工具"""
-        allowed = cls.MODE_ALLOWED_TOOLS.get(mode, set())
-        return [t for t in all_tools if t in allowed]
 
     @classmethod
-    def get_llm_primary_tools(cls, mode: EditMode) -> List[str]:
+    def can_use_tool(cls, mode: EditMode, tool_name: str) -> bool:
+        """AGENT 模式允许所有工具"""
+        return True
+
+    @classmethod
+    def can_edit(cls, mode: EditMode) -> bool:
+        """AGENT 模式可编辑"""
+        return True
+
+    @classmethod
+    def get_system_prompt(cls, mode: EditMode = EditMode.AGENT) -> str:
+        """获取系统提示词"""
+        return AGENT_SYSTEM_PROMPT
+
+    @classmethod
+    def get_description(cls, mode: EditMode = EditMode.AGENT) -> str:
+        """获取模式描述"""
+        return cls.MODE_DESCRIPTIONS.get(mode, "")
+
+    @classmethod
+    def filter_tools(cls, mode: EditMode, all_tools: List[str]) -> List[str]:
+        """AGENT 模式允许所有工具"""
+        return list(all_tools)
+
+    @classmethod
+    def get_llm_primary_tools(cls, mode: EditMode = EditMode.AGENT) -> List[str]:
         """
         给 LLM 的主工具子集。
 
@@ -244,22 +194,20 @@ class EditModeConfig:
         - 提高工具前缀稳定性与缓存命中率
         - 保留完整后端能力，但默认只暴露高频编排工具
         """
-        allowed = cls.MODE_ALLOWED_TOOLS.get(mode, set())
-        primary = cls.MODE_LLM_PRIMARY_TOOLS.get(mode, [])
-        return [name for name in primary if name in allowed]
+        return list(cls.MODE_LLM_PRIMARY_TOOLS.get(EditMode.AGENT, []))
 
     @classmethod
-    def get_llm_tools_for_message(cls, mode: EditMode, user_message: str = "") -> List[str]:
+    def get_llm_tools_for_message(cls, mode: EditMode = EditMode.AGENT, user_message: str = "") -> List[str]:
         """
         给当前这轮消息挑选工具集。
 
         设计目标：
         - 默认使用更稳定的主工具集，优化缓存
         - 当用户明确进入 AI IDE 深水区操作时，自动补齐相关工具能力
-        - 不丢失原有“可直接读取、直接改、局部改、维护设定”的核心体验
+        - 不丢失原有"可直接读取、直接改、局部改、维护设定"的核心体验
         """
-        allowed = cls.MODE_ALLOWED_TOOLS.get(mode, set())
-        selected = set(cls.get_llm_primary_tools(mode))
+        allowed = cls.MODE_ALLOWED_TOOLS.get(EditMode.AGENT, set())
+        selected = set(cls.get_llm_primary_tools())
         text = (user_message or "").strip()
 
         if text:
@@ -267,14 +215,13 @@ class EditModeConfig:
                 if any(cue in text for cue in cues):
                     selected.update(cls.TOOL_BUNDLES.get(bundle_name, set()))
 
-        if mode == EditMode.AGENT and any(cue in text for cue in ("工具", "mcp", "全部能力", "像ide", "像 agent", "像coding agent")):
+        if any(cue in text for cue in ("工具", "mcp", "全部能力", "像ide", "像 agent", "像coding agent")):
             selected.update(allowed)
 
         # 保证编辑核心链路始终可达
-        if mode == EditMode.AGENT:
-            selected.update(cls.TOOL_BUNDLES["editing"])
+        selected.update(cls.TOOL_BUNDLES["editing"])
 
-        ordered_primary = cls.MODE_LLM_PRIMARY_TOOLS.get(mode, [])
+        ordered_primary = cls.MODE_LLM_PRIMARY_TOOLS.get(EditMode.AGENT, [])
         ordered_extra = sorted(name for name in selected if name not in ordered_primary)
         return [name for name in ordered_primary if name in selected and name in allowed] + [
             name for name in ordered_extra if name in allowed

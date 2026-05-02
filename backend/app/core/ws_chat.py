@@ -506,7 +506,7 @@ async def websocket_chat(
 
 async def _handle_create_session(websocket, data, user_id, novel_id):
     model = data.get("model", "deepseek-v4-flash")
-    edit_mode = data.get("edit_mode", "agent")
+    edit_mode = "agent"
     reasoning_effort = data.get("reasoning_effort")
 
     async with AsyncSessionLocal() as db:
@@ -532,7 +532,6 @@ async def _handle_create_session(websocket, data, user_id, novel_id):
         "title": session.title,
         "subtitle": session.get_subtitle(),
         "model": model,
-        "edit_mode": edit_mode,
         "reasoning_effort": reasoning_effort,
         "stats": session_manager.get_session_stats(session),
         "timestamp": datetime.now(timezone.utc).isoformat()
@@ -866,11 +865,7 @@ async def _run_chat_with_tools(
     try:
         logger.info(f"Starting chat task {task_id}, mode={session.edit_mode}")
         
-        try:
-            edit_mode = EditMode(session.edit_mode) if session.edit_mode else EditMode.AGENT
-        except ValueError:
-            edit_mode = EditMode.AGENT
-            logger.warning(f"Invalid edit_mode: {session.edit_mode}, fallback to AGENT")
+        edit_mode = EditMode.AGENT
         
         session_manager.add_message(session, MessageRole.USER, user_message)
         
@@ -906,13 +901,13 @@ async def _run_chat_with_tools(
                     if formatted_profile:
                         creative_profile_text = f"【当前已沉淀的作者长期创作配置】\n{formatted_profile}"
                 
-                if edit_mode == EditMode.AGENT and not _looks_like_authoring_intent(user_message):
+                if not _looks_like_authoring_intent(user_message):
                     conditional_reminders.append(
                         "用户这次没有明确的创作或编辑意图，更像是在确认、反馈或简单交流。"
                         "请正常对话回应，不要主动创建章节、生成正文或修改正文，除非用户随后明确提出产出内容的请求。"
                     )
                 
-                if edit_mode == EditMode.AGENT and _looks_like_long_term_rule(user_message):
+                if _looks_like_long_term_rule(user_message):
                     conditional_reminders.append(
                         "用户这次很可能在表达长期创作规则或全局偏好。"
                         "如果这些要求不是只针对当前这一章，而是希望后续持续生效，"

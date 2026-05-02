@@ -24,7 +24,7 @@ import { editorApi } from '@/services/editorService'
 import { chapterApi } from '@/services/chapterService'
 import { generationApi } from '@/services/generationService'
 import type {
-  ServerMsg, DiffData, EditMode,
+  ServerMsg, DiffData,
   SessionCreatedMsg, SessionListMsg, ContentChunkMsg, ThinkingChunkMsg,
   ToolCallMsg,
   EditStartedMsg, EditAppliedMsg, EditAcceptedMsg, EditRejectedMsg,
@@ -107,12 +107,6 @@ const DEFAULT_MODEL_OPTIONS = [
 const REASONING_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
   { value: 'high', label: '高' },
   { value: 'max', label: '最大' },
-]
-
-const EDIT_MODE_OPTIONS: Array<{ value: EditMode; label: string; desc: string }> = [
-  { value: 'agent', label: '智能助手', desc: '可读可写，帮助创作修改' },
-  { value: 'review', label: '审阅模式', desc: '只读审查，发现问题提供建议' },
-  { value: 'plan', label: '规划模式', desc: '只读规划，制定大纲和计划' },
 ]
 
 function getToolDisplayName(toolName: string, chapterNumber?: number, chapterTitle?: string): string {
@@ -205,7 +199,6 @@ export default function EditorPage() {
   const [latestPendingEditSessionId, setLatestPendingEditSessionId] = useState<string | null>(null)
   const [selectedModel, setSelectedModel] = useState('deepseek-v4-flash')
   const [modelOptions, setModelOptions] = useState(DEFAULT_MODEL_OPTIONS)
-  const [selectedEditMode, setSelectedEditMode] = useState<EditMode>('agent')
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('high')
   const [changeCount, setChangeCount] = useState(0)
   const [hasActiveEdit, setHasActiveEdit] = useState(false)
@@ -374,7 +367,6 @@ export default function EditorPage() {
       case 'session_created': {
         const m = msg as SessionCreatedMsg
         setCurrentSessionId(m.session_id)
-        if (m.edit_mode) setSelectedEditMode(m.edit_mode)
         if (m.model) setSelectedModel(m.model)
         if (m.reasoning_effort) setReasoningEffort(m.reasoning_effort)
         navigate(`/novels/${novelId}/editor/${m.session_id}`, { replace: true })
@@ -876,7 +868,7 @@ export default function EditorPage() {
 
     if (!currentSessionId) {
       pendingMessageRef.current = msg
-      const sent = wsEditorService.createSession(selectedModel, selectedEditMode, reasoningEffort)
+      const sent = wsEditorService.createSession(selectedModel, undefined, reasoningEffort)
       if (!sent) {
         message.error('WebSocket 未连接')
         setTurns(prev => prev.filter(t => t.id !== turnId))
@@ -1134,7 +1126,7 @@ export default function EditorPage() {
                       {hasActiveEdit ? 'AI 正在写作' : hasPendingReview ? '有待确认修改' : '正文已同步'}
                     </span>
                     <span className={styles.chapterPill}>
-                      {selectedEditMode === 'agent' ? '协作创作' : selectedEditMode === 'review' ? '审阅模式' : '规划模式'}
+                      协作创作
                     </span>
                   </div>
                 </div>
@@ -1377,17 +1369,6 @@ export default function EditorPage() {
                   />
                 </div>
               )}
-              <div className={styles.controlChip}>
-                <span className={styles.controlLabel}>模式</span>
-                <Select
-                  size="small"
-                  value={selectedEditMode}
-                  onChange={setSelectedEditMode}
-                  className={styles.chatControlSelect}
-                  popupMatchSelectWidth={false}
-                  options={EDIT_MODE_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
-                />
-              </div>
             </div>
           </div>
         </div>

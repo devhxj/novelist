@@ -428,11 +428,7 @@ async def novel_characters_resource(novel_id: int, ctx: Context) -> dict:
 
 @mcp.prompt("edit_mode_prompt")
 async def edit_mode_prompt(mode: str = "agent") -> list[dict]:
-    try:
-        edit_mode = EditMode(mode)
-    except ValueError:
-        edit_mode = EditMode.AGENT
-    return [{"role": "system", "content": EditModeConfig.get_system_prompt(edit_mode)}]
+    return [{"role": "system", "content": EditModeConfig.get_system_prompt(EditMode.AGENT)}]
 
 
 @mcp.tool()

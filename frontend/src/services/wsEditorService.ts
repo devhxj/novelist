@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/stores/authStore'
 
-export type EditMode = 'agent' | 'review' | 'plan'
+export type EditMode = 'agent'
 export type ReasoningEffort = 'high' | 'max'
 
 export interface StartEditMsg {
@@ -33,7 +33,6 @@ export interface RejectEditMsg {
 export interface CreateSessionMsg {
   type: 'create_session'
   model?: string
-  edit_mode?: EditMode
   reasoning_effort?: ReasoningEffort
 }
 
@@ -123,7 +122,6 @@ export interface SessionCreatedMsg {
   type: 'session_created'
   session_id: string
   display_name: string
-  edit_mode: EditMode
   model: string
   reasoning_effort?: ReasoningEffort
 }
@@ -460,8 +458,8 @@ export class WsEditorService {
     })
   }
 
-  createSession(model?: string, editMode?: EditMode, reasoningEffort?: ReasoningEffort): boolean {
-    return this.send({ type: 'create_session', model, edit_mode: editMode, reasoning_effort: reasoningEffort })
+  createSession(model?: string, _editMode?: EditMode, reasoningEffort?: ReasoningEffort): boolean {
+    return this.send({ type: 'create_session', model, reasoning_effort: reasoningEffort })
   }
 
   loadSession(sessionId: string): boolean {
