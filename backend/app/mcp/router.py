@@ -130,8 +130,8 @@ async def get_novel_summary(
     current_user: CurrentUserDep
 ):
     registry = get_mcp_registry()
-    result = await registry.execute("get_novel_summary", db=db, user_id=current_user.id, novel_id=novel.id)
-    
+    result = await registry.execute("get_novel_info", db=db, user_id=current_user.id, novel_id=novel.id, mode="summary")
+
     if result.success:
         return ApiResponse.success(result.data)
     return ApiResponse.error("TOOL_ERROR", result.error or "Unknown error")
@@ -205,8 +205,8 @@ async def get_novel_progress(
     current_user: CurrentUserDep
 ):
     registry = get_mcp_registry()
-    result = await registry.execute("get_novel_progress", db=db, user_id=current_user.id, novel_id=novel.id)
-    
+    result = await registry.execute("get_novel_info", db=db, user_id=current_user.id, novel_id=novel.id, mode="progress")
+
     if result.success:
         return ApiResponse.success(result.data)
     return ApiResponse.error("TOOL_ERROR", result.error or "Unknown error")
@@ -221,13 +221,14 @@ async def get_character_list(
 ):
     registry = get_mcp_registry()
     result = await registry.execute(
-        "get_character_list",
+        "get_characters",
         db=db,
         user_id=current_user.id,
         novel_id=novel.id,
+        mode="list",
         search=search
     )
-    
+
     if result.success:
         return ApiResponse.success(result.data)
     return ApiResponse.error("TOOL_ERROR", result.error or "Unknown error")
@@ -242,25 +243,27 @@ async def get_character_detail(
     from app.characters.models import Character
     from app.core.exceptions import NotFoundException, UnauthorizedException
     from sqlalchemy import select
-    
+
     result = await db.execute(select(Character).where(Character.id == character_id))
     character = result.scalar_one_or_none()
     if not character:
         raise NotFoundException("角色")
-    
+
     result = await db.execute(select(Novel).where(Novel.id == character.novel_id))
     novel = result.scalar_one_or_none()
     if not novel or novel.author_id != current_user.id:
         raise UnauthorizedException("无权访问此角色")
-    
+
     registry = get_mcp_registry()
     result = await registry.execute(
-        "get_character_detail",
+        "get_characters",
         db=db,
         user_id=current_user.id,
+        novel_id=character.novel_id,
+        mode="detail",
         character_id=character_id
     )
-    
+
     if result.success:
         return ApiResponse.success(result.data)
     return ApiResponse.error("TOOL_ERROR", result.error or "Unknown error")
@@ -317,11 +320,13 @@ async def get_character_memory(
 
     registry = get_mcp_registry()
     result = await registry.execute(
-        "get_character_memory",
+        "get_characters",
         db=db,
         user_id=current_user.id,
         novel_id=novel.id,
+        mode="detail",
         character_id=character_id,
+        include_memory=True,
     )
 
     if result.success:

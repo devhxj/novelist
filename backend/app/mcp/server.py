@@ -59,8 +59,8 @@ async def _execute_tool(name: str, ctx: Optional[Context] = None, **params) -> d
 
 
 @mcp.tool()
-async def get_novel_summary(novel_id: int, ctx: Context) -> dict:
-    return await _execute_tool("get_novel_summary", ctx, novel_id=novel_id)
+async def get_novel_info(novel_id: int, mode: str, ctx: Context) -> dict:
+    return await _execute_tool("get_novel_info", ctx, novel_id=novel_id, mode=mode)
 
 
 @mcp.tool()
@@ -102,11 +102,6 @@ async def get_chapter_content(
 
 
 @mcp.tool()
-async def get_novel_progress(novel_id: int, ctx: Context) -> dict:
-    return await _execute_tool("get_novel_progress", ctx, novel_id=novel_id)
-
-
-@mcp.tool()
 async def get_creative_profile(novel_id: int, ctx: Context) -> dict:
     return await _execute_tool("get_creative_profile", ctx, novel_id=novel_id)
 
@@ -142,32 +137,23 @@ async def update_creative_profile(
 
 
 @mcp.tool()
-async def get_character_list(
+async def get_characters(
     novel_id: int,
+    mode: str,
+    character_id: Optional[int] = None,
     search: Optional[str] = None,
-    ctx: Context = None
-) -> dict:
-    return await _execute_tool("get_character_list", ctx, novel_id=novel_id, search=search)
-
-
-@mcp.tool()
-async def get_character_detail(novel_id: int, character_id: int, ctx: Context = None) -> dict:
-    return await _execute_tool("get_character_detail", ctx, novel_id=novel_id, character_id=character_id)
-
-
-@mcp.tool()
-async def get_writing_characters(
-    novel_id: int,
     include_relations: bool = True,
     include_recent_events: bool = True,
+    include_memory: bool = False,
+    include_inactive: bool = False,
     ctx: Context = None
 ) -> dict:
     return await _execute_tool(
-        "get_writing_characters",
-        ctx,
-        novel_id=novel_id,
-        include_relations=include_relations,
-        include_recent_events=include_recent_events
+        "get_characters", ctx,
+        novel_id=novel_id, mode=mode, character_id=character_id,
+        search=search, include_relations=include_relations,
+        include_recent_events=include_recent_events,
+        include_memory=include_memory, include_inactive=include_inactive
     )
 
 
@@ -299,20 +285,6 @@ async def search_plot_memory(
 
 
 @mcp.tool()
-async def get_character_memory(
-    novel_id: int,
-    character_id: int,
-    ctx: Context = None
-) -> dict:
-    return await _execute_tool(
-        "get_character_memory",
-        ctx,
-        novel_id=novel_id,
-        character_id=character_id,
-    )
-
-
-@mcp.tool()
 async def get_recent_context(
     novel_id: int,
     chapter_id: int,
@@ -409,27 +381,6 @@ async def update_timeline_entry(
 
 
 @mcp.tool()
-async def get_character_network(novel_id: int, ctx: Context = None) -> dict:
-    return await _execute_tool("get_character_network", ctx, novel_id=novel_id)
-
-
-@mcp.tool()
-async def get_character_relationships(
-    novel_id: int,
-    character_id: int,
-    include_inactive: bool = False,
-    ctx: Context = None
-) -> dict:
-    return await _execute_tool(
-        "get_character_relationships",
-        ctx,
-        novel_id=novel_id,
-        character_id=character_id,
-        include_inactive=include_inactive
-    )
-
-
-@mcp.tool()
 async def update_character_relationship(
     novel_id: int,
     source_character_id: Optional[int] = None,
@@ -489,7 +440,7 @@ async def run_subagent(
 
 @mcp.resource("novel://{novel_id}/summary")
 async def novel_summary_resource(novel_id: int, ctx: Context) -> dict:
-    result = await _execute_tool("get_novel_summary", ctx, novel_id=novel_id)
+    result = await _execute_tool("get_novel_info", ctx, novel_id=novel_id, mode="summary")
     return result.get("data", result)
 
 
@@ -513,7 +464,7 @@ async def chapter_resource(chapter_id: int, ctx: Context) -> dict:
 
 @mcp.resource("novel://{novel_id}/characters")
 async def novel_characters_resource(novel_id: int, ctx: Context) -> dict:
-    result = await _execute_tool("get_character_list", ctx, novel_id=novel_id)
+    result = await _execute_tool("get_characters", ctx, novel_id=novel_id, mode="list")
     return result.get("data", result)
 
 
@@ -527,27 +478,18 @@ async def edit_mode_prompt(mode: str = "agent") -> list[dict]:
 
 
 @mcp.tool()
-async def get_location_list(
+async def get_locations(
     novel_id: int,
+    mode: str,
+    location_id: Optional[int] = None,
     location_type: Optional[str] = None,
     search: Optional[str] = None,
     ctx: Context = None
 ) -> dict:
     return await _execute_tool(
-        "get_location_list", ctx,
-        novel_id=novel_id, location_type=location_type, search=search
-    )
-
-
-@mcp.tool()
-async def get_location_detail(
-    novel_id: int,
-    location_id: int,
-    ctx: Context = None
-) -> dict:
-    return await _execute_tool(
-        "get_location_detail", ctx,
-        novel_id=novel_id, location_id=location_id
+        "get_locations", ctx,
+        novel_id=novel_id, mode=mode, location_id=location_id,
+        location_type=location_type, search=search
     )
 
 

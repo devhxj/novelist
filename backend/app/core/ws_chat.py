@@ -206,34 +206,25 @@ async def _lookup_chapter_brief(
 
 _TOOL_SYNC_NAMES = {
     "get_chapter_list": "查看章节目录",
-    "read_chapter": "读取章节正文",
     "get_chapter_content": "读取章节正文",
     "edit_chapter": "编辑章节内容",
     "create_new_chapter": "创建新章节",
     "get_creative_profile": "查看创作规则",
     "update_creative_profile": "设置创作规则",
-    "search_plot_memory": "搜索情节内容",
     "search_story_memory": "搜索故事记忆",
     "get_recent_context": "获取写作上下文",
-    "get_character_memory": "回顾角色经历",
     "get_timeline": "查看故事时间线",
     "add_timeline_entry": "记录追踪条目",
     "update_timeline_entry": "更新追踪条目",
-    "get_location_list": "查看地点列表",
-    "get_location_detail": "查看地点详情",
+    "get_locations": "查看地点信息",
     "create_location": "创建新地点",
     "update_location": "更新地点设定",
     "delete_location": "删除地点",
     "run_review": "执行审查",
-    "get_novel_summary": "查看小说概况",
-    "get_novel_progress": "查看写作进度",
-    "get_character_list": "查看角色列表",
-    "get_character_detail": "查看角色档案",
-    "get_writing_characters": "整理角色阵容和关系",
+    "get_novel_info": "查看小说信息",
+    "get_characters": "查看角色信息",
     "create_character": "创建新角色",
     "update_character": "更新角色设定",
-    "get_character_network": "查看人物关系图",
-    "get_character_relationships": "查看角色关系详情",
     "update_character_relationship": "更新人物关系",
     "run_subagent": "调度AI子任务",
 }
@@ -243,34 +234,25 @@ def _sync_tool_display_name(tool_name: str) -> str:
 
 _TOOL_SYNC_KINDS = {
     "get_chapter_list": "browse",
-    "read_chapter": "view",
     "get_chapter_content": "view",
     "edit_chapter": "write",
     "create_new_chapter": "create",
     "get_creative_profile": "memory",
     "update_creative_profile": "memory",
-    "search_plot_memory": "browse",
     "search_story_memory": "memory",
     "get_recent_context": "memory",
-    "get_character_memory": "memory",
     "get_timeline": "view",
     "add_timeline_entry": "write",
     "update_timeline_entry": "edit",
-    "get_location_list": "view",
-    "get_location_detail": "view",
+    "get_locations": "view",
     "create_location": "create",
     "update_location": "edit",
     "delete_location": "delete",
     "run_review": "review",
-    "get_novel_summary": "view",
-    "get_novel_progress": "view",
-    "get_character_list": "view",
-    "get_character_detail": "view",
-    "get_writing_characters": "memory",
+    "get_novel_info": "view",
+    "get_characters": "view",
     "create_character": "create",
     "update_character": "edit",
-    "get_character_network": "view",
-    "get_character_relationships": "view",
     "update_character_relationship": "edit",
     "run_subagent": "plan",
 }
@@ -324,33 +306,25 @@ async def _build_tool_call_presentation(
 
     _TOOL_BASE_NAMES = {
         "get_chapter_list": ("查看章节目录", "browse"),
-        "read_chapter": (f"查看 {chapter_label}" if chapter_label else "读取章节正文", "view"),
         "get_chapter_content": (f"查看 {chapter_label}" if chapter_label else "读取章节正文", "view"),
         "edit_chapter": (f"编辑 {chapter_label}" if chapter_label else "编辑章节内容", "write"),
         "create_new_chapter": (f"创建 {chapter_label}" if chapter_label else "创建新章节", "create"),
         "get_creative_profile": ("查看创作规则", "memory"),
         "update_creative_profile": ("设置创作规则", "memory"),
-        "search_plot_memory": ("搜索情节内容", "browse"),
+        "search_story_memory": ("搜索故事记忆", "memory"),
         "get_recent_context": ("获取写作上下文", "memory"),
-        "get_character_memory": ("回顾角色经历", "memory"),
         "get_timeline": ("查看故事时间线", "view"),
         "add_timeline_entry": ("记录追踪条目", "write"),
         "update_timeline_entry": ("更新追踪条目", "edit"),
         "run_review": ("执行审查", "review"),
-        "get_location_list": ("查看地点列表", "view"),
-        "get_location_detail": ("查看地点详情", "view"),
+        "get_locations": ("查看地点信息", "view"),
         "create_location": ("创建新地点", "create"),
         "update_location": ("更新地点设定", "edit"),
         "delete_location": ("删除地点", "delete"),
-        "get_novel_summary": ("查看小说概况", "view"),
-        "get_novel_progress": ("查看写作进度", "view"),
-        "get_character_list": ("查看角色列表", "view"),
-        "get_character_detail": ("查看角色档案", "view"),
-        "get_writing_characters": ("整理角色阵容和关系", "memory"),
+        "get_novel_info": ("查看小说信息", "view"),
+        "get_characters": ("查看角色信息", "view"),
         "create_character": ("创建新角色", "create"),
         "update_character": ("更新角色设定", "edit"),
-        "get_character_network": ("查看人物关系图", "view"),
-        "get_character_relationships": ("查看角色关系详情", "view"),
         "update_character_relationship": ("更新人物关系", "edit"),
         "run_subagent": ("调度AI子任务", "plan"),
     }
@@ -1009,11 +983,10 @@ async def _run_chat_with_tools(
             max_tool_loops = 50
             max_context_tokens = session_manager.config.max_tokens
             READ_ONLY_TOOLS = {
-                "search_story_memory", "get_novel_summary",
-                "get_chapter_list", "get_chapter_content", "get_character_list",
-                "get_character_detail", "get_writing_characters",
+                "search_story_memory", "get_novel_info",
+                "get_chapter_list", "get_chapter_content", "get_characters",
                 "get_timeline", "run_review",
-                "get_location_list", "get_location_detail"
+                "get_locations"
             }
             while loop_count < max_tool_loops:
                 tool_outputs: List[Dict[str, Any]] = []
@@ -1149,7 +1122,9 @@ async def _run_chat_with_tools(
                                 "tool": tool_name,
                                 "tool_id": tool_id,
                                 "arguments": arguments,
-                                "result": result_payload
+                                "result": result_payload,
+                                "display_text": presentation.get("display_text"),
+                                "activity_kind": presentation.get("activity_kind"),
                             })
                             continue
                         
@@ -1235,7 +1210,9 @@ async def _run_chat_with_tools(
                                 "tool": tool_name,
                                 "tool_id": tool_id,
                                 "arguments": clean_args,
-                                "result": tool_result_payload
+                                "result": tool_result_payload,
+                                "display_text": presentation.get("display_text"),
+                                "activity_kind": presentation.get("activity_kind"),
                             })
                             
                             if not tool_result_payload.get("success"):
@@ -1287,7 +1264,7 @@ async def _run_chat_with_tools(
                                 if tool_name in ("create_character", "update_character"):
                                     stale_keys = [
                                         key for key in list(tool_cache.keys())
-                                        if key.startswith(("get_character_list:", "get_character_detail:", "get_writing_characters:", "get_character_memory:", "get_character_network:", "get_character_relationships:"))
+                                        if key.startswith("get_characters:")
                                     ]
                                     for stale_key in stale_keys:
                                         tool_cache.pop(stale_key, None)
@@ -1295,7 +1272,7 @@ async def _run_chat_with_tools(
                                 if tool_name == "update_character_relationship":
                                     stale_keys = [
                                         key for key in list(tool_cache.keys())
-                                        if key.startswith(("get_character_network:", "get_character_relationships:", "get_writing_characters:"))
+                                        if key.startswith("get_characters:")
                                     ]
                                     for stale_key in stale_keys:
                                         tool_cache.pop(stale_key, None)
@@ -1303,7 +1280,7 @@ async def _run_chat_with_tools(
                                 if tool_name == "create_location":
                                     stale_keys = [
                                         key for key in list(tool_cache.keys())
-                                        if key.startswith(("get_location_list:", "get_location_detail:"))
+                                        if key.startswith("get_locations:")
                                     ]
                                     for stale_key in stale_keys:
                                         tool_cache.pop(stale_key, None)
@@ -1311,7 +1288,7 @@ async def _run_chat_with_tools(
                                 if tool_name in ("update_location", "delete_location"):
                                     stale_keys = [
                                         key for key in list(tool_cache.keys())
-                                        if key.startswith(("get_location_list:", "get_location_detail:"))
+                                        if key.startswith("get_locations:")
                                     ]
                                     for stale_key in stale_keys:
                                         tool_cache.pop(stale_key, None)
@@ -1319,7 +1296,7 @@ async def _run_chat_with_tools(
                                 if tool_name == "create_new_chapter":
                                     stale_keys = [
                                         key for key in list(tool_cache.keys())
-                                        if key.startswith(("get_chapter_list:", "get_novel_progress:"))
+                                        if key.startswith(("get_chapter_list:", "get_novel_info:"))
                                     ]
                                     for stale_key in stale_keys:
                                         tool_cache.pop(stale_key, None)
@@ -1367,7 +1344,9 @@ async def _run_chat_with_tools(
                             "function": {
                                 "name": item["tool"],
                                 "arguments": json.dumps(item.get("arguments", {}), ensure_ascii=False)
-                            }
+                            },
+                            "display_text": item.get("display_text"),
+                            "activity_kind": item.get("activity_kind"),
                         })
                     tool_meta: Dict[str, Any] = {"tool_calls": combined_tool_calls}
                     tool_meta["thinking_content"] = thinking_buffer
@@ -1388,7 +1367,9 @@ async def _run_chat_with_tools(
                             json.dumps(item["result"], ensure_ascii=False),
                             metadata={
                                 "tool_call_id": item.get("tool_id") or f"call_{item['tool']}",
-                                "tool_name": item["tool"]
+                                "tool_name": item["tool"],
+                                "display_text": item.get("display_text"),
+                                "activity_kind": item.get("activity_kind"),
                             }
                         )
                     history_messages = session_manager.get_messages_for_api(session, include_context=False)

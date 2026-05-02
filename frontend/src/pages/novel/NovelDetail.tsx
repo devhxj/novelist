@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Card, Descriptions, Tag, Button, Space, message, Divider, Row, Col } from 'antd'
-import { FileTextOutlined, UserOutlined, ToolOutlined, CheckCircleOutlined, BarChartOutlined, EditOutlined, RocketOutlined, ClockCircleOutlined } from '@ant-design/icons'
+import { FileTextOutlined, UserOutlined, CheckCircleOutlined, BarChartOutlined, EditOutlined, RocketOutlined, ClockCircleOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import { novelApi } from '@/services/novelService'
 import { getErrorMessage } from '@/types/error'
@@ -135,15 +135,6 @@ function NovelDetailPage() {
               avatar={<BarChartOutlined style={{ fontSize: 24, color: '#2f54eb' }} />}
               title="进度追踪"
               description="小说写作进度"
-            />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card hoverable onClick={() => navigate(`/novels/${id}/mcp-tools`)}>
-            <Card.Meta
-              avatar={<ToolOutlined style={{ fontSize: 24, color: '#595959' }} />}
-              title="MCP工具"
-              description="AI工具集"
             />
           </Card>
         </Col>

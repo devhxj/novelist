@@ -97,9 +97,9 @@ No test suite exists. No pytest config, no test files, no test dependencies in r
 
 Vite + React 19 + TypeScript + Ant Design 6 + Zustand + Monaco Editor.
 
-**Pages** (`src/pages/`): `chat/ChatPage.tsx` (main IDE-like chat UI, ~1300+ lines), `editor/EditorPage.tsx` (Monaco editor), plus dedicated pages for: auth, chapter, character, consistency, generation, mcp, novel, planning, progress, timeline, workflow.
+**Pages** (`src/pages/`): `chat/ChatPage.tsx` (main IDE-like chat UI, ~1300+ lines), `editor/EditorPage.tsx` (Monaco editor), plus dedicated pages for: auth, chapter, character, consistency, generation, novel, planning, progress, timeline, workflow.
 
-**Services** (`src/services/`): REST clients for each domain (novel, chapter, character, etc.) plus two WebSocket services — `wsGenerationService.ts` (chat/streaming) and `wsEditorService.ts` (collaborative editing). Also `mcpService.ts` for MCP tool invocation.
+**Services** (`src/services/`): REST clients for each domain (novel, chapter, character, etc.) plus two WebSocket services — `wsGenerationService.ts` (chat/streaming) and `wsEditorService.ts` (collaborative editing).
 
 **Stores** (`src/stores/`): Zustand stores — `authStore.ts` (auth state, token persistence), `novelStore.ts` (current novel context).
 

@@ -33,7 +33,7 @@ class EditModeConfig:
   - 正式回复（content）：必须包含对用户友好的信息，如"我来帮你查看XX的内容""好的，让我先了解当前的角色阵容"
   - **不要把所有有用信息都放在思考里而让正式回复为空或只有寥寥几字**
 - 工具调用输出原则——**按任务聚合，不要逐个汇报**：
-  - ❌ 错误："我要调用 get_novel_summary 查看小说概况，然后调用 get_character_list 查角色，再调用 get_timeline 查时间线"
+  - ❌ 错误："我要调用 get_novel_info 查看小说概况，然后调用 get_characters 查角色，再调用 get_timeline 查时间线"
   - ✅ 正确："我来帮你全面了解一下这本小说的总体情况"（然后静默调用所需工具，完成后给用户一个整合的总结）
   - 当用户问一件事需要多个工具配合时，**用一句话说明你要做什么这件事**，而不是罗列你要调哪些工具
   - 只有在工具调用出错或结果异常时才单独提及该工具
@@ -72,12 +72,12 @@ class EditModeConfig:
 8. **时间线状态维护**：每章写作完成后，检查时间线中是否有状态不合理的条目（例如：明显已在前几章回收的伏笔仍是 pending、已完成章节的规划未标记 completed、已过期的安排未更新），主动调用 update_timeline_entry 修正状态
 
 【人物关系管理】
-1. 生成章节前应优先调用 get_writing_characters 了解角色阵容和关系网络，确保角色言行一致。
-2. 如果需要深入了解某个角色的完整档案，调用 get_character_detail(character_id)。
-3. 如果需要了解某个角色的出场记录和最近动态，调用 get_character_memory(character_id)。
+1. 生成章节前应优先调用 get_characters(mode="list") 了解角色阵容和关系网络，确保角色言行一致。
+2. 如果需要深入了解某个角色的完整档案，调用 get_characters(mode="detail", character_id=...)。
+3. 如果需要了解某个角色的出场记录和最近动态，调用 get_characters(mode="detail", character_id=..., include_memory=true)。
 4. 章节生成后如果发现角色间关系发生变化（如：从敌对转为合作、建立新友谊、解除旧盟约等），
    应主动调用 update_character_relationship 记录变化。这会自动更新人物关系图并联动到时间线。
-5. 如果用户要求修改某个角色的设定或关系，先通过 get_character_detail 确认当前状态再修改。
+5. 如果用户要求修改某个角色的设定或关系，先通过 get_characters(mode="detail") 确认当前状态再修改。
 6. 人物关系是有向图结构——A对B的" mentor "关系不等于B对A的关系，注意区分方向性。
 
 【审查与检查】
@@ -105,28 +105,27 @@ class EditModeConfig:
     
     MODE_ALLOWED_TOOLS: dict[EditMode, Set[str]] = {
         EditMode.AGENT: {
-            "get_novel_summary", "get_chapter_list", "get_chapter_content", "create_new_chapter",
+            "get_novel_info", "get_chapter_list", "get_chapter_content", "create_new_chapter",
             "get_creative_profile", "update_creative_profile",
-            "get_novel_progress", "get_character_list", "get_character_detail", "get_writing_characters",
-            "create_character", "update_character",
-            "search_story_memory", "get_character_memory",
+            "get_characters", "create_character", "update_character",
+            "search_story_memory",
             "edit_chapter",
             "run_subagent",
             "get_timeline", "add_timeline_entry", "update_timeline_entry",
             "run_review",
-            "get_character_network", "get_character_relationships", "update_character_relationship",
-            "get_location_list", "get_location_detail", "create_location",
-            "update_location", "delete_location",
+            "update_character_relationship",
+            "get_locations", "create_location", "update_location", "delete_location",
+            "get_story_arcs", "add_story_arc", "update_story_arc",
         },
         EditMode.REVIEW: {
-            "get_novel_summary", "get_chapter_list", "get_chapter_content", "get_creative_profile",
-            "get_novel_progress", "get_character_list", "get_character_detail",
-            "search_story_memory", "get_character_memory"
+            "get_novel_info", "get_chapter_list", "get_chapter_content", "get_creative_profile",
+            "get_characters",
+            "search_story_memory",
         },
         EditMode.PLAN: {
-            "get_novel_summary", "get_chapter_list", "get_chapter_content", "get_creative_profile",
-            "get_novel_progress", "get_character_list", "get_character_detail",
-            "search_story_memory", "get_character_memory"
+            "get_novel_info", "get_chapter_list", "get_chapter_content", "get_creative_profile",
+            "get_characters",
+            "search_story_memory",
         }
     }
     
@@ -140,11 +139,10 @@ class EditModeConfig:
         EditMode.AGENT: [
             "get_creative_profile",
             "update_creative_profile",
-            "get_novel_summary",
+            "get_novel_info",
             "get_chapter_list",
             "get_chapter_content",
-            "get_writing_characters",
-            "get_character_detail",
+            "get_characters",
             "search_story_memory",
             "get_timeline",
             "run_review",
@@ -155,22 +153,21 @@ class EditModeConfig:
             "run_subagent",
         ],
         EditMode.REVIEW: [
-            "get_novel_summary",
+            "get_novel_info",
             "get_chapter_list",
             "get_chapter_content",
             "get_creative_profile",
-            "get_writing_characters",
-            "get_character_detail",
+            "get_characters",
             "search_story_memory",
             "get_timeline",
             "run_review",
         ],
         EditMode.PLAN: [
-            "get_novel_summary",
+            "get_novel_info",
             "get_chapter_list",
             "get_chapter_content",
             "get_creative_profile",
-            "get_writing_characters",
+            "get_characters",
             "search_story_memory",
             "get_timeline",
         ],
@@ -182,12 +179,12 @@ class EditModeConfig:
             "edit_chapter",
         },
         "characters": {
-            "get_character_list", "get_character_detail", "get_writing_characters",
-            "create_character", "update_character", "get_character_memory",
-            "get_character_network", "get_character_relationships", "update_character_relationship",
+            "get_characters",
+            "create_character", "update_character",
+            "update_character_relationship",
         },
         "locations": {
-            "get_location_list", "get_location_detail", "create_location",
+            "get_locations", "create_location",
             "update_location", "delete_location",
         },
         "timeline": {

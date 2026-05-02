@@ -23,9 +23,6 @@ import { wsEditorService } from '@/services/wsEditorService'
 import { editorApi } from '@/services/editorService'
 import { chapterApi } from '@/services/chapterService'
 import { generationApi } from '@/services/generationService'
-import {
-  getToolDisplayName as mapToolName,
-} from '@/utils/toolDisplayMap'
 import type {
   ServerMsg, DiffData, EditMode,
   SessionCreatedMsg, SessionListMsg, ContentChunkMsg, ThinkingChunkMsg,
@@ -126,7 +123,7 @@ function getToolDisplayName(toolName: string, chapterNumber?: number, chapterTit
   if (toolName === 'create_new_chapter' && chapterNumber != null) {
     return `创建第${chapterNumber}章${chapterTitle ? ` ${chapterTitle}` : ''}`
   }
-  return mapToolName(toolName)
+  return '处理创作任务'
 }
 
 function getActivityVisual(kind?: string): { icon: React.ReactNode; label: string; badge: string } {
@@ -410,7 +407,8 @@ export default function EditorPage() {
                     type: 'tool',
                     call: {
                       tool_name: tc.function?.name || tc.name || 'unknown',
-                      display_text: getToolDisplayName(tc.function?.name || tc.name || 'unknown'),
+                      display_text: tc.display_text || getToolDisplayName(tc.function?.name || tc.name || 'unknown'),
+                      activity_kind: tc.activity_kind,
                       status: 'completed',
                       task_id: msgTaskId,
                     },

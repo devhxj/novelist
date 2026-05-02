@@ -17,7 +17,6 @@ import ChapterEdit from '@/pages/chapter/ChapterEdit'
 import ConsistencyCheck from '@/pages/consistency/ConsistencyCheck'
 import ForeshadowingList from '@/pages/consistency/ForeshadowingList'
 import StoryTracker from '@/pages/timeline/StoryTracker'
-import MCPTools from '@/pages/mcp/MCPTools'
 import EditorPage from '@/pages/editor/EditorPage'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -54,7 +53,6 @@ function AppRoutes() {
           <Route path="novels/:novelId/consistency" element={<ConsistencyCheck />} />
           <Route path="novels/:novelId/foreshadowings" element={<ForeshadowingList />} />
           <Route path="novels/:novelId/tracker" element={<StoryTracker />} />
-          <Route path="novels/:novelId/mcp-tools" element={<MCPTools />} />
           <Route path="novels/:novelId/editor/:sessionId" element={<EditorPage />} />
           <Route path="novels/:novelId/editor" element={<EditorPage />} />
         </Route>

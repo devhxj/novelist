@@ -8,129 +8,110 @@ from app.core.permissions import verify_novel_ownership
 from app.mcp.novel_tools import _invalidate_novel_cache
 
 
-class GetLocationListTool(BaseMCPTool):
-    """获取地点列表"""
+class GetLocationsTool(BaseMCPTool):
+    """获取地点信息（列表/详情）"""
 
-    name = "get_location_list"
+    name = "get_locations"
     description = (
-        "获取当前小说的地点列表。无需传novel_id，系统会注入当前小说ID。"
-        "\n返回所有已创建的地点，包含名称、类型、描述等信息。"
-        "\n适用场景：了解故事中的地点布局、确认某个地点是否存在、规划新章节的场景时。"
-        "\n支持按类型筛选（city/forest/building等）和关键词搜索。"
+        "获取当前小说的地点信息，支持两种模式："
+        "\n- list: 地点列表，参数: location_type(类型筛选), search(关键词搜索)"
+        "\n- detail: 地点详情（含地理信息、关联角色、子地点等），参数: location_id(必填)"
+        "\n无需传novel_id，系统会注入当前小说ID。"
     )
     category = MCPToolCategory.NOVEL_MANAGEMENT
     parameters_schema = {
         "type": "object",
         "properties": {
+            "mode": {
+                "type": "string",
+                "enum": ["list", "detail"],
+                "description": "查询模式：list=地点列表，detail=地点详情"
+            },
+            "location_id": {
+                "type": "integer",
+                "description": "地点ID（detail模式必填）"
+            },
             "location_type": {
                 "type": "string",
                 "enum": ["city", "town", "forest", "mountain", "building", "room",
                          "sea", "river", "road", "castle", "temple", "village",
                          "dungeon", "palace", "market", "inn", "other"],
-                "description": "按类型筛选（可选）"
+                "description": "按类型筛选（list模式可选）"
             },
-            "search": {"type": "string", "description": "按名称或描述搜索（可选）"},
+            "search": {"type": "string", "description": "按名称或描述搜索（list模式可选）"},
         },
-        "required": []
+        "required": ["mode"]
     }
 
-    async def execute(self, db, novel_id: int, user_id: int, location_type: Optional[str]=None,
-                     search: Optional[str]=None, **kwargs) -> MCPToolResult:
+    async def execute(self, db, novel_id: int, user_id: int, mode: str = "list",
+                     location_id: Optional[int] = None, location_type: Optional[str] = None,
+                     search: Optional[str] = None, **kwargs) -> MCPToolResult:
         try:
             novel = await verify_novel_ownership(db, novel_id, user_id)
             if not novel:
                 return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-            
+
             from app.locations.service import LocationService
             svc = LocationService(db, novel_id)
-            
-            if search:
-                locations = await svc.search(search)
-            elif location_type:
-                locations = await svc.get_by_type(location_type)
+
+            if mode == "detail":
+                if not location_id:
+                    return MCPToolResult(success=False, error="detail 模式需要 location_id")
+                location = await svc.get_by_id(location_id)
+                if not location:
+                    return MCPToolResult(success=False, error=f"地点 {location_id} 不存在")
+
+                parent_name = None
+                if location.parent_location_id:
+                    parent = await svc.get_by_id(location.parent_location_id)
+                    if parent:
+                        parent_name = parent.name
+
+                child_locs = await svc.get_children(location_id)
+                children = [{"id": c.id, "name": c.name, "type": c.location_type}
+                           for c in child_locs]
+
+                return MCPToolResult(
+                    success=True,
+                    data={
+                        "id": location.id,
+                        "name": location.name,
+                        "type": location.location_type,
+                        "description": location.description,
+                        "geo_info": location.geo_info,
+                        "related_characters": location.related_characters,
+                        "related_chapters": location.related_chapters,
+                        "tags": location.tags,
+                        "parent_name": parent_name,
+                        "children": children,
+                        "children_count": len(children),
+                    },
+                    metadata={"tool": self.name, "novel_id": novel_id, "location_id": location_id, "mode": "detail"}
+                )
             else:
-                locations = await svc.get_all()
-            
-            return MCPToolResult(
-                success=True,
-                data={
-                    "locations": [
-                        {"id": l.id, "name": l.name, "type": l.location_type,
-                         "description": l.description[:100] if l.description else None,
-                         "tags": l.tags}
-                        for l in locations
-                    ],
-                    "total": len(locations),
-                    "types": list(set(l.location_type for l in locations)),
-                },
-                metadata={"tool": self.name, "novel_id": novel_id}
-            )
+                if search:
+                    locations = await svc.search(search)
+                elif location_type:
+                    locations = await svc.get_by_type(location_type)
+                else:
+                    locations = await svc.get_all()
+
+                return MCPToolResult(
+                    success=True,
+                    data={
+                        "locations": [
+                            {"id": l.id, "name": l.name, "type": l.location_type,
+                             "description": l.description[:100] if l.description else None,
+                             "tags": l.tags}
+                            for l in locations
+                        ],
+                        "total": len(locations),
+                        "types": list(set(l.location_type for l in locations)),
+                    },
+                    metadata={"tool": self.name, "novel_id": novel_id, "mode": "list"}
+                )
         except Exception as e:
-            return MCPToolResult(success=False, error=f"获取地点列表失败: {str(e)}")
-
-
-class GetLocationDetailTool(BaseMCPTool):
-    """获取地点详情"""
-
-    name = "get_location_detail"
-    description = (
-        "获取指定地点的详细信息。无需传novel_id，系统会注入当前小说ID。"
-        "\n返回完整信息：名称、类型、描述、地理信息、关联角色、关联章节、子地点等。"
-        "\n适用场景：需要深入了解某个地点的详细设定、写某地点发生的戏份前调用。"
-    )
-    category = MCPToolCategory.NOVEL_MANAGEMENT
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "location_id": {"type": "integer", "description": "地点ID（必填）"},
-        },
-        "required": ["location_id"]
-    }
-
-    async def execute(self, db, novel_id: int, user_id: int, location_id: int,
-                     **kwargs) -> MCPToolResult:
-        try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-            
-            from app.locations.service import LocationService
-            svc = LocationService(db, novel_id)
-            location = await svc.get_by_id(location_id)
-            
-            if not location:
-                return MCPToolResult(success=False, error=f"地点 {location_id} 不存在")
-            
-            parent_name = None
-            children = []
-            if location.parent_location_id:
-                parent = await svc.get_by_id(location.parent_location_id)
-                if parent:
-                    parent_name = parent.name
-            
-            child_locs = await svc.get_children(location_id)
-            children = [{"id": c.id, "name": c.name, "type": c.location_type}
-                       for c in child_locs]
-            
-            return MCPToolResult(
-                success=True,
-                data={
-                    "id": location.id,
-                    "name": location.name,
-                    "type": location.location_type,
-                    "description": location.description,
-                    "geo_info": location.geo_info,
-                    "related_characters": location.related_characters,
-                    "related_chapters": location.related_chapters,
-                    "tags": location.tags,
-                    "parent_name": parent_name,
-                    "children": children,
-                    "children_count": len(children),
-                },
-                metadata={"tool": self.name, "novel_id": novel_id, "location_id": location_id}
-            )
-        except Exception as e:
-            return MCPToolResult(success=False, error=f"获取地点详情失败: {str(e)}")
+            return MCPToolResult(success=False, error=f"获取地点信息失败: {str(e)}")
 
 
 class CreateLocationTool(BaseMCPTool):
@@ -141,7 +122,7 @@ class CreateLocationTool(BaseMCPTool):
         "为当前小说创建一个新地点。无需传novel_id，系统会注入当前小说ID。"
         "\n适用场景：用户要求添加新地点、AI写作时发现需要新的场景设定、规划世界观时。"
         "\nname 为必填；location_type 建议从 city/town/forest/building 等中选择。"
-        "\n创建后可通过 get_location_detail 查看详情，通过 update_location 修改设定。"
+        "\n创建后可通过 get_locations(mode=\"detail\") 查看详情，通过 update_location 修改设定。"
     )
     category = MCPToolCategory.NOVEL_MANAGEMENT
     parameters_schema = {
@@ -327,8 +308,7 @@ class DeleteLocationTool(BaseMCPTool):
 
 
 def register_location_tools(registry) -> None:
-    registry.register(GetLocationListTool())
-    registry.register(GetLocationDetailTool())
+    registry.register(GetLocationsTool())
     registry.register(CreateLocationTool())
     registry.register(UpdateLocationTool())
     registry.register(DeleteLocationTool())

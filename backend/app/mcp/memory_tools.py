@@ -131,76 +131,6 @@ class SearchStoryMemoryTool(BaseMCPTool):
             return MCPToolResult(success=False, error=f"Search failed: {str(e)}")
 
 
-class GetCharacterMemoryTool(BaseMCPTool):
-    """获取角色记忆"""
-    
-    name = "get_character_memory"
-    description = (
-        "获取指定角色在小说中的所有相关信息和出场记录（动态信息）。"
-        "无需传novel_id，系统会注入当前小说ID。"
-        "\n与 get_character_detail 不同，此工具不仅返回静态档案，还返回该角色相关的正文片段。"
-        "\n适用场景：写某个角色的戏份前调用，了解他/她最近做了什么、经历了什么。"
-        "\n参数说明：character_id 为必填项，需先从 get_character_list 获取。"
-        "\n💡 提示：get_writing_characters 已包含各角色的最近动态，可优先使用。"
-    )
-    category = MCPToolCategory.MEMORY_RETRIEVAL
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "novel_id": {"type": "integer", "description": "小说ID"},
-            "character_id": {"type": "integer", "description": "角色ID"},
-        },
-        "required": ["novel_id", "character_id"]
-    }
-
-    def __init__(self):
-        pass
-
-    async def execute(
-        self,
-        db: AsyncSession,
-        novel_id: int,
-        user_id: int,
-        character_id: int,
-        **kwargs
-    ) -> MCPToolResult:
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
-        result = await db.execute(
-            select(Character).where(Character.id == character_id, Character.novel_id == novel_id)
-        )
-        character = result.scalar_one_or_none()
-        if not character:
-            return MCPToolResult(success=False, error=f"Character not found: {character_id}")
-
-        memory = {
-            "character": {
-                "id": character.id,
-                "name": character.name,
-                "personality": character.personality,
-                "abilities": character.abilities,
-                "relationships": character.relationships
-            }
-        }
-
-        try:
-            search_results = await vector_store.search(novel_id=novel_id, query=character.name, top_k=5)
-            memory["relevant_content"] = [
-                {"content": r["content"][:200] + "..." if len(r["content"]) > 200 else r["content"], "chapter_id": r["metadata"].get("chapter_id")}
-                for r in search_results
-            ]
-        except VectorStoreError:
-            memory["relevant_content"] = []
-        
-        return MCPToolResult(
-            success=True,
-            data=memory,
-            metadata={"tool": self.name, "novel_id": novel_id, "character_id": character_id}
-        )
-
-
 class GetRecentContextTool(BaseMCPTool):
     """获取最近上下文"""
     
@@ -293,6 +223,5 @@ class MemoryRetrievalTools:
         """注册所有记忆检索工具"""
         registry.register(SearchPlotMemoryTool())
         registry.register(SearchStoryMemoryTool())
-        registry.register(GetCharacterMemoryTool())
         registry.register(GetRecentContextTool())
 

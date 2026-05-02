@@ -41,8 +41,7 @@ REVIEW_SPEC = SubAgentSpec(
     ],
     allowed_tools=[
         "get_chapter_content",
-        "get_character_list",
-        "get_character_detail",
+        "get_characters",
         "get_timeline",
     ],
     allowed_resources=[
