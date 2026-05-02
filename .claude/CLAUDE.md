@@ -124,3 +124,7 @@ Vite + React 19 + TypeScript + Ant Design 6 + Zustand + Monaco Editor.
 ### Environment
 Required: `DATABASE_URL` (MySQL), `DEEPSEEK_API_KEY`, `SECRET_KEY` (JWT).
 Optional: `REDIS_URL` (cache/pub-sub, degrades gracefully).
+
+## Git Conventions
+
+- Do NOT include `Co-Authored-By` trailers in commit messages.

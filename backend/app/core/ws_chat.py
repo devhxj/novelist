@@ -14,10 +14,10 @@ from app.core.websocket import ws_manager, GenerationProgress
 from app.core.database import AsyncSessionLocal
 from app.core.auth import decode_token
 from app.core.llm_service import llm_service, LLMServiceError
-from app.core.exceptions import BusinessError, SystemError, ConflictException
+from app.core.exceptions import BusinessError, SystemError
 from app.core.session_manager import (
     Session, MessageRole,
-    NovelContext, ChapterContext,
+    NovelContext,
     session_manager
 )
 from app.core.session_storage import session_storage
@@ -39,7 +39,6 @@ from app.novels.models import NovelCreativeProfile
 from app.novels.models import Novel
 from app.editor.service import get_edit_session_manager
 from app.mcp.registry import get_mcp_registry
-from app.workflows.langgraph_workflow import ChapterWorkflow, LANGGRAPH_AVAILABLE  # deprecated
 from app.generation.service import ChapterGenerationService
 
 router = APIRouter(tags=["websocket"])
@@ -382,217 +381,6 @@ async def _build_tool_call_presentation(
         "chapter_number": chapter_number,
         "chapter_title": chapter_title
     }
-
-
-async def _ensure_generation_chapter(
-    db,
-    novel_id: int,
-    chapter_number: Optional[int],
-    title: Optional[str],
-    overwrite_existing: bool = False
-) -> Chapter:
-    if chapter_number is None:
-        result = await db.execute(
-            select(func.max(Chapter.chapter_number)).where(Chapter.novel_id == novel_id)
-        )
-        max_chapter = result.scalar()
-        chapter_number = (max_chapter or 0) + 1
-
-    result = await db.execute(
-        select(Chapter).where(
-            Chapter.novel_id == novel_id,
-            Chapter.chapter_number == chapter_number
-        )
-    )
-    chapter = result.scalar_one_or_none()
-    if chapter:
-        if not overwrite_existing:
-            raise ConflictException("目标章节已存在。如需重写，请显式设置 overwrite_existing=true。")
-        if title:
-            chapter.title = title
-            await db.commit()
-            await db.refresh(chapter)
-        return chapter
-
-    chapter = Chapter(
-        novel_id=novel_id,
-        chapter_number=chapter_number,
-        title=title or f"第{chapter_number}章",
-        content="",
-        status="draft",
-        word_count=0,
-    )
-    db.add(chapter)
-    await db.commit()
-    await db.refresh(chapter)
-    return chapter
-
-
-async def _execute_streaming_edit_chapter(
-    novel_id: int,
-    session: Session,
-    task_id: str,
-    tool_id: Optional[str],
-    websocket: WebSocket,
-    task_flags: Dict[str, bool],
-    arguments: Dict[str, Any]
-) -> Dict[str, Any]:
-    async with AsyncSessionLocal() as db:
-        try:
-            chapter = await _ensure_generation_chapter(
-                db,
-                novel_id=novel_id,
-                chapter_number=arguments.get("chapter_number"),
-                title=arguments.get("title"),
-                overwrite_existing=bool(arguments.get("overwrite_existing", False))
-            )
-        except ValueError as exc:
-            return {"success": False, "data": None, "error": str(exc), "metadata": {"tool": "edit_chapter"}}
-        session.current_chapter_id = chapter.id
-
-        presentation = await _build_tool_call_presentation(
-            db,
-            novel_id,
-            "edit_chapter",
-            {
-                **arguments,
-                "chapter_id": chapter.id,
-                "chapter_number": chapter.chapter_number,
-                "title": chapter.title,
-            }
-        )
-        await ws_manager.send_personal_message({
-            "type": "tool_call",
-            "task_id": task_id,
-            "tool_name": "edit_chapter",
-            "tool_id": tool_id,
-            "status": "executing",
-            **presentation,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }, websocket)
-
-        target_length = arguments.get("target_length", 3000)
-        style = arguments.get("style", "narrative")
-        model = arguments.get("model")
-        reasoning_effort = arguments.get("reasoning_effort") or session.metadata.get("reasoning_effort")
-        context_builder = ContextBuilder(db, novel_id)
-        context_data = await context_builder.build_writing_context(
-            chapter_number=chapter.chapter_number,
-            context_size=arguments.get("context_size", 3000),
-            include_previous_chapters=True,
-            include_characters=True,
-        )
-        system_prompt = get_system_prompt(GenerationType.CHAPTER, style)
-        user_prompt = build_chapter_prompt(
-            chapter_number=chapter.chapter_number,
-            target_length=target_length,
-            style=style,
-            context=context_data.get("context", ""),
-            user_prompt=arguments.get("writing_task"),
-            author_intent=arguments.get("author_intent"),
-            scene_goal=arguments.get("scene_goal"),
-            chapter_outline=arguments.get("outline"),
-            tone=arguments.get("tone"),
-            must_keep=arguments.get("must_keep"),
-            must_avoid=arguments.get("must_avoid"),
-            key_events=arguments.get("key_events"),
-            focus_characters=arguments.get("focus_characters")
-        )
-
-        full_content = ""
-        stream_interval = 0
-        try:
-            async for chunk in llm_service.generate_stream(
-                prompt=user_prompt,
-                system_prompt=system_prompt,
-                model=model,
-                reasoning_effort=reasoning_effort,
-            ):
-                if not task_flags.get(task_id):
-                    raise asyncio.CancelledError()
-                full_content += chunk
-                stream_interval += 1
-                msg: dict[str, Any] = {
-                    "type": "chapter_stream",
-                    "task_id": task_id,
-                    "tool_name": "edit_chapter",
-                    "chapter_id": chapter.id,
-                    "chapter_number": chapter.chapter_number,
-                    "chapter_title": chapter.title,
-                    "chunk": chunk,
-                    "content": full_content,
-                    "word_count": count_words(full_content),
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-                if stream_interval % 10 == 0:
-                    msg["text_stats"] = compute_text_stats(full_content).to_dict()
-                await ws_manager.send_personal_message(msg, websocket)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            await db.rollback()
-            return {
-                "success": False,
-                "data": {
-                    "chapter_id": chapter.id,
-                    "chapter_number": chapter.chapter_number,
-                    "title": chapter.title,
-                },
-                "error": _friendly_error_message(exc),
-                "metadata": {"tool": "edit_chapter", "novel_id": novel_id, "chapter_id": chapter.id}
-            }
-
-        from app.editor.service import get_edit_session_manager
-        manager = get_edit_session_manager(db)
-        ws_session_id = session.session_id
-        edit_session = await manager.create_edit_session(chapter.id, ws_session_id)
-
-        await ws_manager.send_personal_message({
-            "type": "edit_started",
-            "task_id": task_id,
-            "tool_name": "edit_chapter",
-            "chapter_id": chapter.id,
-            "edit_session_id": edit_session.edit_session_id,
-            "latest_pending_edit_session_id": edit_session.edit_session_id,
-            "working_content": edit_session.working_content or "",
-            "original_content": edit_session.original_content or "",
-            "change_count": 0,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }, websocket)
-
-        await manager.apply_change(
-            edit_session=edit_session,
-            change_type="full_replace",
-            new_content=full_content,
-            reason=f"AI生成第{chapter.chapter_number}章初稿"
-        )
-
-        await ws_manager.send_personal_message({
-            "type": "edit_pending",
-            "task_id": task_id,
-            "edit_session_id": edit_session.edit_session_id,
-            "latest_pending_edit_session_id": edit_session.edit_session_id,
-            "chapter_id": chapter.id,
-            "change_count": edit_session.change_count,
-            "word_count": count_words(full_content),
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }, websocket)
-
-        return {
-            "success": True,
-            "data": {
-                "chapter_id": chapter.id,
-                "chapter_number": chapter.chapter_number,
-                "title": chapter.title,
-                "edit_session_id": edit_session.edit_session_id,
-                "status": "pending_confirmation",
-                "word_count": count_words(full_content),
-                "content": full_content,
-                "iterations": 1
-            },
-            "error": None,
-            "metadata": {"tool": "edit_chapter", "novel_id": novel_id, "chapter_id": chapter.id, "edit_session_id": edit_session.edit_session_id}
-        }
 
 
 @router.websocket("/ws/chat")
@@ -1403,26 +1191,15 @@ async def _run_chat_with_tools(
                             if cached:
                                 tool_result_payload = cached
                             else:
-                                if tool_name == "edit_chapter" and clean_args.get("change_type", "full_replace") == "full_replace" and not clean_args.get("new_content"):
-                                    tool_result_payload = await _execute_streaming_edit_chapter(
+                                async with AsyncSessionLocal() as tool_db:
+                                    tool_result = await registry.execute(
+                                        tool_name,
+                                        db=tool_db,
+                                        user_id=session.user_id,
+                                        session_id=session.session_id,
                                         novel_id=novel_id,
-                                        session=session,
-                                        task_id=task_id,
-                                        tool_id=tool_id,
-                                        websocket=websocket,
-                                        task_flags=task_flags,
-                                        arguments=clean_args
+                                        **clean_args
                                     )
-                                else:
-                                    async with AsyncSessionLocal() as tool_db:
-                                        tool_result = await registry.execute(
-                                            tool_name,
-                                            db=tool_db,
-                                            user_id=session.user_id,
-                                            session_id=session.session_id,
-                                            novel_id=novel_id,
-                                            **clean_args
-                                        )
                                     tool_result_payload = tool_result.model_dump()
                                 if tool_result_payload.get("success"):
                                     tool_cache[cache_key] = tool_result_payload
@@ -1552,7 +1329,7 @@ async def _run_chat_with_tools(
                                     for stale_key in stale_keys:
                                         tool_cache.pop(stale_key, None)
                             
-                            if tool_name == "edit_chapter" and tool_result_payload.get("success") and metadata.get("requires_user_confirmation"):
+                            if tool_name == "edit_chapter" and tool_result_payload.get("success"):
                                 await ws_manager.send_personal_message({
                                     "type": "edit_pending",
                                     "task_id": task_id,
@@ -1561,7 +1338,7 @@ async def _run_chat_with_tools(
                                     "change_count": data_payload.get("change_count", 0),
                                     "timestamp": datetime.now(timezone.utc).isoformat()
                                 }, websocket)
-                            
+
                             if tool_result_payload.get("success") and data_payload.get("working_content") is not None:
                                 await ws_manager.send_personal_message({
                                     "type": "edit_preview",
@@ -1574,16 +1351,15 @@ async def _run_chat_with_tools(
                                     "diff": data_payload.get("diff", {}),
                                     "timestamp": datetime.now(timezone.utc).isoformat()
                                 }, websocket)
-                            if metadata.get("requires_user_confirmation"):
-                                edit_session_id = metadata.get("edit_session_id")
-                                if edit_session_id:
-                                    await ws_manager.send_personal_message({
-                                        "type": "edit_pending",
-                                        "task_id": task_id,
-                                        "edit_session_id": edit_session_id,
-                                        "change_count": (tool_result_payload.get("data") or {}).get("change_count", 0),
-                                        "timestamp": datetime.now(timezone.utc).isoformat()
-                                    }, websocket)
+                            edit_session_id = metadata.get("edit_session_id")
+                            if edit_session_id:
+                                await ws_manager.send_personal_message({
+                                    "type": "edit_pending",
+                                    "task_id": task_id,
+                                    "edit_session_id": edit_session_id,
+                                    "change_count": (tool_result_payload.get("data") or {}).get("change_count", 0),
+                                    "timestamp": datetime.now(timezone.utc).isoformat()
+                                }, websocket)
                 
                 if tool_outputs and tools_enabled:
                     # 合并本轮所有工具调用为一条 assistant 消息（DeepSeek 要求）
@@ -2170,20 +1946,3 @@ async def _build_novel_context(db, novel_id: int) -> NovelContext:
     )
 
 
-async def _build_chapter_context(db, novel_id: int, chapter_number: int) -> Optional[ChapterContext]:
-    result = await db.execute(
-        select(Chapter).where(
-            Chapter.novel_id == novel_id,
-            Chapter.chapter_number == chapter_number
-        )
-    )
-    chapter = result.scalar_one_or_none()
-    
-    if not chapter:
-        return None
-    
-    return ChapterContext(
-        chapter_number=chapter.chapter_number,
-        chapter_title=chapter.title or "",
-        previous_summary=chapter.summary or ""
-    )

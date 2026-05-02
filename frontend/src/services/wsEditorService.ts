@@ -317,19 +317,6 @@ export interface EditStreamMsg {
   timestamp?: string
 }
 
-export interface ChapterStreamMsg {
-  type: 'chapter_stream'
-  task_id: string
-  tool_name: string
-  chapter_id: number
-  chapter_number: number
-  chapter_title?: string
-  chunk: string
-  content: string
-  word_count: number
-  timestamp?: string
-}
-
 export interface EditPendingMsg {
   type: 'edit_pending'
   task_id: string
@@ -362,7 +349,6 @@ export type ServerMsg =
   | EditPreviewMsg
   | EditPendingMsg
   | EditStreamMsg
-  | ChapterStreamMsg
 
 export type MsgHandler = (msg: ServerMsg) => void
 

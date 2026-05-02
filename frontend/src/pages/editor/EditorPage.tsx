@@ -35,7 +35,6 @@ import type {
   SessionLoadedMsg,
   EditPreviewMsg,
   EditPendingMsg,
-  ChapterStreamMsg,
   ReasoningEffort,
 } from '@/services/wsEditorService'
 import { Markdown } from '@/components/Markdown'
@@ -235,8 +234,6 @@ export default function EditorPage() {
   const pendingMessageRef = useRef<string | null>(null)
   const pendingInterruptMessageRef = useRef<string | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [streamingChapterMeta, setStreamingChapterMeta] = useState<{ id: number; chapterNumber: number; title: string } | null>(null)
-
   const updateTurn = useCallback((turnId: string, updater: (turn: ConversationTurn) => ConversationTurn) => {
     setTurns(prev => prev.map(t => t.id === turnId ? updater(t) : t))
   }, [])
@@ -444,11 +441,14 @@ export default function EditorPage() {
         setIsStreaming(true)
         const turnId = m.task_id || `task_${Date.now()}`
         currentTurnIdRef.current = turnId
-        setTurns(prev => [...prev, {
-          id: turnId,
-          segments: [],
-          status: 'streaming',
-        }])
+        setTurns(prev => {
+          const closed = prev.map(t =>
+            t.status === 'streaming'
+              ? { ...t, status: 'done' as const, segments: t.segments.map(s => s.type === 'text' ? { ...s, isStreaming: false } : s) }
+              : t
+          )
+          return [...closed, { id: turnId, segments: [], status: 'streaming' as const }]
+        })
         break
       }
       case 'thinking_chunk': {
@@ -484,7 +484,7 @@ export default function EditorPage() {
           ...turn,
           segments: turn.segments.map(seg =>
             seg.type === 'text' && seg.thinkingContent && !seg.thinkingDone
-              ? { ...seg, thinkingDone: true }
+              ? { ...seg, thinkingDone: true, isStreaming: false }
               : seg
           ),
         }))
@@ -528,9 +528,8 @@ export default function EditorPage() {
           }))
         }
         void refreshChapterList()
-        if (streamingChapterMeta?.id) {
-          void refreshSelectedChapter(streamingChapterMeta.id)
-          setStreamingChapterMeta(null)
+        if (selectedChapterId) {
+          void refreshSelectedChapter(selectedChapterId)
         }
         if (pendingInterruptMessageRef.current) {
           const nextMessage = pendingInterruptMessageRef.current
@@ -605,7 +604,6 @@ export default function EditorPage() {
           void revealChapterByNumber(m.chapter_number)
         }
         if (m.tool_name === 'edit_chapter' && (m.status === 'failed' || m.status === 'rejected')) {
-          setStreamingChapterMeta(null)
           setEditNotice('这次编辑没有完成，正文保持原样。')
           void refreshChapterList()
         }
@@ -615,21 +613,6 @@ export default function EditorPage() {
             void refreshSelectedChapter(selectedChapterId)
           }
         }
-        break
-      }
-      case 'chapter_stream': {
-        const m = msg as ChapterStreamMsg
-        if (selectedChapterId !== m.chapter_id) {
-          setSelectedChapterId(m.chapter_id)
-          void refreshChapterList()
-        }
-        setStreamingChapterMeta({
-          id: m.chapter_id,
-          chapterNumber: m.chapter_number,
-          title: m.chapter_title || `第${m.chapter_number}章`,
-        })
-        setWorkingContent(m.content)
-        setChapterWordCount(m.word_count)
         break
       }
       case 'edit_stream': {
@@ -747,7 +730,6 @@ export default function EditorPage() {
         }
         message.error(m.error)
         setIsStreaming(false)
-        setStreamingChapterMeta(null)
         if (pendingInterruptMessageRef.current) {
           const nextMessage = pendingInterruptMessageRef.current
           pendingInterruptMessageRef.current = null
@@ -758,7 +740,6 @@ export default function EditorPage() {
       case 'task_cancelled': {
         setIsStreaming(false)
         setIsApplyingEdit(false)
-        setStreamingChapterMeta(null)
         const turnId = currentTurnIdRef.current
         if (turnId) {
           updateTurn(turnId, turn => ({
@@ -777,7 +758,7 @@ export default function EditorPage() {
         break
       }
     }
-  }, [dispatchMessage, originalContent, refreshChapterList, refreshSelectedChapter, selectedChapterId, streamingChapterMeta, updateTurn])
+  }, [dispatchMessage, originalContent, refreshChapterList, refreshSelectedChapter, selectedChapterId, updateTurn])
 
   useEffect(() => {
     const unsub = wsEditorService.onMessage(handleMsg)
@@ -790,7 +771,6 @@ export default function EditorPage() {
 
   const selectChapter = async (chapterId: number) => {
     setSelectedChapterId(chapterId)
-    setStreamingChapterMeta(null)
     setShowDiff(false)
     setDiffData(null)
     setEditNotice('')
@@ -992,9 +972,7 @@ export default function EditorPage() {
   const selectedChapter = chapters.find(c => c.id === selectedChapterId)
   const activeChapterMeta = selectedChapter
     ? { chapterNumber: selectedChapter.chapter_number, title: selectedChapter.title }
-    : streamingChapterMeta
-      ? { chapterNumber: streamingChapterMeta.chapterNumber, title: streamingChapterMeta.title }
-      : null
+    : null
   const theme = darkMode ? 'vs-dark' : 'light'
   const activePendingSessionId = latestPendingEditSessionId || editSessionId
   const hasPendingChanges = changeCount > 0 || workingContent !== originalContent
@@ -1120,7 +1098,7 @@ export default function EditorPage() {
                       </span>
                     </Tooltip>
                     <span className={`${styles.chapterPill} ${hasPendingReview ? styles.chapterPillPending : ''}`}>
-                      {streamingChapterMeta ? 'AI 正在写作' : hasPendingReview ? '有待确认修改' : '正文已同步'}
+                      {hasActiveEdit ? 'AI 正在写作' : hasPendingReview ? '有待确认修改' : '正文已同步'}
                     </span>
                     <span className={styles.chapterPill}>
                       {selectedEditMode === 'agent' ? '协作创作' : selectedEditMode === 'review' ? '审阅模式' : '规划模式'}
@@ -1208,7 +1186,7 @@ export default function EditorPage() {
                     onChange={handleEditorChange}
                     onMount={handleEditorMount}
                     options={{
-                      readOnly: Boolean(streamingChapterMeta),
+                      readOnly: hasActiveEdit,
                       minimap: { enabled: false },
                       lineNumbers: 'on',
                       scrollBeyondLastLine: false,
@@ -1259,7 +1237,7 @@ export default function EditorPage() {
                             <details className={`${styles.thinkingBlock} ${!seg.thinkingDone && seg.isStreaming ? styles.thinkingThinking : ''}`} open={seg.isStreaming ? true : !seg.thinkingDone}>
                               <summary className={styles.thinkingSummary}>
                                 <ReadOutlined /> 思考过程
-                                {seg.thinkingDone || (!seg.isStreaming && seg.content)
+                                {seg.thinkingDone || seg.content || !seg.isStreaming
                                   ? <span className={styles.thinkingToggle}>展开</span>
                                   : <span className={`${styles.thinkingToggle} ${styles.thinkingActive}`}>思考中…</span>
                                 }

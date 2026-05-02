@@ -1,6 +1,5 @@
 """
-编辑类MCP工具 - 支持副本编辑机制
-注意：accept_edit和reject_edit是用户操作，不暴露给AI
+编辑类MCP工具
 """
 from contextvars import ContextVar
 from typing import Any
@@ -149,12 +148,11 @@ async def _execute_subagent_task(
 
 
 class EditChapterTool(BaseMCPTool):
-    """编辑章节内容 - 统一写入入口，内部自动管理副本会话"""
+    """编辑章节内容 - 统一写入入口"""
 
     name = "edit_chapter"
     description = (
-        "编辑指定章节的内容。内部自动创建/复用副本编辑会话，无需手动管理。"
-        "编辑只修改副本，需用户确认后才生效。"
+        "编辑指定章节的内容。"
         "\n必须提供 chapter_id；若不清楚章节ID，先调用 get_chapter_list 获取。"
         "\n【变更类型选择指南】"
         "\n- full_replace：你有完整的修改后全文 → 传 new_content 为完整替换文本"
@@ -306,13 +304,12 @@ class EditChapterTool(BaseMCPTool):
                     "working_content": edit_session.working_content,
                     "diff": diff_data.get("diff", {}),
                     "reused_existing": reused,
-                    "message": f"变更已应用到副本，共 {edit_session.change_count} 处改动。等待用户确认。",
+                    "message": f"已应用，共 {edit_session.change_count} 处改动。",
                 },
                 metadata={
                     "tool": self.name,
                     "change_count": edit_session.change_count,
                     "edit_session_id": edit_session.edit_session_id,
-                    "requires_user_confirmation": True,
                 },
             )
         except Exception as e:
@@ -384,8 +381,8 @@ class EditChapterTool(BaseMCPTool):
             "snapshot_id": snapshot_id,
             "working_content": edit_session.working_content,
             "diff": diff_data.get("diff", {}),
-            "message": f"替换了 {count} 处匹配。共 {edit_session.change_count} 处改动。等待用户确认。",
-        }, metadata={"tool": self.name, "change_count": edit_session.change_count, "edit_session_id": edit_session.edit_session_id, "requires_user_confirmation": True})
+            "message": f"替换了 {count} 处匹配。共 {edit_session.change_count} 处改动。",
+        }, metadata={"tool": self.name, "change_count": edit_session.change_count, "edit_session_id": edit_session.edit_session_id})
 
     async def _handle_multi_search_replace(self, db, manager, edit_session, edits, match_mode, dry_run):
         if not edits:
@@ -435,11 +432,11 @@ class EditChapterTool(BaseMCPTool):
             "snapshot_id": snapshot_id,
             "working_content": edit_session.working_content,
             "diff": diff_data.get("diff", {}),
-            "message": f"批量替换了 {total} 处匹配。共 {edit_session.change_count} 处改动。等待用户确认。",
+            "message": f"批量替换了 {total} 处匹配。共 {edit_session.change_count} 处改动。",
         }
         if errors:
             result_data["partial_errors"] = errors
-        return MCPToolResult(success=True, data=result_data, metadata={"tool": self.name, "change_count": edit_session.change_count, "edit_session_id": edit_session.edit_session_id, "requires_user_confirmation": True})
+        return MCPToolResult(success=True, data=result_data, metadata={"tool": self.name, "change_count": edit_session.change_count, "edit_session_id": edit_session.edit_session_id})
 
 
 

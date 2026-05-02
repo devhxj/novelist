@@ -2,7 +2,7 @@
 编辑模式系统 - 控制AI的权限级别
 """
 from enum import Enum
-from typing import Optional, List, Set, Dict
+from typing import List, Set, Dict
 
 
 class EditMode(str, Enum):
@@ -40,7 +40,6 @@ class EditModeConfig:
 - 与用户对话时保持自然、友好、有温度的语气
 - 工具调用全部完成后，给用户一个简洁的整合总结反馈
 
-在编辑时，你会创建一个副本进行修改，用户需要确认后才会应用到原稿。
 当需要写作、审核或一致性检查时，可以调度子Agent执行任务。
 可以直接创建空章节，也可以用 edit_chapter 直接写出或修改章节正文。
 当作者表达"以后都这样写""长期不要出现某类内容""这本书整体风格/目标/禁忌"等稳定规则时，
@@ -54,11 +53,9 @@ class EditModeConfig:
 
 【编辑章节最佳实践】
 1. 编辑前先 get_chapter_content(include_lines=true) 了解当前内容和行号
-2. 用 edit_chapter 写入内容，内部自动管理副本会话，无需手动创建
-3. 如果你有完整的修改后全文，用 change_type=full_replace（默认）
-4. 如果只改几段话，优先用 search_replace 模式（提供 search_text + new_content）
-5. 如果你知道精确行号范围，用 line_range_replace 模式
-6. 编辑是副本机制，用户需确认后才生效
+2. 如果你有完整的修改后全文，用 change_type=full_replace（默认）
+3. 如果只改几段话，优先用 search_replace 模式（提供 search_text + new_content）
+4. 如果你知道精确行号范围，用 line_range_replace 模式
 
 【故事时间线管理】
 时间线采用双轨维护：
