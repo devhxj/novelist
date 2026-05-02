@@ -998,6 +998,9 @@ async def _run_chat_with_tools(
                 ):
                     if not task_flags.get(task_id):
                         logger.info(f"Task {task_id} cancelled")
+                        partial = response_buffer.strip() or full_response.strip()
+                        if partial:
+                            session_manager.add_message(session, MessageRole.ASSISTANT, partial, metadata={"cancelled": True})
                         return
                     
                     if event["type"] == "thinking":
@@ -1470,6 +1473,9 @@ async def _run_chat_with_tools(
     
     except asyncio.CancelledError:
         logger.info(f"Chat task {task_id} was cancelled")
+        partial = response_buffer.strip() or full_response.strip()
+        if partial:
+            session_manager.add_message(session, MessageRole.ASSISTANT, partial, metadata={"cancelled": True})
     except Exception as e:
         logger.error(f"Chat with tools failed: {e}", exc_info=True)
         await ws_manager.send_personal_message({
