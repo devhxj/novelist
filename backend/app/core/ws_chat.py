@@ -937,24 +937,30 @@ async def _run_chat_with_tools(
             else:
                 tools = None
             
+            # --- 构建消息结构 ---
+            # 稳定 system message（base prompt + creative profile，跨工具循环不变）
             base_system_prompt = EditModeConfig.get_system_prompt(edit_mode)
-            
-            system_sections = [base_system_prompt]
+            stable_sections = [base_system_prompt]
             if creative_profile_text:
-                system_sections.append(creative_profile_text)
+                stable_sections.append(creative_profile_text)
+            prefix_messages = [{
+                "role": "system",
+                "content": "\n\n".join(s for s in stable_sections if s).strip()
+            }]
+
+            # 动态内容（conditional_reminders + RAG）追加到用户消息末尾
+            user_parts = [user_message]
+            if extra_context_for_user:
+                user_parts.append(extra_context_for_user)
             if conditional_reminders:
                 reminder_text = "\n".join(
                     f"- {reminder}" for reminder in conditional_reminders
                 )
-                system_sections.append(f"【本轮额外提醒】\n{reminder_text}")
-            prefix_messages = [{
-                "role": "system",
-                "content": "\n\n".join(section for section in system_sections if section).strip()
-            }]
-            
+                user_parts.append(f"【本轮额外提醒】\n{reminder_text}")
+            enhanced_user_content = "\n\n".join(user_parts)
+
             history_messages = session_manager.get_messages_for_api(session, include_context=False)
-            
-            enhanced_user_content = user_message + (extra_context_for_user or "")
+
             full_messages = (
                 prefix_messages +
                 history_messages +
