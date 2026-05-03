@@ -121,6 +121,7 @@ class EditModeConfig:
             "get_locations", "create_location", "update_location", "delete_location",
             "get_story_arcs", "add_story_arc", "update_story_arc",
             "get_story_state", "update_story_state",
+            "get_reader_perspective", "add_reader_perspective_entry", "update_reader_perspective_entry",
         },
     }
 
@@ -144,6 +145,7 @@ class EditModeConfig:
             "update_timeline_entry",
             "update_character_relationship",
             "get_story_state", "update_story_state",
+            "get_reader_perspective", "add_reader_perspective_entry", "update_reader_perspective_entry",
             "run_subagent",
         ],
     }

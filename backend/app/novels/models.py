@@ -103,3 +103,22 @@ class NovelStoryState(Base):
     novel_id: Mapped[int] = mapped_column(ForeignKey("novels.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     content: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[Optional[datetime]] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+
+class ReaderPerspective(Base):
+    """读者认知条目 - 记录读者已知信息、活跃悬念、读者误知"""
+    __tablename__ = "reader_perspectives"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    novel_id: Mapped[int] = mapped_column(ForeignKey("novels.id", ondelete="CASCADE"), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String(20), nullable=False)  # known / suspense / misconception
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    related_truth: Mapped[Optional[str]] = mapped_column(Text)  # 仅 misconception：真实情况
+    planted_chapter: Mapped[int] = mapped_column(Integer, nullable=False)
+    revealed_chapter: Mapped[Optional[int]] = mapped_column(Integer)
+    last_mentioned_chapter: Mapped[Optional[int]] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    __table_args__ = (
+        Index('idx_rp_novel_type', 'novel_id', 'type'),
+    )

@@ -46,7 +46,7 @@ from app.agents.models import AgentTaskRecord
 from app.story_arcs.models import StoryArc
 from app.editor.models import EditSession, EditChange
 from app.timeline.models import TimelineEntry
-from app.novels.models import UserCreativeProfile, NovelStoryState
+from app.novels.models import UserCreativeProfile, NovelStoryState, ReaderPerspective
 from app.chat.models import ChatSession, ChatMessage
 
 logger = logging.getLogger(__name__)

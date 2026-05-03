@@ -560,5 +560,44 @@ async def update_story_state(novel_id: int, content: str, ctx: Context = None) -
     return await _execute_tool("update_story_state", ctx, novel_id=novel_id, content=content)
 
 
+@mcp.tool()
+async def get_reader_perspective(novel_id: int, ctx: Context = None) -> dict:
+    return await _execute_tool("get_reader_perspective", ctx, novel_id=novel_id)
+
+
+@mcp.tool()
+async def add_reader_perspective_entry(
+    novel_id: int,
+    type: str,
+    content: str,
+    planted_chapter: int,
+    related_truth: Optional[str] = None,
+    planned_reveal_chapter: Optional[int] = None,
+    ctx: Context = None
+) -> dict:
+    return await _execute_tool(
+        "add_reader_perspective_entry", ctx,
+        novel_id=novel_id, type=type, content=content,
+        planted_chapter=planted_chapter, related_truth=related_truth,
+        planned_reveal_chapter=planned_reveal_chapter,
+    )
+
+
+@mcp.tool()
+async def update_reader_perspective_entry(
+    novel_id: int,
+    entry_id: int,
+    last_mentioned_chapter: Optional[int] = None,
+    revealed_chapter: Optional[int] = None,
+    ctx: Context = None
+) -> dict:
+    return await _execute_tool(
+        "update_reader_perspective_entry", ctx,
+        novel_id=novel_id, entry_id=entry_id,
+        last_mentioned_chapter=last_mentioned_chapter,
+        revealed_chapter=revealed_chapter,
+    )
+
+
 def get_mcp_transport():
     return mcp.streamable_http_app()
