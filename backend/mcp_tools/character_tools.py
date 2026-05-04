@@ -5,15 +5,15 @@
 from typing import Any, Dict, List, Optional
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
-from app.characters.schemas import (
+from characters.schemas import (
     CharacterRelationCreate,
     CharacterRelationUpdate,
     CharacterRelationEvolve,
     RelationStatus,
 )
-from app.characters.service import CharacterService
-from app.core.permissions import verify_novel_ownership
-from app.mcp.novel_tools import _invalidate_character_cache
+from characters.service import CharacterService
+from core.permissions import verify_novel_ownership
+from mcp_tools.novel_tools import _invalidate_character_cache
 
 
 class UpdateCharacterRelationTool(BaseMCPTool):

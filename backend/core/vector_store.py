@@ -8,7 +8,7 @@ import asyncio
 import gc
 from typing import List, Dict, Any, Optional
 
-from app.core.exceptions import SystemError
+from core.exceptions import SystemError
 
 os.environ.setdefault("HF_HUB_OFFLINE", "0")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "0")

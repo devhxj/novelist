@@ -6,11 +6,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from typing import Optional
 
-from app.core.database import DBSession
-from app.core.response import ApiResponse
-from app.core.dependencies import NovelOwner
-from app.consistency.service import ConsistencyChecker
-from app.consistency.schemas import ConsistencyCheckRequest
+from core.database import DBSession
+from core.response import ApiResponse
+from core.dependencies import NovelOwner
+from consistency.service import ConsistencyChecker
+from consistency.schemas import ConsistencyCheckRequest
 
 router = APIRouter(prefix="/consistency", tags=["consistency"])
 logger = logging.getLogger(__name__)
@@ -59,8 +59,8 @@ async def get_foreshadowing_statistics_redirect(novel: NovelOwner):
     [已迁移] 伏笔统计已迁移到时间线系统。
     请使用 GET /api/v1/timeline/novels/{novel_id}/stats 替代。
     """
-    from app.timeline.service import TimelineService
-    from app.core.database import get_db_session
+    from timeline.service import TimelineService
+    from core.database import get_db_session
     async for session in get_db_session():
         service = TimelineService(session, novel.id)
         counts = await service.get_unresolved_count()

@@ -41,18 +41,18 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db():
-    from app.auth.models import User
-    from app.novels.models import Novel, NovelCreativeProfile
-    from app.characters.models import Character, CharacterRelation
-    from app.locations.models import Location
-    from app.chapters.models import Chapter
-    from app.memory.models import MemoryChunk
-    from app.rag.models import RAGContext
-    from app.agents.models import AgentTaskRecord
-    from app.story_arcs.models import StoryArc
-    from app.editor.models import EditSession, EditChange
-    from app.timeline.models import TimelineEntry
-    from app.novels.models import UserCreativeProfile
+    from auth.models import User
+    from novels.models import Novel, NovelCreativeProfile
+    from characters.models import Character, CharacterRelation
+    from locations.models import Location
+    from chapters.models import Chapter
+    from memory.models import MemoryChunk
+    from rag.models import RAGContext
+    from agents.models import AgentTaskRecord
+    from story_arcs.models import StoryArc
+    from editor.models import EditSession, EditChange
+    from timeline.models import TimelineEntry
+    from novels.models import UserCreativeProfile
     
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

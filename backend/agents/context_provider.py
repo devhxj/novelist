@@ -10,9 +10,9 @@ from typing import Any, Callable, Awaitable
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.chapters.models import Chapter
-from app.characters.models import Character
-from app.agents.base import SubAgentSpec
+from chapters.models import Chapter
+from characters.models import Character
+from agents.base import SubAgentSpec
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ async def _get_previous_summary(db: AsyncSession, novel_id: int, chapter_id: int
 @register_context_builder("layered_context")
 async def _get_layered_context(db: AsyncSession, novel_id: int, chapter_id: int | None) -> dict[str, Any]:
     try:
-        from app.core.context_builder import ContextBuilder
+        from core.context_builder import ContextBuilder
         builder = ContextBuilder(db, novel_id)
         chapter_number = 1
         if chapter_id:
@@ -116,7 +116,7 @@ async def _get_layered_context(db: AsyncSession, novel_id: int, chapter_id: int 
 @register_context_builder("active_story_arcs")
 async def _get_active_story_arcs(db: AsyncSession, novel_id: int, chapter_id: int | None) -> list[dict[str, Any]]:
     try:
-        from app.story_arcs.service import StoryArcService
+        from story_arcs.service import StoryArcService
         service = StoryArcService(db, novel_id)
         return await service.get_active_arcs(chapter_id or 1)
     except Exception as e:
@@ -131,7 +131,7 @@ async def _get_unresolved_foreshadowings(
     chapter_id: int | None,
 ) -> list[dict[str, Any]]:
     try:
-        from app.timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryStatus
+        from timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryStatus
         from sqlalchemy import select
         result = await db.execute(
             select(TimelineEntry)
@@ -155,7 +155,7 @@ async def _get_unresolved_foreshadowings(
 @register_context_builder("consistency_result")
 async def _get_consistency_result(db: AsyncSession, novel_id: int, chapter_id: int | None) -> dict[str, Any] | None:
     try:
-        from app.consistency.service import ConsistencyChecker
+        from consistency.service import ConsistencyChecker
         checker = ConsistencyChecker(db, novel_id)
         return await checker.check_all(
             chapter_ids=[chapter_id] if chapter_id else None,

@@ -5,10 +5,10 @@
 import logging
 from fastapi import APIRouter
 
-from app.core.response import ApiResponse
-from app.core.database import DBSession
-from app.core.dependencies import NovelOwner
-from app.text.service import TextGenerator, GenerationType, GenerationConfig
+from core.response import ApiResponse
+from core.database import DBSession
+from core.dependencies import NovelOwner
+from text.service import TextGenerator, GenerationType, GenerationConfig
 
 router = APIRouter(prefix="/text", tags=["text-generation"])
 logger = logging.getLogger(__name__)

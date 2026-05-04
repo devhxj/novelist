@@ -10,13 +10,13 @@ from datetime import datetime, timezone
 from sqlalchemy import select, func, or_, desc, asc, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.timeline.models import (
+from timeline.models import (
     TimelineEntry,
     TimelineEntryCategory,
     TimelineEntryStatus,
     TimeHorizon,
 )
-from app.timeline.schemas import (
+from timeline.schemas import (
     TimelineEntryCreate,
     TimelineEntryUpdate,
     TimelineEntryCategory as SchemaTimelineEntryCategory,
@@ -309,8 +309,8 @@ class TimelineService:
         self, summary_text: str, current_chapter: int
     ) -> str:
         try:
-            from app.characters.models import CharacterRelation, Character
-            from app.characters.schemas import RelationStatus
+            from characters.models import CharacterRelation, Character
+            from characters.schemas import RelationStatus
 
             threshold = max(1, current_chapter - 3)
             result = await self.db.execute(

@@ -7,14 +7,14 @@ from typing import List, Optional
 from fastapi import APIRouter, Query
 from sqlalchemy import select
 
-from app.core.response import ApiResponse
-from app.core.database import DBSession
-from app.core.auth import CurrentUserDep
-from app.core.dependencies import NovelOwner
-from app.core.exceptions import NotFoundException
-from app.core.vector_store import vector_store, VectorStoreError
-from app.novels.models import Novel
-from app.chapters.models import Chapter
+from core.response import ApiResponse
+from core.database import DBSession
+from core.auth import CurrentUserDep
+from core.dependencies import NovelOwner
+from core.exceptions import NotFoundException
+from core.vector_store import vector_store, VectorStoreError
+from novels.models import Novel
+from chapters.models import Chapter
 from .models import MemoryChunk
 from .schemas import MemorySearchRequest, MemoryIndexRequest
 

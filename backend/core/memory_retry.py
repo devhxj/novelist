@@ -36,7 +36,7 @@ async def schedule_memory_retry(novel_id: int, chapter_id: int) -> None:
     logger.info(f"Scheduled memory retry for novel={novel_id}, chapter={chapter_id}")
 
     try:
-        from app.core.redis_service import redis_service
+        from core.redis_service import redis_service
         await redis_service.client.hset(REDIS_KEY, key, json.dumps(entry))
     except Exception as e:
         logger.warning(f"Redis schedule failed: {e}")
@@ -46,7 +46,7 @@ async def _load_all_pending() -> dict[str, dict[str, Any]]:
     merged = dict(_pending_retries)
 
     try:
-        from app.core.redis_service import redis_service
+        from core.redis_service import redis_service
         raw: Any = await redis_service.client.hgetall(REDIS_KEY)
         for key_bytes, val_bytes in raw.items():
             key = key_bytes if isinstance(key_bytes, str) else key_bytes.decode()
@@ -65,7 +65,7 @@ async def _remove_pending(key: str) -> None:
     _pending_retries.pop(key, None)
 
     try:
-        from app.core.redis_service import redis_service
+        from core.redis_service import redis_service
         await redis_service.client.hdel(REDIS_KEY, key)
     except Exception:
         pass
@@ -75,7 +75,7 @@ async def _update_pending(key: str, entry: dict[str, Any]) -> None:
     _pending_retries[key] = entry
 
     try:
-        from app.core.redis_service import redis_service
+        from core.redis_service import redis_service
         await redis_service.client.hset(REDIS_KEY, key, json.dumps(entry))
     except Exception:
         pass
@@ -95,9 +95,9 @@ async def execute_pending_retries() -> int:
         info["attempts"] += 1
 
         try:
-            from app.core.database import AsyncSessionLocal
-            from app.core.vector_store import vector_store
-            from app.chapters.models import Chapter
+            from core.database import AsyncSessionLocal
+            from core.vector_store import vector_store
+            from chapters.models import Chapter
             from sqlalchemy import select
 
             async with AsyncSessionLocal() as db:

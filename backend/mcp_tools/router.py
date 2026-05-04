@@ -5,14 +5,14 @@ MCP工具API路由
 from fastapi import APIRouter, Query, Body
 from typing import Optional
 
-from app.core.response import ApiResponse
-from app.core.database import DBSession
-from app.core.auth import CurrentUserDep
-from app.core.dependencies import NovelOwner
-from app.novels.models import Novel
+from core.response import ApiResponse
+from core.database import DBSession
+from core.auth import CurrentUserDep
+from core.dependencies import NovelOwner
+from novels.models import Novel
 from .base import MCPToolCategory
 from .registry import get_mcp_registry
-from app.agents.registry import get_agent_for_task, get_all_specs
+from agents.registry import get_agent_for_task, get_all_specs
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 
@@ -169,8 +169,8 @@ async def get_chapter_content(
     current_user: CurrentUserDep,
     include_summary: bool = Query(True)
 ):
-    from app.chapters.models import Chapter
-    from app.core.exceptions import NotFoundException, UnauthorizedException
+    from chapters.models import Chapter
+    from core.exceptions import NotFoundException, UnauthorizedException
     from sqlalchemy import select
     
     result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
@@ -240,8 +240,8 @@ async def get_character_detail(
     db: DBSession,
     current_user: CurrentUserDep
 ):
-    from app.characters.models import Character
-    from app.core.exceptions import NotFoundException, UnauthorizedException
+    from characters.models import Character
+    from core.exceptions import NotFoundException, UnauthorizedException
     from sqlalchemy import select
 
     result = await db.execute(select(Character).where(Character.id == character_id))
@@ -275,8 +275,8 @@ async def get_character_memory(
     db: DBSession,
     current_user: CurrentUserDep,
 ):
-    from app.characters.models import Character
-    from app.core.exceptions import NotFoundException, UnauthorizedException
+    from characters.models import Character
+    from core.exceptions import NotFoundException, UnauthorizedException
     from sqlalchemy import select
 
     result = await db.execute(select(Character).where(Character.id == character_id))

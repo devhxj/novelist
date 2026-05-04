@@ -33,14 +33,14 @@ except ImportError:
     END = None
     MemorySaver = None
 
-from app.core.context_builder import ContextBuilder
-from app.consistency.service import ConsistencyChecker
-from app.core.vector_store import vector_store
-from app.core.text_utils import count_words
-from app.agents.base import AgentTask, AgentResult, TaskType
-from app.agents.writer import WriterAgent
-from app.agents.reviewer import ReviewerAgent
-from app.core.chapter_summary import generate_chapter_summary
+from core.context_builder import ContextBuilder
+from consistency.service import ConsistencyChecker
+from core.vector_store import vector_store
+from core.text_utils import count_words
+from agents.base import AgentTask, AgentResult, TaskType
+from agents.writer import WriterAgent
+from agents.reviewer import ReviewerAgent
+from core.chapter_summary import generate_chapter_summary
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +179,7 @@ class ChapterWorkflow:
         logger.info(f"[{state['task_id']}] Preparing context for chapter {state['chapter_number']}")
 
         try:
-            from app.core.database import AsyncSessionLocal
+            from core.database import AsyncSessionLocal
 
             async with AsyncSessionLocal() as db:
                 builder = ContextBuilder(db, state["novel_id"])
@@ -308,7 +308,7 @@ class ChapterWorkflow:
         logger.info(f"[{state['task_id']}] Checking consistency")
         
         try:
-            from app.core.database import AsyncSessionLocal
+            from core.database import AsyncSessionLocal
             
             async with AsyncSessionLocal() as db:
                 checker = ConsistencyChecker(db, state["novel_id"])
@@ -340,9 +340,9 @@ class ChapterWorkflow:
         logger.info(f"[{state['task_id']}] Saving chapter")
         
         try:
-            from app.core.database import AsyncSessionLocal
-            from app.chapters.models import Chapter
-            from app.core.chapter_post_processor import ChapterPostProcessor
+            from core.database import AsyncSessionLocal
+            from chapters.models import Chapter
+            from core.chapter_post_processor import ChapterPostProcessor
             
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
@@ -408,8 +408,8 @@ class ChapterWorkflow:
         logger.info(f"[{state['task_id']}] Updating memory")
         
         try:
-            from app.core.database import AsyncSessionLocal
-            from app.chapters.models import Chapter
+            from core.database import AsyncSessionLocal
+            from chapters.models import Chapter
             
             async with AsyncSessionLocal() as db:
                 result = await db.execute(

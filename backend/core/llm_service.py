@@ -13,13 +13,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from collections import defaultdict
 
-from app.core.prompt_templates import LLMModel
-from app.core.exceptions import SystemError
-from app.core.session_manager import (
+from core.prompt_templates import LLMModel
+from core.exceptions import SystemError
+from core.session_manager import (
     Session, SessionManager, SessionConfig, MessageRole,
     session_manager
 )
-from app.core.session_storage import session_storage
+from core.session_storage import session_storage
 
 logger = logging.getLogger(__name__)
 

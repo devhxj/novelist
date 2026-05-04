@@ -10,27 +10,27 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from sqlalchemy import select
 from typing import Optional, Dict, Any, List
 
-from app.core.websocket import ws_manager
-from app.core.database import AsyncSessionLocal
-from app.core.auth import decode_token
-from app.core.llm_service import llm_service
-from app.core.session_manager import (
+from core.websocket import ws_manager
+from core.database import AsyncSessionLocal
+from core.auth import decode_token
+from core.llm_service import llm_service
+from core.session_manager import (
     Session, MessageRole,
     session_manager
 )
-from app.core.session_storage import session_storage
-from app.core.context_builder import (
+from core.session_storage import session_storage
+from core.context_builder import (
     ContextBuilder,
     _format_creative_profile_for_prompt,
     _build_novel_context_snapshot,
     _build_novel_context,
 )
-from app.core.edit_mode import EditMode, EditModeConfig
-from app.chapters.models import Chapter
-from app.novels.models import NovelCreativeProfile
-from app.novels.models import Novel
-from app.editor.service import get_edit_session_manager
-from app.mcp.registry import get_mcp_registry
+from core.edit_mode import EditMode, EditModeConfig
+from chapters.models import Chapter
+from novels.models import NovelCreativeProfile
+from novels.models import Novel
+from editor.service import get_edit_session_manager
+from mcp_tools.registry import get_mcp_registry
 
 router = APIRouter(tags=["websocket"])
 logger = logging.getLogger(__name__)
@@ -78,7 +78,7 @@ def _looks_like_authoring_intent(message: str) -> bool:
     return any(cue in text for cue in AUTHORING_INTENT_CUES)
 
 
-from app.core.ws_utils import (
+from core.ws_utils import (
     _friendly_error_message,
     _sanitize_tool_error,
     _extract_partial_argument_string,
@@ -86,7 +86,7 @@ from app.core.ws_utils import (
     _build_tool_call_presentation,
     _TOOL_SYNC_KINDS,
 )
-from app.core.ws_generation import _run_generation_task
+from core.ws_generation import _run_generation_task
 
 
 @router.websocket("/ws/chat")

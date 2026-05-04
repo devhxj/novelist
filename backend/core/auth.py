@@ -5,8 +5,8 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from app.core.jwt import decode_token
-from app.auth.schemas import CurrentUser
+from core.jwt import decode_token
+from auth.schemas import CurrentUser
 
 security = HTTPBearer()
 

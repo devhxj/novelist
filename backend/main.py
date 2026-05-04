@@ -9,45 +9,45 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.core.database import init_db
-from app.core.redis_service import redis_service
-from app.core.exceptions import APIException, BusinessError, SystemError
-from app.core.llm_service import LLMServiceError
+from core.database import init_db
+from core.redis_service import redis_service
+from core.exceptions import APIException, BusinessError, SystemError
+from core.llm_service import LLMServiceError
 
-import app.agents.writer
-import app.agents.reviewer
-import app.agents.memory
+import agents.writer
+import agents.reviewer
+import agents.memory
 
-from app.auth.router import router as auth_router
-from app.novels.router import router as novels_router
-from app.characters.router import router as characters_router
-from app.locations.router import router as locations_router
-from app.chapters.router import router as chapters_router
-from app.memory.router import router as memory_router
-from app.rag.router import router as rag_router
-from app.agents.router import router as agents_router
-from app.consistency.router import router as consistency_router
-from app.story_arcs.router import router as story_arcs_router
-from app.mcp.router import router as mcp_router
-from app.mcp.server import get_mcp_transport
-from app.core.ws_chat import router as ws_chat_router
-from app.generation.router import router as generation_router
-from app.sessions.router import router as sessions_router
-from app.editor.router import router as editor_router
-from app.timeline.router import router as timeline_router
+from auth.router import router as auth_router
+from novels.router import router as novels_router
+from characters.router import router as characters_router
+from locations.router import router as locations_router
+from chapters.router import router as chapters_router
+from memory.router import router as memory_router
+from rag.router import router as rag_router
+from agents.router import router as agents_router
+from consistency.router import router as consistency_router
+from story_arcs.router import router as story_arcs_router
+from mcp_tools.router import router as mcp_router
+from mcp_tools.server import get_mcp_transport
+from core.ws_chat import router as ws_chat_router
+from generation.router import router as generation_router
+from sessions.router import router as sessions_router
+from editor.router import router as editor_router
+from timeline.router import router as timeline_router
 
-from app.auth.models import User
-from app.novels.models import Novel
-from app.characters.models import Character
-from app.chapters.models import Chapter
-from app.memory.models import MemoryChunk
-from app.rag.models import RAGContext
-from app.agents.models import AgentTaskRecord
-from app.story_arcs.models import StoryArc
-from app.editor.models import EditSession, EditChange
-from app.timeline.models import TimelineEntry
-from app.novels.models import UserCreativeProfile, NovelStoryState, ReaderPerspective
-from app.chat.models import ChatSession, ChatMessage
+from auth.models import User
+from novels.models import Novel
+from characters.models import Character
+from chapters.models import Chapter
+from memory.models import MemoryChunk
+from rag.models import RAGContext
+from agents.models import AgentTaskRecord
+from story_arcs.models import StoryArc
+from editor.models import EditSession, EditChange
+from timeline.models import TimelineEntry
+from novels.models import UserCreativeProfile, NovelStoryState, ReaderPerspective
+from chat.models import ChatSession, ChatMessage
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Redis connection failed, running without cache: {e}")
     
-    from app.core.memory_retry import start_retry_background_task, stop_retry_background_task
+    from core.memory_retry import start_retry_background_task, stop_retry_background_task
     start_retry_background_task()
     
     yield
@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
     stop_retry_background_task()
     
     try:
-        from app.core.vector_store import vector_store
+        from core.vector_store import vector_store
         vector_store.close()
     except Exception as e:
         logger.warning(f"VectorStore shutdown cleanup failed: {e}")

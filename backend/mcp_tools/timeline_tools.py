@@ -5,14 +5,14 @@
 from typing import Any, Dict, List, Optional
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
-from app.timeline.models import TimelineEntry
-from app.timeline.schemas import (
+from timeline.models import TimelineEntry
+from timeline.schemas import (
     TimelineEntryCreate,
     TimelineEntryUpdate,
 )
-from app.mcp.novel_tools import _invalidate_novel_cache
-from app.timeline.service import TimelineService
-from app.core.permissions import verify_novel_ownership
+from mcp_tools.novel_tools import _invalidate_novel_cache
+from timeline.service import TimelineService
+from core.permissions import verify_novel_ownership
 
 
 class GetTimelineTool(BaseMCPTool):

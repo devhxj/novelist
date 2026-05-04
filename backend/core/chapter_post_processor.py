@@ -12,7 +12,7 @@ import re
 import logging
 from typing import Optional, Dict, Any
 
-from app.core.llm_service import llm_service
+from core.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 

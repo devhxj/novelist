@@ -6,15 +6,15 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Query, Body
 from typing import Optional, List
 
-from app.core.response import ApiResponse
-from app.core.database import DBSession
-from app.core.auth import CurrentUserDep
-from app.core.session_manager import (
+from core.response import ApiResponse
+from core.database import DBSession
+from core.auth import CurrentUserDep
+from core.session_manager import (
     Session, MessageRole,
     NovelContext, ChapterContext,
     session_manager
 )
-from app.core.session_storage import session_storage
+from core.session_storage import session_storage
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ async def create_session(
     subtitle: Optional[str] = Body(None, description="会话副标题"),
 ):
     """创建新会话"""
-    from app.novels.models import Novel
+    from novels.models import Novel
     from sqlalchemy import select
 
     result = await db.execute(select(Novel).where(Novel.id == novel_id))

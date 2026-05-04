@@ -6,7 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 from typing import Optional, List
 
-from app.core.database import Base
+from core.database import Base
 
 
 class Chapter(Base):

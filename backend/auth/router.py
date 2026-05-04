@@ -4,10 +4,10 @@
 from fastapi import APIRouter, status
 from sqlalchemy import select, or_
 
-from app.core.response import ApiResponse
-from app.core.jwt import hash_password, verify_password, create_tokens, decode_token, create_access_token
-from app.core.database import DBSession
-from app.core.auth import CurrentUserDep
+from core.response import ApiResponse
+from core.jwt import hash_password, verify_password, create_tokens, decode_token, create_access_token
+from core.database import DBSession
+from core.auth import CurrentUserDep
 from .models import User
 from .schemas import UserRegister, UserLogin, TokenRefresh
 

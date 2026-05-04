@@ -10,10 +10,10 @@ from datetime import datetime
 from typing import Optional, Dict, Any, TYPE_CHECKING
 import enum
 
-from app.core.database import Base
+from core.database import Base
 
 if TYPE_CHECKING:
-    from app.novels.models import Novel
+    from novels.models import Novel
 
 
 class StoryArcType(str, enum.Enum):

@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any, List
 from sqlalchemy import String, Text, DateTime, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.database import Base
+from core.database import Base
 
 
 class EditSessionStatus(str):

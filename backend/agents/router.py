@@ -6,12 +6,12 @@ import uuid
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func
 
-from app.core.response import ApiResponse
-from app.core.exceptions import NotFoundException
-from app.core.database import DBSession
-from app.core.auth import get_current_user, CurrentUserDep
-from app.core.dependencies import NovelOwner
-from app.novels.models import Novel
+from core.response import ApiResponse
+from core.exceptions import NotFoundException
+from core.database import DBSession
+from core.auth import get_current_user, CurrentUserDep
+from core.dependencies import NovelOwner
+from novels.models import Novel
 from .base import AgentTask, TaskType, TaskStatus
 from .factory import create_default_coordinator
 from .models import AgentTaskRecord

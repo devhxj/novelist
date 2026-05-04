@@ -6,10 +6,10 @@ import logging
 from typing import Optional, List
 from datetime import datetime, timezone
 
-from app.core.redis_service import redis_service
-from app.core.database import AsyncSessionLocal
-from app.core.session_manager import Session, SessionConfig, Message, MessageRole, NovelContext, ChapterContext
-from app.chat.models import ChatSession as DBChatSession, ChatMessage as DBChatMessage
+from core.redis_service import redis_service
+from core.database import AsyncSessionLocal
+from core.session_manager import Session, SessionConfig, Message, MessageRole, NovelContext, ChapterContext
+from chat.models import ChatSession as DBChatSession, ChatMessage as DBChatMessage
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 

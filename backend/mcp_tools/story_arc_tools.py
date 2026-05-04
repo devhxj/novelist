@@ -5,10 +5,10 @@
 from typing import Any, Dict, List, Optional
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
-from app.story_arcs.models import StoryArc, StoryArcType, StoryArcStatus
-from app.story_arcs.schemas import StoryArcCreate, StoryArcUpdate
-from app.story_arcs.service import StoryArcService
-from app.core.permissions import verify_novel_ownership
+from story_arcs.models import StoryArc, StoryArcType, StoryArcStatus
+from story_arcs.schemas import StoryArcCreate, StoryArcUpdate
+from story_arcs.service import StoryArcService
+from core.permissions import verify_novel_ownership
 
 
 class GetStoryArcsTool(BaseMCPTool):
@@ -112,7 +112,7 @@ class AddStoryArcTool(BaseMCPTool):
             if not novel:
                 return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
 
-            from app.story_arcs.schemas import StoryArcType as SchemaArcType
+            from story_arcs.schemas import StoryArcType as SchemaArcType
             service = StoryArcService(db, novel_id)
             data = StoryArcCreate(
                 name=name,

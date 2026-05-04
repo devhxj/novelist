@@ -5,7 +5,7 @@
 from typing import Optional
 import logging
 
-from app.core.llm_service import llm_service
+from core.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 

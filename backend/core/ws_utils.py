@@ -7,9 +7,9 @@ from typing import Optional, Dict, Any, List
 
 from sqlalchemy import select
 
-from app.core.exceptions import BusinessError, SystemError
-from app.core.llm_service import LLMServiceError
-from app.chapters.models import Chapter
+from core.exceptions import BusinessError, SystemError
+from core.llm_service import LLMServiceError
+from chapters.models import Chapter
 
 logger = logging.getLogger(__name__)
 

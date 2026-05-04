@@ -4,8 +4,8 @@
 from typing import Any, Dict, List, Optional
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory
-from app.core.permissions import verify_novel_ownership
-from app.mcp.novel_tools import _invalidate_novel_cache
+from core.permissions import verify_novel_ownership
+from mcp_tools.novel_tools import _invalidate_novel_cache
 
 
 class GetLocationsTool(BaseMCPTool):
@@ -51,7 +51,7 @@ class GetLocationsTool(BaseMCPTool):
             if not novel:
                 return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
 
-            from app.locations.service import LocationService
+            from locations.service import LocationService
             svc = LocationService(db, novel_id)
 
             if mode == "detail":
@@ -156,8 +156,8 @@ class CreateLocationTool(BaseMCPTool):
             if not novel:
                 return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
 
-            from app.locations.schemas import LocationCreate, LocationType
-            from app.locations.service import LocationService
+            from locations.schemas import LocationCreate, LocationType
+            from locations.service import LocationService
 
             loc_data = LocationCreate(
                 name=name,
@@ -226,8 +226,8 @@ class UpdateLocationTool(BaseMCPTool):
             if not novel:
                 return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
             
-            from app.locations.schemas import LocationUpdate, LocationType
-            from app.locations.service import LocationService
+            from locations.schemas import LocationUpdate, LocationType
+            from locations.service import LocationService
 
             svc = LocationService(db, novel_id)
             update_fields = {}
@@ -292,7 +292,7 @@ class DeleteLocationTool(BaseMCPTool):
             if not novel:
                 return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
             
-            from app.locations.service import LocationService
+            from locations.service import LocationService
             svc = LocationService(db, novel_id)
             deleted = await svc.delete(location_id)
             if not deleted:

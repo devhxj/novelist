@@ -8,9 +8,9 @@ from enum import Enum
 from dataclasses import dataclass
 
 from sqlalchemy import select
-from app.chapters.models import Chapter
-from app.core.llm_service import llm_service
-from app.core.context_builder import ContextBuilder
+from chapters.models import Chapter
+from core.llm_service import llm_service
+from core.context_builder import ContextBuilder
 
 logger = logging.getLogger(__name__)
 

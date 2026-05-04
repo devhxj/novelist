@@ -1,6 +1,6 @@
 {
   "include": [
-    "backend/app"
+    "backend"
   ],
   "exclude": [
     "**/__pycache__",

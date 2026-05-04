@@ -6,10 +6,10 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.core.database import get_db
-from app.core.auth import CurrentUserDep
-from app.core.response import ApiResponse
-from app.core.exceptions import NotFoundException, BadRequestException
+from core.database import get_db
+from core.auth import CurrentUserDep
+from core.response import ApiResponse
+from core.exceptions import NotFoundException, BadRequestException
 from .models import Location
 from .schemas import (
     LocationCreate, LocationUpdate, LocationResponse, LocationNetworkResponse,
@@ -76,7 +76,7 @@ async def create_location(
     db: AsyncSession = Depends(get_db),
 ):
     svc = LocationService(db, data.novel_id if hasattr(data, 'novel_id') else 0)
-    from app.novels.models import Novel
+    from novels.models import Novel
     novel_result = await db.execute(select(Novel))
     novels = novel_result.scalars().first()
     if not novels:

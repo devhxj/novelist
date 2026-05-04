@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.novels.models import Novel
+from novels.models import Novel
 
 
 async def verify_novel_ownership(
@@ -26,7 +26,7 @@ async def verify_novel_ownership(
         Novel对象（验证通过）或None（无权访问）
     
     使用示例:
-        from app.core.permissions import verify_novel_ownership
+        from core.permissions import verify_novel_ownership
         
         novel = await verify_novel_ownership(db, novel_id, user_id)
         if not novel:

@@ -426,7 +426,7 @@ class ContextCompressor:
         key facts that are valuable for future creative decisions.
         """
         try:
-            from app.core.llm_service import llm_service
+            from core.llm_service import llm_service
         except ImportError:
             return self._build_fallback_summary(older_messages)
 

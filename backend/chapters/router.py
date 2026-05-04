@@ -6,16 +6,16 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from typing import Optional
 
-from app.core.response import ApiResponse
-from app.core.database import DBSession
-from app.core.auth import CurrentUserDep
-from app.core.dependencies import NovelOwner
-from app.core.exceptions import NotFoundException, UnauthorizedException, BadRequestException
-from app.core.redis_service import redis_service
-from app.core.text_utils import count_words
-from app.editor.service import get_edit_session_manager
-from app.editor.models import ChangeSource
-from app.novels.models import Novel
+from core.response import ApiResponse
+from core.database import DBSession
+from core.auth import CurrentUserDep
+from core.dependencies import NovelOwner
+from core.exceptions import NotFoundException, UnauthorizedException, BadRequestException
+from core.redis_service import redis_service
+from core.text_utils import count_words
+from editor.service import get_edit_session_manager
+from editor.models import ChangeSource
+from novels.models import Novel
 from .models import Chapter
 from .schemas import ChapterCreate, ChapterUpdate, NextChapterNumberResponse
 
@@ -164,7 +164,7 @@ async def create_chapter(
     
     await redis_service.clear_pattern(f"novel:{chapter.novel_id}:chapters:*")
     
-    from app.core.context_builder import context_cache
+    from core.context_builder import context_cache
     context_cache.invalidate_novel(chapter.novel_id)
     
     return ApiResponse.success(
@@ -301,7 +301,7 @@ async def update_chapter(
     await redis_service.delete(f"chapter:{chapter_id}:detail")
     await redis_service.clear_pattern(f"novel:{db_chapter.novel_id}:chapters:*")
     
-    from app.core.context_builder import context_cache
+    from core.context_builder import context_cache
     context_cache.invalidate_novel(db_chapter.novel_id)
     
     return ApiResponse.success(
@@ -350,7 +350,7 @@ async def delete_chapter(
     await redis_service.delete(f"chapter:{chapter_id}:detail")
     await redis_service.clear_pattern(f"novel:{novel_id}:chapters:*")
     
-    from app.core.context_builder import context_cache
+    from core.context_builder import context_cache
     context_cache.invalidate_novel(novel_id)
     
     return ApiResponse.success(

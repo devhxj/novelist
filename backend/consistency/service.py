@@ -12,12 +12,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
 
-from app.novels.models import Novel
-from app.chapters.models import Chapter
-from app.characters.models import Character
-from app.timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryStatus
-from app.consistency.schemas import ConsistencyIssue
-from app.core.llm_service import LLMService
+from novels.models import Novel
+from chapters.models import Chapter
+from characters.models import Character
+from timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryStatus
+from consistency.schemas import ConsistencyIssue
+from core.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
 

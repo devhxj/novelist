@@ -5,8 +5,8 @@
 from sqlalchemy import select, or_
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
-from app.novels.models import ReaderPerspective
-from app.core.permissions import verify_novel_ownership
+from novels.models import ReaderPerspective
+from core.permissions import verify_novel_ownership
 
 
 class GetReaderPerspectiveTool(BaseMCPTool):

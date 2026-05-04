@@ -4,16 +4,16 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.core.database import get_db, DBSession
-from app.core.response import ApiResponse
-from app.core.dependencies import NovelOwner
-from app.story_arcs.models import StoryArc, StoryArcType, StoryArcStatus
-from app.story_arcs.schemas import (
+from core.database import get_db, DBSession
+from core.response import ApiResponse
+from core.dependencies import NovelOwner
+from story_arcs.models import StoryArc, StoryArcType, StoryArcStatus
+from story_arcs.schemas import (
     StoryArcCreate,
     StoryArcUpdate,
     StoryArcResponse,
 )
-from app.story_arcs.service import StoryArcService
+from story_arcs.service import StoryArcService
 
 router = APIRouter(prefix="/story-arcs", tags=["story-arcs"])
 logger = logging.getLogger(__name__)

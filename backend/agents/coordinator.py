@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import uuid
 
 from .base import BaseAgent, AgentTask, AgentResult, AgentRole, TaskType, TaskStatus
-from app.core.database import AsyncSessionLocal
+from core.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 

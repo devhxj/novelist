@@ -6,10 +6,10 @@ from fastapi import Depends, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.core.database import get_db
-from app.core.exceptions import NotFoundException, UnauthorizedException
-from app.core.auth import CurrentUserDep
-from app.novels.models import Novel
+from core.database import get_db
+from core.exceptions import NotFoundException, UnauthorizedException
+from core.auth import CurrentUserDep
+from novels.models import Novel
 
 
 async def check_novel_ownership(
@@ -26,7 +26,7 @@ async def check_novel_ownership(
             return novel
     
     或使用 Annotated:
-        from app.core.dependencies import NovelOwner
+        from core.dependencies import NovelOwner
         
         @router.get("/novels/{novel_id}")
         async def get_novel(novel: NovelOwner):

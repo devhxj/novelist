@@ -9,9 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import datetime, timezone
 
-from app.characters.models import Character, CharacterRelation
-from app.core.exceptions import BadRequestException
-from app.characters.schemas import (
+from characters.models import Character, CharacterRelation
+from core.exceptions import BadRequestException
+from characters.schemas import (
     CharacterRelationCreate,
     CharacterRelationUpdate,
     CharacterRelationEvolve,
@@ -243,13 +243,13 @@ class CharacterService:
         notes: Optional[str] = None,
     ):
         try:
-            from app.timeline.models import (
+            from timeline.models import (
                 TimelineEntry,
                 TimelineEntryCategory,
                 TimelineEntryStatus,
             )
-            from app.timeline.schemas import TimelineEntryCreate
-            from app.timeline.service import TimelineService
+            from timeline.schemas import TimelineEntryCreate
+            from timeline.service import TimelineService
 
             source_name = f"角色#{old_rel.source_character_id}"
             target_name = f"角色#{old_rel.target_character_id}"

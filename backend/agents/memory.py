@@ -8,8 +8,8 @@ from sqlalchemy import select
 
 from .base import BaseAgent, AgentTask, AgentResult, AgentRole, TaskType, SubAgentSpec
 from .registry import register_agent
-from app.core.database import AsyncSessionLocal
-from app.chapters.models import Chapter
+from core.database import AsyncSessionLocal
+from chapters.models import Chapter
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class MemoryAgent(BaseAgent):
         chapter_number = task.parameters.get("chapter_number")
 
         async with AsyncSessionLocal() as db:
-            from app.core.vector_store import vector_store
+            from core.vector_store import vector_store
 
             query = select(Chapter).where(Chapter.novel_id == task.novel_id)
             if chapter_id:

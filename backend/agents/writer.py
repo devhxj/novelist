@@ -6,8 +6,8 @@ from typing import Dict, Any, Optional
 
 from .base import BaseAgent, AgentTask, AgentResult, AgentRole, TaskType, SubAgentSpec
 from .registry import register_agent
-from app.core.llm_service import llm_service
-from app.core.text_utils import count_words
+from core.llm_service import llm_service
+from core.text_utils import count_words
 
 logger = logging.getLogger(__name__)
 

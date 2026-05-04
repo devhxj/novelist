@@ -5,11 +5,11 @@ from fastapi import APIRouter, Query
 from sqlalchemy import select, func
 from typing import Optional
 
-from app.core.response import ApiResponse
-from app.core.database import DBSession
-from app.core.auth import CurrentUserDep
-from app.core.dependencies import NovelOwner
-from app.core.redis_service import redis_service, NovelCache
+from core.response import ApiResponse
+from core.database import DBSession
+from core.auth import CurrentUserDep
+from core.dependencies import NovelOwner
+from core.redis_service import redis_service, NovelCache
 from .models import Novel, NovelCreativeProfile
 from .schemas import NovelCreate, NovelUpdate, CreativeProfileUpdate, CreativeProfileResponse
 

@@ -10,12 +10,12 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 import enum
 
-from app.core.database import Base
+from core.database import Base
 
 if TYPE_CHECKING:
-    from app.novels.models import Novel
-    from app.chapters.models import Chapter
-    from app.story_arcs.models import StoryArc
+    from novels.models import Novel
+    from chapters.models import Chapter
+    from story_arcs.models import StoryArc
 
 
 class TimelineEntryCategory(str, enum.Enum):

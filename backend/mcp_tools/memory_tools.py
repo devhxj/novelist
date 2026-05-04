@@ -6,8 +6,8 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
-from app.core.permissions import verify_novel_ownership
-from app.core.context_builder import ContextBuilder
+from core.permissions import verify_novel_ownership
+from core.context_builder import ContextBuilder
 
 
 class SearchStoryMemoryTool(BaseMCPTool):

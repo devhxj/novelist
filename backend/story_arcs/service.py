@@ -7,8 +7,8 @@ from typing import Any, Optional
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.story_arcs.models import StoryArc, StoryArcType, StoryArcStatus
-from app.story_arcs.schemas import StoryArcCreate, StoryArcUpdate
+from story_arcs.models import StoryArc, StoryArcType, StoryArcStatus
+from story_arcs.schemas import StoryArcCreate, StoryArcUpdate
 
 logger = logging.getLogger(__name__)
 

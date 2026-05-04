@@ -8,10 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
-from app.chapters.models import Chapter
-from app.editor.service import get_edit_session_manager
-from app.core.permissions import verify_novel_ownership
-from app.core.diff_engine import diff_engine
+from chapters.models import Chapter
+from editor.service import get_edit_session_manager
+from core.permissions import verify_novel_ownership
+from core.diff_engine import diff_engine
 
 _subagent_running_var: ContextVar[bool] = ContextVar("_subagent_running_var", default=False)
 
@@ -59,9 +59,9 @@ async def _execute_subagent_task(
     if not novel:
         return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
 
-    from app.agents.registry import get_agent_for_task, get_all_specs
-    from app.agents.context_provider import build_subagent_context
-    from app.agents.base import AgentTask, TaskType, SubAgentReport
+    from agents.registry import get_agent_for_task, get_all_specs
+    from agents.context_provider import build_subagent_context
+    from agents.base import AgentTask, TaskType, SubAgentReport
 
     registry_entry = get_agent_for_task(normalized_type)
     if not registry_entry:
@@ -347,7 +347,7 @@ class EditChapterTool(BaseMCPTool):
         if not search_text:
             return MCPToolResult(success=False, error="search_replace 必须提供 search_text")
 
-        from app.core.diff_engine import DiffEngine
+        from core.diff_engine import DiffEngine
         working = edit_session.working_content or ""
 
         if dry_run:
@@ -388,7 +388,7 @@ class EditChapterTool(BaseMCPTool):
         if not edits:
             return MCPToolResult(success=False, error="multi_search_replace 必须提供 edits 数组")
 
-        from app.core.diff_engine import DiffEngine
+        from core.diff_engine import DiffEngine
         working = edit_session.working_content or ""
         snapshot_id = f"snap_{uuid.uuid4().hex[:8]}"
         snapshots = dict(edit_session.extra_metadata.get("snapshots", {})) if edit_session.extra_metadata else {}

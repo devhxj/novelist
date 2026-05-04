@@ -10,19 +10,19 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
-from app.novels.models import Novel, NovelCreativeProfile
-from app.chapters.models import Chapter
-from app.core.text_utils import count_words
-from app.characters.models import Character
-from app.generation.service import ChapterGenerationService
-from app.core.permissions import verify_novel_ownership
-from app.core.vector_store import vector_store, VectorStoreError
+from novels.models import Novel, NovelCreativeProfile
+from chapters.models import Chapter
+from core.text_utils import count_words
+from characters.models import Character
+from generation.service import ChapterGenerationService
+from core.permissions import verify_novel_ownership
+from core.vector_store import vector_store, VectorStoreError
 
 
 async def _invalidate_novel_cache(novel_id: int) -> None:
     try:
-        from app.core.redis_service import redis_service
-        from app.core.context_builder import context_cache
+        from core.redis_service import redis_service
+        from core.context_builder import context_cache
         await redis_service.clear_pattern(f"novel:{novel_id}:*")
         context_cache.invalidate_novel(novel_id)
     except Exception:
@@ -31,7 +31,7 @@ async def _invalidate_novel_cache(novel_id: int) -> None:
 
 async def _invalidate_character_cache(novel_id: int, character_id: int | None = None) -> None:
     try:
-        from app.core.redis_service import redis_service
+        from core.redis_service import redis_service
         if character_id:
             await redis_service.delete(f"character:{character_id}:detail")
         await redis_service.clear_pattern(f"novel:{novel_id}:characters:*")
@@ -42,7 +42,7 @@ async def _invalidate_character_cache(novel_id: int, character_id: int | None = 
 
 async def _invalidate_chapter_cache(novel_id: int, chapter_id: int | None = None) -> None:
     try:
-        from app.core.redis_service import redis_service
+        from core.redis_service import redis_service
         if chapter_id:
             await redis_service.delete(f"chapter:{chapter_id}:detail")
         await redis_service.clear_pattern(f"novel:{novel_id}:chapters:*")
@@ -395,7 +395,7 @@ class GetCreativeProfileTool(BaseMCPTool):
         )
         novel_profile = result.scalar_one_or_none()
 
-        from app.novels.models import UserCreativeProfile
+        from novels.models import UserCreativeProfile
         up_result = await db.execute(
             select(UserCreativeProfile).where(UserCreativeProfile.user_id == user_id)
         )
@@ -587,7 +587,7 @@ class UpdateCreativeProfileTool(BaseMCPTool):
         must_avoid_limited = self._enforce_limit(must_avoid)
 
         if global_writing_style and user_id:
-            from app.novels.models import UserCreativeProfile
+            from novels.models import UserCreativeProfile
             up_result = await db.execute(
                 select(UserCreativeProfile).where(UserCreativeProfile.user_id == user_id)
             )
@@ -641,9 +641,9 @@ class UpdateCreativeProfileTool(BaseMCPTool):
         await db.commit()
         await db.refresh(profile)
 
-        from app.core.redis_service import redis_service
+        from core.redis_service import redis_service
         await redis_service.clear_pattern(f"novel:{novel_id}:*")
-        from app.core.context_builder import context_cache
+        from core.context_builder import context_cache
         context_cache.invalidate_novel(novel_id)
 
         return MCPToolResult(
@@ -777,7 +777,7 @@ class GetCharactersTool(BaseMCPTool):
         relations_data = []
         if include_relations and characters:
             try:
-                from app.characters.models import CharacterRelation
+                from characters.models import CharacterRelation
                 rel_result = await db.execute(
                     select(CharacterRelation).where(
                         CharacterRelation.novel_id == novel_id,
@@ -802,7 +802,7 @@ class GetCharactersTool(BaseMCPTool):
         recent_events_summary = ""
         if include_recent_events and characters:
             try:
-                from app.timeline.models import TimelineEntry
+                from timeline.models import TimelineEntry
                 entry_result = await db.execute(
                     select(TimelineEntry)
                     .where(TimelineEntry.novel_id == novel_id)
@@ -879,7 +879,7 @@ class GetCharactersTool(BaseMCPTool):
         )
 
     async def _execute_network(self, db, novel_id, character_id, include_inactive):
-        from app.characters.service import CharacterService
+        from characters.service import CharacterService
         service = CharacterService(db, novel_id)
 
         if character_id:
@@ -943,7 +943,7 @@ class CreateCharacterTool(BaseMCPTool):
             if not novel:
                 return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
 
-            from app.characters.models import Character
+            from characters.models import Character
             character = Character(
                 novel_id=novel_id,
                 name=name,
@@ -1016,7 +1016,7 @@ class UpdateCharacterTool(BaseMCPTool):
             if not novel:
                 return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
             
-            from app.characters.models import Character
+            from characters.models import Character
             result = await db.execute(
                 select(Character).where(Character.id == character_id)
             )

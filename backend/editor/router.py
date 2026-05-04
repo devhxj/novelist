@@ -4,13 +4,13 @@
 from fastapi import APIRouter, Query, Body
 from typing import Optional
 
-from app.core.response import ApiResponse
-from app.core.database import DBSession
-from app.core.auth import CurrentUserDep
-from app.editor.service import EditSessionManager, get_edit_session_manager
-from app.editor.models import EditSession, EditChange
-from app.chapters.models import Chapter
-from app.novels.models import Novel
+from core.response import ApiResponse
+from core.database import DBSession
+from core.auth import CurrentUserDep
+from editor.service import EditSessionManager, get_edit_session_manager
+from editor.models import EditSession, EditChange
+from chapters.models import Chapter
+from novels.models import Novel
 from sqlalchemy import select
 
 router = APIRouter(prefix="/editor", tags=["editor"])

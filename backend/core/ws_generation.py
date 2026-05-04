@@ -9,11 +9,11 @@ from typing import Dict, Any
 from fastapi import WebSocket
 from sqlalchemy import select, func
 
-from app.core.websocket import ws_manager, GenerationProgress
-from app.core.database import AsyncSessionLocal
-from app.core.llm_service import llm_service
-from app.core.context_builder import ContextBuilder
-from app.core.prompt_templates import (
+from core.websocket import ws_manager, GenerationProgress
+from core.database import AsyncSessionLocal
+from core.llm_service import llm_service
+from core.context_builder import ContextBuilder
+from core.prompt_templates import (
     get_system_prompt,
     build_chapter_prompt,
     build_dialogue_prompt,
@@ -23,10 +23,10 @@ from app.core.prompt_templates import (
     build_character_profile_prompt,
     GenerationType
 )
-from app.chapters.models import Chapter
-from app.core.text_utils import count_words, compute_text_stats
-from app.generation.service import ChapterGenerationService
-from app.core.ws_utils import _friendly_error_message
+from chapters.models import Chapter
+from core.text_utils import count_words, compute_text_stats
+from generation.service import ChapterGenerationService
+from core.ws_utils import _friendly_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +223,7 @@ async def _generate_chapter_ws(
     await db.commit()
     await db.refresh(chapter)
 
-    from app.core.chapter_post_processor import ChapterPostProcessor
+    from core.chapter_post_processor import ChapterPostProcessor
     try:
         post_processor = ChapterPostProcessor(db, novel_id)
         process_result = await post_processor.process(
@@ -252,7 +252,7 @@ async def _generate_chapter_ws(
         await service._update_chapter_memory(chapter.id)
     except Exception as e:
         logger.warning(f"Failed to update chapter memory after WS fallback generation: {e}")
-        from app.core.memory_retry import schedule_memory_retry
+        from core.memory_retry import schedule_memory_retry
         await schedule_memory_retry(novel_id, chapter.id)
 
     final_stats = compute_text_stats(full_content).to_dict()

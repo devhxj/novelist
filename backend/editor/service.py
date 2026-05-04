@@ -9,14 +9,14 @@ from typing import Optional, Dict, Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.editor.models import EditSession, EditSessionStatus, EditChange, ChangeSource
-from app.core.diff_engine import diff_engine, DiffChangeType
-from app.chapters.models import Chapter
-from app.core.text_utils import count_words
-from app.core.vector_store import vector_store
-from app.core.chapter_summary import generate_chapter_summary
-from app.core.database import AsyncSessionLocal
-from app.core.exceptions import BadRequestException, ConflictException
+from editor.models import EditSession, EditSessionStatus, EditChange, ChangeSource
+from core.diff_engine import diff_engine, DiffChangeType
+from chapters.models import Chapter
+from core.text_utils import count_words
+from core.vector_store import vector_store
+from core.chapter_summary import generate_chapter_summary
+from core.database import AsyncSessionLocal
+from core.exceptions import BadRequestException, ConflictException
 
 logger = logging.getLogger(__name__)
 
@@ -353,7 +353,7 @@ class EditSessionManager:
             vector_store.add_chunks(chapter["novel_id"], chunk_data)
 
     async def _invalidate_cache(self, chapter: Dict[str, Any]) -> None:
-        from app.core.redis_service import redis_service
+        from core.redis_service import redis_service
         await redis_service.delete(f"chapter:{chapter['id']}:detail")
         await redis_service.clear_pattern(f"novel:{chapter['novel_id']}:chapters:*")
         await redis_service.delete(f"novel:{chapter['novel_id']}:detail")

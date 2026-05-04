@@ -14,15 +14,15 @@ from sqlalchemy import select
 
 from .base import BaseAgent, AgentTask, AgentResult, AgentRole, TaskType, SubAgentSpec
 from .registry import register_agent
-from app.core.database import AsyncSessionLocal
-from app.consistency.service import ConsistencyChecker
-from app.timeline.models import TimelineEntry, TimelineEntryStatus
-from app.timeline.schemas import (
+from core.database import AsyncSessionLocal
+from consistency.service import ConsistencyChecker
+from timeline.models import TimelineEntry, TimelineEntryStatus
+from timeline.schemas import (
     TimelineEntryCreate,
     TimelineEntryCategory as TimelineEntryCategorySchema,
     TimeHorizon as TimeHorizonSchema,
 )
-from app.chapters.models import Chapter
+from chapters.models import Chapter
 
 logger = logging.getLogger(__name__)
 
@@ -186,8 +186,8 @@ class ReviewerAgent(BaseAgent):
     async def _llm_review(self, content: str, context: dict, task: AgentTask) -> dict | None:
         """LLM 语义深审（有成本、秒级）"""
         try:
-            from app.core.llm_service import llm_service
-            from app.core.prompt_templates import REVIEW_SYSTEM_PROMPT, build_review_prompt
+            from core.llm_service import llm_service
+            from core.prompt_templates import REVIEW_SYSTEM_PROMPT, build_review_prompt
 
             chapter_number = task.parameters.get("chapter_number") or context.get("chapter_number")
             characters = context.get("characters", [])

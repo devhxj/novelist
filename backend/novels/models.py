@@ -8,14 +8,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 
-from app.core.database import Base
+from core.database import Base
 
 if TYPE_CHECKING:
-    from app.characters.models import Character
-    from app.chapters.models import Chapter
-    from app.story_arcs.models import StoryArc
-    from app.timeline.models import TimelineEntry
-    from app.locations.models import Location
+    from characters.models import Character
+    from chapters.models import Chapter
+    from story_arcs.models import StoryArc
+    from timeline.models import TimelineEntry
+    from locations.models import Location
 
 
 class Novel(Base):

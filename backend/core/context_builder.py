@@ -10,13 +10,13 @@ from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.core.vector_store import vector_store, VectorStoreError
-from app.core.session_manager import NovelContext
-from app.novels.models import Novel, NovelCreativeProfile, NovelStoryState, ReaderPerspective
-from app.locations.models import Location
-from app.chapters.models import Chapter
-from app.characters.models import Character
-from app.timeline.models import TimelineEntry
+from core.vector_store import vector_store, VectorStoreError
+from core.session_manager import NovelContext
+from novels.models import Novel, NovelCreativeProfile, NovelStoryState, ReaderPerspective
+from locations.models import Location
+from chapters.models import Chapter
+from characters.models import Character
+from timeline.models import TimelineEntry
 
 logger = logging.getLogger(__name__)
 
@@ -683,7 +683,7 @@ class ContextBuilder:
     
     async def _get_timeline_context(self, current_chapter: Optional[int] = None) -> Optional[str]:
         try:
-            from app.timeline.service import TimelineService
+            from timeline.service import TimelineService
             service = TimelineService(self.db, self.novel_id)
             target_chapter = current_chapter or 9999
             entries, summary_text = await service.get_context_for_generation(
@@ -699,7 +699,7 @@ class ContextBuilder:
     async def _get_relation_network_context(self) -> Optional[str]:
         """获取人物关系概要（原始版本，保持兼容性）"""
         try:
-            from app.characters.service import CharacterService
+            from characters.service import CharacterService
 
             char_svc = CharacterService(self.db, self.novel_id)
             network = await char_svc.get_network()
@@ -724,7 +724,7 @@ class ContextBuilder:
         按source_name和target_name排序以确保缓存键稳定
         """
         try:
-            from app.characters.service import CharacterService
+            from characters.service import CharacterService
 
             char_svc = CharacterService(self.db, self.novel_id)
             network = await char_svc.get_network()

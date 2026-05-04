@@ -6,13 +6,13 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from typing import Optional
 
-from app.core.response import ApiResponse
-from app.core.database import DBSession
-from app.core.auth import CurrentUserDep
-from app.core.dependencies import NovelOwner
-from app.core.exceptions import NotFoundException, UnauthorizedException, BadRequestException
-from app.core.redis_service import redis_service
-from app.novels.models import Novel
+from core.response import ApiResponse
+from core.database import DBSession
+from core.auth import CurrentUserDep
+from core.dependencies import NovelOwner
+from core.exceptions import NotFoundException, UnauthorizedException, BadRequestException
+from core.redis_service import redis_service
+from novels.models import Novel
 from .models import Character, CharacterRelation
 from .schemas import (
     CharacterCreate, CharacterUpdate,
@@ -101,7 +101,7 @@ async def create_character(
     
     await redis_service.clear_pattern(f"novel:{character.novel_id}:characters:*")
     
-    from app.core.context_builder import context_cache
+    from core.context_builder import context_cache
     context_cache.invalidate_novel(character.novel_id)
     
     return ApiResponse.success(

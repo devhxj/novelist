@@ -8,7 +8,7 @@ Registry 自动找到对应的 Agent 和规格。
 import logging
 from typing import Any
 
-from app.agents.base import BaseAgent, SubAgentSpec
+from agents.base import BaseAgent, SubAgentSpec
 
 logger = logging.getLogger(__name__)
 

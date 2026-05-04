@@ -9,13 +9,13 @@ from fastapi import APIRouter, BackgroundTasks
 from sqlalchemy import select, func
 from typing import Any
 
-from app.core.response import ApiResponse
-from app.core.database import DBSession, AsyncSessionLocal
-from app.core.dependencies import NovelOwner
-from app.core.llm_service import llm_service
-from app.core.context_builder import ContextBuilder
-from app.core.text_utils import count_words
-from app.core.prompt_templates import (
+from core.response import ApiResponse
+from core.database import DBSession, AsyncSessionLocal
+from core.dependencies import NovelOwner
+from core.llm_service import llm_service
+from core.context_builder import ContextBuilder
+from core.text_utils import count_words
+from core.prompt_templates import (
     get_system_prompt,
     build_chapter_prompt,
     build_dialogue_prompt,
@@ -27,9 +27,9 @@ from app.core.prompt_templates import (
     get_available_styles,
     GenerationType
 )
-from app.chapters.models import Chapter
-from app.novels.models import Novel
-from app.generation.service import ChapterGenerationService
+from chapters.models import Chapter
+from novels.models import Novel
+from generation.service import ChapterGenerationService
 
 router = APIRouter(prefix="/generation", tags=["generation"])
 logger = logging.getLogger(__name__)

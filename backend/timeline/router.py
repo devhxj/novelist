@@ -7,12 +7,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.core.database import get_db, DBSession
-from app.core.response import ApiResponse
-from app.core.auth import CurrentUserDep
-from app.core.dependencies import NovelOwner
-from app.timeline.models import TimelineEntry
-from app.timeline.schemas import (
+from core.database import get_db, DBSession
+from core.response import ApiResponse
+from core.auth import CurrentUserDep
+from core.dependencies import NovelOwner
+from timeline.models import TimelineEntry
+from timeline.schemas import (
     TimelineEntryCreate,
     TimelineEntryUpdate,
     TimelineEntryResolve,
@@ -21,8 +21,8 @@ from app.timeline.schemas import (
     TimelineContextRequest,
     TimelineContextResponse,
 )
-from app.timeline.service import TimelineService
-from app.novels.models import Novel
+from timeline.service import TimelineService
+from novels.models import Novel
 
 router = APIRouter(prefix="/timeline", tags=["timeline"])
 logger = logging.getLogger(__name__)

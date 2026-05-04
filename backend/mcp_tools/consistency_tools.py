@@ -29,12 +29,12 @@ from sqlalchemy import select, func, case
 from datetime import datetime, timezone
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
-from app.novels.models import Novel
-from app.chapters.models import Chapter
-from app.characters.models import Character
-from app.timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryStatus
-from app.consistency.service import ConsistencyChecker
-from app.core.permissions import verify_novel_ownership
+from novels.models import Novel
+from chapters.models import Chapter
+from characters.models import Character
+from timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryStatus
+from consistency.service import ConsistencyChecker
+from core.permissions import verify_novel_ownership
 
 
 class RunReviewTool(BaseMCPTool):

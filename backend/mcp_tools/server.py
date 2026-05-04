@@ -5,11 +5,11 @@ from typing import Any, Optional, List, Dict
 
 from mcp.server.fastmcp import FastMCP, Context
 
-from app.core.auth import decode_token
-from app.core.database import AsyncSessionLocal
-from app.core.edit_mode import EditMode, EditModeConfig
-from app.mcp.registry import get_mcp_registry
-from app.chapters.models import Chapter
+from core.auth import decode_token
+from core.database import AsyncSessionLocal
+from core.edit_mode import EditMode, EditModeConfig
+from mcp_tools.registry import get_mcp_registry
+from chapters.models import Chapter
 from sqlalchemy import select
 
 mcp = FastMCP("AI Novel Generator")
