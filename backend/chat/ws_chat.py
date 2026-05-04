@@ -930,6 +930,8 @@ async def _run_chat_with_tools(
                                         user_id=session.user_id,
                                         session_id=session.session_id,
                                         novel_id=novel_id,
+                                        websocket=websocket,
+                                        chat_session=session,
                                         **clean_args
                                     )
                                     tool_result_payload = tool_result.model_dump()
@@ -1123,6 +1125,9 @@ async def _run_chat_with_tools(
                         metadata=tool_meta
                     )
                     for item in tool_outputs:
+                        result = item.get("result") or {}
+                        if isinstance(result, dict) and result.get("__appended__"):
+                            continue  # 工具已自行追加所有消息
                         session_manager.add_message(
                             session,
                             MessageRole.TOOL,
