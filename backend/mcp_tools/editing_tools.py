@@ -11,7 +11,7 @@ from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from chapters.models import Chapter
 from editor.service import get_edit_session_manager
 from core.permissions import verify_novel_ownership
-from core.diff_engine import diff_engine
+from editor.diff_engine import diff_engine
 
 _subagent_running_var: ContextVar[bool] = ContextVar("_subagent_running_var", default=False)
 
@@ -347,7 +347,7 @@ class EditChapterTool(BaseMCPTool):
         if not search_text:
             return MCPToolResult(success=False, error="search_replace 必须提供 search_text")
 
-        from core.diff_engine import DiffEngine
+        from editor.diff_engine import DiffEngine
         working = edit_session.working_content or ""
 
         if dry_run:
@@ -388,7 +388,7 @@ class EditChapterTool(BaseMCPTool):
         if not edits:
             return MCPToolResult(success=False, error="multi_search_replace 必须提供 edits 数组")
 
-        from core.diff_engine import DiffEngine
+        from editor.diff_engine import DiffEngine
         working = edit_session.working_content or ""
         snapshot_id = f"snap_{uuid.uuid4().hex[:8]}"
         snapshots = dict(edit_session.extra_metadata.get("snapshots", {})) if edit_session.extra_metadata else {}

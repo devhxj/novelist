@@ -9,12 +9,12 @@ from typing import Optional, List
 from core.response import ApiResponse
 from core.database import DBSession
 from core.auth import CurrentUserDep
-from core.session_manager import (
+from chat.session_manager import (
     Session, MessageRole,
     NovelContext, ChapterContext,
     session_manager
 )
-from core.session_storage import session_storage
+from sessions.session_storage import session_storage
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 logger = logging.getLogger(__name__)

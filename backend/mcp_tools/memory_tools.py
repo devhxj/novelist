@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from core.permissions import verify_novel_ownership
-from core.context_builder import ContextBuilder
+from context.context_builder import ContextBuilder
 
 
 class SearchStoryMemoryTool(BaseMCPTool):

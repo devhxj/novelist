@@ -13,9 +13,9 @@ from core.response import ApiResponse
 from core.database import DBSession, AsyncSessionLocal
 from core.dependencies import NovelOwner
 from core.llm_service import llm_service
-from core.context_builder import ContextBuilder
-from core.text_utils import count_words
-from core.prompt_templates import (
+from context.context_builder import ContextBuilder
+from text.utils import count_words
+from context.prompt_templates import (
     get_system_prompt,
     build_chapter_prompt,
     build_dialogue_prompt,

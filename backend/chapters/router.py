@@ -12,7 +12,7 @@ from core.auth import CurrentUserDep
 from core.dependencies import NovelOwner
 from core.exceptions import NotFoundException, UnauthorizedException, BadRequestException
 from core.redis_service import redis_service
-from core.text_utils import count_words
+from text.utils import count_words
 from editor.service import get_edit_session_manager
 from editor.models import ChangeSource
 from novels.models import Novel
@@ -164,7 +164,7 @@ async def create_chapter(
     
     await redis_service.clear_pattern(f"novel:{chapter.novel_id}:chapters:*")
     
-    from core.context_builder import context_cache
+    from context.context_builder import context_cache
     context_cache.invalidate_novel(chapter.novel_id)
     
     return ApiResponse.success(
@@ -301,7 +301,7 @@ async def update_chapter(
     await redis_service.delete(f"chapter:{chapter_id}:detail")
     await redis_service.clear_pattern(f"novel:{db_chapter.novel_id}:chapters:*")
     
-    from core.context_builder import context_cache
+    from context.context_builder import context_cache
     context_cache.invalidate_novel(db_chapter.novel_id)
     
     return ApiResponse.success(
@@ -350,7 +350,7 @@ async def delete_chapter(
     await redis_service.delete(f"chapter:{chapter_id}:detail")
     await redis_service.clear_pattern(f"novel:{novel_id}:chapters:*")
     
-    from core.context_builder import context_cache
+    from context.context_builder import context_cache
     context_cache.invalidate_novel(novel_id)
     
     return ApiResponse.success(

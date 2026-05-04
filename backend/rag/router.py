@@ -10,7 +10,7 @@ from core.database import DBSession
 from core.auth import CurrentUserDep
 from core.dependencies import NovelOwner
 from core.exceptions import NotFoundException, UnauthorizedException
-from core.context_builder import ContextBuilder
+from context.context_builder import ContextBuilder
 from novels.models import Novel
 from .models import RAGContext
 from .schemas import (

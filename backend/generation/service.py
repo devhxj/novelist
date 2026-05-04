@@ -7,15 +7,15 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from core.context_builder import ContextBuilder
-from core.chapter_post_processor import ChapterPostProcessor
-from core.text_utils import count_words
+from context.context_builder import ContextBuilder
+from chapters.post_processor import ChapterPostProcessor
+from text.utils import count_words
 from agents.base import AgentTask, TaskType
 from agents.factory import create_default_coordinator
 from novels.models import Novel
 from chapters.models import Chapter
 from workflows.langgraph_workflow import ChapterWorkflow, LANGGRAPH_AVAILABLE
-from core.chapter_summary import generate_chapter_summary
+from chapters.summary import generate_chapter_summary
 
 logger = logging.getLogger(__name__)
 

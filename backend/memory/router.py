@@ -12,7 +12,7 @@ from core.database import DBSession
 from core.auth import CurrentUserDep
 from core.dependencies import NovelOwner
 from core.exceptions import NotFoundException
-from core.vector_store import vector_store, VectorStoreError
+from rag.vector_store import vector_store, VectorStoreError
 from novels.models import Novel
 from chapters.models import Chapter
 from .models import MemoryChunk

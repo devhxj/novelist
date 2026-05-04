@@ -7,7 +7,7 @@ from mcp.server.fastmcp import FastMCP, Context
 
 from core.auth import decode_token
 from core.database import AsyncSessionLocal
-from core.edit_mode import EditMode, EditModeConfig
+from chat.edit_mode import EditMode, EditModeConfig
 from mcp_tools.registry import get_mcp_registry
 from chapters.models import Chapter
 from sqlalchemy import select

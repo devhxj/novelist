@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from chapters.models import Chapter
 from core.llm_service import llm_service
-from core.context_builder import ContextBuilder
+from context.context_builder import ContextBuilder
 
 logger = logging.getLogger(__name__)
 

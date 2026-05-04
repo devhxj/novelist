@@ -66,7 +66,7 @@ class MemoryAgent(BaseAgent):
         chapter_number = task.parameters.get("chapter_number")
 
         async with AsyncSessionLocal() as db:
-            from core.vector_store import vector_store
+            from rag.vector_store import vector_store
 
             query = select(Chapter).where(Chapter.novel_id == task.novel_id)
             if chapter_id:

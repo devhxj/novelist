@@ -10,11 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from editor.models import EditSession, EditSessionStatus, EditChange, ChangeSource
-from core.diff_engine import diff_engine, DiffChangeType
+from editor.diff_engine import diff_engine, DiffChangeType
 from chapters.models import Chapter
-from core.text_utils import count_words
-from core.vector_store import vector_store
-from core.chapter_summary import generate_chapter_summary
+from text.utils import count_words
+from rag.vector_store import vector_store
+from chapters.summary import generate_chapter_summary
 from core.database import AsyncSessionLocal
 from core.exceptions import BadRequestException, ConflictException
 

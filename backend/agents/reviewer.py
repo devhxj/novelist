@@ -187,7 +187,7 @@ class ReviewerAgent(BaseAgent):
         """LLM 语义深审（有成本、秒级）"""
         try:
             from core.llm_service import llm_service
-            from core.prompt_templates import REVIEW_SYSTEM_PROMPT, build_review_prompt
+            from context.prompt_templates import REVIEW_SYSTEM_PROMPT, build_review_prompt
 
             chapter_number = task.parameters.get("chapter_number") or context.get("chapter_number")
             characters = context.get("characters", [])

@@ -95,7 +95,7 @@ async def _get_previous_summary(db: AsyncSession, novel_id: int, chapter_id: int
 @register_context_builder("layered_context")
 async def _get_layered_context(db: AsyncSession, novel_id: int, chapter_id: int | None) -> dict[str, Any]:
     try:
-        from core.context_builder import ContextBuilder
+        from context.context_builder import ContextBuilder
         builder = ContextBuilder(db, novel_id)
         chapter_number = 1
         if chapter_id:

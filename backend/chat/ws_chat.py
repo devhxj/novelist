@@ -14,23 +14,34 @@ from core.websocket import ws_manager
 from core.database import AsyncSessionLocal
 from core.auth import decode_token
 from core.llm_service import llm_service
-from core.session_manager import (
+from chat.session_manager import (
     Session, MessageRole,
     session_manager
 )
-from core.session_storage import session_storage
-from core.context_builder import (
+from sessions.session_storage import session_storage
+from context.context_builder import (
     ContextBuilder,
     _format_creative_profile_for_prompt,
     _build_novel_context_snapshot,
     _build_novel_context,
 )
-from core.edit_mode import EditMode, EditModeConfig
+from chat.edit_mode import EditMode, EditModeConfig
 from chapters.models import Chapter
 from novels.models import NovelCreativeProfile
 from novels.models import Novel
 from editor.service import get_edit_session_manager
 from mcp_tools.registry import get_mcp_registry
+
+from chat.ws_utils import (
+    _friendly_error_message,
+    _sanitize_tool_error,
+    _extract_partial_argument_string,
+    _sync_tool_display_name,
+    _build_tool_call_presentation,
+    _TOOL_SYNC_KINDS,
+)
+from chat.ws_generation import _run_generation_task
+
 
 router = APIRouter(tags=["websocket"])
 logger = logging.getLogger(__name__)
@@ -78,15 +89,6 @@ def _looks_like_authoring_intent(message: str) -> bool:
     return any(cue in text for cue in AUTHORING_INTENT_CUES)
 
 
-from core.ws_utils import (
-    _friendly_error_message,
-    _sanitize_tool_error,
-    _extract_partial_argument_string,
-    _sync_tool_display_name,
-    _build_tool_call_presentation,
-    _TOOL_SYNC_KINDS,
-)
-from core.ws_generation import _run_generation_task
 
 
 @router.websocket("/ws/chat")

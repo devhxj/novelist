@@ -33,14 +33,14 @@ except ImportError:
     END = None
     MemorySaver = None
 
-from core.context_builder import ContextBuilder
+from context.context_builder import ContextBuilder
 from consistency.service import ConsistencyChecker
-from core.vector_store import vector_store
-from core.text_utils import count_words
+from rag.vector_store import vector_store
+from text.utils import count_words
 from agents.base import AgentTask, AgentResult, TaskType
 from agents.writer import WriterAgent
 from agents.reviewer import ReviewerAgent
-from core.chapter_summary import generate_chapter_summary
+from chapters.summary import generate_chapter_summary
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +342,7 @@ class ChapterWorkflow:
         try:
             from core.database import AsyncSessionLocal
             from chapters.models import Chapter
-            from core.chapter_post_processor import ChapterPostProcessor
+            from chapters.post_processor import ChapterPostProcessor
             
             async with AsyncSessionLocal() as db:
                 result = await db.execute(

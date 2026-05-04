@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from core.vector_store import vector_store, VectorStoreError
-from core.session_manager import NovelContext
+from rag.vector_store import vector_store, VectorStoreError
+from chat.session_manager import NovelContext
 from novels.models import Novel, NovelCreativeProfile, NovelStoryState, ReaderPerspective
 from locations.models import Location
 from chapters.models import Chapter

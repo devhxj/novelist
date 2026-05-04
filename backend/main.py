@@ -30,7 +30,7 @@ from consistency.router import router as consistency_router
 from story_arcs.router import router as story_arcs_router
 from mcp_tools.router import router as mcp_router
 from mcp_tools.server import get_mcp_transport
-from core.ws_chat import router as ws_chat_router
+from chat.ws_chat import router as ws_chat_router
 from generation.router import router as generation_router
 from sessions.router import router as sessions_router
 from editor.router import router as editor_router
@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Redis connection failed, running without cache: {e}")
     
-    from core.memory_retry import start_retry_background_task, stop_retry_background_task
+    from memory.retry import start_retry_background_task, stop_retry_background_task
     start_retry_background_task()
     
     yield
@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
     stop_retry_background_task()
     
     try:
-        from core.vector_store import vector_store
+        from rag.vector_store import vector_store
         vector_store.close()
     except Exception as e:
         logger.warning(f"VectorStore shutdown cleanup failed: {e}")

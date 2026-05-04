@@ -13,13 +13,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from collections import defaultdict
 
-from core.prompt_templates import LLMModel
+from context.prompt_templates import LLMModel
 from core.exceptions import SystemError
-from core.session_manager import (
+from chat.session_manager import (
     Session, SessionManager, SessionConfig, MessageRole,
     session_manager
 )
-from core.session_storage import session_storage
+from sessions.session_storage import session_storage
 
 logger = logging.getLogger(__name__)
 

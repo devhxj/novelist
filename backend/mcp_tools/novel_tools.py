@@ -12,17 +12,17 @@ from sqlalchemy.exc import IntegrityError
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from novels.models import Novel, NovelCreativeProfile
 from chapters.models import Chapter
-from core.text_utils import count_words
+from text.utils import count_words
 from characters.models import Character
 from generation.service import ChapterGenerationService
 from core.permissions import verify_novel_ownership
-from core.vector_store import vector_store, VectorStoreError
+from rag.vector_store import vector_store, VectorStoreError
 
 
 async def _invalidate_novel_cache(novel_id: int) -> None:
     try:
         from core.redis_service import redis_service
-        from core.context_builder import context_cache
+        from context.context_builder import context_cache
         await redis_service.clear_pattern(f"novel:{novel_id}:*")
         context_cache.invalidate_novel(novel_id)
     except Exception:
@@ -643,7 +643,7 @@ class UpdateCreativeProfileTool(BaseMCPTool):
 
         from core.redis_service import redis_service
         await redis_service.clear_pattern(f"novel:{novel_id}:*")
-        from core.context_builder import context_cache
+        from context.context_builder import context_cache
         context_cache.invalidate_novel(novel_id)
 
         return MCPToolResult(

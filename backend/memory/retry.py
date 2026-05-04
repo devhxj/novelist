@@ -96,7 +96,7 @@ async def execute_pending_retries() -> int:
 
         try:
             from core.database import AsyncSessionLocal
-            from core.vector_store import vector_store
+            from rag.vector_store import vector_store
             from chapters.models import Chapter
             from sqlalchemy import select
 
