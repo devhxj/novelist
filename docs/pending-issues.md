@@ -23,3 +23,14 @@
 **当前处理**：依赖 LLM 自主判断，不做自动重试。
 **风险**：LLM 可能不调工具重新生成，而是直接文字讨论；多轮来回效率低。
 **优先级**：低（先跑通，实际使用中观察 LLM 行为再决定是否需要自动重试循环）
+
+## 3. ChapterGenerationService 待清理
+
+**问题**：`backend/generation/service.py` 中 `ChapterGenerationService.generate_chapter()` 走旧的 AgentTask 路径，已被 LangGraph 工作流替代。`generate_chapter()` 仅 `generation/router.py` HTTP 端点调用，主线 `ws_chat.py` 已不再使用。
+
+**当前状态**：`ws_generation.py` 仍使用 `ChapterGenerationService._generate_chapter_summary()` 辅助方法。其余逻辑可清理。
+
+**需要做的**：
+- [ ] 确认 `generation/router.py` 的 HTTP 生成端点是否需要保留
+- [ ] 如不需要，可将 `_generate_chapter_summary` 移出，删除 `ChapterGenerationService` 和 `generate_chapter()`
+**优先级**：低（不影响当前功能）
