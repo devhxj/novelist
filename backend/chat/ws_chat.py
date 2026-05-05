@@ -932,6 +932,7 @@ async def _run_chat_with_tools(
                                         novel_id=novel_id,
                                         websocket=websocket,
                                         chat_session=session,
+                                        tool_id=tool_id,
                                         **clean_args
                                     )
                                     tool_result_payload = tool_result.model_dump()

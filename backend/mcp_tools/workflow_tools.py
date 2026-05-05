@@ -62,11 +62,15 @@ class CreateChapterWorkflowTool(BaseMCPTool):
             _current_ws.set(websocket)
 
             # 1. 追加 tool_result（紧跟 tool_call，符合协议）
+            tool_call_id = kwargs.get("tool_id") or f"call_{chat_session.session_id}"
             session_manager.add_message(
                 chat_session,
                 MessageRole.TOOL,
                 "章节创作工作流已启动，请根据系统提示词和以下信息继续创作。",
-                metadata={"tool_name": "create_chapter_workflow"},
+                metadata={
+                    "tool_call_id": tool_call_id,
+                    "tool_name": "create_chapter_workflow",
+                },
             )
 
             state = create_initial_state(
