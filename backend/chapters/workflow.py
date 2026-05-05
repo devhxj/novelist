@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextvars import ContextVar
 from typing import TypedDict, Any
 from dataclasses import dataclass
 
@@ -15,6 +16,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import interrupt
 
 logger = logging.getLogger(__name__)
+
+# 用于将 websocket 和 session 从工具传递给图节点
+_current_ws: ContextVar = ContextVar("workflow_ws", default=None)
 
 
 class WorkflowState(TypedDict):
@@ -211,11 +215,29 @@ async def _write_chapter(state: WorkflowState) -> dict[str, Any]:
     )
 
     from core.llm_service import llm_service
-    content = await llm_service.generate_text(
-        prompt=user_prompt,
-        system_prompt=system_prompt,
-        model=state.get("model"),
-    )
+
+    ws = _current_ws.get()
+    content_parts: list[str] = []
+    if ws:
+        async for chunk in llm_service.generate_stream(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            model=state.get("model"),
+        ):
+            if chunk:
+                content_parts.append(chunk)
+                await ws.send_json({
+                    "type": "content_chunk",
+                    "content": chunk,
+                    "chapter_number": chapter_number,
+                })
+        content = "".join(content_parts)
+    else:
+        content = await llm_service.generate_text(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            model=state.get("model"),
+        )
 
     title = outline.get("title") or f"第{chapter_number}章"
     word_count = len(content)
@@ -273,6 +295,7 @@ async def _post_process(state: WorkflowState) -> dict[str, Any]:
     chapter_number = chapter["chapter_number"]
     content = chapter["content"]
 
+    # 1. 摘要 + review + 向量记忆 并行
     async def save_summary():
         from core.llm_service import llm_service
         return await llm_service.generate_text(
@@ -290,7 +313,36 @@ async def _post_process(state: WorkflowState) -> dict[str, Any]:
             model=state.get("model"),
         )
 
-    results = await asyncio.gather(save_summary(), do_review(), return_exceptions=True)
+    async def update_memory():
+        from core.database import AsyncSessionLocal
+        from sqlalchemy import select
+        from chapters.models import Chapter
+        from rag.vector_store import vector_store
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Chapter).where(
+                    Chapter.novel_id == state["novel_id"],
+                    Chapter.chapter_number == chapter_number,
+                )
+            )
+            ch = result.scalar_one_or_none()
+            if not ch or not ch.content:
+                return
+            chunk_data = vector_store.build_chapter_chunks(
+                chapter_id=ch.id,
+                chapter_number=ch.chapter_number,
+                chapter_title=ch.title,
+                content=ch.content,
+                summary=ch.summary,
+            )
+            if chunk_data:
+                vector_store.delete_chapter_chunks(state["novel_id"], ch.id)
+                vector_store.add_chunks(state["novel_id"], chunk_data)
+
+    results = await asyncio.gather(
+        save_summary(), do_review(), update_memory(), return_exceptions=True
+    )
     summary = results[0] if not isinstance(results[0], Exception) else None
 
     if summary and isinstance(summary, str):

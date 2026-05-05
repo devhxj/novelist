@@ -57,7 +57,9 @@ class CreateChapterWorkflowTool(BaseMCPTool):
             from langgraph.errors import GraphInterrupt
 
             from chat.session_manager import session_manager, MessageRole
-            from chapters.workflow import create_initial_state, chapter_graph
+            from chapters.workflow import create_initial_state, chapter_graph, _current_ws
+
+            _current_ws.set(websocket)
 
             # 1. 追加 tool_result（紧跟 tool_call，符合协议）
             session_manager.add_message(
@@ -116,7 +118,7 @@ class CreateChapterWorkflowTool(BaseMCPTool):
                         )
 
                     if approved:
-                        # 6. 恢复图：build_layer3 → write → post_process
+                        # 6. 恢复图：build_layer3 → write_chapter（流式）→ post_process
                         await chapter_graph.ainvoke(Command(resume=True), config)  # type: ignore[arg-type]
 
                         # 追加正文到 session
@@ -129,6 +131,23 @@ class CreateChapterWorkflowTool(BaseMCPTool):
                                     ch.get("content", ""),
                                     metadata={"workflow_event": "chapter_body", "chapter_number": ch.get("chapter_number")},
                                 )
+
+                        # 7. 追加 user 消息驱动 LLM 全面维护小说状态
+                        session_manager.add_message(
+                            chat_session, MessageRole.USER,
+                            "正文已写入完成。请根据本章内容，全面检查并维护小说状态：\n"
+                            "- 新出现的角色 → 创建角色；角色属性变化 → 更新角色\n"
+                            "- 角色关系变化 → 更新关系\n"
+                            "- 新出现的地点 → 创建或更新地点\n"
+                            "- 伏笔埋下/推进/回收 → 更新时间线\n"
+                            "- 更新故事状态文档\n"
+                            "- 更新读者认知（已知信息、悬念、误知）\n"
+                            "- 故事弧线推进或新增 → 更新或创建弧线\n"
+                            "- 如有创作偏好变化 → 更新 creative profile\n"
+                            "完成后向用户汇报本章成果。",
+                            metadata={"workflow_event": "state_maintenance_instruction"},
+                        )
+
                         return MCPToolResult(success=True, data={"__appended__": True, "status": "completed"})
                     else:
                         return MCPToolResult(success=True, data={"__appended__": True, "status": "outline_rejected"})
