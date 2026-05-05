@@ -898,7 +898,12 @@ async def _run_chat_with_tools(
                             continue
                         
                         if tools_enabled and tool_name:
-                            clean_args = {k: v for k, v in arguments.items() if k not in ('session_id', 'novel_id')}
+                            raw_args = {k: v for k, v in arguments.items() if k not in ('session_id', 'novel_id')}
+                            # 归一化：LLM 偶尔传字符串 "true"/"false"
+                            clean_args = {
+                                k: True if v == "true" else False if v == "false" else v
+                                for k, v in raw_args.items()
+                            }
                             
                             if session.current_chapter_id and 'chapter_id' not in arguments:
                                 clean_args['chapter_id'] = session.current_chapter_id
