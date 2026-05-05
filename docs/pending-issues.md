@@ -49,7 +49,17 @@
 - [ ] 或在 review/memory agent 中暴露可复用的独立函数
 **优先级**：中（当前能跑，但质量有提升空间）
 
-## 5. Memory Agent 未实现独立 LLM 能力
+## 5. system2 上下文注入与 LLM 自主查询冗余
+
+**问题**：system2 注入的故事状态、读者认知、角色索引等信息，LLM 在对话中仍会主动调用 MCP 工具重新查询。注入的小说级创作偏好也面临同样问题——system1 已包含，但 LLM 仍调用 `get_creative_profile`。
+
+**原因**：system1 明确指示 LLM"优先读取 get_creative_profile"，且 LLM 天然不信任快照的时效性。注入收益不明显。
+
+**当前评估**：可能不需要全面注入。让 LLM 自主决定查什么更灵活。system2 保留 LLM 自己查不到的内容（如故事状态这种叙事性 markdown），其他让工具自然覆盖。
+
+**优先级**：低（不影响功能，待架构方向确定后再优化）
+
+## 6. Memory Agent 未实现独立 LLM 能力
 
 **问题**：`agents/memory.py` 当前只是一个薄包装，直接调 `vector_store.delete_chapter_chunks` / `build_chapter_chunks` / `add_chunks`，没有任何 LLM 调用。
 
