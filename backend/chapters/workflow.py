@@ -28,6 +28,11 @@ _work_msgs: ContextVar[list[dict]] = ContextVar("workflow_work_msgs", default=[]
 # 图节点追加，工具最终取回
 _delta: ContextVar[list[dict]] = ContextVar("workflow_delta", default=[])
 
+# 审批机制：ws_chat 主循环收到审批消息后，通过 event 通知工具
+import asyncio as _asyncio
+_approval_event: _asyncio.Event | None = None
+_approval_result: dict = {}
+
 
 class WorkflowState(TypedDict):
     novel_id: int

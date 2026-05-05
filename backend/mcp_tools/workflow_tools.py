@@ -112,8 +112,15 @@ class CreateChapterWorkflowTool(BaseMCPTool):
                 "outlines": outlines,
             })
 
-            # 等待用户审批
-            approval_raw = await websocket.receive_json()
+            # 等待用户审批（通过主循环 Event 通知，不直接 recv）
+            import asyncio
+            import chapters.workflow as _wf
+            event = asyncio.Event()
+            _wf._approval_event = event
+            _wf._approval_result.clear()
+            await event.wait()
+            _wf._approval_event = None
+            approval_raw = dict(_wf._approval_result)
             approved = approval_raw.get("approved", False)
 
             if approved:

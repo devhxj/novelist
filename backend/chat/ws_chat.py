@@ -130,7 +130,14 @@ async def websocket_chat(
         while True:
             data = await websocket.receive_json()
             message_type = data.get("type")
-            
+
+            # 审批消息拦截：工作流等在 _approval_event 上，直接通知
+            from chapters.workflow import _approval_event as _evt, _approval_result as _res
+            if _evt is not None and not _evt.is_set():
+                _res.update(data)
+                _evt.set()
+                continue
+
             logger.debug(f"Received message type: {message_type}")
             try:
                 if message_type == "create_session":
