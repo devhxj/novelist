@@ -1,3 +1,4 @@
+import { message } from 'antd'
 import { useAuthStore } from '@/stores/authStore'
 
 export type EditMode = 'agent'
@@ -407,6 +408,15 @@ export class WsEditorService {
 
       this.ws.onclose = (e) => {
         this.isConnecting = false
+        if (e.code === 4001) {
+          this.shouldReconnect = false
+          message.error('登录已过期，请重新登录')
+          setTimeout(() => {
+            useAuthStore.getState().logout()
+            window.location.href = '/login'
+          }, 1500)
+          return
+        }
         if (this.shouldReconnect && e.code !== 1000 && this.reconnectAttempts < this.maxReconnect) {
           this.reconnectAttempts++
           const delay = Math.min(1000 * this.reconnectAttempts, 10000)

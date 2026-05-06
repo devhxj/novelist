@@ -1,3 +1,4 @@
+import { message } from 'antd'
 import { useAuthStore } from '@/stores/authStore'
 import type { SessionLevel, SessionStats } from './sessionService'
 
@@ -327,6 +328,15 @@ export class WebSocketGenerationService {
       this.ws.onclose = (event) => {
         console.log('WebSocket closed:', event.code, event.reason)
         this.isConnecting = false
+        if (event.code === 4001) {
+          this.shouldReconnect = false
+          message.error('登录已过期，请重新登录')
+          setTimeout(() => {
+            useAuthStore.getState().logout()
+            window.location.href = '/login'
+          }, 1500)
+          return
+        }
         if (this.shouldReconnect && event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
           this.reconnectAttempts++
           const delay = Math.min(this.reconnectDelay * this.reconnectAttempts, 10000)

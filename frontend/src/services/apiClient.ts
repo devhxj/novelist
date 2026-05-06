@@ -1,5 +1,6 @@
 import axios from 'axios'
 import type { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios'
+import { message } from 'antd'
 import type { ApiError } from '@/types/api'
 import { authApi } from './authService'
 import { useAuthStore } from '@/stores/authStore'
@@ -79,8 +80,11 @@ apiClient.interceptors.response.use(
         }
       } catch (refreshError) {
         processQueue(refreshError, null)
-        useAuthStore.getState().logout()
-        window.location.href = '/login'
+        message.error('登录已过期，请重新登录')
+        setTimeout(() => {
+          useAuthStore.getState().logout()
+          window.location.href = '/login'
+        }, 1500)
         return Promise.reject(refreshError)
       } finally {
         isRefreshing = false
