@@ -83,11 +83,9 @@ class CreateChapterWorkflowTool(BaseMCPTool):
 
             outline_texts: list[str] = [_format_outline(ol) for ol in outlines]
 
-            # === 大纲文本追加到 delta ===
+            # === delta 初始为空（指令和大纲均由 tool_call 参数注入 session，不重复） ===
             combined_text = "\n\n---\n\n".join(outline_texts)
-            delta: list[dict] = [
-                {"role": "assistant", "content": combined_text, "workflow_event": "outline"},
-            ]
+            delta: list[dict] = []
 
             # === 发送大纲给前端审批 ===
             await websocket.send_json({
@@ -109,7 +107,6 @@ class CreateChapterWorkflowTool(BaseMCPTool):
             approved = approval_raw.get("approved", False)
 
             if not approved:
-                # 审批未通过，返回拒绝信息，不启动图
                 feedback = approval_raw.get("feedback", "请重新生成")
                 delta.append({
                     "role": "user",
@@ -121,9 +118,13 @@ class CreateChapterWorkflowTool(BaseMCPTool):
             # === 审批通过，启动 LangGraph ===
             _current_ws.set(websocket)
 
-            # 拷贝 session 到 work_msgs
+            # 拷贝 session 到 work_msgs，注入大纲（指令在 _write_chapter 合并追加）
             session_msgs = session_manager.get_messages_for_api(chat_session, include_context=True)
             work: list[dict] = list(session_msgs)
+            work.append({
+                "role": "user",
+                "content": f"大纲：\n{combined_text}",
+            })
             _work_msgs.set(work)
             _delta.set(delta)
 

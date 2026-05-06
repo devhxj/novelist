@@ -56,9 +56,12 @@ async def complete_ending(text: str, model: str | None = None) -> str:
     )
     try:
         completion = ""
+        messages = [
+            {"role": "system", "content": "你是一个专业的小说编辑助手，擅长自然地补全被截断的文本。"},
+            {"role": "user", "content": prompt},
+        ]
         async for chunk in llm_service.generate_stream(
-            prompt=prompt,
-            system_prompt="你是一个专业的小说编辑助手，擅长自然地补全被截断的文本。",
+            messages=messages,
             model=model,
             max_tokens=200,
         ):

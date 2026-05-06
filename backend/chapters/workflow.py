@@ -158,22 +158,34 @@ async def _write_chapter(state: WorkflowState) -> dict[str, Any]:
     idx = state["current_chapter_idx"]
     chapter_number = state["chapter_numbers"][idx]
     outline = state["outlines"][idx] if idx < len(state["outlines"]) else {}
-    outline_text = state["outline_texts"][idx] if idx < len(state["outline_texts"]) else ""
 
     from core.llm_service import llm_service
 
-    user_prompt = (
+    # work_msgs 已包含 system1 + system2 + history + 大纲 + Layer3
+    # 合并用户指令和创作触发，追加到 work_msgs 和 delta
+    instruction = state.get("instruction", "")
+    merged_instruction = (
+        f"{instruction}\n\n"
         f"请根据以上大纲和上下文创作第{chapter_number}章正文。\n\n"
-        f"大纲：\n{outline_text}\n\n"
+        f"字数要求：约{outline.get('estimated_words', 3000)}字。"
+    ) if instruction else (
+        f"请根据以上大纲和上下文创作第{chapter_number}章正文。\n\n"
         f"字数要求：约{outline.get('estimated_words', 3000)}字。"
     )
+    merge_msg = {"role": "user", "content": merged_instruction, "workflow_event": "instruction"}
+
+    work = _work_msgs.get()
+    delta = _delta.get()
+    work.append(merge_msg)
+    delta.append(merge_msg)
+
+    llm_messages = list(work)
 
     # 流式输出到前端
     ws = _current_ws.get()
     content_parts: list[str] = []
     async for chunk in llm_service.generate_stream(
-        prompt=user_prompt,
-        system_prompt="你是一位专业的小说作家，严格遵循大纲，语言自然流畅。",
+        messages=llm_messages,
         model=state.get("model"),
     ):
         if chunk:
@@ -223,9 +235,7 @@ async def _write_chapter(state: WorkflowState) -> dict[str, Any]:
             db.add(chapter)
         await db.commit()
 
-    # 追加到 work_msgs（下一批节点可见）和 delta
-    work = _work_msgs.get()
-    delta = _delta.get()
+    # 正文追加到 work_msgs（下一批节点可见）和 delta
     msg = {"role": "assistant", "content": content, "workflow_event": "chapter_body", "chapter_number": chapter_number}
     work.append(msg)
     delta.append(msg)

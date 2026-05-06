@@ -538,8 +538,7 @@ class LLMService:
     
     async def generate_stream(
         self,
-        prompt: str,
-        system_prompt: str | None = None,
+        messages: list[dict[str, str]],
         model: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
@@ -547,7 +546,7 @@ class LLMService:
         thinking_enabled: bool | None = None,
     ) -> AsyncGenerator[str, None]:
         selected_model = model or self.config.default_model
-        
+
         # GLM API 路径不同
         if selected_model.startswith("glm"):
             api_base = self.config.glm_api_base
@@ -556,17 +555,12 @@ class LLMService:
             api_base = self.config.api_base
             api_key = self.config.api_key
         url = self._build_chat_url(api_base, selected_model)
-        
+
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-        
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        
+
         payload = {
             "model": selected_model,
             "messages": messages,
