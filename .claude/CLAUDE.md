@@ -10,7 +10,9 @@ AI-powered novel creation and collaborative editing platform. IDE-like chat inte
 
 ### Backend
 ```bash
-pip install -r requirements.txt                    # Install dependencies
+cd backend && python -m venv .venv && source .venv/bin/activate  # Create and activate venv
+pip install -r requirements.txt                                  # Install dependencies
+cd ..
 cp .env.example .env                                # Configure env vars
 python database/scripts/init_db.py                  # Initialize database
 uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000  # Dev server
@@ -25,7 +27,7 @@ npm run lint                   # ESLint check
 ```
 
 ### Testing
-No test suite exists. No pytest config, no test files, no test dependencies in requirements.txt.
+No test suite exists. No pytest config, no test files, no test dependencies in backend/requirements.txt.
 
 ## Architecture
 

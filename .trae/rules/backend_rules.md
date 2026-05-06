@@ -7,19 +7,19 @@ description: 编写后端代码时候必须遵守本规则
 ## 环境要求
 
 ### Python虚拟环境
-**必须**先激活虚拟环境再运行任何Python命令(位于项目根目录而非backend/)：
+**必须**先激活虚拟环境再运行任何Python命令：
 ```bash
 
-source venv/bin/activate  # Linux/Mac
+source backend/.venv/bin/activate  # Linux/Mac
 # 或
-venv\Scripts\activate  # Windows
+backend\.venv\Scripts\activate  # Windows
 ```
 
 ### 启动服务
 ```bash
 
-source venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+source backend/.venv/bin/activate
+uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ## 项目架构
@@ -50,9 +50,8 @@ backend/
 │   ├── characters/     # 角色管理模块
 │   ├── chapters/       # 章节管理模块
 │   ├── plot_events/    # 情节事件模块
-│   └── main.py         # 应用入口
-├── venv/               # 虚拟环境
-└── requirements.txt
+│   ├── main.py         # 应用入口
+│   └── requirements.txt
 ```
 
 ## API规范

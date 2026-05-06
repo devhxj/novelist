@@ -180,7 +180,8 @@ todo/
 │   ├── editor/                     # 协作编辑器模块
 │   ├── generation/                 # 文本生成端点
 │   ├── sessions/                   # 会话持久化
-│   └── auth/                       # JWT 认证
+│   ├── auth/                       # JWT 认证
+│   └── requirements.txt            # Python 依赖
 │
 ├── frontend/src/
 │   ├── pages/chat/ChatPage.tsx     # ★ 统一聊天界面 (1345行)
@@ -190,7 +191,6 @@ todo/
 │   └── types/                      # TypeScript 类型定义
 │
 ├── database/scripts/init_db.py     # 数据库初始化
-├── requirements.txt                # Python 依赖
 └── .env.example                    # 环境变量模板
 ```
 
@@ -212,7 +212,9 @@ git clone <repository-url>
 cd todo
 
 # 后端依赖
+cd backend && python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+cd ..
 
 # 前端依赖
 cd frontend && npm install
