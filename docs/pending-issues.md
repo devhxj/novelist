@@ -72,3 +72,30 @@
 - [ ] 接受主 agent 指令后自主探索向量库
 - [ ] 智能决定 chunk 策略、关联标记
 **优先级**：中（当前能跑，但记忆检索质量受限）
+
+## 7. 整个 Agents 模块架构实现错误
+
+**问题**：`run_subagent` MCP 工具和整个 `agents/` 模块的设计意图与实际实现完全不符。
+
+**本意设计**：
+- Subagent = 独立 LLM 会话，有自己的上下文窗口、独立的工具调用循环、自主推理能力
+- 主 Agent（主循环 LLM）通过 `run_subagent` 分发任务给子 Agent，子 Agent 自主查资料、调工具、思考、返回结构化报告
+- Memory Agent：独立 LLM，能搜索整本小说、跨章节检索、类似 Claude Code 的 Explore Agent
+- Review Agent：独立 LLM，能读章节原文、查角色信息、检查一致性、产出自省性审核
+
+**当前实现**：
+- `run_subagent` → `_execute_subagent_task` → 查注册表 → 实例化 Agent 类 → `agent.execute(task)`
+- 每个 Agent 的 `execute()` 只是硬编码函数调用：
+  - `WriterAgent._generate_chapter()` → 单次 `llm_service.generate_text()`
+  - `ReviewerAgent._review_chapter()` → 规则初筛 + 单次 `llm_service.generate_json()`
+  - `MemoryAgent._update_memory()` → 纯 DB CRUD，无 LLM 调用
+- `CoordinatorAgent`、`AgentTask`、`SubAgentSpec`、`SubAgentReport` 等抽象层过度工程化，本质只是函数分发路由
+- Subagent 无独立工具调用能力，无法自主探索
+
+**需要做的**：
+- [ ] 重新设计 `run_subagent`：启动独立 LLM 会话（独立 messages 上下文 + 工具循环），类似 ws_chat 的子实例
+- [ ] Review Agent：独立 LLM 读章节、调 MCP 工具查角色/时间线/故事弧线，产出结构化审核报告
+- [ ] Memory/Explore Agent：独立 LLM 搜索向量库、跨章节检索、分析上下文关联
+- [ ] 移除 CoordinatorAgent / AgentTask / SubAgentSpec 等过度抽象层
+- [ ] WriterAgent subagent 与章节工作流冗余，考虑移除或整合
+**优先级**：高（架构方向问题，越早重构代价越小）
