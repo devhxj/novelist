@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Card, Descriptions, Tag, Button, Space, message } from 'antd'
+import { Card, Descriptions, Tag, Button, Space, message, Collapse } from 'antd'
 import { useParams, useNavigate } from 'react-router-dom'
 import { chapterApi } from '@/services/chapterService'
 import { getErrorMessage } from '@/types/error'
 import type { ChapterDetail } from '@/types/chapter'
+import { Markdown } from '@/components/Markdown'
 import dayjs from 'dayjs'
 
 interface StatusConfig {
@@ -83,6 +84,21 @@ function ChapterDetailPage() {
         <Descriptions.Item label="摘要" span={2}>
           {chapter.summary || '-'}
         </Descriptions.Item>
+        {chapter.outline_text && (
+          <Descriptions.Item label="创作大纲" span={2}>
+            <Collapse
+              items={[{
+                key: 'outline',
+                label: `第${chapter.chapter_number}章大纲`,
+                children: (
+                  <div style={{ maxHeight: '400px', overflow: 'auto' }}>
+                    <Markdown>{chapter.outline_text}</Markdown>
+                  </div>
+                ),
+              }]}
+            />
+          </Descriptions.Item>
+        )}
         <Descriptions.Item label="内容" span={2}>
           <div style={{ whiteSpace: 'pre-wrap', maxHeight: '400px', overflow: 'auto' }}>
             {chapter.content || '-'}

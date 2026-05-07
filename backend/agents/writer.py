@@ -82,7 +82,7 @@ class WriterAgent(BaseAgent):
                 system_prompt=self.SYSTEM_PROMPT,
                 model=model,
                 temperature=0.8,
-                max_tokens=4096
+                max_tokens=50000
             )
 
             return self.create_result(
@@ -137,7 +137,7 @@ class WriterAgent(BaseAgent):
                 prompt=prompt,
                 system_prompt=self.SYSTEM_PROMPT,
                 temperature=0.7,
-                max_tokens=2048
+                max_tokens=50000
             )
             
             return self.create_result(

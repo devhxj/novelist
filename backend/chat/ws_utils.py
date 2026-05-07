@@ -153,6 +153,15 @@ _TOOL_SYNC_NAMES = {
     "update_character": "更新角色设定",
     "update_character_relationship": "更新人物关系",
     "run_subagent": "调度AI子任务",
+    "create_outline": "章节大纲审批",
+    "get_reader_perspective": "查看读者视角",
+    "add_reader_perspective_entry": "添加读者视角",
+    "update_reader_perspective_entry": "更新读者视角",
+    "get_story_arcs": "查看故事弧线",
+    "add_story_arc": "创建故事弧线",
+    "update_story_arc": "更新故事弧线",
+    "get_story_state": "查看故事状态",
+    "update_story_state": "更新故事状态",
 }
 
 
@@ -182,6 +191,15 @@ _TOOL_SYNC_KINDS = {
     "update_character": "edit",
     "update_character_relationship": "edit",
     "run_subagent": "plan",
+    "create_outline": "plan",
+    "get_reader_perspective": "view",
+    "add_reader_perspective_entry": "write",
+    "update_reader_perspective_entry": "edit",
+    "get_story_arcs": "view",
+    "add_story_arc": "create",
+    "update_story_arc": "edit",
+    "get_story_state": "view",
+    "update_story_state": "edit",
 }
 
 
@@ -252,17 +270,19 @@ async def _build_tool_call_presentation(
         "create_character": ("创建新角色", "create"),
         "update_character": ("更新角色设定", "edit"),
         "update_character_relationship": ("更新人物关系", "edit"),
+        "create_outline": ("章节大纲审批", "plan"),
         "run_subagent": ("调度AI子任务", "plan"),
     }
 
     if tool_name in _TOOL_BASE_NAMES:
         base_text, activity_kind = _TOOL_BASE_NAMES[tool_name]
+    elif tool_name in _TOOL_SYNC_NAMES:
+        base_text = _TOOL_SYNC_NAMES[tool_name]
+        activity_kind = _TOOL_SYNC_KINDS.get(tool_name, "general")
     elif tool_name == "run_subagent":
         task_type = arguments.get("task_type")
         if task_type == "review":
             base_text, activity_kind = "检查剧情一致性", "review"
-        elif task_type == "update_memory":
-            base_text, activity_kind = "更新故事记忆", "memory"
         elif task_type == "write_chapter":
             base_text, activity_kind = "调度写作子任务", "write"
 

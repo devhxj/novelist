@@ -30,7 +30,6 @@ def _normalize_subagent_task_type(task_type: str) -> str:
         "check_consistency": "review",
         "manage_foreshadowing": "review",
         "review": "review",
-        "memory": "update_memory",
     }
     return type_aliases.get(task_type, task_type)
 
@@ -91,7 +90,6 @@ async def _execute_subagent_task(
     registry_to_task_type = {
         "write_chapter": TaskType.GENERATE_CHAPTER,
         "review": TaskType.REVIEW_CHAPTER,
-        "update_memory": TaskType.UPDATE_MEMORY,
     }
 
     try:
@@ -295,17 +293,41 @@ class EditChapterTool(BaseMCPTool):
             )
 
             diff_data = await manager.get_diff(edit_session.edit_session_id)
+            data: dict[str, Any] = {
+                "edit_session_id": edit_session.edit_session_id,
+                "chapter_id": chapter_id,
+                "change_count": edit_session.change_count,
+                "working_content": edit_session.working_content,
+                "diff": diff_data.get("diff", {}),
+                "reused_existing": reused,
+                "message": f"已应用，共 {edit_session.change_count} 处改动。",
+            }
+
+            # 大幅写入时注入维护提醒
+            inject: list[dict[str, Any]] | None = None
+            if change_type == "full_replace" and len(new_content or "") > 500:
+                inject = [{
+                    "role": "user",
+                    "content": (
+                        "已写入大量内容，请：\n"
+                        "1. 调用 run_subagent（task_type=\"review\"）对本章进行审核\n"
+                        "2. 全面检查并维护小说状态：\n"
+                        "   - 新出现的角色 → 创建角色；角色属性变化 → 更新角色\n"
+                        "   - 角色关系变化 → 更新关系\n"
+                        "   - 伏笔埋下/推进/回收 → 更新时间线\n"
+                        "   - 更新故事状态文档\n"
+                        "   - 更新读者认知（已知信息、悬念、误知）\n"
+                        "   - 故事弧线推进或新增 → 更新或创建弧线\n"
+                        "   - 如有创作偏好变化 → 更新 creative profile\n"
+                        "3. 向用户汇报本章成果"
+                    ),
+                    "workflow_event": "maintenance_reminder",
+                }]
+
             return MCPToolResult(
                 success=True,
-                data={
-                    "edit_session_id": edit_session.edit_session_id,
-                    "chapter_id": chapter_id,
-                    "change_count": edit_session.change_count,
-                    "working_content": edit_session.working_content,
-                    "diff": diff_data.get("diff", {}),
-                    "reused_existing": reused,
-                    "message": f"已应用，共 {edit_session.change_count} 处改动。",
-                },
+                data=data,
+                inject=inject,
                 metadata={
                     "tool": self.name,
                     "change_count": edit_session.change_count,
@@ -448,8 +470,7 @@ class RunSubagentTool(BaseMCPTool):
     description = (
         "调度子Agent执行专业任务。可用任务类型：\n"
         "- write_chapter: 写作/续写章节内容\n"
-        "- review: 全量审核章节（规则初筛+LLM语义深审+一致性检查+伏笔管理）\n"
-        "- update_memory: 更新向量记忆索引\n\n"
+        "- review: 全量审核章节（规则初筛+LLM语义深审+一致性检查+伏笔管理）\n\n"
         "你只需指定任务类型和目标（如章节ID），后端会自动准备上下文。\n"
         "子Agent会返回结构化报告，包含摘要、关键发现和建议。"
     )
@@ -459,7 +480,7 @@ class RunSubagentTool(BaseMCPTool):
         "properties": {
             "task_type": {
                 "type": "string",
-                "description": "任务类型：write_chapter / review / update_memory"
+                "description": "任务类型：write_chapter / review"
             },
             "chapter_id": {
                 "type": "integer",

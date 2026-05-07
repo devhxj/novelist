@@ -160,8 +160,7 @@ async def _generate_chapter_ws(
     stats_interval = 0
 
     async for chunk in llm_service.generate_stream(
-        prompt=user_message,
-        system_prompt=system_prompt,
+        messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}],
         model=model
     ):
         if not task_flags.get(task_id):
@@ -296,8 +295,7 @@ async def _generate_streaming_ws(
     stats_interval = 0
 
     async for chunk in llm_service.generate_stream(
-        prompt=user_message,
-        system_prompt=system_prompt,
+        messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_message}],
         model=params.get("model")
     ):
         if not task_flags.get(task_id):

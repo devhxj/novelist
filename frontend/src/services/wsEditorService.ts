@@ -1,3 +1,4 @@
+import { message } from 'antd'
 import { useAuthStore } from '@/stores/authStore'
 
 export type EditMode = 'agent'
@@ -62,6 +63,11 @@ export interface CancelMsg {
   task_id: string
 }
 
+export interface OutlineApprovalMsg {
+  approved: boolean
+  feedback?: string
+}
+
 export type ClientMsg =
   | StartEditMsg
   | ApplyEditMsg
@@ -73,6 +79,7 @@ export type ClientMsg =
   | ChatMsg
   | ReadChapterMsg
   | CancelMsg
+  | OutlineApprovalMsg
 
 export interface EditStartedMsg {
   type: 'edit_started'
@@ -325,6 +332,14 @@ export interface EditPendingMsg {
   timestamp?: string
 }
 
+export interface OutlineGeneratedMsg {
+  type: 'outline_generated'
+  novel_id: number
+  chapter_numbers: number[]
+  content: string
+  outlines: Array<Record<string, unknown>>
+}
+
 export type ServerMsg =
   | EditStartedMsg
   | EditAppliedMsg
@@ -347,6 +362,7 @@ export type ServerMsg =
   | EditPreviewMsg
   | EditPendingMsg
   | EditStreamMsg
+  | OutlineGeneratedMsg
 
 export type MsgHandler = (msg: ServerMsg) => void
 
@@ -392,6 +408,15 @@ export class WsEditorService {
 
       this.ws.onclose = (e) => {
         this.isConnecting = false
+        if (e.code === 4001) {
+          this.shouldReconnect = false
+          message.error('登录已过期，请重新登录')
+          setTimeout(() => {
+            useAuthStore.getState().logout()
+            window.location.href = '/login'
+          }, 1500)
+          return
+        }
         if (this.shouldReconnect && e.code !== 1000 && this.reconnectAttempts < this.maxReconnect) {
           this.reconnectAttempts++
           const delay = Math.min(1000 * this.reconnectAttempts, 10000)
@@ -480,6 +505,10 @@ export class WsEditorService {
 
   cancelTask(taskId: string): boolean {
     return this.send({ type: 'cancel', task_id: taskId })
+  }
+
+  sendOutlineApproval(approved: boolean, feedback?: string): boolean {
+    return this.send({ type: 'outline_approval', approved, feedback })
   }
 
   isConnected(): boolean {

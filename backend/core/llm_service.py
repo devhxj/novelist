@@ -205,7 +205,7 @@ class LLMConfig:
     api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     api_base: str = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com")
     default_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
-    max_tokens: int = int(os.getenv("DEEPSEEK_MAX_TOKENS", "4096"))
+    max_tokens: int = int(os.getenv("DEEPSEEK_MAX_TOKENS", "100000"))
     temperature: float = float(os.getenv("DEEPSEEK_TEMPERATURE", "0.7"))
     timeout: int = int(os.getenv("DEEPSEEK_TIMEOUT", "120"))
     
@@ -538,8 +538,7 @@ class LLMService:
     
     async def generate_stream(
         self,
-        prompt: str,
-        system_prompt: str | None = None,
+        messages: list[dict[str, str]],
         model: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
@@ -547,7 +546,7 @@ class LLMService:
         thinking_enabled: bool | None = None,
     ) -> AsyncGenerator[str, None]:
         selected_model = model or self.config.default_model
-        
+
         # GLM API 路径不同
         if selected_model.startswith("glm"):
             api_base = self.config.glm_api_base
@@ -556,17 +555,12 @@ class LLMService:
             api_base = self.config.api_base
             api_key = self.config.api_key
         url = self._build_chat_url(api_base, selected_model)
-        
+
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-        
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        
+
         payload = {
             "model": selected_model,
             "messages": messages,
@@ -625,123 +619,13 @@ class LLMService:
         except Exception as e:
             logger.error(f"Stream generation error: {e}")
             raise LLMServiceError("生成服务暂时不可用，请稍后再试。", status_code=502, provider=_provider_name(selected_model)) from e
-    
-    async def chat_with_session(
-        self,
-        session: Session,
-        user_message: str,
-        model: str | None = None,
-        temperature: float | None = None,
-        stream: bool = False
-    ) -> AsyncGenerator[str, None] | str:
-        session_manager.add_message(session, MessageRole.USER, user_message)
-        
-        messages = session_manager.get_messages_for_api(session)
-        
-        if session_manager.compressor.should_compress(session):
-            summary = await self._generate_summary(session)
-            session_manager.compress_session(session, summary)
-            messages = session_manager.get_messages_for_api(session)
-        
-        if stream:
-            return self._stream_with_session(session, messages, model, temperature)
-        else:
-            result = await self.chat_completion(
-                messages=messages,
-                model=model,
-                temperature=temperature
-            )
-            
-            if result["success"]:
-                session_manager.add_message(
-                    session, MessageRole.ASSISTANT, result["content"],
-                    metadata={"usage": result.get("usage", {})}
-                )
-                await session_manager.save_session(session)
-                return result["content"]
-            else:
-                raise Exception(f"LLM generation failed: {result.get('error')}")
-    
-    async def _stream_with_session(
-        self,
-        session: Session,
-        messages: list[dict[str, str]],
-        model: str | None,
-        temperature: float | None
-    ) -> AsyncGenerator[str, None]:
-        selected_model = model or self.config.default_model
-        
-        # GLM API 路径不同
-        if selected_model.startswith("glm"):
-            api_base = self.config.glm_api_base
-            api_key = self.config.glm_api_key
-        else:
-            api_base = self.config.api_base
-            api_key = self.config.api_key
-        url = self._build_chat_url(api_base, selected_model)
-        
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": selected_model,
-            "messages": messages,
-            "temperature": temperature or self.config.temperature,
-            "max_tokens": self.config.max_tokens,
-            "stream": True
-        }
-        
-        full_content = ""
-        
-        try:
-            async with self.client.stream("POST", url, json=payload, headers=headers) as response:
-                if response.is_error:
-                    response_json = None
-                    response_text = await response.aread()
-                    try:
-                        response_json = json.loads(response_text.decode("utf-8"))
-                    except Exception:
-                        response_json = None
-                    raise self._build_llm_error(
-                        selected_model=selected_model,
-                        status_code=response.status_code,
-                        response_text=response_text.decode("utf-8", errors="ignore"),
-                        response_json=response_json
-                    )
-                
-                async for line in response.aiter_lines():
-                    if line.startswith("data: "):
-                        data = line[6:]
-                        if data == "[DONE]":
-                            break
-                        
-                        try:
-                            chunk = json.loads(data)
-                            if "choices" in chunk and len(chunk["choices"]) > 0:
-                                delta = chunk["choices"][0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    full_content += content
-                                    yield content
-                        except json.JSONDecodeError:
-                            continue
-            
-            session_manager.add_message(
-                session, MessageRole.ASSISTANT, full_content
-            )
-            await session_manager.save_session(session)
-            
-        except Exception as e:
-            logger.error(f"Stream with session error: {e}")
-            raise
-    
+
     async def chat_stream_with_tools(
         self,
         messages: list[dict[str, str]],
         model: str | None = None,
         tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
         temperature: float | None = None,
         max_tool_iterations: int = 5,
         system_prompt: str | None = None,
@@ -788,13 +672,13 @@ class LLMService:
             "model": selected_model,
             "messages": api_messages,
             "temperature": temperature or self.config.temperature,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": max_tokens or self.config.max_tokens,
             "stream": True
         }
-        
+
         if tools:
             payload["tools"] = tools
-        
+
         _apply_reasoning_params(
             payload,
             selected_model,

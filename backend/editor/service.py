@@ -13,11 +13,11 @@ from editor.models import EditSession, EditSessionStatus, EditChange, ChangeSour
 from editor.diff_engine import diff_engine, DiffChangeType
 from chapters.models import Chapter
 from text.utils import count_words
-from rag.vector_store import vector_store
+
 from chapters.summary import generate_chapter_summary
 from core.database import AsyncSessionLocal
 from core.exceptions import BadRequestException, ConflictException
-
+from rag.memory_updater import schedule_memory_update
 logger = logging.getLogger(__name__)
 
 
@@ -329,28 +329,13 @@ class EditSessionManager:
         except Exception as exc:
             logger.warning("Failed to generate chapter summary after accept edit: %s", exc)
         try:
-            await self._refresh_chapter_memory(chapter_snapshot)
+            schedule_memory_update(chapter_snapshot["novel_id"], chapter_snapshot["id"])
         except Exception as exc:
-            logger.warning("Failed to refresh chapter memory after accept edit: %s", exc)
+            logger.warning("Failed to schedule memory update after accept edit: %s", exc)
         try:
             await self._invalidate_cache(chapter_snapshot)
         except Exception as exc:
             logger.warning("Failed to invalidate cache after accept edit: %s", exc)
-
-    async def _refresh_chapter_memory(self, chapter: dict[str, Any]) -> None:
-        vector_store.delete_chapter_chunks(chapter["novel_id"], chapter["id"])
-        content = chapter["content"]
-        if not content.strip():
-            return
-        chunk_data = vector_store.build_chapter_chunks(
-            chapter_id=chapter["id"],
-            chapter_number=chapter["chapter_number"],
-            chapter_title=chapter.get("title"),
-            content=content,
-            summary=chapter.get("summary"),
-        )
-        if chunk_data:
-            vector_store.add_chunks(chapter["novel_id"], chunk_data)
 
     async def _invalidate_cache(self, chapter: dict[str, Any]) -> None:
         from core.redis_service import redis_service

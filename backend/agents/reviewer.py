@@ -208,7 +208,7 @@ class ReviewerAgent(BaseAgent):
                 prompt=prompt,
                 system_prompt=REVIEW_SYSTEM_PROMPT,
                 temperature=0.3,
-                max_tokens=1024,
+                max_tokens=50000,
             )
 
         except Exception as e:

@@ -16,6 +16,7 @@ class MCPToolResult(BaseModel):
     data: Any | None = None
     error: str | None = None
     metadata: dict[str, Any] | None = None
+    inject: list[dict[str, Any]] | None = None
 
 
 class MCPToolCategory(str, Enum):
@@ -132,6 +133,17 @@ class MCPToolRegistry:
 
     def _validate_params(self, tool: BaseMCPTool, params: dict[str, Any]) -> str | None:
         schema = tool.parameters_schema or {"type": "object"}
+        # 只保留 schema 中声明的字段，避免 chat_session 等内部对象
+        # 被 jsonschema 塞进报错消息，泄露整个会话上下文给 LLM
+        #
+        # 白名单基于 schema.properties.keys()，注意：
+        # - 使用 patternProperties / additionalProperties 的复杂 schema
+        #   不会有 properties 键，allowed 为空，走 else 分支不过滤（回退到原始行为）
+        # - 如果同时用了 properties + patternProperties，patternProperties 的
+        #   字段会被过滤掉，导致误杀。现有工具无此用法，若新增工具需注意
+        allowed = set(schema.get("properties", {}).keys())
+        if allowed:
+            params = {k: v for k, v in params.items() if k in allowed}
         try:
             validate(instance=params, schema=schema)
         except ValidationError as e:

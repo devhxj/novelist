@@ -1,7 +1,7 @@
 """
 章节管理模块 - 数据库模型
 """
-from sqlalchemy import String, Text, ForeignKey, UniqueConstraint, Index, func
+from sqlalchemy import JSON, String, Text, ForeignKey, UniqueConstraint, Index, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 
@@ -20,6 +20,8 @@ class Chapter(Base):
     summary: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(50), default='draft', index=True)
     word_count: Mapped[int] = mapped_column(default=0)
+    outline_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    writing_status: Mapped[str] = mapped_column(String(50), default='idle')
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now(), onupdate=func.now())
 
@@ -41,6 +43,8 @@ class Chapter(Base):
             "summary": self.summary,
             "status": self.status,
             "word_count": self.word_count,
+            "outline_json": self.outline_json,
+            "writing_status": self.writing_status,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }

@@ -57,14 +57,33 @@ AI 不调工具也能知道"故事现在是什么情况"。想深入了解某个
 
 ## 消息结构
 
+### 正常对话
+
 ```
 messages = [
-    system: "基础指令 + 创作偏好 + 写作规则"    ← Layer 0，永远不变
-    system: "小说上下文快照"                     ← Layer 1，对话开始注入，压缩时才更新
+    system: "基础指令 + 创作偏好 + 写作规则"    ← system1，永远不变
+    system: "小说上下文快照"                     ← system2，对话开始注入，压缩时才更新
     ... 历史对话（已冻结）                       ← 前缀缓存，不碰
     user: "当前用户输入 + RAG + 条件提醒"        ← 本轮动态
 ]
 ```
+
+### 章节创作工作流执行期间
+
+```
+system: [system1]                                ← 前缀，全部命中缓存
+system: [system2]                                ← 前缀
+... 历史消息 ...                                  ← 前缀
+assistant: tool_call(create_chapter_workflow)     ← LLM 决定创作
+tool: tool_result("工作流已启动...")               ← 工具内追加，紧跟 tool_call
+user: [Layer 2 详细上下文]                        ← RAG + 章节摘要 + 时间线 + 弧线
+assistant: [大纲格式化文本]                        ← 供 LLM 后续参考
+user: [Layer 3 精准上下文]                        ← 角色档案 + 章节原文 + 伏笔原文 + 地点
+assistant: [正文]                                 ← 流式输出 + 追加
+user: [状态维护指令]                               ← 驱动 LLM 维护全部状态
+```
+
+Layer 2 和 Layer 3 作为 user 角色消息追加到 session，而非 system 消息——支持 API 协议且不破坏前缀缓存。主循环 LLM 在下一轮工具循环中看到完整上下文。
 
 ## 缓存策略
 
@@ -110,42 +129,40 @@ system2 在整个工具循环中不变 → 作为前缀的一部分 → 每次 A
 Layer 1 是 ws_chat.py 和 LangGraph 共用的基础。LangGraph 在 Layer 1 之上叠加 Layer 2/3：
 
 ```
-LangGraph Chapter Workflow:
-  Node 1 (Context Prep):
-    → 读取已有的 system2 作为基础
-    → 补充 Layer 2 详细上下文
-    → 生成大纲
-
-  Node 2 (interrupt): 大纲审批
-
-  Node 3 (Precise Context):
-    → 基于审批通过的大纲
-    → 补充 Layer 3 精准上下文
-
-  Node 4 (Generate): 写正文
-
-  Node 5 (Post-process): 并行更新
-    ├── 更新 story_state → 下次对话的 system2 会反映
-    ├── 更新 reader_perspective → 下次对话的 system2 会反映
-    ├── 更新 timeline
-    ├── 生成摘要
-    ├── 向量记忆入库
-    └── Review
+create_chapter_workflow 工具内执行：
+  1. 追加 tool_result 到 session（紧跟 tool_call）
+  2. LangGraph build_layer2 → 查 DB 构建 Layer 2 → 追加为 session user 消息
+  3. LangGraph generate_outline → LLM 用 Layer 2 生成大纲 JSON → interrupt
+  4. 工具 ws.send 大纲给用户 → ws.receive 等审批
+  5. 工具追加审批结果 + 大纲格式化文本到 session
+  6. LangGraph build_layer3 → 基于审批过的大纲构建 Layer 3 → 追加为 session user 消息
+  7. LangGraph write_chapter → LLM 用大纲 + Layer 3 流式写正文 → ws.send 流式输出
+  8. LangGraph post_process → 摘要 + review + 向量记忆入库（后端做，不需要 LLM）
+  9. 工具追加正文 + 状态维护指令到 session
+ 10. 返回 __appended__ → 主循环 LLM 看到全部上下文
+ 11. LLM 回到工具循环 → 根据状态维护指令自主调用 MCP 工具维护所有状态
 ```
+
+状态维护不在 LangGraph 内完成，而是由主循环 LLM 根据 session 中追加的指令自主决定调哪些工具。这保持了 LLM 的自主性，同时通过明确的指令消息确保状态不会被遗漏。
 
 ## 实现要点
 
 ### ws_chat.py 改动
 
-1. 对话开始时，异步获取 story_state + reader_perspective + character_summary + world_summary
-2. 组装为第二个 system message（system2）
-3. system2 存入 session，对话期间不重新获取
-4. 仅在上下文压缩时重新生成 system2
+1. 对话开始时构建 system2（story_state + reader_perspective + character_summary + world_summary）
+2. system2 存入 session，对话期间不重新获取，压缩时才更新
+3. 工具执行时传入 websocket 和 chat_session
+4. 工具返回 `__appended__` 时跳过自动 tool_result 追加
 
 ### 工具层
 
-不需要改动。AI 调工具获得的结果自然存在于对话历史中。system2 的存在不影响工具的正常使用。
+`create_chapter_workflow` 工具：
+- 阻塞执行 LangGraph，内部通过 contextvar 传 websocket
+- 自行管理所有 session 消息追加（tool_result / Layer 2 / 大纲 / Layer 3 / 正文 / 状态维护指令）
+- 返回 `__appended__` 标记避免循环重复追加
 
 ### LangGraph 节点
 
-Node 1 和 Node 3 直接使用 MCP 工具获取 Layer 2/3 上下文，组装到 prompt 中。
+- `_build_layer2` / `_build_layer3`：纯 DB 查询构建上下文，不调 LLM
+- Layer 2/3 内容通过工具从 graph state 提取后追加为 session user 消息
+- 消息角色为 user（非 system），不破坏前缀缓存且符合 API 协议

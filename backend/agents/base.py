@@ -16,7 +16,6 @@ class AgentRole(str, Enum):
     COORDINATOR = "coordinator"
     WRITER = "writer"
     REVIEWER = "reviewer"
-    MEMORY = "memory"
 
 
 class TaskType(str, Enum):
@@ -25,7 +24,6 @@ class TaskType(str, Enum):
     WRITE_CHAPTER = "write_chapter"
     REVIEW_CHAPTER = "review_chapter"
     CHECK_CONSISTENCY = "check_consistency"
-    UPDATE_MEMORY = "update_memory"
     PLAN_PLOT = "plan_plot"
     MANAGE_FORESHADOWING = "manage_foreshadowing"
 

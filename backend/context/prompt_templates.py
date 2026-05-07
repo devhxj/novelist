@@ -402,3 +402,64 @@ def build_review_prompt(
             parts.append(f"- {pl.get('name', '')}: {pl.get('description', '')[:100]}")
     parts.append(f"\n【待审核的章节内容】\n{content}")
     return "\n".join(parts)
+
+
+# === 章节创作大纲 prompt ===
+
+CHAPTER_OUTLINE_SYSTEM_PROMPT = """你是一位资深的故事架构师。
+
+## 你的任务
+根据提供的上下文，为指定章节编写结构化大纲。输出始终为数组，一章就是数组中的一个元素。
+
+## 每章大纲结构
+- title: 章节标题
+- scenes: 3-6 个场景，每个含 name/description/purpose
+- key_events: 本章核心转折点
+- focus_characters: 重点角色及其本章作用
+- foreshadowing_ops: 伏笔操作（plant 埋下 / advance 推进 / resolve 回收）
+- tone: 本章氛围
+- chapter_hook: 章末钩子
+- estimated_words: 预估字数
+
+## 输出格式
+严格输出 JSON，不要包含任何其他内容：
+{"chapters": [{
+  "chapter_number": 15,
+  "title": "章节标题",
+  "scenes": [
+    {"name": "场景名", "description": "场景描述（50字内）", "purpose": "叙事目的"}
+  ],
+  "key_events": ["事件1", "事件2"],
+  "focus_characters": [
+    {"name": "角色名", "role_in_chapter": "本章作用"}
+  ],
+  "foreshadowing_ops": [
+    {"action": "plant", "content": "伏笔描述"}
+  ],
+  "tone": "紧张/温馨/悲伤/热血/悬疑/...",
+  "chapter_hook": "章末钩子描述",
+  "estimated_words": 3000
+}]}"""
+
+
+def build_chapter_outline_user_prompt(
+    chapter_numbers: list[int],
+    instruction: str,
+    layer2_context: str,
+    author_intent: str | None = None,
+) -> str:
+    """构建大纲生成的用户提示词，支持单章和多章"""
+    if len(chapter_numbers) == 1:
+        ch_desc = f"第{chapter_numbers[0]}章"
+    else:
+        ch_desc = f"第{chapter_numbers[0]}章至第{chapter_numbers[-1]}章（共{len(chapter_numbers)}章）"
+
+    parts = [
+        f"请为{ch_desc}编写结构化大纲。",
+        f"\n【创作指令】\n{instruction}",
+    ]
+    if author_intent:
+        parts.append(f"\n【作者意图】\n{author_intent}")
+    parts.append(f"\n【参考上下文】\n{layer2_context}")
+    parts.append(f"\n请输出{ch_desc}的结构化大纲 JSON 数组。")
+    return "\n".join(parts)

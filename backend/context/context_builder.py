@@ -17,6 +17,7 @@ from locations.models import Location
 from chapters.models import Chapter
 from characters.models import Character
 from timeline.models import TimelineEntry
+from story_arcs.models import StoryArc
 
 logger = logging.getLogger(__name__)
 
@@ -476,10 +477,7 @@ class ContextBuilder:
             filtered_results = []
             for result in results:
                 distance = result["distance"]
-                if distance >= 0:
-                    relevance_score = 1.0 / (1.0 + distance)
-                else:
-                    relevance_score = 1.0
+                relevance_score = max(0.0, 1.0 - distance)
                 
                 if relevance_score < min_relevance_score:
                     logger.debug(f"丢弃低质量结果 (score={relevance_score:.3f}<{min_relevance_score}): {result['content'][:50]}...")
@@ -892,3 +890,212 @@ async def _build_novel_context(db, novel_id: int) -> NovelContext:
         description=novel.description or "",
         genre=novel.genre or ""
     )
+
+
+async def build_layer2_context(
+    db,
+    novel_id: int,
+    instruction: str,
+) -> str:
+    """Layer 2 详细上下文 — 用于大纲编写
+
+    在 Layer 1 (system2) 基础上补充：
+    - RAG 检索结果（与创作指令相关的章节片段）
+    - 相关章节摘要（最近完成的章节）
+    - 时间线 pending 项（待回收伏笔、待推进节点）
+    - 故事弧线状态
+    """
+
+    sections: list[str] = []
+    sections.append("【Layer 2 详细上下文 — 用于编写大纲】")
+
+    # 1. RAG 检索
+    try:
+        rag_results = await vector_store.search(
+            novel_id=novel_id,
+            query=instruction,
+            top_k=5,
+        )
+        if rag_results:
+            rag_lines = ["## RAG 相关片段"]
+            for r in rag_results:
+                content = r.get("content", "")
+                if content and len(content) > 20:
+                    rag_lines.append(
+                        f"- [{r.get('metadata', {}).get('chunk_type', 'content')}] {content[:300]}"
+                    )
+            if len(rag_lines) > 1:
+                sections.append("\n".join(rag_lines))
+    except Exception as e:
+        logger.warning(f"Layer 2 RAG failed: {e}")
+
+    # 2. 相关章节摘要
+    chapter_result = await db.execute(
+        select(Chapter)
+        .where(Chapter.novel_id == novel_id, Chapter.summary.isnot(None))
+        .order_by(Chapter.chapter_number.desc())
+        .limit(5)
+    )
+    recent_chapters = chapter_result.scalars().all()
+    if recent_chapters:
+        ch_lines = ["## 最近章节摘要"]
+        for ch in reversed(recent_chapters):
+            ch_lines.append(f"- 第{ch.chapter_number}章《{ch.title or '无标题'}》：{ch.summary[:200]}")
+        sections.append("\n".join(ch_lines))
+
+    # 3. 时间线 pending 项
+    timeline_result = await db.execute(
+        select(TimelineEntry)
+        .where(
+            TimelineEntry.novel_id == novel_id,
+            TimelineEntry.status.in_(["pending"]),
+        )
+        .order_by(TimelineEntry.importance.desc(), TimelineEntry.created_at)
+        .limit(15)
+    )
+    pending_entries = timeline_result.scalars().all()
+    if pending_entries:
+        tl_lines = ["## 时间线待办"]
+        for entry in pending_entries:
+            tl_lines.append(
+                f"- [{entry.category}] {entry.title}"
+                f"{'：' + entry.description[:100] if entry.description else ''}"
+                f"（重要性：{entry.importance}）"
+            )
+        sections.append("\n".join(tl_lines))
+
+    # 4. 故事弧线状态
+    arc_result = await db.execute(
+        select(StoryArc)
+        .where(StoryArc.novel_id == novel_id, StoryArc.status == "active")
+        .order_by(StoryArc.arc_type, StoryArc.importance.desc())
+    )
+    arcs = arc_result.scalars().all()
+    if arcs:
+        arc_lines = ["## 故事弧线"]
+        for arc in arcs:
+            span = ""
+            if arc.start_chapter:
+                span = f"（第{arc.start_chapter}章"
+                if arc.end_chapter:
+                    span += f"→第{arc.end_chapter}章"
+                span += "）"
+            arc_lines.append(
+                f"- [{arc.arc_type}] {arc.name}{span}"
+                f"{'：' + arc.description[:120] if arc.description else ''}"
+            )
+        sections.append("\n".join(arc_lines))
+
+    return "\n\n".join(sections)
+
+
+async def build_layer3_context(
+    db,
+    novel_id: int,
+    outline: dict,
+) -> str:
+    """Layer 3 精准上下文 — 用于正文写作
+
+    基于审批通过的大纲，精确构建：
+    - 大纲中涉及的角色的完整档案
+    - 相关章节原文（需要呼应的具体段落）
+    - 伏笔原文（需要回收的伏笔，查看埋下时的具体措辞）
+    - 地点设定详情
+    """
+
+    sections: list[str] = []
+    sections.append("【Layer 3 精准上下文 — 用于正文写作】")
+
+    # 1. 角色完整档案（大纲中提及的角色）
+    focus_chars: list[str] = []
+    if isinstance(outline, dict):
+        for fc in outline.get("focus_characters") or []:
+            if isinstance(fc, dict) and fc.get("name"):
+                focus_chars.append(fc["name"])
+            elif isinstance(fc, str):
+                focus_chars.append(fc)
+
+    if focus_chars:
+        char_result = await db.execute(
+            select(Character)
+            .where(
+                Character.novel_id == novel_id,
+                Character.name.in_(focus_chars),
+            )
+        )
+    else:
+        # 无明确角色时获取全部
+        char_result = await db.execute(
+            select(Character).where(Character.novel_id == novel_id).limit(10)
+        )
+    characters = char_result.scalars().all()
+    if characters:
+        char_lines = ["## 角色档案"]
+        for char in characters:
+            char_lines.append(f"### {char.name}")
+            if char.personality and isinstance(char.personality, dict):
+                for key, val in char.personality.items():
+                    if isinstance(val, list):
+                        char_lines.append(f"- {key}：{'、'.join(str(v) for v in val)}")
+                    elif isinstance(val, str) and len(val) < 300:
+                        char_lines.append(f"- {key}：{val}")
+            if char.abilities and isinstance(char.abilities, dict):
+                for key, val in char.abilities.items():
+                    char_lines.append(f"- 能力/{key}：{val}")
+        sections.append("\n".join(char_lines))
+
+    # 2. 对应章节原文（最近几章的内容）
+    chapter_result = await db.execute(
+        select(Chapter)
+        .where(Chapter.novel_id == novel_id, Chapter.content.isnot(None))
+        .order_by(Chapter.chapter_number.desc())
+        .limit(3)
+    )
+    recent_chapters = chapter_result.scalars().all()
+    if recent_chapters:
+        ref_lines = ["## 最近章节原文（尾部）"]
+        for ch in recent_chapters:
+            if ch.content:
+                tail = ch.content[-500:] if len(ch.content) > 500 else ch.content
+                ref_lines.append(
+                    f"### 第{ch.chapter_number}章《{ch.title or '无标题'}》（尾部 {min(500, len(ch.content))} 字）\n{tail}"
+                )
+        if len(ref_lines) > 1:
+            sections.append("\n\n".join(ref_lines))
+
+    # 3. 伏笔原文（pending 伏笔 + 种下时的语境）
+    foreshadowing_entries = await db.execute(
+        select(TimelineEntry)
+        .where(
+            TimelineEntry.novel_id == novel_id,
+            TimelineEntry.status.in_(["pending"]),
+            TimelineEntry.category == "foreshadowing",
+        )
+        .limit(10)
+    )
+    f_entries = foreshadowing_entries.scalars().all()
+    if f_entries:
+        fs_lines = ["## 待回收伏笔"]
+        for entry in f_entries:
+            fs_lines.append(
+                f"- {entry.title}"
+                f"{'：' + entry.description[:200] if entry.description else ''}"
+                f"（第{entry.source_chapter_id}章种下）"
+            )
+        sections.append("\n".join(fs_lines))
+
+    # 4. 地点设定详情
+    loc_result = await db.execute(
+        select(Location)
+        .where(Location.novel_id == novel_id)
+        .limit(15)
+    )
+    locations = loc_result.scalars().all()
+    if locations:
+        loc_lines = ["## 地点设定"]
+        for loc in locations:
+            desc = (loc.description or "")[:200]
+            loc_lines.append(f"- {loc.name}（{loc.location_type}）{'：' + desc if desc else ''}")
+        sections.append("\n".join(loc_lines))
+
+    return "\n\n".join(sections)

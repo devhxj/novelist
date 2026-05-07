@@ -14,7 +14,6 @@ from agents.base import AgentTask, TaskType
 from agents.factory import create_default_coordinator
 from novels.models import Novel
 from chapters.models import Chapter
-from workflows.langgraph_workflow import ChapterWorkflow, LANGGRAPH_AVAILABLE
 from chapters.summary import generate_chapter_summary
 
 logger = logging.getLogger(__name__)
@@ -44,7 +43,6 @@ class ChapterGenerationService:
         additional_context: dict[str, Any] | None = None,
         agent_role: str | None = None,
         model: str | None = None,
-        use_workflow: bool | None = None,
         context_size: int = 3000
     ) -> dict[str, Any]:
         """
@@ -67,41 +65,8 @@ class ChapterGenerationService:
                 additional_context,
                 context_size=context_size
             )
-            should_use_workflow = LANGGRAPH_AVAILABLE if use_workflow is None else use_workflow
             extra_parameters = self._build_generation_parameters(additional_context)
 
-            if should_use_workflow and LANGGRAPH_AVAILABLE:
-                workflow = ChapterWorkflow()
-                workflow_result = await workflow.run(
-                    task_id=f"gen_{self.novel_id}_{chapter_number}_{datetime.now(timezone.utc).timestamp()}",
-                    novel_id=self.novel_id,
-                    chapter_number=chapter_number,
-                    target_length=target_length,
-                    style=style,
-                    context=context,
-                    model=model,
-                    agent_role=agent_role,
-                    context_size=context_size,
-                    extra_parameters=extra_parameters
-                )
-                if workflow_result.get("success"):
-                    chapter = await self._get_chapter(chapter_number)
-                    generated_content = chapter.content if chapter else workflow_result.get("generated_content", "")
-                    return {
-                        "success": True,
-                        "chapter_id": chapter.id if chapter else None,
-                        "chapter_number": chapter_number,
-                        "content": generated_content,
-                        "word_count": count_words(generated_content or ""),
-                        "review_result": workflow_result.get("review_result"),
-                        "consistency_result": workflow_result.get("consistency_result"),
-                        "iterations": workflow_result.get("iterations", 0)
-                    }
-                return {
-                    "success": False,
-                    "error": workflow_result.get("error") or "工作流执行失败"
-                }
-            
             task = AgentTask(
                 task_id=f"gen_{self.novel_id}_{chapter_number}_{datetime.now(timezone.utc).timestamp()}",
                 task_type=TaskType.GENERATE_CHAPTER,
@@ -261,18 +226,9 @@ class ChapterGenerationService:
 
         return chapter
     
-    async def _update_chapter_memory(self, chapter_id: int) -> dict[str, Any]:
-        task = AgentTask(
-            task_id=f"memory_{self.novel_id}_{chapter_id}_{datetime.now(timezone.utc).timestamp()}",
-            task_type=TaskType.UPDATE_MEMORY,
-            novel_id=self.novel_id,
-            chapter_id=chapter_id,
-            parameters={"chapter_id": chapter_id}
-        )
-        result = await self.coordinator.execute(task)
-        if not result.success:
-            logger.warning(f"Memory update failed for chapter {chapter_id}: {result.error}")
-        return result.to_dict()
+    async def _update_chapter_memory(self, chapter_id: int) -> None:
+        from rag.memory_updater import schedule_memory_update
+        schedule_memory_update(self.novel_id, chapter_id)
 
     async def _get_chapter(self, chapter_number: int) -> Chapter | None:
         result = await self.db.execute(

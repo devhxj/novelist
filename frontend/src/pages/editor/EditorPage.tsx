@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import Editor, { type OnMount } from '@monaco-editor/react'
-import { Select, Tooltip, message, Modal, Input } from 'antd'
+import { Select, Segmented, Tooltip, message, Modal, Input } from 'antd'
 import {
   ArrowLeftOutlined,
   CheckOutlined,
@@ -33,6 +33,7 @@ import type {
   EditPreviewMsg,
   EditPendingMsg,
   ReasoningEffort,
+  OutlineGeneratedMsg,
 } from '@/services/wsEditorService'
 import { Markdown } from '@/components/Markdown'
 import styles from './EditorPage.module.css'
@@ -89,7 +90,16 @@ interface TurnSegmentTool {
   call: ToolCallInfo
 }
 
-type TurnSegment = TurnSegmentText | TurnSegmentTool
+interface TurnSegmentOutline {
+  id: string
+  type: 'outline'
+  content: string
+  outlines: Array<Record<string, unknown>>
+  approvalState: 'pending' | 'approved' | 'rejected'
+  feedbackDraft?: string
+}
+
+type TurnSegment = TurnSegmentText | TurnSegmentTool | TurnSegmentOutline
 
 interface ConversationTurn {
   id: string
@@ -109,18 +119,6 @@ const REASONING_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
   { value: 'max', label: '最大' },
 ]
 
-function getToolDisplayName(toolName: string, chapterNumber?: number, chapterTitle?: string): string {
-  if ((toolName === 'read_chapter' || toolName === 'get_chapter_content') && chapterNumber != null) {
-    return `查看第${chapterNumber}章${chapterTitle ? ` ${chapterTitle}` : ''}`
-  }
-  if (toolName === 'edit_chapter' && chapterNumber != null) {
-    return `编辑第${chapterNumber}章${chapterTitle ? ` ${chapterTitle}` : ''}`
-  }
-  if (toolName === 'create_new_chapter' && chapterNumber != null) {
-    return `创建第${chapterNumber}章${chapterTitle ? ` ${chapterTitle}` : ''}`
-  }
-  return '处理创作任务'
-}
 
 function getActivityVisual(kind?: string): { icon: React.ReactNode; label: string; badge: string } {
   switch (kind) {
@@ -207,6 +205,8 @@ export default function EditorPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [isApplyingEdit, setIsApplyingEdit] = useState(false)
   const [editNotice, setEditNotice] = useState<string>('')
+  const [editorViewMode, setEditorViewMode] = useState<'content' | 'outline'>('content')
+  const [outlineContent, setOutlineContent] = useState<string | null>(null)
 
   const [leftTab, setLeftTab] = useState<'chapters' | 'sessions'>('chapters')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -229,7 +229,6 @@ export default function EditorPage() {
   const turnIdCounter = useRef(0)
   const segIdCounter = useRef(0)
   const isUserScrolledUp = useRef(false)
-  const scrollRafId = useRef<number | null>(null)
   const originalContentRef = useRef(originalContent)
   const dispatchMessageRef = useRef<((msg: string) => void) | null>(null)
   const updateTurn = useCallback((turnId: string, updater: (turn: ConversationTurn) => ConversationTurn) => {
@@ -308,24 +307,34 @@ export default function EditorPage() {
     const el = chatContainerRef.current
     if (!el) return
     const handleScroll = () => {
-      const threshold = 80
-      isUserScrolledUp.current = el.scrollTop + el.clientHeight < el.scrollHeight - threshold
+      isUserScrolledUp.current = el.scrollTop + el.clientHeight < el.scrollHeight - 5
     }
     el.addEventListener('scroll', handleScroll, { passive: true })
     return () => el.removeEventListener('scroll', handleScroll)
   }, [])
 
   useEffect(() => {
+    const hasPending = turns.some(t =>
+      t.segments.some(s => s.type === 'outline' && s.approvalState === 'pending')
+    )
+    if (hasPending) return
     if (isUserScrolledUp.current) return
     const el = chatContainerRef.current
     if (!el) return
-    if (scrollRafId.current) cancelAnimationFrame(scrollRafId.current)
-    scrollRafId.current = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight
-    })
+    el.scrollTop = el.scrollHeight
   }, [turns])
 
   useEffect(() => { originalContentRef.current = originalContent }, [originalContent])
+
+  useEffect(() => {
+    const hasPending = turns.some(t =>
+      t.segments.some(s => s.type === 'outline' && s.approvalState === 'pending')
+    )
+    if (!hasPending) return
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault() }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [turns])
 
   const refreshChapterList = useCallback(async () => {
     if (!novelId) return
@@ -428,7 +437,7 @@ export default function EditorPage() {
                     type: 'tool',
                     call: {
                       tool_name: tc.function?.name || tc.name || 'unknown',
-                      display_text: tc.display_text || getToolDisplayName(tc.function?.name || tc.name || 'unknown'),
+                      display_text: tc.display_text || '处理中...',
                       activity_kind: tc.activity_kind,
                       status: 'completed',
                       task_id: msgTaskId,
@@ -595,7 +604,7 @@ export default function EditorPage() {
               status: m.status,
               tool_id: m.tool_id,
               phase: m.phase,
-              display_text: m.display_text || getToolDisplayName(m.tool_name, m.chapter_number, m.chapter_title),
+              display_text: m.display_text || '处理中...',
               activity_kind: m.activity_kind,
               chapter_id: m.chapter_id,
               chapter_number: m.chapter_number,
@@ -635,6 +644,23 @@ export default function EditorPage() {
           if (selectedChapterId) {
             void refreshSelectedChapter(selectedChapterId)
           }
+        }
+        break
+      }
+
+      case 'outline_generated': {
+        const om = msg as OutlineGeneratedMsg
+        if (currentTurnIdRef.current) {
+          updateTurn(currentTurnIdRef.current, turn => ({
+            ...turn,
+            segments: [...turn.segments, {
+              id: nextSegId(),
+              type: 'outline' as const,
+              content: om.content,
+              outlines: om.outlines,
+              approvalState: 'pending' as const,
+            }],
+          }))
         }
         break
       }
@@ -797,6 +823,8 @@ export default function EditorPage() {
     setShowDiff(false)
     setDiffData(null)
     setEditNotice('')
+    setEditorViewMode('content')
+    setOutlineContent(null)
 
     try {
       const res = await editorApi.getChapterForEditor(chapterId)
@@ -831,6 +859,12 @@ export default function EditorPage() {
         setHasActiveEdit(false)
       }
     }
+
+    chapterApi.getChapter(chapterId).then(res => {
+      if (res.success) {
+        setOutlineContent(res.data.outline_text || null)
+      }
+    }).catch(() => {})
   }
 
   async function revealChapterFromTool(chapterId?: number | null) {
@@ -925,6 +959,31 @@ export default function EditorPage() {
     if (editSessionId || latestPendingEditSessionId || selectedChapterId) {
       wsEditorService.rejectEdit(latestPendingEditSessionId || editSessionId, selectedChapterId)
     }
+  }
+
+  const handleApproveOutline = (turnId: string, segId: string) => {
+    wsEditorService.sendOutlineApproval(true)
+    updateTurn(turnId, turn => ({
+      ...turn,
+      segments: turn.segments.map(seg =>
+        seg.type === 'outline' && seg.id === segId
+          ? { ...seg, approvalState: 'approved' as const }
+          : seg
+      ),
+    }))
+  }
+
+  const handleRejectOutline = (turnId: string, segId: string, feedback: string) => {
+    if (!feedback.trim()) return
+    wsEditorService.sendOutlineApproval(false, feedback.trim())
+    updateTurn(turnId, turn => ({
+      ...turn,
+      segments: turn.segments.map(seg =>
+        seg.type === 'outline' && seg.id === segId
+          ? { ...seg, approvalState: 'rejected' as const }
+          : seg
+      ),
+    }))
   }
 
   const handleStop = () => {
@@ -1130,6 +1189,16 @@ export default function EditorPage() {
                     </span>
                   </div>
                 </div>
+                <Segmented
+                  size="small"
+                  value={editorViewMode}
+                  onChange={v => setEditorViewMode(v as 'content' | 'outline')}
+                  options={[
+                    { value: 'content', label: '正文' },
+                    { value: 'outline', label: '大纲' },
+                  ]}
+                  className={styles.editorViewSegmented}
+                />
                 {isSaving && (
                   <span style={{ fontSize: 11, color: '#faad14' }}>
                     <SaveOutlined style={{ marginRight: 2 }} /> 保存中...
@@ -1180,7 +1249,19 @@ export default function EditorPage() {
                 </div>
               )}
               <div className={styles.editorContainer}>
-                {selectedChapter && showDiff && hasPendingReview ? (
+                {editorViewMode === 'outline' ? (
+                  outlineContent ? (
+                    <div className={styles.outlinePreview}>
+                      <Markdown>{outlineContent}</Markdown>
+                    </div>
+                  ) : (
+                    <div className={styles.emptyChat}>
+                      <FileTextOutlined className={styles.emptyChatIcon} />
+                      <div>该章节暂无大纲</div>
+                      <div style={{ fontSize: 12, color: '#999' }}>大纲会在章节创作工作流中自动生成</div>
+                    </div>
+                  )
+                ) : selectedChapter && showDiff && hasPendingReview ? (
                   diffData ? (
                     <InlineDiffPreview diff={diffData} />
                   ) : (
@@ -1204,6 +1285,7 @@ export default function EditorPage() {
                   )
                 ) : (
                   <Editor
+                    key="content-editor"
                     height="100%"
                     language="markdown"
                     theme={theme}
@@ -1281,6 +1363,56 @@ export default function EditorPage() {
                       )
                     }
 
+                    if (seg.type === 'outline') {
+                      return (
+                        <div key={seg.id} className={styles.outlineInline}>
+                          <div className={styles.outlineBody}>
+                            <Markdown>{seg.content}</Markdown>
+                          </div>
+                          {seg.approvalState === 'pending' ? (
+                            <div className={styles.outlineActions}>
+                              <textarea
+                                className={styles.outlineFeedback}
+                                value={seg.feedbackDraft || ''}
+                                onChange={e => {
+                                  const draft = e.target.value
+                                  updateTurn(turn.id, t => ({
+                                    ...t,
+                                    segments: t.segments.map(s =>
+                                      s.type === 'outline' && s.id === seg.id
+                                        ? { ...s, feedbackDraft: draft }
+                                        : s
+                                    ),
+                                  }))
+                                }}
+                                placeholder="修改意见（拒绝时必填）…"
+                                rows={2}
+                              />
+                              <div className={styles.outlineButtons}>
+                                <button
+                                  className={styles.outlineRejectBtn}
+                                  onClick={() => handleRejectOutline(turn.id, seg.id, seg.feedbackDraft || '')}
+                                  disabled={!(seg.feedbackDraft || '').trim()}
+                                >
+                                  拒绝
+                                </button>
+                                <button
+                                  className={styles.outlineApproveBtn}
+                                  onClick={() => handleApproveOutline(turn.id, seg.id)}
+                                >
+                                  批准
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className={styles.outlineStatusBadge}>
+                              {seg.approvalState === 'approved' ? '✅ 已批准' : '❌ 已拒绝'}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    }
+
                     const tc = seg.call
                     const visual = getActivityVisual(tc.activity_kind)
                     return (
@@ -1290,7 +1422,7 @@ export default function EditorPage() {
                       >
                         <span className={styles.toolCompactIcon}>{visual.icon}</span>
                         <span className={styles.toolCompactName}>
-                          {tc.display_text || getToolDisplayName(tc.tool_name, tc.chapter_number, tc.chapter_title)}
+                          {tc.display_text || '处理中...'}
                         </span>
                         <span className={`${styles.toolCompactStatus} ${tc.status === 'executing' ? styles.toolCompactRunning : tc.status === 'completed' ? styles.toolCompactDone : styles.toolCompactFailed}`}>
                           {tc.status === 'executing' && <LoadingOutlined spin />}
@@ -1345,29 +1477,25 @@ export default function EditorPage() {
               </button>
             </div>
             <div className={styles.chatControls}>
-              <div className={styles.controlChip}>
-                <span className={styles.controlLabel}>模型</span>
+              <Select
+                size="small"
+                value={selectedModel}
+                onChange={setSelectedModel}
+                className={styles.modelSelect}
+                popupMatchSelectWidth={false}
+                options={modelOptions}
+                variant="borderless"
+              />
+              {(selectedModel.startsWith('deepseek-v4')) && (
                 <Select
                   size="small"
-                  value={selectedModel}
-                  onChange={setSelectedModel}
-                  className={styles.chatControlSelect}
+                  value={reasoningEffort}
+                  onChange={setReasoningEffort}
+                  className={styles.reasoningSelect}
                   popupMatchSelectWidth={false}
-                  options={modelOptions}
+                  options={REASONING_OPTIONS}
+                  variant="borderless"
                 />
-              </div>
-              {(selectedModel.startsWith('deepseek-v4')) && (
-                <div className={styles.controlChip}>
-                  <span className={styles.controlLabel}>推理强度</span>
-                  <Select
-                    size="small"
-                    value={reasoningEffort}
-                    onChange={setReasoningEffort}
-                    className={styles.chatControlCompact}
-                    popupMatchSelectWidth={false}
-                    options={REASONING_OPTIONS}
-                  />
-                </div>
               )}
             </div>
           </div>

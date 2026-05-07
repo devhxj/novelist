@@ -13,6 +13,7 @@ from core.exceptions import NotFoundException, UnauthorizedException, BadRequest
 from core.redis_service import redis_service
 from text.utils import count_words
 from editor.service import get_edit_session_manager
+from chapters.utils import _format_outline
 from editor.models import ChangeSource
 from novels.models import Novel
 from .models import Chapter
@@ -220,6 +221,8 @@ async def get_chapter(
         "summary": chapter.summary,
         "status": chapter.status,
         "word_count": chapter.word_count or count_words(chapter.content or ""),
+        "outline_json": chapter.outline_json,
+        "outline_text": _format_outline(chapter.outline_json) if chapter.outline_json else None,
         "created_at": chapter.created_at,
         "updated_at": chapter.updated_at,
         "novel": {
@@ -299,9 +302,13 @@ async def update_chapter(
     
     await redis_service.delete(f"chapter:{chapter_id}:detail")
     await redis_service.clear_pattern(f"novel:{db_chapter.novel_id}:chapters:*")
-    
+
     from context.context_builder import context_cache
     context_cache.invalidate_novel(db_chapter.novel_id)
+
+    if chapter.content is not None:
+        from rag.memory_updater import schedule_memory_update
+        schedule_memory_update(db_chapter.novel_id, chapter_id)
     
     return ApiResponse.success(
         {

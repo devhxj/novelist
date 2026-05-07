@@ -130,7 +130,13 @@ async def websocket_chat(
         while True:
             data = await websocket.receive_json()
             message_type = data.get("type")
-            
+
+            # 审批消息拦截：工作流等在 _approval_events 上，直接通知
+            if data.get("type") == "outline_approval" and current_session.session_id:
+                from mcp_tools.workflow_tools import signal_approval
+                signal_approval(current_session.session_id, data.get("approved", False), data.get("feedback", ""))
+                continue
+
             logger.debug(f"Received message type: {message_type}")
             try:
                 if message_type == "create_session":
@@ -148,11 +154,17 @@ async def websocket_chat(
                 
                 elif message_type == "chat":
                     if not current_session:
-                        current_session = session_manager.create_session(
-                            user_id=user_id,
-                            novel_id=novel_id,
-                        )
-                        await session_manager.save_session(current_session)
+                        session_id = data.get("session_id")
+                        if session_id:
+                            current_session = await session_manager.load_session(session_id)
+                            if current_session and current_session.user_id != user_id:
+                                current_session = None
+                        if not current_session:
+                            current_session = session_manager.create_session(
+                                user_id=user_id,
+                                novel_id=novel_id,
+                            )
+                            await session_manager.save_session(current_session)
                     
                     task_id = f"chat_{current_session.session_id}_{datetime.now(timezone.utc).strftime('%H%M%S')}"
                     task_flags[task_id] = True
@@ -238,11 +250,17 @@ async def websocket_chat(
         logger.info(f"Chat WebSocket disconnected: user={user_id}, novel={novel_id}")
         for task_id in task_flags:
             task_flags[task_id] = False
+        if current_session and current_session.session_id:
+            from mcp_tools.workflow_tools import abort_approval
+            abort_approval(current_session.session_id)
         ws_manager.disconnect(websocket, user_id, novel_id)
     except Exception as e:
         logger.error(f"Chat WebSocket error: {e}", exc_info=True)
         for task_id in task_flags:
             task_flags[task_id] = False
+        if current_session and current_session.session_id:
+            from mcp_tools.workflow_tools import abort_approval
+            abort_approval(current_session.session_id)
         ws_manager.disconnect(websocket, user_id, novel_id)
 
 
@@ -737,6 +755,7 @@ async def _run_chat_with_tools(
             tool_cache: dict[str, dict[str, Any]] = {}
             disabled_tools: set[str] = set()
             failed_tool_keys: dict[str, int] = {}
+            pending_injects: dict[str, list[dict[str, Any]]] = {}
             max_tool_retries = 3
             recent_tool_patterns: list[str] = []
             max_tool_loops = 50
@@ -891,7 +910,12 @@ async def _run_chat_with_tools(
                             continue
                         
                         if tools_enabled and tool_name:
-                            clean_args = {k: v for k, v in arguments.items() if k not in ('session_id', 'novel_id')}
+                            raw_args = {k: v for k, v in arguments.items() if k not in ('session_id', 'novel_id')}
+                            # 归一化：LLM 偶尔传字符串 "true"/"false"
+                            clean_args = {
+                                k: True if v == "true" else False if v == "false" else v
+                                for k, v in raw_args.items()
+                            }
                             
                             if session.current_chapter_id and 'chapter_id' not in arguments:
                                 clean_args['chapter_id'] = session.current_chapter_id
@@ -930,9 +954,14 @@ async def _run_chat_with_tools(
                                         user_id=session.user_id,
                                         session_id=session.session_id,
                                         novel_id=novel_id,
+                                        websocket=websocket,
+                                        chat_session=session,
+                                        tool_id=tool_id,
                                         **clean_args
                                     )
-                                    tool_result_payload = tool_result.model_dump()
+                                    if tool_result.inject:
+                                        pending_injects[tool_id] = tool_result.inject
+                                    tool_result_payload = tool_result.model_dump(exclude={"inject"})
                                 if tool_result_payload.get("success"):
                                     tool_cache[cache_key] = tool_result_payload
                             
@@ -1134,6 +1163,19 @@ async def _run_chat_with_tools(
                                 "activity_kind": item.get("activity_kind"),
                             }
                         )
+                        # 工具返回了 inject 消息列表，需要注入到 session
+                        inject_msgs = pending_injects.pop(item.get("tool_id", ""), None)
+                        if inject_msgs and isinstance(inject_msgs, list):
+                            for inj in inject_msgs:
+                                role = inj.get("role", "user")
+                                content = inj.get("content", "")
+                                meta = {k: v for k, v in inj.items() if k not in ("role", "content")}
+                                session_manager.add_message(
+                                    session,
+                                    MessageRole(role),
+                                    content,
+                                    metadata=meta or None,
+                                )
                     history_messages = session_manager.get_messages_for_api(session, include_context=False)
                     full_messages = (
                         prefix_messages +

@@ -452,7 +452,7 @@ class ContextCompressor:
                 prompt="\n".join(context_parts),
                 system_prompt=summary_prompt,
                 temperature=0.3,
-                max_tokens=500,
+                max_tokens=50000,
             )
         except Exception as e:
             logger.warning(f"LLM summary generation failed, using fallback: {e}")

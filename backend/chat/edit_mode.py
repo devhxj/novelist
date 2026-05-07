@@ -35,6 +35,41 @@ AGENT_SYSTEM_PROMPT = """你是一个专业的小说创作助手。你可以：
 
 当需要写作、审核或一致性检查时，可以调度子Agent执行任务。
 可以直接创建空章节，也可以用 edit_chapter 直接写出或修改章节正文。
+
+【创建新章节 — 必须使用 create_outline 工具】
+当用户明确要求"写新章节""创作第X章""写15-20章"等创建新章节的意图时：
+
+第一步：搜集上下文（你必须自主完成）
+  - search_story_memory：搜索与本章主题相关的故事记忆
+  - get_characters：了解相关角色状态
+  - get_timeline：了解待回收伏笔和规划
+  - 视需要调用 get_story_arcs、get_locations 等
+  - 可以分多次调用，直到你认为上下文充分
+
+第二步：生成大纲并调用 create_outline
+  根据搜集的上下文，生成结构化大纲 JSON，统一数组格式：
+  {"chapters": [{"title": "章节标题", "scenes": [{"name": "场景名", "description": "描述", "purpose": "目的"}], "key_events": ["事件1", "事件2"], "focus_characters": [{"name": "角色名", "role_in_chapter": "本章作用"}], "foreshadowing_ops": [{"action": "plant/advance/resolve", "content": "内容"}], "tone": "语调", "chapter_hook": "章末钩子", "estimated_words": 3000}, ...]}
+  **不要**将大纲内容直接展示给用户，调用 create_outline 传入大纲 JSON，系统会在前端渲染大纲供用户审批。
+  参数：novel_id、chapter_numbers、outline（你生成的大纲 JSON）。
+  如果用户拒绝大纲，工具会返回拒绝原因，请根据反馈修改后重新调用。
+
+第三步：大纲审批通过后，系统会自动注入一条包含大纲、Layer3 精准上下文和创作指令的消息。收到后使用 edit_chapter（full_replace）写出该章正文。
+
+【审批通过后系统自动注入的上下文 — 不需要你重复查询】
+大纲审批通过后，系统会根据大纲内容自动注入以下精准上下文：
+  - focus_characters 中每个角色的完整档案（性格、能力、背景、当前状态）
+  - 近期章节末尾段落（用于衔接文风和叙事节奏）
+  - foreshadowing_ops 中伏笔的原始埋下段落（精确措辞）
+  - 场景涉及的地点详细设定
+以上内容会自动注入到写作环境中，你不需要在大纲审批后再查询这些信息。
+如果以上注入不足，你可以在正文写作开始前自行补充搜索。
+
+**必须**调用 create_outline 工具提交大纲，不要跳过此步骤直接写作。
+
+当用户的任务**不是**全新章节创作（修改章节、讨论剧情、补充细节等），
+不要调用 create_outline，而是自行调用相应工具（get_chapter_content、get_characters、
+get_timeline 等）获取详细信息后直接处理。对话开始时的系统快照只是概要，实际操作前
+务必用工具获取精确数据。
 当作者表达"以后都这样写""长期不要出现某类内容""这本书整体风格/目标/禁忌"等稳定规则时，
 应主动调用 update_creative_profile 进行沉淀。
 当准备生成章节、规划情节、审阅方向，且需要确认长期规则时，应优先调用 get_creative_profile。
@@ -127,6 +162,7 @@ class EditModeConfig:
             "get_story_arcs", "add_story_arc", "update_story_arc",
             "get_story_state", "update_story_state",
             "get_reader_perspective", "add_reader_perspective_entry", "update_reader_perspective_entry",
+            "create_outline",
         },
     }
 
@@ -152,6 +188,7 @@ class EditModeConfig:
             "get_story_state", "update_story_state",
             "get_reader_perspective", "add_reader_perspective_entry", "update_reader_perspective_entry",
             "run_subagent",
+            "create_outline",
         ],
     }
 
@@ -176,6 +213,7 @@ class EditModeConfig:
         "generation": {
             "create_new_chapter", "edit_chapter",
             "search_story_memory", "run_subagent",
+            "create_outline",
         },
     }
 
