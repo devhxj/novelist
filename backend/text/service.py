@@ -32,7 +32,7 @@ class GenerationConfig:
     style: str = "narrative"
     target_length: int = 3000
     temperature: float = 0.8
-    max_tokens: int = 4000
+    max_tokens: int = 50000
 
 
 class TextGenerator:
