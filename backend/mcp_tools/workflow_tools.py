@@ -16,8 +16,36 @@ from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 logger = logging.getLogger(__name__)
 
 # 审批机制：ws_chat 主循环收到审批消息后，通过 event 通知工具
-_approval_event: asyncio.Event | None = None
-_approval_result: dict = {}
+# key 为 session_id，多用户隔离
+_approval_events: dict[str, asyncio.Event] = {}
+_approval_results: dict[str, dict] = {}
+
+
+def _get_approval(session_id: str) -> tuple[asyncio.Event, dict]:
+    """获取或创建审批等待对象"""
+    if session_id not in _approval_events:
+        _approval_events[session_id] = asyncio.Event()
+        _approval_results[session_id] = {}
+    return _approval_events[session_id], _approval_results[session_id]
+
+
+def signal_approval(session_id: str, approved: bool, feedback: str = ""):
+    """外部通知审批结果"""
+    if session_id in _approval_events:
+        event = _approval_events[session_id]
+        _approval_results[session_id].update({"approved": approved, "feedback": feedback})
+        event.set()
+
+
+def abort_approval(session_id: str):
+    """终止审批（断连等场景）"""
+    signal_approval(session_id, False, "会话已断开")
+
+
+def cleanup_approval(session_id: str):
+    """清理审批等待对象"""
+    _approval_events.pop(session_id, None)
+    _approval_results.pop(session_id, None)
 
 
 class CreateOutlineArgs(BaseModel):
@@ -95,13 +123,12 @@ class CreateOutlineTool(BaseMCPTool):
             })
 
             # === 等待用户审批 ===
-            global _approval_event, _approval_result
-            event = asyncio.Event()
-            _approval_event = event
-            _approval_result.clear()
+            session_id = chat_session.session_id
+            event, result = _get_approval(session_id)
+            result.clear()
             await event.wait()
-            _approval_event = None
-            approval_raw = dict(_approval_result)
+            approval_raw = dict(result)
+            cleanup_approval(session_id)
             approved = approval_raw.get("approved", False)
 
             if not approved:

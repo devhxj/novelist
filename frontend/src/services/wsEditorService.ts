@@ -508,7 +508,7 @@ export class WsEditorService {
   }
 
   sendOutlineApproval(approved: boolean, feedback?: string): boolean {
-    return this.send({ approved, feedback })
+    return this.send({ type: 'outline_approval', approved, feedback })
   }
 
   isConnected(): boolean {

@@ -1683,8 +1683,6 @@
 
 .outlineBody {
   padding: 16px 20px 12px;
-  max-height: 420px;
-  overflow-y: auto;
   font-size: 14px;
   line-height: 1.7;
 }

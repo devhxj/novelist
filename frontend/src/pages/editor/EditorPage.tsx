@@ -229,8 +229,6 @@ export default function EditorPage() {
   const turnIdCounter = useRef(0)
   const segIdCounter = useRef(0)
   const isUserScrolledUp = useRef(false)
-  const scrollRafId = useRef<number | null>(null)
-  const isProgrammaticScroll = useRef(false)
   const originalContentRef = useRef(originalContent)
   const dispatchMessageRef = useRef<((msg: string) => void) | null>(null)
   const updateTurn = useCallback((turnId: string, updater: (turn: ConversationTurn) => ConversationTurn) => {
@@ -309,27 +307,34 @@ export default function EditorPage() {
     const el = chatContainerRef.current
     if (!el) return
     const handleScroll = () => {
-      if (isProgrammaticScroll.current) return
-      const threshold = 80
-      isUserScrolledUp.current = el.scrollTop + el.clientHeight < el.scrollHeight - threshold
+      isUserScrolledUp.current = el.scrollTop + el.clientHeight < el.scrollHeight - 5
     }
     el.addEventListener('scroll', handleScroll, { passive: true })
     return () => el.removeEventListener('scroll', handleScroll)
   }, [])
 
   useEffect(() => {
+    const hasPending = turns.some(t =>
+      t.segments.some(s => s.type === 'outline' && s.approvalState === 'pending')
+    )
+    if (hasPending) return
     if (isUserScrolledUp.current) return
     const el = chatContainerRef.current
     if (!el) return
-    if (scrollRafId.current) cancelAnimationFrame(scrollRafId.current)
-    scrollRafId.current = requestAnimationFrame(() => {
-      isProgrammaticScroll.current = true
-      el.scrollTop = el.scrollHeight
-      requestAnimationFrame(() => { isProgrammaticScroll.current = false })
-    })
+    el.scrollTop = el.scrollHeight
   }, [turns])
 
   useEffect(() => { originalContentRef.current = originalContent }, [originalContent])
+
+  useEffect(() => {
+    const hasPending = turns.some(t =>
+      t.segments.some(s => s.type === 'outline' && s.approvalState === 'pending')
+    )
+    if (!hasPending) return
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault() }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [turns])
 
   const refreshChapterList = useCallback(async () => {
     if (!novelId) return

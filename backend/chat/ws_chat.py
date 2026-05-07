@@ -131,11 +131,10 @@ async def websocket_chat(
             data = await websocket.receive_json()
             message_type = data.get("type")
 
-            # 审批消息拦截：工作流等在 _approval_event 上，直接通知
-            from mcp_tools.workflow_tools import _approval_event as _evt, _approval_result as _res
-            if _evt is not None and not _evt.is_set():
-                _res.update(data)
-                _evt.set()
+            # 审批消息拦截：工作流等在 _approval_events 上，直接通知
+            if data.get("type") == "outline_approval" and current_session.session_id:
+                from mcp_tools.workflow_tools import signal_approval
+                signal_approval(current_session.session_id, data.get("approved", False), data.get("feedback", ""))
                 continue
 
             logger.debug(f"Received message type: {message_type}")
@@ -245,11 +244,17 @@ async def websocket_chat(
         logger.info(f"Chat WebSocket disconnected: user={user_id}, novel={novel_id}")
         for task_id in task_flags:
             task_flags[task_id] = False
+        if current_session and current_session.session_id:
+            from mcp_tools.workflow_tools import abort_approval
+            abort_approval(current_session.session_id)
         ws_manager.disconnect(websocket, user_id, novel_id)
     except Exception as e:
         logger.error(f"Chat WebSocket error: {e}", exc_info=True)
         for task_id in task_flags:
             task_flags[task_id] = False
+        if current_session and current_session.session_id:
+            from mcp_tools.workflow_tools import abort_approval
+            abort_approval(current_session.session_id)
         ws_manager.disconnect(websocket, user_id, novel_id)
 
 
