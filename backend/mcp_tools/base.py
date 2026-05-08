@@ -59,7 +59,7 @@ class BaseMCPTool(ABC):
         """统一入口：鉴权 → 校验 → 分发 _execute()"""
         db: AsyncSession | None = kwargs.pop("db", None)
         user_id: int | None = kwargs.pop("user_id", None)
-        novel_id: int | None = kwargs.get("novel_id")
+        novel_id: int | None = kwargs.pop("novel_id", None)
 
         if db is None or user_id is None or novel_id is None:
             return MCPToolResult(
@@ -82,7 +82,7 @@ class BaseMCPTool(ABC):
         except Exception as e:
             return MCPToolResult(success=False, error=str(e))
 
-        return await self._execute(args=args, db=db, user_id=user_id)
+        return await self._execute(args=args, db=db, user_id=user_id, novel_id=novel_id)
 
     @abstractmethod
     async def _execute(self, *args: Any, **kwargs: Any) -> MCPToolResult:
