@@ -10,6 +10,7 @@ import asyncio
 import logging
 
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 
@@ -49,7 +50,6 @@ def cleanup_approval(session_id: str):
 
 
 class CreateOutlineArgs(BaseModel):
-    novel_id: int
     chapter_numbers: list[int] = Field(description="章节号列表，单章如[15]，多章如[15,16,17]")
     outline: dict = Field(description="结构化大纲 JSON，统一数组格式：{'chapters': [{...}, {...}]}")
     model: str | None = Field(default=None)
@@ -64,31 +64,19 @@ class CreateOutlineTool(BaseMCPTool):
         "审批未通过时请根据用户反馈修改大纲后重新调用。"
     )
     category = MCPToolCategory.WRITING_ASSISTANT
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "novel_id": {"type": "integer", "description": "小说ID"},
-            "chapter_numbers": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "description": "章节号列表，单章如[15]，多章如[15,16,17]",
-            },
-            "outline": {
-                "type": "object",
-                "description": "结构化大纲 JSON，统一数组格式：{'chapters': [{...}, {...}]}",
-            },
-            "model": {"type": "string", "description": "LLM模型（可选）"},
-        },
-        "required": ["novel_id", "chapter_numbers", "outline"],
-    }
+    args_schema = CreateOutlineArgs
 
-    async def _execute(self, **kwargs) -> MCPToolResult:  # type: ignore[override]
-        novel_id: int = kwargs["novel_id"]
-        chapter_numbers: list[int] = kwargs["chapter_numbers"]
-        outline_raw: dict = kwargs["outline"]
-        model: str | None = kwargs.get("model")
-        websocket = kwargs.get("websocket")
-        chat_session = kwargs.get("chat_session")
+    async def _execute(
+        self,
+        args: CreateOutlineArgs,
+        *,
+        db: AsyncSession | None = None,
+        user_id: int,
+        novel_id: int,
+        **extra,
+    ) -> MCPToolResult:
+        websocket = extra.get("websocket")
+        chat_session = extra.get("chat_session")
 
         if not websocket or not chat_session:
             return MCPToolResult(success=False, error="缺少 ws 或 session")
@@ -97,18 +85,18 @@ class CreateOutlineTool(BaseMCPTool):
             from chapters.utils import _format_outline
 
             # === 解析大纲 ===
-            if "chapters" in outline_raw and isinstance(outline_raw["chapters"], list):
-                outlines: list[dict] = outline_raw["chapters"]
+            if "chapters" in args.outline and isinstance(args.outline["chapters"], list):
+                outlines: list[dict] = args.outline["chapters"]
             else:
-                outlines = [outline_raw]
+                outlines = [args.outline]
 
             if not outlines:
                 return MCPToolResult(success=False, error="大纲为空")
 
             # 补 chapter_number
             for i, ol in enumerate(outlines):
-                if not ol.get("chapter_number") and i < len(chapter_numbers):
-                    ol["chapter_number"] = chapter_numbers[i]
+                if not ol.get("chapter_number") and i < len(args.chapter_numbers):
+                    ol["chapter_number"] = args.chapter_numbers[i]
 
             outline_texts: list[str] = [_format_outline(ol) for ol in outlines]
             combined_text = "\n\n---\n\n".join(outline_texts)
@@ -117,7 +105,7 @@ class CreateOutlineTool(BaseMCPTool):
             await websocket.send_json({
                 "type": "outline_generated",
                 "novel_id": novel_id,
-                "chapter_numbers": chapter_numbers,
+                "chapter_numbers": args.chapter_numbers,
                 "content": combined_text,
                 "outlines": outlines,
             })
@@ -148,7 +136,7 @@ class CreateOutlineTool(BaseMCPTool):
 
             inject_msgs: list[dict] = []
             for idx, ol in enumerate(outlines):
-                chapter_number = ol.get("chapter_number", chapter_numbers[idx])
+                chapter_number = ol.get("chapter_number", args.chapter_numbers[idx])
                 async with AsyncSessionLocal() as db:
                     layer3 = (await build_layer3_context(db, novel_id, ol)) or ""
 
@@ -166,7 +154,7 @@ class CreateOutlineTool(BaseMCPTool):
 
             return MCPToolResult(
                 success=True,
-                data={"approved": True, "chapter_numbers": chapter_numbers},
+                data={"approved": True, "chapter_numbers": args.chapter_numbers},
                 inject=inject_msgs,
             )
 
