@@ -36,6 +36,7 @@ class GetStoryArcsTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             service = StoryArcService(db, novel_id)
@@ -80,6 +81,7 @@ class AddStoryArcTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             from story_arcs.schemas import StoryArcType as SchemaArcType
@@ -130,6 +132,7 @@ class UpdateStoryArcTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             update_fields = args.model_dump(exclude_unset=True)

@@ -31,6 +31,7 @@ class GetStoryStateTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         result = await db.execute(
             select(NovelStoryState).where(NovelStoryState.novel_id == novel_id)
@@ -64,6 +65,7 @@ class UpdateStoryStateTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         result = await db.execute(
             select(NovelStoryState).where(NovelStoryState.novel_id == novel_id)

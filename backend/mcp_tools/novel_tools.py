@@ -103,6 +103,7 @@ class GetNovelInfoTool(BaseMCPTool):
         db: AsyncSession,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         result = await db.execute(
             select(Novel)
@@ -192,6 +193,7 @@ class GetChapterListTool(BaseMCPTool):
         db: AsyncSession,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         query = select(Chapter).where(Chapter.novel_id == novel_id)
 
@@ -255,6 +257,7 @@ class GetChapterContentTool(BaseMCPTool):
         db: AsyncSession,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         if not args.chapter_id and not args.chapter_number:
             result = await db.execute(
@@ -323,6 +326,7 @@ class GetCreativeProfileTool(BaseMCPTool):
         db: AsyncSession,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         result = await db.execute(
             select(NovelCreativeProfile).where(NovelCreativeProfile.novel_id == novel_id)
@@ -474,6 +478,7 @@ class UpdateCreativeProfileTool(BaseMCPTool):
         db: AsyncSession,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
 
         must_keep_limited = self._enforce_limit(args.must_keep)
@@ -601,6 +606,7 @@ class GetCharactersTool(BaseMCPTool):
         db: AsyncSession,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         if args.mode == "detail":
             return await self._execute_detail(db, novel_id, args.character_id, args.include_memory)
@@ -778,6 +784,7 @@ class CreateCharacterTool(BaseMCPTool):
         db: AsyncSession,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             from characters.models import Character
@@ -834,6 +841,7 @@ class UpdateCharacterTool(BaseMCPTool):
         db: AsyncSession,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             from characters.models import Character
@@ -893,6 +901,7 @@ class CreateNewChapterTool(BaseMCPTool):
         db: AsyncSession,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         ch_num = args.chapter_number
         if ch_num is None:

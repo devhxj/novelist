@@ -35,6 +35,7 @@ class SearchStoryMemoryTool(BaseMCPTool):
         db: AsyncSession,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             builder = ContextBuilder(db, novel_id)

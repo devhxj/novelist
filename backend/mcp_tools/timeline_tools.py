@@ -49,6 +49,7 @@ class GetTimelineTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             service = TimelineService(db, novel_id)
@@ -114,6 +115,7 @@ class AddTimelineEntryTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             entries = args.entries
@@ -205,6 +207,7 @@ class UpdateTimelineEntryTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             update_fields = args.model_dump(exclude_unset=True)

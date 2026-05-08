@@ -41,6 +41,7 @@ class GetLocationsTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             from locations.service import LocationService
@@ -134,6 +135,7 @@ class CreateLocationTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             from locations.schemas import LocationCreate, LocationType
@@ -194,6 +196,7 @@ class UpdateLocationTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             from locations.schemas import LocationUpdate, LocationType
@@ -253,6 +256,7 @@ class DeleteLocationTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             from locations.service import LocationService

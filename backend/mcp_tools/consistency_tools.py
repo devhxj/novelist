@@ -74,6 +74,7 @@ class RunReviewTool(BaseMCPTool):
         db: AsyncSession,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             if args.scope == "foreshadowing":

@@ -32,6 +32,7 @@ class GetReaderPerspectiveTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         # known 类型全部返回；suspense/misconception 只返回未回收的（revealed_chapter IS NULL）
         result = await db.execute(
@@ -126,6 +127,7 @@ class AddReaderPerspectiveEntryTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         entry = ReaderPerspective(
             novel_id=novel_id,
@@ -166,6 +168,7 @@ class UpdateReaderPerspectiveEntryTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         result = await db.execute(
             select(ReaderPerspective).where(

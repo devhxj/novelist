@@ -62,6 +62,7 @@ class UpdateCharacterRelationTool(BaseMCPTool):
         db,
         user_id: int,
         novel_id: int,
+        **extra,
     ) -> MCPToolResult:
         try:
             service = CharacterService(db, novel_id)
