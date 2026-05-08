@@ -10,7 +10,6 @@ from sqlalchemy import select
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from chapters.models import Chapter
 from editor.service import get_edit_session_manager
-from core.permissions import verify_novel_ownership
 from editor.diff_engine import diff_engine
 
 _subagent_running_var: ContextVar[bool] = ContextVar("_subagent_running_var", default=False)
@@ -54,10 +53,6 @@ async def _execute_subagent_task(
         )
 
     normalized_type = _normalize_subagent_task_type(task_type)
-    novel = await verify_novel_ownership(db, novel_id, user_id)
-    if not novel:
-        return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
     from agents.registry import get_agent_for_task, get_all_specs
     from agents.context_provider import build_subagent_context
     from agents.base import AgentTask, TaskType, SubAgentReport
@@ -232,7 +227,7 @@ class EditChapterTool(BaseMCPTool):
         "required": ["chapter_id"]
     }
 
-    async def execute(
+    async def _execute(
         self,
         db: AsyncSession,
         novel_id: int,
@@ -253,10 +248,6 @@ class EditChapterTool(BaseMCPTool):
         **kwargs
     ) -> MCPToolResult:
         try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
             result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
             chapter = result.scalar_one_or_none()
             if not chapter:
@@ -514,7 +505,7 @@ class RunSubagentTool(BaseMCPTool):
         "required": ["task_type", "novel_id"]
     }
 
-    async def execute(
+    async def _execute(
         self,
         db: AsyncSession,
         user_id: int,

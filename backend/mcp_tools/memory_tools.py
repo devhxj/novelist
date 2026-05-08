@@ -5,7 +5,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
-from core.permissions import verify_novel_ownership
 from context.context_builder import ContextBuilder
 
 
@@ -29,7 +28,7 @@ class SearchStoryMemoryTool(BaseMCPTool):
         "required": ["query"]
     }
 
-    async def execute(
+    async def _execute(
         self,
         db: AsyncSession,
         novel_id: int,
@@ -39,10 +38,6 @@ class SearchStoryMemoryTool(BaseMCPTool):
         min_relevance_score: float = 0.35,
         **kwargs
     ) -> MCPToolResult:
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
         try:
             builder = ContextBuilder(db, novel_id)
             results = await builder.search_relevant_context(

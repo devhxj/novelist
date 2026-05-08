@@ -11,7 +11,6 @@ from characters.schemas import (
     RelationStatus,
 )
 from characters.service import CharacterService
-from core.permissions import verify_novel_ownership
 from mcp_tools.novel_tools import _invalidate_character_cache
 
 
@@ -53,7 +52,7 @@ class UpdateCharacterRelationTool(BaseMCPTool):
         "required": []
     }
 
-    async def execute(
+    async def _execute(
         self,
         db,
         novel_id: int,
@@ -71,10 +70,6 @@ class UpdateCharacterRelationTool(BaseMCPTool):
         **kwargs
     ) -> MCPToolResult:
         try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-            
             service = CharacterService(db, novel_id)
 
             if relation_id and evolve:

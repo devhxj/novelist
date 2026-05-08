@@ -3,7 +3,6 @@
 """
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory
-from core.permissions import verify_novel_ownership
 from mcp_tools.novel_tools import _invalidate_novel_cache
 
 
@@ -42,14 +41,10 @@ class GetLocationsTool(BaseMCPTool):
         "required": ["mode"]
     }
 
-    async def execute(self, db, novel_id: int, user_id: int, mode: str = "list",
+    async def _execute(self, db, novel_id: int, user_id: int, mode: str = "list",
                      location_id: int | None = None, location_type: str | None = None,
                      search: str | None = None, **kwargs) -> MCPToolResult:
         try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
             from locations.service import LocationService
             svc = LocationService(db, novel_id)
 
@@ -146,15 +141,11 @@ class CreateLocationTool(BaseMCPTool):
         "required": ["name"]
     }
 
-    async def execute(self, db, novel_id: int, user_id: int, name: str="",
+    async def _execute(self, db, novel_id: int, user_id: int, name: str="",
                      location_type: str | None=None, description: str | None=None,
                      tags: list[str] | None=None, parent_location_id: int | None=None,
                      **kwargs) -> MCPToolResult:
         try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
             from locations.schemas import LocationCreate, LocationType
             from locations.service import LocationService
 
@@ -218,13 +209,9 @@ class UpdateLocationTool(BaseMCPTool):
         "required": ["location_id"]
     }
 
-    async def execute(self, db, novel_id: int, user_id: int, location_id: int,
+    async def _execute(self, db, novel_id: int, user_id: int, location_id: int,
                      **kwargs) -> MCPToolResult:
         try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-            
             from locations.schemas import LocationUpdate, LocationType
             from locations.service import LocationService
 
@@ -284,13 +271,9 @@ class DeleteLocationTool(BaseMCPTool):
         "required": ["location_id"]
     }
 
-    async def execute(self, db, novel_id: int, user_id: int, location_id: int,
+    async def _execute(self, db, novel_id: int, user_id: int, location_id: int,
                      **kwargs) -> MCPToolResult:
         try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-            
             from locations.service import LocationService
             svc = LocationService(db, novel_id)
             deleted = await svc.delete(location_id)

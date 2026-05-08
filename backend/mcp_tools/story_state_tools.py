@@ -6,7 +6,6 @@ from sqlalchemy import select
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from novels.models import NovelStoryState
-from core.permissions import verify_novel_ownership
 
 
 class GetStoryStateTool(BaseMCPTool):
@@ -24,8 +23,7 @@ class GetStoryStateTool(BaseMCPTool):
         "properties": {},
     }
 
-    async def execute(self, db, novel_id: int, user_id: int, **kwargs) -> MCPToolResult:
-        await verify_novel_ownership(db, novel_id, user_id)
+    async def _execute(self, db, novel_id: int, user_id: int, **kwargs) -> MCPToolResult:
         result = await db.execute(
             select(NovelStoryState).where(NovelStoryState.novel_id == novel_id)
         )
@@ -57,8 +55,7 @@ class UpdateStoryStateTool(BaseMCPTool):
         "required": ["content"],
     }
 
-    async def execute(self, db, novel_id: int, user_id: int, content: str = "", **kwargs) -> MCPToolResult:
-        await verify_novel_ownership(db, novel_id, user_id)
+    async def _execute(self, db, novel_id: int, user_id: int, content: str = "", **kwargs) -> MCPToolResult:
         result = await db.execute(
             select(NovelStoryState).where(NovelStoryState.novel_id == novel_id)
         )

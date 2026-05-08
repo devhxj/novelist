@@ -82,7 +82,7 @@ class CreateOutlineTool(BaseMCPTool):
         "required": ["novel_id", "chapter_numbers", "outline"],
     }
 
-    async def execute(self, **kwargs) -> MCPToolResult:  # type: ignore[override]
+    async def _execute(self, **kwargs) -> MCPToolResult:  # type: ignore[override]
         novel_id: int = kwargs["novel_id"]
         chapter_numbers: list[int] = kwargs["chapter_numbers"]
         outline_raw: dict = kwargs["outline"]

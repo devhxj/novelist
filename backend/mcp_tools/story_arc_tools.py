@@ -8,7 +8,6 @@ from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from story_arcs.models import StoryArc
 from story_arcs.schemas import StoryArcCreate, StoryArcUpdate
 from story_arcs.service import StoryArcService
-from core.permissions import verify_novel_ownership
 
 
 class GetStoryArcsTool(BaseMCPTool):
@@ -37,7 +36,7 @@ class GetStoryArcsTool(BaseMCPTool):
         },
     }
 
-    async def execute(
+    async def _execute(
         self,
         db,
         novel_id: int,
@@ -47,10 +46,6 @@ class GetStoryArcsTool(BaseMCPTool):
         **kwargs
     ) -> MCPToolResult:
         try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
             service = StoryArcService(db, novel_id)
             arcs = await service.list_arcs(arc_type=arc_type, status=status)
             return MCPToolResult(
@@ -94,7 +89,7 @@ class AddStoryArcTool(BaseMCPTool):
         "required": ["name"],
     }
 
-    async def execute(
+    async def _execute(
         self,
         db,
         novel_id: int,
@@ -108,10 +103,6 @@ class AddStoryArcTool(BaseMCPTool):
         **kwargs
     ) -> MCPToolResult:
         try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
             from story_arcs.schemas import StoryArcType as SchemaArcType
             service = StoryArcService(db, novel_id)
             data = StoryArcCreate(
@@ -164,7 +155,7 @@ class UpdateStoryArcTool(BaseMCPTool):
         "required": ["arc_id"],
     }
 
-    async def execute(
+    async def _execute(
         self,
         db,
         novel_id: int,
@@ -180,10 +171,6 @@ class UpdateStoryArcTool(BaseMCPTool):
         **kwargs
     ) -> MCPToolResult:
         try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
             update_data: dict[str, Any] = {}
             if name is not None:
                 update_data["name"] = name

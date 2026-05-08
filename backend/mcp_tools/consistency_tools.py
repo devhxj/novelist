@@ -31,7 +31,6 @@ from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from chapters.models import Chapter
 from timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryStatus
 from consistency.service import ConsistencyChecker
-from core.permissions import verify_novel_ownership
 
 
 class RunReviewTool(BaseMCPTool):
@@ -77,7 +76,7 @@ class RunReviewTool(BaseMCPTool):
         "required": ["scope"]
     }
 
-    async def execute(
+    async def _execute(
         self,
         db: AsyncSession,
         novel_id: int,
@@ -87,10 +86,6 @@ class RunReviewTool(BaseMCPTool):
         min_importance: int | None = None,
         **kwargs
     ) -> MCPToolResult:
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
         try:
             if scope == "foreshadowing":
                 return await self._query_foreshadowing_list(db, novel_id, min_importance)

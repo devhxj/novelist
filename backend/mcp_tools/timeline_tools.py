@@ -12,7 +12,6 @@ from timeline.schemas import (
 )
 from mcp_tools.novel_tools import _invalidate_novel_cache
 from timeline.service import TimelineService
-from core.permissions import verify_novel_ownership
 
 
 class GetTimelineTool(BaseMCPTool):
@@ -66,7 +65,7 @@ class GetTimelineTool(BaseMCPTool):
         },
     }
 
-    async def execute(
+    async def _execute(
         self,
         db,
         novel_id: int,
@@ -83,10 +82,6 @@ class GetTimelineTool(BaseMCPTool):
         **kwargs
     ) -> MCPToolResult:
         try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
             service = TimelineService(db, novel_id)
 
             if mode == "context":
@@ -170,7 +165,7 @@ class AddTimelineEntryTool(BaseMCPTool):
         "required": ["entries"],
     }
 
-    async def execute(
+    async def _execute(
         self,
         db,
         novel_id: int,
@@ -179,10 +174,6 @@ class AddTimelineEntryTool(BaseMCPTool):
         **kwargs
     ) -> MCPToolResult:
         try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
             if not entries or len(entries) == 0:
                 return MCPToolResult(success=False, error="entries不能为空")
             if len(entries) > 6:
@@ -275,7 +266,7 @@ class UpdateTimelineEntryTool(BaseMCPTool):
         "required": ["entry_id"],
     }
 
-    async def execute(
+    async def _execute(
         self,
         db,
         novel_id: int,
@@ -296,10 +287,6 @@ class UpdateTimelineEntryTool(BaseMCPTool):
         **kwargs
     ) -> MCPToolResult:
         try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-            
             update_data = {}
             if title is not None:
                 update_data["title"] = title

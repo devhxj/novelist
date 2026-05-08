@@ -13,7 +13,6 @@ from novels.models import Novel, NovelCreativeProfile
 from chapters.models import Chapter
 from text.utils import count_words
 from characters.models import Character
-from core.permissions import verify_novel_ownership
 from rag.vector_store import vector_store, VectorStoreError
 
 
@@ -103,7 +102,7 @@ class GetNovelInfoTool(BaseMCPTool):
         "required": ["mode"]
     }
 
-    async def execute(
+    async def _execute(
         self,
         db: AsyncSession,
         novel_id: int,
@@ -111,10 +110,6 @@ class GetNovelInfoTool(BaseMCPTool):
         mode: str = "summary",
         **kwargs
     ) -> MCPToolResult:
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
         result = await db.execute(
             select(Novel)
             .options(selectinload(Novel.chapters), selectinload(Novel.characters))
@@ -211,7 +206,7 @@ class GetChapterListTool(BaseMCPTool):
         "required": []
     }
     
-    async def execute(
+    async def _execute(
         self,
         db: AsyncSession,
         novel_id: int,
@@ -221,10 +216,6 @@ class GetChapterListTool(BaseMCPTool):
         page_size: int = 20,
         **kwargs
     ) -> MCPToolResult:
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-        
         query = select(Chapter).where(Chapter.novel_id == novel_id)
         
         if status:
@@ -297,7 +288,7 @@ class GetChapterContentTool(BaseMCPTool):
         "required": []
     }
 
-    async def execute(
+    async def _execute(
         self,
         db: AsyncSession,
         novel_id: int,
@@ -308,10 +299,6 @@ class GetChapterContentTool(BaseMCPTool):
         include_lines: bool = False,
         **kwargs
     ) -> MCPToolResult:
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-        
         if not chapter_id and not chapter_number:
             result = await db.execute(
                 select(Chapter).where(Chapter.novel_id == novel_id).order_by(Chapter.chapter_number).limit(1)
@@ -373,7 +360,7 @@ class GetCreativeProfileTool(BaseMCPTool):
         "required": []
     }
 
-    async def execute(
+    async def _execute(
         self,
         db: AsyncSession,
         novel_id: int,
@@ -383,10 +370,6 @@ class GetCreativeProfileTool(BaseMCPTool):
         novel_id = novel_id or kwargs.get("novel_id", 0)
         if not novel_id:
             return MCPToolResult(success=False, error="novel_id is required")
-
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
 
         result = await db.execute(
             select(NovelCreativeProfile).where(NovelCreativeProfile.novel_id == novel_id)
@@ -559,7 +542,7 @@ class UpdateCreativeProfileTool(BaseMCPTool):
         merged.update(incoming)
         return merged
 
-    async def execute(
+    async def _execute(
         self,
         db: AsyncSession,
         novel_id: int,
@@ -576,10 +559,6 @@ class UpdateCreativeProfileTool(BaseMCPTool):
         novel_id = novel_id or kwargs.get("novel_id", 0)
         if not novel_id:
             return MCPToolResult(success=False, error="novel_id is required")
-
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
 
         must_keep_limited = self._enforce_limit(must_keep)
         must_avoid_limited = self._enforce_limit(must_avoid)
@@ -729,7 +708,7 @@ class GetCharactersTool(BaseMCPTool):
                 parts.append(f"{key}：{text}")
         return "；".join(parts[:5])
 
-    async def execute(
+    async def _execute(
         self,
         db: AsyncSession,
         novel_id: int,
@@ -743,10 +722,6 @@ class GetCharactersTool(BaseMCPTool):
         include_inactive: bool = False,
         **kwargs
     ) -> MCPToolResult:
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
         if mode == "detail":
             return await self._execute_detail(db, novel_id, character_id, include_memory)
         elif mode == "network":
@@ -926,7 +901,7 @@ class CreateCharacterTool(BaseMCPTool):
         "required": ["name"]
     }
 
-    async def execute(
+    async def _execute(
         self,
         db,
         novel_id: int,
@@ -937,10 +912,6 @@ class CreateCharacterTool(BaseMCPTool):
         **kwargs
     ) -> MCPToolResult:
         try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
             from characters.models import Character
             character = Character(
                 novel_id=novel_id,
@@ -998,7 +969,7 @@ class UpdateCharacterTool(BaseMCPTool):
         "required": ["character_id"]
     }
 
-    async def execute(
+    async def _execute(
         self,
         db,
         novel_id: int,
@@ -1010,10 +981,6 @@ class UpdateCharacterTool(BaseMCPTool):
         **kwargs
     ) -> MCPToolResult:
         try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-            
             from characters.models import Character
             result = await db.execute(
                 select(Character).where(Character.id == character_id)
@@ -1080,7 +1047,7 @@ class CreateNewChapterTool(BaseMCPTool):
         "required": []
     }
     
-    async def execute(
+    async def _execute(
         self,
         db: AsyncSession,
         novel_id: int,
@@ -1090,10 +1057,6 @@ class CreateNewChapterTool(BaseMCPTool):
         content: str | None = None,
         **kwargs
     ) -> MCPToolResult:
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
         if chapter_number is None:
             latest_result = await db.execute(
                 select(Chapter.chapter_number)

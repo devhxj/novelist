@@ -6,7 +6,6 @@ from sqlalchemy import select, or_
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from novels.models import ReaderPerspective
-from core.permissions import verify_novel_ownership
 
 
 class GetReaderPerspectiveTool(BaseMCPTool):
@@ -24,8 +23,7 @@ class GetReaderPerspectiveTool(BaseMCPTool):
         "properties": {},
     }
 
-    async def execute(self, db, novel_id: int, user_id: int, **kwargs) -> MCPToolResult:
-        await verify_novel_ownership(db, novel_id, user_id)
+    async def _execute(self, db, novel_id: int, user_id: int, **kwargs) -> MCPToolResult:
         # known 类型全部返回；suspense/misconception 只返回未回收的（revealed_chapter IS NULL）
         result = await db.execute(
             select(ReaderPerspective)
@@ -131,13 +129,12 @@ class AddReaderPerspectiveEntryTool(BaseMCPTool):
         "required": ["type", "content", "planted_chapter"],
     }
 
-    async def execute(
+    async def _execute(
         self, db, novel_id: int, user_id: int,
         type: str = "", content: str = "", planted_chapter: int = 0,
         related_truth: str | None = None, planned_reveal_chapter: int | None = None,
         **kwargs
     ) -> MCPToolResult:
-        await verify_novel_ownership(db, novel_id, user_id)
         entry = ReaderPerspective(
             novel_id=novel_id,
             type=type,
@@ -182,14 +179,13 @@ class UpdateReaderPerspectiveEntryTool(BaseMCPTool):
         "required": ["entry_id"],
     }
 
-    async def execute(
+    async def _execute(
         self, db, novel_id: int, user_id: int,
         entry_id: int = 0,
         last_mentioned_chapter: int | None = None,
         revealed_chapter: int | None = None,
         **kwargs
     ) -> MCPToolResult:
-        await verify_novel_ownership(db, novel_id, user_id)
         result = await db.execute(
             select(ReaderPerspective).where(
                 ReaderPerspective.id == entry_id,

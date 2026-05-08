@@ -1,6 +1,5 @@
 """
 MCP工具基类和注册表
-定义MCP工具的标准接口和注册机制
 """
 import logging
 import time
@@ -31,13 +30,18 @@ class MCPToolCategory(str, Enum):
 
 
 class BaseMCPTool(ABC):
-    """MCP工具基类"""
+    """MCP工具基类 — 模板方法模式"""
 
     name: str
     description: str
     category: MCPToolCategory
     args_schema: type[BaseModel] | None = None
     expose_to_llm: bool = True
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        if "execute" in cls.__dict__:
+            raise TypeError(f"{cls.__name__}: 禁止覆盖 execute()，请实现 _execute()")
 
     @property
     def parameters_schema(self) -> dict[str, Any]:
@@ -49,14 +53,45 @@ class BaseMCPTool(ABC):
     def parameters_schema(self, value: dict[str, Any]) -> None:
         self._parameters_schema = value
 
+    # ── 模板方法 ──────────────────────────────────────
+
+    async def execute(self, **kwargs: Any) -> MCPToolResult:
+        """统一入口：鉴权 → 校验 → 分发 _execute()"""
+        db: AsyncSession | None = kwargs.pop("db", None)
+        user_id: int | None = kwargs.pop("user_id", None)
+        novel_id: int | None = kwargs.get("novel_id")
+
+        if db is None or user_id is None or novel_id is None:
+            return MCPToolResult(
+                success=False, error="内部错误：缺少 db / user_id / novel_id"
+            )
+
+        from core.permissions import verify_novel_ownership
+        if not await verify_novel_ownership(db, novel_id, user_id):
+            return MCPToolResult(
+                success=False, error="无权访问此小说或小说不存在"
+            )
+
+        if self.args_schema is None:
+            return MCPToolResult(
+                success=False, error=f"Tool {self.name}: args_schema not set"
+            )
+
+        try:
+            args = self.args_schema.model_validate(kwargs)
+        except Exception as e:
+            return MCPToolResult(success=False, error=str(e))
+
+        return await self._execute(args=args, db=db, user_id=user_id)
+
     @abstractmethod
-    async def execute(self, args: Any = None, *, db: AsyncSession | None = None,
-                      user_id: int | None = None, **extra: Any) -> MCPToolResult:
-        """执行工具"""
+    async def _execute(self, *args: Any, **kwargs: Any) -> MCPToolResult:
+        """子类实现业务逻辑 — args 已校验"""
         ...
 
+    # ── 工具信息 ──────────────────────────────────────
+
     def get_info(self) -> dict[str, Any]:
-        """获取工具信息"""
         return {
             "name": self.name,
             "description": self.description,
@@ -65,7 +100,6 @@ class BaseMCPTool(ABC):
         }
 
     def to_openai_function(self) -> dict[str, Any]:
-        """转换为OpenAI function calling格式"""
         parameters: dict[str, Any] = self.parameters_schema or {"type": "object"}
         return {
             "type": "function",
@@ -78,18 +112,19 @@ class BaseMCPTool(ABC):
 
 
 class MCPToolRegistry:
-    """MCP工具注册表 - 实例化模式"""
-    
-    def __init__(self):
+    """MCP工具注册表"""
+
+    def __init__(self) -> None:
         self._tools: dict[str, BaseMCPTool] = {}
-    
+
     def register(self, tool: BaseMCPTool) -> None:
-        """注册工具"""
         self._tools[tool.name] = tool
-    
+
     def get(self, name: str) -> BaseMCPTool | None:
-        """获取工具"""
         return self._tools.get(name)
+
+    def iter_tools(self) -> list[BaseMCPTool]:
+        return list(self._tools.values())
 
     def _filter_tools(
         self,
@@ -98,76 +133,51 @@ class MCPToolRegistry:
     ) -> list[BaseMCPTool]:
         tools = list(self._tools.values())
         if category:
-            tools = [tool for tool in tools if tool.category == category]
+            tools = [t for t in tools if t.category == category]
         if allowed_names is not None:
             allowed_set = set(allowed_names)
-            tools = [tool for tool in tools if tool.name in allowed_set]
+            tools = [t for t in tools if t.name in allowed_set]
         return tools
 
     def list_tools(
-        self,
-        category: MCPToolCategory | None = None,
+        self, category: MCPToolCategory | None = None,
         allowed_names: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """列出所有工具"""
-        tools = self._filter_tools(category=category, allowed_names=allowed_names)
-        return [t.get_info() for t in tools]
+        return [t.get_info() for t in self._filter_tools(category, allowed_names)]
 
-    def list_by_category(self, allowed_names: list[str] | None = None) -> dict[str, list[dict[str, Any]]]:
-        """按分类列出工具"""
+    def list_by_category(
+        self, allowed_names: list[str] | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
         result: dict[str, list[dict[str, Any]]] = {}
         for tool in self._filter_tools(allowed_names=allowed_names):
             cat = tool.category.value
-            if cat not in result:
-                result[cat] = []
-            result[cat].append(tool.get_info())
+            result.setdefault(cat, []).append(tool.get_info())
         return result
 
-    def get_openai_functions(self, allowed_names: list[str] | None = None) -> list[dict[str, Any]]:
-        """获取所有工具的OpenAI function calling格式"""
+    def get_openai_functions(
+        self, allowed_names: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         return [
-            tool.to_openai_function()
-            for tool in self._filter_tools(allowed_names=allowed_names)
-            if getattr(tool, "expose_to_llm", True)
+            t.to_openai_function()
+            for t in self._filter_tools(allowed_names=allowed_names)
+            if getattr(t, "expose_to_llm", True)
         ]
 
-    def iter_tools(self) -> list[BaseMCPTool]:
-        """返回所有已注册工具"""
-        return list(self._tools.values())
-
     async def execute(self, tool_name: str, **kwargs: Any) -> MCPToolResult:
-        """执行工具"""
         tool = self.get(tool_name)
         if not tool:
             return MCPToolResult(success=False, error=f"Tool not found: {tool_name}")
 
-        db: AsyncSession | None = kwargs.pop("db", None)
-        user_id: int | None = kwargs.pop("user_id", None)
-        system_extra: dict[str, Any] = {}
-        for key in ("websocket", "chat_session", "session_id"):
-            if key in kwargs:
-                system_extra[key] = kwargs.pop(key)
-
-        if tool.args_schema is not None:
-            try:
-                args = tool.args_schema.model_validate(kwargs)
-            except Exception as e:
-                return MCPToolResult(success=False, error=str(e))
-            call_kwargs = {"args": args}
-        else:
-            call_kwargs = dict(kwargs)
-
-        call_kwargs.update(system_extra)
-
         t0 = time.monotonic()
         try:
-            result = await tool.execute(db=db, user_id=user_id, **call_kwargs)
+            result = await tool.execute(**kwargs)
             elapsed = (time.monotonic() - t0) * 1000
             logger.info("tool=%s elapsed=%.0fms success=%s", tool_name, elapsed, result.success)
             return result
         except Exception as e:
             elapsed = (time.monotonic() - t0) * 1000
             logger.error("tool=%s elapsed=%.0fms error=%s", tool_name, elapsed, e)
+            db = kwargs.get("db")
             if isinstance(db, AsyncSession):
                 try:
                     await db.rollback()
