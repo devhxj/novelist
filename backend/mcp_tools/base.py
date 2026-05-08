@@ -55,16 +55,9 @@ class BaseMCPTool(ABC):
 
     # ── 模板方法 ──────────────────────────────────────
 
-    async def execute(self, **kwargs: Any) -> MCPToolResult:
+    async def execute(self, *, db: AsyncSession, user_id: int,
+                      novel_id: int, **tool_params: Any) -> MCPToolResult:
         """统一入口：鉴权 → 校验 → 分发 _execute()"""
-        db: AsyncSession | None = kwargs.pop("db", None)
-        user_id: int | None = kwargs.pop("user_id", None)
-        novel_id: int | None = kwargs.pop("novel_id", None)
-
-        if db is None or user_id is None or novel_id is None:
-            return MCPToolResult(
-                success=False, error="内部错误：缺少 db / user_id / novel_id"
-            )
 
         from core.permissions import verify_novel_ownership
         if not await verify_novel_ownership(db, novel_id, user_id):
@@ -79,11 +72,11 @@ class BaseMCPTool(ABC):
 
         system_extra: dict[str, Any] = {}
         for key in ("websocket", "chat_session", "session_id"):
-            if key in kwargs:
-                system_extra[key] = kwargs.pop(key)
+            if key in tool_params:
+                system_extra[key] = tool_params.pop(key)
 
         try:
-            args = self.args_schema.model_validate(kwargs)
+            args = self.args_schema.model_validate(tool_params)
         except Exception as e:
             return MCPToolResult(success=False, error=str(e))
 
@@ -168,24 +161,25 @@ class MCPToolRegistry:
             if getattr(t, "expose_to_llm", True)
         ]
 
-    async def execute(self, tool_name: str, **kwargs: Any) -> MCPToolResult:
+    async def execute(self, tool_name: str, *, db: AsyncSession,
+                      user_id: int, novel_id: int,
+                      **tool_params: Any) -> MCPToolResult:
         tool = self.get(tool_name)
         if not tool:
             return MCPToolResult(success=False, error=f"Tool not found: {tool_name}")
 
         t0 = time.monotonic()
         try:
-            result = await tool.execute(**kwargs)
+            result = await tool.execute(db=db, user_id=user_id,
+                                        novel_id=novel_id, **tool_params)
             elapsed = (time.monotonic() - t0) * 1000
             logger.info("tool=%s elapsed=%.0fms success=%s", tool_name, elapsed, result.success)
             return result
         except Exception as e:
             elapsed = (time.monotonic() - t0) * 1000
             logger.error("tool=%s elapsed=%.0fms error=%s", tool_name, elapsed, e)
-            db = kwargs.get("db")
-            if isinstance(db, AsyncSession):
-                try:
-                    await db.rollback()
-                except Exception:
-                    pass
+            try:
+                await db.rollback()
+            except Exception:
+                pass
             return MCPToolResult(success=False, error=str(e))
