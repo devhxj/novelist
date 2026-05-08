@@ -23,6 +23,8 @@
 - get_foreshadowing_status    → run_review(scope='foreshadowing_status') [统计信息]
 - run_full_consistency_check   → run_review(scope='full')
 """
+from pydantic import BaseModel, Field
+from typing import Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from datetime import datetime, timezone
@@ -33,12 +35,27 @@ from timeline.models import TimelineEntry, TimelineEntryCategory, TimelineEntryS
 from consistency.service import ConsistencyChecker
 
 
+class RunReviewArgs(BaseModel):
+    scope: Literal["character", "plot", "foreshadowing", "foreshadowing_status", "full"] = Field(
+        description=(
+            "检查范围："
+            "\ncharacter=角色一致性检查;"
+            "\nplot=情节逻辑检查;"
+            "\nforeshadowing=未回收伏笔列表(查的是TimelineEntry中category=foreshadowing的条目);"
+            "\nforeshadowing_status=伏笔统计(总数/解决率/状态分布/优先级分布);"
+            "\nfull=全面检查(character+plot+timeline+foreshadowing)"
+        )
+    )
+    chapter_ids: list[int] | None = Field(default=None, description="只检查指定章节（可选，不传则检查全部已完成章节）")
+    min_importance: int | None = Field(default=None, description="仅scope=foreshadowing时有效，筛选最低重要程度（1-5），默认不筛选")
+
+
 class RunReviewTool(BaseMCPTool):
     """统一审查工具"""
 
     name = "run_review"
     description = (
-        "执行小说审查，支持多种检查类型。无需传novel_id，系统会注入当前小说ID。"
+        "执行小说审查，支持多种检查类型。"
         "\n适用场景："
         "\n- 写完几章后检查角色/情节是否前后一致 → scope='character' 或 'plot'"
         "\n- 查看还有哪些伏笔(foreshadowing)没有回收 → scope='foreshadowing'"
@@ -48,61 +65,33 @@ class RunReviewTool(BaseMCPTool):
         "与'叙事弧线'(StoryArc)是不同层级的概念。"
     )
     category = MCPToolCategory.CONSISTENCY_CHECK
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "scope": {
-                "type": "string",
-                "enum": ["character", "plot", "foreshadowing", "foreshadowing_status", "full"],
-                "description": (
-                    "检查范围："
-                    "\ncharacter=角色一致性检查;"
-                    "\nplot=情节逻辑检查;"
-                    "\nforeshadowing=未回收伏笔列表(查的是TimelineEntry中category=foreshadowing的条目);"
-                    "\nforeshadowing_status=伏笔统计(总数/解决率/状态分布/优先级分布);"
-                    "\nfull=全面检查(character+plot+timeline+foreshadowing)"
-                )
-            },
-            "chapter_ids": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "description": "只检查指定章节（可选，不传则检查全部已完成章节）"
-            },
-            "min_importance": {
-                "type": "integer",
-                "description": "仅scope=foreshadowing时有效，筛选最低重要程度（1-5），默认不筛选"
-            },
-        },
-        "required": ["scope"]
-    }
+    args_schema = RunReviewArgs
 
     async def _execute(
         self,
+        args: RunReviewArgs,
+        *,
         db: AsyncSession,
-        novel_id: int,
         user_id: int,
-        scope: str,
-        chapter_ids: list[int] | None = None,
-        min_importance: int | None = None,
-        **kwargs
+        novel_id: int,
     ) -> MCPToolResult:
         try:
-            if scope == "foreshadowing":
-                return await self._query_foreshadowing_list(db, novel_id, min_importance)
+            if args.scope == "foreshadowing":
+                return await self._query_foreshadowing_list(db, novel_id, args.min_importance)
 
-            if scope == "foreshadowing_status":
+            if args.scope == "foreshadowing_status":
                 return await self._query_foreshadowing_stats(db, novel_id)
 
             checker = ConsistencyChecker(db, novel_id)
 
             query = select(Chapter).where(Chapter.novel_id == novel_id, Chapter.status == "completed")
-            if chapter_ids:
-                query = query.where(Chapter.id.in_(chapter_ids))
+            if args.chapter_ids:
+                query = query.where(Chapter.id.in_(args.chapter_ids))
             query = query.order_by(Chapter.chapter_number)
             result = await db.execute(query)
             chapters = result.scalars().all()
 
-            if scope == "character":
+            if args.scope == "character":
                 issues = await checker.check_character_consistency(chapters)
                 return MCPToolResult(
                     success=True,
@@ -116,7 +105,7 @@ class RunReviewTool(BaseMCPTool):
                     metadata={"tool": self.name, "novel_id": novel_id}
                 )
 
-            elif scope == "plot":
+            elif args.scope == "plot":
                 issues = await checker.check_plot_consistency(chapters)
                 return MCPToolResult(
                     success=True,
@@ -130,12 +119,12 @@ class RunReviewTool(BaseMCPTool):
                     metadata={"tool": self.name, "novel_id": novel_id}
                 )
 
-            elif scope == "full":
+            elif args.scope == "full":
                 check_result = await checker.check_all(
-                    chapter_ids=chapter_ids,
+                    chapter_ids=args.chapter_ids,
                     check_types=["character", "plot", "timeline", "foreshadowing"]
                 )
-                fs_data = await self._query_foreshadowing_list(db, novel_id, min_importance, return_raw=True)
+                fs_data = await self._query_foreshadowing_list(db, novel_id, args.min_importance, return_raw=True)
                 check_result["unresolved_plots"] = fs_data.get("unresolved_plots", [])
                 stats_data = await self._query_foreshadowing_stats(db, novel_id, return_raw=True)
                 check_result["foreshadowing_statistics"] = stats_data
@@ -143,7 +132,7 @@ class RunReviewTool(BaseMCPTool):
                 return MCPToolResult(success=True, data=check_result, metadata={"tool": self.name, "novel_id": novel_id})
 
             else:
-                return MCPToolResult(success=False, error=f"不支持的scope: {scope}")
+                return MCPToolResult(success=False, error=f"不支持的scope: {args.scope}")
 
         except Exception as e:
             return MCPToolResult(success=False, error=f"审查失败: {str(e)}")

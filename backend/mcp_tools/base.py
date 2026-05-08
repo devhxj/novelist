@@ -77,12 +77,17 @@ class BaseMCPTool(ABC):
                 success=False, error=f"Tool {self.name}: args_schema not set"
             )
 
+        system_extra: dict[str, Any] = {}
+        for key in ("websocket", "chat_session", "session_id"):
+            if key in kwargs:
+                system_extra[key] = kwargs.pop(key)
+
         try:
             args = self.args_schema.model_validate(kwargs)
         except Exception as e:
             return MCPToolResult(success=False, error=str(e))
 
-        return await self._execute(args=args, db=db, user_id=user_id, novel_id=novel_id)
+        return await self._execute(args=args, db=db, user_id=user_id, novel_id=novel_id, **system_extra)
 
     @abstractmethod
     async def _execute(self, *args: Any, **kwargs: Any) -> MCPToolResult:
