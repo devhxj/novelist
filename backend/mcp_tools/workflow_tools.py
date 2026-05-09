@@ -162,6 +162,5 @@ class CreateOutlineTool(BaseMCPTool):
             logger.error(f"Create outline failed: {e}", exc_info=True)
             return MCPToolResult(success=False, error=str(e))
 
-    @classmethod
-    def register_all(cls, registry: MCPToolRegistry):
-        registry.register(cls())
+def register_workflow_tools(registry: MCPToolRegistry):
+    registry.register(CreateOutlineTool())

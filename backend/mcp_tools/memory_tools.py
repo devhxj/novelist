@@ -57,11 +57,6 @@ class SearchStoryMemoryTool(BaseMCPTool):
             return MCPToolResult(success=False, error=f"Search failed: {str(e)}")
 
 
-class MemoryRetrievalTools:
-    """记忆检索工具集合"""
-    
-    @staticmethod
-    def register_all(registry: MCPToolRegistry) -> None:
-        """注册所有记忆检索工具"""
-        registry.register(SearchStoryMemoryTool())
+def register_memory_tools(registry: MCPToolRegistry) -> None:
+    registry.register(SearchStoryMemoryTool())
 

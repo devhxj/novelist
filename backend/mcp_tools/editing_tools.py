@@ -446,11 +446,6 @@ class RunSubagentTool(BaseMCPTool):
 
 
 
-class EditingTools:
-    """编辑工具集合 - 只包含AI可调用的工具"""
-    
-    @staticmethod
-    def register_all(registry: MCPToolRegistry) -> None:
-        """注册所有编辑工具（不包括accept/reject，那是用户操作）"""
-        registry.register(EditChapterTool())
-        registry.register(RunSubagentTool())
+def register_editing_tools(registry: MCPToolRegistry) -> None:
+    registry.register(EditChapterTool())
+    registry.register(RunSubagentTool())

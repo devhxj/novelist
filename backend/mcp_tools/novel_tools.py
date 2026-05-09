@@ -619,15 +619,10 @@ class CreateNewChapterTool(BaseMCPTool):
         )
 
 
-class NovelManagementTools:
-    """小说管理工具集合"""
-    
-    @staticmethod
-    def register_all(registry: MCPToolRegistry) -> None:
-        """注册所有小说管理工具"""
-        registry.register(GetNovelInfoTool())
-        registry.register(GetChapterListTool())
-        registry.register(GetChapterContentTool())
-        registry.register(GetCreativeProfileTool())
-        registry.register(UpdateCreativeProfileTool())
-        registry.register(CreateNewChapterTool())
+def register_novel_tools(registry: MCPToolRegistry) -> None:
+    registry.register(GetNovelInfoTool())
+    registry.register(GetChapterListTool())
+    registry.register(GetChapterContentTool())
+    registry.register(GetCreativeProfileTool())
+    registry.register(UpdateCreativeProfileTool())
+    registry.register(CreateNewChapterTool())

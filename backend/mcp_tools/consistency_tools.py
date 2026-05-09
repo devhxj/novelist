@@ -237,9 +237,5 @@ class RunReviewTool(BaseMCPTool):
         return MCPToolResult(success=True, data=stats, metadata={"tool": self.name, "novel_id": novel_id})
 
 
-class ConsistencyCheckTools:
-    """审查工具集合 — 只注册 RunReviewTool"""
-
-    @staticmethod
-    def register_all(registry: MCPToolRegistry) -> None:
-        registry.register(RunReviewTool())
+def register_consistency_tools(registry: MCPToolRegistry) -> None:
+    registry.register(RunReviewTool())
