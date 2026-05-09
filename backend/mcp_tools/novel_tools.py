@@ -14,7 +14,7 @@ from typing import Literal
 from novels.models import Novel, NovelCreativeProfile
 from chapters.models import Chapter
 from text.utils import count_words
-from .utils import _invalidate_chapter_cache
+from .utils import _invalidate_chapter_cache, _invalidate_novel_cache
 
 
 class GetNovelInfoArgs(BaseModel):
@@ -506,10 +506,7 @@ class UpdateCreativeProfileTool(BaseMCPTool):
         await db.commit()
         await db.refresh(profile)
 
-        from core.redis_service import redis_service
-        await redis_service.clear_pattern(f"novel:{novel_id}:*")
-        from context.context_builder import context_cache
-        context_cache.invalidate_novel(novel_id)
+        await _invalidate_novel_cache(novel_id)
 
         return MCPToolResult(
             success=True,
