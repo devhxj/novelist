@@ -2,11 +2,15 @@
 人物关系MCP工具集
 供AI调用的核心工具：创建更新演变关系
 """
+import logging
 
 from pydantic import BaseModel, Field
 from typing import Literal
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
+
+logger = logging.getLogger(__name__)
+
 from characters.schemas import (
     CharacterRelationCreate,
     CharacterRelationUpdate,
@@ -112,7 +116,7 @@ class GetCharactersTool(BaseMCPTool):
                             "status": rel.status,
                         })
             except Exception:
-                pass
+                logger.warning("Failed to load character relations", exc_info=True)
 
         recent_events_summary = ""
         if include_recent_events and characters:
@@ -137,6 +141,7 @@ class GetCharactersTool(BaseMCPTool):
                 else:
                     recent_events_summary = "暂无追踪记录。"
             except Exception:
+                logger.warning("Failed to load recent timeline events", exc_info=True)
                 recent_events_summary = ""
 
         return MCPToolResult(
@@ -329,11 +334,6 @@ class UpdateCharacterTool(BaseMCPTool):
             },
             metadata={"tool": self.name, "novel_id": novel_id, "character_id": args.character_id}
         )
-       
-
-
-
-
 
 RelationTypeEnum = Literal[
     "ally", "enemy", "lover", "family", "mentor", "student", "rival", "acquaintance",

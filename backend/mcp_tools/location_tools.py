@@ -5,7 +5,7 @@
 from pydantic import BaseModel, Field
 from typing import Literal
 
-from .base import BaseMCPTool, MCPToolResult, MCPToolCategory
+from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from .utils import _invalidate_novel_cache
 
 LocationTypeEnum = Literal[
@@ -262,7 +262,7 @@ class DeleteLocationTool(BaseMCPTool):
         )
 
 
-def register_location_tools(registry) -> None:
+def register_location_tools(registry: MCPToolRegistry) -> None:
     registry.register(GetLocationsTool())
     registry.register(CreateLocationTool())
     registry.register(UpdateLocationTool())
