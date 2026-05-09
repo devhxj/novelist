@@ -118,6 +118,10 @@ Vite + React 19 + TypeScript + Ant Design 6 + Zustand + Monaco Editor.
 Required: `DATABASE_URL` (MySQL), `DEEPSEEK_API_KEY`, `SECRET_KEY` (JWT).
 Optional: `REDIS_URL` (cache/pub-sub, degrades gracefully), `OPENAI_API_KEY`, `GLM_API_KEY`.
 
+## Module Rules
+
+If a module directory contains a `rules.md` file (e.g., `mcp_tools/rules.md`), you **must** read it before modifying any code in that directory. These files define conventions, patterns, and constraints that are not enforced by the linter.
+
 ## Coding Standards
 
 ### Type Annotations (Python)

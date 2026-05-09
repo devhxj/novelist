@@ -24,8 +24,6 @@ from rag.router import router as rag_router
 from agents.router import router as agents_router
 from consistency.router import router as consistency_router
 from story_arcs.router import router as story_arcs_router
-from mcp_tools.router import router as mcp_router
-from mcp_tools.server import get_mcp_transport
 from chat.ws_chat import router as ws_chat_router
 from generation.router import router as generation_router
 from sessions.router import router as sessions_router
@@ -177,13 +175,11 @@ app.include_router(rag_router, prefix="/api/v1")
 app.include_router(agents_router, prefix="/api/v1")
 app.include_router(consistency_router, prefix="/api/v1")
 app.include_router(story_arcs_router, prefix="/api/v1")
-app.include_router(mcp_router, prefix="/api/v1")
 app.include_router(generation_router, prefix="/api/v1")
 app.include_router(sessions_router, prefix="/api/v1")
 app.include_router(editor_router, prefix="/api/v1")
 app.include_router(timeline_router, prefix="/api/v1")
 app.include_router(ws_chat_router)
-app.mount("/mcp", get_mcp_transport())
 
 
 @app.get("/")

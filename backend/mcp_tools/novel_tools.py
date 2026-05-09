@@ -9,76 +9,16 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
+from pydantic import BaseModel, Field
+from typing import Literal
 from novels.models import Novel, NovelCreativeProfile
 from chapters.models import Chapter
 from text.utils import count_words
-from characters.models import Character
-from core.permissions import verify_novel_ownership
-from rag.vector_store import vector_store, VectorStoreError
+from .utils import _invalidate_chapter_cache, _invalidate_novel_cache
 
 
-async def _invalidate_novel_cache(novel_id: int) -> None:
-    try:
-        from core.redis_service import redis_service
-        from context.context_builder import context_cache
-        await redis_service.clear_pattern(f"novel:{novel_id}:*")
-        context_cache.invalidate_novel(novel_id)
-    except Exception:
-        pass
-
-
-async def _invalidate_character_cache(novel_id: int, character_id: int | None = None) -> None:
-    try:
-        from core.redis_service import redis_service
-        if character_id:
-            await redis_service.delete(f"character:{character_id}:detail")
-        await redis_service.clear_pattern(f"novel:{novel_id}:characters:*")
-    except Exception:
-        pass
-    await _invalidate_novel_cache(novel_id)
-
-
-async def _invalidate_chapter_cache(novel_id: int, chapter_id: int | None = None) -> None:
-    try:
-        from core.redis_service import redis_service
-        if chapter_id:
-            await redis_service.delete(f"chapter:{chapter_id}:detail")
-        await redis_service.clear_pattern(f"novel:{novel_id}:chapters:*")
-    except Exception:
-        pass
-    await _invalidate_novel_cache(novel_id)
-
-
-def _build_creative_profile_summary(
-    author_intent: str | None = None,
-    preferred_tone: str | None = None,
-    scene_planning_notes: str | None = None,
-    must_keep: list[str] | None = None,
-    must_avoid: list[str] | None = None,
-    long_term_goals: list[str] | None = None
-) -> str:
-    parts: list[str] = []
-    if author_intent:
-        parts.append(f"长期意图：{author_intent.strip()}")
-    if preferred_tone:
-        parts.append(f"默认语气：{preferred_tone.strip()}")
-    if scene_planning_notes:
-        parts.append(f"规划备注：{scene_planning_notes.strip()}")
-    if must_keep:
-        parts.append("必须保留：" + "；".join(str(item).strip() for item in must_keep[:5] if str(item).strip()))
-    if must_avoid:
-        parts.append("必须避免：" + "；".join(str(item).strip() for item in must_avoid[:5] if str(item).strip()))
-    if long_term_goals:
-        parts.append("长线目标：" + "；".join(str(item).strip() for item in long_term_goals[:5] if str(item).strip()))
-    return "\n".join(parts[:6])
-
-
-def _attach_profile_summary(extra_metadata: dict[str, Any] | None, summary: str) -> dict[str, Any]:
-    merged = dict(extra_metadata or {})
-    if summary.strip():
-        merged["llm_brief"] = summary.strip()
-    return merged
-
+class GetNovelInfoArgs(BaseModel):
+    mode: Literal["summary", "progress"] = Field(default="summary", description="查询模式：summary=整体摘要，progress=写作进度")
 
 class GetNovelInfoTool(BaseMCPTool):
     """获取小说信息（摘要或进度）"""
@@ -88,33 +28,19 @@ class GetNovelInfoTool(BaseMCPTool):
         "获取小说信息，支持两种模式："
         "\n- summary: 获取小说整体摘要（标题、类型、描述、状态、章节数、字数、角色数等）"
         "\n- progress: 获取小说写作进度（章节完成情况、字数统计、最新章节等）"
-        "\n无需传novel_id，系统会注入当前小说ID。"
     )
     category = MCPToolCategory.NOVEL_MANAGEMENT
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "mode": {
-                "type": "string",
-                "enum": ["summary", "progress"],
-                "description": "查询模式：summary=整体摘要，progress=写作进度"
-            }
-        },
-        "required": ["mode"]
-    }
+    args_schema = GetNovelInfoArgs
 
-    async def execute(
+    async def _execute(
         self,
+        args: GetNovelInfoArgs,
+        *,
         db: AsyncSession,
-        novel_id: int,
         user_id: int,
-        mode: str = "summary",
-        **kwargs
+        novel_id: int,
+        **extra,
     ) -> MCPToolResult:
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
         result = await db.execute(
             select(Novel)
             .options(selectinload(Novel.chapters), selectinload(Novel.characters))
@@ -127,7 +53,7 @@ class GetNovelInfoTool(BaseMCPTool):
         total_words = sum(len(ch.content or "") for ch in chapters)
         completed_chapters = len([ch for ch in chapters if ch.status == "completed"])
 
-        if mode == "progress":
+        if args.mode == "progress":
             total_chapters = len(chapters)
             draft_chapters = total_chapters - completed_chapters
             avg_words_per_chapter = total_words / total_chapters if total_chapters > 0 else 0
@@ -179,66 +105,46 @@ class GetNovelInfoTool(BaseMCPTool):
         return MCPToolResult(
             success=True,
             data=data,
-            metadata={"tool": self.name, "novel_id": novel_id, "mode": mode}
+            metadata={"tool": self.name, "novel_id": novel_id, "mode": args.mode}
         )
 
+
+class GetChapterListArgs(BaseModel):
+    status: Literal["draft", "completed"] | None = Field(default=None, description="章节状态筛选（可选）")
+    page: int = Field(default=1, description="页码")
+    page_size: int = Field(default=20, description="每页数量")
 
 class GetChapterListTool(BaseMCPTool):
     """获取章节列表"""
     
     name = "get_chapter_list"
-    description = "获取小说的章节列表，支持分页和状态筛选。无需传novel_id，系统会注入当前小说ID。返回可用于 edit_chapter 的 chapter_id。"
+    description = "获取小说的章节列表，支持分页和状态筛选。返回可用于 edit_chapter 的 chapter_id。"
     category = MCPToolCategory.NOVEL_MANAGEMENT
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "status": {
-                "type": "string",
-                "enum": ["draft", "completed"],
-                "description": "章节状态筛选（可选）"
-            },
-            "page": {
-                "type": "integer",
-                "default": 1,
-                "description": "页码"
-            },
-            "page_size": {
-                "type": "integer",
-                "default": 20,
-                "description": "每页数量"
-            }
-        },
-        "required": []
-    }
+    args_schema = GetChapterListArgs
     
-    async def execute(
+    async def _execute(
         self,
+        args: GetChapterListArgs,
+        *,
         db: AsyncSession,
-        novel_id: int,
         user_id: int,
-        status: str | None = None,
-        page: int = 1,
-        page_size: int = 20,
-        **kwargs
+        novel_id: int,
+        **extra,
     ) -> MCPToolResult:
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-        
         query = select(Chapter).where(Chapter.novel_id == novel_id)
-        
-        if status:
-            query = query.filter(Chapter.status == status)
-        
+
+        if args.status:
+            query = query.filter(Chapter.status == args.status)
+
         from sqlalchemy import func
         count_query = select(func.count()).select_from(query.subquery())
         total_result = await db.execute(count_query)
         total = total_result.scalar()
-        
-        query = query.order_by(Chapter.chapter_number).offset((page - 1) * page_size).limit(page_size)
+
+        query = query.order_by(Chapter.chapter_number).offset((args.page - 1) * args.page_size).limit(args.page_size)
         result = await db.execute(query)
         chapters = result.scalars().all()
-        
+
         items = [
             {
                 "id": ch.id,
@@ -252,19 +158,25 @@ class GetChapterListTool(BaseMCPTool):
             }
             for ch in chapters
         ]
-        
+
         return MCPToolResult(
             success=True,
             data={
                 "items": items,
                 "total": total,
-                "page": page,
-                "page_size": page_size,
-                "total_pages": (total + page_size - 1) // page_size
+                "page": args.page,
+                "page_size": args.page_size,
+                "total_pages": (total + args.page_size - 1) // args.page_size
             },
             metadata={"tool": self.name, "novel_id": novel_id}
         )
 
+
+class GetChapterContentArgs(BaseModel):
+    chapter_id: int | None = Field(default=None, description="章节ID（可选，不提供则返回第一章）")
+    chapter_number: int | None = Field(default=None, description="章节号（可选）")
+    include_summary: bool = Field(default=True, description="是否包含摘要")
+    include_lines: bool = Field(default=False, description="是否返回带行号的行数组（用于按行号编辑）")
 
 class GetChapterContentTool(BaseMCPTool):
     """获取章节内容"""
@@ -272,67 +184,38 @@ class GetChapterContentTool(BaseMCPTool):
     name = "get_chapter_content"
     description = "获取指定章节的完整内容。可以通过章节号或章节ID获取。如果不提供chapter_id，则返回第一章的内容。"
     category = MCPToolCategory.NOVEL_MANAGEMENT
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "chapter_id": {
-                "type": "integer",
-                "description": "章节ID（可选，不提供则返回第一章）"
-            },
-            "chapter_number": {
-                "type": "integer",
-                "description": "章节号（可选）"
-            },
-            "include_summary": {
-                "type": "boolean",
-                "default": True,
-                "description": "是否包含摘要"
-            },
-            "include_lines": {
-                "type": "boolean",
-                "default": False,
-                "description": "是否返回带行号的行数组（用于按行号编辑）"
-            }
-        },
-        "required": []
-    }
+    args_schema = GetChapterContentArgs
 
-    async def execute(
+    async def _execute(
         self,
+        args: GetChapterContentArgs,
+        *,
         db: AsyncSession,
-        novel_id: int,
         user_id: int,
-        chapter_id: int | None = None,
-        chapter_number: int | None = None,
-        include_summary: bool = True,
-        include_lines: bool = False,
-        **kwargs
+        novel_id: int,
+        **extra,
     ) -> MCPToolResult:
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-        
-        if not chapter_id and not chapter_number:
+        if not args.chapter_id and not args.chapter_number:
             result = await db.execute(
                 select(Chapter).where(Chapter.novel_id == novel_id).order_by(Chapter.chapter_number).limit(1)
             )
             chapter = result.scalar_one_or_none()
         else:
             query = select(Chapter).where(Chapter.novel_id == novel_id)
-            if chapter_id:
-                query = query.where(Chapter.id == chapter_id)
-            elif chapter_number:
-                query = query.where(Chapter.chapter_number == chapter_number)
-            
+            if args.chapter_id:
+                query = query.where(Chapter.id == args.chapter_id)
+            elif args.chapter_number:
+                query = query.where(Chapter.chapter_number == args.chapter_number)
+
             result = await db.execute(query)
             chapter = result.scalar_one_or_none()
-        
+
         if not chapter:
             return MCPToolResult(
                 success=False,
                 error=f"Chapter not found"
             )
-        
+
         data = {
             "id": chapter.id,
             "novel_id": chapter.novel_id,
@@ -344,50 +227,43 @@ class GetChapterContentTool(BaseMCPTool):
             "created_at": chapter.created_at.isoformat() if chapter.created_at else None,
             "updated_at": chapter.updated_at.isoformat() if chapter.updated_at else None
         }
-        
-        if include_summary:
+
+        if args.include_summary:
             data["summary"] = chapter.summary
 
-        if include_lines:
-            content = chapter.content or ""
-            lines = content.splitlines()
+        if args.include_lines:
+            chapter_text = chapter.content or ""
+            lines = chapter_text.splitlines()
             data["lines"] = [{"line_number": i + 1, "content": line} for i, line in enumerate(lines)]
             data["line_count"] = len(lines)
 
         return MCPToolResult(
             success=True,
             data=data,
-            metadata={"tool": self.name, "chapter_id": chapter_id}
+            metadata={"tool": self.name, "chapter_id": args.chapter_id}
         )
 
+
+class GetCreativeProfileArgs(BaseModel):
+    pass
 
 class GetCreativeProfileTool(BaseMCPTool):
     """获取作者创作配置（双层：全局+单书）"""
 
     name = "get_creative_profile"
-    description = "获取当前小说的作者创作配置，包含两层：(1) 作者全局偏好 — 跨所有书的写作习惯；(2) 本书的专属偏好。无需传novel_id，系统会注入当前小说ID。当准备生成章节、规划情节、审阅方向时，应优先调用此工具确认长期规则。"
+    description = "获取当前小说的作者创作配置，包含两层：(1) 作者全局偏好 — 跨所有书的写作习惯；(2) 本书的专属偏好。当准备生成章节、规划情节、审阅方向时，应优先调用此工具确认长期规则。"
     category = MCPToolCategory.NOVEL_MANAGEMENT
-    parameters_schema = {
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
+    args_schema = GetCreativeProfileArgs
 
-    async def execute(
+    async def _execute(
         self,
+        args: GetCreativeProfileArgs,
+        *,
         db: AsyncSession,
-        novel_id: int,
         user_id: int,
-        **kwargs
+        novel_id: int,
+        **extra,
     ) -> MCPToolResult:
-        novel_id = novel_id or kwargs.get("novel_id", 0)
-        if not novel_id:
-            return MCPToolResult(success=False, error="novel_id is required")
-
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
         result = await db.execute(
             select(NovelCreativeProfile).where(NovelCreativeProfile.novel_id == novel_id)
         )
@@ -475,12 +351,21 @@ class GetCreativeProfileTool(BaseMCPTool):
         )
 
 
+class UpdateCreativeProfileArgs(BaseModel):
+    author_intent: str | None = Field(default=None, description="作者长期创作意图（本书专属）")
+    preferred_tone: str | None = Field(default=None, description="默认语气/文风偏好（本书专属）")
+    global_writing_style: str | None = Field(default=None, description="全局写作风格习惯（跨所有书生效）")
+    must_keep: list[str] | None = Field(default=None, description="长期必须保留、必须遵守的规则（上限15条，本书专属）")
+    must_avoid: list[str] | None = Field(default=None, description="长期必须避免的内容（上限15条，本书专属）")
+    long_term_goals: list[str] | None = Field(default=None, description="长线创作目标（本书专属）")
+    merge_with_existing: bool = Field(default=True, description="是否与现有配置增量合并；默认 true")
+
 class UpdateCreativeProfileTool(BaseMCPTool):
     """更新作者创作配置（双层 + 防膨胀）"""
 
     name = "update_creative_profile"
     description = (
-        "更新当前小说的作者创作配置。无需传novel_id，系统会注入当前小说ID。"
+        "更新当前小说的作者创作配置。"
         "\n⚠️ 重要规则："
         "\n- must_keep 和 must_avoid 每类最多 15 条，超出时自动合并语义相近的条目。保持简洁，不要无限追加。"
         "\n- 如果是'这本书的风格/目标/禁忌'，更新到本书偏好；如果是'我个人的写作习惯'，考虑是否应设为全局规则。"
@@ -489,44 +374,7 @@ class UpdateCreativeProfileTool(BaseMCPTool):
         "\n建议先调用 get_creative_profile 确认当前状态再修改。"
     )
     category = MCPToolCategory.NOVEL_MANAGEMENT
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "author_intent": {
-                "type": "string",
-                "description": "作者长期创作意图（本书专属）"
-            },
-            "preferred_tone": {
-                "type": "string",
-                "description": "默认语气/文风偏好（本书专属）"
-            },
-            "global_writing_style": {
-                "type": "string",
-                "description": "全局写作风格习惯（跨所有书生效）"
-            },
-            "must_keep": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "长期必须保留、必须遵守的规则（上限15条，本书专属）"
-            },
-            "must_avoid": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "长期必须避免的内容（上限15条，本书专属）"
-            },
-            "long_term_goals": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "长线创作目标（本书专属）"
-            },
-            "merge_with_existing": {
-                "type": "boolean",
-                "default": True,
-                "description": "是否与现有配置增量合并；默认 true"
-            }
-        },
-        "required": []
-    }
+    args_schema = UpdateCreativeProfileArgs
 
     MAX_LIST_ITEMS = 15
 
@@ -559,32 +407,51 @@ class UpdateCreativeProfileTool(BaseMCPTool):
         merged.update(incoming)
         return merged
 
-    async def execute(
-        self,
-        db: AsyncSession,
-        novel_id: int,
-        user_id: int,
+    @staticmethod
+    def _build_profile_summary(
         author_intent: str | None = None,
         preferred_tone: str | None = None,
-        global_writing_style: str | None = None,
+        scene_planning_notes: str | None = None,
         must_keep: list[str] | None = None,
         must_avoid: list[str] | None = None,
         long_term_goals: list[str] | None = None,
-        merge_with_existing: bool = True,
-        **kwargs
+    ) -> str:
+        parts: list[str] = []
+        if author_intent:
+            parts.append(f"长期意图：{author_intent.strip()}")
+        if preferred_tone:
+            parts.append(f"默认语气：{preferred_tone.strip()}")
+        if scene_planning_notes:
+            parts.append(f"规划备注：{scene_planning_notes.strip()}")
+        if must_keep:
+            parts.append("必须保留：" + "；".join(str(item).strip() for item in must_keep[:5] if str(item).strip()))
+        if must_avoid:
+            parts.append("必须避免：" + "；".join(str(item).strip() for item in must_avoid[:5] if str(item).strip()))
+        if long_term_goals:
+            parts.append("长线目标：" + "；".join(str(item).strip() for item in long_term_goals[:5] if str(item).strip()))
+        return "\n".join(parts[:6])
+
+    @staticmethod
+    def _attach_profile_summary(extra_metadata: dict[str, Any] | None, summary: str) -> dict[str, Any]:
+        merged = dict(extra_metadata or {})
+        if summary.strip():
+            merged["llm_brief"] = summary.strip()
+        return merged
+
+    async def _execute(
+        self,
+        args: UpdateCreativeProfileArgs,
+        *,
+        db: AsyncSession,
+        user_id: int,
+        novel_id: int,
+        **extra,
     ) -> MCPToolResult:
-        novel_id = novel_id or kwargs.get("novel_id", 0)
-        if not novel_id:
-            return MCPToolResult(success=False, error="novel_id is required")
 
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
+        must_keep_limited = self._enforce_limit(args.must_keep)
+        must_avoid_limited = self._enforce_limit(args.must_avoid)
 
-        must_keep_limited = self._enforce_limit(must_keep)
-        must_avoid_limited = self._enforce_limit(must_avoid)
-
-        if global_writing_style and user_id:
+        if args.global_writing_style and user_id:
             from novels.models import UserCreativeProfile
             up_result = await db.execute(
                 select(UserCreativeProfile).where(UserCreativeProfile.user_id == user_id)
@@ -593,7 +460,7 @@ class UpdateCreativeProfileTool(BaseMCPTool):
             if not user_profile:
                 user_profile = UserCreativeProfile(user_id=user_id)
                 db.add(user_profile)
-            user_profile.global_writing_style = global_writing_style
+            user_profile.global_writing_style = args.global_writing_style
 
         result = await db.execute(
             select(NovelCreativeProfile).where(NovelCreativeProfile.novel_id == novel_id)
@@ -606,27 +473,27 @@ class UpdateCreativeProfileTool(BaseMCPTool):
             )
             db.add(profile)
 
-        if author_intent is not None:
-            profile.author_intent = author_intent
-        if preferred_tone is not None:
-            profile.preferred_tone = preferred_tone
+        if args.author_intent is not None:
+            profile.author_intent = args.author_intent
+        if args.preferred_tone is not None:
+            profile.preferred_tone = args.preferred_tone
 
-        if merge_with_existing:
+        if args.merge_with_existing:
             profile.must_keep = self._merge_unique_list(profile.must_keep, must_keep_limited)
             profile.must_avoid = self._merge_unique_list(profile.must_avoid, must_avoid_limited)
-            profile.long_term_goals = self._merge_unique_list(profile.long_term_goals, long_term_goals)
+            profile.long_term_goals = self._merge_unique_list(profile.long_term_goals, args.long_term_goals)
         else:
             if must_keep_limited is not None:
                 profile.must_keep = self._merge_unique_list([], must_keep_limited)
             if must_avoid_limited is not None:
                 profile.must_avoid = self._merge_unique_list([], must_avoid_limited)
-            if long_term_goals is not None:
-                profile.long_term_goals = self._merge_unique_list([], long_term_goals)
+            if args.long_term_goals is not None:
+                profile.long_term_goals = self._merge_unique_list([], args.long_term_goals)
 
         profile.must_keep = self._enforce_limit(profile.must_keep)
         profile.must_avoid = self._enforce_limit(profile.must_avoid)
 
-        profile_summary = _build_creative_profile_summary(
+        profile_summary = self._build_profile_summary(
             author_intent=profile.author_intent,
             preferred_tone=profile.preferred_tone,
             scene_planning_notes=profile.scene_planning_notes,
@@ -634,15 +501,12 @@ class UpdateCreativeProfileTool(BaseMCPTool):
             must_avoid=profile.must_avoid or [],
             long_term_goals=profile.long_term_goals or []
         )
-        profile.extra_metadata = _attach_profile_summary(profile.extra_metadata, profile_summary)
+        profile.extra_metadata = self._attach_profile_summary(profile.extra_metadata, profile_summary)
 
         await db.commit()
         await db.refresh(profile)
 
-        from core.redis_service import redis_service
-        await redis_service.clear_pattern(f"novel:{novel_id}:*")
-        from context.context_builder import context_cache
-        context_cache.invalidate_novel(novel_id)
+        await _invalidate_novel_cache(novel_id)
 
         return MCPToolResult(
             success=True,
@@ -659,442 +523,36 @@ class UpdateCreativeProfileTool(BaseMCPTool):
                 "extra_metadata": profile.extra_metadata or {},
                 "profile_summary": profile_summary,
                 "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
-                "merge_with_existing": merge_with_existing
+                "merge_with_existing": args.merge_with_existing
             },
             metadata={"tool": self.name, "novel_id": novel_id}
         )
 
 
-class GetCharactersTool(BaseMCPTool):
-    """获取角色信息（列表/详情/关系网络）"""
-
-    name = "get_characters"
-    description = (
-        "获取当前小说的角色信息，支持三种模式："
-        "\n- list: 角色列表概览（含性格标签、关系概要、最近动态），参数: search, include_relations, include_recent_events"
-        "\n- detail: 单角色详细档案，参数: character_id(必填), include_memory(语义检索)"
-        "\n- network: 关系网络图，参数: character_id(可选,有=单角色,无=全局), include_inactive"
-        "\n无需传novel_id，系统会注入当前小说ID。"
-        "\n适用场景：写作前了解角色阵容、深入了解某个角色、查看人物关系网络。"
-    )
-    category = MCPToolCategory.NOVEL_MANAGEMENT
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "mode": {
-                "type": "string",
-                "enum": ["list", "detail", "network"],
-                "description": "查询模式：list=角色列表概览，detail=单角色详细档案，network=关系网络图"
-            },
-            "character_id": {
-                "type": "integer",
-                "description": "角色ID（detail模式必填，network模式可选）"
-            },
-            "search": {
-                "type": "string",
-                "description": "角色名搜索（list模式可选）"
-            },
-            "include_relations": {
-                "type": "boolean",
-                "default": True,
-                "description": "是否包含人物关系网络（list模式）"
-            },
-            "include_recent_events": {
-                "type": "boolean",
-                "default": True,
-                "description": "是否包含各角色的最近动态（list模式）"
-            },
-            "include_memory": {
-                "type": "boolean",
-                "default": False,
-                "description": "是否包含语义检索的相关内容片段（detail模式）"
-            },
-            "include_inactive": {
-                "type": "boolean",
-                "default": False,
-                "description": "是否包含已失效/休眠的关系（network模式）"
-            },
-        },
-        "required": ["mode"]
-    }
-
-    @staticmethod
-    def _extract_personality_summary(personality: dict[str, Any] | None) -> str:
-        if not personality or not isinstance(personality, dict):
-            return ""
-        parts: list[str] = []
-        for key, value in personality.items():
-            text = str(value).strip()
-            if text and len(text) < 200:
-                parts.append(f"{key}：{text}")
-        return "；".join(parts[:5])
-
-    async def execute(
-        self,
-        db: AsyncSession,
-        novel_id: int,
-        user_id: int,
-        mode: str = "list",
-        character_id: int | None = None,
-        search: str | None = None,
-        include_relations: bool = True,
-        include_recent_events: bool = True,
-        include_memory: bool = False,
-        include_inactive: bool = False,
-        **kwargs
-    ) -> MCPToolResult:
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
-        if mode == "detail":
-            return await self._execute_detail(db, novel_id, character_id, include_memory)
-        elif mode == "network":
-            return await self._execute_network(db, novel_id, character_id, include_inactive)
-        else:
-            return await self._execute_list(db, novel_id, search, include_relations, include_recent_events)
-
-    async def _execute_list(self, db, novel_id, search, include_relations, include_recent_events):
-        query = select(Character).where(Character.novel_id == novel_id)
-        if search:
-            query = query.filter(Character.name.contains(search))
-        result = await db.execute(query)
-        characters = result.scalars().all()
-        char_id_map = {c.id: c for c in characters}
-
-        characters_data = [
-            {
-                "id": c.id,
-                "name": c.name,
-                "personality_summary": self._extract_personality_summary(c.personality),
-                "abilities": c.abilities or [],
-            }
-            for c in characters
-        ]
-
-        relations_data = []
-        if include_relations and characters:
-            try:
-                from characters.models import CharacterRelation
-                rel_result = await db.execute(
-                    select(CharacterRelation).where(
-                        CharacterRelation.novel_id == novel_id,
-                        CharacterRelation.status == "active"
-                    )
-                )
-                all_relations = rel_result.scalars().all()
-                for rel in all_relations:
-                    source = char_id_map.get(rel.source_character_id)
-                    target = char_id_map.get(rel.target_character_id)
-                    if source and target:
-                        relations_data.append({
-                            "source_name": source.name,
-                            "target_name": target.name,
-                            "type": rel.relationship_type,
-                            "intensity": rel.intensity,
-                            "status": rel.status,
-                        })
-            except Exception:
-                pass
-
-        recent_events_summary = ""
-        if include_recent_events and characters:
-            try:
-                from timeline.models import TimelineEntry
-                entry_result = await db.execute(
-                    select(TimelineEntry)
-                    .where(TimelineEntry.novel_id == novel_id)
-                    .order_by(TimelineEntry.updated_at.desc())
-                    .limit(10)
-                )
-                recent_entries = entry_result.scalars().all()
-                if recent_entries:
-                    event_lines = []
-                    for entry in recent_entries:
-                        status_label = {"pending": "待办", "active": "进行中", "completed": "已完成", "resolved": "已回收"}.get(entry.status, entry.status)
-                        line = f"[{entry.category}/{status_label}] {entry.title}"
-                        if entry.description:
-                            line += f" — {entry.description[:50]}"
-                        event_lines.append(line)
-                    recent_events_summary = "\n".join(event_lines)
-                else:
-                    recent_events_summary = "暂无追踪记录。"
-            except Exception:
-                recent_events_summary = ""
-
-        return MCPToolResult(
-            success=True,
-            data={
-                "characters": characters_data,
-                "relations": relations_data,
-                "recent_events_summary": recent_events_summary,
-                "total_characters": len(characters),
-            },
-            metadata={"tool": self.name, "novel_id": novel_id, "mode": "list"}
-        )
-
-    async def _execute_detail(self, db, novel_id, character_id, include_memory):
-        if not character_id:
-            return MCPToolResult(success=False, error="detail 模式需要 character_id")
-
-        result = await db.execute(
-            select(Character)
-            .options(selectinload(Character.novel))
-            .where(Character.id == character_id)
-        )
-        character = result.scalar_one_or_none()
-        if not character:
-            return MCPToolResult(success=False, error=f"角色不存在: {character_id}")
-        if character.novel_id != novel_id:
-            return MCPToolResult(success=False, error=f"角色 {character_id} 不属于当前小说")
-
-        data = {
-            "id": character.id,
-            "novel_id": character.novel_id,
-            "name": character.name,
-            "personality": character.personality,
-            "abilities": character.abilities,
-            "relationships": character.relationships,
-            "created_at": character.created_at.isoformat() if character.created_at else None,
-            "novel": {"id": character.novel.id, "title": character.novel.title} if character.novel else None,
-        }
-
-        if include_memory:
-            try:
-                search_results = await vector_store.search(novel_id=novel_id, query=character.name, top_k=5)
-                data["relevant_content"] = [
-                    {"content": r["content"][:200] + "..." if len(r["content"]) > 200 else r["content"],
-                     "chapter_id": r["metadata"].get("chapter_id")}
-                    for r in search_results
-                ]
-            except VectorStoreError:
-                data["relevant_content"] = []
-
-        return MCPToolResult(
-            success=True,
-            data=data,
-            metadata={"tool": self.name, "novel_id": novel_id, "character_id": character_id, "mode": "detail"}
-        )
-
-    async def _execute_network(self, db, novel_id, character_id, include_inactive):
-        from characters.service import CharacterService
-        service = CharacterService(db, novel_id)
-
-        if character_id:
-            relationships = await service.get_character_relationships(
-                character_id=character_id, include_inactive=include_inactive
-            )
-            return MCPToolResult(
-                success=True,
-                data={"relationships": relationships, "total": len(relationships), "character_id": character_id},
-                metadata={"tool": self.name, "novel_id": novel_id, "mode": "network"}
-            )
-        else:
-            network_data = await service.get_network()
-            return MCPToolResult(
-                success=True,
-                data=network_data,
-                metadata={"tool": self.name, "novel_id": novel_id, "mode": "network"}
-            )
-
-
-class CreateCharacterTool(BaseMCPTool):
-    """创建新角色"""
-
-    name = "create_character"
-    description = (
-        "为当前小说创建一个新角色。无需传novel_id，系统会注入当前小说ID。"
-        "\n适用场景：用户要求添加新角色、AI写作时发现需要新角色、规划角色阵容时。"
-        "\n创建后可通过 get_characters(mode=\"detail\") 查看详情，通过 update_character 修改设定。"
-        "\n注意：name 为必填；personality 建议包含 role(角色定位)、traits(性格特点)、background(背景) 等字段。"
-    )
-    category = MCPToolCategory.NOVEL_MANAGEMENT
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "description": "角色名称（必填）"},
-            "personality": {
-                "type": "object",
-                "description": "角色性格/设定字典，建议包含: role(定位), traits(性格), background(背景), motivation(动机), appearance(外貌)"
-            },
-            "abilities": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "角色能力/技能列表"
-            },
-        },
-        "required": ["name"]
-    }
-
-    async def execute(
-        self,
-        db,
-        novel_id: int,
-        user_id: int,
-        name: str,
-        personality: dict | None = None,
-        abilities: list[str] | None = None,
-        **kwargs
-    ) -> MCPToolResult:
-        try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
-            from characters.models import Character
-            character = Character(
-                novel_id=novel_id,
-                name=name,
-                personality=personality or {},
-                abilities=abilities or [],
-            )
-            db.add(character)
-            await db.commit()
-            await db.refresh(character)
-
-            await _invalidate_character_cache(novel_id)
-
-            return MCPToolResult(
-                success=True,
-                data={
-                    "id": character.id,
-                    "name": character.name,
-                    "novel_id": character.novel_id,
-                    "personality": character.personality,
-                    "abilities": character.abilities,
-                },
-                metadata={"tool": self.name, "novel_id": novel_id, "character_id": character.id}
-            )
-        except Exception as e:
-            return MCPToolResult(success=False, error=f"创建角色失败: {str(e)}")
-
-
-class UpdateCharacterTool(BaseMCPTool):
-    """更新角色信息"""
-
-    name = "update_character"
-    description = (
-        "更新已有角色的设定信息。无需传novel_id，系统会注入当前小说ID。"
-        "\n适用场景：用户要求修改角色设定、AI写作中发现需要调整角色属性时。"
-        "\n只需传入要修改的字段，未传入的字段保持不变。"
-        "\n修改后相关缓存会自动失效，下次查询获取最新数据。"
-    )
-    category = MCPToolCategory.NOVEL_MANAGEMENT
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "character_id": {"type": "integer", "description": "角色ID（必填）"},
-            "name": {"type": "string", "description": "新的名称"},
-            "personality": {
-                "type": "object",
-                "description": "新的性格/设定字典（完全替换旧的）"
-            },
-            "abilities": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "新的能力列表（完全替换旧的）"
-            },
-        },
-        "required": ["character_id"]
-    }
-
-    async def execute(
-        self,
-        db,
-        novel_id: int,
-        user_id: int,
-        character_id: int,
-        name: str | None = None,
-        personality: dict | None = None,
-        abilities: list[str] | None = None,
-        **kwargs
-    ) -> MCPToolResult:
-        try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-            
-            from characters.models import Character
-            result = await db.execute(
-                select(Character).where(Character.id == character_id)
-            )
-            character = result.scalar_one_or_none()
-            if not character:
-                return MCPToolResult(success=False, error=f"角色 {character_id} 不存在")
-            if character.novel_id != novel_id:
-                return MCPToolResult(success=False, error=f"角色不属于当前小说")
-
-            if name is not None:
-                character.name = name
-            if personality is not None:
-                character.personality = personality
-            if abilities is not None:
-                character.abilities = abilities
-
-            await db.commit()
-            await db.refresh(character)
-
-            await _invalidate_character_cache(novel_id, character_id)
-
-            return MCPToolResult(
-                success=True,
-                data={
-                    "id": character.id,
-                    "name": character.name,
-                    "novel_id": character.novel_id,
-                    "personality": character.personality,
-                    "abilities": character.abilities,
-                },
-                metadata={"tool": self.name, "novel_id": novel_id, "character_id": character_id}
-            )
-        except Exception as e:
-            return MCPToolResult(success=False, error=f"更新角色失败: {str(e)}")
-
+class CreateNewChapterArgs(BaseModel):
+    chapter_number: int | None = Field(default=None, description="章节号")
+    title: str | None = Field(default=None, description="章节标题（可选）")
+    content: str | None = Field(default=None, description="章节内容（可选）")
 
 class CreateNewChapterTool(BaseMCPTool):
     """创建新章节"""
     
     name = "create_new_chapter"
-    description = "创建小说的新空章节。无需传novel_id，系统会注入当前小说ID。chapter_number 可省略，系统会自动创建下一章。创建后可用 edit_chapter 写入正文。"
+    description = "创建小说的新空章节。chapter_number 可省略，系统会自动创建下一章。创建后可用 edit_chapter 写入正文。"
     category = MCPToolCategory.NOVEL_MANAGEMENT
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "novel_id": {
-                "type": "integer",
-                "description": "小说ID"
-            },
-            "chapter_number": {
-                "type": "integer",
-                "description": "章节号"
-            },
-            "title": {
-                "type": "string",
-                "description": "章节标题（可选）"
-            },
-            "content": {
-                "type": "string",
-                "description": "章节内容（可选）"
-            }
-        },
-        "required": []
-    }
+    args_schema = CreateNewChapterArgs
     
-    async def execute(
+    async def _execute(
         self,
+        args: CreateNewChapterArgs,
+        *,
         db: AsyncSession,
-        novel_id: int,
         user_id: int,
-        chapter_number: int | None = None,
-        title: str | None = None,
-        content: str | None = None,
-        **kwargs
+        novel_id: int,
+        **extra,
     ) -> MCPToolResult:
-        novel = await verify_novel_ownership(db, novel_id, user_id)
-        if not novel:
-            return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
-
-        if chapter_number is None:
+        ch_num = args.chapter_number
+        if ch_num is None:
             latest_result = await db.execute(
                 select(Chapter.chapter_number)
                 .where(Chapter.novel_id == novel_id)
@@ -1102,10 +560,10 @@ class CreateNewChapterTool(BaseMCPTool):
                 .limit(1)
             )
             latest_chapter_number = latest_result.scalar_one_or_none()
-            chapter_number = (latest_chapter_number or 0) + 1
-        
+            ch_num = (latest_chapter_number or 0) + 1
+
         existing = await db.execute(
-            select(Chapter).where(Chapter.novel_id == novel_id, Chapter.chapter_number == chapter_number)
+            select(Chapter).where(Chapter.novel_id == novel_id, Chapter.chapter_number == ch_num)
         )
         existing_chapter = existing.scalar_one_or_none()
         if existing_chapter:
@@ -1117,14 +575,14 @@ class CreateNewChapterTool(BaseMCPTool):
                 data=data,
                 metadata={"tool": self.name, "novel_id": novel_id, "chapter_id": existing_chapter.id, "reused_existing": True}
             )
-        
+
         chapter = Chapter(
             novel_id=novel_id,
-            chapter_number=chapter_number,
-            title=title or f"第{chapter_number}章",
-            content=content or "",
+            chapter_number=ch_num,
+            title=args.title or f"第{ch_num}章",
+            content=args.content or "",
             status="draft",
-            word_count=count_words(content or "")
+            word_count=count_words(args.content or "")
         )
         db.add(chapter)
         try:
@@ -1132,7 +590,7 @@ class CreateNewChapterTool(BaseMCPTool):
         except IntegrityError:
             await db.rollback()
             existing_after_conflict = await db.execute(
-                select(Chapter).where(Chapter.novel_id == novel_id, Chapter.chapter_number == chapter_number)
+                select(Chapter).where(Chapter.novel_id == novel_id, Chapter.chapter_number == ch_num)
             )
             conflicted_chapter = existing_after_conflict.scalar_one_or_none()
             if conflicted_chapter:
@@ -1158,18 +616,10 @@ class CreateNewChapterTool(BaseMCPTool):
         )
 
 
-class NovelManagementTools:
-    """小说管理工具集合"""
-    
-    @staticmethod
-    def register_all(registry: MCPToolRegistry) -> None:
-        """注册所有小说管理工具"""
-        registry.register(GetNovelInfoTool())
-        registry.register(GetChapterListTool())
-        registry.register(GetChapterContentTool())
-        registry.register(GetCreativeProfileTool())
-        registry.register(UpdateCreativeProfileTool())
-        registry.register(GetCharactersTool())
-        registry.register(CreateCharacterTool())
-        registry.register(UpdateCharacterTool())
-        registry.register(CreateNewChapterTool())
+def register_novel_tools(registry: MCPToolRegistry) -> None:
+    registry.register(GetNovelInfoTool())
+    registry.register(GetChapterListTool())
+    registry.register(GetChapterContentTool())
+    registry.register(GetCreativeProfileTool())
+    registry.register(UpdateCreativeProfileTool())
+    registry.register(CreateNewChapterTool())

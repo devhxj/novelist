@@ -4,11 +4,18 @@
 """
 from typing import Any
 
+from pydantic import BaseModel, Field
+from typing import Literal
+
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from story_arcs.models import StoryArc
 from story_arcs.schemas import StoryArcCreate, StoryArcUpdate
 from story_arcs.service import StoryArcService
-from core.permissions import verify_novel_ownership
+
+
+class GetStoryArcsArgs(BaseModel):
+    arc_type: Literal["main", "sub", "character", "background"] | None = Field(default=None, description="按弧线类型筛选（可选）")
+    status: Literal["active", "paused", "completed", "abandoned"] | None = Field(default=None, description="按状态筛选（可选，默认返回所有）")
 
 
 class GetStoryArcsTool(BaseMCPTool):
@@ -18,48 +25,35 @@ class GetStoryArcsTool(BaseMCPTool):
     description = (
         "获取小说的叙事弧线列表。叙事弧线是跨越多章节的故事线（如主线、支线、角色线），"
         "每条弧线包含名称、类型、章节范围和状态。"
-        "无需传novel_id，系统会注入当前小说ID。"
     )
     category = MCPToolCategory.MEMORY_RETRIEVAL
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "arc_type": {
-                "type": "string",
-                "enum": ["main", "sub", "character", "background"],
-                "description": "按弧线类型筛选（可选）"
-            },
-            "status": {
-                "type": "string",
-                "enum": ["active", "paused", "completed", "abandoned"],
-                "description": "按状态筛选（可选，默认返回所有）"
-            },
-        },
-    }
+    args_schema = GetStoryArcsArgs
 
-    async def execute(
+    async def _execute(
         self,
+        args: GetStoryArcsArgs,
+        *,
         db,
-        novel_id: int,
         user_id: int,
-        arc_type: str | None = None,
-        status: str | None = None,
-        **kwargs
+        novel_id: int,
+        **extra,
     ) -> MCPToolResult:
-        try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
+        service = StoryArcService(db, novel_id)
+        arcs = await service.list_arcs(arc_type=args.arc_type, status=args.status)
+        return MCPToolResult(
+            success=True,
+            data=[_arc_to_dict(a) for a in arcs],
+            metadata={"tool": self.name, "novel_id": novel_id}
+        )
 
-            service = StoryArcService(db, novel_id)
-            arcs = await service.list_arcs(arc_type=arc_type, status=status)
-            return MCPToolResult(
-                success=True,
-                data=[_arc_to_dict(a) for a in arcs],
-                metadata={"tool": self.name, "novel_id": novel_id}
-            )
-        except Exception as e:
-            return MCPToolResult(success=False, error=f"获取叙事弧线失败: {str(e)}")
+
+class AddStoryArcArgs(BaseModel):
+    name: str = Field(description="弧线名称（必填），如'复仇之路'")
+    description: str | None = Field(default=None, description="弧线描述")
+    arc_type: Literal["main", "sub", "character", "background"] = Field(default="sub", description="弧线类型")
+    start_chapter: int | None = Field(default=None, description="起始章节号（可选）")
+    end_chapter: int | None = Field(default=None, description="结束章节号（可选）")
+    importance: int = Field(default=1, description="重要程度1-5")
 
 
 class AddStoryArcTool(BaseMCPTool):
@@ -68,7 +62,6 @@ class AddStoryArcTool(BaseMCPTool):
     name = "add_story_arc"
     description = (
         "创建一条新的叙事弧线。叙事弧线是跨越多章节的故事线，用于组织情节节点的宏观结构。"
-        "无需传novel_id，系统会注入当前小说ID。"
         "\n弧线类型说明："
         "- main: 主线（核心故事线）"
         "- sub: 支线（辅助故事线）"
@@ -76,60 +69,44 @@ class AddStoryArcTool(BaseMCPTool):
         "- background: 背景线（世界观/背景设定推进线）"
     )
     category = MCPToolCategory.WRITING_ASSISTANT
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "description": "弧线名称（必填），如'复仇之路'"},
-            "description": {"type": "string", "description": "弧线描述"},
-            "arc_type": {
-                "type": "string",
-                "enum": ["main", "sub", "character", "background"],
-                "default": "sub",
-                "description": "弧线类型"
-            },
-            "start_chapter": {"type": ["integer", "null"], "description": "起始章节号（可选）"},
-            "end_chapter": {"type": ["integer", "null"], "description": "结束章节号（可选）"},
-            "importance": {"type": "integer", "default": 1, "description": "重要程度1-5"},
-        },
-        "required": ["name"],
-    }
+    args_schema = AddStoryArcArgs
 
-    async def execute(
+    async def _execute(
         self,
+        args: AddStoryArcArgs,
+        *,
         db,
-        novel_id: int,
         user_id: int,
-        name: str,
-        description: str | None = None,
-        arc_type: str = "sub",
-        start_chapter: int | None = None,
-        end_chapter: int | None = None,
-        importance: int = 1,
-        **kwargs
+        novel_id: int,
+        **extra,
     ) -> MCPToolResult:
-        try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
+        from story_arcs.schemas import StoryArcType as SchemaArcType
+        service = StoryArcService(db, novel_id)
+        data = StoryArcCreate(
+            name=args.name,
+            description=args.description,
+            arc_type=SchemaArcType(args.arc_type),
+            start_chapter=args.start_chapter,
+            end_chapter=args.end_chapter,
+            importance=args.importance,
+        )
+        arc = await service.create_arc(data)
+        return MCPToolResult(
+            success=True,
+            data=_arc_to_dict(arc),
+            metadata={"tool": self.name, "novel_id": novel_id}
+        )
 
-            from story_arcs.schemas import StoryArcType as SchemaArcType
-            service = StoryArcService(db, novel_id)
-            data = StoryArcCreate(
-                name=name,
-                description=description,
-                arc_type=SchemaArcType(arc_type),
-                start_chapter=start_chapter,
-                end_chapter=end_chapter,
-                importance=importance,
-            )
-            arc = await service.create_arc(data)
-            return MCPToolResult(
-                success=True,
-                data=_arc_to_dict(arc),
-                metadata={"tool": self.name, "novel_id": novel_id}
-            )
-        except Exception as e:
-            return MCPToolResult(success=False, error=f"创建叙事弧线失败: {str(e)}")
+
+class UpdateStoryArcArgs(BaseModel):
+    arc_id: int = Field(description="弧线ID（必填）")
+    name: str | None = Field(default=None, description="新的弧线名称")
+    description: str | None = Field(default=None, description="新的描述")
+    arc_type: Literal["main", "sub", "character", "background"] | None = Field(default=None, description="新的弧线类型")
+    start_chapter: int | None = Field(default=None, description="新的起始章节号")
+    end_chapter: int | None = Field(default=None, description="新的结束章节号")
+    importance: int | None = Field(default=None, description="新的重要程度(1-5)")
+    status: Literal["active", "paused", "completed", "abandoned"] | None = Field(default=None, description="新状态")
 
 
 class UpdateStoryArcTool(BaseMCPTool):
@@ -138,83 +115,35 @@ class UpdateStoryArcTool(BaseMCPTool):
     name = "update_story_arc"
     description = (
         "更新已有的叙事弧线。可用于修改弧线状态（如暂停/完成）、调整章节范围、更新描述等。"
-        "无需传novel_id，系统会注入当前小说ID。"
     )
     category = MCPToolCategory.WRITING_ASSISTANT
-    parameters_schema = {
-        "type": "object",
-        "properties": {
-            "arc_id": {"type": "integer", "description": "弧线ID（必填）"},
-            "name": {"type": "string", "description": "新的弧线名称"},
-            "description": {"type": "string", "description": "新的描述"},
-            "arc_type": {
-                "type": "string",
-                "enum": ["main", "sub", "character", "background"],
-                "description": "新的弧线类型"
-            },
-            "start_chapter": {"type": ["integer", "null"], "description": "新的起始章节号"},
-            "end_chapter": {"type": ["integer", "null"], "description": "新的结束章节号"},
-            "importance": {"type": "integer", "description": "新的重要程度(1-5)"},
-            "status": {
-                "type": "string",
-                "enum": ["active", "paused", "completed", "abandoned"],
-                "description": "新状态。active=进行中，paused=暂停，completed=已完成，abandoned=已废弃"
-            },
-        },
-        "required": ["arc_id"],
-    }
+    args_schema = UpdateStoryArcArgs
 
-    async def execute(
+    async def _execute(
         self,
+        args: UpdateStoryArcArgs,
+        *,
         db,
-        novel_id: int,
         user_id: int,
-        arc_id: int,
-        name: str | None = None,
-        description: str | None = None,
-        arc_type: str | None = None,
-        start_chapter: int | None = None,
-        end_chapter: int | None = None,
-        importance: int | None = None,
-        status: str | None = None,
-        **kwargs
+        novel_id: int,
+        **extra,
     ) -> MCPToolResult:
-        try:
-            novel = await verify_novel_ownership(db, novel_id, user_id)
-            if not novel:
-                return MCPToolResult(success=False, error="无权访问此小说或小说不存在")
+        update_fields = args.model_dump(exclude_unset=True)
+        update_fields.pop("arc_id", None)
 
-            update_data: dict[str, Any] = {}
-            if name is not None:
-                update_data["name"] = name
-            if description is not None:
-                update_data["description"] = description
-            if arc_type is not None:
-                update_data["arc_type"] = arc_type
-            if start_chapter is not None:
-                update_data["start_chapter"] = start_chapter
-            if end_chapter is not None:
-                update_data["end_chapter"] = end_chapter
-            if importance is not None:
-                update_data["importance"] = importance
-            if status is not None:
-                update_data["status"] = status
+        if not update_fields:
+            return MCPToolResult(success=False, error="没有提供更新字段")
 
-            if not update_data:
-                return MCPToolResult(success=False, error="没有提供更新字段")
-
-            data = StoryArcUpdate(**update_data)
-            service = StoryArcService(db, novel_id)
-            arc = await service.update_arc(arc_id, data)
-            if not arc:
-                return MCPToolResult(success=False, error=f"弧线 {arc_id} 不存在")
-            return MCPToolResult(
-                success=True,
-                data=_arc_to_dict(arc),
-                metadata={"tool": self.name, "novel_id": novel_id}
-            )
-        except Exception as e:
-            return MCPToolResult(success=False, error=f"更新叙事弧线失败: {str(e)}")
+        data = StoryArcUpdate(**update_fields)
+        service = StoryArcService(db, novel_id)
+        arc = await service.update_arc(args.arc_id, data)
+        if not arc:
+            return MCPToolResult(success=False, error=f"弧线 {args.arc_id} 不存在")
+        return MCPToolResult(
+            success=True,
+            data=_arc_to_dict(arc),
+            metadata={"tool": self.name, "novel_id": novel_id}
+        )
 
 
 def _arc_to_dict(arc: StoryArc) -> dict[str, Any]:

@@ -27,19 +27,6 @@ def _friendly_error_message(exc: Exception) -> str:
     return "服务器异常，请稍后重试。"
 
 
-def _sanitize_tool_error(error: str | None) -> str | None:
-    if not error:
-        return error
-    business_keywords = (
-        "不存在", "无权", "已存在", "已处理", "不允许", "已过期",
-        "格式错误", "无效", "缺少", "需要", "必须", "已结束",
-        "已被拒绝", "已被接受", "不能创建",
-    )
-    for kw in business_keywords:
-        if kw in error:
-            return error
-    return "服务器异常，请稍后重试。"
-
 
 def _decode_partial_json_string(raw: str) -> str:
     result: list[str] = []

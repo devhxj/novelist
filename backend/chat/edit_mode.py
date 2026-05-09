@@ -215,6 +215,9 @@ class EditModeConfig:
             "search_story_memory", "run_subagent",
             "create_outline",
         },
+        "story_arc": {
+            "get_story_arcs", "add_story_arc", "update_story_arc",
+        },
     }
 
     TOOL_BUNDLE_CUES: dict[str, tuple[str, ...]] = {
@@ -223,6 +226,7 @@ class EditModeConfig:
         "locations": ("地点", "场景", "地图", "城市", "房间", "森林", "宫殿", "地点设定"),
         "timeline": ("伏笔", "时间线", "规划", "大纲", "安排", "下章", "长期", "回收", "设定检查"),
         "generation": ("写", "续写", "生成", "创建章节", "新章节", "扩写", "补写"),
+        "story_arc": ("弧线", "故事线", "主线", "支线", "角色线", "叙事线", "剧情线", "故事结构"),
     }
 
     @classmethod

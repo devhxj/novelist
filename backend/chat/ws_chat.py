@@ -34,7 +34,6 @@ from mcp_tools.registry import get_mcp_registry
 
 from chat.ws_utils import (
     _friendly_error_message,
-    _sanitize_tool_error,
     _extract_partial_argument_string,
     _sync_tool_display_name,
     _build_tool_call_presentation,
@@ -988,12 +987,12 @@ async def _run_chat_with_tools(
                                 "arguments": clean_args,
                                 "result_summary": {
                                     "success": tool_result_payload.get("success"),
-                                    "error": _sanitize_tool_error(tool_result_payload.get("error")),
+                                    "error": tool_result_payload.get("error"),
                                     "metadata": metadata,
                                     "data_keys": list(data_payload.keys()) if isinstance(data_payload, dict) else [],
                                 },
                                 **presentation,
-                                "error": _sanitize_tool_error(tool_result_payload.get("error")),
+                                "error": tool_result_payload.get("error"),
                                 "timestamp": datetime.now(timezone.utc).isoformat()
                             }, websocket)
                             
