@@ -17,24 +17,6 @@ from editor.diff_engine import diff_engine
 _subagent_running_var: ContextVar[bool] = ContextVar("_subagent_running_var", default=False)
 
 
-def _build_agent_task_id(prefix: str = "task") -> str:
-    return f"{prefix}_{uuid.uuid4().hex}"
-
-
-def _normalize_subagent_task_type(task_type: str) -> str:
-    type_aliases = {
-        "write": "write_chapter",
-        "writing": "write_chapter",
-        "generate": "write_chapter",
-        "generate_chapter": "write_chapter",
-        "review_chapter": "review",
-        "check_consistency": "review",
-        "manage_foreshadowing": "review",
-        "review": "review",
-    }
-    return type_aliases.get(task_type, task_type)
-
-
 async def _execute_subagent_task(
     *,
     db: AsyncSession,
@@ -54,7 +36,13 @@ async def _execute_subagent_task(
             error="子Agent不允许启动子Agent，避免无限递归",
         )
 
-    normalized_type = _normalize_subagent_task_type(task_type)
+    type_aliases = {
+        "write": "write_chapter", "writing": "write_chapter",
+        "generate": "write_chapter", "generate_chapter": "write_chapter",
+        "review_chapter": "review", "check_consistency": "review",
+        "manage_foreshadowing": "review", "review": "review",
+    }
+    normalized_type = type_aliases.get(task_type, task_type)
     from agents.registry import get_agent_for_task, get_all_specs
     from agents.context_provider import build_subagent_context
     from agents.base import AgentTask, TaskType, SubAgentReport
@@ -100,7 +88,7 @@ async def _execute_subagent_task(
         )
 
         task = AgentTask(
-            task_id=_build_agent_task_id("sub"),
+            task_id=f"sub_{uuid.uuid4().hex}",
             task_type=registry_to_task_type.get(normalized_type, TaskType.GENERATE_CHAPTER),
             novel_id=novel_id,
             chapter_id=chapter_id,

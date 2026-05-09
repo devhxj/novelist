@@ -17,37 +17,6 @@ from text.utils import count_words
 from .utils import _invalidate_chapter_cache
 
 
-def _build_creative_profile_summary(
-    author_intent: str | None = None,
-    preferred_tone: str | None = None,
-    scene_planning_notes: str | None = None,
-    must_keep: list[str] | None = None,
-    must_avoid: list[str] | None = None,
-    long_term_goals: list[str] | None = None
-) -> str:
-    parts: list[str] = []
-    if author_intent:
-        parts.append(f"长期意图：{author_intent.strip()}")
-    if preferred_tone:
-        parts.append(f"默认语气：{preferred_tone.strip()}")
-    if scene_planning_notes:
-        parts.append(f"规划备注：{scene_planning_notes.strip()}")
-    if must_keep:
-        parts.append("必须保留：" + "；".join(str(item).strip() for item in must_keep[:5] if str(item).strip()))
-    if must_avoid:
-        parts.append("必须避免：" + "；".join(str(item).strip() for item in must_avoid[:5] if str(item).strip()))
-    if long_term_goals:
-        parts.append("长线目标：" + "；".join(str(item).strip() for item in long_term_goals[:5] if str(item).strip()))
-    return "\n".join(parts[:6])
-
-
-def _attach_profile_summary(extra_metadata: dict[str, Any] | None, summary: str) -> dict[str, Any]:
-    merged = dict(extra_metadata or {})
-    if summary.strip():
-        merged["llm_brief"] = summary.strip()
-    return merged
-
-
 class GetNovelInfoArgs(BaseModel):
     mode: Literal["summary", "progress"] = Field(default="summary", description="查询模式：summary=整体摘要，progress=写作进度")
 
@@ -438,6 +407,37 @@ class UpdateCreativeProfileTool(BaseMCPTool):
         merged.update(incoming)
         return merged
 
+    @staticmethod
+    def _build_profile_summary(
+        author_intent: str | None = None,
+        preferred_tone: str | None = None,
+        scene_planning_notes: str | None = None,
+        must_keep: list[str] | None = None,
+        must_avoid: list[str] | None = None,
+        long_term_goals: list[str] | None = None,
+    ) -> str:
+        parts: list[str] = []
+        if author_intent:
+            parts.append(f"长期意图：{author_intent.strip()}")
+        if preferred_tone:
+            parts.append(f"默认语气：{preferred_tone.strip()}")
+        if scene_planning_notes:
+            parts.append(f"规划备注：{scene_planning_notes.strip()}")
+        if must_keep:
+            parts.append("必须保留：" + "；".join(str(item).strip() for item in must_keep[:5] if str(item).strip()))
+        if must_avoid:
+            parts.append("必须避免：" + "；".join(str(item).strip() for item in must_avoid[:5] if str(item).strip()))
+        if long_term_goals:
+            parts.append("长线目标：" + "；".join(str(item).strip() for item in long_term_goals[:5] if str(item).strip()))
+        return "\n".join(parts[:6])
+
+    @staticmethod
+    def _attach_profile_summary(extra_metadata: dict[str, Any] | None, summary: str) -> dict[str, Any]:
+        merged = dict(extra_metadata or {})
+        if summary.strip():
+            merged["llm_brief"] = summary.strip()
+        return merged
+
     async def _execute(
         self,
         args: UpdateCreativeProfileArgs,
@@ -493,7 +493,7 @@ class UpdateCreativeProfileTool(BaseMCPTool):
         profile.must_keep = self._enforce_limit(profile.must_keep)
         profile.must_avoid = self._enforce_limit(profile.must_avoid)
 
-        profile_summary = _build_creative_profile_summary(
+        profile_summary = self._build_profile_summary(
             author_intent=profile.author_intent,
             preferred_tone=profile.preferred_tone,
             scene_planning_notes=profile.scene_planning_notes,
@@ -501,7 +501,7 @@ class UpdateCreativeProfileTool(BaseMCPTool):
             must_avoid=profile.must_avoid or [],
             long_term_goals=profile.long_term_goals or []
         )
-        profile.extra_metadata = _attach_profile_summary(profile.extra_metadata, profile_summary)
+        profile.extra_metadata = self._attach_profile_summary(profile.extra_metadata, profile_summary)
 
         await db.commit()
         await db.refresh(profile)
