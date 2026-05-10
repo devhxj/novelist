@@ -40,7 +40,6 @@ from chat.ws_utils import (
     _extract_partial_argument_string,
     _build_tool_call_presentation,
 )
-from chat.ws_generation import _run_generation_task
 
 
 router = APIRouter(tags=["websocket"])
@@ -183,22 +182,6 @@ async def websocket_chat(
                             user_message=data.get("message", ""),
                             tools_enabled=data.get("tools_enabled", True),
                             novel_id=novel_id,
-                            websocket=websocket,
-                            task_flags=task_flags
-                        )
-                    )
-                    active_tasks[task_id] = task
-                
-                elif message_type == "generate":
-                    task_id = f"gen_{novel_id}_{data.get('generation_type', 'chapter')}_{datetime.now(timezone.utc).strftime('%H%M%S')}"
-                    task_flags[task_id] = True
-                    
-                    task = asyncio.create_task(
-                        _run_generation_task(
-                            task_id=task_id,
-                            novel_id=novel_id,
-                            generation_type=data.get("generation_type", "chapter"),
-                            params=data.get("params", {}),
                             websocket=websocket,
                             task_flags=task_flags
                         )
