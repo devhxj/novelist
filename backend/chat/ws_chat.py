@@ -791,12 +791,11 @@ async def _run_chat_with_tools(
                 async def _on_message(msg: dict[str, Any]) -> None:
                     role = msg.get("role", "")
                     content = msg.get("content", "")
-                    # 公共元数据
-                    common_meta: dict[str, Any] = {}
-                    if msg.get("source"):
-                        common_meta["source"] = msg["source"]
-                    if msg.get("parent_task_id"):
-                        common_meta["parent_task_id"] = msg["parent_task_id"]
+                    # 公共元数据：从消息里提取 source/parent_task_id 和 inject 额外字段
+                    common_meta: dict[str, Any] = {
+                        k: v for k, v in msg.items()
+                        if k not in ("role", "content", "tool_calls", "reasoning_content", "tool_call_id")
+                    }
 
                     if role == "assistant":
                         if msg.get("tool_calls"):
@@ -880,6 +879,7 @@ async def _run_chat_with_tools(
                             tool_id=tool_id,
                             on_message=_on_message,
                             pre_display=_pre_display,
+                            parent_task_id=task_id,
                             **clean_args
                         )
                         inject = tool_result.inject
@@ -896,14 +896,9 @@ async def _run_chat_with_tools(
                         await ws_manager.send_personal_message({
                             "type": "system_warning",
                             "task_id": task_id,
-                            "message": f"工具 {tool_name} 执行连续失败 {max_tool_retries} 次，已禁用。请告知用户该工具暂时不可用。",
+                            "message": f"工具 {tool_name} 已连续失败 {max_tool_retries} 次，已暂时禁用。",
                             "timestamp": datetime.now(timezone.utc).isoformat()
                         }, websocket)
-                        session_manager.add_message(
-                            session,
-                            MessageRole.SYSTEM,
-                            f"工具 {tool_name} 已多次失败并被禁用，请不要再调用此工具。如果已有信息足够，请直接回应用户。"
-                        )
 
                     # 获取展示文本
                     async with AsyncSessionLocal() as disp_db:

@@ -188,12 +188,14 @@ class RunSubagentTool(BaseMCPTool):
 
         # 执行循环
         cancel_event = asyncio.Event()
+        parent_task_id = extra.get("parent_task_id", sub_task_id)
+
         loop_result = await run_agent_loop(
             messages=messages,
             tools=sub_tools,
             websocket=websocket,
             task_id=sub_task_id,
-            parent_task_id=sub_task_id,
+            parent_task_id=parent_task_id,
             cancel_event=cancel_event,
             tool_call_handler=sub_handler,
             pre_display_handler=pre_display,
