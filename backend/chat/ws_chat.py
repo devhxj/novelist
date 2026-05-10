@@ -4,7 +4,6 @@ WebSocket路由 - AI IDE风格统一入口
 """
 import logging
 import asyncio
-import json
 from datetime import datetime, timezone
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from sqlalchemy import select
@@ -754,8 +753,7 @@ async def _run_chat_with_tools(
             registry_for_handler = registry
             edit_mode_for_handler = edit_mode
 
-            # 缓存和失败计数
-            tool_cache: dict[str, dict[str, Any]] = {}
+            # 失败计数
             failed_tool_keys: dict[str, int] = {}
             max_tool_retries = 3
 
@@ -793,7 +791,7 @@ async def _run_chat_with_tools(
                 async def _handle_tool(
                     tool_name: str, tool_id: str, arguments: dict[str, Any]
                 ) -> ToolCallResult:
-                    nonlocal tool_cache, failed_tool_keys
+                    nonlocal failed_tool_keys
 
                     # 权限检查
                     if not EditModeConfig.can_use_tool(edit_mode_for_handler, tool_name):
@@ -833,29 +831,21 @@ async def _run_chat_with_tools(
                         if chapter:
                             clean_args["chapter_id"] = chapter.id
 
-                    # 缓存检查
                     inject = None
-                    cache_key = f"{tool_name}:{json.dumps(clean_args, ensure_ascii=False, sort_keys=True)}"
-                    cached = tool_cache.get(cache_key)
-                    if cached:
-                        tool_result_payload = cached
-                    else:
-                        async with AsyncSessionLocal() as tool_db:
-                            tool_result = await registry_for_handler.execute(
-                                tool_name,
-                                db=tool_db,
-                                user_id=session.user_id,
-                                session_id=session.session_id,
-                                novel_id=novel_id,
-                                websocket=websocket,
-                                chat_session=session,
-                                tool_id=tool_id,
-                                **clean_args
-                            )
-                            inject = tool_result.inject
-                            tool_result_payload = tool_result.model_dump(exclude={"inject"})
-                        if tool_result_payload.get("success"):
-                            tool_cache[cache_key] = tool_result_payload
+                    async with AsyncSessionLocal() as tool_db:
+                        tool_result = await registry_for_handler.execute(
+                            tool_name,
+                            db=tool_db,
+                            user_id=session.user_id,
+                            session_id=session.session_id,
+                            novel_id=novel_id,
+                            websocket=websocket,
+                            chat_session=session,
+                            tool_id=tool_id,
+                            **clean_args
+                        )
+                        inject = tool_result.inject
+                        tool_result_payload = tool_result.model_dump(exclude={"inject"})
 
                     # 失败计数
                     if not tool_result_payload.get("success"):
@@ -911,13 +901,6 @@ async def _run_chat_with_tools(
                                     "new_content": new_content,
                                     "timestamp": datetime.now(timezone.utc).isoformat()
                                 }, websocket)
-
-                    # 创作配置更新后清除对应缓存
-                    if tool_name == "update_creative_profile" and tool_result_payload.get("success"):
-                        tool_cache.pop(
-                            f"get_creative_profile:{json.dumps({}, ensure_ascii=False, sort_keys=True)}",
-                            None
-                        )
 
                     return ToolCallResult(
                         success=tool_result_payload.get("success", False),
