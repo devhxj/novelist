@@ -791,27 +791,36 @@ async def _run_chat_with_tools(
                 async def _on_message(msg: dict[str, Any]) -> None:
                     role = msg.get("role", "")
                     content = msg.get("content", "")
+                    # 公共元数据
+                    common_meta: dict[str, Any] = {}
+                    if msg.get("source"):
+                        common_meta["source"] = msg["source"]
+                    if msg.get("parent_task_id"):
+                        common_meta["parent_task_id"] = msg["parent_task_id"]
+
                     if role == "assistant":
-                        meta: dict[str, Any] = {}
                         if msg.get("tool_calls"):
-                            meta["tool_calls"] = msg["tool_calls"]
+                            common_meta["tool_calls"] = msg["tool_calls"]
                         if msg.get("reasoning_content"):
-                            meta["thinking_content"] = msg["reasoning_content"]
+                            common_meta["thinking_content"] = msg["reasoning_content"]
                         session_manager.add_message(
-                            session, MessageRole.ASSISTANT, content, metadata=meta or None
+                            session, MessageRole.ASSISTANT, content, metadata=common_meta or None
                         )
                     elif role == "tool":
+                        common_meta["tool_call_id"] = msg.get("tool_call_id", "")
                         session_manager.add_message(
                             session, MessageRole.TOOL, content,
-                            metadata={"tool_call_id": msg.get("tool_call_id", "")}
+                            metadata=common_meta
                         )
                     elif role == "user":
                         session_manager.add_message(
-                            session, MessageRole.USER, content
+                            session, MessageRole.USER, content,
+                            metadata=common_meta or None
                         )
                     elif role == "system":
                         session_manager.add_message(
-                            session, MessageRole.SYSTEM, content
+                            session, MessageRole.SYSTEM, content,
+                            metadata=common_meta or None
                         )
 
                 # --- tool_call_handler ---

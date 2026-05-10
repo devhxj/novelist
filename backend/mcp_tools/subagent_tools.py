@@ -153,6 +153,16 @@ class RunSubagentTool(BaseMCPTool):
         # 子 Agent 工具回调：白名单门控
         sub_task_id = f"sub_{uuid.uuid4().hex[:12]}"
 
+        # 包装 on_message：每条消息自动打上子 agent 来源标记
+        sub_on_message = None
+        if on_message:
+            async def sub_on_message(msg: dict[str, Any]) -> None:
+                msg["source"] = "subagent"
+                msg["parent_task_id"] = sub_task_id
+                await on_message(msg)
+        else:
+            sub_on_message = None
+
         async def sub_handler(
             tool_name: str, tool_id: str, arguments: dict[str, Any]
         ) -> ToolCallResult:
@@ -188,7 +198,7 @@ class RunSubagentTool(BaseMCPTool):
             tool_call_handler=sub_handler,
             pre_display_handler=pre_display,
             on_args_stream=None,
-            on_message=on_message,
+            on_message=sub_on_message,
             max_turns=max_turns,
             max_context_tokens=400000,
             read_only_tools=allowed_tools,
