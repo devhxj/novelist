@@ -110,7 +110,6 @@ async def run_agent_loop(
     response_buffer = ""      # 当前轮次的文本累积
     thinking_buffer = ""      # DeepSeek reasoning_content
     is_thinking = False
-    disabled_tools: set[str] = set()
     recent_tool_patterns: list[str] = []
 
     async def _append_msg(msg: dict[str, Any]) -> None:
@@ -126,17 +125,12 @@ async def run_agent_loop(
         tool_outputs: list[dict[str, Any]] = []
         pending_injects: dict[str, list[dict]] = {}
 
-        # 过滤被禁用的工具
-        active_tools = tools
-        if disabled_tools and tools:
-            active_tools = [t for t in tools if t["function"]["name"] not in disabled_tools]
-
         # ---- LLM 流式调用 ----
         try:
             async for event in llm_service.chat_stream_with_tools(
                 messages=messages,
                 model=model,
-                tools=active_tools,
+                tools=tools,
                 reasoning_effort=reasoning_effort,
             ):
                 # 取消检查：cancel_event 初始为 clear（运行中），set() 后为 cancelled
@@ -246,7 +240,6 @@ async def run_agent_loop(
                     handler_result = await tool_call_handler(tool_name, tool_id, arguments)
 
                     if handler_result.should_disable:
-                        disabled_tools.add(tool_name)
                         await _append_msg({
                             "role": "system",
                             "content": f"工具 {tool_name} 已多次失败并被禁用，请不要再调用此工具。如果已有信息足够，请直接回应用户。"
