@@ -1767,3 +1767,81 @@
   font-size: 13px;
   color: #8c8c8c;
 }
+
+/* ---- 子 Agent 嵌套卡片 ---- */
+.subagentCard {
+  margin: 6px 0 6px 12px;
+  border-left: 3px solid #b37feb;
+  border-radius: 0 8px 8px 0;
+  background: #faf9fb;
+  overflow: hidden;
+}
+
+.subagentStreaming {
+  border-left-color: #9254de;
+  box-shadow: 0 0 0 1px rgba(146, 84, 222, 0.12);
+}
+
+.subagentHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: #5a4a6a;
+  background: linear-gradient(135deg, rgba(179, 127, 235, 0.06), transparent);
+  border-bottom: 1px solid rgba(179, 127, 235, 0.12);
+}
+
+.subagentHeaderIcon {
+  color: #9254de;
+  font-size: 13px;
+}
+
+.subagentHeaderLabel {
+  font-weight: 500;
+  flex: 1;
+}
+
+.subagentHeaderStatus {
+  color: #9254de;
+  font-size: 11px;
+}
+
+.subagentHeaderDone {
+  color: #52c41a;
+  font-size: 11px;
+}
+
+.subagentHeaderFailed {
+  color: #ff4d4f;
+  font-size: 11px;
+}
+
+.subagentBody {
+  padding: 8px 14px;
+}
+
+.subagentTool {
+  margin-left: 0 !important;
+  font-size: 11px !important;
+  padding: 4px 8px !important;
+}
+
+.subagentText {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #434343;
+}
+
+.subagentThinking {
+  margin-bottom: 8px;
+}
+
+.subagentContent {
+  margin-bottom: 10px;
+}
+
+.subagentContent p {
+  margin: 0 0 4px;
+}

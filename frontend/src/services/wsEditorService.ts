@@ -144,6 +144,8 @@ export interface SessionLoadedMsg {
     message_id?: string
     created_at?: string
     metadata?: {
+      source?: string
+      parent_task_id?: string
       tool_calls?: string | Array<{
         id: string
         function?: {
@@ -173,23 +175,31 @@ export interface ContentChunkMsg {
   chunk: string
   task_id?: string
   message_id?: string
+  parent_task_id?: string
+  source?: string
 }
 
 export interface ThinkingChunkMsg {
   type: 'thinking_chunk'
   chunk: string
   task_id?: string
+  parent_task_id?: string
+  source?: string
 }
 
 export interface ThinkingDoneMsg {
   type: 'thinking_done'
   task_id?: string
+  parent_task_id?: string
+  source?: string
   timestamp?: string
 }
 
 export interface ToolCallMsg {
   type: 'tool_call'
   task_id?: string
+  parent_task_id?: string
+  source?: string
   tool_name: string
   tool_id?: string
   status: 'executing' | 'completed' | 'failed' | 'rejected'

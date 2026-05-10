@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { flushSync } from 'react-dom'
 import { useParams, useNavigate } from 'react-router-dom'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import { Select, Segmented, Tooltip, message, Modal, Input } from 'antd'
@@ -26,7 +27,7 @@ import { generationApi } from '@/services/generationService'
 import type {
   ServerMsg, DiffData,
   SessionCreatedMsg, SessionListMsg, ContentChunkMsg, ThinkingChunkMsg,
-  ToolCallMsg,
+  ThinkingDoneMsg, ToolCallMsg,
   EditStartedMsg, EditAppliedMsg, EditAcceptedMsg, EditRejectedMsg,
   ErrorMsg,
   SessionLoadedMsg,
@@ -99,7 +100,17 @@ interface TurnSegmentOutline {
   feedbackDraft?: string
 }
 
-type TurnSegment = TurnSegmentText | TurnSegmentTool | TurnSegmentOutline
+interface TurnSegmentSubagent {
+  id: string
+  type: 'subagent'
+  agentType: 'memory' | 'review'
+  taskId: string
+  segments: TurnSegment[]
+  status: 'streaming' | 'done' | 'failed'
+  finalText: string
+}
+
+type TurnSegment = TurnSegmentText | TurnSegmentTool | TurnSegmentOutline | TurnSegmentSubagent
 
 interface ConversationTurn {
   id: string
@@ -227,8 +238,10 @@ export default function EditorPage() {
   const pendingInterruptMessageRef = useRef<string | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const turnIdCounter = useRef(0)
+  const subTaskMeta = useRef<Map<string, { turnId: string; agentType: string }>>(new Map())
   const segIdCounter = useRef(0)
   const isUserScrolledUp = useRef(false)
+  const isProgrammaticScroll = useRef(false)
   const originalContentRef = useRef(originalContent)
   const dispatchMessageRef = useRef<((msg: string) => void) | null>(null)
   const updateTurn = useCallback((turnId: string, updater: (turn: ConversationTurn) => ConversationTurn) => {
@@ -237,6 +250,32 @@ export default function EditorPage() {
 
   const nextTurnId = useCallback(() => `turn_${++turnIdCounter.current}`, [])
   const nextSegId = useCallback(() => `seg_${++segIdCounter.current}`, [])
+
+  const applyToSubagent = useCallback((
+    turnId: string,
+    taskId: string,
+    agentType: string,
+    updater: (seg: TurnSegmentSubagent) => TurnSegmentSubagent,
+  ) => {
+    updateTurn(turnId, turn => {
+      const idx = turn.segments.findIndex(s => s.type === 'subagent' && s.taskId === taskId)
+      if (idx >= 0) {
+        const segs = [...turn.segments]
+        segs[idx] = updater(segs[idx] as TurnSegmentSubagent)
+        return { ...turn, segments: segs }
+      }
+      const newSeg: TurnSegmentSubagent = {
+        id: nextSegId(),
+        type: 'subagent',
+        agentType: agentType as 'memory' | 'review',
+        taskId,
+        segments: [],
+        status: 'streaming',
+        finalText: '',
+      }
+      return { ...turn, segments: [...turn.segments, newSeg] }
+    })
+  }, [updateTurn, nextSegId])
 
   const computedStats = useMemo(() => {
     if (!workingContent) return null
@@ -307,6 +346,7 @@ export default function EditorPage() {
     const el = chatContainerRef.current
     if (!el) return
     const handleScroll = () => {
+      if (isProgrammaticScroll.current) return
       isUserScrolledUp.current = el.scrollTop + el.clientHeight < el.scrollHeight - 5
     }
     el.addEventListener('scroll', handleScroll, { passive: true })
@@ -321,7 +361,13 @@ export default function EditorPage() {
     if (isUserScrolledUp.current) return
     const el = chatContainerRef.current
     if (!el) return
-    el.scrollTop = el.scrollHeight
+    isProgrammaticScroll.current = true
+    requestAnimationFrame(() => {
+      if (el) el.scrollTop = el.scrollHeight
+      requestAnimationFrame(() => {
+        isProgrammaticScroll.current = false
+      })
+    })
   }, [turns])
 
   useEffect(() => { originalContentRef.current = originalContent }, [originalContent])
@@ -400,6 +446,8 @@ export default function EditorPage() {
         if (m.recent_messages && m.recent_messages.length > 0) {
           const historyTurns: ConversationTurn[] = []
           let currentTaskId: string | null = null
+          // 历史重建时的子 Agent segment 索引
+          const subagentCache = new Map<string, TurnSegmentSubagent>()
 
           m.recent_messages.forEach((msg, _i) => {
             const msgTaskId = msg.message_id || `hist_${_i}`
@@ -427,6 +475,66 @@ export default function EditorPage() {
               const turn = historyTurns.find(t => t.id === currentTaskId)
               if (!turn) return
 
+              // 子 Agent 消息 — 路由到嵌套 subagent segment
+              if (msg.metadata?.source === 'subagent') {
+                const subTaskId = msg.metadata.parent_task_id || 'unknown'
+                let subSeg = subagentCache.get(subTaskId)
+                if (!subSeg) {
+                  // 从 run_subagent tool_call 反推 agent_type
+                  const runToolSeg = turn.segments.find(s => s.type === 'tool' && s.call.tool_name === 'run_subagent')
+                  const agentType = String((runToolSeg as TurnSegmentTool)?.call?.arguments?.agent_type || 'memory') as 'memory' | 'review'
+                  subSeg = {
+                    id: nextSegId(),
+                    type: 'subagent',
+                    agentType,
+                    taskId: subTaskId,
+                    segments: [],
+                    status: 'done',
+                    finalText: '',
+                  }
+                  turn.segments.push(subSeg)
+                  subagentCache.set(subTaskId, subSeg)
+                }
+
+                if (msg.metadata?.tool_calls) {
+                  const toolCalls = Array.isArray(msg.metadata.tool_calls)
+                    ? msg.metadata.tool_calls
+                    : JSON.parse(msg.metadata.tool_calls || '[]')
+                  toolCalls.forEach((tc: any) => {
+                    subSeg.segments.push({
+                      id: nextSegId(),
+                      type: 'tool',
+                      call: {
+                        tool_name: tc.function?.name || tc.name || 'unknown',
+                        display_text: tc.display_text || '处理中...',
+                        activity_kind: tc.activity_kind,
+                        status: 'completed',
+                        task_id: msgTaskId,
+                      },
+                    })
+                  })
+                }
+
+                if (msg.content) {
+                  subSeg.finalText = (subSeg.finalText ? subSeg.finalText + '\n' : '') + msg.content
+                  const lastSeg = subSeg.segments[subSeg.segments.length - 1]
+                  if (lastSeg && lastSeg.type === 'text') {
+                    lastSeg.content = (lastSeg.content ? lastSeg.content + '\n' : '') + msg.content
+                  } else {
+                    subSeg.segments.push({
+                      id: nextSegId(),
+                      type: 'text',
+                      content: msg.content,
+                      thinkingContent: '',
+                      thinkingDone: true,
+                      isStreaming: false,
+                    })
+                  }
+                }
+                return
+              }
+
+              // 主 Agent 消息 — 原有逻辑
               if (msg.metadata?.tool_calls) {
                 const toolCalls = Array.isArray(msg.metadata.tool_calls)
                   ? msg.metadata.tool_calls
@@ -484,6 +592,25 @@ export default function EditorPage() {
       case 'thinking_chunk': {
         const m = msg as ThinkingChunkMsg
         if (!m.chunk?.trim()) break
+        if (m.parent_task_id && m.task_id) {
+          const agentType = subTaskMeta.current.get(m.parent_task_id)?.agentType || 'memory'
+          applyToSubagent(m.parent_task_id, m.task_id, agentType, seg => {
+            const lastSeg = seg.segments[seg.segments.length - 1]
+            if (lastSeg && lastSeg.type === 'text' && lastSeg.isStreaming) {
+              const subSegs = [...seg.segments]
+              subSegs[subSegs.length - 1] = { ...lastSeg, thinkingContent: lastSeg.thinkingContent + m.chunk }
+              return { ...seg, segments: subSegs }
+            }
+            return {
+              ...seg,
+              segments: [...seg.segments, {
+                id: nextSegId(), type: 'text', content: '',
+                thinkingContent: m.chunk, thinkingDone: false, isStreaming: true,
+              }],
+            }
+          })
+          break
+        }
         const turnId = currentTurnIdRef.current
         if (!turnId) break
         updateTurn(turnId, turn => {
@@ -509,6 +636,19 @@ export default function EditorPage() {
         break
       }
       case 'thinking_done': {
+        const m = msg as ThinkingDoneMsg
+        if (m.parent_task_id && m.task_id) {
+          const agentType = subTaskMeta.current.get(m.parent_task_id)?.agentType || 'memory'
+          applyToSubagent(m.parent_task_id, m.task_id, agentType, seg => ({
+            ...seg,
+            segments: seg.segments.map(s =>
+              s.type === 'text' && s.thinkingContent && !s.thinkingDone
+                ? { ...s, thinkingDone: true, isStreaming: false }
+                : s
+            ),
+          }))
+          break
+        }
         const turnId = currentTurnIdRef.current
         if (!turnId) break
         updateTurn(turnId, turn => ({
@@ -523,6 +663,25 @@ export default function EditorPage() {
       }
       case 'content_chunk': {
         const m = msg as ContentChunkMsg
+        if (m.parent_task_id && m.task_id) {
+          const agentType = subTaskMeta.current.get(m.parent_task_id)?.agentType || 'memory'
+          applyToSubagent(m.parent_task_id, m.task_id, agentType, seg => {
+            const lastSeg = seg.segments[seg.segments.length - 1]
+            if (lastSeg && lastSeg.type === 'text' && lastSeg.isStreaming) {
+              const subSegs = [...seg.segments]
+              subSegs[subSegs.length - 1] = { ...lastSeg, content: lastSeg.content + m.chunk }
+              return { ...seg, segments: subSegs }
+            }
+            return {
+              ...seg,
+              segments: [...seg.segments, {
+                id: nextSegId(), type: 'text', content: m.chunk,
+                thinkingContent: '', thinkingDone: false, isStreaming: true,
+              }],
+            }
+          })
+          break
+        }
         const turnId = currentTurnIdRef.current
         if (!turnId) break
         updateTurn(turnId, turn => {
@@ -588,9 +747,52 @@ export default function EditorPage() {
       }
       case 'tool_call': {
         const m = msg as ToolCallMsg
+
+        // 子 Agent 内部的工具调用 — 路由到嵌套 segment
+        if (m.parent_task_id && m.task_id) {
+          const agentType = subTaskMeta.current.get(m.parent_task_id)?.agentType || 'memory'
+          const subToolCall: ToolCallInfo = {
+            tool_name: m.tool_name,
+            task_id: m.task_id,
+            status: m.status,
+            tool_id: m.tool_id,
+            phase: m.phase,
+            display_text: m.display_text || '处理中...',
+            activity_kind: m.activity_kind,
+            chapter_id: m.chapter_id,
+            chapter_number: m.chapter_number,
+            chapter_title: m.chapter_title,
+            arguments: m.arguments,
+            result_summary: m.result_summary,
+            error: m.error,
+            timestamp: m.timestamp,
+          }
+          const subUpdater = (seg: TurnSegmentSubagent): TurnSegmentSubagent => {
+            const subSegs = [...seg.segments]
+            const idx = subSegs.findIndex(s =>
+              s.type === 'tool' && (
+                (m.tool_id && s.call.tool_id === m.tool_id) ||
+                (!m.tool_id && s.call.task_id === m.task_id && s.call.tool_name === m.tool_name && s.call.status === 'executing')
+              )
+            )
+            if (idx >= 0) {
+              subSegs[idx] = { ...subSegs[idx] as TurnSegmentTool, call: { ...(subSegs[idx] as TurnSegmentTool).call, ...subToolCall } }
+            } else {
+              subSegs.push({ id: nextSegId(), type: 'tool', call: subToolCall })
+            }
+            return { ...seg, segments: subSegs }
+          }
+          if (m.status === 'executing') {
+            flushSync(() => { applyToSubagent(m.parent_task_id!, m.task_id!, agentType, subUpdater) })
+          } else {
+            applyToSubagent(m.parent_task_id, m.task_id, agentType, subUpdater)
+          }
+          break
+        }
+
         const turnId = currentTurnIdRef.current
         if (turnId) {
-          updateTurn(turnId, turn => {
+          const toolUpdater = (turn: ConversationTurn): ConversationTurn => {
             const segs = [...turn.segments]
             const idx = segs.findIndex(seg =>
               seg.type === 'tool' && (
@@ -624,7 +826,27 @@ export default function EditorPage() {
               segs.push({ id: nextSegId(), type: 'tool', call: toolCall })
             }
             return { ...turn, segments: segs }
-          })
+          }
+          if (m.status === 'executing') {
+            flushSync(() => { updateTurn(turnId, toolUpdater) })
+          } else {
+            updateTurn(turnId, toolUpdater)
+          }
+        }
+
+        // 记录 run_subagent 的 agent_type，供子 Agent 事件路由使用
+        if (m.tool_name === 'run_subagent' && m.status === 'executing' && m.task_id) {
+          const agentType = String(m.arguments?.agent_type || 'memory')
+          subTaskMeta.current.set(m.task_id, { turnId: m.task_id, agentType })
+        }
+        // run_subagent 完成时，将嵌套 subagent 段标记为 done
+        if (m.tool_name === 'run_subagent' && m.status === 'completed' && m.task_id) {
+          updateTurn(m.task_id, turn => ({
+            ...turn,
+            segments: turn.segments.map(s =>
+              s.type === 'subagent' ? { ...s, status: 'done' as const } : s
+            ),
+          }))
         }
 
         if (m.status === 'completed' && (m.tool_name === 'create_new_chapter' || m.tool_name === 'edit_chapter' || m.tool_name === 'get_chapter_list')) {
@@ -1407,6 +1629,74 @@ export default function EditorPage() {
                           ) : (
                             <div className={styles.outlineStatusBadge}>
                               {seg.approvalState === 'approved' ? '✅ 已批准' : '❌ 已拒绝'}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    }
+
+                    if (seg.type === 'subagent') {
+                      const subLabel = seg.agentType === 'review' ? '审核章节内容' : '探索故事记忆'
+                      const subIcon = seg.agentType === 'review' ? <CheckOutlined /> : <MessageOutlined />
+                      const isSubStreaming = seg.status === 'streaming'
+                      return (
+                        <div key={seg.id} className={`${styles.subagentCard} ${isSubStreaming ? styles.subagentStreaming : ''}`}>
+                          <div className={styles.subagentHeader}>
+                            <span className={styles.subagentHeaderIcon}>{subIcon}</span>
+                            <span className={styles.subagentHeaderLabel}>{subLabel}</span>
+                            {isSubStreaming
+                              ? <span className={styles.subagentHeaderStatus}><LoadingOutlined spin /> 执行中</span>
+                              : seg.status === 'done'
+                                ? <span className={styles.subagentHeaderDone}><CheckCircleOutlined /> 完成</span>
+                                : <span className={styles.subagentHeaderFailed}><CloseCircleOutlined /> 失败</span>
+                            }
+                          </div>
+                          {seg.segments.length > 0 && (
+                            <div className={styles.subagentBody}>
+                              {seg.segments.map(subSeg => {
+                                if (subSeg.type === 'text') {
+                                  return (
+                                    <div key={subSeg.id} className={styles.subagentText}>
+                                      {subSeg.thinkingContent && (
+                                        <details className={`${styles.thinkingBlock} ${styles.subagentThinking}`} open={!subSeg.thinkingDone}>
+                                          <summary className={styles.thinkingSummary}>
+                                            <ReadOutlined /> 子任务思考
+                                          </summary>
+                                          <div className={styles.thinkingContent}>
+                                            <pre>{subSeg.thinkingContent}</pre>
+                                          </div>
+                                        </details>
+                                      )}
+                                      {subSeg.content && (
+                                        <div className={styles.subagentContent}>
+                                          <Markdown>{subSeg.content}</Markdown>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                }
+                                if (subSeg.type === 'tool') {
+                                  const subTc = subSeg.call
+                                  const subVisual = getActivityVisual(subTc.activity_kind)
+                                  return (
+                                    <div
+                                      key={subSeg.id}
+                                      className={`${styles.toolInlineCompact} ${styles.subagentTool} ${subTc.status === 'executing' ? styles.toolInlineActive : ''}`}
+                                    >
+                                      <span className={styles.toolCompactIcon}>{subVisual.icon}</span>
+                                      <span className={styles.toolCompactName}>
+                                        {subTc.display_text || '处理中...'}
+                                      </span>
+                                      <span className={`${styles.toolCompactStatus} ${subTc.status === 'executing' ? styles.toolCompactRunning : styles.toolCompactDone}`}>
+                                        {subTc.status === 'executing' && <LoadingOutlined spin />}
+                                        {subTc.status === 'completed' && <CheckCircleOutlined />}
+                                        {subTc.status === 'executing' ? subVisual.badge : '完成'}
+                                      </span>
+                                    </div>
+                                  )
+                                }
+                                return null
+                              })}
                             </div>
                           )}
                         </div>
