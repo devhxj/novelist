@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 from novels.models import Novel, NovelCreativeProfile
 from chapters.models import Chapter
-from text.utils import count_words
+from utils import count_words
 from .utils import _invalidate_chapter_cache, _invalidate_novel_cache
 
 

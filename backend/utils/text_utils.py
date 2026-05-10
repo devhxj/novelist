@@ -1,17 +1,16 @@
+"""
+文本工具 — 字数统计与文本分析
+"""
+from __future__ import annotations
+
 import re
 import unicodedata
 from dataclasses import dataclass
 
 _CJK_RANGES = (
-    (0x4E00, 0x9FFF),
-    (0x3400, 0x4DBF),
-    (0x20000, 0x2A6DF),
-    (0x2A700, 0x2B73F),
-    (0x2B740, 0x2B81F),
-    (0x2B820, 0x2CEAF),
-    (0xF900, 0xFAFF),
-    (0x2F800, 0x2FA1F),
-    (0x3000, 0x303F),
+    (0x4E00, 0x9FFF), (0x3400, 0x4DBF), (0x20000, 0x2A6DF),
+    (0x2A700, 0x2B73F), (0x2B740, 0x2B81F), (0x2B820, 0x2CEAF),
+    (0xF900, 0xFAFF), (0x2F800, 0x2FA1F), (0x3000, 0x303F),
     (0xFF00, 0xFFEF),
 )
 
@@ -59,6 +58,7 @@ class TextStats:
 
 
 def count_words(text: str) -> int:
+    """统计中英文混合文本字数（CJK 字符 + 英文单词）"""
     if not text or not text.strip():
         return 0
     return compute_text_stats(text).total_count
@@ -85,12 +85,10 @@ def compute_text_stats(text: str) -> TextStats:
 
     english_words = len(_ENGLISH_WORD_RE.findall(text))
 
-    total_count = chinese_chars + english_words
-
     return TextStats(
         chinese_chars=chinese_chars,
         english_words=english_words,
         spaces=spaces,
         punctuation=punctuation,
-        total_count=total_count,
+        total_count=chinese_chars + english_words,
     )
