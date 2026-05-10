@@ -132,168 +132,177 @@ async def run_agent_loop(
             active_tools = [t for t in tools if t["function"]["name"] not in disabled_tools]
 
         # ---- LLM 流式调用 ----
-        async for event in llm_service.chat_stream_with_tools(
-            messages=messages,
-            model=model,
-            tools=active_tools,
-            reasoning_effort=reasoning_effort,
-        ):
-            # 取消检查：cancel_event 初始为 clear（运行中），set() 后为 cancelled
-            if cancel_event.is_set():
-                logger.info(f"Agent loop {task_id} cancelled")
-                partial = response_buffer.strip() or full_response.strip()
-                return AgentLoopResult(
-                    final_text=partial,
-                    turn_count=loop_count,
-                )
+        try:
+            async for event in llm_service.chat_stream_with_tools(
+                messages=messages,
+                model=model,
+                tools=active_tools,
+                reasoning_effort=reasoning_effort,
+            ):
+                # 取消检查：cancel_event 初始为 clear（运行中），set() 后为 cancelled
+                if cancel_event.is_set():
+                    logger.info(f"Agent loop {task_id} cancelled")
+                    partial = response_buffer.strip() or full_response.strip()
+                    return AgentLoopResult(
+                        final_text=partial,
+                        turn_count=loop_count,
+                    )
 
-            event_type: str = event.get("type", "")
+                event_type: str = event.get("type", "")
 
-            # ======== thinking ========
-            if event_type == "thinking":
-                thinking_content: str = event.get("content", "")
-                if not is_thinking and thinking_content:
-                    is_thinking = True
-                thinking_buffer += thinking_content
-                await ws_manager.send_personal_message({
-                    "type": "thinking_chunk",
-                    "task_id": task_id,
-                    "parent_task_id": parent_task_id,
-                    "chunk": thinking_content,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }, websocket)
-
-            # ======== content ========
-            elif event_type == "content":
-                if is_thinking:
-                    is_thinking = False
+                # ======== thinking ========
+                if event_type == "thinking":
+                    thinking_content: str = event.get("content", "")
+                    if not is_thinking and thinking_content:
+                        is_thinking = True
+                    thinking_buffer += thinking_content
                     await ws_manager.send_personal_message({
-                        "type": "thinking_done",
+                        "type": "thinking_chunk",
                         "task_id": task_id,
                         "parent_task_id": parent_task_id,
+                        "chunk": thinking_content,
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     }, websocket)
-                chunk: str = event["content"]
-                full_response += chunk
-                response_buffer += chunk
-                await ws_manager.send_personal_message({
-                    "type": "content_chunk",
-                    "task_id": task_id,
-                    "parent_task_id": parent_task_id,
-                    "chunk": chunk,
-                    "accumulated_length": len(full_response),
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }, websocket)
 
-            # ======== tool_call_start ========
-            elif event_type == "tool_call_start":
-                if is_thinking:
-                    is_thinking = False
+                # ======== content ========
+                elif event_type == "content":
+                    if is_thinking:
+                        is_thinking = False
+                        await ws_manager.send_personal_message({
+                            "type": "thinking_done",
+                            "task_id": task_id,
+                            "parent_task_id": parent_task_id,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }, websocket)
+                    chunk: str = event["content"]
+                    full_response += chunk
+                    response_buffer += chunk
                     await ws_manager.send_personal_message({
-                        "type": "thinking_done",
+                        "type": "content_chunk",
                         "task_id": task_id,
                         "parent_task_id": parent_task_id,
+                        "chunk": chunk,
+                        "accumulated_length": len(full_response),
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     }, websocket)
-                logger.info(f"Agent loop {task_id}: tool_call_start: {event.get('tool_name', 'unknown')}")
 
-            # ======== tool_call_arguments ========
-            elif event_type == "tool_call_arguments":
-                if on_args_stream:
-                    try:
-                        await on_args_stream(
-                            event.get("tool_name", ""),
-                            event.get("tool_id", ""),
-                            event.get("arguments_text", ""),
-                        )
-                    except Exception:
-                        logger.warning("on_args_stream failed", exc_info=True)
+                # ======== tool_call_start ========
+                elif event_type == "tool_call_start":
+                    if is_thinking:
+                        is_thinking = False
+                        await ws_manager.send_personal_message({
+                            "type": "thinking_done",
+                            "task_id": task_id,
+                            "parent_task_id": parent_task_id,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }, websocket)
+                    logger.info(f"Agent loop {task_id}: tool_call_start: {event.get('tool_name', 'unknown')}")
 
-            # ======== tool_call_end ========
-            elif event_type == "tool_call_end":
-                tool_name: str = event.get("tool_name", "")
-                tool_id: str = event.get("tool_id") or ""
-                arguments: dict[str, Any] = event.get("arguments", {})
+                # ======== tool_call_arguments ========
+                elif event_type == "tool_call_arguments":
+                    if on_args_stream:
+                        try:
+                            await on_args_stream(
+                                event.get("tool_name", ""),
+                                event.get("tool_id", ""),
+                                event.get("arguments_text", ""),
+                            )
+                        except Exception:
+                            logger.warning("on_args_stream failed", exc_info=True)
 
-                if not tool_name:
-                    continue
+                # ======== tool_call_end ========
+                elif event_type == "tool_call_end":
+                    tool_name: str = event.get("tool_name", "")
+                    tool_id: str = event.get("tool_id") or ""
+                    arguments: dict[str, Any] = event.get("arguments", {})
 
-                # -- pre-display（"executing" 展示文本）--
-                display_text: str | None = None
-                activity_kind: str | None = None
-                if pre_display_handler:
-                    try:
-                        display_text, activity_kind = await pre_display_handler(tool_name, arguments)
-                    except Exception:
-                        logger.warning("pre_display_handler failed", exc_info=True)
+                    if not tool_name:
+                        continue
 
-                await ws_manager.send_personal_message({
-                    "type": "tool_call",
-                    "task_id": task_id,
-                    "parent_task_id": parent_task_id,
-                    "tool_name": tool_name,
-                    "tool_id": tool_id,
-                    "status": "executing",
-                    "phase": "executing",
-                    "arguments": arguments,
-                    "display_text": display_text,
-                    "activity_kind": activity_kind,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }, websocket)
+                    # -- pre-display（"executing" 展示文本）--
+                    display_text: str | None = None
+                    activity_kind: str | None = None
+                    if pre_display_handler:
+                        try:
+                            display_text, activity_kind = await pre_display_handler(tool_name, arguments)
+                        except Exception:
+                            logger.warning("pre_display_handler failed", exc_info=True)
 
-                # -- 执行工具（回调）--
-                handler_result = await tool_call_handler(tool_name, tool_id, arguments)
+                    await ws_manager.send_personal_message({
+                        "type": "tool_call",
+                        "task_id": task_id,
+                        "parent_task_id": parent_task_id,
+                        "tool_name": tool_name,
+                        "tool_id": tool_id,
+                        "status": "executing",
+                        "phase": "executing",
+                        "arguments": arguments,
+                        "display_text": display_text,
+                        "activity_kind": activity_kind,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }, websocket)
 
-                if handler_result.should_disable:
-                    disabled_tools.add(tool_name)
-                    await _append_msg({
-                        "role": "system",
-                        "content": f"工具 {tool_name} 已多次失败并被禁用，请不要再调用此工具。如果已有信息足够，请直接回应用户。"
-                    })
+                    # -- 执行工具（回调）--
+                    handler_result = await tool_call_handler(tool_name, tool_id, arguments)
 
-                if handler_result.inject:
-                    pending_injects[tool_id] = handler_result.inject
+                    if handler_result.should_disable:
+                        disabled_tools.add(tool_name)
+                        await _append_msg({
+                            "role": "system",
+                            "content": f"工具 {tool_name} 已多次失败并被禁用，请不要再调用此工具。如果已有信息足够，请直接回应用户。"
+                        })
 
-                tool_result_payload: dict[str, Any] = {
-                    "success": handler_result.success,
-                    "data": handler_result.result,
-                }
-                if handler_result.error:
-                    tool_result_payload["error"] = handler_result.error
+                    if handler_result.inject:
+                        pending_injects[tool_id] = handler_result.inject
 
-                data_payload = tool_result_payload.get("data") or {}
-                if not isinstance(data_payload, dict):
-                    data_payload = {}
-
-                await ws_manager.send_personal_message({
-                    "type": "tool_call",
-                    "task_id": task_id,
-                    "parent_task_id": parent_task_id,
-                    "tool_name": tool_name,
-                    "status": "completed" if handler_result.success else "failed",
-                    "tool_id": tool_id,
-                    "phase": "completed" if handler_result.success else "failed",
-                    "arguments": arguments,
-                    "result_summary": {
+                    tool_result_payload: dict[str, Any] = {
                         "success": handler_result.success,
-                        "error": handler_result.error,
-                        "metadata": handler_result.result.get("metadata") or {},
-                        "data_keys": list(data_payload.keys()) if isinstance(data_payload, dict) else [],
-                    },
-                    "display_text": handler_result.display_text,
-                    "activity_kind": handler_result.activity_kind,
-                    "error": handler_result.error,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }, websocket)
+                        "data": handler_result.result,
+                    }
+                    if handler_result.error:
+                        tool_result_payload["error"] = handler_result.error
 
-                tool_outputs.append({
-                    "tool": tool_name,
-                    "tool_id": tool_id,
-                    "arguments": arguments,
-                    "result": tool_result_payload,
-                    "display_text": handler_result.display_text,
-                    "activity_kind": handler_result.activity_kind,
-                })
+                    data_payload = tool_result_payload.get("data") or {}
+                    if not isinstance(data_payload, dict):
+                        data_payload = {}
+
+                    await ws_manager.send_personal_message({
+                        "type": "tool_call",
+                        "task_id": task_id,
+                        "parent_task_id": parent_task_id,
+                        "tool_name": tool_name,
+                        "status": "completed" if handler_result.success else "failed",
+                        "tool_id": tool_id,
+                        "phase": "completed" if handler_result.success else "failed",
+                        "arguments": arguments,
+                        "result_summary": {
+                            "success": handler_result.success,
+                            "error": handler_result.error,
+                            "metadata": handler_result.result.get("metadata") or {},
+                            "data_keys": list(data_payload.keys()) if isinstance(data_payload, dict) else [],
+                        },
+                        "display_text": handler_result.display_text,
+                        "activity_kind": handler_result.activity_kind,
+                        "error": handler_result.error,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }, websocket)
+
+                    tool_outputs.append({
+                        "tool": tool_name,
+                        "tool_id": tool_id,
+                        "arguments": arguments,
+                        "result": tool_result_payload,
+                        "display_text": handler_result.display_text,
+                        "activity_kind": handler_result.activity_kind,
+                    })
+        except (asyncio.CancelledError, Exception):
+            partial = response_buffer.strip() or full_response.strip()
+            if partial or thinking_buffer:
+                msg: dict[str, Any] = {"role": "assistant", "content": partial}
+                if thinking_buffer:
+                    msg["reasoning_content"] = thinking_buffer
+                await _append_msg(msg)
+            raise
 
         # ======== 流结束，判断是否有工具调用 ========
         if tool_outputs:
