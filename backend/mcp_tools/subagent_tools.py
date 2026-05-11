@@ -215,9 +215,9 @@ class RunSubagentTool(BaseMCPTool):
         )
 
         # 子 agent 最终回复也持久化到 session
-        if on_message and loop_result.final_text:
+        if sub_on_message and loop_result.final_text:
             try:
-                await on_message({"role": "assistant", "content": loop_result.final_text})
+                await sub_on_message({"role": "assistant", "content": loop_result.final_text})
             except Exception:
                 logger.warning("on_message failed for sub-agent final_text", exc_info=True)
 
