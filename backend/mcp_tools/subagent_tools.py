@@ -172,6 +172,7 @@ class RunSubagentTool(BaseMCPTool):
             async def sub_on_message(msg: dict[str, Any]) -> None:
                 msg["source"] = "subagent"
                 msg["parent_task_id"] = sub_task_id
+                msg["agent_type"] = args.agent_type
                 await on_message(msg)
         else:
             sub_on_message = None

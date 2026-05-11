@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { flushSync } from 'react-dom'
 import { useParams, useNavigate } from 'react-router-dom'
 import Editor, { type OnMount } from '@monaco-editor/react'
-import { Select, Segmented, Tooltip, message, Modal, Input } from 'antd'
+import { Select, Segmented, Tooltip, message, Modal, Input, Collapse } from 'antd'
 import {
   ArrowLeftOutlined,
   CheckOutlined,
@@ -227,6 +227,7 @@ export default function EditorPage() {
   const [turns, setTurns] = useState<ConversationTurn[]>([])
   const [inputValue, setInputValue] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
+  const [collapsedSubagents, setCollapsedSubagents] = useState<Set<string>>(new Set())
   const currentTurnIdRef = useRef<string | null>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
 
@@ -382,6 +383,21 @@ export default function EditorPage() {
     return () => window.removeEventListener('beforeunload', handler)
   }, [turns])
 
+  // 子 Agent 完成后延迟 1s 自动折叠
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = []
+    for (const turn of turns) {
+      for (const seg of turn.segments) {
+        if (seg.type === 'subagent' && seg.status === 'done' && !collapsedSubagents.has(seg.taskId)) {
+          timers.push(setTimeout(() => {
+            setCollapsedSubagents(prev => new Set([...prev, seg.taskId]))
+          }, 1000))
+        }
+      }
+    }
+    return () => timers.forEach(clearTimeout)
+  }, [turns])
+
   const refreshChapterList = useCallback(async () => {
     if (!novelId) return
     try {
@@ -480,13 +496,10 @@ export default function EditorPage() {
                 const subTaskId = msg.metadata.parent_task_id || 'unknown'
                 let subSeg = subagentCache.get(subTaskId)
                 if (!subSeg) {
-                  // 从 run_subagent tool_call 反推 agent_type
-                  const runToolSeg = turn.segments.find(s => s.type === 'tool' && s.call.tool_name === 'run_subagent')
-                  const agentType = String((runToolSeg as TurnSegmentTool)?.call?.arguments?.agent_type || 'memory') as 'memory' | 'review'
                   subSeg = {
                     id: nextSegId(),
                     type: 'subagent',
-                    agentType,
+                    agentType: (msg.metadata?.agent_type || 'memory') as 'memory' | 'review',
                     taskId: subTaskId,
                     segments: [],
                     status: 'done',
@@ -494,6 +507,23 @@ export default function EditorPage() {
                   }
                   turn.segments.push(subSeg)
                   subagentCache.set(subTaskId, subSeg)
+                }
+
+                if (msg.content) {
+                  subSeg.finalText = (subSeg.finalText ? subSeg.finalText + '\n' : '') + msg.content
+                  const lastSeg = subSeg.segments[subSeg.segments.length - 1]
+                  if (lastSeg && lastSeg.type === 'text') {
+                    lastSeg.content = (lastSeg.content ? lastSeg.content + '\n' : '') + msg.content
+                  } else {
+                    subSeg.segments.push({
+                      id: nextSegId(),
+                      type: 'text',
+                      content: msg.content,
+                      thinkingContent: '',
+                      thinkingDone: true,
+                      isStreaming: false,
+                    })
+                  }
                 }
 
                 if (msg.metadata?.tool_calls) {
@@ -514,27 +544,23 @@ export default function EditorPage() {
                     })
                   })
                 }
-
-                if (msg.content) {
-                  subSeg.finalText = (subSeg.finalText ? subSeg.finalText + '\n' : '') + msg.content
-                  const lastSeg = subSeg.segments[subSeg.segments.length - 1]
-                  if (lastSeg && lastSeg.type === 'text') {
-                    lastSeg.content = (lastSeg.content ? lastSeg.content + '\n' : '') + msg.content
-                  } else {
-                    subSeg.segments.push({
-                      id: nextSegId(),
-                      type: 'text',
-                      content: msg.content,
-                      thinkingContent: '',
-                      thinkingDone: true,
-                      isStreaming: false,
-                    })
-                  }
-                }
                 return
               }
 
               // 主 Agent 消息 — 原有逻辑
+              // 恢复历史时保持和流式阶段一致的视觉顺序：
+              // 先展示 thinking / content，再展示本轮 assistant 触发的工具或 subagent 卡片。
+              if (msg.content || msg.metadata?.thinking_content) {
+                turn.segments.push({
+                  id: nextSegId(),
+                  type: 'text',
+                  content: msg.content || '',
+                  thinkingContent: msg.metadata?.thinking_content || '',
+                  thinkingDone: true,
+                  isStreaming: false,
+                })
+              }
+
               if (msg.metadata?.tool_calls) {
                 const toolCalls = Array.isArray(msg.metadata.tool_calls)
                   ? msg.metadata.tool_calls
@@ -551,17 +577,6 @@ export default function EditorPage() {
                       task_id: msgTaskId,
                     },
                   })
-                })
-              }
-
-              if (msg.content || msg.metadata?.thinking_content) {
-                turn.segments.push({
-                  id: nextSegId(),
-                  type: 'text',
-                  content: msg.content || '',
-                  thinkingContent: msg.metadata?.thinking_content || '',
-                  thinkingDone: true,
-                  isStreaming: false,
                 })
               }
             }
@@ -593,7 +608,7 @@ export default function EditorPage() {
         const m = msg as ThinkingChunkMsg
         if (!m.chunk?.trim()) break
         if (m.parent_task_id && m.task_id) {
-          const agentType = subTaskMeta.current.get(m.parent_task_id)?.agentType || 'memory'
+          const agentType = (subTaskMeta.current.get(m.parent_task_id)?.agentType || (m as any).agent_type || 'memory')
           applyToSubagent(m.parent_task_id, m.task_id, agentType, seg => {
             const lastSeg = seg.segments[seg.segments.length - 1]
             if (lastSeg && lastSeg.type === 'text' && lastSeg.isStreaming) {
@@ -638,7 +653,7 @@ export default function EditorPage() {
       case 'thinking_done': {
         const m = msg as ThinkingDoneMsg
         if (m.parent_task_id && m.task_id) {
-          const agentType = subTaskMeta.current.get(m.parent_task_id)?.agentType || 'memory'
+          const agentType = (subTaskMeta.current.get(m.parent_task_id)?.agentType || (m as any).agent_type || 'memory')
           applyToSubagent(m.parent_task_id, m.task_id, agentType, seg => ({
             ...seg,
             segments: seg.segments.map(s =>
@@ -664,7 +679,7 @@ export default function EditorPage() {
       case 'content_chunk': {
         const m = msg as ContentChunkMsg
         if (m.parent_task_id && m.task_id) {
-          const agentType = subTaskMeta.current.get(m.parent_task_id)?.agentType || 'memory'
+          const agentType = (subTaskMeta.current.get(m.parent_task_id)?.agentType || (m as any).agent_type || 'memory')
           applyToSubagent(m.parent_task_id, m.task_id, agentType, seg => {
             const lastSeg = seg.segments[seg.segments.length - 1]
             if (lastSeg && lastSeg.type === 'text' && lastSeg.isStreaming) {
@@ -750,7 +765,7 @@ export default function EditorPage() {
 
         // 子 Agent 内部的工具调用 — 路由到嵌套 segment
         if (m.parent_task_id && m.task_id) {
-          const agentType = subTaskMeta.current.get(m.parent_task_id)?.agentType || 'memory'
+          const agentType = (subTaskMeta.current.get(m.parent_task_id)?.agentType || (m as any).agent_type || 'memory')
           const subToolCall: ToolCallInfo = {
             tool_name: m.tool_name,
             task_id: m.task_id,
@@ -1559,6 +1574,12 @@ export default function EditorPage() {
 
                   {turn.segments.map((seg) => {
                     if (seg.type === 'text') {
+                      // 紧跟在 run_subagent 后的纯 thinking（无正文）由子 Agent 卡片渲染，此处跳过
+                      const prevIdx = turn.segments.indexOf(seg) - 1
+                      if (!seg.content && prevIdx >= 0) {
+                        const prev = turn.segments[prevIdx]
+                        if (prev.type === 'tool' && (prev as TurnSegmentTool).call.tool_name === 'run_subagent') return null
+                      }
                       if (!seg.content && !seg.thinkingContent) return null
                       return (
                         <div key={seg.id} className={styles.chatTurnAssistant}>
@@ -1636,74 +1657,124 @@ export default function EditorPage() {
                     }
 
                     if (seg.type === 'subagent') {
-                      const subLabel = seg.agentType === 'review' ? '审核章节内容' : '探索故事记忆'
-                      const subIcon = seg.agentType === 'review' ? <CheckOutlined /> : <MessageOutlined />
-                      const isSubStreaming = seg.status === 'streaming'
-                      return (
-                        <div key={seg.id} className={`${styles.subagentCard} ${isSubStreaming ? styles.subagentStreaming : ''}`}>
-                          <div className={styles.subagentHeader}>
-                            <span className={styles.subagentHeaderIcon}>{subIcon}</span>
-                            <span className={styles.subagentHeaderLabel}>{subLabel}</span>
-                            {isSubStreaming
-                              ? <span className={styles.subagentHeaderStatus}><LoadingOutlined spin /> 执行中</span>
-                              : seg.status === 'done'
-                                ? <span className={styles.subagentHeaderDone}><CheckCircleOutlined /> 完成</span>
-                                : <span className={styles.subagentHeaderFailed}><CloseCircleOutlined /> 失败</span>
-                            }
-                          </div>
-                          {seg.segments.length > 0 && (
-                            <div className={styles.subagentBody}>
-                              {seg.segments.map(subSeg => {
-                                if (subSeg.type === 'text') {
-                                  return (
-                                    <div key={subSeg.id} className={styles.subagentText}>
-                                      {subSeg.thinkingContent && (
-                                        <details className={`${styles.thinkingBlock} ${styles.subagentThinking}`} open={!subSeg.thinkingDone}>
-                                          <summary className={styles.thinkingSummary}>
-                                            <ReadOutlined /> 子任务思考
-                                          </summary>
-                                          <div className={styles.thinkingContent}>
-                                            <pre>{subSeg.thinkingContent}</pre>
-                                          </div>
-                                        </details>
-                                      )}
-                                      {subSeg.content && (
-                                        <div className={styles.subagentContent}>
-                                          <Markdown>{subSeg.content}</Markdown>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )
-                                }
-                                if (subSeg.type === 'tool') {
-                                  const subTc = subSeg.call
-                                  const subVisual = getActivityVisual(subTc.activity_kind)
-                                  return (
-                                    <div
-                                      key={subSeg.id}
-                                      className={`${styles.toolInlineCompact} ${styles.subagentTool} ${subTc.status === 'executing' ? styles.toolInlineActive : ''}`}
-                                    >
-                                      <span className={styles.toolCompactIcon}>{subVisual.icon}</span>
-                                      <span className={styles.toolCompactName}>
-                                        {subTc.display_text || '处理中...'}
-                                      </span>
-                                      <span className={`${styles.toolCompactStatus} ${subTc.status === 'executing' ? styles.toolCompactRunning : styles.toolCompactDone}`}>
-                                        {subTc.status === 'executing' && <LoadingOutlined spin />}
-                                        {subTc.status === 'completed' && <CheckCircleOutlined />}
-                                        {subTc.status === 'executing' ? subVisual.badge : '完成'}
-                                      </span>
-                                    </div>
-                                  )
-                                }
-                                return null
-                              })}
-                            </div>
+                      // 子 Agent 卡片已在 run_subagent 工具段位置渲染，此处跳过
+                      return null
+                    }
+
+                    const renderSubagentCard = (subSeg: TurnSegmentSubagent) => {
+                      const subIsReview = subSeg.agentType === 'review'
+                      const subIsStreaming = subSeg.status === 'streaming'
+                      const subIsFinished = subSeg.status === 'done'
+                      const subAccentCls = subIsReview ? styles.subagentReview : styles.subagentMemory
+                      const subAgentLabel = subIsReview ? '审核编辑' : '记忆分析师'
+                      const subAgentEmoji = subIsReview ? '🔍' : '📝'
+                      const subCollapsed = collapsedSubagents.has(subSeg.taskId)
+
+                      const subActiveKey = subIsStreaming ? [subSeg.taskId]
+                        : subIsFinished && subCollapsed ? []
+                        : subIsFinished && !subCollapsed ? [subSeg.taskId]
+                        : subSeg.status === 'failed' ? [subSeg.taskId]
+                        : [subSeg.taskId]
+
+                      const subHeader = (
+                        <div className={`${styles.subagentPanelHeader} ${subAccentCls}`}>
+                          <span className={styles.subagentPanelIcon}>{subAgentEmoji}</span>
+                          <span className={styles.subagentPanelLabel}>{subAgentLabel}</span>
+                          {subIsStreaming && (
+                            <span className={styles.subagentPanelBadge}><LoadingOutlined spin /> 执行中</span>
                           )}
+                          {subIsFinished && (
+                            <span className={styles.subagentPanelBadgeDone}><CheckCircleOutlined /> 完成</span>
+                          )}
+                          {subSeg.status === 'failed' && (
+                            <span className={styles.subagentPanelBadgeFailed}><CloseCircleOutlined /> 失败</span>
+                          )}
+                        </div>
+                      )
+
+                      return (
+                        <div key={subSeg.id} className={`${styles.subagentCard} ${subAccentCls} ${subIsStreaming ? styles.subagentStreaming : ''}`}>
+                          <Collapse
+                            activeKey={subActiveKey}
+                            onChange={keys => {
+                              if (!subIsStreaming) {
+                                setCollapsedSubagents(prev => {
+                                  const next = new Set(prev)
+                                  if (keys.includes(subSeg.taskId)) next.delete(subSeg.taskId)
+                                  else next.add(subSeg.taskId)
+                                  return next
+                                })
+                              }
+                            }}
+                            items={[{
+                              key: subSeg.taskId,
+                              label: subHeader,
+                              children: subSeg.segments.length > 0 ? (
+                                <div className={styles.subagentBody}>
+                                  {subSeg.segments.map(subSubSeg => {
+                                    if (subSubSeg.type === 'text') {
+                                      return (
+                                        <div key={subSubSeg.id} className={styles.subagentText}>
+                                          {subSubSeg.thinkingContent && (
+                                            <details className={`${styles.thinkingBlock} ${styles.subagentThinking}`} open={!subSubSeg.thinkingDone}>
+                                              <summary className={styles.thinkingSummary}>
+                                                <ReadOutlined /> 思考过程
+                                              </summary>
+                                              <div className={styles.thinkingContent}>
+                                                <pre>{subSubSeg.thinkingContent}</pre>
+                                              </div>
+                                            </details>
+                                          )}
+                                          {subSubSeg.content && (
+                                            <div className={styles.subagentContent}>
+                                              <Markdown>{subSubSeg.content}</Markdown>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )
+                                    }
+                                    if (subSubSeg.type === 'tool') {
+                                      const subTc = subSubSeg.call
+                                      const subVisual = getActivityVisual(subTc.activity_kind)
+                                      return (
+                                        <div
+                                          key={subSubSeg.id}
+                                          className={`${styles.toolInlineCompact} ${styles.subagentTool} ${subTc.status === 'executing' ? styles.toolInlineActive : ''}`}
+                                        >
+                                          <span className={styles.toolCompactIcon}>{subVisual.icon}</span>
+                                          <span className={styles.toolCompactName}>
+                                            {subTc.display_text || '处理中...'}
+                                          </span>
+                                          <span className={`${styles.toolCompactStatus} ${subTc.status === 'executing' ? styles.toolCompactRunning : styles.toolCompactDone}`}>
+                                            {subTc.status === 'executing' && <LoadingOutlined spin />}
+                                            {subTc.status === 'completed' && <CheckCircleOutlined />}
+                                            {subTc.status === 'executing' ? subVisual.badge : '完成'}
+                                          </span>
+                                        </div>
+                                      )
+                                    }
+                                    return null
+                                  })}
+                                </div>
+                              ) : (
+                                <div className={styles.subagentEmpty}>暂无内容</div>
+                              ),
+                            }]}
+                            bordered={false}
+                            expandIcon={() => null}
+                            className={styles.subagentCollapse}
+                          />
                         </div>
                       )
                     }
 
                     const tc = seg.call
+                    // run_subagent 位置渲染子 Agent 卡片（同 turn 内匹配）
+                    if (tc.tool_name === 'run_subagent') {
+                      const subSeg = turn.segments.find(s => s.type === 'subagent') as TurnSegmentSubagent | undefined
+                      if (!subSeg) return null
+                      return renderSubagentCard(subSeg)
+                    }
                     const visual = getActivityVisual(tc.activity_kind)
                     return (
                       <div

@@ -146,6 +146,7 @@ export interface SessionLoadedMsg {
     metadata?: {
       source?: string
       parent_task_id?: string
+      agent_type?: string
       tool_calls?: string | Array<{
         id: string
         function?: {
@@ -185,6 +186,7 @@ export interface ThinkingChunkMsg {
   task_id?: string
   parent_task_id?: string
   source?: string
+  agent_type?: string
 }
 
 export interface ThinkingDoneMsg {

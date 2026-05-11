@@ -1772,57 +1772,121 @@
 }
 
 /* ---- 子 Agent 嵌套卡片 ---- */
+/* ---- Sub-Agent Card ---- */
 .subagentCard {
   margin: 6px 0 6px 12px;
-  border-left: 3px solid #b37feb;
-  border-radius: 0 8px 8px 0;
-  background: #faf9fb;
+  border-radius: 8px;
   overflow: hidden;
 }
 
-.subagentStreaming {
-  border-left-color: #9254de;
-  box-shadow: 0 0 0 1px rgba(146, 84, 222, 0.12);
+/* memory: amber accent */
+.subagentMemory {
+  border-left: 3px solid #d4880f;
+  background: #fffbe6;
 }
 
-.subagentHeader {
+/* review: teal accent */
+.subagentReview {
+  border-left: 3px solid #008874;
+  background: #e6f7f5;
+}
+
+.subagentStreaming.subagentMemory {
+  box-shadow: 0 0 0 1px rgba(212, 136, 15, 0.13);
+}
+.subagentStreaming.subagentReview {
+  box-shadow: 0 0 0 1px rgba(0, 136, 116, 0.13);
+}
+
+/* Collapse overrides */
+.subagentCollapse {
+  background: transparent !important;
+  border: none !important;
+}
+.subagentCollapse :global(.ant-collapse-item) {
+  border: none !important;
+}
+.subagentCollapse :global(.ant-collapse-header) {
+  padding: 0 !important;
+  align-items: center !important;
+}
+.subagentCollapse :global(.ant-collapse-content) {
+  border-top: 1px solid rgba(0, 0, 0, 0.06) !important;
+}
+.subagentCollapse :global(.ant-collapse-content-active) {
+  transition: height 0.4s ease !important;
+}
+.subagentCollapse :global(.ant-collapse-content-inactive) {
+  transition: height 0.35s ease !important;
+}
+.subagentCollapse :global(.ant-collapse-content-box) {
+  padding: 12px 14px !important;
+}
+
+.subagentPanelHeader {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
+  padding: 10px 14px;
   font-size: 12px;
-  color: #5a4a6a;
-  background: linear-gradient(135deg, rgba(179, 127, 235, 0.06), transparent);
-  border-bottom: 1px solid rgba(179, 127, 235, 0.12);
 }
 
-.subagentHeaderIcon {
-  color: #9254de;
-  font-size: 13px;
+.subagentPanelIcon {
+  font-size: 15px;
+  line-height: 1;
 }
 
-.subagentHeaderLabel {
-  font-weight: 500;
+.subagentPanelLabel {
+  font-weight: 600;
   flex: 1;
+  font-size: 12.5px;
 }
 
-.subagentHeaderStatus {
-  color: #9254de;
+.subagentMemory .subagentPanelLabel { color: #8d6a00; }
+.subagentReview .subagentPanelLabel { color: #006b5c; }
+
+.subagentPanelBadge {
   font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: #8d6a00;
+  background: rgba(212, 136, 15, 0.1);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.subagentHeaderDone {
+.subagentPanelBadgeDone {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
   color: #52c41a;
-  font-size: 11px;
+  background: rgba(82, 196, 26, 0.08);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.subagentHeaderFailed {
-  color: #ff4d4f;
+.subagentPanelBadgeFailed {
   font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.06);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .subagentBody {
-  padding: 8px 14px;
+  /* children of Collapse content */
+}
+
+.subagentEmpty {
+  color: #bfbfbf;
+  font-size: 12px;
+  padding: 8px 0;
+  text-align: center;
 }
 
 .subagentTool {
@@ -1847,4 +1911,37 @@
 
 .subagentContent p {
   margin: 0 0 4px;
+}
+
+/* ---- Dark mode: Sub-Agent ---- */
+.editorPageDark .subagentMemory {
+  background: rgba(212, 136, 15, 0.06);
+  border-left-color: #b8780a;
+}
+.editorPageDark .subagentReview {
+  background: rgba(0, 136, 116, 0.06);
+  border-left-color: #007a66;
+}
+.editorPageDark .subagentPanelLabel {
+  color: #e0d4b0;
+}
+.editorPageDark .subagentReview .subagentPanelLabel {
+  color: #b0dcd0;
+}
+.editorPageDark .subagentMemory .subagentPanelLabel {
+  color: #e0d4b0;
+}
+.editorPageDark .subagentPanelBadge {
+  color: #e0c060;
+  background: rgba(212, 136, 15, 0.15);
+}
+.editorPageDark .subagentPanelBadgeDone {
+  color: #73d13d;
+  background: rgba(82, 196, 26, 0.1);
+}
+.editorPageDark .subagentCollapse :global(.ant-collapse-content) {
+  border-top-color: rgba(255, 255, 255, 0.06) !important;
+}
+.editorPageDark .subagentText {
+  color: #d0d0d0;
 }
