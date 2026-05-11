@@ -11,7 +11,8 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Awaitable, TYPE_CHECKING
+from collections.abc import Callable, Awaitable
+from typing import Any, TYPE_CHECKING
 
 from fastapi import WebSocket
 
