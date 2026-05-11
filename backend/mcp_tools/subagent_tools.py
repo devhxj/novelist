@@ -14,7 +14,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.agent_loop import run_agent_loop, ToolCallResult
+from core.agent_loop import run_agent_loop
 from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -167,26 +167,21 @@ class RunSubagentTool(BaseMCPTool):
 
         async def sub_handler(
             tool_name: str, tool_id: str, arguments: dict[str, Any]
-        ) -> ToolCallResult:
+        ) -> MCPToolResult:
             if tool_name not in allowed_tools:
-                return ToolCallResult(
-                    success=False, result={},
+                return MCPToolResult(
+                    success=False, data={},
                     error=f"子 Agent 不允许调用 {tool_name}",
                 )
             from core.database import AsyncSessionLocal
             async with AsyncSessionLocal() as sub_db:
-                result = await registry.execute(
+                return await registry.execute(
                     tool_name,
                     db=sub_db,
                     user_id=user_id,
                     novel_id=novel_id,
                     **arguments,
                 )
-            return ToolCallResult(
-                success=result.success,
-                result=result.data or {},
-                error=result.error,
-            )
 
         # 执行循环 — 复用主 chat 的 cancel_event，确保主任务取消时子 Agent 同步退出
         cancel_event = extra.get("cancel_event") or asyncio.Event()

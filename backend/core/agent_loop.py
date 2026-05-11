@@ -11,12 +11,15 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Awaitable
+from typing import Any, Callable, Awaitable, TYPE_CHECKING
 
 from fastapi import WebSocket
 
 from core.websocket import ws_manager
 from core.llm_service import llm_service
+
+if TYPE_CHECKING:
+    from mcp_tools.base import MCPToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +29,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 @dataclass
-class ToolCallResult:
-    """工具执行结果，由 tool_call_handler 返回"""
-    success: bool
-    result: dict[str, Any]          # 发送给 LLM 的 TOOL 消息体 (data 字段)
-    error: str | None = None
-    display_text: str | None = None  # 前端展示文本
-    activity_kind: str | None = None  # 前端图标分类 view/write/edit/plan
-    inject: list[dict] | None = None  # 需注入到会话的消息列表
-    should_disable: bool = False      # 失败过多后禁用该工具（主 chat 用）
-
-
-@dataclass
 class AgentLoopResult:
     """Agent 循环结束后的返回"""
     final_text: str
@@ -45,18 +36,18 @@ class AgentLoopResult:
 
 
 # 回调类型
-ToolCallHandler = Callable[[str, str, dict[str, Any]], Awaitable[ToolCallResult]]
-"""工具执行回调：async (tool_name, tool_id, arguments) -> ToolCallResult"""
+type ToolCallHandler = Callable[[str, str, dict[str, Any]], Awaitable[MCPToolResult]]
+"""工具执行回调：async (tool_name, tool_id, arguments) -> MCPToolResult"""
 
-DisplayHandler = Callable[[str, dict[str, Any], str], Awaitable[tuple[str | None, str | None]]]
+type DisplayHandler = Callable[[str, dict[str, Any], str], Awaitable[tuple[str | None, str | None]]]
 """展示文本回调：async (tool_name, arguments, status) -> (display_text, activity_kind)
 循环在 selected / executing / completed 三个阶段统一调用，status 为 "executing" / "completed" / "failed" """
 
-OnArgsStreamHandler = Callable[[str, str, str], Awaitable[None]]
+type OnArgsStreamHandler = Callable[[str, str, str], Awaitable[None]]
 """参数流式回调：async (tool_name, tool_id, arguments_text) -> None
 用于 edit_chapter 的 new_content 实时预览等场景"""
 
-OnMessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
+type OnMessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
 """消息持久化回调：async (message) -> None
 循环每追加一条 assistant/tool/system 消息时调用，实现任意状态可恢复"""
 
@@ -112,6 +103,7 @@ async def run_agent_loop(
     thinking_buffer = ""      # DeepSeek reasoning_content
     is_thinking = False
     recent_tool_patterns: list[str] = []
+    tool_failed_cnt: dict[str, int] = {}
 
     async def _append_msg(msg: dict[str, Any]) -> None:
         """追加消息到列表，同时回调持久化"""
@@ -262,34 +254,37 @@ async def run_agent_loop(
 
                     # -- 执行工具（回调）--
                     logger.info(f"收到完整toolcall 开始执行: {tool_name}, 参数: {arguments}")
-                    handler_result = await tool_call_handler(tool_name, tool_id, arguments)
+                    tool_result = await tool_call_handler(tool_name, tool_id, arguments)
 
-                    if handler_result.should_disable:
+                    # 失败计数：连续失败达阈值时注入 system 提示，不修改工具列表
+                    if not tool_result.success:
+                        tool_failed_cnt[tool_name] = tool_failed_cnt.get(tool_name, 0) + 1
+                    else:
+                        tool_failed_cnt[tool_name] = 0
+                    if tool_failed_cnt.get(tool_name, 0) >= 3:
                         await _append_msg({
                             "role": "system",
                             "content": f"工具 {tool_name} 已多次失败并被禁用，请不要再调用此工具。如果已有信息足够，请直接回应用户。"
                         })
+                        await ws_manager.send_personal_message({
+                            "type": "system_warning",
+                            "task_id": task_id,
+                            "parent_task_id": parent_task_id,
+                            "message": f"工具 {tool_name} 已连续失败 3 次，已暂时禁用。",
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }, websocket)
 
-                    if handler_result.inject:
-                        pending_injects[tool_id] = handler_result.inject
+                    if tool_result.inject:
+                        pending_injects[tool_id] = tool_result.inject
 
-                    tool_result_payload: dict[str, Any] = {
-                        "success": handler_result.success,
-                        "data": handler_result.result,
-                    }
-                    if handler_result.error:
-                        tool_result_payload["error"] = handler_result.error
-
-                    data_payload = tool_result_payload.get("data") or {}
-                    if not isinstance(data_payload, dict):
-                        data_payload = {}
-
+                    tool_result_payload = tool_result.model_dump(exclude={"inject"})
+                    data_payload = (tool_result.data or {}) if isinstance(tool_result.data, dict) else {}
                     logger.info(f"Tool result payload: {tool_result_payload}")
 
                     # -- completed 展示文本（回调统一生成）--
-                    status_result = "completed" if handler_result.success else "failed"
-                    display_text_result = handler_result.display_text
-                    activity_kind_result = handler_result.activity_kind
+                    status_result = "completed" if tool_result.success else "failed"
+                    display_text_result = None
+                    activity_kind_result = None
                     if display_handler:
                         try:
                             display_text_result, activity_kind_result = await display_handler(
@@ -308,14 +303,14 @@ async def run_agent_loop(
                         "phase": status_result,
                         "arguments": arguments,
                         "result_summary": {
-                            "success": handler_result.success,
-                            "error": handler_result.error,
-                            "metadata": handler_result.result.get("metadata") or {},
-                            "data_keys": list(data_payload.keys()) if isinstance(data_payload, dict) else [],
+                            "success": tool_result.success,
+                            "error": tool_result.error,
+                            "metadata": tool_result.metadata or {},
+                            "data_keys": list(data_payload.keys()),
                         },
                         "display_text": display_text_result,
                         "activity_kind": activity_kind_result,
-                        "error": handler_result.error,
+                        "error": tool_result.error,
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     }, websocket)
 
@@ -324,8 +319,8 @@ async def run_agent_loop(
                         "tool_id": tool_id,
                         "arguments": arguments,
                         "result": tool_result_payload,
-                        "display_text": handler_result.display_text,
-                        "activity_kind": handler_result.activity_kind,
+                        "display_text": display_text_result,
+                        "activity_kind": activity_kind_result,
                     })
         except (asyncio.CancelledError, Exception):
             partial = response_buffer.strip() or full_response.strip()

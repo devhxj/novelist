@@ -13,9 +13,9 @@ from core.websocket import ws_manager
 from core.database import AsyncSessionLocal
 from core.agent_loop import (
     run_agent_loop,
-    ToolCallResult,
     AgentLoopResult,
 )
+from mcp_tools.base import MCPToolResult
 from core.auth import decode_token
 from chat.session_manager import (
     Session, MessageRole,
@@ -735,10 +735,6 @@ async def _run_chat_with_tools(
             cache_db_ref = db
             registry_for_handler = registry
 
-            # 失败计数
-            failed_tool_keys: dict[str, int] = {}
-            max_tool_retries = 3
-
 
             # 取消事件：同步 task_flags → asyncio.Event
             cancel_event = asyncio.Event()
@@ -807,8 +803,7 @@ async def _run_chat_with_tools(
                 # --- tool_call_handler ---
                 async def _handle_tool(
                     tool_name: str, tool_id: str, arguments: dict[str, Any]
-                ) -> ToolCallResult:
-                    nonlocal failed_tool_keys
+                ) -> MCPToolResult:
 
                     # 参数清洗
                     raw_args = {k: v for k, v in arguments.items() if k not in ('session_id', 'novel_id')}
@@ -831,7 +826,6 @@ async def _run_chat_with_tools(
                         if chapter:
                             clean_args["chapter_id"] = chapter.id
 
-                    inject = None
                     async with AsyncSessionLocal() as tool_db:
                         tool_result = await registry_for_handler.execute(
                             tool_name,
@@ -848,27 +842,10 @@ async def _run_chat_with_tools(
                             cancel_event=cancel_event,
                             **clean_args
                         )
-                        inject = tool_result.inject
-                        tool_result_payload = tool_result.model_dump(exclude={"inject"})
-
-                    # 失败计数
-                    if not tool_result_payload.get("success"):
-                        failed_tool_keys[tool_name] = failed_tool_keys.get(tool_name, 0) + 1
-                    else:
-                        failed_tool_keys[tool_name] = 0
-                    should_disable = failed_tool_keys.get(tool_name, 0) >= max_tool_retries
-
-                    if should_disable:
-                        await ws_manager.send_personal_message({
-                            "type": "system_warning",
-                            "task_id": task_id,
-                            "message": f"工具 {tool_name} 已连续失败 {max_tool_retries} 次，已暂时禁用。",
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }, websocket)
 
                     # edit_chapter 成功后推送 edit_pending 和 edit_preview
-                    if tool_name == "edit_chapter" and tool_result_payload.get("success"):
-                        result_data = tool_result_payload.get("data") or {}
+                    if tool_name == "edit_chapter" and tool_result.success:
+                        result_data = (tool_result.data or {}) if isinstance(tool_result.data, dict) else {}
                         edit_session_id = result_data.get("edit_session_id")
                         if edit_session_id:
                             await ws_manager.send_personal_message({
@@ -893,13 +870,7 @@ async def _run_chat_with_tools(
                                     "timestamp": datetime.now(timezone.utc).isoformat()
                                 }, websocket)
 
-                    return ToolCallResult(
-                        success=tool_result_payload.get("success", False),
-                        result=tool_result_payload.get("data") or {},
-                        error=tool_result_payload.get("error"),
-                        inject=inject,
-                        should_disable=should_disable,
-                    )
+                    return tool_result
 
                 # --- on_args_stream（edit_chapter 实时预览） ---
                 async def _on_args(tool_name: str, tool_id: str, arguments_text: str):
