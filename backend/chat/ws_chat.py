@@ -681,17 +681,8 @@ async def _run_chat_with_tools(
                     logger.warning(f"Failed to build novel context snapshot: {exc}")
                     novel_context_snapshot = ""
 
-            all_tools = registry.get_openai_functions() if tools_enabled else None
-            if all_tools:
-                selected_tool_names = EditModeConfig.get_llm_tools_for_message(edit_mode, user_message)
-                order_map = {name: idx for idx, name in enumerate(selected_tool_names)}
-                tools = [
-                    tool for tool in all_tools
-                    if tool.get("function", {}).get("name") in order_map
-                ]
-                tools.sort(key=lambda tool: order_map.get(tool.get("function", {}).get("name", ""), 999))
-            else:
-                tools = None
+            main_agent_tools = EditModeConfig.get_main_agent_tools()
+            tools = registry.get_openai_functions(allowed_names=list(main_agent_tools)) if tools_enabled else None
             
             # --- 构建消息结构 ---
             # system1：基础指令 + 创作偏好（永远不变）
@@ -833,6 +824,7 @@ async def _run_chat_with_tools(
                             user_id=session.user_id,
                             session_id=session.session_id,
                             novel_id=novel_id,
+                            allowed_tools=main_agent_tools,
                             websocket=websocket,
                             chat_session=session,
                             tool_id=tool_id,

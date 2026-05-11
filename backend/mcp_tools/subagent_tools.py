@@ -154,11 +154,10 @@ class RunSubagentTool(BaseMCPTool):
         if args.chapter_id:
             user_prompt += f"\n目标章节 ID: {args.chapter_id}"
 
-        # 构建子 Agent 工具列表（从注册表中筛选，不包含 run_subagent）
+        # 构建子 Agent 工具列表（从注册表中按白名单筛选，不包含 run_subagent）
         from .registry import get_mcp_registry
         registry = get_mcp_registry()
-        all_tools = registry.get_openai_functions()
-        sub_tools = [t for t in all_tools if t["function"]["name"] in allowed_tools]
+        sub_tools = registry.get_openai_functions(allowed_names=list(allowed_tools))
 
         # 初始消息
         messages: list[dict[str, Any]] = [
@@ -183,11 +182,6 @@ class RunSubagentTool(BaseMCPTool):
         async def sub_handler(
             tool_name: str, tool_id: str, arguments: dict[str, Any]
         ) -> MCPToolResult:
-            if tool_name not in allowed_tools:
-                return MCPToolResult(
-                    success=False, data={},
-                    error=f"子 Agent 不允许调用 {tool_name}",
-                )
             from core.database import AsyncSessionLocal
             async with AsyncSessionLocal() as sub_db:
                 return await registry.execute(
@@ -195,6 +189,7 @@ class RunSubagentTool(BaseMCPTool):
                     db=sub_db,
                     user_id=user_id,
                     novel_id=novel_id,
+                    allowed_tools=allowed_tools,
                     **arguments,
                 )
 

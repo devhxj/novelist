@@ -164,9 +164,12 @@ class MCPToolRegistry:
 
     async def execute(self, tool_name: str, *, db: AsyncSession,
                       user_id: int, novel_id: int,
+                      allowed_tools: frozenset[str],
                       **tool_params: Any) -> MCPToolResult:
         tool = self.get(tool_name)
         if not tool:
+            return MCPToolResult(success=False, error=f"Tool not found: {tool_name}")
+        if tool_name not in allowed_tools:
             return MCPToolResult(success=False, error=f"Tool not found: {tool_name}")
 
         t0 = time.monotonic()

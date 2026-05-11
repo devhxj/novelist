@@ -148,90 +148,27 @@ class EditModeConfig:
         EditMode.AGENT: AGENT_SYSTEM_PROMPT,
     }
 
-    MODE_ALLOWED_TOOLS: dict[EditMode, set[str]] = {
-        EditMode.AGENT: {
-            "get_novel_info", "get_chapter_list", "get_chapter_content", "create_new_chapter",
-            "get_creative_profile", "update_creative_profile",
-            "get_characters", "create_character", "update_character",
-            "search_story_memory", "get_character_memory",
-            "edit_chapter",
-            "run_subagent",
-            "get_timeline", "add_timeline_entry", "update_timeline_entry",
-            "update_character_relationship",
-            "get_locations", "create_location", "update_location", "delete_location",
-            "get_story_arcs", "add_story_arc", "update_story_arc",
-            "get_story_state", "update_story_state",
-            "get_reader_perspective", "add_reader_perspective_entry", "update_reader_perspective_entry",
-            "create_outline",
-        },
-    }
+    # 主 Agent 可见工具白名单。不在白名单内的工具（如 lint_chapter、get_character_memory）
+    # 仅供子 Agent 通过 registry.execute(allowed_tools=...) 调用。
+    MAIN_AGENT_TOOLS: frozenset[str] = frozenset({
+        "get_novel_info", "get_chapter_list", "get_chapter_content", "create_new_chapter",
+        "get_creative_profile", "update_creative_profile",
+        "get_characters", "create_character", "update_character",
+        "search_story_memory",
+        "edit_chapter",
+        "run_subagent",
+        "get_timeline", "add_timeline_entry", "update_timeline_entry",
+        "update_character_relationship",
+        "get_locations", "create_location", "update_location", "delete_location",
+        "get_story_arcs", "add_story_arc", "update_story_arc",
+        "get_story_state", "update_story_state",
+        "get_reader_perspective", "add_reader_perspective_entry", "update_reader_perspective_entry",
+        "create_outline",
+    })
 
     MODE_CAN_EDIT: dict[EditMode, bool] = {
         EditMode.AGENT: True,
     }
-
-    MODE_LLM_PRIMARY_TOOLS: dict[EditMode, list[str]] = {
-        EditMode.AGENT: [
-            "get_creative_profile",
-            "update_creative_profile",
-            "get_novel_info",
-            "get_chapter_list",
-            "get_chapter_content",
-            "get_characters",
-            "search_story_memory",
-            "get_timeline",
-            "edit_chapter",
-            "add_timeline_entry",
-            "update_timeline_entry",
-            "update_character_relationship",
-            "get_story_state", "update_story_state",
-            "get_reader_perspective", "add_reader_perspective_entry", "update_reader_perspective_entry",
-            "run_subagent",
-            "create_outline",
-        ],
-    }
-
-    TOOL_BUNDLES: dict[str, set[str]] = {
-        "editing": {
-            "get_chapter_list", "get_chapter_content",
-            "edit_chapter",
-        },
-        "characters": {
-            "get_characters",
-            "create_character", "update_character",
-            "update_character_relationship",
-        },
-        "locations": {
-            "get_locations", "create_location",
-            "update_location", "delete_location",
-        },
-        "timeline": {
-            "get_timeline",
-            "add_timeline_entry", "update_timeline_entry",
-        },
-        "generation": {
-            "create_new_chapter", "edit_chapter",
-            "search_story_memory", "run_subagent",
-            "create_outline",
-        },
-        "story_arc": {
-            "get_story_arcs", "add_story_arc", "update_story_arc",
-        },
-    }
-
-    TOOL_BUNDLE_CUES: dict[str, tuple[str, ...]] = {
-        "editing": ("修改", "改写", "润色", "重写", "编辑", "替换", "局部改", "edit_chapter", "副本"),
-        "characters": ("角色", "人物", "关系", "师徒", "敌对", "盟友", "恋人", "创建角色"),
-        "locations": ("地点", "场景", "地图", "城市", "房间", "森林", "宫殿", "地点设定"),
-        "timeline": ("伏笔", "时间线", "规划", "大纲", "安排", "下章", "长期", "回收", "设定检查"),
-        "generation": ("写", "续写", "生成", "创建章节", "新章节", "扩写", "补写"),
-        "story_arc": ("弧线", "故事线", "主线", "支线", "角色线", "叙事线", "剧情线", "故事结构"),
-    }
-
-    @classmethod
-    def can_use_tool(cls, mode: EditMode, tool_name: str) -> bool:
-        """AGENT 模式允许所有工具"""
-        return True
 
     @classmethod
     def can_edit(cls, mode: EditMode) -> bool:
@@ -249,51 +186,6 @@ class EditModeConfig:
         return cls.MODE_DESCRIPTIONS.get(mode, "")
 
     @classmethod
-    def filter_tools(cls, mode: EditMode, all_tools: list[str]) -> list[str]:
-        """AGENT 模式允许所有工具"""
-        return list(all_tools)
-
-    @classmethod
-    def get_llm_primary_tools(cls, mode: EditMode = EditMode.AGENT) -> list[str]:
-        """
-        给 LLM 的主工具子集。
-
-        目的：
-        - 减少创作时的工具噪声
-        - 提高工具前缀稳定性与缓存命中率
-        - 保留完整后端能力，但默认只暴露高频编排工具
-        """
-        return list(cls.MODE_LLM_PRIMARY_TOOLS.get(EditMode.AGENT, []))
-
-    @classmethod
-    def get_llm_tools_for_message(cls, mode: EditMode = EditMode.AGENT, user_message: str = "") -> list[str]:
-        """
-        给当前这轮消息挑选工具集。
-
-        设计目标：
-        - 默认使用更稳定的主工具集，优化缓存
-        - 当用户明确进入 AI IDE 深水区操作时，自动补齐相关工具能力
-        - 不丢失原有"可直接读取、直接改、局部改、维护设定"的核心体验
-        """
-        allowed = cls.MODE_ALLOWED_TOOLS.get(EditMode.AGENT, set())
-        selected = set(cls.get_llm_primary_tools())
-        text = (user_message or "").strip()
-
-        if text:
-            for bundle_name, cues in cls.TOOL_BUNDLE_CUES.items():
-                if any(cue in text for cue in cues):
-                    selected.update(cls.TOOL_BUNDLES.get(bundle_name, set()))
-
-        if any(cue in text for cue in ("工具", "mcp", "全部能力", "像ide", "像 agent", "像coding agent")):
-            selected.update(allowed)
-
-        # 保证编辑核心链路始终可达
-        selected.update(cls.TOOL_BUNDLES["editing"])
-        # 角色记忆检索暂时仅供 memory subagent 使用，不直接暴露给主 Agent。
-        selected.discard("get_character_memory")
-
-        ordered_primary = cls.MODE_LLM_PRIMARY_TOOLS.get(EditMode.AGENT, [])
-        ordered_extra = sorted(name for name in selected if name not in ordered_primary)
-        return [name for name in ordered_primary if name in selected and name in allowed] + [
-            name for name in ordered_extra if name in allowed
-        ]
+    def get_main_agent_tools(cls) -> frozenset[str]:
+        """返回主 Agent 工具白名单"""
+        return cls.MAIN_AGENT_TOOLS
