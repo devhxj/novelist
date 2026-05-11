@@ -122,12 +122,12 @@
 
 .leftSidebar {
   width: 260px;
+  min-height: 0;
   background: rgba(255, 255, 255, 0.7);
   border-right: 1px solid rgba(113, 132, 164, 0.16);
   backdrop-filter: blur(18px);
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
   overflow: hidden;
   transition: width 0.2s ease;
   position: relative;
@@ -1634,6 +1634,9 @@
 .sidebarWrapper {
   position: relative;
   flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .emptyChat {
