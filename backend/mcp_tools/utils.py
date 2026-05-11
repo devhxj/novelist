@@ -14,6 +14,7 @@ async def _invalidate_character_cache(novel_id: int, character_id: int | None = 
         from core.redis_service import redis_service
         if character_id:
             await redis_service.delete(f"character:{character_id}:detail")
+            await redis_service.delete(f"character:{character_id}:memory")
         await redis_service.clear_pattern(f"novel:{novel_id}:characters:*")
     except Exception:
         pass

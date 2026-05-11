@@ -43,31 +43,3 @@ export interface ConsistencyCheckResponse {
   check_time: number
 }
 
-export interface MemorySearchRequest {
-  query: string
-  search_type?: 'semantic' | 'keyword'
-  filters?: {
-    chapter_ids?: number[]
-    character_ids?: number[]
-    event_types?: string[]
-  }
-  top_k?: number
-}
-
-export interface MemorySearchResult {
-  id: number
-  type: string
-  content: string
-  chapter_id: number
-  relevance_score: number
-  metadata: {
-    chapter_number: number
-    title: string
-  }
-}
-
-export interface MemorySearchResponse {
-  results: MemorySearchResult[]
-  total: number
-  search_time: number
-}

@@ -494,17 +494,35 @@ class ContextBuilder:
                 filtered_results.append(formatted)
             
             diverse_results = self._mmr_rerank(filtered_results, final_k=top_k)
-            
+
+            # 批量回查章节元信息（章节号、标题、摘要）
+            chapter_ids = {r["source_id"] for r in diverse_results if r.get("source_id")}
+            chapter_map: dict[int, dict[str, Any]] = {}
+            if chapter_ids:
+                ch_result = await self.db.execute(
+                    select(Chapter.id, Chapter.chapter_number, Chapter.title, Chapter.summary)
+                    .where(Chapter.id.in_(list(chapter_ids)))
+                )
+                for row in ch_result:
+                    chapter_map[row[0]] = {
+                        "chapter_number": row[1],
+                        "title": row[2],
+                        "summary": row[3],
+                    }
+                for r in diverse_results:
+                    if r.get("source_id") and r["source_id"] in chapter_map:
+                        r["chapter"] = chapter_map[r["source_id"]]
+
             total_chars = sum(len(r["content"]) for r in diverse_results)
-            
+
             logger.info(
                 f"✅ RAG完成: 原始={len(results)} → 过滤后={len(filtered_results)} "
                 f"→ 重排后={len(diverse_results)}, 总字符={total_chars}, "
                 f"最高分={diverse_results[0]['relevance_score']:.3f}" if diverse_results else "❌ 无有效结果"
             )
-            
+
             context_cache.set(cache_key, diverse_results, novel_id=self.novel_id)
-            
+
             return diverse_results
             
         except VectorStoreError as e:

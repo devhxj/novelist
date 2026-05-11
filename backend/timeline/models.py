@@ -1,6 +1,20 @@
 """
 故事时间线模块 - 数据库模型
-TimelineEntry: 统一的时间线条目，替代分散的 Foreshadowing 系统
+
+架构说明（重要）：
+本系统有2层故事数据架构：
+
+  Layer 1: StoryArc          → 叙事弧线（主线/支线/角色线/背景线），跨越多章节的故事线
+  Layer 2: TimelineEntry     → 故事追踪（伏笔、情节里程碑、章节规划、用户指令）
+           └─ category=foreshadowing: 伏笔/钩子（待回收）
+           └─ category=plot_node:      情节里程碑（可通过 arc_id 关联到 StoryArc）
+           └─ category=chapter_plan:  章节写作计划
+           └─ category=user_directive: 用户指令
+
+关键区分：
+- "叙事弧线" 指 StoryArc 系统（宏观故事线结构）
+- "伏笔" 指 TimelineEntry 的 foreshadowing 分类（微观追踪）
+- 两者是不同层级的概念，不要混淆！
 """
 from __future__ import annotations
 

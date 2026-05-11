@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 from typing import Literal
 from novels.models import Novel, NovelCreativeProfile
 from chapters.models import Chapter
-from text.utils import count_words
+from editor.models import EditSession, EditSessionStatus
+from utils import count_words
 from .utils import _invalidate_chapter_cache, _invalidate_novel_cache
 
 
@@ -216,13 +217,23 @@ class GetChapterContentTool(BaseMCPTool):
                 error=f"Chapter not found"
             )
 
+        # 优先读取编辑副本（working_content），没有则读正文
+        edit_result = await db.execute(
+            select(EditSession).where(
+                EditSession.chapter_id == chapter.id,
+                EditSession.status == EditSessionStatus.PENDING,
+            ).order_by(EditSession.created_at.desc()).limit(1)
+        )
+        edit_session = edit_result.scalar_one_or_none()
+        content = edit_session.working_content if edit_session else chapter.content
+
         data = {
             "id": chapter.id,
             "novel_id": chapter.novel_id,
             "chapter_number": chapter.chapter_number,
             "title": chapter.title,
-            "content": chapter.content,
-            "word_count": count_words(chapter.content or ""),
+            "content": content,
+            "word_count": count_words(content or ""),
             "status": chapter.status,
             "created_at": chapter.created_at.isoformat() if chapter.created_at else None,
             "updated_at": chapter.updated_at.isoformat() if chapter.updated_at else None
@@ -232,7 +243,7 @@ class GetChapterContentTool(BaseMCPTool):
             data["summary"] = chapter.summary
 
         if args.include_lines:
-            chapter_text = chapter.content or ""
+            chapter_text = content or ""
             lines = chapter_text.splitlines()
             data["lines"] = [{"line_number": i + 1, "content": line} for i, line in enumerate(lines)]
             data["line_count"] = len(lines)

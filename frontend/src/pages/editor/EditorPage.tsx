@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { flushSync } from 'react-dom'
 import { useParams, useNavigate } from 'react-router-dom'
 import Editor, { type OnMount } from '@monaco-editor/react'
-import { Select, Segmented, Tooltip, message, Modal, Input } from 'antd'
+import { Select, Segmented, Tooltip, message, Modal, Input, Collapse } from 'antd'
 import {
   ArrowLeftOutlined,
   CheckOutlined,
@@ -26,7 +27,7 @@ import { generationApi } from '@/services/generationService'
 import type {
   ServerMsg, DiffData,
   SessionCreatedMsg, SessionListMsg, ContentChunkMsg, ThinkingChunkMsg,
-  ToolCallMsg,
+  ThinkingDoneMsg, ToolCallMsg,
   EditStartedMsg, EditAppliedMsg, EditAcceptedMsg, EditRejectedMsg,
   ErrorMsg,
   SessionLoadedMsg,
@@ -99,7 +100,17 @@ interface TurnSegmentOutline {
   feedbackDraft?: string
 }
 
-type TurnSegment = TurnSegmentText | TurnSegmentTool | TurnSegmentOutline
+interface TurnSegmentSubagent {
+  id: string
+  type: 'subagent'
+  agentType: 'memory' | 'review'
+  taskId: string
+  segments: TurnSegment[]
+  status: 'streaming' | 'done' | 'failed'
+  finalText: string
+}
+
+type TurnSegment = TurnSegmentText | TurnSegmentTool | TurnSegmentOutline | TurnSegmentSubagent
 
 interface ConversationTurn {
   id: string
@@ -216,6 +227,7 @@ export default function EditorPage() {
   const [turns, setTurns] = useState<ConversationTurn[]>([])
   const [inputValue, setInputValue] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
+  const [collapsedSubagents, setCollapsedSubagents] = useState<Set<string>>(new Set())
   const currentTurnIdRef = useRef<string | null>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
 
@@ -227,8 +239,10 @@ export default function EditorPage() {
   const pendingInterruptMessageRef = useRef<string | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const turnIdCounter = useRef(0)
+  const subTaskMeta = useRef<Map<string, { turnId: string; agentType: string }>>(new Map())
   const segIdCounter = useRef(0)
   const isUserScrolledUp = useRef(false)
+  const isProgrammaticScroll = useRef(false)
   const originalContentRef = useRef(originalContent)
   const dispatchMessageRef = useRef<((msg: string) => void) | null>(null)
   const updateTurn = useCallback((turnId: string, updater: (turn: ConversationTurn) => ConversationTurn) => {
@@ -237,6 +251,32 @@ export default function EditorPage() {
 
   const nextTurnId = useCallback(() => `turn_${++turnIdCounter.current}`, [])
   const nextSegId = useCallback(() => `seg_${++segIdCounter.current}`, [])
+
+  const applyToSubagent = useCallback((
+    turnId: string,
+    taskId: string,
+    agentType: string,
+    updater: (seg: TurnSegmentSubagent) => TurnSegmentSubagent,
+  ) => {
+    updateTurn(turnId, turn => {
+      const idx = turn.segments.findIndex(s => s.type === 'subagent' && s.taskId === taskId)
+      if (idx >= 0) {
+        const segs = [...turn.segments]
+        segs[idx] = updater(segs[idx] as TurnSegmentSubagent)
+        return { ...turn, segments: segs }
+      }
+      const newSeg: TurnSegmentSubagent = {
+        id: nextSegId(),
+        type: 'subagent',
+        agentType: agentType as 'memory' | 'review',
+        taskId,
+        segments: [],
+        status: 'streaming',
+        finalText: '',
+      }
+      return { ...turn, segments: [...turn.segments, newSeg] }
+    })
+  }, [updateTurn, nextSegId])
 
   const computedStats = useMemo(() => {
     if (!workingContent) return null
@@ -307,6 +347,7 @@ export default function EditorPage() {
     const el = chatContainerRef.current
     if (!el) return
     const handleScroll = () => {
+      if (isProgrammaticScroll.current) return
       isUserScrolledUp.current = el.scrollTop + el.clientHeight < el.scrollHeight - 5
     }
     el.addEventListener('scroll', handleScroll, { passive: true })
@@ -321,7 +362,13 @@ export default function EditorPage() {
     if (isUserScrolledUp.current) return
     const el = chatContainerRef.current
     if (!el) return
-    el.scrollTop = el.scrollHeight
+    isProgrammaticScroll.current = true
+    requestAnimationFrame(() => {
+      if (el) el.scrollTop = el.scrollHeight
+      requestAnimationFrame(() => {
+        isProgrammaticScroll.current = false
+      })
+    })
   }, [turns])
 
   useEffect(() => { originalContentRef.current = originalContent }, [originalContent])
@@ -334,6 +381,21 @@ export default function EditorPage() {
     const handler = (e: BeforeUnloadEvent) => { e.preventDefault() }
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
+  }, [turns])
+
+  // 子 Agent 完成后延迟 1s 自动折叠
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = []
+    for (const turn of turns) {
+      for (const seg of turn.segments) {
+        if (seg.type === 'subagent' && seg.status === 'done' && !collapsedSubagents.has(seg.taskId)) {
+          timers.push(setTimeout(() => {
+            setCollapsedSubagents(prev => new Set([...prev, seg.taskId]))
+          }, 1000))
+        }
+      }
+    }
+    return () => timers.forEach(clearTimeout)
   }, [turns])
 
   const refreshChapterList = useCallback(async () => {
@@ -400,6 +462,8 @@ export default function EditorPage() {
         if (m.recent_messages && m.recent_messages.length > 0) {
           const historyTurns: ConversationTurn[] = []
           let currentTaskId: string | null = null
+          // 历史重建时的子 Agent segment 索引
+          const subagentCache = new Map<string, TurnSegmentSubagent>()
 
           m.recent_messages.forEach((msg, _i) => {
             const msgTaskId = msg.message_id || `hist_${_i}`
@@ -427,6 +491,76 @@ export default function EditorPage() {
               const turn = historyTurns.find(t => t.id === currentTaskId)
               if (!turn) return
 
+              // 子 Agent 消息 — 路由到嵌套 subagent segment
+              if (msg.metadata?.source === 'subagent') {
+                const subTaskId = msg.metadata.parent_task_id || 'unknown'
+                let subSeg = subagentCache.get(subTaskId)
+                if (!subSeg) {
+                  subSeg = {
+                    id: nextSegId(),
+                    type: 'subagent',
+                    agentType: (msg.metadata?.agent_type || 'memory') as 'memory' | 'review',
+                    taskId: subTaskId,
+                    segments: [],
+                    status: 'done',
+                    finalText: '',
+                  }
+                  turn.segments.push(subSeg)
+                  subagentCache.set(subTaskId, subSeg)
+                }
+
+                if (msg.content) {
+                  subSeg.finalText = (subSeg.finalText ? subSeg.finalText + '\n' : '') + msg.content
+                  const lastSeg = subSeg.segments[subSeg.segments.length - 1]
+                  if (lastSeg && lastSeg.type === 'text') {
+                    lastSeg.content = (lastSeg.content ? lastSeg.content + '\n' : '') + msg.content
+                  } else {
+                    subSeg.segments.push({
+                      id: nextSegId(),
+                      type: 'text',
+                      content: msg.content,
+                      thinkingContent: '',
+                      thinkingDone: true,
+                      isStreaming: false,
+                    })
+                  }
+                }
+
+                if (msg.metadata?.tool_calls) {
+                  const toolCalls = Array.isArray(msg.metadata.tool_calls)
+                    ? msg.metadata.tool_calls
+                    : JSON.parse(msg.metadata.tool_calls || '[]')
+                  toolCalls.forEach((tc: any) => {
+                    subSeg.segments.push({
+                      id: nextSegId(),
+                      type: 'tool',
+                      call: {
+                        tool_name: tc.function?.name || tc.name || 'unknown',
+                        display_text: tc.display_text || '处理中...',
+                        activity_kind: tc.activity_kind,
+                        status: 'completed',
+                        task_id: msgTaskId,
+                      },
+                    })
+                  })
+                }
+                return
+              }
+
+              // 主 Agent 消息 — 原有逻辑
+              // 恢复历史时保持和流式阶段一致的视觉顺序：
+              // 先展示 thinking / content，再展示本轮 assistant 触发的工具或 subagent 卡片。
+              if (msg.content || msg.metadata?.thinking_content) {
+                turn.segments.push({
+                  id: nextSegId(),
+                  type: 'text',
+                  content: msg.content || '',
+                  thinkingContent: msg.metadata?.thinking_content || '',
+                  thinkingDone: true,
+                  isStreaming: false,
+                })
+              }
+
               if (msg.metadata?.tool_calls) {
                 const toolCalls = Array.isArray(msg.metadata.tool_calls)
                   ? msg.metadata.tool_calls
@@ -443,17 +577,6 @@ export default function EditorPage() {
                       task_id: msgTaskId,
                     },
                   })
-                })
-              }
-
-              if (msg.content || msg.metadata?.thinking_content) {
-                turn.segments.push({
-                  id: nextSegId(),
-                  type: 'text',
-                  content: msg.content || '',
-                  thinkingContent: msg.metadata?.thinking_content || '',
-                  thinkingDone: true,
-                  isStreaming: false,
                 })
               }
             }
@@ -484,6 +607,25 @@ export default function EditorPage() {
       case 'thinking_chunk': {
         const m = msg as ThinkingChunkMsg
         if (!m.chunk?.trim()) break
+        if (m.parent_task_id && m.task_id) {
+          const agentType = (subTaskMeta.current.get(m.parent_task_id)?.agentType || (m as any).agent_type || 'memory')
+          applyToSubagent(m.parent_task_id, m.task_id, agentType, seg => {
+            const lastSeg = seg.segments[seg.segments.length - 1]
+            if (lastSeg && lastSeg.type === 'text' && lastSeg.isStreaming) {
+              const subSegs = [...seg.segments]
+              subSegs[subSegs.length - 1] = { ...lastSeg, thinkingContent: lastSeg.thinkingContent + m.chunk }
+              return { ...seg, segments: subSegs }
+            }
+            return {
+              ...seg,
+              segments: [...seg.segments, {
+                id: nextSegId(), type: 'text', content: '',
+                thinkingContent: m.chunk, thinkingDone: false, isStreaming: true,
+              }],
+            }
+          })
+          break
+        }
         const turnId = currentTurnIdRef.current
         if (!turnId) break
         updateTurn(turnId, turn => {
@@ -509,6 +651,19 @@ export default function EditorPage() {
         break
       }
       case 'thinking_done': {
+        const m = msg as ThinkingDoneMsg
+        if (m.parent_task_id && m.task_id) {
+          const agentType = (subTaskMeta.current.get(m.parent_task_id)?.agentType || (m as any).agent_type || 'memory')
+          applyToSubagent(m.parent_task_id, m.task_id, agentType, seg => ({
+            ...seg,
+            segments: seg.segments.map(s =>
+              s.type === 'text' && s.thinkingContent && !s.thinkingDone
+                ? { ...s, thinkingDone: true, isStreaming: false }
+                : s
+            ),
+          }))
+          break
+        }
         const turnId = currentTurnIdRef.current
         if (!turnId) break
         updateTurn(turnId, turn => ({
@@ -523,6 +678,25 @@ export default function EditorPage() {
       }
       case 'content_chunk': {
         const m = msg as ContentChunkMsg
+        if (m.parent_task_id && m.task_id) {
+          const agentType = (subTaskMeta.current.get(m.parent_task_id)?.agentType || (m as any).agent_type || 'memory')
+          applyToSubagent(m.parent_task_id, m.task_id, agentType, seg => {
+            const lastSeg = seg.segments[seg.segments.length - 1]
+            if (lastSeg && lastSeg.type === 'text' && lastSeg.isStreaming) {
+              const subSegs = [...seg.segments]
+              subSegs[subSegs.length - 1] = { ...lastSeg, content: lastSeg.content + m.chunk }
+              return { ...seg, segments: subSegs }
+            }
+            return {
+              ...seg,
+              segments: [...seg.segments, {
+                id: nextSegId(), type: 'text', content: m.chunk,
+                thinkingContent: '', thinkingDone: false, isStreaming: true,
+              }],
+            }
+          })
+          break
+        }
         const turnId = currentTurnIdRef.current
         if (!turnId) break
         updateTurn(turnId, turn => {
@@ -588,9 +762,52 @@ export default function EditorPage() {
       }
       case 'tool_call': {
         const m = msg as ToolCallMsg
+
+        // 子 Agent 内部的工具调用 — 路由到嵌套 segment
+        if (m.parent_task_id && m.task_id) {
+          const agentType = (subTaskMeta.current.get(m.parent_task_id)?.agentType || (m as any).agent_type || 'memory')
+          const subToolCall: ToolCallInfo = {
+            tool_name: m.tool_name,
+            task_id: m.task_id,
+            status: m.status,
+            tool_id: m.tool_id,
+            phase: m.phase,
+            display_text: m.display_text || '处理中...',
+            activity_kind: m.activity_kind,
+            chapter_id: m.chapter_id,
+            chapter_number: m.chapter_number,
+            chapter_title: m.chapter_title,
+            arguments: m.arguments,
+            result_summary: m.result_summary,
+            error: m.error,
+            timestamp: m.timestamp,
+          }
+          const subUpdater = (seg: TurnSegmentSubagent): TurnSegmentSubagent => {
+            const subSegs = [...seg.segments]
+            const idx = subSegs.findIndex(s =>
+              s.type === 'tool' && (
+                (m.tool_id && s.call.tool_id === m.tool_id) ||
+                (!m.tool_id && s.call.task_id === m.task_id && s.call.tool_name === m.tool_name && s.call.status === 'executing')
+              )
+            )
+            if (idx >= 0) {
+              subSegs[idx] = { ...subSegs[idx] as TurnSegmentTool, call: { ...(subSegs[idx] as TurnSegmentTool).call, ...subToolCall } }
+            } else {
+              subSegs.push({ id: nextSegId(), type: 'tool', call: subToolCall })
+            }
+            return { ...seg, segments: subSegs }
+          }
+          if (m.status === 'executing') {
+            flushSync(() => { applyToSubagent(m.parent_task_id!, m.task_id!, agentType, subUpdater) })
+          } else {
+            applyToSubagent(m.parent_task_id, m.task_id, agentType, subUpdater)
+          }
+          break
+        }
+
         const turnId = currentTurnIdRef.current
         if (turnId) {
-          updateTurn(turnId, turn => {
+          const toolUpdater = (turn: ConversationTurn): ConversationTurn => {
             const segs = [...turn.segments]
             const idx = segs.findIndex(seg =>
               seg.type === 'tool' && (
@@ -624,7 +841,27 @@ export default function EditorPage() {
               segs.push({ id: nextSegId(), type: 'tool', call: toolCall })
             }
             return { ...turn, segments: segs }
-          })
+          }
+          if (m.status === 'executing') {
+            flushSync(() => { updateTurn(turnId, toolUpdater) })
+          } else {
+            updateTurn(turnId, toolUpdater)
+          }
+        }
+
+        // 记录 run_subagent 的 agent_type，供子 Agent 事件路由使用
+        if (m.tool_name === 'run_subagent' && m.status === 'executing' && m.task_id) {
+          const agentType = String(m.arguments?.agent_type || 'memory')
+          subTaskMeta.current.set(m.task_id, { turnId: m.task_id, agentType })
+        }
+        // run_subagent 完成时，将嵌套 subagent 段标记为 done
+        if (m.tool_name === 'run_subagent' && m.status === 'completed' && m.task_id) {
+          updateTurn(m.task_id, turn => ({
+            ...turn,
+            segments: turn.segments.map(s =>
+              s.type === 'subagent' ? { ...s, status: 'done' as const } : s
+            ),
+          }))
         }
 
         if (m.status === 'completed' && (m.tool_name === 'create_new_chapter' || m.tool_name === 'edit_chapter' || m.tool_name === 'get_chapter_list')) {
@@ -1337,6 +1574,12 @@ export default function EditorPage() {
 
                   {turn.segments.map((seg) => {
                     if (seg.type === 'text') {
+                      // 紧跟在 run_subagent 后的纯 thinking（无正文）由子 Agent 卡片渲染，此处跳过
+                      const prevIdx = turn.segments.indexOf(seg) - 1
+                      if (!seg.content && prevIdx >= 0) {
+                        const prev = turn.segments[prevIdx]
+                        if (prev.type === 'tool' && (prev as TurnSegmentTool).call.tool_name === 'run_subagent') return null
+                      }
                       if (!seg.content && !seg.thinkingContent) return null
                       return (
                         <div key={seg.id} className={styles.chatTurnAssistant}>
@@ -1413,7 +1656,125 @@ export default function EditorPage() {
                       )
                     }
 
+                    if (seg.type === 'subagent') {
+                      // 子 Agent 卡片已在 run_subagent 工具段位置渲染，此处跳过
+                      return null
+                    }
+
+                    const renderSubagentCard = (subSeg: TurnSegmentSubagent) => {
+                      const subIsReview = subSeg.agentType === 'review'
+                      const subIsStreaming = subSeg.status === 'streaming'
+                      const subIsFinished = subSeg.status === 'done'
+                      const subAccentCls = subIsReview ? styles.subagentReview : styles.subagentMemory
+                      const subAgentLabel = subIsReview ? '审核编辑' : '记忆分析师'
+                      const subAgentEmoji = subIsReview ? '🔍' : '📝'
+                      const subCollapsed = collapsedSubagents.has(subSeg.taskId)
+
+                      const subActiveKey = subIsStreaming ? [subSeg.taskId]
+                        : subIsFinished && subCollapsed ? []
+                        : subIsFinished && !subCollapsed ? [subSeg.taskId]
+                        : subSeg.status === 'failed' ? [subSeg.taskId]
+                        : [subSeg.taskId]
+
+                      const subHeader = (
+                        <div className={`${styles.subagentPanelHeader} ${subAccentCls}`}>
+                          <span className={styles.subagentPanelIcon}>{subAgentEmoji}</span>
+                          <span className={styles.subagentPanelLabel}>{subAgentLabel}</span>
+                          {subIsStreaming && (
+                            <span className={styles.subagentPanelBadge}><LoadingOutlined spin /> 执行中</span>
+                          )}
+                          {subIsFinished && (
+                            <span className={styles.subagentPanelBadgeDone}><CheckCircleOutlined /> 完成</span>
+                          )}
+                          {subSeg.status === 'failed' && (
+                            <span className={styles.subagentPanelBadgeFailed}><CloseCircleOutlined /> 失败</span>
+                          )}
+                        </div>
+                      )
+
+                      return (
+                        <div key={subSeg.id} className={`${styles.subagentCard} ${subAccentCls} ${subIsStreaming ? styles.subagentStreaming : ''}`}>
+                          <Collapse
+                            activeKey={subActiveKey}
+                            onChange={keys => {
+                              if (!subIsStreaming) {
+                                setCollapsedSubagents(prev => {
+                                  const next = new Set(prev)
+                                  if (keys.includes(subSeg.taskId)) next.delete(subSeg.taskId)
+                                  else next.add(subSeg.taskId)
+                                  return next
+                                })
+                              }
+                            }}
+                            items={[{
+                              key: subSeg.taskId,
+                              label: subHeader,
+                              children: subSeg.segments.length > 0 ? (
+                                <div className={styles.subagentBody}>
+                                  {subSeg.segments.map(subSubSeg => {
+                                    if (subSubSeg.type === 'text') {
+                                      return (
+                                        <div key={subSubSeg.id} className={styles.subagentText}>
+                                          {subSubSeg.thinkingContent && (
+                                            <details className={`${styles.thinkingBlock} ${styles.subagentThinking}`} open={!subSubSeg.thinkingDone}>
+                                              <summary className={styles.thinkingSummary}>
+                                                <ReadOutlined /> 思考过程
+                                              </summary>
+                                              <div className={styles.thinkingContent}>
+                                                <pre>{subSubSeg.thinkingContent}</pre>
+                                              </div>
+                                            </details>
+                                          )}
+                                          {subSubSeg.content && (
+                                            <div className={styles.subagentContent}>
+                                              <Markdown>{subSubSeg.content}</Markdown>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )
+                                    }
+                                    if (subSubSeg.type === 'tool') {
+                                      const subTc = subSubSeg.call
+                                      const subVisual = getActivityVisual(subTc.activity_kind)
+                                      return (
+                                        <div
+                                          key={subSubSeg.id}
+                                          className={`${styles.toolInlineCompact} ${styles.subagentTool} ${subTc.status === 'executing' ? styles.toolInlineActive : ''}`}
+                                        >
+                                          <span className={styles.toolCompactIcon}>{subVisual.icon}</span>
+                                          <span className={styles.toolCompactName}>
+                                            {subTc.display_text || '处理中...'}
+                                          </span>
+                                          <span className={`${styles.toolCompactStatus} ${subTc.status === 'executing' ? styles.toolCompactRunning : styles.toolCompactDone}`}>
+                                            {subTc.status === 'executing' && <LoadingOutlined spin />}
+                                            {subTc.status === 'completed' && <CheckCircleOutlined />}
+                                            {subTc.status === 'executing' ? subVisual.badge : '完成'}
+                                          </span>
+                                        </div>
+                                      )
+                                    }
+                                    return null
+                                  })}
+                                </div>
+                              ) : (
+                                <div className={styles.subagentEmpty}>暂无内容</div>
+                              ),
+                            }]}
+                            bordered={false}
+                            expandIcon={() => null}
+                            className={styles.subagentCollapse}
+                          />
+                        </div>
+                      )
+                    }
+
                     const tc = seg.call
+                    // run_subagent 位置渲染子 Agent 卡片（同 turn 内匹配）
+                    if (tc.tool_name === 'run_subagent') {
+                      const subSeg = turn.segments.find(s => s.type === 'subagent') as TurnSegmentSubagent | undefined
+                      if (!subSeg) return null
+                      return renderSubagentCard(subSeg)
+                    }
                     const visual = getActivityVisual(tc.activity_kind)
                     return (
                       <div

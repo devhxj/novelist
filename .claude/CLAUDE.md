@@ -143,3 +143,9 @@ Run locally: `ruff check --select UP045,UP006,UP035,F401 --fix backend/`
 ## Git Conventions
 
 - Do NOT include `Co-Authored-By` trailers in commit messages.
+
+## Critical Rules
+
+- **NEVER delete or modify any `logger.info` / `logger.debug` / `logger.warning` / `logger.error` statements** without explicit user permission. These are vital for debugging.
+- **NEVER delete or modify comments** without explicit user permission. Comments capture intent and design rationale.
+- When refactoring or extracting code, preserve ALL existing log statements and comments. If they need to move to a different location, move them — do not remove them.

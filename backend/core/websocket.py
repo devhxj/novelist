@@ -54,10 +54,18 @@ class ConnectionManager:
     
     async def send_personal_message(self, message: dict, websocket: WebSocket):
         """发送个人消息"""
+        from fastapi.websockets import WebSocketState
+        if websocket.client_state != WebSocketState.CONNECTED:
+            logger.info(
+                "Skipping send_personal_message: WebSocket not connected (state=%s, type=%s)",
+                websocket.client_state.name if hasattr(websocket.client_state, 'name') else websocket.client_state,
+                message.get("type"),
+            )
+            return
         try:
             await websocket.send_json(message)
         except Exception as e:
-            logger.error(f"Failed to send personal message: {e}")
+            logger.warning(f"Failed to send personal message: {e}")
     
     async def broadcast_to_novel(self, novel_id: int, message: dict):
         """广播消息到小说的所有连接"""

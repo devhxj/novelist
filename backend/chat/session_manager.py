@@ -190,18 +190,6 @@ MODEL_CONFIGS: dict[str, ModelContextConfig] = {
         max_output_tokens=65536,
         description="DeepSeek-V4-Pro - 1M上下文窗口"
     ),
-    "deepseek-v4-flash": ModelContextConfig(
-        name="deepseek-v4-flash",
-        context_window=1048576,
-        max_output_tokens=8192,
-        description="DeepSeek-V4-Flash - 1M上下文窗口"
-    ),
-    "deepseek-v4-pro": ModelContextConfig(
-        name="deepseek-v4-pro",
-        context_window=1048576,
-        max_output_tokens=65536,
-        description="DeepSeek-V4-Pro - 1M上下文窗口"
-    ),
 }
 
 

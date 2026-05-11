@@ -1,11 +1,10 @@
 """
 编辑类MCP工具
 """
-from contextvars import ContextVar
-from typing import Any
 import uuid
+
 from pydantic import BaseModel, Field
-from typing import Literal
+from typing import Any, Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -13,118 +12,6 @@ from .base import BaseMCPTool, MCPToolResult, MCPToolCategory, MCPToolRegistry
 from chapters.models import Chapter
 from editor.service import get_edit_session_manager
 from editor.diff_engine import diff_engine
-
-_subagent_running_var: ContextVar[bool] = ContextVar("_subagent_running_var", default=False)
-
-
-async def _execute_subagent_task(
-    *,
-    db: AsyncSession,
-    user_id: int,
-    task_type: str,
-    novel_id: int,
-    chapter_id: int | None = None,
-    instruction: str | None = None,
-    parameters: dict[str, Any] | None = None,
-    agent_role: str | None = None,
-    agent_id: str | None = None,
-    model: str | None = None,
-) -> MCPToolResult:
-    if _subagent_running_var.get():
-        return MCPToolResult(
-            success=False,
-            error="子Agent不允许启动子Agent，避免无限递归",
-        )
-
-    type_aliases = {
-        "write": "write_chapter", "writing": "write_chapter",
-        "generate": "write_chapter", "generate_chapter": "write_chapter",
-        "review_chapter": "review", "check_consistency": "review",
-        "manage_foreshadowing": "review", "review": "review",
-    }
-    normalized_type = type_aliases.get(task_type, task_type)
-    from agents.registry import get_agent_for_task, get_all_specs
-    from agents.context_provider import build_subagent_context
-    from agents.base import AgentTask, TaskType, SubAgentReport
-
-    registry_entry = get_agent_for_task(normalized_type)
-    if not registry_entry:
-        available = list(get_all_specs().keys())
-        return MCPToolResult(
-            success=False,
-            error=f"未知的任务类型 '{task_type}'，可用类型: {', '.join(available)}",
-        )
-
-    agent_cls, spec = registry_entry
-    if spec.requires_chapter_id and not chapter_id:
-        return MCPToolResult(
-            success=False,
-            error=f"任务类型 '{normalized_type}' 需要 chapter_id 参数",
-        )
-
-    task_parameters = dict(parameters or {})
-    if instruction:
-        task_parameters.setdefault("instruction", instruction)
-    if model:
-        task_parameters["model"] = model
-    if agent_role:
-        task_parameters["agent_role"] = agent_role
-    if agent_id:
-        task_parameters["agent_id"] = agent_id
-
-    registry_to_task_type = {
-        "write_chapter": TaskType.GENERATE_CHAPTER,
-        "review": TaskType.REVIEW_CHAPTER,
-    }
-
-    context = await build_subagent_context(
-        db=db,
-        novel_id=novel_id,
-        spec=spec,
-        chapter_id=chapter_id,
-        instruction=instruction,
-        extra_parameters=task_parameters,
-    )
-
-    task = AgentTask(
-        task_id=f"sub_{uuid.uuid4().hex}",
-        task_type=registry_to_task_type.get(normalized_type, TaskType.GENERATE_CHAPTER),
-        novel_id=novel_id,
-        chapter_id=chapter_id,
-        parameters=task_parameters,
-        context=context,
-    )
-
-    agent_factory = agent_cls
-    token = _subagent_running_var.set(True)
-    try:
-        agent = agent_factory()  # type: ignore[call-arg]
-        result = await agent.execute(task)
-    finally:
-        _subagent_running_var.reset(token)
-
-    report = SubAgentReport(
-        task_type=normalized_type,
-        success=result.success,
-        summary=result.result.get("summary", "任务完成") if result.success else f"任务失败: {result.error}",
-        key_findings=result.result.get("key_findings", []) if result.success else [],
-        suggestions=result.suggestions,
-        data=result.result,
-        error=result.error,
-    )
-
-    report_data = report.to_dict()
-    report_data["capability_profile"] = {
-        "allowed_tools": spec.allowed_tools,
-        "allowed_resources": spec.allowed_resources,
-        "allow_subagent_spawn": spec.allow_subagent_spawn,
-    }
-
-    return MCPToolResult(
-        success=report.success,
-        data=report_data,
-        error=report.error,
-    )
 
 
 class EditChapterArgs(BaseModel):
@@ -377,55 +264,5 @@ class EditChapterTool(BaseMCPTool):
 
 
 
-class RunSubagentArgs(BaseModel):
-    task_type: str = Field(description="任务类型：write_chapter / review")
-    chapter_id: int | None = Field(default=None, description="目标章节ID（写作/审核/一致性检查时必填）")
-    instruction: str | None = Field(default=None, description="给子Agent的额外指令（如写作要求、审核重点、修订意见等）")
-    parameters: dict[str, Any] | None = Field(default=None, description="任务特定参数（可选，如 model、style、target_length 等）")
-    agent_role: str | None = Field(default=None, description="指定Agent角色（可选）")
-    agent_id: str | None = Field(default=None, description="指定Agent ID（可选）")
-    model: str | None = Field(default=None, description="指定模型（可选）")
-
-
-class RunSubagentTool(BaseMCPTool):
-    """调度子Agent执行专业任务"""
-
-    name = "run_subagent"
-    description = (
-        "调度子Agent执行专业任务。可用任务类型：\n"
-        "- write_chapter: 写作/续写章节内容\n"
-        "- review: 全量审核章节（规则初筛+LLM语义深审+一致性检查+伏笔管理）\n\n"
-        "你只需指定任务类型和目标（如章节ID），后端会自动准备上下文。\n"
-        "子Agent会返回结构化报告，包含摘要、关键发现和建议。"
-    )
-    category = MCPToolCategory.WRITING_ASSISTANT
-    args_schema = RunSubagentArgs
-
-    async def _execute(
-        self,
-        args: RunSubagentArgs,
-        *,
-        db: AsyncSession,
-        user_id: int,
-        novel_id: int,
-        **extra,
-    ) -> MCPToolResult:
-        return await _execute_subagent_task(
-            db=db,
-            user_id=user_id,
-            task_type=args.task_type,
-            novel_id=novel_id,
-            chapter_id=args.chapter_id,
-            instruction=args.instruction,
-            parameters=args.parameters,
-            agent_role=args.agent_role,
-            agent_id=args.agent_id,
-            model=args.model,
-        )
-
-
-
-
 def register_editing_tools(registry: MCPToolRegistry) -> None:
     registry.register(EditChapterTool())
-    registry.register(RunSubagentTool())

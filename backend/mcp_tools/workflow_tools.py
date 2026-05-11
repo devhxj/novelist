@@ -134,17 +134,42 @@ class CreateOutlineTool(BaseMCPTool):
         # === 审批通过，构建 Layer3 ===
         from core.database import AsyncSessionLocal
         from context.context_builder import build_layer3_context
+        from chapters.models import Chapter
+        from sqlalchemy import select
 
         inject_msgs: list[dict] = []
         for idx, ol in enumerate(outlines):
             chapter_number = ol.get("chapter_number", args.chapter_numbers[idx])
+            chapter_title = ol.get("title", f"第{chapter_number}章")
+
             async with AsyncSessionLocal() as db:
+                # 自动创建 Chapter（如不存在）
+                result = await db.execute(
+                    select(Chapter).where(
+                        Chapter.novel_id == novel_id,
+                        Chapter.chapter_number == chapter_number,
+                    )
+                )
+                chapter = result.scalar_one_or_none()
+                if not chapter:
+                    chapter = Chapter(
+                        novel_id=novel_id,
+                        chapter_number=chapter_number,
+                        title=chapter_title,
+                        status="draft",
+                    )
+                    db.add(chapter)
+                    await db.commit()
+                    await db.refresh(chapter)
+                    logger.info(f"Auto-created chapter {chapter.id} (#{chapter_number})")
+
                 layer3 = (await build_layer3_context(db, novel_id, ol)) or ""
 
             estimated_words = ol.get("estimated_words", 3000)
             inject_msgs.append({
                 "role": "user",
                 "content": (
+                    f"章节 ID: {chapter.id}\n"
                     f"大纲：\n{outline_texts[idx]}\n\n"
                     f"内容：\n{layer3}\n\n"
                     f"请根据以上大纲和内容创作第{chapter_number}章正文。"

@@ -122,12 +122,12 @@
 
 .leftSidebar {
   width: 260px;
+  min-height: 0;
   background: rgba(255, 255, 255, 0.7);
   border-right: 1px solid rgba(113, 132, 164, 0.16);
   backdrop-filter: blur(18px);
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
   overflow: hidden;
   transition: width 0.2s ease;
   position: relative;
@@ -1634,6 +1634,9 @@
 .sidebarWrapper {
   position: relative;
   flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .emptyChat {
@@ -1766,4 +1769,179 @@
   padding: 10px 20px 14px;
   font-size: 13px;
   color: #8c8c8c;
+}
+
+/* ---- 子 Agent 嵌套卡片 ---- */
+/* ---- Sub-Agent Card ---- */
+.subagentCard {
+  margin: 6px 0 6px 12px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* memory: amber accent */
+.subagentMemory {
+  border-left: 3px solid #d4880f;
+  background: #fffbe6;
+}
+
+/* review: teal accent */
+.subagentReview {
+  border-left: 3px solid #008874;
+  background: #e6f7f5;
+}
+
+.subagentStreaming.subagentMemory {
+  box-shadow: 0 0 0 1px rgba(212, 136, 15, 0.13);
+}
+.subagentStreaming.subagentReview {
+  box-shadow: 0 0 0 1px rgba(0, 136, 116, 0.13);
+}
+
+/* Collapse overrides */
+.subagentCollapse {
+  background: transparent !important;
+  border: none !important;
+}
+.subagentCollapse :global(.ant-collapse-item) {
+  border: none !important;
+}
+.subagentCollapse :global(.ant-collapse-header) {
+  padding: 0 !important;
+  align-items: center !important;
+}
+.subagentCollapse :global(.ant-collapse-content) {
+  border-top: 1px solid rgba(0, 0, 0, 0.06) !important;
+}
+.subagentCollapse :global(.ant-collapse-content-active) {
+  transition: height 0.4s ease !important;
+}
+.subagentCollapse :global(.ant-collapse-content-inactive) {
+  transition: height 0.35s ease !important;
+}
+.subagentCollapse :global(.ant-collapse-content-box) {
+  padding: 12px 14px !important;
+}
+
+.subagentPanelHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+}
+
+.subagentPanelIcon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.subagentPanelLabel {
+  font-weight: 600;
+  flex: 1;
+  font-size: 12.5px;
+}
+
+.subagentMemory .subagentPanelLabel { color: #8d6a00; }
+.subagentReview .subagentPanelLabel { color: #006b5c; }
+
+.subagentPanelBadge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: #8d6a00;
+  background: rgba(212, 136, 15, 0.1);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.subagentPanelBadgeDone {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: #52c41a;
+  background: rgba(82, 196, 26, 0.08);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.subagentPanelBadgeFailed {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.06);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.subagentBody {
+  /* children of Collapse content */
+}
+
+.subagentEmpty {
+  color: #bfbfbf;
+  font-size: 12px;
+  padding: 8px 0;
+  text-align: center;
+}
+
+.subagentTool {
+  margin-left: 0 !important;
+  font-size: 11px !important;
+  padding: 4px 8px !important;
+}
+
+.subagentText {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #434343;
+}
+
+.subagentThinking {
+  margin-bottom: 8px;
+}
+
+.subagentContent {
+  margin-bottom: 10px;
+}
+
+.subagentContent p {
+  margin: 0 0 4px;
+}
+
+/* ---- Dark mode: Sub-Agent ---- */
+.editorPageDark .subagentMemory {
+  background: rgba(212, 136, 15, 0.06);
+  border-left-color: #b8780a;
+}
+.editorPageDark .subagentReview {
+  background: rgba(0, 136, 116, 0.06);
+  border-left-color: #007a66;
+}
+.editorPageDark .subagentPanelLabel {
+  color: #e0d4b0;
+}
+.editorPageDark .subagentReview .subagentPanelLabel {
+  color: #b0dcd0;
+}
+.editorPageDark .subagentMemory .subagentPanelLabel {
+  color: #e0d4b0;
+}
+.editorPageDark .subagentPanelBadge {
+  color: #e0c060;
+  background: rgba(212, 136, 15, 0.15);
+}
+.editorPageDark .subagentPanelBadgeDone {
+  color: #73d13d;
+  background: rgba(82, 196, 26, 0.1);
+}
+.editorPageDark .subagentCollapse :global(.ant-collapse-content) {
+  border-top-color: rgba(255, 255, 255, 0.06) !important;
+}
+.editorPageDark .subagentText {
+  color: #d0d0d0;
 }

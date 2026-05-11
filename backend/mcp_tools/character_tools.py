@@ -31,7 +31,7 @@ class GetCharactersArgs(BaseModel):
     search: str | None = Field(default=None, description="角色名搜索（list模式可选）")
     include_relations: bool = Field(default=True, description="是否包含人物关系网络（list模式）")
     include_recent_events: bool = Field(default=True, description="是否包含各角色的最近动态（list模式）")
-    include_memory: bool = Field(default=False, description="是否包含语义检索的相关内容片段（detail模式）")
+    include_memory: bool = Field(default=False, description="是否包含轻量语义检索片段（detail模式）。适合顺手补几段相关内容，不替代完整角色记忆查询")
     include_inactive: bool = Field(default=False, description="是否包含已失效/休眠的关系（network模式）")
 
 class GetCharactersTool(BaseMCPTool):
@@ -41,9 +41,10 @@ class GetCharactersTool(BaseMCPTool):
     description = (
         "获取当前小说的角色信息，支持三种模式："
         "\n- list: 角色列表概览（含性格标签、关系概要、最近动态），参数: search, include_relations, include_recent_events"
-        "\n- detail: 单角色详细档案，参数: character_id(必填), include_memory(语义检索)"
+        "\n- detail: 单角色详细档案，参数: character_id(必填), include_memory(轻量相关片段补充)"
         "\n- network: 关系网络图，参数: character_id(可选,有=单角色,无=全局), include_inactive"
         "\n适用场景：写作前了解角色阵容、深入了解某个角色、查看人物关系网络。"
+        "\n如果需要系统回忆某角色的经历、关系和涉及章节，请改用 get_character_memory。"
     )
     category = MCPToolCategory.NOVEL_MANAGEMENT
     args_schema = GetCharactersArgs

@@ -11,7 +11,7 @@ from core.auth import CurrentUserDep
 from core.dependencies import NovelOwner
 from core.exceptions import NotFoundException, UnauthorizedException, BadRequestException
 from core.redis_service import redis_service
-from text.utils import count_words
+from utils import count_words
 from editor.service import get_edit_session_manager
 from chapters.utils import _format_outline
 from editor.models import ChangeSource

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from editor.models import EditSession, EditSessionStatus, EditChange, ChangeSource
 from editor.diff_engine import diff_engine, DiffChangeType
 from chapters.models import Chapter
-from text.utils import count_words
+from utils import count_words
 
 from chapters.summary import generate_chapter_summary
 from core.database import AsyncSessionLocal
