@@ -23,7 +23,7 @@ import {
 import { wsEditorService } from '@/services/wsEditorService'
 import { editorApi } from '@/services/editorService'
 import { chapterApi } from '@/services/chapterService'
-import { generationApi } from '@/services/generationService'
+import { sessionApi } from '@/services/sessionService'
 import type {
   ServerMsg, DiffData,
   SessionCreatedMsg, SessionListMsg, ContentChunkMsg, ThinkingChunkMsg,
@@ -323,7 +323,7 @@ export default function EditorPage() {
       }
     }).catch(() => {})
 
-    generationApi.getModels().then(res => {
+    sessionApi.getModels().then(res => {
       if (res.success && res.data?.models?.length) {
         setModelOptions(res.data.models.map((m: any) => ({ value: m.id, label: m.name })))
       }

@@ -1,6 +1,7 @@
 import apiClient from './apiClient'
 import type { ApiResponse, PaginatedResponse } from '@/types/api'
-import type { LLMModel } from './wsGenerationService'
+
+export type LLMModel = 'deepseek-v4-flash' | 'deepseek-v4-pro' | 'glm-4.7-flash'
 
 export type SessionLevel = 'novel' | 'chapter' | 'free'
 
@@ -119,7 +120,18 @@ export interface SessionStatsResponse {
   should_compress: boolean
 }
 
+export interface ModelOption {
+  id: string
+  name: string
+  provider: string
+  supports_thinking: boolean
+}
+
 export const sessionApi = {
+  getModels: async (): Promise<ApiResponse<{ models: ModelOption[] }>> => {
+    return apiClient.get('/models')
+  },
+
   create: async (data: CreateSessionRequest): Promise<ApiResponse<Session>> => {
     return apiClient.post('/sessions/create', data)
   },
