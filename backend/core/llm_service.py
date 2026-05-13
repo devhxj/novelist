@@ -15,10 +15,7 @@ from datetime import datetime, timezone
 from collections import defaultdict
 
 from core.exceptions import SystemError
-from chat.session_manager import (
-    Session, MessageRole,
-    session_manager
-)
+from chat.session_manager import session_manager
 from sessions.session_storage import session_storage
 
 logger = logging.getLogger(__name__)
@@ -497,45 +494,6 @@ class LLMService:
             retryable=result.get("retryable", False)
         )
 
-    async def generate_json(
-        self,
-        prompt: str,
-        system_prompt: str | None = None,
-        model: str | None = None,
-        temperature: float = 0.3,
-        max_tokens: int = 1024
-    ) -> dict[str, Any]:
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-
-        result = await self.chat_completion(
-            messages=messages,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"}
-        )
-
-        if result["success"]:
-            content = result["content"]
-            try:
-                start = content.find("{")
-                end = content.rfind("}") + 1
-                if start >= 0 and end > start:
-                    return json.loads(content[start:end])
-            except json.JSONDecodeError:
-                pass
-            return {}
-        logger.error(f"generate_json failed: {result.get('error')}, provider={result.get('provider')}")
-        raise LLMServiceError(
-            "服务器异常，请稍后重试。",
-            status_code=result.get("status_code", 502),
-            provider=result.get("provider"),
-            retryable=result.get("retryable", False)
-        )
-    
     async def generate_stream(
         self,
         messages: list[dict[str, str]],
@@ -545,80 +503,16 @@ class LLMService:
         reasoning_effort: str | None = None,
         thinking_enabled: bool | None = None,
     ) -> AsyncGenerator[str, None]:
-        selected_model = model or self.config.default_model
-
-        # GLM API 路径不同
-        if selected_model.startswith("glm"):
-            api_base = self.config.glm_api_base
-            api_key = self.config.glm_api_key
-        else:
-            api_base = self.config.api_base
-            api_key = self.config.api_key
-        url = self._build_chat_url(api_base, selected_model)
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "model": selected_model,
-            "messages": messages,
-            "temperature": temperature or self.config.temperature,
-            "max_tokens": max_tokens or self.config.max_tokens,
-            "stream": True
-        }
-        
-        _apply_reasoning_params(
-            payload,
-            selected_model,
-            thinking_enabled=thinking_enabled,
+        async for event in self.chat_stream_with_tools(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
             reasoning_effort=reasoning_effort,
-        )
-        
-        logger.debug(f"Starting stream generation: model={selected_model}")
-        
-        try:
-            async with self.client.stream("POST", url, json=payload, headers=headers) as response:
-                if response.is_error:
-                    response_json = None
-                    response_text = await response.aread()
-                    try:
-                        response_json = json.loads(response_text.decode("utf-8"))
-                    except Exception:
-                        response_json = None
-                    raise self._build_llm_error(
-                        selected_model=selected_model,
-                        status_code=response.status_code,
-                        response_text=response_text.decode("utf-8", errors="ignore"),
-                        response_json=response_json
-                    )
-                
-                async for line in response.aiter_lines():
-                    if line.startswith("data: "):
-                        data = line[6:]
-                        if data == "[DONE]":
-                            break
-                        
-                        try:
-                            chunk = json.loads(data)
-                            if "choices" in chunk and len(chunk["choices"]) > 0:
-                                delta = chunk["choices"][0].get("delta", {})
-                                
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                        except json.JSONDecodeError:
-                            continue
-                            
-        except LLMServiceError:
-            raise
-        except httpx.RequestError as e:
-            logger.error(f"Stream generation request error: {e}")
-            raise self._build_llm_error(selected_model=selected_model, request_error=e) from e
-        except Exception as e:
-            logger.error(f"Stream generation error: {e}")
-            raise LLMServiceError("生成服务暂时不可用，请稍后再试。", status_code=502, provider=_provider_name(selected_model)) from e
+            thinking_enabled=thinking_enabled,
+        ):
+            if event["type"] == "content":
+                yield event["content"]
 
     async def chat_stream_with_tools(
         self,
@@ -627,8 +521,6 @@ class LLMService:
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
-        max_tool_iterations: int = 5,
-        system_prompt: str | None = None,
         reasoning_effort: str | None = None,
         thinking_enabled: bool | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
@@ -652,14 +544,10 @@ class LLMService:
             "Content-Type": "application/json"
         }
         
-        api_messages = messages
-        if system_prompt:
-            api_messages = [{"role": "system", "content": system_prompt}] + messages
-        
-        prefix_hash = cache_monitor.compute_prefix_hash(api_messages, tools)
-        
-        logger.info(f"Sending to API: model={selected_model}, messages={len(api_messages)}, tools={len(tools) if tools else 0}, prefix={prefix_hash}")
-        for i, m in enumerate(api_messages):
+        prefix_hash = cache_monitor.compute_prefix_hash(messages, tools)
+
+        logger.info(f"Sending to API: model={selected_model}, messages={len(messages)}, tools={len(tools) if tools else 0}, prefix={prefix_hash}")
+        for i, m in enumerate(messages):
             if m.get("role") == "assistant" and m.get("tool_calls"):
                 has_rc = "reasoning_content" in m
                 rc_len = len(m.get("reasoning_content", "")) if has_rc else -1
@@ -667,11 +555,11 @@ class LLMService:
                     f"  msg[{i}]: assistant+tool_calls, reasoning_content="
                     f"{'present(' + str(rc_len) + ' chars)' if has_rc else 'MISSING'}"
                 )
-        logger.debug(f"Messages: {api_messages[:3]}")  # 只记录前 3 条
+        logger.debug(f"Messages: {messages[:3]}")  # 只记录前 3 条
         
         payload = {
             "model": selected_model,
-            "messages": api_messages,
+            "messages": messages,
             "temperature": temperature or self.config.temperature,
             "max_tokens": max_tokens or self.config.max_tokens,
             "stream": True,
@@ -821,34 +709,6 @@ class LLMService:
             logger.error(f"Chat stream with tools error: {e}", exc_info=True)
             raise LLMServiceError("对话服务暂时不可用，请稍后再试。", status_code=502, provider=_provider_name(selected_model)) from e
     
-    async def _generate_summary(self, session: Session) -> str:
-        messages_to_summarize = [
-            m for m in session.messages
-            if m.role != MessageRole.SYSTEM
-        ][:-10]
-        
-        if not messages_to_summarize:
-            return ""
-        
-        summary_prompt = f"""请总结以下对话内容，保留关键信息：
-
-{chr(10).join([f"[{m.role.value}]: {m.content[:300]}..." for m in messages_to_summarize[-5:]])}
-
-请用简洁的语言总结上述对话的关键内容，包括：
-1. 讨论的主要话题
-2. 重要的设定或决定
-3. 用户的核心需求
-"""
-        
-        try:
-            summary = await self.generate_text(summary_prompt)
-            return f"[历史对话摘要]\n{summary}"
-        except Exception as e:
-            logger.error(f"Failed to generate summary: {e}")
-            return ""
-    
-    async def close(self):
-        await self.client.aclose()
 
 
 llm_service = LLMService()
