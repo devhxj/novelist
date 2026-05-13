@@ -234,10 +234,12 @@ async def _build_tool_call_presentation(
     base_text = _TOOL_SYNC_NAMES.get(tool_name, tool_name)
     activity_kind = _TOOL_SYNC_KINDS.get(tool_name, "general")
 
+    metadata = None
     if tool_name == "run_subagent":
         _SUB_LABELS = {"memory": "探索故事记忆", "review": "审核章节内容"}
         agent_type = str(arguments.get("agent_type", ""))
         base_text = _SUB_LABELS.get(agent_type, base_text)
+        metadata = {"agent_type": agent_type}
 
     _CHAPTER_TOOLS = frozenset({"get_chapter_content", "edit_chapter", "create_new_chapter"})
     if tool_name in _CHAPTER_TOOLS and chapter_label:
@@ -256,5 +258,6 @@ async def _build_tool_call_presentation(
         "activity_kind": activity_kind,
         "chapter_id": chapter_id,
         "chapter_number": chapter_number,
-        "chapter_title": chapter_title
+        "chapter_title": chapter_title,
+        "metadata": metadata,
     }

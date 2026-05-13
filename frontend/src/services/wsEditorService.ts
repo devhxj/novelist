@@ -211,7 +211,7 @@ export interface ToolCallMsg {
   chapter_id?: number
   chapter_number?: number
   chapter_title?: string
-  arguments?: Record<string, unknown>
+  metadata?: Record<string, unknown>
   result_summary?: {
     success?: boolean
     error?: string | null

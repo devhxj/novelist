@@ -43,8 +43,8 @@ class AgentLoopResult:
 type ToolCallHandler = Callable[[str, str, dict[str, Any]], Awaitable[MCPToolResult]]
 """工具执行回调：async (tool_name, tool_id, arguments) -> MCPToolResult"""
 
-type DisplayHandler = Callable[[str, dict[str, Any], str], Awaitable[tuple[str | None, str | None]]]
-"""展示文本回调：async (tool_name, arguments, status) -> (display_text, activity_kind)
+type DisplayHandler = Callable[[str, dict[str, Any], str], Awaitable[tuple[str | None, str | None, dict[str, Any] | None]]]
+"""展示文本回调：async (tool_name, arguments, status) -> (display_text, activity_kind, metadata)
 循环在 selected / executing / completed 三个阶段统一调用，status 为 "executing" / "completed" / "failed" """
 
 type OnArgsStreamHandler = Callable[[str, str, str], Awaitable[None]]
@@ -228,7 +228,7 @@ async def run_agent_loop(
                     activity_kind_selected: str | None = None
                     if display_handler and tool_name_start:
                         try:
-                            display_text_selected, activity_kind_selected = await display_handler(tool_name_start, {}, "executing")
+                            display_text_selected, activity_kind_selected, _ = await display_handler(tool_name_start, {}, "executing")
                         except Exception:
                             logger.warning("display_handler failed at tool_call_start", exc_info=True)
                     if tool_name_start:
@@ -269,9 +269,10 @@ async def run_agent_loop(
                     # -- pre-display（"executing" 展示文本）--
                     display_text: str | None = None
                     activity_kind: str | None = None
+                    metadata: dict[str, Any] | None = None
                     if display_handler:
                         try:
-                            display_text, activity_kind = await display_handler(tool_name, arguments, "executing")
+                            display_text, activity_kind, metadata = await display_handler(tool_name, arguments, "executing")
                         except Exception:
                             logger.warning("display_handler failed", exc_info=True)
 
@@ -283,7 +284,7 @@ async def run_agent_loop(
                         "tool_id": tool_id,
                         "status": "executing",
                         "phase": "executing",
-                        "arguments": arguments,
+                        "metadata": metadata,
                         "display_text": display_text,
                         "activity_kind": activity_kind,
                         "timestamp": datetime.now(timezone.utc).isoformat()
@@ -322,9 +323,10 @@ async def run_agent_loop(
                     status_result = "completed" if tool_result.success else "failed"
                     display_text_result = None
                     activity_kind_result = None
+                    metadata_result: dict[str, Any] | None = None
                     if display_handler:
                         try:
-                            display_text_result, activity_kind_result = await display_handler(
+                            display_text_result, activity_kind_result, metadata_result = await display_handler(
                                 tool_name, arguments, status_result
                             )
                         except Exception:
@@ -338,7 +340,7 @@ async def run_agent_loop(
                         "status": status_result,
                         "tool_id": tool_id,
                         "phase": status_result,
-                        "arguments": arguments,
+                        "metadata": metadata_result,
                         "result_summary": {
                             "success": tool_result.success,
                             "error": tool_result.error,

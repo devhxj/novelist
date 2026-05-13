@@ -745,16 +745,16 @@ async def _run_chat_with_tools(
                 # --- display_handler ---
                 async def _display(
                     tool_name: str, arguments: dict[str, Any], status: str = "executing"
-                ) -> tuple[str | None, str | None]:
+                ) -> tuple[str | None, str | None, dict[str, Any] | None]:
                     try:
                         async with AsyncSessionLocal() as disp_db:
                             pres = await _build_tool_call_presentation(
                                 disp_db, novel_id, tool_name, arguments, status=status
                             )
-                            return pres.get("display_text"), pres.get("activity_kind")
+                            return pres.get("display_text"), pres.get("activity_kind"), pres.get("metadata")
                     except Exception:
                         logger.warning(f"display_handler failed for {tool_name}", exc_info=True)
-                        return None, None
+                        return None, None, None
 
                 # --- 消息即时持久化回调 ---
                 async def _on_message(msg: dict[str, Any]) -> None:

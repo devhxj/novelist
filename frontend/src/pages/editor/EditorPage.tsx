@@ -65,7 +65,7 @@ interface ToolCallInfo {
   chapter_id?: number
   chapter_number?: number
   chapter_title?: string
-  arguments?: Record<string, unknown>
+  metadata?: Record<string, unknown>
   result_summary?: {
     success?: boolean
     error?: string | null
@@ -777,7 +777,7 @@ export default function EditorPage() {
             chapter_id: m.chapter_id,
             chapter_number: m.chapter_number,
             chapter_title: m.chapter_title,
-            arguments: m.arguments,
+            metadata: m.metadata,
             result_summary: m.result_summary,
             error: m.error,
             timestamp: m.timestamp,
@@ -826,7 +826,7 @@ export default function EditorPage() {
               chapter_id: m.chapter_id,
               chapter_number: m.chapter_number,
               chapter_title: m.chapter_title,
-              arguments: m.arguments,
+              metadata: m.metadata,
               result_summary: m.result_summary,
               error: m.error,
               timestamp: m.timestamp,
@@ -851,7 +851,7 @@ export default function EditorPage() {
 
         // 记录 run_subagent 的 agent_type，供子 Agent 事件路由使用
         if (m.tool_name === 'run_subagent' && m.status === 'executing' && m.task_id) {
-          const agentType = String(m.arguments?.agent_type || 'memory')
+          const agentType = String(m.metadata?.agent_type || 'memory')
           subTaskMeta.current.set(m.task_id, { turnId: m.task_id, agentType })
         }
         // run_subagent 完成时，将嵌套 subagent 段标记为 done
