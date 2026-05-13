@@ -10,8 +10,10 @@ import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
+
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -23,36 +25,14 @@ class MessageRole(str, Enum):
     TOOL = "tool"
 
 
-@dataclass
-class Message:
+class Message(BaseModel):
     role: MessageRole
     content: str
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     token_count: int = 0
     importance: float = 0.5
-    metadata: dict[str, Any] = field(default_factory=dict)
-    
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "role": self.role.value,
-            "content": self.content,
-            "timestamp": self.timestamp.isoformat(),
-            "token_count": self.token_count,
-            "importance": self.importance,
-            "metadata": self.metadata
-        }
-    
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Message":
-        return cls(
-            role=MessageRole(data["role"]),
-            content=data["content"],
-            timestamp=datetime.fromisoformat(data["timestamp"]),
-            token_count=data.get("token_count", 0),
-            importance=data.get("importance", 0.5),
-            metadata=data.get("metadata", {})
-        )
-    
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
     def to_api_format(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"role": self.role.value, "content": self.content}
         if self.role == MessageRole.ASSISTANT:
@@ -72,8 +52,7 @@ class Message:
         return payload
 
 
-@dataclass
-class NovelContext:
+class NovelContext(BaseModel):
     title: str = ""
     description: str = ""
     genre: str = ""
@@ -81,30 +60,7 @@ class NovelContext:
     world_setting: str = ""
     characters_summary: str = ""
     main_plot: str = ""
-    
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "title": self.title,
-            "description": self.description,
-            "genre": self.genre,
-            "outline": self.outline,
-            "world_setting": self.world_setting,
-            "characters_summary": self.characters_summary,
-            "main_plot": self.main_plot
-        }
-    
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "NovelContext":
-        return cls(
-            title=data.get("title", ""),
-            description=data.get("description", ""),
-            genre=data.get("genre", ""),
-            outline=data.get("outline", ""),
-            world_setting=data.get("world_setting", ""),
-            characters_summary=data.get("characters_summary", ""),
-            main_plot=data.get("main_plot", "")
-        )
-    
+
     def to_prompt(self) -> str:
         parts = []
         if self.title:
@@ -124,36 +80,14 @@ class NovelContext:
         return "\n".join(parts)
 
 
-@dataclass
-class ChapterContext:
+class ChapterContext(BaseModel):
     chapter_number: int = 0
     chapter_title: str = ""
     previous_summary: str = ""
     current_outline: str = ""
-    key_events: list[str] = field(default_factory=list)
-    focus_characters: list[str] = field(default_factory=list)
-    
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "chapter_number": self.chapter_number,
-            "chapter_title": self.chapter_title,
-            "previous_summary": self.previous_summary,
-            "current_outline": self.current_outline,
-            "key_events": self.key_events,
-            "focus_characters": self.focus_characters
-        }
-    
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ChapterContext":
-        return cls(
-            chapter_number=data.get("chapter_number", 0),
-            chapter_title=data.get("chapter_title", ""),
-            previous_summary=data.get("previous_summary", ""),
-            current_outline=data.get("current_outline", ""),
-            key_events=data.get("key_events", []),
-            focus_characters=data.get("focus_characters", [])
-        )
-    
+    key_events: list[str] = Field(default_factory=list)
+    focus_characters: list[str] = Field(default_factory=list)
+
     def to_prompt(self) -> str:
         parts = [f"【当前章节】第{self.chapter_number}章"]
         if self.chapter_title:
@@ -222,78 +156,28 @@ class SessionConfig:
         )
 
 
-@dataclass
-class Session:
+class Session(BaseModel):
+    model_config = {"extra": "ignore"}
+
     session_id: str
     user_id: int
     novel_id: int | None = None
     title: str = ""
-    messages: list[Message] = field(default_factory=list)
+    messages: list[Message] = Field(default_factory=list)
     summary: str | None = None
     novel_context: NovelContext | None = None
     chapter_context: ChapterContext | None = None
-    pending_changes: list[str] = field(default_factory=list)
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    metadata: dict[str, Any] = field(default_factory=dict)
+    pending_changes: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    metadata: dict[str, Any] = Field(default_factory=dict)
     model: str = "deepseek-v4-flash"
     edit_mode: str = "agent"
-    chapter_ids: list[int] = field(default_factory=list)
+    chapter_ids: list[int] = Field(default_factory=list)
     subtitle: str = ""
     current_chapter_id: int | None = None
     last_usage: dict[str, Any] | None = None
-    
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "session_id": self.session_id,
-            "user_id": self.user_id,
-            "novel_id": self.novel_id,
-            "title": self.title,
-            "subtitle": self.subtitle,
-            "messages": [m.to_dict() for m in self.messages],
-            "summary": self.summary,
-            "novel_context": self.novel_context.to_dict() if self.novel_context else None,
-            "chapter_context": self.chapter_context.to_dict() if self.chapter_context else None,
-            "pending_changes": self.pending_changes,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
-            "metadata": self.metadata,
-            "model": self.model,
-            "edit_mode": self.edit_mode,
-            "current_chapter_id": self.current_chapter_id,
-            "last_usage": self.last_usage
-        }
-    
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Session":
-        novel_context = None
-        if data.get("novel_context"):
-            novel_context = NovelContext.from_dict(data["novel_context"])
 
-        chapter_context = None
-        if data.get("chapter_context"):
-            chapter_context = ChapterContext.from_dict(data["chapter_context"])
-
-        return cls(
-            session_id=data["session_id"],
-            user_id=data["user_id"],
-            novel_id=data.get("novel_id"),
-            title=data.get("title", ""),
-            subtitle=data.get("subtitle", "") or data.get("metadata", {}).get("subtitle", ""),
-            messages=[Message.from_dict(m) for m in data.get("messages", [])],
-            summary=data.get("summary"),
-            novel_context=novel_context,
-            chapter_context=chapter_context,
-            pending_changes=data.get("pending_changes", []),
-            created_at=datetime.fromisoformat(data["created_at"]),
-            updated_at=datetime.fromisoformat(data["updated_at"]),
-            metadata=data.get("metadata", {}),
-            model=data.get("model", "deepseek-v4-flash"),
-            edit_mode=data.get("edit_mode", "agent"),
-            current_chapter_id=data.get("current_chapter_id"),
-            last_usage=data.get("last_usage")
-        )
-    
     def get_token_count(self) -> int:
         return sum(m.token_count for m in self.messages)
     

@@ -135,10 +135,10 @@ async def get_session(
         "title": session.title,
         "subtitle": session.get_subtitle(),
         "novel_id": session.novel_id,
-        "messages": [m.to_dict() for m in session.messages],
+        "messages": [m.model_dump(mode="json") for m in session.messages],
         "summary": session.summary,
-        "novel_context": session.novel_context.to_dict() if session.novel_context else None,
-        "chapter_context": session.chapter_context.to_dict() if session.chapter_context else None,
+        "novel_context": session.novel_context.model_dump(mode="json") if session.novel_context else None,
+        "chapter_context": session.chapter_context.model_dump(mode="json") if session.chapter_context else None,
         "pending_changes": session.pending_changes,
         "stats": stats,
         "created_at": session.created_at.isoformat(),
@@ -166,7 +166,7 @@ async def get_messages(
     
     return ApiResponse.success({
         "session_id": session.session_id,
-        "messages": [m.to_dict() for m in messages],
+        "messages": [m.model_dump(mode="json") for m in messages],
         "total": len(session.messages),
         "limit": limit,
         "offset": offset
@@ -310,7 +310,7 @@ async def update_novel_context(
     
     return ApiResponse.success({
         "message": "小说上下文已更新",
-        "novel_context": novel_context.to_dict()
+        "novel_context": novel_context.model_dump(mode="json")
     })
 
 
@@ -348,5 +348,5 @@ async def update_chapter_context(
     
     return ApiResponse.success({
         "message": "章节上下文已更新",
-        "chapter_context": chapter_context.to_dict()
+        "chapter_context": chapter_context.model_dump(mode="json")
     })

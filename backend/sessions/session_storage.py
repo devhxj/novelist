@@ -140,7 +140,7 @@ class SessionStorage:
         try:
             session.updated_at = datetime.now(timezone.utc)
             session_key = self._get_session_key(session.session_id)
-            await redis_service.set(session_key, session.to_dict(), ttl=self.cache_ttl)
+            await redis_service.set(session_key, session.model_dump(mode="json"), ttl=self.cache_ttl)
             return True
         except Exception as e:
             logger.warning(f"Failed to save to cache: {e}")
@@ -153,7 +153,7 @@ class SessionStorage:
             data = await redis_service.get(session_key)
             if not data:
                 return None
-            return Session.from_dict(data)
+            return Session.model_validate(data)
         except Exception as e:
             logger.warning(f"Failed to load from cache: {e}")
             return None
@@ -195,8 +195,8 @@ class SessionStorage:
                     db_session.title = session.title
                     db_session.model = session.model
                     db_session.summary = session.summary
-                    db_session.novel_context = session.novel_context.to_dict() if session.novel_context else None
-                    db_session.chapter_context = session.chapter_context.to_dict() if session.chapter_context else None
+                    db_session.novel_context = session.novel_context.model_dump(mode="json") if session.novel_context else None
+                    db_session.chapter_context = session.chapter_context.model_dump(mode="json") if session.chapter_context else None
                     db_session.pending_changes = session.pending_changes
                     db_session.extra_metadata = session.metadata
                     db_session.usage = session.last_usage
@@ -208,8 +208,8 @@ class SessionStorage:
                         title=session.title,
                         model=session.model,
                         summary=session.summary,
-                        novel_context=session.novel_context.to_dict() if session.novel_context else None,
-                        chapter_context=session.chapter_context.to_dict() if session.chapter_context else None,
+                        novel_context=session.novel_context.model_dump(mode="json") if session.novel_context else None,
+                        chapter_context=session.chapter_context.model_dump(mode="json") if session.chapter_context else None,
                         pending_changes=session.pending_changes,
                         extra_metadata=session.metadata,
                         usage=session.last_usage
@@ -336,11 +336,11 @@ class SessionStorage:
         """数据库模型转Session对象"""
         novel_context = None
         if db_session.novel_context:
-            novel_context = NovelContext.from_dict(db_session.novel_context)
+            novel_context = NovelContext.model_validate(db_session.novel_context)
         
         chapter_context = None
         if db_session.chapter_context:
-            chapter_context = ChapterContext.from_dict(db_session.chapter_context)
+            chapter_context = ChapterContext.model_validate(db_session.chapter_context)
         
         messages = []
         for msg in sorted(db_session.messages, key=lambda m: m.created_at):

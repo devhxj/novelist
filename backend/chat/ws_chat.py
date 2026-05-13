@@ -312,7 +312,7 @@ async def _handle_load_session(websocket, data, user_id):
         "message_count": session.get_message_count(),
         "stats": session_manager.get_session_stats(session),
         "recent_messages": [
-            m.to_dict()
+            m.model_dump(mode="json")
             for m in session.messages
             if m.role != MessageRole.TOOL
         ],
