@@ -29,6 +29,8 @@ class ChatSession(Base):
     extra_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
+    active_version: Mapped[int] = mapped_column(default=1)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
 
@@ -55,11 +57,18 @@ class ChatMessage(Base):
     importance: Mapped[int] = mapped_column(default=50)
     extra_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
+    version: Mapped[int] = mapped_column(default=1, index=True)
+    to_api: Mapped[bool] = mapped_column(default=True)
+    to_frontend: Mapped[bool] = mapped_column(default=True)
+    event_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
 
     session: Mapped["ChatSession"] = relationship(back_populates="messages")
 
     __table_args__ = (
         Index('idx_chat_message_session_created', 'session_id', 'created_at'),
+        Index('idx_chat_message_api', 'session_id', 'to_api', 'version', 'created_at'),
+        Index('idx_chat_message_frontend', 'session_id', 'to_frontend', 'created_at'),
     )
 

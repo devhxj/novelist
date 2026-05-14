@@ -7,10 +7,12 @@ from datetime import datetime, timezone
 
 from core.redis_service import redis_service
 from core.database import AsyncSessionLocal
-from chat.session_manager import Session, SessionConfig, Message, MessageRole, NovelContext, ChapterContext
-from chat.models import ChatSession as DBChatSession, ChatMessage as DBChatMessage
+from sessions.session_manager import SessionConfig
+from sessions.models import ChatSession as DBChatSession, ChatMessage as DBChatMessage
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
+
+from sessions.schema import ChapterContext, Message, MessageRole, NovelContext, Session
 
 logger = logging.getLogger(__name__)
 

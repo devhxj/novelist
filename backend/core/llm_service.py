@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from collections import defaultdict
 
 from core.exceptions import SystemError
-from chat.session_manager import session_manager
+from sessions.session_manager import session_manager
 from sessions.session_storage import session_storage
 
 logger = logging.getLogger(__name__)

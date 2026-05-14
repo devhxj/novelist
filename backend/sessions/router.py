@@ -8,11 +8,10 @@ from fastapi import APIRouter, Query, Body
 from core.response import ApiResponse
 from core.database import DBSession
 from core.auth import CurrentUserDep
-from chat.session_manager import (
-    MessageRole,
-    NovelContext, ChapterContext,
+from sessions.session_manager import (
     session_manager
 )
+from sessions.schema import ChapterContext, MessageRole, NovelContext
 from sessions.session_storage import session_storage
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])

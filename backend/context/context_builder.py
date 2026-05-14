@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from rag.vector_store import vector_store, VectorStoreError
-from chat.session_manager import NovelContext
+from sessions.schema import NovelContext
 from novels.models import Novel, NovelCreativeProfile, NovelStoryState, ReaderPerspective
 from locations.models import Location
 from chapters.models import Chapter
