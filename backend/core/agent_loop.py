@@ -370,11 +370,14 @@ async def run_agent_loop(
                     usage = event.get("usage", {})
                     prompt_tokens = usage.get("prompt_tokens", 0)
 
-                    # API 的 prompt_tokens 包含工具定义等开销，本地差值归入 system
+                    # 用 tiktoken 算各角色占比，套到 API total_tokens 上作为锚
                     local_total = sum(_running_tokens.values())
-                    detail = dict(_running_tokens)
-                    if local_total > 0 and prompt_tokens > local_total:
-                        detail["system"] = _running_tokens["system"] + (prompt_tokens - local_total)
+                    api_total = usage.get("total_tokens", 0)
+                    if local_total > 0 and api_total > 0:
+                        scale = api_total / local_total
+                        detail = {role: int(tokens * scale) for role, tokens in _running_tokens.items()}
+                    else:
+                        detail = dict(_running_tokens)
 
                     from chat.session_manager import SessionConfig
                     config = SessionConfig.for_model(model or "deepseek-v4-flash")

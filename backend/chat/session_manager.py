@@ -114,13 +114,13 @@ class ModelContextConfig:
 MODEL_CONFIGS: dict[str, ModelContextConfig] = {
     "deepseek-v4-flash": ModelContextConfig(
         name="deepseek-v4-flash",
-        context_window=1048576,
+        context_window=1000000,
         max_output_tokens=65536,
         description="DeepSeek-V4-Flash - 1M上下文窗口"
     ),
     "deepseek-v4-pro": ModelContextConfig(
         name="deepseek-v4-pro",
-        context_window=1048576,
+        context_window=1000000,
         max_output_tokens=65536,
         description="DeepSeek-V4-Pro - 1M上下文窗口"
     ),
@@ -131,7 +131,7 @@ MODEL_CONFIGS: dict[str, ModelContextConfig] = {
 class SessionConfig:
     max_messages: int = 500
     max_tokens: int = 800000
-    context_window: int = 1048576
+    context_window: int = 1000000
     summary_threshold: float = 0.9
     keep_recent_messages: int = 50
     api_max_history_messages: int = 200
