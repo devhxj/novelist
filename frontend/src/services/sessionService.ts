@@ -11,7 +11,6 @@ export interface SessionMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string
   created_at: string
-  importance?: number
 }
 
 export interface SessionStats extends Partial<UsageData> {

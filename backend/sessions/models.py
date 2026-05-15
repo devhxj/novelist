@@ -54,7 +54,6 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text().with_variant(mysql.MEDIUMTEXT(), 'mysql'), nullable=False)
 
     token_count: Mapped[int] = mapped_column(default=0)
-    importance: Mapped[int] = mapped_column(default=50)
     extra_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     version: Mapped[int] = mapped_column(default=1, index=True)

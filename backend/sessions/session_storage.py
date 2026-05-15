@@ -12,7 +12,7 @@ from sessions.models import ChatSession as DBChatSession, ChatMessage as DBChatM
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 
-from sessions.schema import ChapterContext, Message, MessageRole, NovelContext, Session
+from sessions.schema import Session
 
 logger = logging.getLogger(__name__)
 
@@ -200,8 +200,8 @@ class SessionStorage:
                     db_session.novel_context = session.novel_context.model_dump(mode="json") if session.novel_context else None
                     db_session.chapter_context = session.chapter_context.model_dump(mode="json") if session.chapter_context else None
                     db_session.pending_changes = session.pending_changes
-                    db_session.extra_metadata = session.metadata
-                    db_session.usage = session.last_usage
+                    db_session.extra_metadata = session.extra_metadata
+                    db_session.usage = session.usage
                 else:
                     db_session = DBChatSession(
                         session_id=session.session_id,
@@ -213,8 +213,8 @@ class SessionStorage:
                         novel_context=session.novel_context.model_dump(mode="json") if session.novel_context else None,
                         chapter_context=session.chapter_context.model_dump(mode="json") if session.chapter_context else None,
                         pending_changes=session.pending_changes,
-                        extra_metadata=session.metadata,
-                        usage=session.last_usage
+                        extra_metadata=session.extra_metadata,
+                        usage=session.usage
                     )
                     db.add(db_session)
                 
@@ -230,8 +230,7 @@ class SessionStorage:
                         role=msg.role.value,
                         content=msg.content,
                         token_count=msg.token_count,
-                        importance=int(msg.importance * 100),
-                        extra_metadata=msg.metadata
+                        extra_metadata=msg.extra_metadata
                     )
                     db.add(db_msg)
                 
@@ -255,7 +254,7 @@ class SessionStorage:
                 if not db_session:
                     return None
                 
-                return self._db_to_session(db_session)
+                return Session.model_validate(db_session)
         except Exception as e:
             logger.error(f"Failed to load from DB: {e}")
             return None
@@ -298,7 +297,7 @@ class SessionStorage:
                 result = await db.execute(query)
                 db_sessions = result.scalars().all()
                 
-                return [self._db_to_session(s) for s in db_sessions]
+                return [Session.model_validate(s) for s in db_sessions]
         except Exception as e:
             logger.error(f"Failed to list from DB: {e}")
             return []
@@ -334,43 +333,5 @@ class SessionStorage:
             logger.error(f"Failed to count from DB: {e}")
             return 0
     
-    def _db_to_session(self, db_session: DBChatSession) -> Session:
-        """数据库模型转Session对象"""
-        novel_context = None
-        if db_session.novel_context:
-            novel_context = NovelContext.model_validate(db_session.novel_context)
-        
-        chapter_context = None
-        if db_session.chapter_context:
-            chapter_context = ChapterContext.model_validate(db_session.chapter_context)
-        
-        messages = []
-        for msg in sorted(db_session.messages, key=lambda m: m.created_at):
-            messages.append(Message(
-                role=MessageRole(msg.role),
-                content=msg.content,
-                timestamp=msg.created_at,
-                token_count=msg.token_count,
-                importance=msg.importance / 100.0,
-                metadata=msg.extra_metadata or {}
-            ))
-        
-        return Session(
-            session_id=db_session.session_id,
-            user_id=db_session.user_id,
-            novel_id=db_session.novel_id,
-            title=db_session.title or "",
-            messages=messages,
-            summary=db_session.summary,
-            novel_context=novel_context,
-            chapter_context=chapter_context,
-            pending_changes=db_session.pending_changes or [],
-            created_at=db_session.created_at,
-            updated_at=db_session.updated_at,
-            metadata=db_session.extra_metadata or {},
-            model=db_session.model,
-            last_usage=db_session.usage if isinstance(db_session.usage, dict) else None
-        )
-
 
 session_storage = SessionStorage()

@@ -626,7 +626,7 @@ async def _run_chat_with_tools(
                     else:
                         session = session_manager.compressor.compress(session)
                     # 压缩后清除快照，下次重新生成
-                    session.metadata.pop("novel_context_snapshot", None)
+                    session.extra_metadata.pop("novel_context_snapshot", None)
                 
                 context_builder = ContextBuilder(db, novel_id)
                 retrieved = await context_builder.search_relevant_context(query=user_message, top_k=5)
@@ -671,12 +671,12 @@ async def _run_chat_with_tools(
                 }, websocket)
             
             # --- 构建/获取小说上下文快照（system2）---
-            novel_context_snapshot = session.metadata.get("novel_context_snapshot")
+            novel_context_snapshot = session.extra_metadata.get("novel_context_snapshot")
             if not novel_context_snapshot:
                 try:
                     novel_context_snapshot = await _build_novel_context_snapshot(db, novel_id)
                     if novel_context_snapshot:
-                        session.metadata["novel_context_snapshot"] = novel_context_snapshot
+                        session.extra_metadata["novel_context_snapshot"] = novel_context_snapshot
                 except Exception as exc:
                     logger.warning(f"Failed to build novel context snapshot: {exc}")
                     novel_context_snapshot = ""
@@ -885,7 +885,7 @@ async def _run_chat_with_tools(
 
                 # --- usage 持久化回调 ---
                 async def _on_usage(usage: dict[str, Any], detail: dict[str, int]) -> None:
-                    session.last_usage = {**usage, "detail": detail}
+                    session.usage = {**usage, "detail": detail}
                     await session_storage.save(session)
 
                 # --- 执行 Agent 循环 ---
@@ -902,7 +902,7 @@ async def _run_chat_with_tools(
                     on_message=_on_message,
                     on_usage=_on_usage,
                     model=session.model,
-                    reasoning_effort=session.metadata.get("reasoning_effort"),
+                    reasoning_effort=session.extra_metadata.get("reasoning_effort"),
                     max_turns=50,
                     max_context_tokens=session_manager.config.max_tokens,
                 )

@@ -62,7 +62,7 @@ async def create_session(
         session.title = f"{base_title} 对话" if base_title else "新对话"
     if subtitle:
         session.subtitle = subtitle[:50]
-        session.metadata["subtitle"] = session.subtitle
+        session.extra_metadata["subtitle"] = session.subtitle
 
     await session_manager.save_session(session)
 
@@ -210,7 +210,7 @@ async def update_session_title(
     session.title = title[:50]
     if subtitle is not None:
         session.subtitle = subtitle[:50]
-        session.metadata["subtitle"] = session.subtitle
+        session.extra_metadata["subtitle"] = session.subtitle
     session.updated_at = datetime.now(timezone.utc)
     await session_manager.save_session(session)
     

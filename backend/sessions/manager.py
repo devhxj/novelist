@@ -84,26 +84,6 @@ class ContextCompressor:
         other_chars = len(text) - chinese_chars
         return int(chinese_chars / 1.5 + other_chars / 4)
 
-    def calculate_importance(self, message: Message) -> float:
-        score = 0.5
-        if message.role == MessageRole.SYSTEM:
-            score = 1.0
-        elif message.role == MessageRole.USER:
-            score = 0.8
-        elif message.role == MessageRole.TOOL:
-            score = 0.25
-        elif message.role == MessageRole.ASSISTANT and message.metadata.get("tool_calls"):
-            score = 0.35
-        if len(message.content) > 500:
-            score += 0.1
-        if len(message.content) > 1000:
-            score += 0.05
-        keywords = ["重要", "关键", "必须", "核心", "设定", "角色", "情节", "注意", "记住"]
-        for kw in keywords:
-            if kw in message.content:
-                score += 0.05
-        return min(score, 1.0)
-
     def should_compress(self, session: Session) -> bool:
         usage_ratio = session.get_context_usage_ratio()
         return (
@@ -120,12 +100,11 @@ class ContextCompressor:
         system_messages = [m for m in messages if m.role == MessageRole.SYSTEM]
         recent_messages = messages[-self.config.keep_recent_messages:]
         older_messages = messages[len(system_messages):-self.config.keep_recent_messages]
-        important_messages = [m for m in older_messages if m.importance >= 0.7]
         if summary_text:
             session.summary = summary_text
         elif older_messages and not session.summary:
             session.summary = self._build_fallback_summary(older_messages)
-        new_messages = system_messages + important_messages + recent_messages
+        new_messages = system_messages + older_messages[-10:] + recent_messages
         session.messages = new_messages
         session.updated_at = datetime.now(timezone.utc)
         old_tokens = sum(m.token_count for m in messages)
@@ -153,14 +132,13 @@ class ContextCompressor:
         system_messages = [m for m in messages if m.role == MessageRole.SYSTEM]
         recent_messages = messages[-self.config.keep_recent_messages:]
         older_messages = messages[len(system_messages):-self.config.keep_recent_messages]
-        important_messages = [m for m in older_messages if m.importance >= 0.7]
 
         if older_messages:
             session.summary = await self._generate_llm_summary(
                 older_messages, session.summary
             )
 
-        new_messages = system_messages + important_messages + recent_messages
+        new_messages = system_messages + older_messages[-10:] + recent_messages
         session.messages = new_messages
         session.updated_at = datetime.now(timezone.utc)
         old_tokens = sum(m.token_count for m in messages)
@@ -259,14 +237,13 @@ class SessionManager:
             novel_context=novel_context,
             chapter_context=chapter_context,
             model=model,
-            metadata={"created_from": "session_manager", **(metadata or {})}
+            extra_metadata={"created_from": "session_manager", **(metadata or {})}
         )
 
         if system_prompt:
             session.messages.append(Message(
                 role=MessageRole.SYSTEM,
                 content=system_prompt,
-                importance=1.0,
                 token_count=self.compressor.estimate_tokens(system_prompt)
             ))
 
@@ -281,13 +258,11 @@ class SessionManager:
         metadata: dict[str, Any] | None = None
     ) -> Message:
         message_metadata = metadata or {}
-        probe = Message(role=role, content=content, metadata=message_metadata)
         message = Message(
             role=role,
             content=content,
             token_count=self.compressor.estimate_tokens(content),
-            importance=self.compressor.calculate_importance(probe),
-            metadata=message_metadata
+            extra_metadata=message_metadata
         )
         session.messages.append(message)
         session.updated_at = datetime.now(timezone.utc)
@@ -352,8 +327,8 @@ class SessionManager:
         required_tool_call_ids: set[str] = set()
 
         for msg in reversed(non_system_messages):
-            tool_call_id = str(msg.metadata.get("tool_call_id", "")) if msg.metadata else ""
-            tool_calls = msg.metadata.get("tool_calls") if msg.metadata else None
+            tool_call_id = str(msg.extra_metadata.get("tool_call_id", "")) if msg.extra_metadata else ""
+            tool_calls = msg.extra_metadata.get("tool_calls") if msg.extra_metadata else None
             tool_call_ids = {
                 str(call.get("id"))
                 for call in tool_calls
@@ -388,8 +363,8 @@ class SessionManager:
 
         for msg in reversed(non_system_messages):
             token_cost = self._estimate_message_tokens(msg)
-            tool_call_id = str(msg.metadata.get("tool_call_id", "")) if msg.metadata else ""
-            tool_calls = msg.metadata.get("tool_calls") if msg.metadata else None
+            tool_call_id = str(msg.extra_metadata.get("tool_call_id", "")) if msg.extra_metadata else ""
+            tool_calls = msg.extra_metadata.get("tool_calls") if msg.extra_metadata else None
             tool_call_ids = {
                 str(call.get("id"))
                 for call in tool_calls
@@ -417,18 +392,18 @@ class SessionManager:
         if message.content:
             return self.compressor.estimate_tokens(message.content)
 
-        if message.metadata.get("tool_calls"):
+        if message.extra_metadata.get("tool_calls"):
             return self.compressor.estimate_tokens(
-                json.dumps(message.metadata["tool_calls"], ensure_ascii=False)
+                json.dumps(message.extra_metadata["tool_calls"], ensure_ascii=False)
             )
 
         return 0
     
     async def save_session(self, session: Session):
         if session.subtitle:
-            session.metadata["subtitle"] = session.subtitle
-        elif session.metadata.get("subtitle"):
-            session.subtitle = session.metadata.get("subtitle", "")
+            session.extra_metadata["subtitle"] = session.subtitle
+        elif session.extra_metadata.get("subtitle"):
+            session.subtitle = session.extra_metadata.get("subtitle", "")
         if self._storage:
             await self._storage.save(session)
         logger.debug(f"Session {session.session_id} saved")
@@ -462,7 +437,7 @@ class SessionManager:
     def get_session_stats(self, session: Session) -> dict[str, Any]:
         model_config = MODEL_CONFIGS.get(session.model, MODEL_CONFIGS["deepseek-v4-flash"])
         token_count = session.get_token_count()
-        last_usage = session.last_usage or {}
+        last_usage = session.usage or {}
         stats: dict[str, Any] = {
             "session_id": session.session_id,
             "display_name": session.get_display_name(),

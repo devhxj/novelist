@@ -58,7 +58,7 @@ type OnMessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
 type OnUsageHandler = Callable[[dict[str, Any], dict[str, int]], Awaitable[None]]
 """用量回调：async (usage, detail) -> None。usage 是 API 返回的原始 usage 字典，detail 是 tiktoken 分角色计数"""
 """用量更新回调：async (usage_dict) -> None
-每次 LLM 调用完成后调用，用于更新 session.last_usage"""
+每次 LLM 调用完成后调用，用于更新 session.usage"""
 
 
 # ---------------------------------------------------------------------------
