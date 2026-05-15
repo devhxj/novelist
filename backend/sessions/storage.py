@@ -24,8 +24,7 @@ class SessionStorage:
     USER_SESSIONS_PREFIX = "user_sessions:"
 
     _SAVE_EXCLUDE = {
-        "messages", "novel_context", "chapter_context",
-        "edit_mode", "chapter_ids", "subtitle", "current_chapter_id",
+        "messages", "edit_mode", "chapter_ids", "subtitle", "current_chapter_id",
     }
 
     def __init__(self, config: SessionConfig | None = None):
@@ -60,8 +59,6 @@ class SessionStorage:
         try:
             # DB
             data = session.model_dump(exclude=self._SAVE_EXCLUDE)
-            data["novel_context"] = session.novel_context.model_dump(mode="json") if session.novel_context else None
-            data["chapter_context"] = session.chapter_context.model_dump(mode="json") if session.chapter_context else None
 
             async with AsyncSessionLocal() as db:
                 result = await db.execute(

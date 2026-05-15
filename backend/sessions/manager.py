@@ -14,8 +14,6 @@ from dataclasses import dataclass
 
 from sessions.schema import MessageRole
 from sessions.schema import Message
-from sessions.schema import NovelContext
-from sessions.schema import ChapterContext
 from sessions.schema import Session
 
 logger = logging.getLogger(__name__)
@@ -88,9 +86,6 @@ class SessionManager:
         self,
         user_id: int,
         novel_id: int | None = None,
-        novel_context: NovelContext | None = None,
-        chapter_context: ChapterContext | None = None,
-        system_prompt: str | None = None,
         model: str = "deepseek-v4-flash",
         metadata: dict[str, Any] | None = None,
     ) -> Session:
@@ -100,17 +95,9 @@ class SessionManager:
             session_id=session_id,
             user_id=user_id,
             novel_id=novel_id,
-            novel_context=novel_context,
-            chapter_context=chapter_context,
             model=model,
             extra_metadata={"created_from": "session_manager", **(metadata or {})}
         )
-
-        if system_prompt:
-            session.messages.append(Message(
-                role=MessageRole.SYSTEM,
-                content=system_prompt,
-            ))
 
         logger.info(f"Created session: {session_id}")
         return session
@@ -137,41 +124,9 @@ class SessionManager:
                     session.title = normalized[:30]
         return message
     
-    def build_context_prompt(self, session: Session) -> str:
-        parts = []
-        if session.novel_context:
-            novel_prompt = session.novel_context.to_prompt()
-            if novel_prompt:
-                parts.append(novel_prompt)
-        if session.chapter_context:
-            chapter_prompt = session.chapter_context.to_prompt()
-            if chapter_prompt:
-                parts.append(chapter_prompt)
-        if session.summary:
-            parts.append(session.summary)
-        return "\n\n".join(parts)
-    
-    def get_messages_for_api(
-        self,
-        session: Session,
-        include_context: bool = True,
-        extra_context: str | None = None
-    ) -> list[dict[str, str]]:
-        messages: list[dict[str, Any]] = []
-        if include_context:
-            context_prompt = self.build_context_prompt(session)
-            if extra_context:
-                context_prompt = f"{context_prompt}\n\n{extra_context}" if context_prompt else extra_context
-            if context_prompt:
-                messages.append({
-                    "role": "system",
-                    "content": f"以下是相关的背景信息，请在回答时参考：\n\n{context_prompt}"
-                })
+    def get_messages_for_api(self, session: Session) -> list[dict[str, str]]:
         history_messages = self._select_messages_for_api(session.messages)
-
-        for msg in history_messages:
-            messages.append(msg.to_api_format())
-        return messages
+        return [msg.to_api_format() for msg in history_messages]
 
     def _select_messages_for_api(self, session_messages: list[Message]) -> list[Message]:
         system_messages = [m for m in session_messages if m.role == MessageRole.SYSTEM]
@@ -265,31 +220,5 @@ class SessionManager:
             stats["usage_ratio"] = round(token_count / model_config.context_window * 100, 2)
         return stats
     
-    def update_novel_context(
-        self,
-        session: Session,
-        novel_context: NovelContext
-    ):
-        session.novel_context = novel_context
-        session.updated_at = datetime.now(timezone.utc)
-    
-    def update_chapter_context(
-        self,
-        session: Session,
-        chapter_context: ChapterContext
-    ):
-        session.chapter_context = chapter_context
-        session.updated_at = datetime.now(timezone.utc)
-    
-    def add_pending_change(self, session: Session, change_id: str):
-        if change_id not in session.pending_changes:
-            session.pending_changes.append(change_id)
-            session.updated_at = datetime.now(timezone.utc)
-    
-    def remove_pending_change(self, session: Session, change_id: str):
-        if change_id in session.pending_changes:
-            session.pending_changes.remove(change_id)
-            session.updated_at = datetime.now(timezone.utc)
-
 
 session_manager = SessionManager()

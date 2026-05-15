@@ -23,8 +23,6 @@ class ChatSession(Base):
     model: Mapped[str] = mapped_column(String(32), default="deepseek-v4-flash")
 
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    novel_context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    chapter_context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     pending_changes: Mapped[list | None] = mapped_column(JSON, default=list)
     extra_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)

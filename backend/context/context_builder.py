@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from rag.vector_store import vector_store, VectorStoreError
-from sessions.schema import NovelContext
 from novels.models import Novel, NovelCreativeProfile, NovelStoryState, ReaderPerspective
 from locations.models import Location
 from chapters.models import Chapter
@@ -894,20 +893,6 @@ async def _build_novel_context_snapshot(db, novel_id: int) -> str:
     )
 
 
-async def _build_novel_context(db, novel_id: int) -> NovelContext:
-    """构建 NovelContext 对象"""
-
-    result = await db.execute(select(Novel).where(Novel.id == novel_id))
-    novel = result.scalar_one_or_none()
-
-    if not novel:
-        return NovelContext()
-
-    return NovelContext(
-        title=novel.title or "",
-        description=novel.description or "",
-        genre=novel.genre or ""
-    )
 
 
 async def build_layer2_context(

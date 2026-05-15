@@ -26,7 +26,6 @@ from context.context_builder import (
     ContextBuilder,
     _format_creative_profile_for_prompt,
     _build_novel_context_snapshot,
-    _build_novel_context,
 )
 from chat.edit_mode import EditMode, EditModeConfig
 from chapters.models import Chapter
@@ -252,19 +251,17 @@ async def _handle_create_session(websocket, data, user_id, novel_id):
     edit_mode = "agent"
     reasoning_effort = data.get("reasoning_effort")
 
-    async with AsyncSessionLocal() as db:
-        novel_context = await _build_novel_context(db, novel_id)
-
     session = session_manager.create_session(
         user_id=user_id,
         novel_id=novel_id,
-        novel_context=novel_context,
         model=model,
         metadata={"reasoning_effort": reasoning_effort} if reasoning_effort else None,
     )
     if not session.title:
-        base_title = novel_context.title if novel_context else ""
-        session.title = f"{base_title} 对话" if base_title else "新对话"
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Novel.title).where(Novel.id == novel_id))
+            novel_title = result.scalar_one_or_none()
+        session.title = f"{novel_title} 对话" if novel_title else "新对话"
     session.edit_mode = edit_mode
     await session_manager.save_session(session)
 
@@ -709,7 +706,7 @@ async def _run_chat_with_tools(
                 user_parts.append(f"【本轮额外提醒】\n{reminder_text}")
             enhanced_user_content = "\n\n".join(user_parts)
 
-            history_messages = session_manager.get_messages_for_api(session, include_context=False)
+            history_messages = session_manager.get_messages_for_api(session)
 
             full_messages = (
                 prefix_messages +

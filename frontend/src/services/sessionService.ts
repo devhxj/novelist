@@ -21,25 +21,6 @@ export interface SessionStats extends Partial<UsageData> {
   should_compress: boolean
 }
 
-export interface NovelContext {
-  title?: string
-  description?: string
-  genre?: string
-  outline?: string
-  world_setting?: string
-  characters_summary?: string
-  main_plot?: string
-}
-
-export interface ChapterContext {
-  chapter_number: number
-  chapter_title?: string
-  previous_summary?: string
-  current_outline?: string
-  key_events?: string[]
-  focus_characters?: string[]
-}
-
 export interface Session {
   id: string
   session_id: string
@@ -51,8 +32,6 @@ export interface Session {
   chapter_number_end?: number
   model: LLMModel
   stats: SessionStats
-  novel_context?: NovelContext
-  chapter_context?: ChapterContext
   created_at: string
   updated_at: string
   expires_at: string
@@ -91,25 +70,6 @@ export interface ChatResponse {
 export interface ClearResponse {
   cleared: boolean
   messages_removed: number
-}
-
-export interface UpdateNovelContextRequest {
-  title?: string
-  description?: string
-  genre?: string
-  outline?: string
-  world_setting?: string
-  characters_summary?: string
-  main_plot?: string
-}
-
-export interface UpdateChapterContextRequest {
-  chapter_number: number
-  chapter_title?: string
-  previous_summary?: string
-  current_outline?: string
-  key_events?: string[]
-  focus_characters?: string[]
 }
 
 export interface SessionStatsResponse extends SessionStats {}
@@ -164,14 +124,6 @@ export const sessionApi = {
 
   compress: async (sessionId: string): Promise<ApiResponse<{ compressed: boolean; messages_removed: number }>> => {
     return apiClient.post(`/sessions/${sessionId}/compress`)
-  },
-
-  updateNovelContext: async (sessionId: string, data: UpdateNovelContextRequest): Promise<ApiResponse<void>> => {
-    return apiClient.put(`/sessions/${sessionId}/context/novel`, data)
-  },
-
-  updateChapterContext: async (sessionId: string, data: UpdateChapterContextRequest): Promise<ApiResponse<void>> => {
-    return apiClient.put(`/sessions/${sessionId}/context/chapter`, data)
   },
 
   getStats: async (sessionId: string): Promise<ApiResponse<SessionStatsResponse>> => {
