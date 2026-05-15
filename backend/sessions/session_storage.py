@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from core.redis_service import redis_service
 from core.database import AsyncSessionLocal
-from sessions.session_manager import SessionConfig
+from sessions.manager import SessionConfig
 from sessions.models import ChatSession as DBChatSession, ChatMessage as DBChatMessage
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload

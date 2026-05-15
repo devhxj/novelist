@@ -17,7 +17,7 @@ from core.agent_loop import (
 )
 from mcp_tools.base import MCPToolResult
 from core.auth import decode_token
-from sessions.session_manager import (
+from sessions.manager import (
     session_manager
 )
 from sessions.schema import MessageRole, Session

@@ -4,7 +4,7 @@ from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any
 
-from sessions.session_manager import MODEL_CONFIGS
+from sessions.manager import MODEL_CONFIGS
 
 
 class MessageRole(str, Enum):

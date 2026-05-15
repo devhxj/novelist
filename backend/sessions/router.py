@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query, Body
 from core.response import ApiResponse
 from core.database import DBSession
 from core.auth import CurrentUserDep
-from sessions.session_manager import (
+from sessions.manager import (
     session_manager
 )
 from sessions.schema import ChapterContext, MessageRole, NovelContext

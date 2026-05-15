@@ -379,7 +379,7 @@ async def run_agent_loop(
                     else:
                         detail = dict(_running_tokens)
 
-                    from sessions.session_manager import SessionConfig
+                    from sessions.manager import SessionConfig
                     config = SessionConfig.for_model(model or "deepseek-v4-flash")
                     context_window = config.context_window
 
