@@ -44,8 +44,6 @@ from chat.ws_utils import (
 router = APIRouter(tags=["websocket"])
 logger = logging.getLogger(__name__)
 
-session_manager.set_storage(session_storage)
-
 
 LONG_TERM_RULE_CUES = (
     "以后都", "之后都", "长期", "一直", "整体风格", "整体基调", "这本书",
@@ -154,7 +152,7 @@ async def websocket_chat(
                     if not current_session:
                         session_id = data.get("session_id")
                         if session_id:
-                            current_session = await session_manager.load_session(session_id)
+                            current_session = await session_storage.load(session_id)
                             if current_session and current_session.user_id != user_id:
                                 current_session = None
                         if not current_session:
@@ -162,7 +160,7 @@ async def websocket_chat(
                                 user_id=user_id,
                                 novel_id=novel_id,
                             )
-                            await session_manager.save_session(current_session)
+                            await session_storage.save(current_session)
                     
                     task_id = f"chat_{current_session.session_id}_{datetime.now(timezone.utc).strftime('%H%M%S')}"
                     task_flags[task_id] = True
@@ -263,7 +261,7 @@ async def _handle_create_session(websocket, data, user_id, novel_id):
             novel_title = result.scalar_one_or_none()
         session.title = f"{novel_title} 对话" if novel_title else "新对话"
     session.edit_mode = edit_mode
-    await session_manager.save_session(session)
+    await session_storage.save(session)
 
     await ws_manager.send_personal_message({
         "type": "session_created",
@@ -282,7 +280,7 @@ async def _handle_create_session(websocket, data, user_id, novel_id):
 
 async def _handle_load_session(websocket, data, user_id):
     session_id = data.get("session_id")
-    session = await session_manager.load_session(session_id)
+    session = await session_storage.load(session_id)
     
     if not session:
         await ws_manager.send_personal_message({
@@ -320,7 +318,7 @@ async def _handle_load_session(websocket, data, user_id):
 
 
 async def _handle_list_sessions(websocket, user_id, novel_id, data):
-    sessions = await session_manager.list_user_sessions(
+    sessions = await session_storage.list_by_user(
         user_id=user_id,
         novel_id=novel_id,
     )
@@ -579,7 +577,7 @@ async def _handle_end_session(websocket, session, active_tasks, task_flags, user
     task_flags.clear()
     
     if session:
-        await session_manager.delete_session(session.session_id)
+        await session_storage.delete(session.session_id)
     
     await ws_manager.send_personal_message({
         "type": "session_ended",
@@ -940,7 +938,7 @@ async def _run_chat_with_tools(
         }, websocket)
     finally:
         try:
-            await session_manager.save_session(session)
+            await session_storage.save(session)
         except Exception:
             logger.warning(f"Failed to save session {session.session_id} in finally block")
         task_flags.pop(task_id, None)

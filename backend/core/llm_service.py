@@ -15,8 +15,7 @@ from datetime import datetime, timezone
 from collections import defaultdict
 
 from core.exceptions import SystemError
-from sessions.manager import session_manager
-from sessions.storage import session_storage
+
 
 logger = logging.getLogger(__name__)
 
@@ -233,8 +232,6 @@ class LLMService:
         LLMConfig.validate()
         self.config = LLMConfig()
         self.client = httpx.AsyncClient(timeout=self.config.timeout)
-        
-        session_manager.set_storage(session_storage)
         
         self._initialized = True
         

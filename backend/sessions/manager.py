@@ -77,11 +77,7 @@ class SessionConfig:
 class SessionManager:
     def __init__(self, config: SessionConfig | None = None):
         self.config = config or SessionConfig()
-        self._storage = None
-    
-    def set_storage(self, storage):
-        self._storage = storage
-    
+
     def create_session(
         self,
         user_id: int,
@@ -163,34 +159,6 @@ class SessionManager:
         return system_messages + selected
 
 
-    async def save_session(self, session: Session):
-        if session.subtitle:
-            session.extra_metadata["subtitle"] = session.subtitle
-        elif session.extra_metadata.get("subtitle"):
-            session.subtitle = session.extra_metadata.get("subtitle", "")
-        if self._storage:
-            await self._storage.save(session)
-        logger.debug(f"Session {session.session_id} saved")
-    
-    async def load_session(self, session_id: str) -> Session | None:
-        if self._storage:
-            return await self._storage.load(session_id)
-        return None
-    
-    async def delete_session(self, session_id: str):
-        if self._storage:
-            await self._storage.delete(session_id)
-        logger.info(f"Session {session_id} deleted")
-    
-    async def list_user_sessions(
-        self,
-        user_id: int,
-        novel_id: int | None = None,
-    ) -> list[Session]:
-        if self._storage:
-            return await self._storage.list_by_user(user_id, novel_id)
-        return []
-    
     def get_session_stats(self, session: Session) -> dict[str, Any]:
         model_config = MODEL_CONFIGS.get(session.model, MODEL_CONFIGS["deepseek-v4-flash"])
         token_count = session.get_token_count()

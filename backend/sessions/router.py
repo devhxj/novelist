@@ -17,8 +17,6 @@ from sessions.storage import session_storage
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 logger = logging.getLogger(__name__)
 
-session_manager.set_storage(session_storage)
-
 
 @router.post("/create")
 async def create_session(
@@ -57,7 +55,7 @@ async def create_session(
         session.subtitle = subtitle[:50]
         session.extra_metadata["subtitle"] = session.subtitle
 
-    await session_manager.save_session(session)
+    await session_storage.save(session)
 
     return ApiResponse.success({
         "session_id": session.session_id,
@@ -78,7 +76,7 @@ async def list_sessions(
     limit: int = Query(20, ge=1, le=100),
 ):
     """列出用户会话"""
-    sessions = await session_manager.list_user_sessions(
+    sessions = await session_storage.list_by_user(
         user_id=user.id,
         novel_id=novel_id,
     )
@@ -110,7 +108,7 @@ async def get_session(
     session_id: str
 ):
     """获取会话详情"""
-    session = await session_manager.load_session(session_id)
+    session = await session_storage.load(session_id)
     
     if not session:
         return ApiResponse.error(code="SESSION_NOT_FOUND", message="会话不存在", status_code=404)
@@ -144,7 +142,7 @@ async def get_messages(
     offset: int = Query(0, ge=0)
 ):
     """获取会话消息列表"""
-    session = await session_manager.load_session(session_id)
+    session = await session_storage.load(session_id)
     
     if not session:
         return ApiResponse.error(code="SESSION_NOT_FOUND", message="会话不存在", status_code=404)
@@ -169,7 +167,7 @@ async def delete_session(
     session_id: str
 ):
     """删除会话"""
-    session = await session_manager.load_session(session_id)
+    session = await session_storage.load(session_id)
     
     if not session:
         return ApiResponse.error(code="SESSION_NOT_FOUND", message="会话不存在", status_code=404)
@@ -177,7 +175,7 @@ async def delete_session(
     if session.user_id != user.id:
         return ApiResponse.error(code="FORBIDDEN", message="无权删除此会话", status_code=403)
     
-    await session_manager.delete_session(session_id)
+    await session_storage.delete(session_id)
     
     return ApiResponse.success({"message": "会话已删除"})
 
@@ -190,7 +188,7 @@ async def update_session_title(
     subtitle: str | None = Body(None, embed=True, description="会话副标题")
 ):
     """更新会话标题"""
-    session = await session_manager.load_session(session_id)
+    session = await session_storage.load(session_id)
     
     if not session:
         return ApiResponse.error(code="SESSION_NOT_FOUND", message="会话不存在", status_code=404)
@@ -203,7 +201,7 @@ async def update_session_title(
         session.subtitle = subtitle[:50]
         session.extra_metadata["subtitle"] = session.subtitle
     session.updated_at = datetime.now(timezone.utc)
-    await session_manager.save_session(session)
+    await session_storage.save(session)
     
     return ApiResponse.success({
         "message": "标题已更新",
@@ -220,7 +218,7 @@ async def clear_messages(
     keep_system: bool = Body(True, embed=True, description="是否保留系统消息")
 ):
     """清空会话消息"""
-    session = await session_manager.load_session(session_id)
+    session = await session_storage.load(session_id)
     
     if not session:
         return ApiResponse.error(code="SESSION_NOT_FOUND", message="会话不存在", status_code=404)
@@ -238,7 +236,7 @@ async def clear_messages(
     
     session.summary = None
     session.pending_changes = []
-    await session_manager.save_session(session)
+    await session_storage.save(session)
     
     return ApiResponse.success({
         "message": "消息已清空",
@@ -252,7 +250,7 @@ async def get_session_stats(
     session_id: str
 ):
     """获取会话统计信息"""
-    session = await session_manager.load_session(session_id)
+    session = await session_storage.load(session_id)
     
     if not session:
         return ApiResponse.error(code="SESSION_NOT_FOUND", message="会话不存在", status_code=404)
