@@ -1,7 +1,7 @@
 """
 文本编辑API路由 - 副本编辑机制
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from core.response import ApiResponse
 from core.database import DBSession
@@ -18,43 +18,50 @@ router = APIRouter(prefix="/editor", tags=["editor"])
 async def accept_edit_session(
     user: CurrentUserDep,
     db: DBSession,
-    edit_session_id: str
+    edit_session_id: str,
+    chapter_id: int | None = Query(None, description="章节ID（edit_session_id 找不到时的回退查找）"),
 ):
-    """
-    接受所有变更
-    
-    - 将副本内容应用到原章节
-    - 返回修改统计（改动位置数量）
-    """
+    """接受所有变更，将副本内容应用到原章节"""
     manager = get_edit_session_manager(db)
     edit_session = await manager.get_edit_session_by_id(edit_session_id)
-    
+    if not edit_session and chapter_id:
+        edit_session = await manager.get_edit_session(chapter_id)
+
     if not edit_session:
-        return ApiResponse.error(code="SESSION_NOT_FOUND", message="编辑会话不存在", status_code=404)
-    
+        current = await manager.get_edit_session(chapter_id) if chapter_id else None
+        return ApiResponse.error(
+            code="SESSION_NOT_FOUND", message="编辑会话不存在",
+            status_code=404,
+            details={"pending_edit_session_id": current.edit_session_id if current else None}
+        )
+
     result = await db.execute(
         select(Chapter).where(Chapter.id == edit_session.chapter_id)
     )
     chapter = result.scalar_one_or_none()
-    
+
     if not chapter:
         return ApiResponse.error(code="CHAPTER_NOT_FOUND", message="章节不存在", status_code=404)
-    
+
     result = await db.execute(
         select(Novel).where(Novel.id == chapter.novel_id)
     )
     novel = result.scalar_one_or_none()
-    
+
     if not novel or novel.author_id != user.id:
         return ApiResponse.error(code="FORBIDDEN", message="无权操作此章节", status_code=403)
-    
+
     try:
-        result = await manager.accept_edit_session(edit_session_id)
+        result = await manager.accept_edit_session(edit_session.edit_session_id)
     except ValueError as e:
-        return ApiResponse.error(code="EDIT_INVALID", message=str(e), status_code=400)
-    
+        current = await manager.get_edit_session(edit_session.chapter_id)
+        return ApiResponse.error(
+            code="EDIT_INVALID", message=str(e), status_code=400,
+            details={"pending_edit_session_id": current.edit_session_id if current else None}
+        )
+
     return ApiResponse.success({
-        "edit_session_id": edit_session_id,
+        "edit_session_id": edit_session.edit_session_id,
         "chapter_id": result["chapter_id"],
         "change_count": result["change_count"],
         "word_count": result["word_count"],
@@ -68,43 +75,41 @@ async def accept_edit_session(
 async def reject_edit_session(
     user: CurrentUserDep,
     db: DBSession,
-    edit_session_id: str
+    edit_session_id: str,
+    chapter_id: int | None = Query(None, description="章节ID（edit_session_id 找不到时的回退查找）"),
 ):
-    """
-    拒绝所有变更
-    
-    - 回退到原版本
-    - 副本内容被丢弃
-    """
+    """拒绝所有变更，回退到原版本，副本内容被丢弃"""
     manager = get_edit_session_manager(db)
     edit_session = await manager.get_edit_session_by_id(edit_session_id)
-    
+    if not edit_session and chapter_id:
+        edit_session = await manager.get_edit_session(chapter_id)
+
     if not edit_session:
         return ApiResponse.error(code="SESSION_NOT_FOUND", message="编辑会话不存在", status_code=404)
-    
+
     result = await db.execute(
         select(Chapter).where(Chapter.id == edit_session.chapter_id)
     )
     chapter = result.scalar_one_or_none()
-    
+
     if not chapter:
         return ApiResponse.error(code="CHAPTER_NOT_FOUND", message="章节不存在", status_code=404)
-    
+
     result = await db.execute(
         select(Novel).where(Novel.id == chapter.novel_id)
     )
     novel = result.scalar_one_or_none()
-    
+
     if not novel or novel.author_id != user.id:
         return ApiResponse.error(code="FORBIDDEN", message="无权操作此章节", status_code=403)
-    
+
     try:
-        result = await manager.reject_edit_session(edit_session_id)
+        result = await manager.reject_edit_session(edit_session.edit_session_id)
     except ValueError as e:
         return ApiResponse.error(code="EDIT_INVALID", message=str(e), status_code=400)
-    
+
     return ApiResponse.success({
-        "edit_session_id": edit_session_id,
+        "edit_session_id": edit_session.edit_session_id,
         "chapter_id": result["chapter_id"],
         "already_processed": result.get("already_processed", False),
         "message": "编辑会话此前已被拒绝" if result.get("already_processed") else "已拒绝所有变更，回退到原版本"

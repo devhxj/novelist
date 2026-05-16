@@ -32,7 +32,6 @@ from chat.edit_mode import EditMode, EditModeConfig
 from chapters.models import Chapter
 from novels.models import NovelCreativeProfile
 from novels.models import Novel
-from editor.service import get_edit_session_manager
 from mcp_tools.registry import get_mcp_registry
 
 from chat.ws_utils import (
@@ -136,38 +135,30 @@ async def websocket_chat(
 
             logger.debug(f"Received message type: {message_type}")
             try:
-                if message_type == "load_session":
-                    current_session = await _handle_load_session(
-                        websocket, data, user_id
-                    )
-                
-                elif message_type == "list_sessions":
-                    await _handle_list_sessions(websocket, user_id, novel_id, data)
-                
-                elif message_type == "chat":
+                if message_type == "chat":
+                    session_id = data.get("session_id")
+                    if session_id and (not current_session or current_session.session_id != session_id):
+                        loaded = await session_storage.load(session_id)
+                        if loaded and loaded.user_id == user_id:
+                            current_session = loaded
+
                     if not current_session:
-                        session_id = data.get("session_id")
-                        if session_id:
-                            current_session = await session_storage.load(session_id)
-                            if current_session and current_session.user_id != user_id:
-                                current_session = None
-                        if not current_session:
-                            session_id = f"sess_{user_id}_{uuid.uuid4().hex[:8]}"
-                            current_session = Session(
-                                session_id=session_id,
-                                user_id=user_id,
-                                novel_id=novel_id,
-                                model=data.get("model", "deepseek-v4-flash"),
-                                reasoning_effort=data.get("reasoning_effort"),
-                                extra_metadata={"created_from": "ws_chat"},
-                            )
-                            logger.info(f"Created session: {session_id}")
-                            await session_storage.save(current_session)
-                            await ws_manager.send_personal_message({
-                                "type": "session_created",
-                                **current_session.model_dump(mode="json", exclude={'extra_metadata', 'active_version'}),
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }, websocket)
+                        session_id = f"sess_{user_id}_{uuid.uuid4().hex[:8]}"
+                        current_session = Session(
+                            session_id=session_id,
+                            user_id=user_id,
+                            novel_id=novel_id,
+                            model=data.get("model", "deepseek-v4-flash"),
+                            reasoning_effort=data.get("reasoning_effort"),
+                            extra_metadata={"created_from": "ws_chat"},
+                        )
+                        logger.info(f"Created session: {session_id}")
+                        await session_storage.save(current_session)
+                        await ws_manager.send_personal_message({
+                            "type": "session_created",
+                            **current_session.model_dump(mode="json", exclude={'extra_metadata', 'active_version'}),
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }, websocket)
                     
                     task_id = f"chat_{current_session.session_id}_{datetime.now(timezone.utc).strftime('%H%M%S')}"
                     task_flags[task_id] = True
@@ -203,21 +194,6 @@ async def websocket_chat(
                             "task_id": task_id,
                             "timestamp": datetime.now(timezone.utc).isoformat()
                         }, websocket)
-                
-                elif message_type == "read_chapter":
-                    await _handle_read_chapter(websocket, data.get("chapter_id"), novel_id)
-                
-                elif message_type == "accept_edit":
-                    await _handle_accept_edit(websocket, data, novel_id)
-                
-                elif message_type == "reject_edit":
-                    await _handle_reject_edit(websocket, data, novel_id)
-                
-                elif message_type == "end_session":
-                    await _handle_end_session(
-                        websocket, current_session, active_tasks, task_flags, user_id, novel_id
-                    )
-                    current_session = None
             except Exception as e:
                 logger.error(f"Message handling error: type={message_type}, error={e}", exc_info=True)
                 await ws_manager.send_personal_message({
@@ -243,226 +219,6 @@ async def websocket_chat(
             from mcp_tools.workflow_tools import abort_approval
             abort_approval(current_session.session_id)
         ws_manager.disconnect(websocket, user_id, novel_id)
-
-
-async def _handle_load_session(websocket, data, user_id):
-    session_id = data.get("session_id")
-    session = await session_storage.load(session_id)
-    
-    if not session:
-        await ws_manager.send_personal_message({
-            "type": "error",
-            "error": "会话不存在",
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }, websocket)
-        return None
-    
-    if session.user_id != user_id:
-        await ws_manager.send_personal_message({
-            "type": "error",
-            "error": "无权访问此会话",
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }, websocket)
-        return None
-    
-    await ws_manager.send_personal_message({
-        "type": "session_loaded",
-        **session.model_dump(mode="json", exclude={'extra_metadata', 'active_version'}),
-        "recent_messages": [
-            m.model_dump(mode="json")
-            for m in session.messages
-            if m.role != MessageRole.TOOL
-        ],
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }, websocket)
-    
-    return session
-
-
-async def _handle_list_sessions(websocket, user_id, novel_id, data):
-    sessions = await session_storage.list_by_user(
-        user_id=user_id,
-        novel_id=novel_id,
-    )
-
-    await ws_manager.send_personal_message({
-        "type": "sessions_list",
-        "sessions": [
-            {
-                "session_id": s.session_id,
-                "title": s.title,
-                "updated_at": s.updated_at.isoformat()
-            }
-            for s in sessions
-        ],
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }, websocket)
-
-
-async def _handle_read_chapter(websocket, chapter_id, novel_id):
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(Chapter).where(Chapter.id == chapter_id)
-        )
-        chapter = result.scalar_one_or_none()
-        
-        if not chapter:
-            await ws_manager.send_personal_message({
-                "type": "error",
-                "error": "章节不存在",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }, websocket)
-            return
-        
-        if chapter.novel_id != novel_id:
-            await ws_manager.send_personal_message({
-                "type": "error",
-                "error": "无权访问此章节",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }, websocket)
-            return
-        
-        manager = get_edit_session_manager(db)
-        edit_session = await manager.get_edit_session(chapter_id)
-        
-        await ws_manager.send_personal_message({
-            "type": "chapter_content",
-            "chapter_id": chapter.id,
-            "chapter_number": chapter.chapter_number,
-            "title": chapter.title,
-            "content": chapter.content or "",
-            "word_count": chapter.word_count or 0,
-            "status": chapter.status,
-            "has_active_edit": edit_session is not None,
-            "edit_session_id": edit_session.edit_session_id if edit_session else None,
-            "working_content": edit_session.working_content if edit_session else None,
-            "change_count": edit_session.change_count if edit_session else 0,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }, websocket)
-
-
-async def _resolve_edit_session_for_action(db, edit_session_id: str | None, chapter_id: int | None):
-    manager = get_edit_session_manager(db)
-    edit_session = None
-    if edit_session_id:
-        edit_session = await manager.get_edit_session_by_id(edit_session_id)
-    if not edit_session and chapter_id:
-        edit_session = await manager.get_edit_session(chapter_id)
-    return manager, edit_session
-
-
-async def _get_latest_pending_edit_session_id(db, chapter_id: int | None) -> str | None:
-    if not chapter_id:
-        return None
-    manager = get_edit_session_manager(db)
-    latest = await manager.get_edit_session(chapter_id)
-    return latest.edit_session_id if latest else None
-
-
-async def _handle_accept_edit(websocket, data, novel_id):
-    edit_session_id = data.get("edit_session_id")
-    chapter_id = data.get("chapter_id")
-    async with AsyncSessionLocal() as db:
-        manager, edit_session = await _resolve_edit_session_for_action(db, edit_session_id, chapter_id)
-        if not edit_session:
-            await ws_manager.send_personal_message({
-                "type": "error",
-                "error": "未找到可接受的编辑会话，可能已处理或章节当前没有待确认修改",
-                "edit_session_id": edit_session_id,
-                "chapter_id": chapter_id,
-                "latest_pending_edit_session_id": await _get_latest_pending_edit_session_id(db, chapter_id),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }, websocket)
-            return
-        try:
-            result = await manager.accept_edit_session(edit_session.edit_session_id)
-        except ValueError as e:
-            await ws_manager.send_personal_message({
-                "type": "error",
-                "error": str(e),
-                "edit_session_id": edit_session.edit_session_id,
-                "chapter_id": edit_session.chapter_id,
-                "latest_pending_edit_session_id": await _get_latest_pending_edit_session_id(db, edit_session.chapter_id),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }, websocket)
-            return
-        
-        await ws_manager.send_personal_message({
-            "type": "edit_accepted",
-            "edit_session_id": edit_session.edit_session_id,
-            "chapter_id": result["chapter_id"],
-            "latest_pending_edit_session_id": await _get_latest_pending_edit_session_id(db, result["chapter_id"]),
-            "change_count": result["change_count"],
-            "word_count": result["word_count"],
-            "already_processed": result.get("already_processed", False),
-            "message": "编辑会话此前已被接受" if result.get("already_processed") else f"已接受 {result['change_count']} 处变更",
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }, websocket)
-
-
-async def _handle_reject_edit(websocket, data, novel_id):
-    edit_session_id = data.get("edit_session_id")
-    chapter_id = data.get("chapter_id")
-    async with AsyncSessionLocal() as db:
-        manager, edit_session = await _resolve_edit_session_for_action(db, edit_session_id, chapter_id)
-        if not edit_session:
-            await ws_manager.send_personal_message({
-                "type": "error",
-                "error": "未找到可拒绝的编辑会话，可能已处理或章节当前没有待确认修改",
-                "edit_session_id": edit_session_id,
-                "chapter_id": chapter_id,
-                "latest_pending_edit_session_id": await _get_latest_pending_edit_session_id(db, chapter_id),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }, websocket)
-            return
-        try:
-            result = await manager.reject_edit_session(edit_session.edit_session_id)
-        except ValueError as e:
-            await ws_manager.send_personal_message({
-                "type": "error",
-                "error": str(e),
-                "edit_session_id": edit_session.edit_session_id,
-                "chapter_id": edit_session.chapter_id,
-                "latest_pending_edit_session_id": await _get_latest_pending_edit_session_id(db, edit_session.chapter_id),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }, websocket)
-            return
-        
-        await ws_manager.send_personal_message({
-            "type": "edit_rejected",
-            "edit_session_id": edit_session.edit_session_id,
-            "chapter_id": result["chapter_id"],
-            "latest_pending_edit_session_id": await _get_latest_pending_edit_session_id(db, result["chapter_id"]),
-            "already_processed": result.get("already_processed", False),
-            "message": "编辑会话此前已被拒绝" if result.get("already_processed") else "已拒绝所有变更，回退到原版本",
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }, websocket)
-
-
-async def _handle_end_session(websocket, session, active_tasks, task_flags, user_id, novel_id):
-    """终止当前会话，取消所有任务"""
-    cancelled_tasks = []
-    
-    for task_id, task in list(active_tasks.items()):
-        task_flags[task_id] = False
-        task.cancel()
-        cancelled_tasks.append(task_id)
-    
-    active_tasks.clear()
-    task_flags.clear()
-    
-    if session:
-        await session_storage.delete(session.session_id)
-    
-    await ws_manager.send_personal_message({
-        "type": "session_ended",
-        "session_id": session.session_id if session else None,
-        "cancelled_tasks": cancelled_tasks,
-        "message": "会话已终止，所有任务已取消",
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }, websocket)
-    
-    logger.info(f"Session ended: user={user_id}, novel={novel_id}, cancelled {len(cancelled_tasks)} tasks")
 
 
 async def _run_chat_with_tools(

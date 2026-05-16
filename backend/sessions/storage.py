@@ -174,18 +174,17 @@ class SessionStorage:
         user_id: int,
         novel_id: int | None = None,
         limit: int = 20,
+        offset: int = 0,
     ) -> list[Session]:
         """列出用户会话"""
         try:
             async with AsyncSessionLocal() as db:
-                query = select(DBChatSession).options(
-                    selectinload(DBChatSession.messages)
-                ).where(DBChatSession.user_id == user_id)
+                query = select(DBChatSession).where(DBChatSession.user_id == user_id)
 
                 if novel_id:
                     query = query.where(DBChatSession.novel_id == novel_id)
 
-                query = query.order_by(DBChatSession.updated_at.desc()).limit(limit)
+                query = query.order_by(DBChatSession.updated_at.desc()).limit(limit).offset(offset)
 
                 result = await db.execute(query)
                 db_sessions = result.scalars().all()
