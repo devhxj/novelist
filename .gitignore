@@ -1,0 +1,30 @@
+# Binaries
+*.exe
+*.dll
+*.dylib
+spike_test
+
+# Test and dev
+dev_test/
+
+# ONNX model files (downloaded at runtime)
+models/
+
+# Build output
+/bin/
+/dist/
+
+# Go
+*.mod.cache
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
