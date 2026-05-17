@@ -1,0 +1,45 @@
+package config
+
+import (
+	"fmt"
+
+	"gorm.io/gorm"
+)
+
+// AppSettings 是全局 app_config 表的单行配置。
+// 增删配置项直接在此 struct 加减字段即可，GORM 自动迁移。
+type AppSettings struct {
+	ID           uint   `gorm:"column:id;primaryKey;default:1"`
+	APIKey       string `gorm:"column:api_key"`
+	DefaultModel string `gorm:"column:default_model"`
+	// 后续新增配置直接加字段，如：Theme string `gorm:"column:theme"`
+}
+
+func (AppSettings) TableName() string { return "app_config" }
+
+// LoadSettings 从全局库读取配置（单行）。首次使用时自动创建空行。
+func LoadSettings(db *gorm.DB) (*AppSettings, error) {
+	if err := db.AutoMigrate(&AppSettings{}); err != nil {
+		return nil, fmt.Errorf("迁移 app_config 表失败: %w", err)
+	}
+
+	// 确保有且只有一行（id=1）
+	if err := db.FirstOrCreate(&AppSettings{}, AppSettings{ID: 1}).Error; err != nil {
+		return nil, fmt.Errorf("读取应用配置失败: %w", err)
+	}
+
+	var s AppSettings
+	if err := db.First(&s, 1).Error; err != nil {
+		return nil, fmt.Errorf("读取应用配置失败: %w", err)
+	}
+	return &s, nil
+}
+
+// SaveSettings 将配置写回全局库。
+func SaveSettings(db *gorm.DB, s *AppSettings) error {
+	s.ID = 1 // 确保只更新同一行
+	if err := db.Save(s).Error; err != nil {
+		return fmt.Errorf("保存应用配置失败: %w", err)
+	}
+	return nil
+}
