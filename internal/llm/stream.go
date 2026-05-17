@@ -13,7 +13,7 @@ import (
 )
 
 // Client 是 LLM 流式调用的传输层。
-// 不关心业务层的 Message / ToolDef 结构，只负责 payload → HTTP POST → SSE 事件流。
+// 接收 messages 和 tools（OpenAI 规范格式），拼装 payload 并管理 SSE 传输。
 type Client struct {
 	provider Provider
 	http     *http.Client
@@ -55,36 +55,29 @@ func DefaultDeepSeek(apiKey string) Provider {
 				SupportsVision:  false,
 			},
 		},
-		BuildRequest: func(payload map[string]any) map[string]any {
-			payload["stream_options"] = map[string]any{"include_usage": true}
-			return payload
-		},
+		BuildRequest: nil, // 默认 OpenAI 兼容格式，无需额外改造
 	}
 }
 
 // ChatStream 发起流式对话，返回 SSE 事件 channel。
 //
-// payload 由调用方按 LLM API 格式组装（包含 messages、tools、temperature 等字段）。
-// Client 仅负责注入 stream 相关参数、调用钩子、发起请求、解析 SSE。
+// messages / tools 由调用方按 OpenAI Function Calling 格式组装。
+// Client 负责拼装完整 payload 并注入流式参数和钩子处理。
 //
 // ctx 取消时底层 HTTP 连接被中止，channel 随之关闭。
 func (c *Client) ChatStream(
 	ctx context.Context,
-	payload map[string]any,
+	messages []map[string]any,
+	tools []map[string]any,
 	model string,
+	opts *CallOptions,
 ) <-chan StreamEvent {
 	ch := make(chan StreamEvent, 8)
 
 	go func() {
 		defer close(ch)
 
-		// 注入流式参数
-		payload["stream"] = true
-
-		// 应用 Provider 的请求体钩子
-		if c.provider.BuildRequest != nil {
-			payload = c.provider.BuildRequest(payload)
-		}
+		payload := c.buildPayload(messages, tools, model, opts)
 
 		body, err := json.Marshal(payload)
 		if err != nil {
@@ -141,6 +134,73 @@ func (c *Client) ChatStream(
 	}()
 
 	return ch
+}
+
+// buildPayload 组装 LLM API 请求体。
+func (c *Client) buildPayload(
+	messages []map[string]any,
+	tools []map[string]any,
+	model string,
+	opts *CallOptions,
+) map[string]any {
+	payload := map[string]any{
+		"model":    model,
+		"messages": messages,
+		"stream":   true,
+		"stream_options": map[string]any{"include_usage": true},
+	}
+
+	if len(tools) > 0 {
+		payload["tools"] = tools
+	}
+
+	// 从 ModelInfo 取模型默认值
+	var info *ModelInfo
+	for i := range c.provider.Models {
+		if c.provider.Models[i].ID == model {
+			info = &c.provider.Models[i]
+			break
+		}
+	}
+
+	temperature := 0.7
+	maxTokens := 4096
+	if opts != nil && opts.Temperature != nil {
+		temperature = *opts.Temperature
+	}
+	if opts != nil && opts.MaxTokens != nil {
+		maxTokens = *opts.MaxTokens
+	} else if info != nil && info.MaxOutputTokens > 0 {
+		maxTokens = info.MaxOutputTokens
+	}
+	payload["temperature"] = temperature
+	payload["max_tokens"] = maxTokens
+
+	// 推理/思考参数
+	reasoningEffort := ""
+	thinkingEnabled := false
+	if opts != nil && opts.ReasoningEffort != nil {
+		reasoningEffort = *opts.ReasoningEffort
+	} else if info != nil {
+		reasoningEffort = info.ReasoningEffort
+	}
+	if opts != nil && opts.ThinkingEnabled != nil {
+		thinkingEnabled = *opts.ThinkingEnabled
+	} else if info != nil && info.ReasoningEffort != "" {
+		thinkingEnabled = true
+	}
+
+	if thinkingEnabled && reasoningEffort != "" {
+		payload["thinking"] = map[string]string{"type": "enabled"}
+		payload["reasoning_effort"] = reasoningEffort
+	}
+
+	// Provider 钩子改造
+	if c.provider.BuildRequest != nil {
+		payload = c.provider.BuildRequest(payload)
+	}
+
+	return payload
 }
 
 // parseSSE 解析 SSE 流，产出 StreamEvent。

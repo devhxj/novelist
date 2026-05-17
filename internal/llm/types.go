@@ -35,6 +35,14 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("[%d] %s", e.StatusCode, e.Message)
 }
 
+// CallOptions LLM 调用的可选参数。nil 时全部使用 Provider/ModelInfo 默认值。
+type CallOptions struct {
+	Temperature     *float64 // 不传走 Provider 默认
+	MaxTokens       *int     // 不传走 ModelInfo 默认
+	ReasoningEffort *string  // 不传从 ModelInfo 取
+	ThinkingEnabled *bool    // 不传从 ModelInfo 判断
+}
+
 // StreamEventType 流式事件的类型。
 type StreamEventType int
 
