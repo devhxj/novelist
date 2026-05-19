@@ -80,7 +80,6 @@ func (Location) TableName() string { return "locations" }
 // MCP 工具实现参考：
 //   - get_locations(mode="detail", location_id=X)：同时返回子地点列表（parent=X）和邻接关系列表（source=X）
 //   - update_location_relation：INSERT ... ON CONFLICT (source_location_id, target_location_id) DO UPDATE
-//     未提供 relation_type 时 DELETE（移除边）
 type LocationRelation struct {
 	ID               int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
 	NovelID          int64     `gorm:"column:novel_id;not null;index"              json:"novel_id"`

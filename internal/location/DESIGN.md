@@ -87,7 +87,7 @@ Go 新增 LocationRelation 表，形成完整的空间图。与 CharacterRelatio
 
 ### update_location_relation 使用 UPSERT
 
-同一对 (source_location_id, target_location_id) 永远只有一条记录。AI 第一次调用是 INSERT，后续调用自动覆盖旧值。无需单独的 delete 工具——AI 只需提供空的 relation_type（或调用中传 remove=true）来删除边。
+同一对 (source_location_id, target_location_id) 永远只有一条记录。AI 第一次调用是 INSERT，后续调用自动覆盖旧值。
 
 ## 排序规则
 
