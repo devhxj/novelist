@@ -17,7 +17,9 @@ from chapters.models import Chapter
 from characters.models import Character
 from timeline.models import TimelineEntry
 from story_arcs.models import StoryArc
-
+"""
+本文件含大量过期方法，重构时绝对不能原样翻译
+"""
 logger = logging.getLogger(__name__)
 
 
@@ -895,6 +897,8 @@ async def _build_novel_context_snapshot(db, novel_id: int) -> str:
 
 
 
+# DEPRECATED: 此函数已废弃，无任何调用方。timeline 和 story arc 数据应通过 MCP 工具
+# (get_timeline / get_story_arcs) 由 LLM 按需查询，而非通过上下文注入。
 async def build_layer2_context(
     db,
     novel_id: int,

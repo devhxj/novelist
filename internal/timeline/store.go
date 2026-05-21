@@ -100,15 +100,16 @@ func (s *Store) ListBefore(ctx context.Context, novelID int64, ChapterID int, li
 	return entries, nil
 }
 
-// ListActiveBefore 取 target_chapter < ChapterID 且未解决（pending）的全部条目，兜底截断 100。
-func (s *Store) ListActiveBefore(ctx context.Context, novelID int64, ChapterID int) ([]TimelineEntry, error) {
+// ListPendingBefore 取 target_chapter < ChapterID 且 pending 的全部条目，兜底截断 100。
+// 按 target_chapter DESC——最近的在前，远古的在后，先展示最相关的。
+func (s *Store) ListPendingBefore(ctx context.Context, novelID int64, ChapterID int) ([]TimelineEntry, error) {
 	var entries []TimelineEntry
 	if err := s.DB.WithContext(ctx).
 		Where("novel_id = ? AND target_chapter < ? AND status = ?", novelID, ChapterID, "pending").
-		Order("target_chapter ASC").
+		Order("target_chapter DESC").
 		Limit(100).
 		Find(&entries).Error; err != nil {
-		return nil, fmt.Errorf("timeline store: list active before: %w", err)
+		return nil, fmt.Errorf("timeline store: list pending before: %w", err)
 	}
 	return entries, nil
 }
