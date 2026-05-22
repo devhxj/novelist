@@ -58,62 +58,85 @@ func (s *Store) ListSessions(ctx context.Context, novelID int64, page, size int)
 
 // UpdateSessionMeta 增量更新标题、模型、推理深度。空字符串不更新。
 func (s *Store) UpdateSessionMeta(ctx context.Context, sessionID, title, model, reasoningEffort string) error {
-	updates := map[string]any{}
-	if title != "" {
-		updates["title"] = title
-	}
-	if model != "" {
-		updates["model"] = model
-	}
-	if reasoningEffort != "" {
-		updates["reasoning_effort"] = reasoningEffort
-	}
-	if len(updates) == 0 {
+	if title == "" && model == "" && reasoningEffort == "" {
 		return nil
 	}
 
-	res := s.DB.WithContext(ctx).
-		Model(&Session{}).
+	var sess Session
+	if err := s.DB.WithContext(ctx).
 		Where("session_id = ?", sessionID).
-		Updates(updates)
-	if res.Error != nil {
-		return fmt.Errorf("session store: update meta: %w", res.Error)
+		First(&sess).Error; err != nil {
+		return fmt.Errorf("session store: update meta: %w", err)
 	}
-	if res.RowsAffected == 0 {
-		return fmt.Errorf("session store: update meta: %w", gorm.ErrRecordNotFound)
+
+	if title != "" {
+		sess.Title = title
+	}
+	if model != "" {
+		sess.Model = model
+	}
+	if reasoningEffort != "" {
+		sess.ReasoningEffort = reasoningEffort
+	}
+
+	if err := s.DB.WithContext(ctx).Save(&sess).Error; err != nil {
+		return fmt.Errorf("session store: update meta: %w", err)
 	}
 	return nil
 }
 
 // UpdateSessionUsage 更新最近一次 LLM 的 token 用量。
 func (s *Store) UpdateSessionUsage(ctx context.Context, sessionID, usageJSON string) error {
-	res := s.DB.WithContext(ctx).
-		Model(&Session{}).
+	var sess Session
+	if err := s.DB.WithContext(ctx).
 		Where("session_id = ?", sessionID).
-		Update("usage", usageJSON)
-	if res.Error != nil {
-		return fmt.Errorf("session store: update usage: %w", res.Error)
+		First(&sess).Error; err != nil {
+		return fmt.Errorf("session store: update usage: %w", err)
 	}
-	if res.RowsAffected == 0 {
-		return fmt.Errorf("session store: update usage: %w", gorm.ErrRecordNotFound)
+
+	sess.Usage = usageJSON
+
+	if err := s.DB.WithContext(ctx).Save(&sess).Error; err != nil {
+		return fmt.Errorf("session store: update usage: %w", err)
 	}
 	return nil
 }
 
-// BumpActiveVersion 原子递增 active_version 并返回新值。
+// BumpActiveVersion 递增 active_version 并返回新值。
 func (s *Store) BumpActiveVersion(ctx context.Context, sessionID string) (int, error) {
-	var newV int
+	var sess Session
 	if err := s.DB.WithContext(ctx).
-		Raw("UPDATE sessions SET active_version = active_version + 1 WHERE session_id = ? RETURNING active_version", sessionID).
-		Scan(&newV).Error; err != nil {
+		Where("session_id = ?", sessionID).
+		First(&sess).Error; err != nil {
 		return 0, fmt.Errorf("session store: bump version: %w", err)
 	}
 
+	sess.ActiveVersion++
+
+	if err := s.DB.WithContext(ctx).Save(&sess).Error; err != nil {
+		return 0, fmt.Errorf("session store: bump version: %w", err)
+	}
+
+	newV := sess.ActiveVersion
 	s.logger.Debug("session store: bumped version", "session_id", sessionID, "new_version", newV)
 	return newV, nil
 }
 
 // ========== Message 查询 ==========
+
+// NextTurn 原子递增 last_turn_id 并返回新值。
+// agent loop 在每个 turn 开始时调用，一步完成递增 + 持久化。
+func (s *Store) NextTurn(ctx context.Context, sessionID string) (int, error) {
+	var turnID int
+	if err := s.DB.WithContext(ctx).
+		Raw("UPDATE sessions SET last_turn_id = last_turn_id + 1 WHERE session_id = ? RETURNING last_turn_id", sessionID).
+		Scan(&turnID).Error; err != nil {
+		return 0, fmt.Errorf("session store: next turn: %w", err)
+	}
+
+	s.logger.Debug("session store: next turn", "session_id", sessionID, "turn_id", turnID)
+	return turnID, nil
+}
 
 // GetMessagesForAPI 返回 LLM context 所需的消息。
 func (s *Store) GetMessagesForAPI(ctx context.Context, sessionID string, version int) ([]Message, error) {

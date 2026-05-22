@@ -18,6 +18,7 @@ type Session struct {
 	PendingChanges  string    `gorm:"column:pending_changes"                                       json:"pending_changes,omitempty"`  // JSON，待确认的编辑变更列表
 	ExtraMetadata   string    `gorm:"column:extra_metadata"                                        json:"extra_metadata,omitempty"`   // JSON，扩展槽
 	ActiveVersion   int       `gorm:"column:active_version;not null;default:1"                    json:"active_version"`             // 当前活跃的上下文代数
+	LastTurnID      int       `gorm:"column:last_turn_id;not null;default:0"                      json:"last_turn_id"`               // 最后一个 turn 的编号，原子自增
 	Usage           string    `gorm:"column:usage"                                                 json:"usage,omitempty"`            // JSON，最近一次 LLM 调用的 token 用量
 	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime"                            json:"created_at"`
 	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime;index:idx_sessions_novel"   json:"updated_at"`
@@ -33,6 +34,7 @@ func (Session) TableName() string { return "sessions" }
 type Message struct {
 	ID            int64     `gorm:"column:id;primaryKey;autoIncrement"                            json:"id"`
 	SessionID     string    `gorm:"column:session_id;index;not null"                             json:"session_id"`
+	TurnID        int       `gorm:"column:turn_id;not null;default:0;index"                      json:"turn_id"`         // 所属 turn，回退时直接 DELETE WHERE turn_id
 	Role          string    `gorm:"column:role;not null"                                          json:"role"`           // "system" | "user" | "assistant" | "tool"
 	Content       string    `gorm:"column:content;not null"                                       json:"content"`
 	TokenCount    int       `gorm:"column:token_count;not null;default:0"                        json:"token_count"`

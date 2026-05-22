@@ -59,12 +59,14 @@ sessions
   pending_changes  TEXT       — JSON，待确认编辑变更
   extra_metadata   TEXT       — JSON，扩展槽
   active_version   INTEGER    — 当前活跃的上下文代数
+  last_turn_id     INTEGER    — 最后一个 turn 的编号，原子自增（详见 operation_log 设计）
   usage            TEXT       — JSON，最近 LLM token 用量
   created_at / updated_at
 
 messages
   id              INTEGER PK AUTOINCREMENT
   session_id      TEXT    FK → sessions.session_id
+  turn_id         INTEGER — 所属 turn 编号，回退时 DELETE WHERE turn_id BETWEEN
   role            TEXT    — "system" | "user" | "assistant" | "tool"
   content         TEXT
   token_count     INTEGER
@@ -170,6 +172,7 @@ ListSessions(novelID, offset, limit)
 UpdateSessionMeta(sessionID, title, model)
 UpdateSessionUsage(sessionID, usageJSON)
 BumpActiveVersion(sessionID) → active_version+1
+NextTurn(sessionID) → last_turn_id+1（原子递增，用于回退定位）
 
 // Message — 只追加，不更新不删除
 AppendMessage(msg)
