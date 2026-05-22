@@ -73,3 +73,7 @@ type XxxArgs struct {
 
 - `ExposeToLLM()` 默认 `true`
 - 新增工具后在 `registry.go` 调用 Register 函数
+
+## 7.格式化
+- 返回的消息能格式化成md的就格式化，不要直接返回原始json。方便llm理解
+- 图结构可以返回邻接表，而不是原始的点和边。
