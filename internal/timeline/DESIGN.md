@@ -127,7 +127,7 @@ far  → 全量注入（完整 content，1 行）
 ## AI 写作完整流程
 
 ```
-第 N 章写作前 — 系统自动注入（AI 无感知）：
+第 N 章写作前 — LLM自己获取plans 和 timeline的信息：
   ├─ chapter_plans（next + near + far，全量）
   └─ time_entries（近期窗口全量 + 全局索引）
 
@@ -150,5 +150,5 @@ far  → 全量注入（完整 content，1 行）
 |------|------|
 | Novel | `novel_id` FK，级联删除 |
 | Chapter | `source_chapter_id` / `resolved_chapter_id` 引用章节 |
-| CharacterRelation | Review agent 检测到关系变更时自动创建 TimelineEntry |
+| Character | timeline可以记录角色名称（写入工具描述/系统提示词） 告诉llm如果这个节点需要用到xx角色，就把角色名写进去，后续可以搜出来角色 |
 | StoryArc | 未来的弧线里程碑通过 TimelineEntry 追踪（预留 detail_json 中的 arc 引用） |

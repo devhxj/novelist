@@ -120,6 +120,20 @@ func (s *Store) GetHistory(ctx context.Context, charA, charB int64) ([]Character
 	return rels, nil
 }
 
+// ListBetweenCharacters 返回给定角色集合内部的当前关系边（两端都在集合内）。
+func (s *Store) ListBetweenCharacters(ctx context.Context, characterIDs []int64) ([]CharacterRelation, error) {
+	if len(characterIDs) == 0 {
+		return nil, nil
+	}
+	var rels []CharacterRelation
+	if err := s.DB.WithContext(ctx).
+		Where("is_current = ? AND source_character_id IN ? AND target_character_id IN ?", true, characterIDs, characterIDs).
+		Find(&rels).Error; err != nil {
+		return nil, fmt.Errorf("character store: list between characters: %w", err)
+	}
+	return rels, nil
+}
+
 // Deactivate 将一条关系标记为非当前（is_current=false）。
 func (s *Store) Deactivate(ctx context.Context, relationID int64) error {
 	res := s.DB.WithContext(ctx).
