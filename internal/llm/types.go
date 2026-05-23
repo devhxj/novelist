@@ -1,6 +1,9 @@
 package llm
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // Provider 定义一个大模型供应商的完整配置。
 // 默认行为走 OpenAI 兼容格式，钩子函数用于处理供应商差异。
@@ -69,10 +72,10 @@ type StreamEvent struct {
 
 // ToolCallDelta 描述一次工具调用的增量信息。
 // 工具调用通过 SSE 流分多次下发：先来 ID 和名称，再逐片来 arguments 字符串。
-// 客户端内部维护按 index 的累积缓冲区，流结束后一次性 json.Unmarshal。
+// 客户端内部维护按 index 的累积缓冲区，流结束后校验并发送原始 JSON。
 type ToolCallDelta struct {
 	ToolName      string         // EventToolCallStart 时填充
 	ToolID        string         // EventToolCallStart 时填充
 	ArgumentsText string         // EventToolCallArguments 时，累积后的完整 JSON 字符串
-	ArgumentsJSON map[string]any // EventToolCallEnd 时，json.Unmarshal 后的完整参数
+	ArgumentsJSON json.RawMessage // EventToolCallEnd 时，原始 JSON 字节，由调用方按需反序列化
 }

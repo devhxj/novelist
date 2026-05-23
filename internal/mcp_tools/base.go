@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/invopop/jsonschema"
 	"gorm.io/gorm"
 
@@ -21,7 +22,8 @@ type Tool interface {
 	Category() ToolCategory
 	JSONSchema() json.RawMessage
 	ExposeToLLM() bool
-	Execute(ctx context.Context, args map[string]any, tc ToolContext) (*ToolResult, error)
+	NewArgs() any                            // 返回零值 args 指针，供 Registry 反序列化 + 校验用
+	Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error)
 }
 
 // ── 上下文 ────────────────────────────────────────────
@@ -109,13 +111,18 @@ type DisplayInfo struct {
 
 // Registry 是 MCP 工具注册表，无全局单例，由 main.go 创建后注入。
 type Registry struct {
-	tools  map[string]Tool
-	logger *slog.Logger
+	tools    map[string]Tool
+	logger   *slog.Logger
+	validate *validator.Validate
 }
 
 // NewRegistry 创建新的工具注册表。
 func NewRegistry(logger *slog.Logger) *Registry {
-	return &Registry{tools: make(map[string]Tool), logger: logger}
+	return &Registry{
+		tools:    make(map[string]Tool),
+		logger:   logger,
+		validate: validator.New(),
+	}
 }
 
 // Register 注册工具。同名工具后注册的覆盖先注册的。
@@ -179,15 +186,24 @@ func (r *Registry) OpenAI(allowed map[string]bool) []map[string]any {
 	return list
 }
 
-// Execute 查表 → 白名单校验 → 调 Tool.Execute → 兜底 panic + 计时。
+// Execute 查表 → 白名单校验 → 反序列化 + validate → 调 Tool.Execute → 兜底 panic + 计时。
 // allowed=nil 表示不限制；非 nil 只放行白名单内的工具。
-func (r *Registry) Execute(ctx context.Context, name string, args map[string]any, tc ToolContext, allowed map[string]bool) (*ToolResult, error) {
+func (r *Registry) Execute(ctx context.Context, name string, rawArgs json.RawMessage, tc ToolContext, allowed map[string]bool) (*ToolResult, error) {
 	t, ok := r.Get(name)
 	if !ok {
 		return &ToolResult{Success: false, Error: "工具不存在: " + name}, nil
 	}
 	if !allow(allowed, name) {
 		return &ToolResult{Success: false, Error: "工具禁止使用: " + name}, nil
+	}
+
+	// 反序列化 + 校验
+	args := t.NewArgs()
+	if err := json.Unmarshal(rawArgs, args); err != nil {
+		return &ToolResult{Success: false, Error: "参数格式不正确: " + err.Error()}, nil
+	}
+	if err := r.validate.Struct(args); err != nil {
+		return &ToolResult{Success: false, Error: "参数校验失败: " + err.Error()}, nil
 	}
 
 	t0 := time.Now()

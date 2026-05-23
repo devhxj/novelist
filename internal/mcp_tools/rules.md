@@ -21,36 +21,38 @@ func (t *XxxTool) JSONSchema() json.RawMessage {
 }
 
 func (t *XxxTool) ExposeToLLM() bool { return true }
+func (t *XxxTool) NewArgs() any     { return &XxxArgs{} }
 
-func (t *XxxTool) Execute(ctx context.Context, args map[string]any, tc ToolContext) (*ToolResult, error) {
-    b, _ := json.Marshal(args)
-    var a XxxArgs
-    if err := json.Unmarshal(b, &a); err != nil {
-        return &ToolResult{Success: false, Error: "参数校验失败: " + err.Error()}, nil
-    }
+func (t *XxxTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
+    a := args.(*XxxArgs)
     return &ToolResult{Success: true, Data: ...}, nil
 }
 ```
 
-Args 结构体用 `jsonschema` tag 定义 JSON Schema，**与 Pydantic Field 等价**：
+Args 结构体同时使用两类 tag：
+
+- `jsonschema` tag —— 生成 OpenAI function calling 的 JSON Schema（给 LLM 看）
+- `validate` tag —— 运行时校验（给 Registry 用）
 
 ```go
 type XxxArgs struct {
-    Name string `json:"name" jsonschema:"required,description=名称"`
-    Type string `json:"type" jsonschema:"description=类型,enum=a,enum=b,enum=c"`
-    Size int    `json:"size" jsonschema:"description=每页数量,default=20,minimum=1,maximum=100"`
+    Name string `json:"name" jsonschema:"required,description=名称"       validate:"required"`
+    Type string `json:"type" jsonschema:"required,enum=a,enum=b,enum=c"  validate:"required,oneof=a b c"`
+    Size int    `json:"size" jsonschema:"default=20,minimum=1,maximum=100" validate:"min=1,max=100,omitempty"`
 }
 ```
 
-**必须使用 tag 表达约束**，禁止在 Execute 里裸写校验逻辑。支持的 tag：
+**校验由 Registry.Execute 统一执行**，工具自身不需要 `json.Unmarshal` 或 `validate.Struct`，直接从 `args.(*XxxArgs)` 取值。
 
-| tag | 用途 | 示例 |
-|-----|------|------|
-| `required` | 必填字段 | `jsonschema:"required,description=..."` |
-| `description=xxx` | 参数描述 | 同上 |
-| `enum=a,enum=b` | 枚举值 | `jsonschema:"enum=known,enum=suspense"` |
-| `default=xxx` | 默认值 | `jsonschema:"default=20"` |
-| `minimum=N` / `maximum=N` | 数值范围 | `jsonschema:"minimum=1,maximum=100"` |
+`jsonschema` tag 对照 Pydantic：
+
+| Pydantic | Go jsonschema tag |
+|----------|-------------------|
+| `Field(description=...)` | `description=xxx` |
+| `Literal["a","b"]` | `enum=a,enum=b` |
+| `Field(default=...)` | `default=xxx` |
+| `Field(ge=1,le=100)` | `minimum=1,maximum=100` |
+| 无默认值 → required | `required` |
 
 ## 3. 错误处理
 
@@ -58,6 +60,7 @@ type XxxArgs struct {
 |------|------|
 | 业务错误（参数不合法、资源不存在） | `return &ToolResult{Success: false, Error: "中文消息"}, nil` |
 | 意外异常（DB、网络） | 不 catch，让 `Registry.Execute()` 兜底，设 `ErrKind: "system"` |
+| 参数校验 | 不手写。Registry 统一用 `validate.Struct()` 执行，工具拿到时已是合法值 |
 
 工具不要用 `recover()` 包裹 `Execute()` 方法体。
 

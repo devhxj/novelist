@@ -13,8 +13,8 @@ import (
 
 // GetChapterListArgs 是 get_chapter_list 的参数。
 type GetChapterListArgs struct {
-	Page int `json:"page" jsonschema:"description=页码,default=1"`
-	Size int `json:"size" jsonschema:"description=每页数量,default=20"`
+	Page int `json:"page" jsonschema:"description=页码,default=1,minimum=1"    validate:"min=1,omitempty"`
+	Size int `json:"size" jsonschema:"description=每页数量,default=20,minimum=1,maximum=100" validate:"min=1,max=100,omitempty"`
 }
 
 // GetChapterListTool 获取章节列表，按章节号降序。
@@ -29,13 +29,10 @@ func (t *GetChapterListTool) JSONSchema() json.RawMessage {
 }
 
 func (t *GetChapterListTool) ExposeToLLM() bool { return true }
+func (t *GetChapterListTool) NewArgs() any     { return &GetChapterListArgs{} }
 
-func (t *GetChapterListTool) Execute(ctx context.Context, args map[string]any, tc ToolContext) (*ToolResult, error) {
-	b, _ := json.Marshal(args)
-	var a GetChapterListArgs
-	if err := json.Unmarshal(b, &a); err != nil {
-		return &ToolResult{Success: false, Error: "参数校验失败: " + err.Error()}, nil
-	}
+func (t *GetChapterListTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
+	a := args.(*GetChapterListArgs)
 
 	if a.Page < 1 {
 		a.Page = 1

@@ -35,14 +35,9 @@ func (t *GetReaderPerspectiveTool) JSONSchema() json.RawMessage {
 }
 
 func (t *GetReaderPerspectiveTool) ExposeToLLM() bool { return true }
+func (t *GetReaderPerspectiveTool) NewArgs() any     { return &GetReaderPerspectiveArgs{} }
 
-func (t *GetReaderPerspectiveTool) Execute(ctx context.Context, args map[string]any, tc ToolContext) (*ToolResult, error) {
-	b, _ := json.Marshal(args)
-	var a GetReaderPerspectiveArgs
-	if err := json.Unmarshal(b, &a); err != nil {
-		return &ToolResult{Success: false, Error: "参数校验失败: " + err.Error()}, nil
-	}
-
+func (t *GetReaderPerspectiveTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
 	rs := reader.NewStore(tc.DB, slog.Default())
 
 	// known：全量可能很大，兜底截断 100 条，按 planted_chapter DESC 取最近的
@@ -141,11 +136,11 @@ func formatReaderPerspective(known, suspenses, misconceptions []reader.ReaderPer
 
 // CreateReaderPerspectiveEntryArgs 是 create_reader_perspective_entry 的参数。
 type CreateReaderPerspectiveEntryArgs struct {
-	Type               string `json:"type" jsonschema:"required,description=条目类型,enum=known,enum=suspense,enum=misconception"`
-	Content            string `json:"content" jsonschema:"required,description=内容描述"`
-	PlantedChapter     int    `json:"planted_chapter" jsonschema:"required,description=种下的章节号"`
-	RelatedTruth       string `json:"related_truth" jsonschema:"description=仅 misconception：真实情况是什么"`
-	PlannedRevealChapter int  `json:"planned_reveal_chapter" jsonschema:"description=仅 suspense/misconception：计划在哪章揭露或回收"`
+	Type                 string `json:"type" jsonschema:"required,description=条目类型,enum=known,enum=suspense,enum=misconception" validate:"required,oneof=known suspense misconception"`
+	Content              string `json:"content" jsonschema:"required,description=内容描述"          validate:"required"`
+	PlantedChapter       int    `json:"planted_chapter" jsonschema:"required,description=种下的章节号"    validate:"required,min=1"`
+	RelatedTruth         string `json:"related_truth" jsonschema:"description=仅 misconception：真实情况是什么"`
+	PlannedRevealChapter int    `json:"planned_reveal_chapter" jsonschema:"description=仅 suspense/misconception：计划在哪章揭露或回收"`
 }
 
 // CreateReaderPerspectiveEntryTool 创建一条读者认知条目。
@@ -166,36 +161,26 @@ func (t *CreateReaderPerspectiveEntryTool) JSONSchema() json.RawMessage {
 }
 
 func (t *CreateReaderPerspectiveEntryTool) ExposeToLLM() bool { return true }
+func (t *CreateReaderPerspectiveEntryTool) NewArgs() any     { return &CreateReaderPerspectiveEntryArgs{} }
 
-func (t *CreateReaderPerspectiveEntryTool) Execute(ctx context.Context, args map[string]any, tc ToolContext) (*ToolResult, error) {
-	b, _ := json.Marshal(args)
-	var a CreateReaderPerspectiveEntryArgs
-	if err := json.Unmarshal(b, &a); err != nil {
-		return &ToolResult{Success: false, Error: "参数校验失败: " + err.Error()}, nil
-	}
+func (t *CreateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
+	a := args.(*CreateReaderPerspectiveEntryArgs)
 
-	if a.Type != reader.TypeKnown && a.Type != reader.TypeSuspense && a.Type != reader.TypeMisconception {
-		return &ToolResult{Success: false, Error: "type 必须是 known、suspense 或 misconception"}, nil
-	}
-
-	entry := reader.ReaderPerspective{
-		NovelID:         tc.NovelID,
-		Type:            a.Type,
-		Content:         a.Content,
-		PlantedChapter:  a.PlantedChapter,
-		RelatedTruth:    a.RelatedTruth,
-	}
-
-	// suspense/misconception 时设置计划回收章节；known 不设
-	if a.Type == reader.TypeSuspense || a.Type == reader.TypeMisconception {
-		entry.RevealedChapter = a.PlannedRevealChapter
-	}
-
+	// 业务校验：misconception 必须提供 related_truth
 	if a.Type == reader.TypeMisconception && a.RelatedTruth == "" {
 		return &ToolResult{Success: false, Error: "misconception 类型必须提供 related_truth（实际真相）"}, nil
 	}
-	if a.Type != reader.TypeMisconception {
-		entry.RelatedTruth = ""
+
+	entry := reader.ReaderPerspective{
+		NovelID:        tc.NovelID,
+		Type:           a.Type,
+		Content:        a.Content,
+		PlantedChapter: a.PlantedChapter,
+		RelatedTruth:   a.RelatedTruth,
+	}
+
+	if a.Type == reader.TypeSuspense || a.Type == reader.TypeMisconception {
+		entry.RevealedChapter = a.PlannedRevealChapter
 	}
 
 	if err := tc.DB.WithContext(ctx).Create(&entry).Error; err != nil {
@@ -212,9 +197,9 @@ func (t *CreateReaderPerspectiveEntryTool) Execute(ctx context.Context, args map
 
 // UpdateReaderPerspectiveEntryArgs 是 update_reader_perspective_entry 的参数。
 type UpdateReaderPerspectiveEntryArgs struct {
-	EntryID               int `json:"entry_id" jsonschema:"required,description=要更新的条目 ID"`
-	LastMentionedChapter  int `json:"last_mentioned_chapter" jsonschema:"description=最近提及的章节号"`
-	RevealedChapter       int `json:"revealed_chapter" jsonschema:"description=实际揭露或回收的章节号（设置后该条目不再出现在活跃列表中）"`
+	EntryID              int `json:"entry_id" jsonschema:"required,description=要更新的条目 ID" validate:"required,min=1"`
+	LastMentionedChapter int `json:"last_mentioned_chapter" jsonschema:"description=最近提及的章节号"`
+	RevealedChapter      int `json:"revealed_chapter" jsonschema:"description=实际揭露或回收的章节号（设置后该条目不再出现在活跃列表中）"`
 }
 
 // UpdateReaderPerspectiveEntryTool 更新读者认知条目。
@@ -234,13 +219,10 @@ func (t *UpdateReaderPerspectiveEntryTool) JSONSchema() json.RawMessage {
 }
 
 func (t *UpdateReaderPerspectiveEntryTool) ExposeToLLM() bool { return true }
+func (t *UpdateReaderPerspectiveEntryTool) NewArgs() any     { return &UpdateReaderPerspectiveEntryArgs{} }
 
-func (t *UpdateReaderPerspectiveEntryTool) Execute(ctx context.Context, args map[string]any, tc ToolContext) (*ToolResult, error) {
-	b, _ := json.Marshal(args)
-	var a UpdateReaderPerspectiveEntryArgs
-	if err := json.Unmarshal(b, &a); err != nil {
-		return &ToolResult{Success: false, Error: "参数校验失败: " + err.Error()}, nil
-	}
+func (t *UpdateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
+	a := args.(*UpdateReaderPerspectiveEntryArgs)
 
 	if a.LastMentionedChapter == 0 && a.RevealedChapter == 0 {
 		return &ToolResult{Success: false, Error: "至少需要提供一个要修改的字段"}, nil

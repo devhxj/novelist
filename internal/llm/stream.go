@@ -81,13 +81,13 @@ func (c *Client) ChatStream(
 
 		body, err := json.Marshal(payload)
 		if err != nil {
-			ch <- StreamEvent{Type: EventError, Error: fmt.Errorf("序列化请求体失败: %w", err)}
+			ch <- StreamEvent{Type: EventError, Error: fmt.Errorf("failed to marshal request body: %w", err)}
 			return
 		}
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.provider.ChatURL, bytes.NewReader(body))
 		if err != nil {
-			ch <- StreamEvent{Type: EventError, Error: fmt.Errorf("创建 HTTP 请求失败: %w", err)}
+			ch <- StreamEvent{Type: EventError, Error: fmt.Errorf("failed to create HTTP request: %w", err)}
 			return
 		}
 
@@ -107,7 +107,7 @@ func (c *Client) ChatStream(
 		if err != nil {
 			ch <- StreamEvent{Type: EventError, Error: &APIError{
 				StatusCode: 0,
-				Message:    fmt.Sprintf("请求失败: %s", err),
+				Message:    fmt.Sprintf("request failed: %s", err),
 				Retryable:  true,
 			}}
 			return
@@ -234,7 +234,7 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, body io.Reader) {
 		// 解析 JSON chunk
 		var chunk map[string]any
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			c.logger.Warn("SSE JSON 解析失败", "line", data, "error", err)
+			c.logger.Warn("SSE JSON parse failed", "line", data, "error", err)
 			continue
 		}
 
@@ -327,20 +327,20 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, body io.Reader) {
 	if err := scanner.Err(); err != nil {
 		ch <- StreamEvent{Type: EventError, Error: &APIError{
 			StatusCode: 0,
-			Message:    fmt.Sprintf("SSE 流读取异常: %s", err),
+			Message:    fmt.Sprintf("SSE stream read error: %s", err),
 			Retryable:  true,
 		}}
 	}
 
-	// 流结束后，parse 所有完整工具调用
+	// 流结束后，发送完整工具调用。参数保留原始 JSON，由 Registry 按目标类型反序列化。
 	for i := range accumulated {
 		acc := &accumulated[i]
 		if acc.name == "" || acc.arguments.Len() == 0 {
 			continue
 		}
-		var args map[string]any
-		if err := json.Unmarshal([]byte(acc.arguments.String()), &args); err != nil {
-			c.logger.Warn("工具参数 JSON 解析失败", "tool", acc.name, "raw", acc.arguments.String(), "error", err)
+		raw := acc.arguments.String()
+		if !json.Valid([]byte(raw)) {
+			c.logger.Warn("tool arguments JSON invalid", "tool", acc.name, "raw", raw)
 			continue
 		}
 		ch <- StreamEvent{
@@ -348,8 +348,8 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, body io.Reader) {
 			Delta: &ToolCallDelta{
 				ToolName:      acc.name,
 				ToolID:        acc.id,
-				ArgumentsText: acc.arguments.String(),
-				ArgumentsJSON: args,
+				ArgumentsText: raw,
+				ArgumentsJSON: json.RawMessage(raw),
 			},
 		}
 	}
@@ -375,7 +375,7 @@ func parseDefaultError(body []byte) error {
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil || resp.Error.Message == "" {
-		return fmt.Errorf("请求失败: %s", string(body))
+		return fmt.Errorf("request failed: %s", string(body))
 	}
 	return fmt.Errorf("%s", resp.Error.Message)
 }
