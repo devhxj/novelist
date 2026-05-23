@@ -40,7 +40,7 @@ app handler:
 ```go
 type Agent struct {
     llm          *llm.Client
-    executeTool  func(ctx context.Context, name string, args map[string]any, tc ToolContext) (*ToolResult, error)
+    executeTool  func(ctx context.Context, name string, rawArgs json.RawMessage, tc ToolContext) *ToolResult
     buildDisplay func(ctx context.Context, name string, args map[string]any, phase DisplayPhase) *DisplayInfo
     persistMsg   func(ctx context.Context, msg *session.Message) error
     logger       *slog.Logger
@@ -79,8 +79,9 @@ type ToolResult struct {
     Success  bool
     Data     map[string]any
     Error    string
+    ErrKind  string            // "system" 表示系统异常（DB/网络），"" 表示业务错误
     Metadata map[string]any
-    Inject   []InjectMessage    // 工具返回的额外上下文消息
+    Inject   []InjectMessage   // 工具返回的额外上下文消息
 }
 
 type InjectMessage struct {
@@ -181,14 +182,20 @@ while turn < maxTurns:
             eventCh <- EventToolCall{Phase: "executing"}
 
             // 执行工具
-            result := executeTool(name, args, ToolContext{DB, NovelID, toolID})
+            result := executeTool(name, rawArgs, ToolContext{DB, NovelID, toolID})
 
             // Phase completed/failed
             phase := "completed" / "failed"
             buildDisplay(name, args, phase)
             eventCh <- EventToolCall{Phase: phase, Result: result}
 
-            // 失败计数 ≥3 → 注入警告
+            // 失败计数：仅系统异常 (ErrKind="system") 计入，业务错误不计数
+            if !result.Success && result.ErrKind == "system":
+                failCnt[toolName]++
+            else:
+                failCnt[toolName] = 0
+            if failCnt[toolName] >= 3:
+                // 注入 system 警告，提醒 LLM 停用该工具
             // Inject 暂存
 
             toolOutputs += {name, toolID, args, result}
@@ -246,7 +253,7 @@ eventCh <- EventDone{FinalText, TurnCount}
 
 | 机制 | 逻辑 | 触发后动作 |
 |------|------|-----------|
-| 工具失败降级 | 同工具连续失败 3 次 | persist system 警告（to_api=true, to_frontend=false） |
+| 工具失败降级 | 同工具连续系统异常（ErrKind="system"）3 次 | persist system 警告（to_api=true, to_frontend=false）。业务错误（ErrKind=""）不计数——LLM 换个参数就能成功 |
 | 死循环检测 | 最近 4 轮 ≤2 种模式 + 全是只读工具 + turn≥4 | persist system 警告 + push loop_detected 事件 |
 | Token 预算 | tiktoken 逐消息计数 > maxContextTokens | persist system 警告 |
 | 取消 | ctx.Done() 在每收到 SSE event 时检查 | 返回当前 partial 文本 |

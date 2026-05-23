@@ -188,22 +188,22 @@ func (r *Registry) OpenAI(allowed map[string]bool) []map[string]any {
 
 // Execute 查表 → 白名单校验 → 反序列化 + validate → 调 Tool.Execute → 兜底 panic + 错误。
 // allowed=nil 表示不限制；非 nil 只放行白名单内的工具。
-func (r *Registry) Execute(ctx context.Context, name string, rawArgs json.RawMessage, tc ToolContext, allowed map[string]bool) (*ToolResult, error) {
+func (r *Registry) Execute(ctx context.Context, name string, rawArgs json.RawMessage, tc ToolContext, allowed map[string]bool) *ToolResult {
 	t, ok := r.Get(name)
 	if !ok {
-		return &ToolResult{Success: false, Error: "工具不存在: " + name}, nil
+		return &ToolResult{Success: false, Error: "工具不存在: " + name}
 	}
 	if !allow(allowed, name) {
-		return &ToolResult{Success: false, Error: "工具禁止使用: " + name}, nil
+		return &ToolResult{Success: false, Error: "工具禁止使用: " + name}
 	}
 
 	// 反序列化 + 校验
 	args := t.NewArgs()
 	if err := json.Unmarshal(rawArgs, args); err != nil {
-		return &ToolResult{Success: false, Error: "参数格式不正确: " + err.Error()}, nil
+		return &ToolResult{Success: false, Error: "参数格式不正确: " + err.Error()}
 	}
 	if err := r.validate.Struct(args); err != nil {
-		return &ToolResult{Success: false, Error: "参数校验失败: " + err.Error()}, nil
+		return &ToolResult{Success: false, Error: "参数校验失败: " + err.Error()}
 	}
 
 	t0 := time.Now()
@@ -222,13 +222,13 @@ func (r *Registry) Execute(ctx context.Context, name string, rawArgs json.RawMes
 
 	if execErr != nil {
 		r.logger.Error("tool execution failed", "tool", name, "error", execErr, "elapsed_ms", time.Since(t0).Milliseconds())
-		return &ToolResult{Success: false, Error: "服务器内部错误，请稍后重试", ErrKind: "system"}, nil
+		return &ToolResult{Success: false, Error: "服务器内部错误，请稍后重试", ErrKind: "system"}
 	}
 
 	if result != nil {
 		r.logger.Info("mcp tool executed", "tool", name, "elapsed_ms", time.Since(t0).Milliseconds(), "success", result.Success)
 	}
-	return result, nil
+	return result
 }
 
 // AllowSet 将 []string 白名单转为 map[string]bool，供 Registry 方法使用。nil → nil。
