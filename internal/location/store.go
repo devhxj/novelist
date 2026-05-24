@@ -86,7 +86,7 @@ func (s *Store) GetByIDs(ctx context.Context, ids []int64) ([]Location, error) {
 
 // ── LocationRelation ──────────────────────────────────
 
-// ListByNovel 返回某小说全部空间关系边。
+// ListRelationsByNovel 返回某小说全部空间关系边。
 func (s *Store) ListRelationsByNovel(ctx context.Context, novelID int64) ([]LocationRelation, error) {
 	var rels []LocationRelation
 	if err := s.DB.WithContext(ctx).
@@ -98,23 +98,38 @@ func (s *Store) ListRelationsByNovel(ctx context.Context, novelID int64) ([]Loca
 	return rels, nil
 }
 
-// ListRelationsBySource 返回从某地点出发的所有空间关系边。
-func (s *Store) ListRelationsBySource(ctx context.Context, sourceID int64) ([]LocationRelation, error) {
+// ListRelationsByLocation 返回涉及某地点的所有无向边（location_a=X 或 location_b=X）。
+func (s *Store) ListRelationsByLocation(ctx context.Context, locID int64) ([]LocationRelation, error) {
 	var rels []LocationRelation
 	if err := s.DB.WithContext(ctx).
-		Where("source_location_id = ?", sourceID).
+		Where("location_a = ? OR location_b = ?", locID, locID).
 		Order("relation_type ASC").
 		Find(&rels).Error; err != nil {
-		return nil, fmt.Errorf("location store: list relations by source: %w", err)
+		return nil, fmt.Errorf("location store: list relations by location: %w", err)
 	}
 	return rels, nil
 }
 
-// UpsertRelation 插入或更新空间关系边。(source, target) 唯一约束下 ON CONFLICT DO UPDATE。
+// ListRelationsInvolving 返回涉及任意给定地点 ID 的全部边。
+func (s *Store) ListRelationsInvolving(ctx context.Context, locIDs []int64) ([]LocationRelation, error) {
+	if len(locIDs) == 0 {
+		return nil, nil
+	}
+	var rels []LocationRelation
+	if err := s.DB.WithContext(ctx).
+		Where("location_a IN ? OR location_b IN ?", locIDs, locIDs).
+		Order("relation_type ASC").
+		Find(&rels).Error; err != nil {
+		return nil, fmt.Errorf("location store: list relations involving: %w", err)
+	}
+	return rels, nil
+}
+
+// UpsertRelation 插入或更新空间关系边。(location_a, location_b) 唯一约束下 ON CONFLICT DO UPDATE。
 func (s *Store) UpsertRelation(ctx context.Context, rel *LocationRelation) error {
 	if err := s.DB.WithContext(ctx).
 		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "source_location_id"}, {Name: "target_location_id"}},
+			Columns:   []clause.Column{{Name: "location_a"}, {Name: "location_b"}},
 			DoUpdates: clause.AssignmentColumns([]string{"relation_type", "description", "updated_at"}),
 		}).
 		Create(rel).Error; err != nil {

@@ -6,4 +6,5 @@ func RegisterAllTools(r *Registry) {
 	RegisterNovelTools(r)
 	RegisterCharacterTools(r)
 	RegisterReaderPerspectiveTools(r)
+	RegisterLocationTools(r)
 }

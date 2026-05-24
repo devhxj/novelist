@@ -33,14 +33,14 @@ import "time"
 //   - get_locations：list（类型/搜索过滤）/ detail（含子地点+邻接空间关系）/ network（完整图结构）
 //   - create_location：新建地点节点（name 必填）
 //   - update_location：更新节点字段（name/type/description/detail_json/tags/parent_location_id）
-//   - update_location_relation：(source, target) 联合唯一约束 UPSERT 空间边，旧值直接覆盖，无演进历史
+//   - update_location_relation：(location_a, location_b) 联合唯一约束 UPSERT 无向空间边，旧值直接覆盖
 //
 // 图结构说明：
 //   地点系统形成两种边：
 //     - 包含树（Location.parent_location_id）：父→子层级，如 王宫→大殿→密室
-//     - 空间图（LocationRelation 表）：有向空间关系，如 迷雾森林→相邻→黑铁城堡
-//   get_location(mode="detail", location_id=X) 返回子地点列表和邻接关系列表，
-//   前端可渲染为完整地点网络图，AI 可查询"当前地点周围有哪些地方"来辅助空间推理。
+//     - 空间图（LocationRelation 表）：无向空间关系，如 迷雾森林—黑铁城堡 由山路连通
+//   get_locations(mode="detail", location_id=X) 返回子地点列表和连通关系列表，
+//   AI 可查询"当前地点周围有哪些地方"来辅助空间推理。
 type Location struct {
 	ID               int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
 	NovelID          int64     `gorm:"column:novel_id;not null;index"    json:"novel_id"`
@@ -57,38 +57,33 @@ type Location struct {
 // TableName 指定 GORM 表名。
 func (Location) TableName() string { return "locations" }
 
-// LocationRelation 是地点之间空间关系的有向边。
+// LocationRelation 是地点之间空间关系的无向边。
 //
-// 设计原则（与 CharacterRelation 的关键差异）：
-//  1. 不需要历史追踪 — 地点空间关系相对静态（山不会搬走、路不会改道），
-//     变更时直接 UPDATE 旧行或 DELETE 即可，不需要 append-only + is_current 模式。
-//     与 CharacterRelation 不同：人物关系每章都可能演变，需要保留完整历史；
-//     地点关系只是空间事实，错了就改，不存在"前一个关系是什么"的查询需求。
-//  2. 联合唯一约束 — (source_location_id, target_location_id) 唯一，
-//     MCP 工具 update_location_relation 做 UPSERT（ON CONFLICT DO UPDATE），
-//     同一对有向边永远只有一条当前记录。与 ChapterPlan 的 (novel_id, scope) 设计一致。
-//  3. relation_type 自由文本 — LLM 自行描述空间关系："相邻""由山路连通""可望见"
-//     "骑马半天路程""途经一片沼泽""同城不同区"。系统不根据类型做不同行为，自由文本更灵活。
-//  4. 有向边 — A→B 表示 A 可以通过某种关系到达 B。如果需要表达双向相邻，
-//     AI 可创建两条 (A→B 相邻, B→A 相邻)。
+// 与 CharacterRelation 的关键差异：
+//  1. 无向边 —— 地点的空间关系默认是双向的（A 和 B 连通），
+//     不存在"A 能到 B 但 B 不能到 A"的空间物理关系。
+//     工具层保证 location_a 总是较小的 ID，location_b 是较大的 ID，
+//     查询时 WHERE location_a = X OR location_b = X。
+//  2. 不需要历史追踪 —— 地点空间关系相对静态（山不会搬走、路不会改道），
+//     变更时直接 UPSERT 覆盖即可，不需要 append-only + is_current 模式。
+//  3. 联合唯一约束 —— (location_a, location_b) 唯一，
+//     MCP 工具 update_location_relation 做 UPSERT（ON CONFLICT DO UPDATE）。
+//  4. relation_type 自由文本 —— LLM 自行描述空间关系："相邻""由山路连通"
+//     "骑马半天路程""途经一片沼泽"。系统不根据类型做不同行为，自由文本更灵活。
 //
 // 图查询支持：
-//   - 某地点的邻接关系：WHERE source_location_id = ? ORDER BY relation_type
-//   - 两点之间的边：WHERE (source_location_id = A AND target_location_id = B)，单条
-//   - 与包含树的区别：parent_location_id 表达"属于"，LocationRelation 表达"相邻/连通/可望见"
-//
-// MCP 工具实现参考：
-//   - get_locations(mode="detail", location_id=X)：同时返回子地点列表（parent=X）和邻接关系列表（source=X）
-//   - update_location_relation：INSERT ... ON CONFLICT (source_location_id, target_location_id) DO UPDATE
+//   - 某地点的所有邻接边：WHERE location_a = X OR location_b = X
+//   - 一批地点之间的边：WHERE location_a IN ? OR location_b IN ?
+//   - 与包含树的区别：parent_location_id 表达"属于"，LocationRelation 表达"相邻/连通"
 type LocationRelation struct {
-	ID               int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	NovelID          int64     `gorm:"column:novel_id;not null;index"              json:"novel_id"`
-	SourceLocationID int64     `gorm:"column:source_location_id;uniqueIndex:uk_location_pair;not null" json:"source_location_id"`
-	TargetLocationID int64     `gorm:"column:target_location_id;uniqueIndex:uk_location_pair;not null" json:"target_location_id"`
-	RelationType     string    `gorm:"column:relation_type;not null"              json:"relation_type"`     // 自由文本："相邻""由山路连通""可望见""骑马半天路程"，LLM 自行描述
-	Description      string    `gorm:"column:description"                          json:"description"`       // 补充细节，如"途经一片沼泽""需穿越迷雾森林"
-	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime"            json:"created_at"`
-	UpdatedAt        time.Time `gorm:"column:updated_at;autoUpdateTime"            json:"updated_at"`
+	ID           int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	NovelID      int64     `gorm:"column:novel_id;not null;index"              json:"novel_id"`
+	LocationA    int64     `gorm:"column:location_a;uniqueIndex:uk_location_pair;not null" json:"location_a"` // 总是较小 ID
+	LocationB    int64     `gorm:"column:location_b;uniqueIndex:uk_location_pair;not null" json:"location_b"` // 总是较大 ID
+	RelationType string    `gorm:"column:relation_type;not null"              json:"relation_type"`           // 自由文本："相邻""由山路连通""可望见"
+	Description  string    `gorm:"column:description"                          json:"description"`             // 补充细节
+	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime"            json:"created_at"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime"            json:"updated_at"`
 }
 
 // TableName 指定 GORM 表名。
