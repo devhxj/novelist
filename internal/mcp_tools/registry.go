@@ -7,4 +7,5 @@ func RegisterAllTools(r *Registry) {
 	RegisterCharacterTools(r)
 	RegisterReaderPerspectiveTools(r)
 	RegisterLocationTools(r)
+	RegisterTimelineTools(r)
 }
