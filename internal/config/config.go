@@ -25,6 +25,11 @@ func (c *AppConfig) GlobalDBPath() string {
 	return filepath.Join(c.DataDir, "novel-agent.db")
 }
 
+// NovelDirPath 返回指定小说的 Git 仓库根目录。
+func (c *AppConfig) NovelDirPath(novelID int64) string {
+	return filepath.Join(c.DataDir, "novels", fmt.Sprintf("%d", novelID))
+}
+
 // ModelsDir 返回 ONNX 模型目录路径。
 func (c *AppConfig) ModelsDir() string {
 	return filepath.Join(c.DataDir, "models")
