@@ -28,7 +28,7 @@ OpenAI 协议允许开头并列多条 system 消息，DeepSeek 兼容。
 ## 文件结构
 
 ```
-internal/context/
+internal/agentcfg/
     system1.go   // 三个 Agent 的 System1 模板 + 各自工具白名单
     system2.go   // 小说快照（novel info + 偏好 + 角色索引 + 地点索引 + 读者认知 + 故事状态）
     layer3.go    // 大纲注入（创作新章时可选）
