@@ -19,10 +19,6 @@ func (AppSettings) TableName() string { return "app_config" }
 
 // LoadSettings 从全局库读取配置（单行）。首次使用时自动创建空行。
 func LoadSettings(db *gorm.DB) (*AppSettings, error) {
-	if err := db.AutoMigrate(&AppSettings{}); err != nil {
-		return nil, fmt.Errorf("迁移 app_config 表失败: %w", err)
-	}
-
 	// 确保有且只有一行（id=1）
 	if err := db.FirstOrCreate(&AppSettings{}, AppSettings{ID: 1}).Error; err != nil {
 		return nil, fmt.Errorf("读取应用配置失败: %w", err)
