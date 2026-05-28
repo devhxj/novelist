@@ -3,43 +3,49 @@
 package rag
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"sync"
-	"unicode"
-	"unicode/utf8"
 
 	ort "github.com/yalue/onnxruntime_go"
 )
 
 var (
-	instance *OnnxEmbedder
-	initOnce sync.Once
-	ready    = make(chan struct{})
-	initErr  error
+	instance  *OnnxEmbedder
+	tokenizer *Tokenizer
+	initOnce  sync.Once
+	ready     = make(chan struct{})
+	initErr   error
 )
 
 // OnnxEmbedder 使用 ONNX Runtime 加载 text2vec-base-chinese 模型生成 embedding。
 // 全局仅一个实例，通过 InitEmbedder 异步初始化。
 // Run 不是线程安全的，Embed/EmbedBatch 内部加锁。
 type OnnxEmbedder struct {
-	session *ort.DynamicAdvancedSession
-	vocab   map[string]int
-	mu      sync.Mutex
-	log     *slog.Logger
+	session   *ort.DynamicAdvancedSession
+	tokenizer *Tokenizer
+	mu        sync.Mutex
+	log       *slog.Logger
 }
 
-// InitEmbedder 启动异步加载 ONNX 模型，不阻塞调用方。多次调用安全。
+// InitEmbedder 加载 tokenizer（同步）后异步加载 ONNX 模型，不阻塞调用方。
 // main 启动时尽早调用，模型在后台加载，GUI 可先行渲染。
+// GetTokenizer() 调用后立即可用，无需等待模型就绪。
 func InitEmbedder(modelsDir string, log *slog.Logger) {
 	initOnce.Do(func() {
+		t, err := NewTokenizer(filepath.Join(modelsDir, "vocab.txt"))
+		if err != nil {
+			initErr = err
+			close(ready)
+			return
+		}
+		tokenizer = t
+
 		go func() {
 			defer close(ready)
-			e, err := newOnnxEmbedder(modelsDir, log)
+			e, err := newOnnxEmbedder(modelsDir, t, log)
 			if err != nil {
 				initErr = err
 				return
@@ -58,16 +64,14 @@ func GetEmbedder() (*OnnxEmbedder, error) {
 	return instance, nil
 }
 
-// newOnnxEmbedder 同步初始化 ONNX Runtime 并加载模型。modelsDir 应包含 model.onnx 和 vocab.txt。
-// 仅由 InitEmbedder 调用，不直接暴露。
-func newOnnxEmbedder(modelsDir string, log *slog.Logger) (*OnnxEmbedder, error) {
-	vocabPath := filepath.Join(modelsDir, "vocab.txt")
-	modelPath := filepath.Join(modelsDir, "model.onnx")
+// GetTokenizer 返回全局 BERT tokenizer 实例。InitEmbedder 调用后立即可用。
+func GetTokenizer() *Tokenizer {
+	return tokenizer
+}
 
-	vocab, err := loadVocab(vocabPath)
-	if err != nil {
-		return nil, fmt.Errorf("rag: load vocab: %w", err)
-	}
+// newOnnxEmbedder 同步初始化 ONNX Runtime 并加载模型。仅由 InitEmbedder 调用。
+func newOnnxEmbedder(modelsDir string, t *Tokenizer, log *slog.Logger) (*OnnxEmbedder, error) {
+	modelPath := filepath.Join(modelsDir, "model.onnx")
 
 	if err := ort.InitializeEnvironment(); err != nil {
 		return nil, fmt.Errorf("rag: init onnx environment: %w", err)
@@ -80,19 +84,14 @@ func newOnnxEmbedder(modelsDir string, log *slog.Logger) (*OnnxEmbedder, error) 
 		return nil, fmt.Errorf("rag: load model: %w", err)
 	}
 
-	log.Info("ONNX embedder 已初始化", "model", modelPath, "vocab_size", len(vocab))
-	return &OnnxEmbedder{session: session, vocab: vocab, log: log}, nil
+	log.Info("ONNX embedder 已初始化", "model", modelPath)
+	return &OnnxEmbedder{session: session, tokenizer: t, log: log}, nil
 }
 
 func (e *OnnxEmbedder) Dim() int { return 768 }
 
-// TokenCount 返回文本的 BERT token 数量，供分块逻辑使用。
-func (e *OnnxEmbedder) TokenCount(text string) int {
-	return len(e.tokenize(text))
-}
-
 func (e *OnnxEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	ids := e.tokenize(text)
+	ids := e.tokenizer.Tokenize(text)
 	if len(ids) > 512 {
 		ids = ids[:512]
 	}
@@ -174,113 +173,6 @@ func (e *OnnxEmbedder) Close() error {
 		e.session = nil
 	}
 	return nil
-}
-
-// ── Tokenizer ────────────────────────────────────────────
-
-// loadVocab 从 vocab.txt 读取词表，每行一个 token，行号即 token ID。
-func loadVocab(path string) (map[string]int, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	v := make(map[string]int)
-	scanner := bufio.NewScanner(f)
-	for id := 0; scanner.Scan(); id++ {
-		v[scanner.Text()] = id
-	}
-	return v, scanner.Err()
-}
-
-func (e *OnnxEmbedder) tokenize(text string) []int {
-	segs := segment(text)
-	unkID := e.vocab["[UNK]"]
-	var ids []int
-
-	for _, seg := range segs {
-		r, _ := utf8.DecodeRuneInString(seg)
-		if r != utf8.RuneError && len(seg) == utf8.RuneLen(r) && (isCJK(r) || unicode.IsPunct(r)) {
-			if id, ok := e.vocab[seg]; ok {
-				ids = append(ids, id)
-			} else {
-				ids = append(ids, unkID)
-			}
-			continue
-		}
-		ids = append(ids, wordPiece(e.vocab, seg)...)
-	}
-	return ids
-}
-
-func isCJK(r rune) bool {
-	return (r >= 0x4E00 && r <= 0x9FFF) ||
-		(r >= 0x3400 && r <= 0x4DBF) ||
-		(r >= 0x20000 && r <= 0x2A6DF)
-}
-
-// segment 将文本按 CJK 字符、标点、连续字母/数字切分为基本单元。
-func segment(text string) []string {
-	var segs []string
-	var buf []rune
-
-	flush := func() {
-		if len(buf) > 0 {
-			segs = append(segs, string(buf))
-			buf = buf[:0]
-		}
-	}
-
-	for _, r := range text {
-		if unicode.IsSpace(r) {
-			flush()
-			continue
-		}
-		if isCJK(r) || unicode.IsPunct(r) {
-			flush()
-			segs = append(segs, string(r))
-		} else {
-			buf = append(buf, unicode.ToLower(r))
-		}
-	}
-	flush()
-	return segs
-}
-
-// wordPiece 用贪婪最长匹配算法拆分连续字母/数字串，返回 token ID。
-// ## 前缀表示子词续接。
-func wordPiece(vocab map[string]int, word string) []int {
-	unkID := vocab["[UNK]"]
-	runes := []rune(word)
-	var ids []int
-	start := 0
-	isFirst := true
-
-	for start < len(runes) {
-		end := len(runes)
-		found := false
-		for end > start {
-			sub := string(runes[start:end])
-			lookup := sub
-			if !isFirst {
-				lookup = "##" + sub
-			}
-			if id, ok := vocab[lookup]; ok {
-				ids = append(ids, id)
-				start = end
-				isFirst = false
-				found = true
-				break
-			}
-			end--
-		}
-		if !found {
-			ids = append(ids, unkID)
-			break
-		}
-	}
-	return ids
 }
 
 // ── Pooling ──────────────────────────────────────────────

@@ -5,12 +5,20 @@ import (
 	"testing"
 )
 
-// runeCount 是测试用的 token 计数 fallback，用字符数近似 token 数。
-func runeCount(s string) int { return len([]rune(s)) }
+// testTokenizer 加载真实词表供测试使用。若 vocab.txt 不可用则跳过。
+func testTokenizer(t *testing.T) *Tokenizer {
+	t.Helper()
+	tok, err := NewTokenizer("../../models/vocab.txt")
+	if err != nil {
+		t.Skipf("skipping: cannot load vocab.txt: %v", err)
+	}
+	return tok
+}
 
 func TestSplitText_Short(t *testing.T) {
+	tok := testTokenizer(t)
 	text := "主角张三走进房间，看到李四正在等待。"
-	chunks := SplitText(text, 500, 50, runeCount)
+	chunks := SplitText(text, 500, 50, tok)
 	if len(chunks) != 1 {
 		t.Fatalf("expected 1 chunk, got %d: %v", len(chunks), chunks)
 	}
@@ -20,45 +28,49 @@ func TestSplitText_Short(t *testing.T) {
 }
 
 func TestSplitText_LongParagraph(t *testing.T) {
+	tok := testTokenizer(t)
 	p1 := strings.Repeat("第一章内容。", 50)
 	p2 := strings.Repeat("第二章内容。", 50)
 	text := p1 + "\n" + p2
 
-	chunks := SplitText(text, 350, 50, runeCount)
+	chunks := SplitText(text, 350, 50, tok)
 	if len(chunks) < 2 {
 		t.Fatalf("expected >=2 chunks, got %d", len(chunks))
 	}
 }
 
 func TestSplitText_SentenceSplit(t *testing.T) {
+	tok := testTokenizer(t)
 	text := strings.Repeat("这是一句很长的话反复说。", 60)
 
-	chunks := SplitText(text, 500, 50, runeCount)
+	chunks := SplitText(text, 500, 50, tok)
 	if len(chunks) < 2 {
 		t.Fatalf("expected >=2 chunks for long sentence, got %d", len(chunks))
 	}
 	// 有重叠的情况下，chunk 可能略超 chunkSize
 	for i, c := range chunks {
-		if len([]rune(c)) > 600 {
-			t.Errorf("chunk %d unreasonably long: %d runes", i, len([]rune(c)))
+		if tok.TokenCount(c) > 600 {
+			t.Errorf("chunk %d unreasonably long: %d tokens", i, tok.TokenCount(c))
 		}
 	}
 }
 
 func TestSplitText_Empty(t *testing.T) {
-	if chunks := SplitText("", 500, 50, runeCount); chunks != nil {
+	tok := testTokenizer(t)
+	if chunks := SplitText("", 500, 50, tok); chunks != nil {
 		t.Errorf("expected nil for empty text, got %v", chunks)
 	}
 }
 
 func TestSplitText_Overlap(t *testing.T) {
+	tok := testTokenizer(t)
 	// 多块文本，验证重叠
 	p1 := strings.Repeat("段落一内容。", 30)
 	p2 := strings.Repeat("段落二内容。", 30)
 	p3 := strings.Repeat("段落三内容。", 30)
 	text := p1 + "\n" + p2 + "\n" + p3
 
-	chunks := SplitText(text, 500, 80, runeCount)
+	chunks := SplitText(text, 500, 80, tok)
 	if len(chunks) < 2 {
 		t.Fatalf("expected >=2 chunks, got %d", len(chunks))
 	}
@@ -80,6 +92,7 @@ func TestSplitText_Overlap(t *testing.T) {
 }
 
 func TestBuildChapterChunks(t *testing.T) {
+	tok := testTokenizer(t)
 	params := ChapterChunkParams{
 		ChapterID:     1,
 		ChapterNumber: 1,
@@ -88,7 +101,7 @@ func TestBuildChapterChunks(t *testing.T) {
 		Summary:       "主角离开家乡，开始了江湖之旅。",
 	}
 
-	chunks := BuildChapterChunks(params, runeCount)
+	chunks := BuildChapterChunks(params, tok)
 	if len(chunks) < 2 {
 		t.Fatalf("expected at least 2 chunks, got %d", len(chunks))
 	}
@@ -130,6 +143,7 @@ func TestBuildChapterChunks(t *testing.T) {
 }
 
 func TestBuildChapterChunks_NoSummary(t *testing.T) {
+	tok := testTokenizer(t)
 	params := ChapterChunkParams{
 		ChapterID:     2,
 		ChapterNumber: 2,
@@ -138,7 +152,7 @@ func TestBuildChapterChunks_NoSummary(t *testing.T) {
 		Summary:       "",
 	}
 
-	chunks := BuildChapterChunks(params, runeCount)
+	chunks := BuildChapterChunks(params, tok)
 	for _, c := range chunks {
 		if c.ChunkType == "summary" {
 			t.Error("summary chunk should not exist when summary is empty")
@@ -159,6 +173,7 @@ func TestBuildChapterChunks_NoSummary(t *testing.T) {
 }
 
 func TestBuildChapterChunks_EmptyContent(t *testing.T) {
+	tok := testTokenizer(t)
 	params := ChapterChunkParams{
 		ChapterID:     3,
 		ChapterNumber: 3,
@@ -167,7 +182,7 @@ func TestBuildChapterChunks_EmptyContent(t *testing.T) {
 		Summary:       "",
 	}
 
-	chunks := BuildChapterChunks(params, runeCount)
+	chunks := BuildChapterChunks(params, tok)
 	if len(chunks) != 1 {
 		for _, c := range chunks {
 			t.Logf("  chunk type=%s id=%s content=%q", c.ChunkType, c.ID, c.Content)
@@ -180,9 +195,10 @@ func TestBuildChapterChunks_EmptyContent(t *testing.T) {
 }
 
 func TestSplitText_NoEmptySentences(t *testing.T) {
+	tok := testTokenizer(t)
 	// 连续标点不应产生空句子
 	text := "你好！！世界"
-	chunks := SplitText(text, 500, 0, runeCount)
+	chunks := SplitText(text, 500, 0, tok)
 	if len(chunks) != 1 {
 		t.Fatalf("expected 1 chunk, got %d", len(chunks))
 	}

@@ -13,9 +13,9 @@ const (
 )
 
 // SplitText 将文本分割成指定大小的重叠块，优先在段落/句子边界切分。
-// chunkSize 为 token 数上限，countFn 负责返回任意字符串的 token 数。
+// chunkSize 为 token 数上限，tokenizer 用于精确 BERT token 计数。
 // overlap 字符从上一块的末尾复制到下一块的开头，防止语义在块边界被切断。
-func SplitText(text string, chunkSize, overlap int, countFn func(string) int) []string {
+func SplitText(text string, chunkSize, overlap int, t *Tokenizer) []string {
 	if text == "" {
 		return nil
 	}
@@ -35,7 +35,7 @@ func SplitText(text string, chunkSize, overlap int, countFn func(string) int) []
 			continue
 		}
 
-		paraLen := countFn(para)
+		paraLen := t.TokenCount(para)
 
 		if curLen+paraLen+1 <= chunkSize {
 			if current != "" {
@@ -58,7 +58,7 @@ func SplitText(text string, chunkSize, overlap int, countFn func(string) int) []
 				current = ""
 				curLen = 0
 				for _, sentence := range sentences {
-					sentLen := countFn(sentence)
+					sentLen := t.TokenCount(sentence)
 					if curLen+sentLen <= chunkSize {
 						if current != "" {
 							current += sentence
@@ -98,8 +98,8 @@ func SplitText(text string, chunkSize, overlap int, countFn func(string) int) []
 }
 
 // BuildChapterChunks 为章节构建多层记忆块：summary、chapter_brief、正文分块。
-// countFn 用于按 token 数精确分块。
-func BuildChapterChunks(params ChapterChunkParams, countFn func(string) int) []Chunk {
+// tokenizer 用于按 token 数精确分块。
+func BuildChapterChunks(params ChapterChunkParams, t *Tokenizer) []Chunk {
 	content := trimSpace(params.Content)
 	summary := trimSpace(params.Summary)
 	title := trimSpace(params.ChapterTitle)
@@ -152,7 +152,7 @@ func BuildChapterChunks(params ChapterChunkParams, countFn func(string) int) []C
 	}
 
 	// content chunks
-	for i, chunk := range SplitText(content, DefaultChunkSize, DefaultOverlap, countFn) {
+	for i, chunk := range SplitText(content, DefaultChunkSize, DefaultOverlap, t) {
 		chunks = append(chunks, Chunk{
 			ID:         fmt.Sprintf("%d_%d", params.ChapterID, i),
 			Content:    chunk,
