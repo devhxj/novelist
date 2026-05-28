@@ -29,9 +29,9 @@ OpenAI 协议允许开头并列多条 system 消息，DeepSeek 兼容。
 
 ```
 internal/agentcfg/
-    system1.go   // 三个 Agent 的 System1 模板 + 各自工具白名单
-    system2.go   // 小说快照（novel info + 偏好 + 角色索引 + 地点索引 + 读者认知 + 故事状态）
-    layer3.go    // 大纲注入（创作新章时可选）
+    system1.go   // ✅ 已实现：三个 Agent 的 System1 模板 + 各自工具白名单
+    system2.go   // ✅ 已实现：小说快照（novel info + 故事状态），不含角色/时间线等 MCP 可查数据
+    layer3.go    // 暂未实现：大纲注入，等大纲系统完成后做
 ```
 
 ## 与 Python 的差异
@@ -40,10 +40,10 @@ internal/agentcfg/
 |---|---|---|
 | 缓存体系 | 4 层 TTL 缓存 | 无缓存，实时查询 |
 | RAG 注入 | 系统自动注入用户消息 | LLM 通过 MCP 工具自行检索 |
-| 角色目录 | STABLE 层全量注入 | System2 注入精简索引（id + name + 简介） |
-| 时间线注入 | Layer 4 整层都是 timeline | 索引行全量注入，LLM 按需展开 |
+| 角色目录 | STABLE 层全量注入 | 不在 System2 中注入（LLM 通过 MCP get_characters 按需获取） |
+| 时间线注入 | Layer 4 整层都是 timeline | 不在 System2 中注入（LLM 通过 MCP get_timeline 按需获取） |
 | 关键词意图检测 | 有 | 砍掉，LLM 自己判断 |
 
-## 暂缓原因
+## 当前状态
 
-System1 的内容依赖系统整体完成后才能编写——工具列表、创作流程、Agent 角色定义都需要实际运行反馈。System2（纯代码查 store 拼快照）现在就能写，但优先级不如 git/rag。决定先完成基础设施，最后用 context + agent loop 收尾。
+System1（三个 Agent 提示词）和 System2（小说基础信息 + Goink 故事状态）已实现。layer3 等大纲系统实现后再做。

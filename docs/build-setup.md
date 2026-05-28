@@ -66,9 +66,9 @@ go build ./...
 ## 验证
 
 ```bash
-# 测试 sqlite-vec 可用
-go run dev_test/rag_test/vec_spike.go
+# 测试 ONNX 加载 + embedding（需 libonnxruntime.so）
+go run -tags cgo ./dev_test/rag_test/cmd/
 
-# 测试 ONNX 加载 + embedding
-go run dev_test/rag_test/main.go
+# RAG 全流程对比测试（需 libonnxruntime.so + ref_data.json）
+go run -tags cgo,compare ./dev_test/rag_test/
 ```
