@@ -26,12 +26,12 @@ func NewTokenizer(vocabPath string) (*Tokenizer, error) {
 	return &Tokenizer{vocab: vocab}, nil
 }
 
-// TokenCount 返回文本的 BERT token 数量。
+// TokenCount 返回文本的 token 数量，供分块使用。
 func (t *Tokenizer) TokenCount(text string) int {
 	return len(t.Tokenize(text))
 }
 
-// Tokenize 将文本转换为 BERT token ID 序列，不含 [CLS] 和 [SEP]。
+// Tokenize 将文本转换为 token ID 序列。不含特殊 token，不做长度截断。
 func (t *Tokenizer) Tokenize(text string) []int {
 	segs := segment(text)
 	unkID := t.vocab["[UNK]"]

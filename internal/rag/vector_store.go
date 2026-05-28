@@ -54,7 +54,7 @@ func (s *VectorStore) ensureTable(ctx context.Context, novelID int64) error {
 	return nil
 }
 
-// IndexChunks 将文本块生成 embedding 并在事务中批量写入向量表。
+// IndexChunks 将文本块批量生成 embedding 并在事务中写入向量表。
 func (s *VectorStore) IndexChunks(ctx context.Context, novelID int64, chunks []Chunk) error {
 	if len(chunks) == 0 {
 		return nil
@@ -64,6 +64,16 @@ func (s *VectorStore) IndexChunks(ctx context.Context, novelID int64, chunks []C
 		return err
 	}
 
+	// 批量生成 embedding，一次 ONNX Run。
+	texts := make([]string, len(chunks))
+	for i, c := range chunks {
+		texts[i] = c.Content
+	}
+	embs, err := s.embedder.EmbedBatch(ctx, texts)
+	if err != nil {
+		return fmt.Errorf("rag: batch embed: %w", err)
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("rag: begin tx: %w", err)
@@ -71,15 +81,10 @@ func (s *VectorStore) IndexChunks(ctx context.Context, novelID int64, chunks []C
 	defer tx.Rollback()
 
 	tableName := s.tableName(novelID)
-	for _, chunk := range chunks {
-		emb, err := s.embedder.Embed(ctx, chunk.Content)
+	for i, chunk := range chunks {
+		v, err := sqlite_vec.SerializeFloat32(embs[i])
 		if err != nil {
-			return fmt.Errorf("rag: embed chunk %s: %w", chunk.ID, err)
-		}
-
-		v, err := sqlite_vec.SerializeFloat32(emb)
-		if err != nil {
-			return fmt.Errorf("rag: serialize embedding: %w", err)
+			return fmt.Errorf("rag: serialize chunk %s: %w", chunk.ID, err)
 		}
 
 		_, err = tx.ExecContext(ctx,
