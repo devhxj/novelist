@@ -5,9 +5,12 @@ import (
 	"testing"
 )
 
+// runeCount 是测试用的 token 计数 fallback，用字符数近似 token 数。
+func runeCount(s string) int { return len([]rune(s)) }
+
 func TestSplitText_Short(t *testing.T) {
 	text := "主角张三走进房间，看到李四正在等待。"
-	chunks := SplitText(text, 500, 50)
+	chunks := SplitText(text, 500, 50, runeCount)
 	if len(chunks) != 1 {
 		t.Fatalf("expected 1 chunk, got %d: %v", len(chunks), chunks)
 	}
@@ -21,7 +24,7 @@ func TestSplitText_LongParagraph(t *testing.T) {
 	p2 := strings.Repeat("第二章内容。", 50)
 	text := p1 + "\n" + p2
 
-	chunks := SplitText(text, 350, 50)
+	chunks := SplitText(text, 350, 50, runeCount)
 	if len(chunks) < 2 {
 		t.Fatalf("expected >=2 chunks, got %d", len(chunks))
 	}
@@ -30,7 +33,7 @@ func TestSplitText_LongParagraph(t *testing.T) {
 func TestSplitText_SentenceSplit(t *testing.T) {
 	text := strings.Repeat("这是一句很长的话反复说。", 60)
 
-	chunks := SplitText(text, 500, 50)
+	chunks := SplitText(text, 500, 50, runeCount)
 	if len(chunks) < 2 {
 		t.Fatalf("expected >=2 chunks for long sentence, got %d", len(chunks))
 	}
@@ -43,7 +46,7 @@ func TestSplitText_SentenceSplit(t *testing.T) {
 }
 
 func TestSplitText_Empty(t *testing.T) {
-	if chunks := SplitText("", 500, 50); chunks != nil {
+	if chunks := SplitText("", 500, 50, runeCount); chunks != nil {
 		t.Errorf("expected nil for empty text, got %v", chunks)
 	}
 }
@@ -55,7 +58,7 @@ func TestSplitText_Overlap(t *testing.T) {
 	p3 := strings.Repeat("段落三内容。", 30)
 	text := p1 + "\n" + p2 + "\n" + p3
 
-	chunks := SplitText(text, 500, 80)
+	chunks := SplitText(text, 500, 80, runeCount)
 	if len(chunks) < 2 {
 		t.Fatalf("expected >=2 chunks, got %d", len(chunks))
 	}
@@ -85,7 +88,7 @@ func TestBuildChapterChunks(t *testing.T) {
 		Summary:       "主角离开家乡，开始了江湖之旅。",
 	}
 
-	chunks := BuildChapterChunks(params)
+	chunks := BuildChapterChunks(params, runeCount)
 	if len(chunks) < 2 {
 		t.Fatalf("expected at least 2 chunks, got %d", len(chunks))
 	}
@@ -135,7 +138,7 @@ func TestBuildChapterChunks_NoSummary(t *testing.T) {
 		Summary:       "",
 	}
 
-	chunks := BuildChapterChunks(params)
+	chunks := BuildChapterChunks(params, runeCount)
 	for _, c := range chunks {
 		if c.ChunkType == "summary" {
 			t.Error("summary chunk should not exist when summary is empty")
@@ -164,7 +167,7 @@ func TestBuildChapterChunks_EmptyContent(t *testing.T) {
 		Summary:       "",
 	}
 
-	chunks := BuildChapterChunks(params)
+	chunks := BuildChapterChunks(params, runeCount)
 	if len(chunks) != 1 {
 		for _, c := range chunks {
 			t.Logf("  chunk type=%s id=%s content=%q", c.ChunkType, c.ID, c.Content)
@@ -179,7 +182,7 @@ func TestBuildChapterChunks_EmptyContent(t *testing.T) {
 func TestSplitText_NoEmptySentences(t *testing.T) {
 	// 连续标点不应产生空句子
 	text := "你好！！世界"
-	chunks := SplitText(text, 500, 0)
+	chunks := SplitText(text, 500, 0, runeCount)
 	if len(chunks) != 1 {
 		t.Fatalf("expected 1 chunk, got %d", len(chunks))
 	}

@@ -17,12 +17,14 @@ import (
 )
 
 var (
-	ortInitOnce sync.Once
-	ortInitErr  error
+	instance *OnnxEmbedder
+	initOnce sync.Once
+	ready    = make(chan struct{})
+	initErr  error
 )
 
 // OnnxEmbedder 使用 ONNX Runtime 加载 text2vec-base-chinese 模型生成 embedding。
-// ONNX 环境和模型各加载一次（sync.Once），引用计数管理生命周期。
+// 全局仅一个实例，通过 InitEmbedder 异步初始化。
 // Run 不是线程安全的，Embed/EmbedBatch 内部加锁。
 type OnnxEmbedder struct {
 	session *ort.DynamicAdvancedSession
@@ -31,9 +33,34 @@ type OnnxEmbedder struct {
 	log     *slog.Logger
 }
 
-// NewOnnxEmbedder 初始化 ONNX Runtime 并加载模型。modelsDir 应包含 model.onnx 和 vocab.txt。
-// 全局 ONNX 环境仅初始化一次，重复调用共享同一个环境。
-func NewOnnxEmbedder(modelsDir string, log *slog.Logger) (*OnnxEmbedder, error) {
+// InitEmbedder 启动异步加载 ONNX 模型，不阻塞调用方。多次调用安全。
+// main 启动时尽早调用，模型在后台加载，GUI 可先行渲染。
+func InitEmbedder(modelsDir string, log *slog.Logger) {
+	initOnce.Do(func() {
+		go func() {
+			defer close(ready)
+			e, err := newOnnxEmbedder(modelsDir, log)
+			if err != nil {
+				initErr = err
+				return
+			}
+			instance = e
+		}()
+	})
+}
+
+// GetEmbedder 返回全局 embedder 实例。若尚未加载完成则阻塞等待。
+func GetEmbedder() (*OnnxEmbedder, error) {
+	<-ready
+	if initErr != nil {
+		return nil, initErr
+	}
+	return instance, nil
+}
+
+// newOnnxEmbedder 同步初始化 ONNX Runtime 并加载模型。modelsDir 应包含 model.onnx 和 vocab.txt。
+// 仅由 InitEmbedder 调用，不直接暴露。
+func newOnnxEmbedder(modelsDir string, log *slog.Logger) (*OnnxEmbedder, error) {
 	vocabPath := filepath.Join(modelsDir, "vocab.txt")
 	modelPath := filepath.Join(modelsDir, "model.onnx")
 
@@ -42,11 +69,8 @@ func NewOnnxEmbedder(modelsDir string, log *slog.Logger) (*OnnxEmbedder, error) 
 		return nil, fmt.Errorf("rag: load vocab: %w", err)
 	}
 
-	ortInitOnce.Do(func() {
-		ortInitErr = ort.InitializeEnvironment()
-	})
-	if ortInitErr != nil {
-		return nil, fmt.Errorf("rag: init onnx environment: %w", ortInitErr)
+	if err := ort.InitializeEnvironment(); err != nil {
+		return nil, fmt.Errorf("rag: init onnx environment: %w", err)
 	}
 
 	session, err := ort.NewDynamicAdvancedSession(modelPath,
@@ -61,6 +85,11 @@ func NewOnnxEmbedder(modelsDir string, log *slog.Logger) (*OnnxEmbedder, error) 
 }
 
 func (e *OnnxEmbedder) Dim() int { return 768 }
+
+// TokenCount 返回文本的 BERT token 数量，供分块逻辑使用。
+func (e *OnnxEmbedder) TokenCount(text string) int {
+	return len(e.tokenize(text))
+}
 
 func (e *OnnxEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	ids := e.tokenize(text)
