@@ -28,6 +28,18 @@ export namespace app {
 	        this.default_model = source["default_model"];
 	    }
 	}
+	export class SetActiveNovelInput {
+	    novel_id: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SetActiveNovelInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	    }
+	}
 
 }
 
@@ -88,6 +100,7 @@ export namespace config {
 	    ID: number;
 	    APIKey: string;
 	    DefaultModel: string;
+	    last_novel_id: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
@@ -98,6 +111,7 @@ export namespace config {
 	        this.ID = source["ID"];
 	        this.APIKey = source["APIKey"];
 	        this.DefaultModel = source["DefaultModel"];
+	        this.last_novel_id = source["last_novel_id"];
 	    }
 	}
 

@@ -1,6 +1,7 @@
 import {
   Chat,
   CreateNovel,
+  SetActiveNovel,
   GetAppConfig,
   GetChapters,
   GetNovels,
@@ -24,6 +25,7 @@ export function useApp() {
     Initialize,
     IsInitialized,
     SaveSettings,
+    SetActiveNovel,
   }
 }
 

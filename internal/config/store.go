@@ -12,6 +12,7 @@ type AppSettings struct {
 	ID           uint   `gorm:"column:id;primaryKey;default:1"`
 	APIKey       string `gorm:"column:api_key"`
 	DefaultModel string `gorm:"column:default_model"`
+	LastNovelID  int64  `gorm:"column:last_novel_id;default:0"                 json:"last_novel_id"`
 	// 后续新增配置直接加字段，如：Theme string `gorm:"column:theme"`
 }
 

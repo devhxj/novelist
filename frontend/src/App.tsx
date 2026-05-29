@@ -1,21 +1,25 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '@/hooks/useApp'
-import type { novel } from '@/hooks/useApp'
 import InitView from '@/views/InitView'
-import NovelListView from '@/views/NovelListView'
 import EditorView from '@/views/EditorView'
-import BookFlipTransition from '@/components/novel/BookFlipTransition'
 
-type View = 'loading' | 'init' | 'novel-list' | 'editor'
+type View = 'loading' | 'init' | 'editor'
 
 export default function App() {
   const [view, setView] = useState<View>('loading')
-  const [selectedNovel, setSelectedNovel] = useState<novel.Novel | null>(null)
-  const [flippingNovel, setFlippingNovel] = useState<novel.Novel | null>(null)
+  const [initialNovelId, setInitialNovelId] = useState(0)
   const app = useApp()
 
   useEffect(() => {
-    app.IsInitialized().then((ok) => setView(ok ? 'novel-list' : 'init'))
+    app.IsInitialized().then(async (ok) => {
+      if (ok) {
+        const settings = await app.GetSettings()
+        setInitialNovelId(settings?.last_novel_id ?? 0)
+        setView('editor')
+      } else {
+        setView('init')
+      }
+    })
   }, [])
 
   if (view === 'loading') {
@@ -28,24 +32,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {view === 'init' && <InitView onInitialized={() => setView('novel-list')} />}
-      {view === 'novel-list' && (
-        <NovelListView onNovelClick={(n) => setFlippingNovel(n)} />
+      {view === 'init' && (
+        <InitView onInitialized={async () => {
+          const settings = await app.GetSettings()
+          setInitialNovelId(settings?.last_novel_id ?? 0)
+          setView('editor')
+        }} />
       )}
-      {flippingNovel && (
-        <BookFlipTransition
-          onComplete={() => {
-            setSelectedNovel(flippingNovel)
-            setFlippingNovel(null)
-            setView('editor')
-          }}
-        />
-      )}
-      {view === 'editor' && selectedNovel && (
-        <EditorView
-          novel={selectedNovel}
-          onBack={() => setView('novel-list')}
-        />
+      {view === 'editor' && (
+        <EditorView initialNovelId={initialNovelId} />
       )}
     </div>
   )

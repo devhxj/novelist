@@ -24,3 +24,5 @@ export function Initialize(arg1:string):Promise<void>;
 export function IsInitialized():Promise<boolean>;
 
 export function SaveSettings(arg1:app.SaveSettingsInput):Promise<void>;
+
+export function SetActiveNovel(arg1:app.SetActiveNovelInput):Promise<void>;

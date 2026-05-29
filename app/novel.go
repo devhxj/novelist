@@ -3,10 +3,18 @@ package app
 import (
 	"fmt"
 
+	"novel/internal/config"
 	"novel/internal/novel"
 )
 
 // ── 小说 ──────────────────────────────────────────────────
+
+// SetActiveNovelInput 是切换当前小说的入参。
+type SetActiveNovelInput struct {
+	NovelID int64 `json:"novel_id"`
+}
+
+// ── 小说操作 ──────────────────────────────────────────────
 
 // GetNovels 返回小说列表。
 func (a *App) GetNovels() ([]novel.Novel, error) {
@@ -33,4 +41,10 @@ func (a *App) CreateNovel(input CreateNovelInput) (*novel.Novel, error) {
 		return nil, fmt.Errorf("创建小说失败: %w", err)
 	}
 	return &n, nil
+}
+
+// SetActiveNovel 记录当前活跃的小说 ID，下次启动自动恢复。
+func (a *App) SetActiveNovel(input SetActiveNovelInput) error {
+	a.settings.LastNovelID = input.NovelID
+	return config.SaveSettings(a.db, a.settings)
 }
