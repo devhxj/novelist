@@ -52,7 +52,7 @@ func (a *App) CreateNovel(input CreateNovelInput) (*novel.Novel, error) {
 	}
 
 	// 为新小说创建 goink.md 空文件
-	if err := git.WriteGoink(n.ID, ""); err != nil {
+	if err := git.WriteFile(n.ID, git.GoinkPath(), ""); err != nil {
 		return nil, fmt.Errorf("failed to create goink.md: %w", err)
 	}
 

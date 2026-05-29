@@ -1,10 +1,11 @@
 import Editor, { type OnMount } from '@monaco-editor/react'
 import { FileText, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { chapter } from '@/hooks/useApp'
+
+type EditingTarget = { type: string; path: string; title: string } | null
 
 interface Props {
-  selectedChapter: chapter.Chapter | undefined
+  target: EditingTarget
   editorContent: string
   editorViewMode: 'content' | 'outline'
   setEditorViewMode: (v: 'content' | 'outline') => void
@@ -17,7 +18,7 @@ interface Props {
 }
 
 export default function EditorArea({
-  selectedChapter, editorContent, editorViewMode, setEditorViewMode,
+  target, editorContent, editorViewMode, setEditorViewMode,
   isLoadingContent, onEditorChange, onEditorMount,
   hasNovels, noChapters, onGoToNovels,
 }: Props) {
@@ -28,7 +29,7 @@ export default function EditorArea({
         : 'text-muted-foreground hover:text-foreground'
     }`
 
-  if (!selectedChapter) {
+  if (!target) {
     return (
       <main className="flex-1 bg-background flex items-center justify-center border-r">
         {!hasNovels ? (
@@ -56,9 +57,7 @@ export default function EditorArea({
   return (
     <main className="flex-1 bg-background flex flex-col min-w-0 border-r">
       <div className="flex items-center justify-between px-4 py-2 border-b shrink-0">
-        <span className="text-sm font-medium truncate">
-          第{selectedChapter.chapter_number}章 {selectedChapter.title}
-        </span>
+        <span className="text-sm font-medium truncate">{target.title}</span>
         <div className="flex items-center gap-0.5 shrink-0">
           <button
             onClick={() => setEditorViewMode('content')}

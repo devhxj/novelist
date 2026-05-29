@@ -27,7 +27,7 @@ func System2(db *gorm.DB, novelID int64) (string, error) {
 		b = append(b, fmt.Sprintf("简介：%s\n", n.Description)...)
 	}
 
-	state, err := git.ReadGoink(novelID)
+	state, err := git.ReadFile(novelID, git.GoinkPath())
 	if err == nil && state != "" {
 		b = append(b, "\n【故事状态文档】\n"...)
 		b = append(b, state...)

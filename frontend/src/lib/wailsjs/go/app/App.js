@@ -18,12 +18,12 @@ export function GetAppConfig() {
   return window['go']['app']['App']['GetAppConfig']();
 }
 
-export function GetChapterContent(arg1, arg2) {
-  return window['go']['app']['App']['GetChapterContent'](arg1, arg2);
-}
-
 export function GetChapters(arg1) {
   return window['go']['app']['App']['GetChapters'](arg1);
+}
+
+export function GetContent(arg1, arg2) {
+  return window['go']['app']['App']['GetContent'](arg1, arg2);
 }
 
 export function GetNovels() {
@@ -46,8 +46,8 @@ export function IsInitialized() {
   return window['go']['app']['App']['IsInitialized']();
 }
 
-export function SaveChapterContent(arg1) {
-  return window['go']['app']['App']['SaveChapterContent'](arg1);
+export function SaveContent(arg1) {
+  return window['go']['app']['App']['SaveContent'](arg1);
 }
 
 export function SaveSettings(arg1) {

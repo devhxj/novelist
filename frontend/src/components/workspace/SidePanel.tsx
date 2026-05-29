@@ -11,8 +11,9 @@ interface Props {
   chapters: chapter.Chapter[]
   chapterBlocks: { key: number; start: number; end: number; chs: chapter.Chapter[] }[]
   expandedBlocks: Set<number>
-  selectedChapterId: number | null
+  target: { path: string; title: string } | null
   onSelectChapter: (ch: chapter.Chapter) => void
+  onSelectGoink: () => void
   onToggleBlock: (key: number) => void
   showCreate: boolean
   setShowCreate: (v: boolean) => void
@@ -31,8 +32,8 @@ interface Props {
 export default function SidePanel({
   activePanel,
   novels, activeNovelId, onSelectNovel,
-  chapters, chapterBlocks, expandedBlocks, selectedChapterId,
-  onSelectChapter, onToggleBlock,
+  chapters, chapterBlocks, expandedBlocks, target,
+  onSelectChapter, onSelectGoink, onToggleBlock,
   showCreate, setShowCreate, title, setTitle, description, setDescription,
   onCreateNovel,
   showCreateChapter, setShowCreateChapter, chapterTitle, setChapterTitle,
@@ -124,6 +125,18 @@ export default function SidePanel({
             </div>
           )}
 
+          <button
+            onClick={onSelectGoink}
+            className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left hover:bg-muted/50 transition-colors relative border-b border-border/50
+              ${target?.path === 'goink.md' ? 'bg-primary/10 font-medium' : ''}`}
+          >
+            {target?.path === 'goink.md' && (
+              <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
+            )}
+            <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <span className="flex-1 text-sm truncate">故事状态</span>
+          </button>
+
           <div className="flex-1 overflow-y-auto">
             {chapters.length === 0 ? (
               <div className="flex items-center justify-center h-full">
@@ -158,9 +171,9 @@ export default function SidePanel({
                             key={ch.id}
                             onClick={() => onSelectChapter(ch)}
                             className={`w-full flex items-center gap-2.5 pl-7 pr-3 py-1.5 text-left hover:bg-muted/50 transition-colors relative
-                              ${ch.id === selectedChapterId ? 'bg-primary/10 font-medium' : ''}`}
+                              ${target?.path === ch.file_path ? 'bg-primary/10 font-medium' : ''}`}
                           >
-                            {ch.id === selectedChapterId && (
+                            {target?.path === ch.file_path && (
                               <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
                             )}
                             <span className="text-xs text-muted-foreground w-8 shrink-0 tabular-nums">

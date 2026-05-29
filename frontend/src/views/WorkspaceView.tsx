@@ -9,6 +9,8 @@ import ChatPanel from '@/components/workspace/ChatPanel'
 import GitHubLink from '@/components/shell/GitHubLink'
 import type { OnMount } from '@monaco-editor/react'
 
+type EditingTarget = { type: 'chapter'; path: string; title: string } | { type: 'goink'; path: string; title: string } | null
+
 interface Props {
   initialNovelId: number
 }
@@ -25,7 +27,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   const [chapterTitle, setChapterTitle] = useState('')
   const [showCreateChapter, setShowCreateChapter] = useState(false)
   const [expandedBlocks, setExpandedBlocks] = useState<Set<number>>(new Set())
-  const [selectedChapterId, setSelectedChapterId] = useState<number | null>(null)
+  const [target, setTarget] = useState<EditingTarget>(null)
   const [editorContent, setEditorContent] = useState('')
   const [editorViewMode, setEditorViewMode] = useState<'content' | 'outline'>('content')
   const [isLoadingContent, setIsLoadingContent] = useState(false)
@@ -76,7 +78,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   useEffect(() => { loadChapters() }, [loadChapters])
 
   useEffect(() => {
-    setSelectedChapterId(null)
+    setTarget(null)
     setEditorContent('')
   }, [activeNovelId])
 
@@ -88,13 +90,29 @@ export default function WorkspaceView({ initialNovelId }: Props) {
     loadChapters()
   }
 
-  async function handleSelectChapter(ch: chapter.Chapter) {
-    setSelectedChapterId(ch.id)
+  async function selectTarget(t: NonNullable<EditingTarget>) {
+    setTarget(t)
     setEditorViewMode('content')
     setIsLoadingContent(true)
-    const content = await app.GetChapterContent(activeNovelId, ch.chapter_number)
+    const content = await app.GetContent(activeNovelId, t.path)
     setEditorContent(content)
     setIsLoadingContent(false)
+  }
+
+  function handleSelectChapter(ch: chapter.Chapter) {
+    selectTarget({
+      type: 'chapter',
+      path: ch.file_path,
+      title: `第${ch.chapter_number}章 ${ch.title}`,
+    })
+  }
+
+  function handleSelectGoink() {
+    selectTarget({
+      type: 'goink',
+      path: 'goink.md',
+      title: '故事状态',
+    })
   }
 
   function handleEditorChange(value: string | undefined) {
@@ -102,13 +120,8 @@ export default function WorkspaceView({ initialNovelId }: Props) {
     setEditorContent(content)
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
-      const chapter = chapters.find(c => c.id === selectedChapterId)
-      if (!chapter || !activeNovelId) return
-      app.SaveChapterContent({
-        novel_id: activeNovelId,
-        chapter_number: chapter.chapter_number,
-        content,
-      })
+      if (!activeNovelId || !target) return
+      app.SaveContent({ novel_id: activeNovelId, path: target.path, content })
     }, 500)
   }
 
@@ -151,7 +164,6 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   }
 
   const activeNovel = novels.find(n => n.id === activeNovelId)
-  const selectedChapter = chapters.find(c => c.id === selectedChapterId)
 
   return (
     <div className="h-screen flex flex-col">
@@ -173,9 +185,10 @@ export default function WorkspaceView({ initialNovelId }: Props) {
           chapters={chapters}
           chapterBlocks={chapterBlocks}
           expandedBlocks={expandedBlocks}
-          selectedChapterId={selectedChapterId}
+          target={target}
           onSelectChapter={handleSelectChapter}
           onToggleBlock={toggleBlock}
+          onSelectGoink={handleSelectGoink}
           showCreate={showCreate}
           setShowCreate={setShowCreate}
           title={title}
@@ -191,7 +204,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
         />
 
         <EditorArea
-          selectedChapter={selectedChapter}
+          target={target}
           editorContent={editorContent}
           editorViewMode={editorViewMode}
           setEditorViewMode={setEditorViewMode}

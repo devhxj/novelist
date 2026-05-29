@@ -28,19 +28,19 @@ export namespace app {
 	        this.description = source["description"];
 	    }
 	}
-	export class SaveChapterContentInput {
+	export class SaveContentInput {
 	    novel_id: number;
-	    chapter_number: number;
+	    path: string;
 	    content: string;
 	
 	    static createFrom(source: any = {}) {
-	        return new SaveChapterContentInput(source);
+	        return new SaveContentInput(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.novel_id = source["novel_id"];
-	        this.chapter_number = source["chapter_number"];
+	        this.path = source["path"];
 	        this.content = source["content"];
 	    }
 	}
@@ -86,6 +86,7 @@ export namespace chapter {
 	    created_at: any;
 	    // Go type: time
 	    updated_at: any;
+	    file_path: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Chapter(source);
@@ -101,6 +102,7 @@ export namespace chapter {
 	        this.word_count = source["word_count"];
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.updated_at = this.convertValues(source["updated_at"], null);
+	        this.file_path = source["file_path"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

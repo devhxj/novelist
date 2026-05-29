@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"novel/internal/git"
 	"novel/internal/storage"
 )
 
@@ -51,6 +52,10 @@ func (s *Store) ListByNovel(ctx context.Context, novelID int64, opts ListByNovel
 		return nil, fmt.Errorf("chapter store: list: %w", err)
 	}
 
+	for i := range chapters {
+		chapters[i].FilePath = git.ChapterPath(chapters[i].ChapterNumber)
+	}
+
 	s.logger.Debug("chapter store: listed", "novel_id", novelID, "total", total, "page", pp.Page)
 	return storage.NewPageResult(chapters, total, pp.Page, pp.Size), nil
 }
@@ -66,6 +71,7 @@ func (s *Store) GetByNovelAndNumber(ctx context.Context, novelID int64, chapterN
 		}
 		return nil, fmt.Errorf("chapter store: get by novel+number: %w", err)
 	}
+	ch.FilePath = git.ChapterPath(ch.ChapterNumber)
 	return &ch, nil
 }
 
@@ -91,6 +97,9 @@ func (s *Store) GetRecent(ctx context.Context, novelID int64, limit int) ([]Chap
 		Limit(limit).
 		Find(&chapters).Error; err != nil {
 		return nil, fmt.Errorf("chapter store: recent: %w", err)
+	}
+	for i := range chapters {
+		chapters[i].FilePath = git.ChapterPath(chapters[i].ChapterNumber)
 	}
 	return chapters, nil
 }

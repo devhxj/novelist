@@ -13,6 +13,7 @@ type Chapter struct {
 	WordCount     int       `gorm:"column:word_count;default:0"                                           json:"word_count"`
 	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime"                                      json:"created_at"`
 	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime"                                      json:"updated_at"`
+	FilePath      string    `gorm:"-"                                                                       json:"file_path"` // 不存 DB，由 git.ChapterPath 计算
 }
 
 // TableName 指定 GORM 表名。
