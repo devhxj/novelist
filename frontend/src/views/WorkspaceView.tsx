@@ -33,6 +33,9 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   const [isLoadingContent, setIsLoadingContent] = useState(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
+  const contentRef = useRef('')
+  const targetRef = useRef<EditingTarget>(null)
+  const novelIdRef = useRef(activeNovelId)
   const loadedRef = useRef(false)
   const BLOCK_SIZE = 100
 
@@ -78,8 +81,15 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   useEffect(() => { loadChapters() }, [loadChapters])
 
   useEffect(() => {
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
+  }, [])
+
+  useEffect(() => {
+    novelIdRef.current = activeNovelId
     setTarget(null)
+    targetRef.current = null
     setEditorContent('')
+    contentRef.current = ''
   }, [activeNovelId])
 
   async function handleCreateChapter() {
@@ -92,11 +102,19 @@ export default function WorkspaceView({ initialNovelId }: Props) {
 
   async function selectTarget(t: NonNullable<EditingTarget>) {
     setTarget(t)
+    targetRef.current = t
     setEditorViewMode('content')
     setIsLoadingContent(true)
-    const content = await app.GetContent(activeNovelId, t.path)
-    setEditorContent(content)
-    setIsLoadingContent(false)
+    try {
+      const content = await app.GetContent(activeNovelId, t.path)
+      setEditorContent(content)
+      contentRef.current = content
+    } catch {
+      setEditorContent('')
+      contentRef.current = ''
+    } finally {
+      setIsLoadingContent(false)
+    }
   }
 
   function handleSelectChapter(ch: chapter.Chapter) {
@@ -118,15 +136,24 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   function handleEditorChange(value: string | undefined) {
     const content = value ?? ''
     setEditorContent(content)
+    contentRef.current = content
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    const t = target
     saveTimerRef.current = setTimeout(() => {
-      if (!activeNovelId || !target) return
-      app.SaveContent({ novel_id: activeNovelId, path: target.path, content })
+      if (!activeNovelId || !t) return
+      app.SaveContent({ novel_id: activeNovelId, path: t.path, content })
     }, 500)
   }
 
   const handleEditorMount: OnMount = (editor) => {
     editorRef.current = editor
+    editor.onDidBlurEditorText(() => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      const t = targetRef.current
+      const nid = novelIdRef.current
+      if (!nid || !t) return
+      app.SaveContent({ novel_id: nid, path: t.path, content: contentRef.current })
+    })
   }
 
   // 自动选择活跃小说

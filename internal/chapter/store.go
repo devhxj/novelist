@@ -60,6 +60,21 @@ func (s *Store) ListByNovel(ctx context.Context, novelID int64, opts ListByNovel
 	return storage.NewPageResult(chapters, total, pp.Page, pp.Size), nil
 }
 
+// ListAllByNovel 返回某小说的全部章节（不分页），按 chapter_number 升序。
+func (s *Store) ListAllByNovel(ctx context.Context, novelID int64) ([]Chapter, error) {
+	var chapters []Chapter
+	if err := s.DB.WithContext(ctx).
+		Where("novel_id = ?", novelID).
+		Order("chapter_number ASC").
+		Find(&chapters).Error; err != nil {
+		return nil, fmt.Errorf("chapter store: list all: %w", err)
+	}
+	for i := range chapters {
+		chapters[i].FilePath = git.ChapterPath(chapters[i].ChapterNumber)
+	}
+	return chapters, nil
+}
+
 // GetByNovelAndNumber 按 novel_id + chapter_number 取单章。
 func (s *Store) GetByNovelAndNumber(ctx context.Context, novelID int64, chapterNumber int) (*Chapter, error) {
 	var ch Chapter

@@ -1,9 +1,11 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"novel/internal/config"
 )
@@ -26,7 +28,11 @@ func ReadFile(novelID int64, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(filepath.Join(dir, path))
+	fullPath, err := safePath(dir, path)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(fullPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("%w: %s", os.ErrNotExist, path)
@@ -41,7 +47,10 @@ func WriteFile(novelID int64, path, content string) error {
 	if err != nil {
 		return err
 	}
-	fullPath := filepath.Join(dir, path)
+	fullPath, err := safePath(dir, path)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		return fmt.Errorf("git: mkdir for %s: %w", path, err)
 	}
@@ -51,10 +60,25 @@ func WriteFile(novelID int64, path, content string) error {
 	return nil
 }
 
+var errPathEscape = errors.New("git: path escapes novel directory")
+
 func novelDir(novelID int64) (string, error) {
 	cfg := config.Get()
 	if cfg == nil {
 		return "", fmt.Errorf("git: config not initialized")
 	}
 	return cfg.NovelDirPath(novelID), nil
+}
+
+// safePath 对给定的上级目录和相对路径求最终路径，如果路径跳出上级目录则返回 error。
+func safePath(base, rel string) (string, error) {
+	absBase, err := filepath.Abs(base)
+	if err != nil {
+		return "", fmt.Errorf("git: resolve base: %w", err)
+	}
+	full := filepath.Clean(filepath.Join(absBase, rel))
+	if !strings.HasPrefix(full, absBase+string(filepath.Separator)) && full != absBase {
+		return "", fmt.Errorf("%w: %s", errPathEscape, rel)
+	}
+	return full, nil
 }

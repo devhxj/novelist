@@ -17,11 +17,11 @@ type CreateChapterInput struct {
 
 // GetChapters 返回指定小说的章节列表，含文件路径。
 func (a *App) GetChapters(novelID int64) ([]chapter.Chapter, error) {
-	result, err := a.chapter.ListByNovel(a.ctx, novelID, chapter.ListByNovelOptions{})
+	chapters, err := a.chapter.ListAllByNovel(a.ctx, novelID)
 	if err != nil {
 		return nil, err
 	}
-	return result.Items, nil
+	return chapters, nil
 }
 
 // CreateChapter 创建新章节，章节号自动递增。同时创建空正文文件。

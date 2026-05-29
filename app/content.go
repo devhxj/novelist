@@ -1,6 +1,8 @@
 package app
 
 import (
+	"os"
+
 	"novel/internal/git"
 )
 
@@ -11,11 +13,14 @@ type SaveContentInput struct {
 	Content string `json:"content"`
 }
 
-// GetContent 返回小说仓库中指定路径的文件内容。
+// GetContent 返回小说仓库中指定路径的文件内容。文件不存在时返回空字符串。
 func (a *App) GetContent(novelID int64, path string) (string, error) {
 	content, err := git.ReadFile(novelID, path)
 	if err != nil {
-		return "", nil
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
 	}
 	return content, nil
 }
