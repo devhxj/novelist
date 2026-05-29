@@ -80,16 +80,16 @@ export default function SidePanel({
               <button
                 key={n.id}
                 onClick={() => onSelectNovel(n)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors
-                  ${n.id === activeNovelId ? 'bg-muted/30' : ''}`}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors relative
+                  ${n.id === activeNovelId ? 'bg-primary/10 text-foreground' : ''}`}
               >
+                {n.id === activeNovelId && (
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
+                )}
                 <div className="w-8 shrink-0 rounded-sm overflow-hidden">
                   <BookCover />
                 </div>
-                <span className="flex-1 text-sm truncate">{n.title}</span>
-                {n.id === activeNovelId && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-                )}
+                <span className={`flex-1 text-sm truncate ${n.id === activeNovelId ? 'font-medium' : ''}`}>{n.title}</span>
               </button>
             ))}
           </div>
@@ -157,9 +157,12 @@ export default function SidePanel({
                           <button
                             key={ch.id}
                             onClick={() => onSelectChapter(ch)}
-                            className={`w-full flex items-center gap-2.5 pl-7 pr-3 py-1.5 text-left hover:bg-muted/50 transition-colors
-                              ${ch.id === selectedChapterId ? 'bg-muted/30' : ''}`}
+                            className={`w-full flex items-center gap-2.5 pl-7 pr-3 py-1.5 text-left hover:bg-muted/50 transition-colors relative
+                              ${ch.id === selectedChapterId ? 'bg-primary/10 font-medium' : ''}`}
                           >
+                            {ch.id === selectedChapterId && (
+                              <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
+                            )}
                             <span className="text-xs text-muted-foreground w-8 shrink-0 tabular-nums">
                               第{ch.chapter_number}章
                             </span>
