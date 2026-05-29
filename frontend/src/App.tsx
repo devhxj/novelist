@@ -4,12 +4,14 @@ import type { novel } from '@/hooks/useApp'
 import InitView from '@/views/InitView'
 import NovelListView from '@/views/NovelListView'
 import EditorView from '@/views/EditorView'
+import BookFlipTransition from '@/components/novel/BookFlipTransition'
 
 type View = 'loading' | 'init' | 'novel-list' | 'editor'
 
 export default function App() {
   const [view, setView] = useState<View>('loading')
   const [selectedNovel, setSelectedNovel] = useState<novel.Novel | null>(null)
+  const [flippingNovel, setFlippingNovel] = useState<novel.Novel | null>(null)
   const app = useApp()
 
   useEffect(() => {
@@ -28,9 +30,13 @@ export default function App() {
     <div className="min-h-screen bg-background text-foreground">
       {view === 'init' && <InitView onInitialized={() => setView('novel-list')} />}
       {view === 'novel-list' && (
-        <NovelListView
-          onNovelClick={(n) => {
-            setSelectedNovel(n)
+        <NovelListView onNovelClick={(n) => setFlippingNovel(n)} />
+      )}
+      {flippingNovel && (
+        <BookFlipTransition
+          onComplete={() => {
+            setSelectedNovel(flippingNovel)
+            setFlippingNovel(null)
             setView('editor')
           }}
         />
