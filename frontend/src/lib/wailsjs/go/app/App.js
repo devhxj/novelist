@@ -6,8 +6,8 @@ export function Chat(arg1, arg2) {
   return window['go']['app']['App']['Chat'](arg1, arg2);
 }
 
-export function CreateNovel(arg1, arg2) {
-  return window['go']['app']['App']['CreateNovel'](arg1, arg2);
+export function CreateNovel(arg1) {
+  return window['go']['app']['App']['CreateNovel'](arg1);
 }
 
 export function GetAppConfig() {
@@ -38,6 +38,6 @@ export function IsInitialized() {
   return window['go']['app']['App']['IsInitialized']();
 }
 
-export function SaveSettings(arg1, arg2) {
-  return window['go']['app']['App']['SaveSettings'](arg1, arg2);
+export function SaveSettings(arg1) {
+  return window['go']['app']['App']['SaveSettings'](arg1);
 }

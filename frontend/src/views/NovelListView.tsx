@@ -23,7 +23,7 @@ export default function NovelListView() {
 
   async function handleCreate() {
     if (!title.trim()) return
-    await app.CreateNovel(title.trim(), description.trim())
+    await app.CreateNovel({ title: title.trim(), description: description.trim() })
     setTitle('')
     setDescription('')
     setShowCreate(false)

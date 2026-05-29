@@ -294,13 +294,9 @@ frontend/
     │   ├── useApp.ts               # Wails IPC 调用封装
     │   └── useKeyboard.ts          # 快捷键管理
     │
-    ├── types/
-    │   ├── novel.ts
-    │   ├── chapter.ts
-    │   └── ...
-    │
     └── lib/
-        └── wails.ts                 # Wails runtime 类型导出
+        ├── wailsjs/                 # Wails 自动生成的 API 绑定 + 类型（须 commit）
+        └── utils.ts
 ```
 
 ## 七、数据流
@@ -353,7 +349,7 @@ App.Chat(session, msg)   →    (*App).Chat(session, msg)
 
 - **构建**: `make dev`（等同于 `wails dev -tags webkit2_41`），前端仅构建：`npm --prefix frontend run build`
 - **浏览器调试**: `wails dev` 启动后用 `http://localhost:34115` 在外部浏览器打开，Go IPC 通过 Wails 代理正常通信
-- **类型定义**: 前端 `types/` 独立维护，不依赖 Wails 生成的 `models.ts`——Go struct 的命名习惯不应透传到前端
+- **类型定义**: Go 侧定义 input struct（入参）和 domain model（出参），Wails 自动生成 TypeScript 类型。前端直接使用 `lib/wailsjs/go/models.ts` 中的类型，API 契约以 Go 方法签名为准
 - **Tailwind v4**: 无 `tailwind.config.ts`/`postcss.config.js`，通过 `@tailwindcss/vite` 插件配置
 - **shadcn 组件**: 按需通过 `npx shadcn add <component>` 添加到 `components/ui/`
 

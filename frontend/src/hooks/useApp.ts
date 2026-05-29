@@ -10,7 +10,7 @@ import {
   IsInitialized,
   SaveSettings,
 } from '@/lib/wailsjs/go/app/App'
-import type { novel, chapter, config } from '@/lib/wailsjs/go/models'
+import type { app, novel, chapter, config } from '@/lib/wailsjs/go/models'
 
 export function useApp() {
   return {
@@ -27,4 +27,4 @@ export function useApp() {
   }
 }
 
-export type { novel, chapter, config }
+export type { app, novel, chapter, config }

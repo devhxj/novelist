@@ -1,3 +1,36 @@
+export namespace app {
+	
+	export class CreateNovelInput {
+	    title: string;
+	    description?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateNovelInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.description = source["description"];
+	    }
+	}
+	export class SaveSettingsInput {
+	    api_key: string;
+	    default_model?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SaveSettingsInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.api_key = source["api_key"];
+	        this.default_model = source["default_model"];
+	    }
+	}
+
+}
+
 export namespace chapter {
 	
 	export class Chapter {

@@ -17,11 +17,17 @@ func (a *App) GetNovels() ([]novel.Novel, error) {
 	return result.Items, nil
 }
 
+// CreateNovelInput 是创建小说的入参。
+type CreateNovelInput struct {
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+}
+
 // CreateNovel 创建一部新小说。
-func (a *App) CreateNovel(title, description string) (*novel.Novel, error) {
+func (a *App) CreateNovel(input CreateNovelInput) (*novel.Novel, error) {
 	n := novel.Novel{
-		Title:       title,
-		Description: description,
+		Title:       input.Title,
+		Description: input.Description,
 	}
 	if err := a.novel.DB.WithContext(a.ctx).Create(&n).Error; err != nil {
 		return nil, fmt.Errorf("创建小说失败: %w", err)
