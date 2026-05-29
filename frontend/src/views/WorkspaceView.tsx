@@ -6,6 +6,7 @@ import StatusBar from '@/components/shell/StatusBar'
 import SidePanel from '@/components/workspace/SidePanel'
 import EditorArea from '@/components/workspace/EditorArea'
 import ChatPanel from '@/components/workspace/ChatPanel'
+import GitHubLink from '@/components/shell/GitHubLink'
 import type { OnMount } from '@monaco-editor/react'
 
 interface Props {
@@ -154,10 +155,11 @@ export default function WorkspaceView({ initialNovelId }: Props) {
 
   return (
     <div className="h-screen flex flex-col">
-      <header className="h-11 flex items-center px-4 border-b bg-muted/10 shrink-0">
+      <header className="h-11 flex items-center justify-between px-4 border-b bg-muted/10 shrink-0">
         <span className="text-sm font-medium">
           {activeNovel?.title ?? 'Goink'}
         </span>
+        <GitHubLink />
       </header>
 
       <div className="flex-1 flex min-h-0">
