@@ -1,5 +1,19 @@
 export namespace app {
 	
+	export class CreateChapterInput {
+	    novel_id: number;
+	    title: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateChapterInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	        this.title = source["title"];
+	    }
+	}
 	export class CreateNovelInput {
 	    title: string;
 	    description?: string;

@@ -1,8 +1,16 @@
 package app
 
 import (
+	"fmt"
+
 	"novel/internal/chapter"
 )
+
+// CreateChapterInput 是创建章节的入参。
+type CreateChapterInput struct {
+	NovelID int64  `json:"novel_id"`
+	Title   string `json:"title"`
+}
 
 // ── 章节 ──────────────────────────────────────────────────
 
@@ -13,4 +21,23 @@ func (a *App) GetChapters(novelID int64) ([]chapter.Chapter, error) {
 		return nil, err
 	}
 	return result.Items, nil
+}
+
+// CreateChapter 创建新章节，章节号自动递增。
+func (a *App) CreateChapter(input CreateChapterInput) (*chapter.Chapter, error) {
+	latest, err := a.chapter.GetLatestNumber(a.ctx, input.NovelID)
+	if err != nil {
+		return nil, fmt.Errorf("创建章节失败: %w", err)
+	}
+
+	ch := chapter.Chapter{
+		NovelID:       input.NovelID,
+		ChapterNumber: latest + 1,
+		Title:         input.Title,
+	}
+
+	if err := a.chapter.DB.WithContext(a.ctx).Create(&ch).Error; err != nil {
+		return nil, fmt.Errorf("创建章节失败: %w", err)
+	}
+	return &ch, nil
 }

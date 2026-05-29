@@ -1,5 +1,6 @@
 import {
   Chat,
+  CreateChapter,
   CreateNovel,
   SetActiveNovel,
   GetAppConfig,
@@ -16,6 +17,7 @@ import type { app, novel, chapter, config } from '@/lib/wailsjs/go/models'
 export function useApp() {
   return {
     Chat,
+    CreateChapter,
     CreateNovel,
     GetAppConfig,
     GetChapters,
