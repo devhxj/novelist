@@ -359,6 +359,8 @@ export default function ChatPanel({ novelId }: Props) {
         onSend={handleSend}
       />
 
+      <div className="border-t mx-4" />
+
       <ChatControls
         models={models}
         selectedKey={selectedKey}
