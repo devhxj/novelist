@@ -225,6 +225,101 @@ export namespace llm {
 	        this.SupportsVision = source["SupportsVision"];
 	    }
 	}
+	export class ModelInfo {
+	    id: string;
+	    name: string;
+	    context_window: number;
+	    max_output_tokens: number;
+	    reasoning_levels?: string[];
+	    supports_vision: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ModelInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.context_window = source["context_window"];
+	        this.max_output_tokens = source["max_output_tokens"];
+	        this.reasoning_levels = source["reasoning_levels"];
+	        this.supports_vision = source["supports_vision"];
+	    }
+	}
+	export class ProviderView {
+	    key: string;
+	    name: string;
+	    chat_url: string;
+	    api_key: string;
+	    source: string;
+	    builtin_models: ModelInfo[];
+	    custom_models: ModelInfo[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ProviderView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.name = source["name"];
+	        this.chat_url = source["chat_url"];
+	        this.api_key = source["api_key"];
+	        this.source = source["source"];
+	        this.builtin_models = this.convertValues(source["builtin_models"], ModelInfo);
+	        this.custom_models = this.convertValues(source["custom_models"], ModelInfo);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class LLMConfigView {
+	    providers: ProviderView[];
+	
+	    static createFrom(source: any = {}) {
+	        return new LLMConfigView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.providers = this.convertValues(source["providers"], ProviderView);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 
 }
 

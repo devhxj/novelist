@@ -23,6 +23,8 @@ export function GetChapters(arg1:number):Promise<Array<chapter.Chapter>>;
 
 export function GetContent(arg1:number,arg2:string):Promise<string>;
 
+export function GetLLMConfig():Promise<llm.LLMConfigView>;
+
 export function GetModels():Promise<Array<llm.AvailableModel>>;
 
 export function GetNovels():Promise<Array<novel.Novel>>;
@@ -40,6 +42,8 @@ export function Initialize(arg1:string):Promise<void>;
 export function IsInitialized():Promise<boolean>;
 
 export function SaveContent(arg1:app.SaveContentInput):Promise<void>;
+
+export function SaveLLMConfig(arg1:llm.LLMConfigView):Promise<void>;
 
 export function SaveSettings(arg1:app.SaveSettingsInput):Promise<void>;
 

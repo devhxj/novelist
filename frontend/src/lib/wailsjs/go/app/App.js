@@ -30,6 +30,10 @@ export function GetContent(arg1, arg2) {
   return window['go']['app']['App']['GetContent'](arg1, arg2);
 }
 
+export function GetLLMConfig() {
+  return window['go']['app']['App']['GetLLMConfig']();
+}
+
 export function GetModels() {
   return window['go']['app']['App']['GetModels']();
 }
@@ -64,6 +68,10 @@ export function IsInitialized() {
 
 export function SaveContent(arg1) {
   return window['go']['app']['App']['SaveContent'](arg1);
+}
+
+export function SaveLLMConfig(arg1) {
+  return window['go']['app']['App']['SaveLLMConfig'](arg1);
 }
 
 export function SaveSettings(arg1) {

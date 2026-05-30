@@ -80,6 +80,81 @@ func Merge(builtin map[string]Provider, user *UserLLMConfig) map[string]Provider
 	return result
 }
 
+// LLMConfigView 是 GetLLMConfig 返回的完整配置视图，合并内置模板和用户配置。
+type LLMConfigView struct {
+	Providers []ProviderView `json:"providers"`
+}
+
+// ProviderView 是单个 provider 的前端展示视图。
+type ProviderView struct {
+	Key           string      `json:"key"`             // provider 标识符，如 "deepseek"
+	Name          string      `json:"name"`            // 显示名称
+	ChatURL       string      `json:"chat_url"`        // API 端点
+	APIKey        string      `json:"api_key"`         // 用户配置的 key，空表示未配置
+	Source        string      `json:"source"`          // "builtin" | "custom"
+	BuiltinModels []ModelInfo `json:"builtin_models"`  // 内置模型，自定义 provider 为 nil
+	CustomModels  []ModelInfo `json:"custom_models"`   // 用户添加的自定义模型
+}
+
+// BuildConfigView 合并内置模板和用户配置，生成前端可用的完整视图。
+func BuildConfigView(user *UserLLMConfig) *LLMConfigView {
+	view := &LLMConfigView{}
+
+	// 内置 provider：从 Builtin 取模板，从 user 取 key 和自定义模型
+	for key, bp := range Builtin {
+		var apiKey string
+		var customModels []ModelInfo
+		for _, up := range user.Providers {
+			if up.Name == key {
+				apiKey = up.APIKey
+				customModels = up.Models
+				break
+			}
+		}
+		view.Providers = append(view.Providers, ProviderView{
+			Key:           key,
+			Name:          bp.Name,
+			ChatURL:       bp.ChatURL,
+			APIKey:        apiKey,
+			Source:        "builtin",
+			BuiltinModels: append([]ModelInfo{}, bp.Models...),
+			CustomModels:  append([]ModelInfo{}, customModels...),
+		})
+	}
+
+	// 自定义 provider：不在 Builtin 中的用户 provider
+	for _, up := range user.Providers {
+		if _, isBuiltin := Builtin[up.Name]; !isBuiltin {
+			view.Providers = append(view.Providers, ProviderView{
+				Key:           up.Name,
+				Name:          up.Name,
+				ChatURL:       up.ChatURL,
+				APIKey:        up.APIKey,
+				Source:        "custom",
+				BuiltinModels: nil,
+				CustomModels:  append([]ModelInfo{}, up.Models...),
+			})
+		}
+	}
+
+	return view
+}
+
+// ToUserConfig 将前端视图转换回可持久化的 UserLLMConfig。
+func (v *LLMConfigView) ToUserConfig() *UserLLMConfig {
+	providers := make([]Provider, 0, len(v.Providers))
+	for _, pv := range v.Providers {
+		models := append([]ModelInfo{}, pv.CustomModels...)
+		providers = append(providers, Provider{
+			Name:    pv.Key,
+			ChatURL: pv.ChatURL,
+			APIKey:  pv.APIKey,
+			Models:  models,
+		})
+	}
+	return &UserLLMConfig{Providers: providers}
+}
+
 // Models 从 Provider map 中提取前端下拉列表。
 func Models(providers map[string]Provider) []AvailableModel {
 	var list []AvailableModel

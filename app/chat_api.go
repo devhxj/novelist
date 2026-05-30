@@ -1,6 +1,9 @@
 package app
 
 import (
+	"fmt"
+
+	"novel/internal/config"
 	"novel/internal/llm"
 	"novel/internal/session"
 	"novel/internal/storage"
@@ -29,8 +32,8 @@ func (a *App) GetSessions(novelID int64, page int, size int) (*storage.PageResul
 	}
 	sessions, total, err := a.session.ListSessions(a.ctx, novelID, page, size)
 	if err != nil {
-		a.logger.Error("GetSessions 查询失败", "novel_id", novelID, "err", err)
-		return nil, err
+		a.logger.Error("failed to list sessions", "novel_id", novelID, "page", page, "err", err)
+		return nil, fmt.Errorf("app: list sessions: %w", err)
 	}
 
 	metas := make([]SessionMeta, 0, len(sessions))
@@ -52,11 +55,38 @@ func (a *App) GetSessionMessages(sessionID string) ([]session.Message, error) {
 	}
 	msgs, err := a.session.GetMessagesForFrontend(a.ctx, sessionID)
 	if err != nil {
-		a.logger.Error("GetSessionMessages 查询失败", "session_id", sessionID, "err", err)
-		return nil, err
+		a.logger.Error("failed to get messages", "session_id", sessionID, "err", err)
+		return nil, fmt.Errorf("app: get messages: %w", err)
 	}
 	if msgs == nil {
 		return []session.Message{}, nil
 	}
 	return msgs, nil
+}
+
+// GetLLMConfig 返回合并内置模板和用户配置的完整视图。
+func (a *App) GetLLMConfig() (*llm.LLMConfigView, error) {
+	user, err := llm.LoadUserConfig(config.LLMConfigPath())
+	if err != nil {
+		a.logger.Error("failed to load LLM config", "err", err)
+		return nil, fmt.Errorf("app: load llm config: %w", err)
+	}
+	return llm.BuildConfigView(user), nil
+}
+
+// SaveLLMConfig 保存用户 LLM 配置并热重载 Client。
+func (a *App) SaveLLMConfig(input llm.LLMConfigView) error {
+	cfg := input.ToUserConfig()
+	if err := llm.SaveUserConfig(config.LLMConfigPath(), cfg); err != nil {
+		a.logger.Error("failed to save LLM config", "err", err)
+		return fmt.Errorf("app: save llm config: %w", err)
+	}
+
+	if a.llmClient != nil {
+		providers := llm.Merge(llm.Builtin, cfg)
+		a.llmClient.Reload(providers)
+	}
+
+	a.logger.Info("LLM config saved and hot-reloaded")
+	return nil
 }

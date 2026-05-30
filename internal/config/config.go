@@ -51,6 +51,12 @@ func (c *AppConfig) NovelDirPath(novelID int64) string {
 	return filepath.Join(c.DataDir, "novels", fmt.Sprintf("%d", novelID))
 }
 
+// LLMConfigPath 返回 LLM 加密配置文件的固定路径 ~/.goink/llm_config.enc。
+func LLMConfigPath() string {
+	dir, _ := configDir()
+	return filepath.Join(dir, "llm_config.enc")
+}
+
 // ModelsDir 返回 ONNX 模型目录路径。
 func (c *AppConfig) ModelsDir() string {
 	return filepath.Join(c.DataDir, "models")

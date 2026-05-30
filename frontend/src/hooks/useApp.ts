@@ -15,9 +15,11 @@ import {
   Initialize,
   IsInitialized,
   SaveSettings,
+  GetLLMConfig,
   GetModels,
   GetSessions,
   GetSessionMessages,
+  SaveLLMConfig,
 } from '@/lib/wailsjs/go/app/App'
 import type { app, novel, chapter, config, llm, session } from '@/lib/wailsjs/go/models'
 
@@ -42,6 +44,8 @@ export function useApp() {
     GetSessionMessages,
     ApproveTool,
     SetApprovalMode,
+    GetLLMConfig,
+    SaveLLMConfig,
   }
 }
 

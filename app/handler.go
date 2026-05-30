@@ -145,8 +145,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 	mcp_tools.RegisterAllTools(a.registry)
 
 	// 7. 初始化 LLM 客户端
-	llmConfigPath := filepath.Join(cfg.DataDir, "llm_config.enc")
-	userConfig, err := llm.LoadUserConfig(llmConfigPath)
+	userConfig, err := llm.LoadUserConfig(config.LLMConfigPath())
 	if err != nil {
 		a.logger.Warn("加载 LLM 配置失败，使用空配置", "err", err)
 		userConfig = &llm.UserLLMConfig{}
