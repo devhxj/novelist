@@ -9,11 +9,9 @@ import (
 // AppSettings 是全局 app_config 表的单行配置。
 // 增删配置项直接在此 struct 加减字段即可，GORM 自动迁移。
 type AppSettings struct {
-	ID           uint   `gorm:"column:id;primaryKey;default:1"`
-	APIKey       string `gorm:"column:api_key"`
-	DefaultModel string `gorm:"column:default_model"`
-	LastNovelID  int64  `gorm:"column:last_novel_id;default:0"                 json:"last_novel_id"`
-	// 后续新增配置直接加字段，如：Theme string `gorm:"column:theme"`
+	ID          uint  `gorm:"column:id;primaryKey;default:1"`
+	LastNovelID int64 `gorm:"column:last_novel_id;default:0"                 json:"last_novel_id"`
+	// 后续新增配置直接加字段
 }
 
 func (AppSettings) TableName() string { return "app_config" }

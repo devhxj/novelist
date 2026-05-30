@@ -7,24 +7,25 @@ import (
 
 // Provider 定义一个大模型供应商的完整配置。
 // 默认行为走 OpenAI 兼容格式，钩子函数用于处理供应商差异。
+// 同时用作用户配置的 JSON 格式（Hooks 不参与序列化，反序列化后为 nil）。
 type Provider struct {
-	Name         string                                          // 供应商名称，如 "DeepSeek"
-	ChatURL      string                                          // 聊天补全端点，如 "https://api.deepseek.com/v1/chat/completions"
-	APIKey       string                                          // API 密钥
-	Models       []ModelInfo                                     // 可用模型列表
-	BuildRequest func(payload map[string]any) map[string]any     // 发送前改造请求体，nil 则原样发送
-	BuildHeaders func(base map[string]string) map[string]string  // 发送前改造请求头，nil 则使用默认 Bearer 鉴权
-	ParseError   func(body []byte) error                         // 解析非标准错误响应体，nil 则使用默认 OpenAI 格式解析
+	Name         string                                          `json:"name"`                            // 供应商名称，如 "DeepSeek"
+	ChatURL      string                                          `json:"chat_url"`                        // 聊天补全端点
+	APIKey       string                                          `json:"api_key,omitempty"`               // API 密钥
+	Models       []ModelInfo                                     `json:"models"`                          // 可用模型列表
+	BuildRequest func(payload map[string]any) map[string]any     `json:"-"` // 发送前改造请求体，nil 则原样发送
+	BuildHeaders func(base map[string]string) map[string]string  `json:"-"` // 发送前改造请求头，nil 则使用默认 Bearer 鉴权
+	ParseError   func(body []byte) error                         `json:"-"` // 解析非标准错误响应体，nil 则使用默认 OpenAI 格式解析
 }
 
 // ModelInfo 描述一个具体模型的元信息。
 type ModelInfo struct {
-	ID              string // 模型标识，如 "deepseek-v4-pro"
-	Name            string // 显示名称，如 "DeepSeek V4 Pro"
-	ContextWindow   int    // 上下文窗口大小（token 数）
-	MaxOutputTokens int    // 最大输出 token 数
-	ReasoningEffort string // 思考程度，"high" / "max"，非推理模型留空
-	SupportsVision  bool   // 是否支持图片输入
+	ID              string   `json:"id"`                                  // 模型标识，如 "deepseek-v4-pro"
+	Name            string   `json:"name"`                                // 显示名称，如 "DeepSeek V4 Pro"
+	ContextWindow   int      `json:"context_window"`                      // 上下文窗口大小（token 数）
+	MaxOutputTokens int      `json:"max_output_tokens"`                   // 最大输出 token 数
+	ReasoningLevels []string `json:"reasoning_levels,omitempty"`          // 支持的推理等级，如 ["low","high","max"]，无推理能力留空
+	SupportsVision  bool     `json:"supports_vision"`                     // 是否支持图片输入
 }
 
 // APIError 表示 LLM API 的调用错误，包含可重试标记。

@@ -13,17 +13,17 @@ import (
 )
 
 // Client 是 LLM 流式调用的传输层。
-// 接收 messages 和 tools（OpenAI 规范格式），拼装 payload 并管理 SSE 传输。
+// 持有多 provider，Run 时根据 providerName 选择合适的后端。
 type Client struct {
-	provider Provider
-	http     *http.Client
-	logger   *slog.Logger
+	providers map[string]Provider // providerName → 完整配置（由 Merge 产出）
+	http      *http.Client
+	logger    *slog.Logger
 }
 
-// NewClient 创建 LLM 客户端。
-func NewClient(p Provider, log *slog.Logger) *Client {
+// NewClient 创建 LLM 客户端。providers 应为 Merge 产出的已组装配置。
+func NewClient(providers map[string]Provider, log *slog.Logger) *Client {
 	return &Client{
-		provider: p,
+		providers: providers,
 		http: &http.Client{
 			Timeout: 0, // 流式请求不设超时，由 ctx 控制
 		},
@@ -31,42 +31,42 @@ func NewClient(p Provider, log *slog.Logger) *Client {
 	}
 }
 
-// DefaultDeepSeek 返回 DeepSeek 默认 Provider 配置。
-func DefaultDeepSeek(apiKey string) Provider {
-	return Provider{
+// Builtin 内置 provider 模板。APIKey 留空，运行时由用户配置注入。
+var Builtin = map[string]Provider{
+	"deepseek": {
 		Name:    "DeepSeek",
 		ChatURL: "https://api.deepseek.com/v1/chat/completions",
-		APIKey:  apiKey,
 		Models: []ModelInfo{
 			{
 				ID:              "deepseek-v4-flash",
 				Name:            "DeepSeek V4 Flash",
-				ContextWindow:   1000000,
-				MaxOutputTokens: 384000,
-				ReasoningEffort: "high",
+				ContextWindow:   1_000_000,
+				MaxOutputTokens: 384_000,
+				ReasoningLevels: []string{"low", "high"},
 				SupportsVision:  false,
 			},
 			{
 				ID:              "deepseek-v4-pro",
 				Name:            "DeepSeek V4 Pro",
-				ContextWindow:   1000000,
-				MaxOutputTokens: 384000,
-				ReasoningEffort: "high",
+				ContextWindow:   1_000_000,
+				MaxOutputTokens: 384_000,
+				ReasoningLevels: []string{"low", "high", "max"},
 				SupportsVision:  false,
 			},
 		},
 		BuildRequest: nil, // 默认 OpenAI 兼容格式，无需额外改造
-	}
+	},
 }
 
 // ChatStream 发起流式对话，返回 SSE 事件 channel。
 //
-// messages / tools 由调用方按 OpenAI Function Calling 格式组装。
+// providerName 指明使用哪个 Provider，messages/tools 由调用方按 OpenAI Function Calling 格式组装。
 // Client 负责拼装完整 payload 并注入流式参数和钩子处理。
 //
 // ctx 取消时底层 HTTP 连接被中止，channel 随之关闭。
 func (c *Client) ChatStream(
 	ctx context.Context,
+	providerName string,
 	messages []map[string]any,
 	tools []map[string]any,
 	model string,
@@ -74,10 +74,18 @@ func (c *Client) ChatStream(
 ) <-chan StreamEvent {
 	ch := make(chan StreamEvent, 8)
 
+	p, ok := c.providers[providerName]
+	if !ok {
+		ch := make(chan StreamEvent, 1)
+		ch <- StreamEvent{Type: EventError, Error: fmt.Errorf("unknown provider: %s", providerName)}
+		close(ch)
+		return ch
+	}
+
 	go func() {
 		defer close(ch)
 
-		payload := c.buildPayload(messages, tools, model, opts)
+		payload := c.buildPayload(&p, messages, tools, model, opts)
 
 		body, err := json.Marshal(payload)
 		if err != nil {
@@ -85,7 +93,7 @@ func (c *Client) ChatStream(
 			return
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.provider.ChatURL, bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.ChatURL, bytes.NewReader(body))
 		if err != nil {
 			ch <- StreamEvent{Type: EventError, Error: fmt.Errorf("failed to create HTTP request: %w", err)}
 			return
@@ -94,10 +102,10 @@ func (c *Client) ChatStream(
 		// 组装请求头
 		headers := map[string]string{
 			"Content-Type":  "application/json",
-			"Authorization": "Bearer " + c.provider.APIKey,
+			"Authorization": "Bearer " + p.APIKey,
 		}
-		if c.provider.BuildHeaders != nil {
-			headers = c.provider.BuildHeaders(headers)
+		if p.BuildHeaders != nil {
+			headers = p.BuildHeaders(headers)
 		}
 		for k, v := range headers {
 			req.Header.Set(k, v)
@@ -118,8 +126,8 @@ func (c *Client) ChatStream(
 		if resp.StatusCode >= 400 {
 			errBody, _ := io.ReadAll(resp.Body)
 			msg := parseDefaultError(errBody).Error()
-			if c.provider.ParseError != nil {
-				msg = c.provider.ParseError(errBody).Error()
+			if p.ParseError != nil {
+				msg = p.ParseError(errBody).Error()
 			}
 			ch <- StreamEvent{Type: EventError, Error: &APIError{
 				StatusCode: resp.StatusCode,
@@ -138,6 +146,7 @@ func (c *Client) ChatStream(
 
 // buildPayload 组装 LLM API 请求体。
 func (c *Client) buildPayload(
+	p *Provider,
 	messages []map[string]any,
 	tools []map[string]any,
 	model string,
@@ -155,10 +164,10 @@ func (c *Client) buildPayload(
 	}
 
 	// 从 ModelInfo 取模型默认值
-	var info *ModelInfo
-	for i := range c.provider.Models {
-		if c.provider.Models[i].ID == model {
-			info = &c.provider.Models[i]
+	var um *ModelInfo
+	for i := range p.Models {
+		if p.Models[i].ID == model {
+			um = &p.Models[i]
 			break
 		}
 	}
@@ -170,24 +179,21 @@ func (c *Client) buildPayload(
 	}
 	if opts != nil && opts.MaxTokens != nil {
 		maxTokens = *opts.MaxTokens
-	} else if info != nil && info.MaxOutputTokens > 0 {
-		maxTokens = info.MaxOutputTokens
+	} else if um != nil && um.MaxOutputTokens > 0 {
+		maxTokens = um.MaxOutputTokens
 	}
 	payload["temperature"] = temperature
 	payload["max_tokens"] = maxTokens
 
-	// 推理/思考参数
-	reasoningEffort := ""
+	// 推理/思考参数：ReasoningEffort 显式传入才启用，ModelInfo.ReasoningLevels 仅描述能力不预设行为
 	thinkingEnabled := false
+	reasoningEffort := ""
 	if opts != nil && opts.ReasoningEffort != nil {
 		reasoningEffort = *opts.ReasoningEffort
-	} else if info != nil {
-		reasoningEffort = info.ReasoningEffort
+		thinkingEnabled = true
 	}
 	if opts != nil && opts.ThinkingEnabled != nil {
 		thinkingEnabled = *opts.ThinkingEnabled
-	} else if info != nil && info.ReasoningEffort != "" {
-		thinkingEnabled = true
 	}
 
 	if thinkingEnabled && reasoningEffort != "" {
@@ -196,8 +202,8 @@ func (c *Client) buildPayload(
 	}
 
 	// Provider 钩子改造
-	if c.provider.BuildRequest != nil {
-		payload = c.provider.BuildRequest(payload)
+	if p.BuildRequest != nil {
+		payload = p.BuildRequest(payload)
 	}
 
 	return payload

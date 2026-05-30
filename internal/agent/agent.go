@@ -35,6 +35,7 @@ type RunOptions struct {
 	AllowedTools     map[string]bool
 	ActiveVersion    int
 	Model            *llm.ModelInfo
+	ProviderName     string
 	AgentType        string
 	ParentTurnID     *int
 	MaxTurns         int
@@ -79,7 +80,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 			// TODO: compress(opts)
 		}
 
-		stream := a.llm.ChatStream(ctx, opts.Messages, tools, opts.Model.ID, nil)
+		stream := a.llm.ChatStream(ctx, opts.ProviderName, opts.Messages, tools, opts.Model.ID, nil)
 
 		// ---- SSE 流处理 ----
 	streamLoop:
