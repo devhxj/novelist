@@ -2,12 +2,15 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { MessageSquare, Loader2 } from 'lucide-react'
 import { EventsOn } from '@/lib/wailsjs/runtime/runtime'
 import { useApp } from '@/hooks/useApp'
-import type { AgentEvent, Turn, TurnSegment } from './types'
+import type { llm } from '@/hooks/useApp'
+import type { AgentEvent, Turn } from './types'
 import { AgentEventType, emptySegment } from './types'
 import ChatInput from './ChatInput'
+import ChatControls from './ChatControls'
 import MessageBubble from './MessageBubble'
 import ThinkingBlock from './ThinkingBlock'
 import ToolCallCard from './ToolCallCard'
+import type { UsageInfo } from './ContextRing'
 
 interface Props {
   novelId: number
@@ -26,21 +29,22 @@ export default function ChatPanel({ novelId }: Props) {
   const [turns, setTurns] = useState<Turn[]>([])
   const [sessionId, setSessionId] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [provider, setProvider] = useState('')
-  const [model, setModel] = useState('')
+  const [models, setModels] = useState<llm.AvailableModel[]>([])
+  const [selectedKey, setSelectedKey] = useState('')
+  const [reasoningEffort, setReasoningEffort] = useState('')
+  const [approvalMode, setApprovalMode] = useState<'manual' | 'auto'>('manual')
+  const [lastUsage, setLastUsage] = useState<UsageInfo | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const counterRef = useRef(0)
   const startedUnsubRef = useRef<(() => void) | null>(null)
   const agentUnsubRef = useRef<(() => void) | null>(null)
 
-  // 加载默认模型
+  // 加载模型列表
   useEffect(() => {
-    app.GetModels().then(models => {
-      if (models && models.length > 0) {
-        const m = models[0]
-        const [p, id] = m.Key.split('/')
-        setProvider(p)
-        setModel(id)
+    app.GetModels().then(list => {
+      if (list && list.length > 0) {
+        setModels(list)
+        setSelectedKey(list[0].Key)
       }
     }).catch(() => {})
   }, [])
@@ -81,6 +85,21 @@ export default function ChatPanel({ novelId }: Props) {
   }, [turns])
 
   const handleAgentEvent = useCallback((turnId: number) => (event: AgentEvent) => {
+    switch (event.type) {
+      case AgentEventType.Usage: {
+        if (event.usage) {
+          setLastUsage(event.usage as unknown as UsageInfo)
+        }
+        return
+      }
+      case AgentEventType.Error: {
+        setTurns(prev => prev.map(turn =>
+          turn.turnId === turnId ? { ...turn, status: 'failed' as const } : turn
+        ))
+        return
+      }
+    }
+
     setTurns(prev => prev.map(turn => {
       if (turn.turnId !== turnId) return turn
 
@@ -89,7 +108,6 @@ export default function ChatPanel({ novelId }: Props) {
 
       switch (event.type) {
         case AgentEventType.Thinking: {
-          // 只取 data 字段，不为空才追加，严格匹配 Python 行为
           const chunk = event.data || ''
           const lastSeg = segments[segments.length - 1]
           if (lastSeg && lastSeg.type === 'text' && lastSeg.isStreaming) {
@@ -174,8 +192,23 @@ export default function ChatPanel({ novelId }: Props) {
     }))
   }, [])
 
+  const handleSelectModel = useCallback((key: string) => {
+    setSelectedKey(key)
+  }, [])
+
+  const handleSelectEffort = useCallback((effort: string) => {
+    setReasoningEffort(effort)
+  }, [])
+
+  const handleToggleApproval = useCallback(() => {
+    const next = approvalMode === 'manual' ? 'auto' : 'manual'
+    setApprovalMode(next)
+    app.SetApprovalMode(next)
+  }, [approvalMode, app])
+
   const handleSend = useCallback(async (content: string) => {
-    if (!provider || !model) return
+    if (!selectedKey) return
+    const [p, m] = selectedKey.split('/')
     setIsLoading(true)
 
     const turnId = `turn_${++counterRef.current}`
@@ -207,16 +240,15 @@ export default function ChatPanel({ novelId }: Props) {
         session_id: sessionId,
         novel_id: novelId,
         message: content,
-        provider_name: provider,
-        model_id: model,
-        reasoning_effort: '',
+        provider_name: p,
+        model_id: m,
+        reasoning_effort: reasoningEffort,
       })
     } catch (err) {
       setTurns(prev => prev.map(t =>
         t.id === turnId ? { ...t, status: 'failed' as const } : t
       ))
     } finally {
-      // 标记当前 turn 完成
       setTurns(prev => prev.map(t =>
         t.id === turnId && t.status === 'streaming'
           ? { ...t, status: 'done' as const, segments: t.segments.map(seg =>
@@ -230,14 +262,14 @@ export default function ChatPanel({ novelId }: Props) {
       agentUnsubRef.current?.()
       agentUnsubRef.current = null
     }
-  }, [sessionId, novelId, provider, model, app, handleAgentEvent])
+  }, [sessionId, novelId, selectedKey, reasoningEffort, app, handleAgentEvent])
 
   const hasNovel = novelId > 0
   const hasTurns = turns.length > 0
 
   const inputPlaceholder = !hasNovel
     ? '请先选择作品'
-    : !provider
+    : !selectedKey
       ? '请先配置模型'
       : isLoading
         ? 'AI 回复中...'
@@ -322,9 +354,20 @@ export default function ChatPanel({ novelId }: Props) {
       </div>
 
       <ChatInput
-        disabled={!hasNovel || isLoading || !provider}
+        disabled={!hasNovel || isLoading || !selectedKey}
         placeholder={inputPlaceholder}
         onSend={handleSend}
+      />
+
+      <ChatControls
+        models={models}
+        selectedKey={selectedKey}
+        onSelectModel={handleSelectModel}
+        reasoningEffort={reasoningEffort}
+        onSelectEffort={handleSelectEffort}
+        approvalMode={approvalMode}
+        onToggleApproval={handleToggleApproval}
+        usage={lastUsage}
       />
 
       {isDragging && (

@@ -1,10 +1,12 @@
 import {
+  ApproveTool,
   Chat,
   CreateChapter,
   CreateNovel,
   GetContent,
   SaveContent,
   SetActiveNovel,
+  SetApprovalMode,
   GetAppConfig,
   GetChapters,
   GetNovels,
@@ -38,6 +40,8 @@ export function useApp() {
     GetModels,
     GetSessions,
     GetSessionMessages,
+    ApproveTool,
+    SetApprovalMode,
   }
 }
 
