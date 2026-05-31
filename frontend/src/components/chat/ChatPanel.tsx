@@ -302,6 +302,11 @@ export default function ChatPanel({ novelId }: Props) {
         setActiveSessionId(data.session_id)
       }
 
+      // 更新 turn 的 turnId 为后端分配的真实值
+      setTurns(prev => prev.map(t =>
+        t.id === turnId ? { ...t, turnId: data.turn_id } : t
+      ))
+
       agentUnsubRef.current?.()
       const agentCleanup = EventsOn(`agent:${data.turn_id}`, handleAgentEvent(data.turn_id))
       agentUnsubRef.current = agentCleanup
