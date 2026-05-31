@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { X, MessageSquare, Loader2 } from 'lucide-react'
+import { MessageSquare, Loader2, History } from 'lucide-react'
 import type { app } from '@/hooks/useApp'
 import { useApp } from '@/hooks/useApp'
 
@@ -24,6 +24,8 @@ function timeAgo(iso: string): string {
 
 export default function SessionHistory({ open, novelId, onClose, onSelectSession }: Props) {
   const app = useApp()
+  const [mounted, setMounted] = useState(false)
+  const [visible, setVisible] = useState(false)
   const [sessions, setSessions] = useState<app.SessionMeta[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -33,6 +35,17 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
   const loadingRef = useRef(false)
 
   const loadPageRef = useRef<(p: number) => void>(null as any)
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true)
+      requestAnimationFrame(() => setVisible(true))
+    } else {
+      setVisible(false)
+      const timer = setTimeout(() => setMounted(false), 200)
+      return () => clearTimeout(timer)
+    }
+  }, [open])
 
   loadPageRef.current = async (p: number) => {
     if (loadingRef.current) return
@@ -71,25 +84,23 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
     }
   }, [hasMore, isLoading, page])
 
-  if (!open) return null
+  if (!mounted) return null
 
   return (
-    <div className="absolute inset-x-0 z-40 flex flex-col bg-background border-b shadow-lg"
-      style={{ height: '35%', top: '33px' }}>
-      {/* 面板头部 */}
+    <div className="absolute inset-0 pointer-events-none">
+      <div className="absolute inset-0 z-30 pointer-events-auto" onClick={onClose} />
+      <div className={`absolute right-3 left-3 z-40 flex flex-col bg-card border rounded-xl shadow-lg pointer-events-auto transition-all duration-200 ease-out ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}`}
+        style={{ height: '40%', top: '4px' }}>
       <div className="flex items-center justify-between px-4 py-2 border-b shrink-0">
         <div className="flex items-center gap-3">
-          <span className="text-xs font-medium">历史会话</span>
+          <div className="flex items-center gap-2">
+            <History className="w-4 h-4 text-muted-foreground" />
+            <span className="text-xs font-medium">历史会话</span>
+          </div>
           {total > 0 && (
             <span className="text-[10px] text-muted-foreground">共 {total} 个</span>
           )}
         </div>
-        <button
-          onClick={onClose}
-          className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
       </div>
 
       {/* 搜索框（占位） */}
@@ -117,7 +128,7 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
               <button
                 key={s.session_id}
                 onClick={() => { onSelectSession(s.session_id); onClose() }}
-                className="w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-left hover:bg-muted/50 transition-colors"
+                className="w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-left hover:bg-muted/50 transition-colors cursor-pointer"
               >
                 <MessageSquare className="w-4 h-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
@@ -137,6 +148,7 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
           </div>
         )}
       </div>
+    </div>
     </div>
   )
 }

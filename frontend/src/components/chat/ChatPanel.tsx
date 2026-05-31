@@ -368,13 +368,13 @@ export default function ChatPanel({ novelId }: Props) {
         <div className="flex items-center gap-2">
           <button
             onClick={handleOpenHistory}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           >
             <History className="w-3.5 h-3.5" /> 历史
           </button>
           <button
             onClick={handleNewChat}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" /> 新对话
           </button>

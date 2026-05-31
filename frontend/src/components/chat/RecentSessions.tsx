@@ -31,7 +31,7 @@ export default function RecentSessions({ sessions, total, onSelectSession, onVie
               <button
                 key={s.session_id}
                 onClick={() => onSelectSession(s.session_id)}
-                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left hover:bg-muted/50 transition-colors"
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left hover:bg-muted/50 transition-colors cursor-pointer"
               >
                 <MessageSquare className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
@@ -45,7 +45,7 @@ export default function RecentSessions({ sessions, total, onSelectSession, onVie
           {total > sessions.length && (
             <button
               onClick={onViewAll}
-              className="w-full text-center text-xs text-muted-foreground hover:text-foreground py-2 transition-colors"
+              className="w-full text-center text-xs text-muted-foreground hover:text-foreground py-2 transition-colors cursor-pointer"
             >
               查看全部（{total} 个）
             </button>
