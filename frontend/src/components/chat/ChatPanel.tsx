@@ -92,6 +92,7 @@ export default function ChatPanel({ novelId }: Props) {
   // 加载历史消息
   useEffect(() => {
     if (!activeSessionId || !novelId) return
+    setSessionId(activeSessionId)
     setIsLoadingHistory(true)
     app.GetSessionMessages(activeSessionId).then(msgs => {
       if (msgs) {
