@@ -1,5 +1,4 @@
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import Markdown from '@/components/Markdown'
 
 interface Props {
   role: 'user' | 'assistant'
@@ -12,15 +11,13 @@ export default function MessageBubble({ role, content }: Props) {
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words prose prose-sm prose-headings:my-1 prose-p:my-0.5 prose-ul:my-0.5 prose-ol:my-0.5 prose-pre:my-1 ${
+        className={`max-w-[85%] rounded-xl px-3.5 py-3 break-words ${
           isUser
             ? 'bg-primary text-primary-foreground rounded-br-sm'
-            : 'bg-muted text-foreground rounded-bl-sm'
+            : 'bg-card border border-border/30 text-foreground rounded-bl-sm shadow-xs'
         }`}
       >
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-          {content}
-        </ReactMarkdown>
+        <Markdown content={content} className={isUser ? 'markdown-user' : undefined} />
       </div>
     </div>
   )

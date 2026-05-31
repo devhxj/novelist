@@ -13,6 +13,7 @@ export enum AgentEventType {
 // AgentEvent 与 Go 端 AgentEvent 的 JSON 序列化一一对应
 export interface AgentEvent {
   turn_id: number
+  seq?: number
   type: AgentEventType
   data?: string
   tool_name?: string

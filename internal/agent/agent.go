@@ -104,6 +104,16 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 	failCnt := make(map[string]int)
 	runningTokens := a.initRunningTokens(opts.Messages)
 	tools := a.registry.OpenAI(opts.AllowedTools)
+	agentEventName := "agent:" + strconv.Itoa(opts.TurnID)
+	eventSeq := 0
+	emit := func(event AgentEvent) {
+		eventSeq++
+		event.Seq = eventSeq
+		if event.Timestamp.IsZero() {
+			event.Timestamp = time.Now()
+		}
+		wails.EventsEmit(ctx, agentEventName, event)
+	}
 
 	for loopCount < opts.MaxTurns {
 		toolOutputs := make([]toolOutput, 0)
@@ -143,28 +153,28 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 				case llm.EventThinking:
 					isThinking = true
 					thinkingBuffer += event.Data
-					wails.EventsEmit(ctx, "agent:"+strconv.Itoa(opts.TurnID), AgentEvent{
+					emit(AgentEvent{
 						TurnID: opts.TurnID, Type: EventThinking,
 						Data: event.Data, Timestamp: time.Now(),
 					})
 
 				case llm.EventContent:
 					if isThinking {
-						wails.EventsEmit(ctx, "agent:"+strconv.Itoa(opts.TurnID), AgentEvent{
+						emit(AgentEvent{
 							TurnID: opts.TurnID, Type: EventThinkingDone, Timestamp: time.Now(),
 						})
 						isThinking = false
 					}
 					responseBuffer += event.Data
 					fullResponse += event.Data
-					wails.EventsEmit(ctx, "agent:"+strconv.Itoa(opts.TurnID), AgentEvent{
+					emit(AgentEvent{
 						TurnID: opts.TurnID, Type: EventContent,
 						Data: event.Data, Timestamp: time.Now(),
 					})
 
 				case llm.EventToolCallStart:
 					if isThinking {
-						wails.EventsEmit(ctx, "agent:"+strconv.Itoa(opts.TurnID), AgentEvent{
+						emit(AgentEvent{
 							TurnID: opts.TurnID, Type: EventThinkingDone, Timestamp: time.Now(),
 						})
 						isThinking = false
@@ -172,7 +182,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 					name := event.Delta.ToolName
 					id := event.Delta.ToolID
 					display := a.buildDisplay(name, nil, mcp_tools.PhaseSelected, opts.NovelID)
-					wails.EventsEmit(ctx, "agent:"+strconv.Itoa(opts.TurnID), AgentEvent{
+					emit(AgentEvent{
 						TurnID: opts.TurnID, Type: EventToolCall,
 						ToolName: name, ToolID: id, Phase: "selected",
 						DisplayText: display.DisplayText, ActivityKind: display.ActivityKind,
@@ -186,7 +196,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 
 					args := parseArgs(rawArgs)
 					display := a.buildDisplay(name, args, mcp_tools.PhaseExecuting, opts.NovelID)
-					wails.EventsEmit(ctx, "agent:"+strconv.Itoa(opts.TurnID), AgentEvent{
+					emit(AgentEvent{
 						TurnID: opts.TurnID, Type: EventToolCall,
 						ToolName: name, ToolID: id, Phase: "executing",
 						ToolArgs: args, DisplayText: display.DisplayText, ActivityKind: display.ActivityKind,
@@ -201,7 +211,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						phase = "failed"
 					}
 					display = a.buildDisplay(name, args, displayPhase(phase), opts.NovelID)
-					wails.EventsEmit(ctx, "agent:"+strconv.Itoa(opts.TurnID), AgentEvent{
+					emit(AgentEvent{
 						TurnID: opts.TurnID, Type: EventToolCall,
 						ToolName: name, ToolID: id, Phase: phase,
 						ToolArgs: args, Success: result.Success, ErrMsg: result.Error,
@@ -232,7 +242,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 
 				case llm.EventError:
 					// 流错误：保存 partial 后返回
-					wails.EventsEmit(ctx, "agent:"+strconv.Itoa(opts.TurnID), AgentEvent{
+					emit(AgentEvent{
 						TurnID: opts.TurnID, Type: EventError,
 						ErrMsg: FriendlyError(event.Error), Timestamp: time.Now(),
 					})
@@ -248,7 +258,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 		// ---- 流结束，判断是否有工具调用 ----
 		if len(toolOutputs) == 0 {
 			if isThinking {
-				wails.EventsEmit(ctx, "agent:"+strconv.Itoa(opts.TurnID), AgentEvent{
+				emit(AgentEvent{
 					TurnID: opts.TurnID, Type: EventThinkingDone, Timestamp: time.Now(),
 				})
 			}
@@ -285,7 +295,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 		if isStuckLoop(patterns, toolOutputs, loopCount) {
 			content := "<system-reminder>\n系统检测到可能陷入重复调用。请基于已获取的信息直接开始写作，或明确告诉我你需要什么新的操作。\n</system-reminder>"
 			a.appendMsg("user", content, nil, &opts, runningTokens)
-			wails.EventsEmit(ctx, "agent:"+strconv.Itoa(opts.TurnID), AgentEvent{
+			emit(AgentEvent{
 				TurnID: opts.TurnID, Type: EventToolCall, Phase: "loop_detected", Timestamp: time.Now(),
 			})
 		}

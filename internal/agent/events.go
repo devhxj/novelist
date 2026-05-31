@@ -18,6 +18,7 @@ const (
 // 仅包含前端展示所需字段，不引用任何内部类型。
 type AgentEvent struct {
 	TurnID       int            `json:"turn_id"`
+	Seq          int            `json:"seq,omitempty"` // 单个 turn 内的事件序号，用于前端恢复流式顺序
 	Type         AgentEventType `json:"type"`
 	Data         string         `json:"data,omitempty"`          // thinking / content 文本 chunk
 	ToolName     string         `json:"tool_name,omitempty"`     // EventToolCall 时

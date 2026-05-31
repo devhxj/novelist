@@ -22,6 +22,18 @@ interface Props {
 const MIN_WIDTH = 280
 const MAX_WIDTH = 600
 const DEFAULT_WIDTH = 360
+const EVENT_REORDER_TIMEOUT = 120
+
+interface EventQueue {
+  nextSeq: number
+  pending: Map<number, AgentEvent>
+  flushTimer: ReturnType<typeof setTimeout> | null
+}
+
+interface ChatStartedEvent {
+  session_id?: string
+  turn_id: number
+}
 
 export default function ChatPanel({ novelId }: Props) {
   const app = useApp()
@@ -47,6 +59,7 @@ export default function ChatPanel({ novelId }: Props) {
   const counterRef = useRef(0)
   const startedUnsubRef = useRef<(() => void) | null>(null)
   const agentUnsubRef = useRef<(() => void) | null>(null)
+  const eventQueuesRef = useRef<Map<number, EventQueue>>(new Map())
 
   // 加载模型列表
   useEffect(() => {
@@ -112,9 +125,14 @@ export default function ChatPanel({ novelId }: Props) {
 
   // 清理事件监听器
   useEffect(() => {
+    const eventQueues = eventQueuesRef.current
     return () => {
       startedUnsubRef.current?.()
       agentUnsubRef.current?.()
+      eventQueues.forEach(queue => {
+        if (queue.flushTimer) clearTimeout(queue.flushTimer)
+      })
+      eventQueues.clear()
     }
   }, [])
 
@@ -143,7 +161,7 @@ export default function ChatPanel({ novelId }: Props) {
     setShowHistoryPanel(false)
   }, [])
 
-  const handleAgentEvent = useCallback((turnId: number) => (event: AgentEvent) => {
+  const applyAgentEvent = useCallback((turnId: number, event: AgentEvent) => {
     switch (event.type) {
       case AgentEventType.Usage: {
         if (event.usage) {
@@ -253,6 +271,65 @@ export default function ChatPanel({ novelId }: Props) {
     }))
   }, [])
 
+  const flushEventQueue = useCallback((turnId: number, force = false) => {
+    const queue = eventQueuesRef.current.get(turnId)
+    if (!queue) return
+
+    let event = queue.pending.get(queue.nextSeq)
+    while (event) {
+      queue.pending.delete(queue.nextSeq)
+      queue.nextSeq += 1
+      applyAgentEvent(turnId, event)
+      event = queue.pending.get(queue.nextSeq)
+    }
+
+    if (force && queue.pending.size > 0) {
+      const orderedEvents = [...queue.pending.entries()].sort(([a], [b]) => a - b)
+      queue.pending.clear()
+
+      for (const [seq, queuedEvent] of orderedEvents) {
+        if (seq >= queue.nextSeq) {
+          queue.nextSeq = seq + 1
+          applyAgentEvent(turnId, queuedEvent)
+        }
+      }
+    }
+
+    if (queue.pending.size === 0 && queue.flushTimer) {
+      clearTimeout(queue.flushTimer)
+      queue.flushTimer = null
+    }
+  }, [applyAgentEvent])
+
+  const handleAgentEvent = useCallback((turnId: number) => (event: AgentEvent) => {
+    if (!event.seq) {
+      applyAgentEvent(turnId, event)
+      return
+    }
+
+    let queue = eventQueuesRef.current.get(turnId)
+    if (!queue) {
+      queue = {
+        nextSeq: 1,
+        pending: new Map<number, AgentEvent>(),
+        flushTimer: null,
+      }
+      eventQueuesRef.current.set(turnId, queue)
+    }
+
+    if (event.seq < queue.nextSeq) return
+
+    queue.pending.set(event.seq, event)
+    flushEventQueue(turnId)
+
+    if (queue.pending.size > 0 && !queue.flushTimer) {
+      queue.flushTimer = setTimeout(() => {
+        queue.flushTimer = null
+        flushEventQueue(turnId, true)
+      }, EVENT_REORDER_TIMEOUT)
+    }
+  }, [applyAgentEvent, flushEventQueue])
+
   const handleConfigModel = useCallback(() => setShowSettings(true), [])
 
   const handleSelectModel = useCallback((key: string) => {
@@ -296,7 +373,7 @@ export default function ChatPanel({ novelId }: Props) {
 
     // 监听 chat:started，拿到 turnId 后订阅 agent 事件流
     startedUnsubRef.current?.()
-    const startedCleanup = EventsOn('chat:started', (data: any) => {
+    const startedCleanup = EventsOn('chat:started', (data: ChatStartedEvent) => {
       if (data.session_id) {
         setSessionId(data.session_id)
         setActiveSessionId(data.session_id)
@@ -331,6 +408,18 @@ export default function ChatPanel({ novelId }: Props) {
         t.id === turnId ? { ...t, status: 'failed' as const, errorMessage: String(err) } : t
       ))
     } finally {
+      eventQueuesRef.current.forEach((queue, queuedTurnId) => {
+        if (queue.flushTimer) clearTimeout(queue.flushTimer)
+        const orderedEvents = [...queue.pending.entries()].sort(([a], [b]) => a - b)
+        queue.pending.clear()
+        for (const [seq, queuedEvent] of orderedEvents) {
+          if (seq >= queue.nextSeq) {
+            queue.nextSeq = seq + 1
+            applyAgentEvent(queuedTurnId, queuedEvent)
+          }
+        }
+      })
+      eventQueuesRef.current.clear()
       setTurns(prev => prev.map(t =>
         t.id === turnId && t.status === 'streaming'
           ? { ...t, status: 'done' as const, segments: t.segments.map(seg =>
@@ -344,7 +433,7 @@ export default function ChatPanel({ novelId }: Props) {
       agentUnsubRef.current?.()
       agentUnsubRef.current = null
     }
-  }, [sessionId, novelId, selectedKey, reasoningEffort, app, handleAgentEvent, activeSessionId])
+  }, [sessionId, novelId, selectedKey, reasoningEffort, app, handleAgentEvent, applyAgentEvent, activeSessionId])
 
   const hasNovel = novelId > 0
   const hasTurns = turns.length > 0
