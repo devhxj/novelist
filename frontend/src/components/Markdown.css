@@ -1,0 +1,172 @@
+/* Prose 主题变量：连接到项目颜色 token */
+.prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-lead: var(--muted-foreground);
+  --tw-prose-links: var(--primary);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-counters: var(--muted-foreground);
+  --tw-prose-bullets: var(--muted-foreground);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--muted-foreground);
+  --tw-prose-quote-borders: var(--primary);
+  --tw-prose-captions: var(--muted-foreground);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-pre-code: var(--foreground);
+  --tw-prose-pre-bg: var(--muted);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+}
+
+.dark .prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-pre-code: var(--foreground);
+  --tw-prose-pre-bg: var(--muted);
+  --tw-prose-quotes: var(--muted-foreground);
+  --tw-prose-hr: var(--border);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+}
+
+/* Chat 紧凑间距：覆盖 prose 默认的大段间距 */
+.prose-sm :where(p, ul, ol):not(:where([class~="not-prose"] *)) {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+.prose-sm :where(h2, h3, h4):not(:where([class~="not-prose"] *)) {
+  margin-top: 0.6em;
+  margin-bottom: 0.2em;
+}
+.prose-sm :where(pre, table, blockquote, hr):not(:where([class~="not-prose"] *)) {
+  margin-top: 0.4em;
+  margin-bottom: 0.4em;
+}
+.prose-sm :where(li > p):not(:where([class~="not-prose"] *)) {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.prose-sm :where(figure):not(:where([class~="not-prose"] *)) {
+  margin-top: 0.4em;
+  margin-bottom: 0.4em;
+}
+.prose-sm :where(figure figcaption):not(:where([class~="not-prose"] *)) {
+  margin-top: 0.25em;
+}
+
+/* 用户消息：颜色继承气泡，不用 prose 默认色 */
+.markdown-user {
+  --tw-prose-body: inherit;
+  --tw-prose-headings: inherit;
+  --tw-prose-links: inherit;
+  --tw-prose-bold: inherit;
+  --tw-prose-counters: inherit;
+  --tw-prose-bullets: inherit;
+  --tw-prose-quotes: inherit;
+  --tw-prose-code: inherit;
+}
+
+.markdown-user a {
+  border-bottom: 1px solid color-mix(in oklab, currentColor 45%, transparent);
+}
+
+/* 代码块外壳 + 工具栏（prose 不处理这些） */
+.markdown-code-block {
+  margin: 0.72rem 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--border) 86%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklab, var(--card) 88%, var(--muted));
+  box-shadow: 0 8px 24px color-mix(in oklab, var(--foreground) 7%, transparent);
+}
+
+.markdown-code-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.7rem;
+  background: color-mix(in oklab, var(--muted) 72%, transparent);
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 78%, transparent);
+}
+
+.markdown-code-lang {
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.markdown-code-copy {
+  color: var(--muted-foreground);
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  font-size: 0.75rem;
+  opacity: 0;
+  transition: color 150ms ease, opacity 150ms ease;
+}
+
+.markdown-code-block:hover .markdown-code-copy,
+.markdown-code-copy:focus-visible {
+  opacity: 1;
+}
+
+.markdown-code-copy:hover {
+  color: var(--foreground);
+}
+
+.markdown-code-pre {
+  margin: 0;
+  padding: 0.85rem 0.95rem;
+  overflow-x: auto;
+  background: transparent;
+  color: inherit;
+  font-size: 0.84rem;
+  line-height: 1.65;
+}
+
+.markdown-code-pre code {
+  display: block;
+  min-width: max-content;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  white-space: pre;
+}
+
+/* KaTeX 显示公式 */
+.prose .katex-display {
+  margin: 0.65rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* Highlight.js 语法着色 */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-title.function_ {
+  color: oklch(0.57 0.22 264);
+}
+
+.hljs-string,
+.hljs-attr,
+.hljs-template-variable {
+  color: oklch(0.57 0.16 145);
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-built_in {
+  color: oklch(0.62 0.18 48);
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--muted-foreground);
+  font-style: italic;
+}

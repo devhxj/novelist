@@ -7,6 +7,7 @@ import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
 import hljs from 'highlight.js/lib/common'
 import 'katex/dist/katex.min.css'
+import './Markdown.css'
 
 interface MarkdownProps {
   content: string
@@ -59,7 +60,7 @@ function CodeBlock({ className, children }: CodeBlockProps) {
   }, [code])
 
   return (
-    <div className="markdown-code-block group">
+    <div className="markdown-code-block group not-prose">
       <div className="markdown-code-toolbar">
         <span className="markdown-code-lang">{lang || 'text'}</span>
         <button
@@ -129,7 +130,7 @@ export default function Markdown({ content, className }: MarkdownProps) {
   const normalizedContent = content.replace(/\r\n?/g, '\n').replace(/^\n+/, '')
 
   return (
-    <div className={`markdown-body ${className || ''}`}>
+    <div className={`prose prose-sm max-w-none dark:prose-invert ${className || ''}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex, rehypeRaw]}
