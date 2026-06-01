@@ -120,14 +120,15 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 	// 8. 持久化最终回复（成功路径；错误/取消路径由 agent 自行持久化 partial）
 	if runErr == nil && result.FinalText != "" {
 		finalMsg := &session.Message{
-			SessionID:  sess.SessionID,
-			TurnID:     turnID,
-			Role:       "assistant",
-			Content:    result.FinalText,
-			Version:    sess.ActiveVersion,
-			ToAPI:      true,
-			ToFrontend: true,
-			AgentType:  "main",
+			SessionID:       sess.SessionID,
+			TurnID:          turnID,
+			Role:            "assistant",
+			Content:         result.FinalText,
+			ThinkingContent: result.ThinkingContent,
+			Version:         sess.ActiveVersion,
+			ToAPI:           true,
+			ToFrontend:      true,
+			AgentType:       "main",
 		}
 		if err := a.session.DB.WithContext(ctx).Create(finalMsg).Error; err != nil {
 			a.logger.Warn("持久化最终回复失败", "err", err)

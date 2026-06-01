@@ -87,13 +87,7 @@ export function rebuildTurns(messages: session.Message[]): Turn[] {
       }
       turns.push(current)
     } else if (msg.role === 'assistant' && msg.agent_type === 'main' && current) {
-      let thinkingContent = ''
-      if (msg.extra_metadata) {
-        try {
-          const meta = JSON.parse(msg.extra_metadata)
-          thinkingContent = meta.thinking_content || ''
-        } catch { /* ignore */ }
-      }
+      const thinkingContent = msg.thinking_content || ''
       current.segments.push({
         id: `seg_${msg.turn_id}_${segCounter++}`,
         type: 'text',

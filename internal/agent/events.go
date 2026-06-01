@@ -36,6 +36,7 @@ type AgentEvent struct {
 
 // AgentLoopResult 是 Run() 的返回值。
 type AgentLoopResult struct {
-	FinalText string
-	TurnCount int
+	FinalText       string
+	ThinkingContent string
+	TurnCount       int
 }

@@ -36,9 +36,10 @@ type Message struct {
 	SessionID     string    `gorm:"column:session_id;index;not null"                             json:"session_id"`
 	TurnID        int       `gorm:"column:turn_id;not null;default:0;index"                      json:"turn_id"`         // 所属 turn，回退时直接 DELETE WHERE turn_id
 	Role          string    `gorm:"column:role;not null"                                          json:"role"`           // "system" | "user" | "assistant" | "tool"
-	Content       string    `gorm:"column:content;not null"                                       json:"content"`
-	TokenCount    int       `gorm:"column:token_count;not null;default:0"                        json:"token_count"`
-	ExtraMetadata string    `gorm:"column:extra_metadata"                                         json:"extra_metadata,omitempty"` // JSON：tool_calls / thinking_content / tool_call_id / display_text 等
+	Content         string    `gorm:"column:content;not null"                                       json:"content"`
+	ThinkingContent string    `gorm:"column:thinking_content"                                     json:"thinking_content,omitempty"`
+	TokenCount      int       `gorm:"column:token_count;not null;default:0"                        json:"token_count"`
+	ExtraMetadata   string    `gorm:"column:extra_metadata"                                         json:"extra_metadata,omitempty"` // JSON：tool_calls / tool_call_id / display_text 等
 	Version       int       `gorm:"column:version;not null;default:1;index"                      json:"version"`                   // 压缩代数，查询时 = session.active_version
 	ToAPI         bool      `gorm:"column:to_api;not null;default:0;index"                       json:"to_api"`                    // LLM context 是否需要此消息。注：default:0 原因同上，子 agent 的 ToAPI=false 不能被默认值覆盖
 	ToFrontend    bool      `gorm:"column:to_frontend;not null;default:0;index"                  json:"to_frontend"`               // 前端是否需要渲染此消息。注：default:0 必须与 Go false 一致，否则 GORM 跳过零值时 DB 填入默认值 1 导致泄漏
@@ -59,21 +60,19 @@ func (m *Message) ToAPIFormat() map[string]any {
 	}
 
 	if m.Role == "assistant" {
+		if m.ThinkingContent != "" {
+			payload["reasoning_content"] = m.ThinkingContent
+		}
 		var meta map[string]any
 		if m.ExtraMetadata != "" {
 			json.Unmarshal([]byte(m.ExtraMetadata), &meta)
 		}
 		if meta != nil {
-			hasToolCalls := false
 			if tc, ok := meta["tool_calls"]; ok {
 				payload["tool_calls"] = tc
-				hasToolCalls = true
-			}
-			if thinking, ok := meta["thinking_content"]; ok && thinking != nil {
-				payload["reasoning_content"] = thinking
-			} else if hasToolCalls {
-				// DeepSeek 要求有 tool_calls 时必须带 reasoning_content
-				payload["reasoning_content"] = ""
+				if m.ThinkingContent == "" {
+					payload["reasoning_content"] = ""
+				}
 			}
 		}
 	}

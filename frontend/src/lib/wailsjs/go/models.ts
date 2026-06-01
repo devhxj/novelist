@@ -380,6 +380,7 @@ export namespace session {
 	    turn_id: number;
 	    role: string;
 	    content: string;
+	    thinking_content?: string;
 	    token_count: number;
 	    extra_metadata?: string;
 	    version: number;
@@ -402,6 +403,7 @@ export namespace session {
 	        this.turn_id = source["turn_id"];
 	        this.role = source["role"];
 	        this.content = source["content"];
+	        this.thinking_content = source["thinking_content"];
 	        this.token_count = source["token_count"];
 	        this.extra_metadata = source["extra_metadata"];
 	        this.version = source["version"];
