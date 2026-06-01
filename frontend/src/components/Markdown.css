@@ -104,10 +104,10 @@
 }
 
 .prose thead th {
-  background: color-mix(in oklab, var(--muted) 85%, transparent);
-  font-weight: 650;
-  font-size: 0.82em;
-  color: var(--muted-foreground);
+  background: color-mix(in oklab, var(--muted) 90%, var(--foreground) 10%);
+  font-weight: 700;
+  font-size: 0.85em;
+  color: var(--foreground);
   text-transform: none;
   letter-spacing: 0;
   padding: 0.55rem 0.75rem;
