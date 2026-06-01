@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useApp } from '@/hooks/useApp'
 import type { novel, chapter } from '@/hooks/useApp'
+import { useEditorTabs } from '@/hooks/useEditorTabs'
 import ActivityBar from '@/components/shell/ActivityBar'
 import StatusBar from '@/components/shell/StatusBar'
 import SidePanel from '@/components/novel/SidePanel'
@@ -10,8 +11,7 @@ import GitHubLink from '@/components/shell/GitHubLink'
 import SettingsDialog from '@/components/settings/SettingsDialog'
 import { Settings } from 'lucide-react'
 import type { OnMount } from '@monaco-editor/react'
-
-type EditingTarget = { type: 'chapter'; path: string; title: string } | { type: 'goink'; path: string; title: string } | null
+import { EventsOn, EventsOff } from '@/lib/wailsjs/runtime/runtime'
 
 interface Props {
   initialNovelId: number
@@ -19,6 +19,12 @@ interface Props {
 
 export default function WorkspaceView({ initialNovelId }: Props) {
   const app = useApp()
+  const {
+    tabs, activeTab, activeTabId,
+    openTab, closeTab, setActiveTabId,
+    updateTab, openDiffTab,
+  } = useEditorTabs()
+
   const [novels, setNovels] = useState<novel.Novel[]>([])
   const [activeNovelId, setActiveNovelId] = useState(initialNovelId)
   const [activePanel, setActivePanel] = useState(initialNovelId ? 'chapters' : 'novels')
@@ -29,15 +35,11 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   const [chapterTitle, setChapterTitle] = useState('')
   const [showCreateChapter, setShowCreateChapter] = useState(false)
   const [expandedBlocks, setExpandedBlocks] = useState<Set<number>>(new Set())
-  const [target, setTarget] = useState<EditingTarget>(null)
-  const [editorContent, setEditorContent] = useState('')
-  const [editorViewMode, setEditorViewMode] = useState<'content' | 'outline'>('content')
   const [isLoadingContent, setIsLoadingContent] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
-  const contentRef = useRef('')
-  const targetRef = useRef<EditingTarget>(null)
+  const savingTabRef = useRef<{ id: string; path: string; content: string } | null>(null)
   const novelIdRef = useRef(activeNovelId)
   const loadedRef = useRef(false)
   const BLOCK_SIZE = 100
@@ -67,6 +69,8 @@ export default function WorkspaceView({ initialNovelId }: Props) {
     })
   }
 
+  // ── Data loading ──────────────────────────────────────────
+
   const loadNovels = useCallback(async () => {
     const list = await app.GetNovels()
     setNovels(list ?? [])
@@ -89,11 +93,122 @@ export default function WorkspaceView({ initialNovelId }: Props) {
 
   useEffect(() => {
     novelIdRef.current = activeNovelId
-    setTarget(null)
-    targetRef.current = null
-    setEditorContent('')
-    contentRef.current = ''
   }, [activeNovelId])
+
+  // ── Tab management ────────────────────────────────────────
+
+  async function handleSelectChapter(ch: chapter.Chapter) {
+    const path = ch.file_path
+    const title = `第${ch.chapter_number}章 ${ch.title}`
+    const existing = tabs.find(t => t.path === path && t.type === 'edit')
+    if (existing) { setActiveTabId(existing.id); return }
+
+    setIsLoadingContent(true)
+    try {
+      const content = await app.GetContent(activeNovelId, path)
+      openTab({ type: 'edit', path, title, content, isDirty: false, viewMode: 'content' })
+    } catch {
+      openTab({ type: 'edit', path, title, content: '', isDirty: false, viewMode: 'content' })
+    } finally {
+      setIsLoadingContent(false)
+    }
+  }
+
+  function handleSelectGoink() {
+    const path = 'goink.md'
+    const title = '故事状态'
+    const existing = tabs.find(t => t.path === path && t.type === 'edit')
+    if (existing) { setActiveTabId(existing.id); return }
+
+    setIsLoadingContent(true)
+    app.GetContent(activeNovelId, path).then(content => {
+      openTab({ type: 'edit', path, title, content, isDirty: false, viewMode: 'content' })
+    }).catch(() => {
+      openTab({ type: 'edit', path, title, content: '', isDirty: false, viewMode: 'content' })
+    }).finally(() => setIsLoadingContent(false))
+  }
+
+  function handleEditorChange(tabId: string, value: string | undefined) {
+    const content = value ?? ''
+    updateTab(tabId, { content, isDirty: true })
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    const tab = tabs.find(t => t.id === tabId)
+    if (!tab) return
+    savingTabRef.current = { id: tabId, path: tab.path, content }
+    saveTimerRef.current = setTimeout(() => {
+      if (!activeNovelId || !savingTabRef.current) return
+      const s = savingTabRef.current
+      app.SaveContent({ novel_id: activeNovelId, path: s.path, content: s.content })
+      updateTab(s.id, { isDirty: false })
+    }, 500)
+  }
+
+  const handleEditorMount: OnMount = (editor) => {
+    editorRef.current = editor
+    editor.onDidBlurEditorText(() => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      const s = savingTabRef.current
+      const nid = novelIdRef.current
+      if (!nid || !s) return
+      app.SaveContent({ novel_id: nid, path: s.path, content: s.content })
+      updateTab(s.id, { isDirty: false })
+    })
+  }
+
+  function handleSetViewMode(tabId: string, mode: 'content' | 'outline') {
+    updateTab(tabId, { viewMode: mode })
+  }
+
+  // ── Approval event listener ───────────────────────────────
+
+  useEffect(() => {
+    EventsOn('approval:requested', (data: any) => {
+      const p = data?.payload ?? {}
+      let title = `diff: ${p.path || ''}`
+      if (p.path?.startsWith('chapters/')) {
+        const num = p.path.replace('chapters/', '').replace('.md', '')
+        title = `diff: 第${parseInt(num)}章`
+      } else if (p.path === 'goink.md') {
+        title = 'diff: 故事状态'
+      }
+      openDiffTab({
+        path: p.path ?? '',
+        title,
+        diff: p.diff ?? '',
+        original: p.original ?? '',
+        modified: p.modified ?? '',
+        changeType: p.change_type ?? '',
+        reason: p.reason ?? '',
+        toolId: data?.tool_id ?? '',
+      })
+    })
+    return () => { EventsOff('approval:requested') }
+  }, [openDiffTab])
+
+  async function handleApprove(toolId: string) {
+    const diffTab = tabs.find(t => t.type === 'diff' && t.toolId === toolId)
+    await app.ApproveTool(toolId, true, '')
+    // 刷新同路径的编辑 tab 内容
+    if (diffTab) {
+      const editTab = tabs.find(t => t.type === 'edit' && t.path === diffTab.path)
+      if (editTab) {
+        try {
+          const content = await app.GetContent(activeNovelId, diffTab.path)
+          updateTab(editTab.id, { content, isDirty: false })
+        } catch { /* tab may have been closed */ }
+      }
+      closeTab(diffTab.id)
+    }
+  }
+
+  async function handleReject(toolId: string) {
+    const diffTab = tabs.find(t => t.type === 'diff' && t.toolId === toolId)
+    await app.ApproveTool(toolId, false, '')
+    if (diffTab) closeTab(diffTab.id)
+  }
+
+  // ── Chapter operations ────────────────────────────────────
 
   async function handleCreateChapter() {
     if (!chapterTitle.trim()) return
@@ -103,63 +218,8 @@ export default function WorkspaceView({ initialNovelId }: Props) {
     loadChapters()
   }
 
-  async function selectTarget(t: NonNullable<EditingTarget>) {
-    setTarget(t)
-    targetRef.current = t
-    setEditorViewMode('content')
-    setIsLoadingContent(true)
-    try {
-      const content = await app.GetContent(activeNovelId, t.path)
-      setEditorContent(content)
-      contentRef.current = content
-    } catch {
-      setEditorContent('')
-      contentRef.current = ''
-    } finally {
-      setIsLoadingContent(false)
-    }
-  }
+  // ── Auto-select active novel ──────────────────────────────
 
-  function handleSelectChapter(ch: chapter.Chapter) {
-    selectTarget({
-      type: 'chapter',
-      path: ch.file_path,
-      title: `第${ch.chapter_number}章 ${ch.title}`,
-    })
-  }
-
-  function handleSelectGoink() {
-    selectTarget({
-      type: 'goink',
-      path: 'goink.md',
-      title: '故事状态',
-    })
-  }
-
-  function handleEditorChange(value: string | undefined) {
-    const content = value ?? ''
-    setEditorContent(content)
-    contentRef.current = content
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    const t = target
-    saveTimerRef.current = setTimeout(() => {
-      if (!activeNovelId || !t) return
-      app.SaveContent({ novel_id: activeNovelId, path: t.path, content })
-    }, 500)
-  }
-
-  const handleEditorMount: OnMount = (editor) => {
-    editorRef.current = editor
-    editor.onDidBlurEditorText(() => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-      const t = targetRef.current
-      const nid = novelIdRef.current
-      if (!nid || !t) return
-      app.SaveContent({ novel_id: nid, path: t.path, content: contentRef.current })
-    })
-  }
-
-  // 自动选择活跃小说
   useEffect(() => {
     if (!loadedRef.current) return
     const exists = novels.find(n => n.id === activeNovelId)
@@ -224,7 +284,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
           chapters={chapters}
           chapterBlocks={chapterBlocks}
           expandedBlocks={expandedBlocks}
-          target={target}
+          target={activeTab?.type === 'edit' ? { path: activeTab.path, title: activeTab.title } : null}
           onSelectChapter={handleSelectChapter}
           onToggleBlock={toggleBlock}
           onSelectGoink={handleSelectGoink}
@@ -243,13 +303,17 @@ export default function WorkspaceView({ initialNovelId }: Props) {
         />
 
         <EditorArea
-          target={target}
-          editorContent={editorContent}
-          editorViewMode={editorViewMode}
-          setEditorViewMode={setEditorViewMode}
+          tabs={tabs}
+          activeTab={activeTab}
+          activeTabId={activeTabId}
           isLoadingContent={isLoadingContent}
+          onSelectTab={setActiveTabId}
+          onCloseTab={closeTab}
           onEditorChange={handleEditorChange}
           onEditorMount={handleEditorMount}
+          onSetViewMode={handleSetViewMode}
+          onApprove={handleApprove}
+          onReject={handleReject}
           hasNovels={novels.length > 0}
           noChapters={chapters.length === 0}
           onGoToNovels={() => setActivePanel('novels')}

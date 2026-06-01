@@ -76,6 +76,8 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 	// 5. 审批（阻塞等待用户确认）
 	if tc.Approver != nil {
 		approval, err := tc.Approver.RequestApproval(ctx, tc.ToolID, map[string]any{
+			"original":    current,
+			"modified":    proposed,
 			"path":        a.Path,
 			"diff":        diff,
 			"change_type": a.ChangeType,

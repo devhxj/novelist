@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { MessageSquare, Loader2, History, Plus } from 'lucide-react'
-import { EventsOn } from '@/lib/wailsjs/runtime/runtime'
+import { EventsOn, EventsOff } from '@/lib/wailsjs/runtime/runtime'
 import { useApp } from '@/hooks/useApp'
 import type { llm, app } from '@/hooks/useApp'
 import type { AgentEvent, Turn } from './types'
@@ -54,6 +54,15 @@ export default function ChatPanel({ novelId }: Props) {
   const [sessions, setSessions] = useState<app.SessionMeta[]>([])
   const [sessionsTotal, setSessionsTotal] = useState(0)
   const [showHistoryPanel, setShowHistoryPanel] = useState(false)
+  const [approvalToolIds, setApprovalToolIds] = useState<Set<string>>(new Set())
+
+  // 监听审批请求，更新工具卡片状态
+  useEffect(() => {
+    EventsOn('approval:requested', (data: any) => {
+      setApprovalToolIds(prev => new Set(prev).add(data?.tool_id ?? ''))
+    })
+    return () => { EventsOff('approval:requested') }
+  }, [])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -255,6 +264,15 @@ export default function ChatPanel({ novelId }: Props) {
           const toolStatus = event.phase === 'completed' ? 'completed' as const
             : event.phase === 'failed' ? 'failed' as const
             : 'executing' as const
+
+          // 工具结束即清除审批等待标记
+          if (toolStatus !== 'executing' && event.tool_id) {
+            setApprovalToolIds(prev => {
+              const next = new Set(prev)
+              next.delete(event.tool_id!)
+              return next
+            })
+          }
 
           if (idx >= 0) {
             segments[idx] = {
@@ -540,6 +558,7 @@ export default function ChatPanel({ novelId }: Props) {
                             displayText={seg.displayText}
                             status={seg.toolStatus}
                             error={seg.error}
+                            isAwaitingApproval={approvalToolIds.has(seg.toolId)}
                           />
                         )
                       }
