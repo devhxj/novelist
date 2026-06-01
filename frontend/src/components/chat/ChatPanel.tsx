@@ -457,9 +457,7 @@ export default function ChatPanel({ novelId }: Props) {
     ? '请先选择作品'
     : !selectedKey
       ? '请先配置模型'
-      : isLoading
-        ? 'AI 回复中...'
-        : '输入消息...'
+      : '输入消息...'
 
   return (
     <aside className="shrink-0 flex flex-col bg-background border-l relative" style={{ width }}>
@@ -586,9 +584,11 @@ export default function ChatPanel({ novelId }: Props) {
       </div>
 
       <ChatInput
-        disabled={!hasNovel || isLoading || !selectedKey}
+        disabled={!hasNovel || !selectedKey}
+        isLoading={isLoading}
         placeholder={inputPlaceholder}
         onSend={handleSend}
+        onStop={() => app.CancelChat(sessionId)}
       />
 
       <div className="border-t mx-4" />

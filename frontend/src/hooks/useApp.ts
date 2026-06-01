@@ -1,5 +1,6 @@
 import {
   ApproveTool,
+  CancelChat,
   Chat,
   CreateChapter,
   CreateNovel,
@@ -26,6 +27,7 @@ import type { app, novel, chapter, config, llm, session } from '@/lib/wailsjs/go
 
 export function useApp() {
   return {
+    CancelChat,
     Chat,
     CreateChapter,
     CreateNovel,
