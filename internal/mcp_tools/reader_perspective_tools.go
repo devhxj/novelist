@@ -199,7 +199,11 @@ func (t *CreateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any
 type UpdateReaderPerspectiveEntryArgs struct {
 	EntryID              int `json:"entry_id" jsonschema:"required,description=要更新的条目 ID" validate:"required,min=1"`
 	LastMentionedChapter int `json:"last_mentioned_chapter" jsonschema:"description=最近提及的章节号"`
+	Content              string `json:"content" jsonschema:"description=更新后的完整内容描述"`
 	RevealedChapter      int `json:"revealed_chapter" jsonschema:"description=实际揭露或回收的章节号（设置后该条目不再出现在活跃列表中）"`
+	PlantedChapter       int    `json:"planted_chapter" jsonschema:"description=在哪章种下的章节号"`
+	RelatedTruth         string `json:"related_truth" jsonschema:"description=作者视角的真实情况（支持所有类型）"`
+	Type                 string `json:"type" jsonschema:"description=条目类型：known（已知信息）、suspense（悬念）、misconception（读者误知）"`
 }
 
 // UpdateReaderPerspectiveEntryTool 更新读者认知条目。
@@ -224,7 +228,7 @@ func (t *UpdateReaderPerspectiveEntryTool) NewArgs() any     { return &UpdateRea
 func (t *UpdateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
 	a := args.(*UpdateReaderPerspectiveEntryArgs)
 
-	if a.LastMentionedChapter == 0 && a.RevealedChapter == 0 {
+	if a.LastMentionedChapter == 0 && a.RevealedChapter == 0 && a.PlantedChapter == 0 && a.Content == "" && a.Type == "" && a.RelatedTruth == "" {
 		return &ToolResult{Success: false, Error: "至少需要提供一个要修改的字段"}, nil
 	}
 
