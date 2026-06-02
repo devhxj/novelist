@@ -1,0 +1,104 @@
+.tool-card {
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  transition: background 0.2s ease, border-color 0.2s ease;
+  font-size: 0.75rem;
+  max-width: 85%;
+}
+
+.tool-card.executing {
+  border-left: 3px solid oklch(0.62 0.19 250); /* blue */
+  background: oklch(0.97 0.01 250);
+}
+.tool-card.completed {
+  border-left: 3px solid oklch(0.5 0.15 155); /* green */
+  background: oklch(0.97 0.02 155);
+  opacity: 0.85;
+}
+.tool-card.failed {
+  border-left: 3px solid oklch(0.58 0.22 27); /* red */
+  background: oklch(0.97 0.01 27);
+}
+
+.tool-card.compact {
+  font-size: 0.68rem;
+  max-width: none;
+}
+.tool-card.compact.executing {
+  border-left-color: oklch(0.6 0.12 250);
+  background: oklch(0.98 0.01 250);
+}
+.tool-card.compact.completed {
+  border-left-color: oklch(0.45 0.08 155);
+  background: oklch(0.98 0.01 155);
+}
+.tool-card.compact.failed {
+  border-left-color: oklch(0.5 0.12 27);
+  background: oklch(0.98 0.01 27);
+}
+
+/* ── Row ── */
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem 0.35rem 0.6rem;
+}
+
+.tool-row.compact {
+  padding: 0.2rem 0.4rem 0.2rem 0.5rem;
+}
+
+/* ── Icon ── */
+.tool-icon {
+  flex-shrink: 0;
+}
+.tool-card.executing .tool-icon { color: oklch(0.62 0.19 250); }
+.tool-card.completed .tool-icon { color: oklch(0.5 0.15 155); }
+.tool-card.failed     .tool-icon { color: oklch(0.58 0.22 27); }
+
+/* ── Label ── */
+.tool-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: oklch(0.35 0 0);
+  line-height: 1.35;
+}
+.tool-card.completed .tool-label { color: oklch(0.5 0 0); }
+
+/* ── Badge ── */
+.tool-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 500;
+}
+.tool-card.executing .tool-badge {
+  color: oklch(0.62 0.19 250);
+  background: oklch(0.94 0.04 250);
+}
+.tool-badge-done {
+  color: #389e0d;
+  background: rgba(82, 196, 26, 0.1);
+}
+.tool-badge-failed {
+  color: #cf1322;
+  background: rgba(255, 77, 79, 0.08);
+}
+
+/* ── Error line ── */
+.tool-error {
+  padding: 0.15rem 0.6rem 0.35rem;
+  color: oklch(0.58 0.22 27 / 0.7);
+  font-size: 0.6rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-top: 1px solid oklch(0.58 0.22 27 / 0.1);
+}

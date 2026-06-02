@@ -111,7 +111,7 @@ export function rebuildTurns(messages: session.Message[]): Turn[] {
             segments: [],
             finalText: '',
           }
-          current!.segments.push(seg)
+          // 不直接 push——等遇到 run_subagent tool_display 时插到正确位置
           subagentCache.set(subTaskId, seg)
           return seg
         })()
@@ -171,6 +171,12 @@ export function rebuildTurns(messages: session.Message[]): Turn[] {
       // 工具展示信息
       const toolDisplays = parseToolDisplays(msg.extra_metadata)
       for (const td of toolDisplays) {
+        // run_subagent：在此位置插入子 Agent 卡片
+        if (td.tool_name === 'run_subagent') {
+          const cached = subagentCache.get(td.tool_id)
+          if (cached) current.segments.push(cached)
+          continue
+        }
         current.segments.push({
           ...emptySegment(`seg_${segCounter++}`),
           type: 'tool',

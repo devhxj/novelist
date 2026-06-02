@@ -213,10 +213,23 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
 
       // 子 Agent 事件：按 sub_task_id 路由到对应 SubagentSegment
       if (event.sub_task_id) {
-        const subIdx = turn.segments.findIndex(s =>
+        let subIdx = turn.segments.findIndex(s =>
           s.type === 'subagent' && s.taskId === event.sub_task_id
         )
-        if (subIdx < 0) return turn
+        if (subIdx < 0) {
+          // run_subagent 的 ToolCall 事件还没 apply，子 Agent 事件先到了——就地创建
+          turn.segments.push({
+            ...emptySegment(`subagent_${event.sub_task_id}`),
+            type: 'subagent' as const,
+            status: 'streaming' as const,
+            agentType: 'memory' as const,
+            taskId: event.sub_task_id,
+            segments: [],
+            finalText: '',
+            toolStatus: 'executing' as const,
+          })
+          subIdx = turn.segments.length - 1
+        }
         const subSeg = { ...turn.segments[subIdx] }
         if (!subSeg.segments) subSeg.segments = []
         const subSegs = [...subSeg.segments]
@@ -380,7 +393,11 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
                 toolStatus: 'executing',
               })
             }
-            return { ...turn, segments }
+            // 移除同 toolId 的 tool segment（可能由空 toolName 的早期事件误创建）
+            const cleanSegs = toolId
+              ? segments.filter(seg => !(seg.type === 'tool' && seg.toolId === toolId))
+              : segments
+            return { ...turn, segments: cleanSegs }
           }
 
           const idx = segments.findIndex(seg =>
@@ -709,10 +726,12 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
                       return (
                         <div key={seg.id}>
                           {seg.thinkingContent && (
-                            <ThinkingBlock
-                              content={seg.thinkingContent}
-                              isStreaming={!seg.thinkingDone && seg.isStreaming}
-                            />
+                            <div className="max-w-[85%]">
+                              <ThinkingBlock
+                                content={seg.thinkingContent}
+                                isStreaming={!seg.thinkingDone && seg.isStreaming}
+                              />
+                            </div>
                           )}
                           {seg.content && (
                             <MessageBubble role="assistant" content={seg.content} />

@@ -153,6 +153,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 	if eventSeq == nil {
 		seq := 0
 		eventSeq = &seq
+		opts.EventSeq = eventSeq //回写 子agent才能共享这个值
 	}
 	emit := func(event AgentEvent) {
 		*eventSeq++
@@ -262,6 +263,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						},
 					}
 					result := a.registry.Execute(ctx, name, rawArgs, tc, opts.AllowedTools)
+					a.logger.Info("tool executed", "tool", name, "success", result.Success, "phase", map[bool]string{true: "completed", false: "failed"}[result.Success])
 
 					phase := "completed"
 					if !result.Success {
@@ -319,6 +321,10 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 					TurnID: opts.TurnID, Type: EventThinkingDone, Timestamp: time.Now(),
 				})
 			}
+			if responseBuffer != "" || thinkingBuffer != "" {
+				a.appendMsg("assistant", responseBuffer, thinkingBuffer,
+					nil, &opts, runningTokens)
+			} //此处持久化最终信息，主agent和subagent共享避免遗漏
 			break
 		}
 
@@ -385,6 +391,7 @@ func (a *Agent) appendMsg(role, content, thinkingContent string, extra map[strin
 		ToAPI:           opts.AgentType == "main",
 		ToFrontend:      role == "assistant",
 	}
+	a.logger.Debug("appendMsg", "role", role, "agentType", opts.AgentType, "subTaskID", opts.SubTaskID, "turnID", opts.TurnID)
 	a.db.Create(msg)
 
 	apiFormat := msg.ToAPIFormat()

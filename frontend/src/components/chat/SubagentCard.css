@@ -1,0 +1,85 @@
+.subagent-card {
+  margin: 0.375rem 0 0.375rem 0.75rem;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: box-shadow 0.4s ease;
+}
+
+/* ── Memory: amber ── */
+.subagent-memory {
+  border-left: 3px solid #d4880f;
+  background: #fffbe6;
+}
+
+/* ── Review: teal ── */
+.subagent-review {
+  border-left: 3px solid #008874;
+  background: #e6f7f5;
+}
+
+/* ── Streaming glow ── */
+.subagent-streaming.subagent-memory {
+  box-shadow: 0 0 0 1px rgba(212, 136, 15, 0.14);
+}
+.subagent-streaming.subagent-review {
+  box-shadow: 0 0 0 1px rgba(0, 136, 116, 0.14);
+}
+
+/* ── Header ── */
+.subagent-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  transition: background 150ms ease;
+}
+.subagent-header:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.subagent-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.subagent-label {
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+.subagent-memory .subagent-label { color: #8d6a00; }
+.subagent-review  .subagent-label { color: #006b5c; }
+
+/* ── Badges ── */
+.subagent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 500;
+}
+
+.subagent-memory .subagent-badge-running {
+  color: #8d6a00;
+  background: rgba(212, 136, 15, 0.1);
+}
+.subagent-review .subagent-badge-running {
+  color: #006b5c;
+  background: rgba(0, 136, 116, 0.1);
+}
+
+.subagent-badge-done {
+  color: #389e0d;
+  background: rgba(82, 196, 26, 0.1);
+}
+
+.subagent-badge-failed {
+  color: #cf1322;
+  background: rgba(255, 77, 79, 0.08);
+}
