@@ -11,9 +11,12 @@ dev_test/
 models/
 
 # Build output
-/bin/
-/dist/
-/build/
+/build/bin/
+/build/runtime/
+/build/dist/
+/build/*.AppDir/
+goink
+goink.exe
 
 # Go
 *.mod.cache

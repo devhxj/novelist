@@ -2,8 +2,6 @@ package app
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"runtime"
 
 	"novel/internal/config"
@@ -17,7 +15,7 @@ func (a *App) GetAppConfig() map[string]any {
 	}
 	return map[string]any{
 		"initialized": true,
-		"data_dir":    a.cfg.DataDir,
+		"data_dir":    config.DataDirPath(),
 	}
 }
 
@@ -50,31 +48,14 @@ func (a *App) UpdateDataDir(newPath string) error {
 	}
 
 	a.initWithConfig(cfg)
-	a.logger.Info("数据目录已更改", "data_dir", cfg.DataDir)
+	a.logger.Info("数据目录已更改", "data_dir", config.DataDirPath())
 	return nil
 }
 
 // GetPlatform 返回平台信息，供前端决定默认路径等行为。
 func (a *App) GetPlatform() map[string]any {
-	info := map[string]any{
+	return map[string]any{
 		"os":          runtime.GOOS,
-		"defaultPath": defaultDataDir(),
+		"defaultPath": config.DataDirPath(),
 	}
-	return info
-}
-
-// defaultDataDir 根据平台返回默认数据目录。
-// Windows: 检测 D/E 盘是否存在，否则回退到用户目录。
-// 其他平台: ~/.goink。
-func defaultDataDir() string {
-	if runtime.GOOS == "windows" {
-		for _, drive := range []string{"D:", "E:", "C:"} {
-			root := drive + string(filepath.Separator)
-			if _, err := os.Stat(root); err == nil {
-				return filepath.Join(root, "Goink")
-			}
-		}
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".goink")
 }

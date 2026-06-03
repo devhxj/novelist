@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"gorm.io/gorm"
 
@@ -64,7 +65,17 @@ func (a *App) OnStartup(ctx context.Context) {
 
 	cfg, err := config.Load()
 	if err != nil {
-		a.logger.Warn("应用未初始化，等待用户配置", "err", err)
+		// 首次启动，自动初始化平台默认数据目录
+		dataDir := config.DataDirPath()
+		if mkErr := os.MkdirAll(dataDir, 0700); mkErr != nil {
+			a.logger.Warn("创建数据目录失败", "err", mkErr)
+		}
+		if saveErr := config.Save(dataDir); saveErr != nil {
+			a.logger.Warn("保存初始化配置失败", "err", saveErr)
+		}
+
+		cfg = &config.AppConfig{}
+		a.initWithConfig(cfg)
 		return
 	}
 	a.initWithConfig(cfg)
@@ -83,7 +94,8 @@ func (a *App) IsInitialized() bool {
 	return a.cfg != nil
 }
 
-// Initialize 在用户选择数据目录后完成首次初始化。
+// Initialize 在用户触发首次初始化时调用。
+// dataDir 参数保留用于前端兼容，实际数据目录由平台决定。
 func (a *App) Initialize(dataDir string) error {
 	if err := config.Save(dataDir); err != nil {
 		return fmt.Errorf("保存配置失败: %w", err)
@@ -104,10 +116,10 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 	config.Set(cfg)
 
 	// 1. 异步加载 ONNX 模型（不阻塞 GUI，尽早调用）
-	rag.InitEmbedder(cfg.ModelsDir(), a.logger)
+	rag.InitEmbedder(config.ModelsDir(), a.logger)
 
 	// 2. 打开全局数据库
-	db, err := storage.Open(cfg.GlobalDBPath(), a.logger)
+	db, err := storage.Open(config.GlobalDBPath(), a.logger)
 	if err != nil {
 		a.logger.Error("打开数据库失败", "err", err)
 		return
@@ -174,5 +186,5 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 	// 10. 创建 Agent 实例（全局复用）
 	a.agent = agent.New(a.llmClient, a.registry, a.session, a.db, a.approvals, a.logger)
 
-	a.logger.Info("应用初始化完成", "data_dir", cfg.DataDir)
+	a.logger.Info("应用初始化完成", "data_dir", config.DataDirPath())
 }

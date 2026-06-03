@@ -42,7 +42,7 @@ func (a *App) CreateNovel(input CreateNovelInput) (*novel.Novel, error) {
 		return nil, fmt.Errorf("failed to create novel: %w", err)
 	}
 
-	n.DirPath = a.cfg.NovelDirPath(n.ID)
+	n.DirPath = config.NovelDirPath(n.ID)
 	if _, err := git.New(n.ID); err != nil {
 		return nil, fmt.Errorf("failed to init novel repo: %w", err)
 	}

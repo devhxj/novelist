@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"novel/internal/platform"
 )
 
 // ErrNotInitialized 表示指针文件不存在，应用尚未完成首次初始化。没初始化弹出来初始化界面，如果初始化了但是还是出错就谈配置错误恢复
@@ -33,22 +35,24 @@ func Get() *AppConfig {
 }
 
 // AppConfig 是启动指针文件 ~/.goink/config.json 的内容。
-// 仅记录用户选择的数据目录，其他运行时配置走 SQLite app_config 表。
+// DataDir 字段保留用于未来扩展，当前数据目录由 platform.DataDir() 确定。
 type AppConfig struct {
-	DataDir string `json:"data_dir"` // 用户选择的数据根目录
+	DataDir string `json:"data_dir"` // 用户选择的数据根目录（保留字段）
 }
 
-// DataDir 返回数据根目录（带尾部路径分隔符）。
-func (c *AppConfig) DataDirPath() string { return c.DataDir }
+// DataDirPath 返回数据根目录（绝对路径）。
+func DataDirPath() string {
+	return platform.DataDir()
+}
 
 // GlobalDBPath 返回全局数据库路径。
-func (c *AppConfig) GlobalDBPath() string {
-	return filepath.Join(c.DataDir, "novel-agent.db")
+func GlobalDBPath() string {
+	return filepath.Join(platform.DataDir(), "novel-agent.db")
 }
 
 // NovelDirPath 返回指定小说的 Git 仓库根目录。
-func (c *AppConfig) NovelDirPath(novelID int64) string {
-	return filepath.Join(c.DataDir, "novels", fmt.Sprintf("%d", novelID))
+func NovelDirPath(novelID int64) string {
+	return filepath.Join(platform.DataDir(), "novels", fmt.Sprintf("%d", novelID))
 }
 
 // LLMConfigPath 返回 LLM 加密配置文件的固定路径 ~/.goink/llm_config.enc。
@@ -58,8 +62,8 @@ func LLMConfigPath() string {
 }
 
 // ModelsDir 返回 ONNX 模型目录路径。
-func (c *AppConfig) ModelsDir() string {
-	return filepath.Join(c.DataDir, "models")
+func ModelsDir() string {
+	return filepath.Join(platform.DataDir(), "models")
 }
 
 // configDir 返回指针文件所在的目录 ~/.goink。
@@ -100,18 +104,11 @@ func Load() (*AppConfig, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("解析配置文件失败: %w", err)
 	}
-	if cfg.DataDir == "" {
-		return nil, fmt.Errorf("配置文件中 data_dir 为空")
-	}
 
-	// 兼容旧版本可能保存的相对路径，转为绝对路径
-	if abs, err := filepath.Abs(cfg.DataDir); err == nil {
-		cfg.DataDir = abs
-	}
-
-	// 确保数据目录存在（用户配置的路径，理应有权创建）
-	if err := os.MkdirAll(cfg.DataDir, 0700); err != nil {
-		return nil, fmt.Errorf("创建数据目录 %s 失败: %w", cfg.DataDir, err)
+	// 确保平台数据目录存在
+	dataDir := platform.DataDir()
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		return nil, fmt.Errorf("创建数据目录 %s 失败: %w", dataDir, err)
 	}
 	return cfg, nil
 }

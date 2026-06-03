@@ -63,11 +63,7 @@ func WriteFile(novelID int64, path, content string) error {
 var errPathEscape = errors.New("git: path escapes novel directory")
 
 func novelDir(novelID int64) (string, error) {
-	cfg := config.Get()
-	if cfg == nil {
-		return "", fmt.Errorf("git: config not initialized")
-	}
-	return cfg.NovelDirPath(novelID), nil
+	return config.NovelDirPath(novelID), nil
 }
 
 // safePath 对给定的上级目录和相对路径求最终路径，如果路径跳出上级目录则返回 error。

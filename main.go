@@ -4,7 +4,6 @@ import (
 	"embed"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	ort "github.com/yalue/onnxruntime_go"
 
@@ -14,33 +13,18 @@ import (
 
 	"novel/app"
 	"novel/internal/logger"
+	"novel/internal/platform"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// findOnnxLib 在常见位置查找 libonnxruntime.so。
-func findOnnxLib() string {
-	candidates := []string{
-		"python-master/backend/.venv/lib/python3.12/site-packages/onnxruntime/capi/libonnxruntime.so",
-		"/usr/lib/libonnxruntime.so",
-		"/usr/local/lib/libonnxruntime.so",
-	}
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return ""
-}
-
 func main() {
 	log := logger.Default()
 
-	if lib := findOnnxLib(); lib != "" {
-		abs, _ := filepath.Abs(lib)
-		ort.SetSharedLibraryPath(abs)
-		log.Info("ONNX 运行库已设置", "path", abs)
+	if lib, err := platform.ResolveOnnxLib(); err == nil {
+		ort.SetSharedLibraryPath(lib)
+		log.Info("ONNX 运行库已设置", "path", lib)
 	}
 
 	wapp := app.New(log)
