@@ -48,8 +48,10 @@ jobs:
 
       - name: Package (NSIS)
         run: |
-          ls -la build/bin/
-          ls -la build/runtime/
+          echo "=== bash pwd ===" && pwd
+          echo "=== bash ls ===" && ls -la build/bin/
+          echo "=== cmd dir ===" && cmd //c "dir build\bin\goink.exe"
+          echo "=== runtime ===" && ls -la build/runtime/
           export PATH="/c/Program Files (x86)/NSIS:$PATH"
           makensis -DVERSION=${GITHUB_REF_NAME#v} build/package/windows/installer.nsi
         shell: bash
