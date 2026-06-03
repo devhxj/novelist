@@ -43,8 +43,12 @@ jobs:
           cd frontend && npm ci && npm run build && cd ..
           wails build -tags webkit2_41 -o goink.exe
 
+      - name: Install NSIS
+        run: choco install -y nsis
+
       - name: Package (NSIS)
         run: makensis -DVERSION=${GITHUB_REF_NAME#v} build/package/windows/installer.nsi
+        shell: bash
 
       - name: Checksum
         shell: bash
