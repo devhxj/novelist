@@ -28,7 +28,7 @@ jobs:
         shell: bash
         run: |
           curl -fsSL --retry 3 -o /tmp/sqlite-amalgamation.zip https://www.sqlite.org/2023/sqlite-amalgamation-3440000.zip
-          unzip -qo /tmp/sqlite-amalgamation.zip -d /tmp/sqlite
+          unzip -qjo /tmp/sqlite-amalgamation.zip -d /tmp/sqlite
           echo "CGO_CFLAGS=${CGO_CFLAGS} -I/tmp/sqlite" >> $GITHUB_ENV
 
       - name: Download runtime deps
