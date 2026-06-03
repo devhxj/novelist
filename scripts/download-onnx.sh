@@ -43,7 +43,8 @@ download_onnx() {
         find /tmp/onnx-extract -type f | head -20
         exit 1
     fi
-    cp "$lib_dir"/libonnxruntime* "$RUNTIME_DIR/"
+    # 只复制库文件和 .pc 文件，跳过 .dSYM 调试目录
+    find "$lib_dir" -maxdepth 1 -type f \( -name "libonnxruntime*" -o -name "*.pc" \) -exec cp {} "$RUNTIME_DIR/" \;
 
     rm -rf /tmp/onnx-extract "/tmp/${file}"
     echo "ONNX Runtime → $RUNTIME_DIR/"
