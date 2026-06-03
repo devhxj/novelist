@@ -27,10 +27,9 @@ jobs:
       - name: Install sqlite3 headers (CGo)
         shell: bash
         run: |
-          go mod download
-          SQLITE_DIR=$(go env GOMODCACHE)/github.com/mattn/go-sqlite3@v1.14.44
-          echo "CGO_CFLAGS=-I${SQLITE_DIR}" >> $GITHUB_ENV
-          ls -la "${SQLITE_DIR}/sqlite3.h"
+          curl -fsSL --retry 3 -o /tmp/sqlite-amalgamation.zip https://www.sqlite.org/2023/sqlite-amalgamation-3440000.zip
+          unzip -qo /tmp/sqlite-amalgamation.zip -d /tmp/sqlite
+          echo "CGO_CFLAGS=${CGO_CFLAGS} -I/tmp/sqlite" >> $GITHUB_ENV
 
       - name: Download runtime deps
         run: |
