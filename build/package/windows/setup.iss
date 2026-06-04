@@ -20,9 +20,13 @@ DirExistsWarning=no
 Source: "..\..\bin\goink.exe"; DestDir: "{app}"
 Source: "..\..\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs
 
+[Tasks]
+Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "快捷方式:"; Flags: checkedonce
+
 [Icons]
 Name: "{autoprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autoprograms}\{#MyAppName}卸载 Goink"; Filename: "{uninstallexe}"
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Code]
 function GetDefaultDir(Param: string): string;
