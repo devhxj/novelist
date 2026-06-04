@@ -28,17 +28,17 @@ func (a *App) UpdateDataDir(newPath string) error {
 		return fmt.Errorf("数据目录路径不能为空")
 	}
 
+	// 先保存新配置，失败时旧 DB 仍可用
+	if err := config.Save(newPath); err != nil {
+		return fmt.Errorf("保存配置失败: %w", err)
+	}
+
 	// 关闭旧数据库
 	if a.db != nil {
 		if err := storage.Close(a.db); err != nil {
 			return fmt.Errorf("关闭旧数据库失败: %w", err)
 		}
 		a.db = nil
-	}
-
-	// 保存新配置
-	if err := config.Save(newPath); err != nil {
-		return fmt.Errorf("保存配置失败: %w", err)
 	}
 
 	// 重新加载并初始化

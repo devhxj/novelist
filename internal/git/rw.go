@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"novel/internal/config"
@@ -24,10 +25,7 @@ func GoinkPath() string {
 // path 为相对于小说仓库根目录的路径，如 "chapters/001.md"、"goink.md"。
 
 func ReadFile(novelID int64, path string) (string, error) {
-	dir, err := novelDir(novelID)
-	if err != nil {
-		return "", err
-	}
+	dir := novelDir(novelID)
 	fullPath, err := safePath(dir, path)
 	if err != nil {
 		return "", err
@@ -43,10 +41,7 @@ func ReadFile(novelID int64, path string) (string, error) {
 }
 
 func WriteFile(novelID int64, path, content string) error {
-	dir, err := novelDir(novelID)
-	if err != nil {
-		return err
-	}
+	dir := novelDir(novelID)
 	fullPath, err := safePath(dir, path)
 	if err != nil {
 		return err
@@ -62,8 +57,8 @@ func WriteFile(novelID int64, path, content string) error {
 
 var errPathEscape = errors.New("git: path escapes novel directory")
 
-func novelDir(novelID int64) (string, error) {
-	return config.NovelDirPath(novelID), nil
+func novelDir(novelID int64) string {
+	return config.NovelDirPath(novelID)
 }
 
 // safePath 对给定的上级目录和相对路径求最终路径，如果路径跳出上级目录则返回 error。
@@ -73,8 +68,15 @@ func safePath(base, rel string) (string, error) {
 		return "", fmt.Errorf("git: resolve base: %w", err)
 	}
 	full := filepath.Clean(filepath.Join(absBase, rel))
-	if !strings.HasPrefix(full, absBase+string(filepath.Separator)) && full != absBase {
-		return "", fmt.Errorf("%w: %s", errPathEscape, rel)
+	// Windows 文件系统不区分大小写，需用 EqualFold 比较防止路径穿越绕过
+	if runtime.GOOS == "windows" {
+		if !strings.EqualFold(full, absBase+string(filepath.Separator)) && !strings.EqualFold(full, absBase) {
+			return "", fmt.Errorf("%w: %s", errPathEscape, rel)
+		}
+	} else {
+		if !strings.HasPrefix(full, absBase+string(filepath.Separator)) && full != absBase {
+			return "", fmt.Errorf("%w: %s", errPathEscape, rel)
+		}
 	}
 	return full, nil
 }

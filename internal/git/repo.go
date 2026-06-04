@@ -157,7 +157,9 @@ func (r *Repo) Revert(hashes []string) error {
 	for i := len(hashes) - 1; i >= 0; i-- {
 		_, stderr, err := r.runInDir("revert", "--no-commit", hashes[i])
 		if err != nil {
-			r.runInDir("revert", "--abort")
+			if _, _, abortErr := r.runInDir("revert", "--abort"); abortErr != nil {
+				return fmt.Errorf("git: revert %s: %s: %w; abort 也失败: %v", hashes[i], stderr, err, abortErr)
+			}
 			return fmt.Errorf("git: revert %s: %s: %w", hashes[i], stderr, err)
 		}
 	}

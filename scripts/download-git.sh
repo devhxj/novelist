@@ -32,9 +32,13 @@ download_mingit() {
 
 copy_native_git() {
     # Linux: 直接复制系统 git（AppImage 打包时由 linuxdeploy 处理依赖）
-    # macOS: 复制系统 git（放在 .app bundle 内）
+    # macOS: 优先使用 Xcode CLT 的 git（自包含），避免 Homebrew 版本的动态库依赖缺失
     local git_bin
-    git_bin=$(which git 2>/dev/null || echo "/usr/bin/git")
+    if [[ "$(uname -s)" == "Darwin" ]] && [ -x "/usr/bin/git" ]; then
+        git_bin="/usr/bin/git"
+    else
+        git_bin=$(which git 2>/dev/null || echo "/usr/bin/git")
+    fi
     if [ ! -f "$git_bin" ]; then
         echo "错误: 未找到系统 Git，请先安装 Git"
         exit 1

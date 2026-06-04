@@ -44,6 +44,7 @@ func (a *App) CreateNovel(input CreateNovelInput) (*novel.Novel, error) {
 
 	n.DirPath = config.NovelDirPath(n.ID)
 	if _, err := git.New(n.ID); err != nil {
+		a.novel.DB.WithContext(a.ctx).Delete(&n) // 回滚孤儿 DB 记录
 		return nil, fmt.Errorf("failed to init novel repo: %w", err)
 	}
 

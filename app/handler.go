@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -65,17 +66,21 @@ func (a *App) OnStartup(ctx context.Context) {
 
 	cfg, err := config.Load()
 	if err != nil {
-		// 首次启动，自动初始化平台默认数据目录
-		dataDir := config.DataDirPath()
-		if mkErr := os.MkdirAll(dataDir, 0700); mkErr != nil {
-			a.logger.Warn("创建数据目录失败", "err", mkErr)
-		}
-		if saveErr := config.Save(dataDir); saveErr != nil {
-			a.logger.Warn("保存初始化配置失败", "err", saveErr)
-		}
+		if errors.Is(err, config.ErrNotInitialized) {
+			// 首次启动，自动初始化平台默认数据目录
+			dataDir := config.DataDirPath()
+			if mkErr := os.MkdirAll(dataDir, 0700); mkErr != nil {
+				a.logger.Warn("创建数据目录失败", "err", mkErr)
+			}
+			if saveErr := config.Save(dataDir); saveErr != nil {
+				a.logger.Warn("保存初始化配置失败", "err", saveErr)
+			}
 
-		cfg = &config.AppConfig{}
-		a.initWithConfig(cfg)
+			cfg = &config.AppConfig{}
+			a.initWithConfig(cfg)
+			return
+		}
+		a.logger.Error("加载配置失败", "err", err)
 		return
 	}
 	a.initWithConfig(cfg)
@@ -85,7 +90,9 @@ func (a *App) OnStartup(ctx context.Context) {
 func (a *App) OnShutdown(_ context.Context) {
 	if a.db != nil {
 		a.logger.Info("应用关闭，释放资源")
-		storage.Close(a.db)
+		if err := storage.Close(a.db); err != nil {
+			a.logger.Error("关闭数据库失败", "err", err)
+		}
 	}
 }
 
@@ -111,8 +118,8 @@ func (a *App) Initialize(dataDir string) error {
 }
 
 // initWithConfig 在配置加载成功后初始化所有运行时模块。
+// 只有全部步骤成功才会将 a.cfg 设为非 nil，防止半初始化状态下 IsInitialized() 误报。
 func (a *App) initWithConfig(cfg *config.AppConfig) {
-	a.cfg = cfg
 	config.Set(cfg)
 
 	// 1. 异步加载 ONNX 模型（不阻塞 GUI，尽早调用）
@@ -186,5 +193,6 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 	// 10. 创建 Agent 实例（全局复用）
 	a.agent = agent.New(a.llmClient, a.registry, a.session, a.db, a.approvals, a.logger)
 
+	a.cfg = cfg
 	a.logger.Info("应用初始化完成", "data_dir", config.DataDirPath())
 }

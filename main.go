@@ -25,6 +25,8 @@ func main() {
 	if lib, err := platform.ResolveOnnxLib(); err == nil {
 		ort.SetSharedLibraryPath(lib)
 		log.Info("ONNX 运行库已设置", "path", lib)
+	} else {
+		log.Warn("未找到 ONNX Runtime 库，向量检索将不可用", "err", err)
 	}
 
 	wapp := app.New(log)

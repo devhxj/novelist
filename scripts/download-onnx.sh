@@ -47,12 +47,18 @@ download_onnx() {
     # 排除 .pdb（调试符号）和 .lib（导入库），运行时不需要
     find "$lib_dir" -maxdepth 1 -type f ! -name "*.pdb" ! -name "*.lib" \( -name "*onnxruntime*" -o -name "*.pc" \) -exec cp {} "$RUNTIME_DIR/" \;
     # 创建不带版本号的 symlink（Linux: libonnxruntime.so，macOS: libonnxruntime.dylib）
+    local symlinked=0
     for f in "$RUNTIME_DIR"/libonnxruntime.so.*; do
-        [ -f "$f" ] && ln -sf "$(basename "$f")" "$RUNTIME_DIR/libonnxruntime.so" && break
+        [ -f "$f" ] && ln -sf "$(basename "$f")" "$RUNTIME_DIR/libonnxruntime.so" && symlinked=1 && break
     done
     for f in "$RUNTIME_DIR"/libonnxruntime.*.dylib; do
-        [ -f "$f" ] && ln -sf "$(basename "$f")" "$RUNTIME_DIR/libonnxruntime.dylib" && break
+        [ -f "$f" ] && ln -sf "$(basename "$f")" "$RUNTIME_DIR/libonnxruntime.dylib" && symlinked=1 && break
     done
+    if [ "$symlinked" -eq 0 ] && [[ "$file" != *.zip ]]; then
+        echo "错误: 未找到带版本号的 ONNX 库文件，无法创建 symlink"
+        ls -la "$RUNTIME_DIR/"
+        exit 1
+    fi
 
     rm -rf /tmp/onnx-extract "/tmp/${file}"
     echo "ONNX Runtime → $RUNTIME_DIR/"

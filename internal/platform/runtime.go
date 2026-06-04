@@ -15,6 +15,10 @@ func AppDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("platform: 获取可执行文件路径失败: %w", err)
 	}
+	exe, err = filepath.EvalSymlinks(exe)
+	if err != nil {
+		return "", fmt.Errorf("platform: 解析可执行文件符号链接失败: %w", err)
+	}
 	return filepath.Dir(exe), nil
 }
 
