@@ -44,12 +44,12 @@ jobs:
           wails build -tags webkit2_41 -o goink.exe
 
       - name: Package (ZIP)
+        shell: bash
         run: |
           mkdir -p build/dist
           cp build/bin/goink.exe build/dist/
           cp -r build/runtime build/dist/
-          cd build/dist && zip -r "goink-${GITHUB_REF_NAME#v}-windows-amd64.zip" goink.exe runtime/
-        shell: bash
+          powershell Compress-Archive -Path build/dist/goink.exe, build/dist/runtime -DestinationPath "build/dist/goink-${GITHUB_REF_NAME#v}-windows-amd64.zip"
 
       - name: Checksum
         shell: bash
