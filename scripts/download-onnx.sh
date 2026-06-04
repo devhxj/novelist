@@ -44,7 +44,8 @@ download_onnx() {
         exit 1
     fi
     # 复制库文件（Win 无 lib 前缀：onnxruntime.dll；Linux/macOS：libonnxruntime.so/.dylib）
-    find "$lib_dir" -maxdepth 1 -type f \( -name "*onnxruntime*" -o -name "*.pc" \) -exec cp {} "$RUNTIME_DIR/" \;
+    # 排除 .pdb（调试符号）和 .lib（导入库），运行时不需要
+    find "$lib_dir" -maxdepth 1 -type f ! -name "*.pdb" ! -name "*.lib" \( -name "*onnxruntime*" -o -name "*.pc" \) -exec cp {} "$RUNTIME_DIR/" \;
 
     rm -rf /tmp/onnx-extract "/tmp/${file}"
     echo "ONNX Runtime → $RUNTIME_DIR/"
