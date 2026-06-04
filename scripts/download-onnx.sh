@@ -46,6 +46,13 @@ download_onnx() {
     # 复制库文件（Win 无 lib 前缀：onnxruntime.dll；Linux/macOS：libonnxruntime.so/.dylib）
     # 排除 .pdb（调试符号）和 .lib（导入库），运行时不需要
     find "$lib_dir" -maxdepth 1 -type f ! -name "*.pdb" ! -name "*.lib" \( -name "*onnxruntime*" -o -name "*.pc" \) -exec cp {} "$RUNTIME_DIR/" \;
+    # 创建不带版本号的 symlink（Linux: libonnxruntime.so，macOS: libonnxruntime.dylib）
+    for f in "$RUNTIME_DIR"/libonnxruntime.so.*; do
+        [ -f "$f" ] && ln -sf "$(basename "$f")" "$RUNTIME_DIR/libonnxruntime.so" && break
+    done
+    for f in "$RUNTIME_DIR"/libonnxruntime.*.dylib; do
+        [ -f "$f" ] && ln -sf "$(basename "$f")" "$RUNTIME_DIR/libonnxruntime.dylib" && break
+    done
 
     rm -rf /tmp/onnx-extract "/tmp/${file}"
     echo "ONNX Runtime → $RUNTIME_DIR/"

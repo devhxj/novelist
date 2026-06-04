@@ -23,12 +23,7 @@ func AppDir() (string, error) {
 func ResolveGit() (string, error) {
 	appDir, err := AppDir()
 	if err == nil {
-		var bundled string
-		if runtime.GOOS == "windows" {
-			bundled = filepath.Join(appDir, "runtime", "git", "mingw64", "bin", "git.exe")
-		} else {
-			bundled = filepath.Join(appDir, "runtime", "git", "git")
-		}
+		bundled := bundledGitPath(appDir)
 		if _, err := os.Stat(bundled); err == nil {
 			return bundled, nil
 		}
@@ -43,9 +38,11 @@ func ResolveOnnxLib() (string, error) {
 
 	appDir, err := AppDir()
 	if err == nil {
-		bundled := filepath.Join(appDir, "runtime", libName)
-		if _, err := os.Stat(bundled); err == nil {
-			return bundled, nil
+		for _, dir := range bundledRuntimeDirs(appDir) {
+			p := filepath.Join(dir, libName)
+			if _, err := os.Stat(p); err == nil {
+				return p, nil
+			}
 		}
 	}
 
@@ -71,6 +68,34 @@ func DataDir() string {
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, "Goink")
+}
+
+// bundledGitPath 返回自带的 git 完整路径。
+func bundledGitPath(appDir string) string {
+	switch runtime.GOOS {
+	case "windows":
+		return filepath.Join(appDir, "runtime", "git", "mingw64", "bin", "git.exe")
+	case "darwin":
+		// macOS .app bundle 中 runtime 在 Contents/Resources/ 下
+		return filepath.Join(appDir, "..", "Resources", "runtime", "git", "git")
+	default:
+		return filepath.Join(appDir, "runtime", "git", "git")
+	}
+}
+
+// bundledRuntimeDirs 返回自带的 runtime 目录列表，按优先级排列。
+func bundledRuntimeDirs(appDir string) []string {
+	switch runtime.GOOS {
+	case "darwin":
+		// macOS .app bundle: runtime 在 Contents/Resources/，
+		// AppDir 返回 Contents/MacOS/，所以用 ../Resources/runtime/
+		return []string{
+			filepath.Join(appDir, "..", "Resources", "runtime"),
+			filepath.Join(appDir, "runtime"),
+		}
+	default:
+		return []string{filepath.Join(appDir, "runtime")}
+	}
 }
 
 func onnxLibName() string {

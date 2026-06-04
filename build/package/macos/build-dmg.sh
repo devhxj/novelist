@@ -11,9 +11,11 @@ echo "使用 Wails 生成的 .app: $APP_BUNDLE"
 
 # 将运行时注入已有 .app bundle
 mkdir -p "$APP_BUNDLE/Contents/Resources/runtime/git"
-mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 cp "$RUNTIME_DIR/git/git" "$APP_BUNDLE/Contents/Resources/runtime/git/"
-find "$RUNTIME_DIR" -maxdepth 1 -type f \( -name "libonnxruntime*" -o -name "*.pc" \) -exec cp {} "$APP_BUNDLE/Contents/Frameworks/" \;
+find "$RUNTIME_DIR" -maxdepth 1 \( -name "libonnxruntime*" -o -name "*.pc" \) -exec cp -R {} "$APP_BUNDLE/Contents/Resources/runtime/" \;
+# 确保可执行
+chmod +x "$APP_BUNDLE/Contents/Resources/runtime/git"
+chmod +x "$APP_BUNDLE/Contents/Resources/runtime/libonnxruntime"* 2>/dev/null || true
 
 # Info.plist
 cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
