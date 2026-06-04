@@ -13,6 +13,10 @@ echo "使用 Wails 生成的 .app: $APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/Resources/runtime/git"
 cp "$RUNTIME_DIR/git/git" "$APP_BUNDLE/Contents/Resources/runtime/git/"
 find "$RUNTIME_DIR" -maxdepth 1 \( -name "libonnxruntime*" -o -name "*.pc" \) -exec cp -R {} "$APP_BUNDLE/Contents/Resources/runtime/" \;
+# 模型文件
+if [ -d "$RUNTIME_DIR/models" ]; then
+	cp -r "$RUNTIME_DIR/models" "$APP_BUNDLE/Contents/Resources/runtime/"
+fi
 # 确保可执行
 chmod +x "$APP_BUNDLE/Contents/Resources/runtime/git"
 chmod +x "$APP_BUNDLE/Contents/Resources/runtime/libonnxruntime"* 2>/dev/null || true
