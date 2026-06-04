@@ -182,9 +182,7 @@ make package-linux     # 指定 Linux AppImage
 **解决**：`choco install -y nsis`，然后通过 msys2 路径结构添加到 PATH：
 `export PATH="/c/Program Files (x86)/NSIS:$PATH"`
 
-## 当前卡点
-
-### Windows NSIS 打包（待解决）
+### 9. NSIS File 命令 "no files found"（CWD 陷阱）
 
 **现象**：
 ```
@@ -195,19 +193,21 @@ makensis ...
 File: "build\bin\goink.exe" -> no files found.    ← NSIS 找不到
 ```
 
-**已知**：
-- `goink.exe` 确实在 `build/bin/` 下（26MB）
-- NSIS 通过 msys2 bash 运行，CWD 正确
-- 反斜杠/正斜杠都试过，`/a` 标志也试过
+**根因**：makensis 默认在编译前将 CWD 切换到 .nsi 脚本所在目录。
+`File "build\bin\goink.exe"` 实际查找的是 `build/package/windows/build/bin/goink.exe`（不存在），
+而不是相对于仓库根目录的 `build/bin/goink.exe`。
 
-**当前猜测**：makensis 的 CWD 可能不是 bash 的 CWD，或路径映射问题。
-需要进一步调试：在 NSIS 步骤前加 `pwd` 和 `cmd /c dir build\bin\goink.exe` 确认。
+**解决**：CI 中用 `cygpath -w "$PWD"` 获取仓库根目录的 Windows 绝对路径，
+通过 `-DSOURCE_DIR` 传递给 makensis，nsi 文件使用 `${SOURCE_DIR}\build\bin\goink.exe`。
 
-### Windows runtime 下载（待解决）
+### 10. Windows ONNX DLL 未复制（命名差异）
 
-**现象**：`ls -la build/runtime/` 显示 `total 0`，只有 `git/` 目录，无 ONNX dll。
+**现象**：`ls build/runtime/` 显示 `total 0`，只有 `git/` 目录，无 ONNX dll。
 
-**可能原因**：`download-onnx.sh` 在 Windows CI 上下载 ONNX 失败，需查看完整日志。
+**根因**：Windows ONNX Runtime 的 DLL 名为 `onnxruntime.dll`（无 `lib` 前缀），
+但 `download-onnx.sh` 中的 find 模式为 `-name "libonnxruntime*"`，不匹配。
+
+**解决**：将 find 模式改为 `-name "*onnxruntime*"`，同时匹配 `libonnxruntime` 和 `onnxruntime`。
 
 ## CI 监控方法
 
