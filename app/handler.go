@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
+
+	"novel/internal/platform"
 
 	"gorm.io/gorm"
 
@@ -78,12 +81,30 @@ func (a *App) OnStartup(ctx context.Context) {
 
 			cfg = &config.AppConfig{}
 			a.initWithConfig(cfg)
+
+			// Windows 首次启动自动创建开始菜单快捷方式
+			a.createShortcutIfNeeded()
 			return
 		}
+
+		a.initWithConfig(cfg)
+		// Windows 非首次但快捷方式可能被误删，尝试补建
+		a.createShortcutIfNeeded()
 		a.logger.Error("加载配置失败", "err", err)
 		return
 	}
 	a.initWithConfig(cfg)
+}
+
+// createShortcutIfNeeded 在 Windows 上为首次启动创建开始菜单快捷方式。
+// 其他平台无操作。
+func (a *App) createShortcutIfNeeded() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	if err := platform.CreateStartMenuShortcut(); err != nil {
+		a.logger.Warn("创建开始菜单快捷方式失败", "err", err)
+	}
 }
 
 // OnShutdown 在 Wails 窗口关闭前调用，释放资源。
