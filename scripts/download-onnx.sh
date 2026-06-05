@@ -3,7 +3,7 @@ set -euo pipefail
 
 OS=$(uname -s)
 RUNTIME_DIR="${RUNTIME_DIR:-build/runtime}"
-ONNX_VERSION="1.21.0"
+ONNX_VERSION="1.26.0"
 BGE_REPO="https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main"
 BGE_MIRROR="https://hf-mirror.com/Xenova/bge-small-zh-v1.5/resolve/main"
 MODEL_DIR="${RUNTIME_DIR}/models"
