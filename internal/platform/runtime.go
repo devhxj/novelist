@@ -36,7 +36,7 @@ func ResolveGit() (string, error) {
 }
 
 // ResolveOnnxLib 返回 ONNX Runtime 动态库的路径。
-// 优先使用 app 自带的 runtime/，找不到再查系统路径。
+// 优先 app 自带的 runtime/，然后用户数据目录 runtime/，最后系统路径。
 func ResolveOnnxLib() (string, error) {
 	libName := onnxLibName()
 
@@ -48,6 +48,11 @@ func ResolveOnnxLib() (string, error) {
 				return p, nil
 			}
 		}
+	}
+
+	dataRuntime := filepath.Join(DataDir(), "runtime", libName)
+	if _, err := os.Stat(dataRuntime); err == nil {
+		return dataRuntime, nil
 	}
 
 	for _, p := range systemOnnxPaths(libName) {
