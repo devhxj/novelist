@@ -95,6 +95,26 @@ export default function WorkspaceView({ initialNovelId }: Props) {
     novelIdRef.current = activeNovelId
   }, [activeNovelId])
 
+  // 监听 AI edit 工具写入文件后的刷新通知
+  useEffect(() => {
+    const unsub = EventsOn('file:changed', async (data: any) => {
+      if (data.novel_id !== activeNovelId) return
+      // 刷新侧边栏章节列表
+      if (data.path && (data.path.startsWith('chapters/') || data.path.startsWith('outlines/') || data.path === 'goink.md')) {
+        loadChapters()
+      }
+      // 刷新已打开的编辑器 tab
+      const activeId = tabs.find(t => t.id === activeTabId)
+      if (activeId && activeTab && activeTab.path === data.path) {
+        try {
+          const content = await app.GetContent(data.novel_id, data.path)
+          updateTab(activeTab.id, { content, isDirty: false })
+        } catch { /* 文件可能被删 */ }
+      }
+    })
+    return () => unsub()
+  }, [activeNovelId, activeTabId, activeTab, tabs, loadChapters])
+
   // ── Tab management ────────────────────────────────────────
 
   async function handleSelectChapter(ch: chapter.Chapter) {

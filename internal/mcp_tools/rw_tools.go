@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 
+	wails "github.com/wailsapp/wails/v2/pkg/runtime"
+
 	"novel/internal/chapter"
 	"novel/internal/git"
 )
@@ -132,7 +134,12 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 		}
 	}
 
-	// 6. 写入文件
+	// 6. 写入前重读对比，阻止并发冲突
+	if fresh, err := git.ReadFile(tc.NovelID, a.Path); err == nil && fresh != current {
+		return &ToolResult{Success: false, Error: "文件已被修改，请重新读取最新内容后重试"}, nil
+	}
+
+	// 7. 写入文件
 	if err := git.WriteFile(tc.NovelID, a.Path, proposed); err != nil {
 		if errors.Is(err, git.ErrPathEscape) {
 			return &ToolResult{Success: false, Error: "路径非法: " + a.Path}, nil
@@ -140,7 +147,12 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 		return nil, fmt.Errorf("write file: %w", err)
 	}
 
-	// 7. inject 维护提醒（章节全量替换且 >500 字时）
+	wails.EventsEmit(ctx, "file:changed", map[string]any{
+		"novel_id": tc.NovelID,
+		"path":     a.Path,
+	})
+
+	// 8. inject 维护提醒（章节全量替换且 >500 字时）
 	var injects []InjectMessage
 	if a.ChangeType == "full_replace" && isChapterPath(a.Path) && len([]rune(proposed)) > 500 {
 		chapNum := parseChapterNum(a.Path)
