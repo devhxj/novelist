@@ -17,7 +17,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 DirExistsWarning=no
 
 [Files]
-Source: "..\..\bin\goink.exe"; DestDir: "{app}"
+Source: "..\..\bin\goink.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs
 
 [Tasks]
