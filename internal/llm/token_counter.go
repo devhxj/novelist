@@ -36,6 +36,7 @@ func (l *embedLoader) LoadTiktokenBpe(tiktokenBpeFile string) (map[string]int, e
 
 	bpeRanks := make(map[string]int)
 	for _, line := range strings.Split(string(contents), "\n") {
+		line = strings.TrimRight(line, "\r")
 		if line == "" {
 			continue
 		}
