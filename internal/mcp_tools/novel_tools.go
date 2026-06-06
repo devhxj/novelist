@@ -102,11 +102,16 @@ func (t *GetPreferencesTool) Execute(ctx context.Context, args any, tc ToolConte
 
 // ── create_preference ────────────────────────────────
 
-// CreatePreferenceArgs 是 create_preference 的参数。
-type CreatePreferenceArgs struct {
+// CreatePreferenceItem 是 create_preference 的单条参数。
+type CreatePreferenceItem struct {
 	IsGlobal bool   `json:"is_global" jsonschema:"description=是否为全局偏好（所有小说生效），默认false"`
 	Category string `json:"category" jsonschema:"required,description=偏好分类(自由文本标签)" validate:"required"`
 	Content  string `json:"content" jsonschema:"required,description=偏好内容" validate:"required"`
+}
+
+// CreatePreferenceArgs 是 create_preference 的参数。
+type CreatePreferenceArgs struct {
+	Preferences []CreatePreferenceItem `json:"preferences" jsonschema:"required,description=要创建的偏好列表（1-5个）" validate:"required,min=1,max=5,dive"`
 }
 
 // CreatePreferenceTool 创建创作偏好条目。
@@ -114,7 +119,8 @@ type CreatePreferenceTool struct{}
 
 func (t *CreatePreferenceTool) Name() string { return "create_preference" }
 func (t *CreatePreferenceTool) Description() string {
-	return "创建新的创作偏好条目。偏好按自由文本 Category 归类，同 Category 即为同类条目。" +
+	return "批量创建创作偏好（1-5个）。所有条目在一次批量 INSERT 中写入，单语句保证原子性。" +
+		"偏好按自由文本 Category 归类，同 Category 即为同类条目。" +
 		"如果已存在相似分类的偏好，应优先调用 update_preference 对已有条目做增量合并（在原文基础上追加），而非创建重复条目。"
 }
 func (t *CreatePreferenceTool) Category() ToolCategory { return CategoryWritingAssistant }
@@ -126,19 +132,28 @@ func (t *CreatePreferenceTool) NewArgs() any                { return &CreatePref
 func (t *CreatePreferenceTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
 	a := args.(*CreatePreferenceArgs)
 
-	item := novel.PreferenceItem{
-		NovelID:  tc.NovelID,
-		IsGlobal: a.IsGlobal,
-		Category: a.Category,
-		Content:  a.Content,
+	items := make([]novel.PreferenceItem, len(a.Preferences))
+	for i, item := range a.Preferences {
+		items[i] = novel.PreferenceItem{
+			NovelID:  tc.NovelID,
+			IsGlobal: item.IsGlobal,
+			Category: item.Category,
+			Content:  item.Content,
+		}
 	}
-	if err := tc.DB.WithContext(ctx).Create(&item).Error; err != nil {
-		return nil, fmt.Errorf("create preference: %w", err)
+
+	if err := tc.DB.WithContext(ctx).Create(&items).Error; err != nil {
+		return nil, fmt.Errorf("create preferences: %w", err)
+	}
+
+	ids := make([]int64, len(items))
+	for i := range items {
+		ids[i] = items[i].ID
 	}
 
 	return &ToolResult{
 		Success: true,
-		Data:    map[string]any{"preference_id": item.ID},
+		Data:    map[string]any{"ids": ids, "count": len(ids)},
 	}, nil
 }
 

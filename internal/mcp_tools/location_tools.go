@@ -201,8 +201,8 @@ func (t *GetLocationsTool) executeNetwork(ctx context.Context, tc ToolContext, s
 
 // ── create_location ────────────────────────────────────
 
-// CreateLocationArgs 是 create_location 的参数。
-type CreateLocationArgs struct {
+// CreateLocationItem 是 create_location 的单条参数。
+type CreateLocationItem struct {
 	Name             string `json:"name" jsonschema:"required,description=地点名称"             validate:"required"`
 	LocationType     string `json:"location_type" jsonschema:"description=地点类型，自由文本，如'森林''城市''洞穴'"`
 	Description      string `json:"description" jsonschema:"description=环境氛围、特色等描述"`
@@ -211,12 +211,18 @@ type CreateLocationArgs struct {
 	ParentLocationID *int64 `json:"parent_location_id" jsonschema:"description=父级地点ID，用于构建层级树"`
 }
 
+// CreateLocationArgs 是 create_location 的参数。
+type CreateLocationArgs struct {
+	Locations []CreateLocationItem `json:"locations" jsonschema:"required,description=要创建的地点列表（1-10个）" validate:"required,min=1,max=10,dive"`
+}
+
 // CreateLocationTool 创建新地点。
 type CreateLocationTool struct{}
 
 func (t *CreateLocationTool) Name() string { return "create_location" }
 func (t *CreateLocationTool) Description() string {
-	return "为当前小说创建一个新地点。name 必填，location_type 自由文本。" +
+	return "批量创建地点（1-10个）。所有地点在一次批量 INSERT 中写入，单语句保证原子性。" +
+		"name 必填，location_type 自由文本。" +
 		"parent_location_id 可接入已有层级树，如创建'大殿'时设为'王宫'的 ID。"
 }
 func (t *CreateLocationTool) Category() ToolCategory { return CategoryNovelManagement }
@@ -228,23 +234,31 @@ func (t *CreateLocationTool) NewArgs() any                { return &CreateLocati
 func (t *CreateLocationTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
 	a := args.(*CreateLocationArgs)
 
-	loc := location.Location{
-		NovelID:          tc.NovelID,
-		Name:             a.Name,
-		LocationType:     a.LocationType,
-		Description:      a.Description,
-		DetailJSON:       a.DetailJSON,
-		Tags:             a.Tags,
-		ParentLocationID: a.ParentLocationID,
+	items := make([]location.Location, len(a.Locations))
+	for i, item := range a.Locations {
+		items[i] = location.Location{
+			NovelID:          tc.NovelID,
+			Name:             item.Name,
+			LocationType:     item.LocationType,
+			Description:      item.Description,
+			DetailJSON:       item.DetailJSON,
+			Tags:             item.Tags,
+			ParentLocationID: item.ParentLocationID,
+		}
 	}
 
-	if err := tc.DB.WithContext(ctx).Create(&loc).Error; err != nil {
-		return nil, fmt.Errorf("create location: %w", err)
+	if err := tc.DB.WithContext(ctx).Create(&items).Error; err != nil {
+		return nil, fmt.Errorf("create locations: %w", err)
+	}
+
+	ids := make([]int64, len(items))
+	for i := range items {
+		ids[i] = items[i].ID
 	}
 
 	return &ToolResult{
 		Success: true,
-		Data:    map[string]any{"id": loc.ID},
+		Data:    map[string]any{"ids": ids, "count": len(ids)},
 	}, nil
 }
 
@@ -310,12 +324,17 @@ func (t *UpdateLocationTool) Execute(ctx context.Context, args any, tc ToolConte
 
 // ── create_location_relation ────────────────────────────
 
-// CreateLocationRelationArgs 是 create_location_relation 的参数。
-type CreateLocationRelationArgs struct {
+// CreateLocationRelationItem 是 create_location_relation 的单条参数。
+type CreateLocationRelationItem struct {
 	LocationA    int64  `json:"location_a" jsonschema:"required,description=地点A的ID"               validate:"required,min=1"`
 	LocationB    int64  `json:"location_b" jsonschema:"required,description=地点B的ID"               validate:"required,min=1"`
 	RelationType string `json:"relation_type" jsonschema:"required,description=空间关系描述，如'相邻''由山路连通'" validate:"required"`
 	Description  string `json:"description" jsonschema:"description=补充细节"`
+}
+
+// CreateLocationRelationArgs 是 create_location_relation 的参数。
+type CreateLocationRelationArgs struct {
+	Relations []CreateLocationRelationItem `json:"relations" jsonschema:"required,description=要创建的关系列表（1-10个）" validate:"required,min=1,max=10,dive"`
 }
 
 // CreateLocationRelationTool 创建地点之间的无向空间关系边。
@@ -323,8 +342,8 @@ type CreateLocationRelationTool struct{}
 
 func (t *CreateLocationRelationTool) Name() string { return "create_location_relation" }
 func (t *CreateLocationRelationTool) Description() string {
-	return "在两个地点之间创建一条无向空间连通关系。" +
-		"已存在边时返回错误，需修改已有边请用 update_location_relation。"
+	return "批量创建地点间的空间连通关系（1-10个）。所有关系在一次批量 INSERT 中写入，单语句保证原子性。" +
+		"关系为无向边（A-B 等价 B-A），已存在边时返回错误，需修改已有边请用 update_location_relation。"
 }
 func (t *CreateLocationRelationTool) Category() ToolCategory { return CategoryWritingAssistant }
 
@@ -337,45 +356,89 @@ func (t *CreateLocationRelationTool) NewArgs() any      { return &CreateLocation
 func (t *CreateLocationRelationTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
 	a := args.(*CreateLocationRelationArgs)
 
-	if a.LocationA == a.LocationB {
-		return &ToolResult{Success: false, Error: "不能创建地点与自身的空间关系"}, nil
+	// 预校验：自环检查 + 归一化
+	for i := range a.Relations {
+		if a.Relations[i].LocationA == a.Relations[i].LocationB {
+			return &ToolResult{Success: false, Error: "不能创建地点与自身的空间关系"}, nil
+		}
+		if a.Relations[i].LocationA > a.Relations[i].LocationB {
+			a.Relations[i].LocationA, a.Relations[i].LocationB = a.Relations[i].LocationB, a.Relations[i].LocationA
+		}
 	}
 
-	// 无向归一化：小的放 A，大的放 B
-	if a.LocationA > a.LocationB {
-		a.LocationA, a.LocationB = a.LocationB, a.LocationA
+	// 预校验：收集所有涉及的地点 ID，批量校验存在性
+	idSet := make(map[int64]bool)
+	for _, item := range a.Relations {
+		idSet[item.LocationA] = true
+		idSet[item.LocationB] = true
+	}
+	allIDs := make([]int64, 0, len(idSet))
+	for id := range idSet {
+		allIDs = append(allIDs, id)
+	}
+	var count int64
+	if err := tc.DB.WithContext(ctx).Model(&location.Location{}).
+		Where("id IN ? AND novel_id = ?", allIDs, tc.NovelID).
+		Count(&count).Error; err != nil {
+		return nil, fmt.Errorf("verify locations: %w", err)
+	}
+	if int(count) != len(allIDs) {
+		return &ToolResult{Success: false, Error: "部分地点不存在或不属于当前小说"}, nil
 	}
 
-	// 校验两个地点存在且属于当前小说
-	if err := verifyLocationPair(ctx, tc.DB, a.LocationA, a.LocationB, tc.NovelID); err != nil {
-		return &ToolResult{Success: false, Error: err.Error()}, nil
+	// 预校验：批量检查是否已存在关系边
+	seen := make(map[string]bool)
+	for _, item := range a.Relations {
+		key := fmt.Sprintf("%d-%d", item.LocationA, item.LocationB)
+		if seen[key] {
+			return &ToolResult{Success: false, Error: fmt.Sprintf("参数中存在重复的关系：地点 %d 和 %d", item.LocationA, item.LocationB)}, nil
+		}
+		seen[key] = true
+	}
+	type pair struct{ a, b int64 }
+	var pairs []pair
+	for key := range seen {
+		var aID, bID int64
+		fmt.Sscanf(key, "%d-%d", &aID, &bID)
+		pairs = append(pairs, pair{aID, bID})
+	}
+	var existing []location.LocationRelation
+	for _, p := range pairs {
+		var rel location.LocationRelation
+		err := tc.DB.WithContext(ctx).
+			Where("location_a = ? AND location_b = ? AND novel_id = ?", p.a, p.b, tc.NovelID).
+			First(&rel).Error
+		if err == nil {
+			existing = append(existing, rel)
+		} else if err != gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("check existing relation: %w", err)
+		}
+	}
+	if len(existing) > 0 {
+		return &ToolResult{Success: false, Error: fmt.Sprintf("地点 %d 和 %d 之间已存在关系边，请使用 update_location_relation 修改", existing[0].LocationA, existing[0].LocationB)}, nil
 	}
 
-	// 检查是否已存在
-	var existing location.LocationRelation
-	err := tc.DB.WithContext(ctx).
-		Where("location_a = ? AND location_b = ? AND novel_id = ?", a.LocationA, a.LocationB, tc.NovelID).
-		First(&existing).Error
-	if err == nil {
-		return &ToolResult{Success: false, Error: "这两个地点之间已存在关系边，请使用 update_location_relation 修改"}, nil
-	}
-	if err != gorm.ErrRecordNotFound {
-		return nil, fmt.Errorf("check existing relation: %w", err)
-	}
-
-	rel := location.LocationRelation{
-		NovelID:      tc.NovelID,
-		LocationA:    a.LocationA,
-		LocationB:    a.LocationB,
-		RelationType: a.RelationType,
-		Description:  a.Description,
+	items := make([]location.LocationRelation, len(a.Relations))
+	for i, item := range a.Relations {
+		items[i] = location.LocationRelation{
+			NovelID:      tc.NovelID,
+			LocationA:    item.LocationA,
+			LocationB:    item.LocationB,
+			RelationType: item.RelationType,
+			Description:  item.Description,
+		}
 	}
 
-	if err := tc.DB.WithContext(ctx).Create(&rel).Error; err != nil {
-		return nil, fmt.Errorf("create relation: %w", err)
+	if err := tc.DB.WithContext(ctx).Create(&items).Error; err != nil {
+		return nil, fmt.Errorf("create relations: %w", err)
 	}
 
-	return &ToolResult{Success: true, Data: map[string]any{"id": rel.ID}}, nil
+	ids := make([]int64, len(items))
+	for i := range items {
+		ids[i] = items[i].ID
+	}
+
+	return &ToolResult{Success: true, Data: map[string]any{"ids": ids, "count": len(ids)}}, nil
 }
 
 // ── update_location_relation ────────────────────────────
@@ -427,20 +490,6 @@ func (t *UpdateLocationRelationTool) Execute(ctx context.Context, args any, tc T
 	}
 
 	return &ToolResult{Success: true, Data: map[string]any{"id": rel.ID}}, nil
-}
-
-// verifyLocationPair 校验两个地点存在且属于当前小说。
-func verifyLocationPair(ctx context.Context, db *gorm.DB, a, b, novelID int64) error {
-	var count int64
-	if err := db.WithContext(ctx).Model(&location.Location{}).
-		Where("id IN ? AND novel_id = ?", []int64{a, b}, novelID).
-		Count(&count).Error; err != nil {
-		return fmt.Errorf("verify locations: %w", err)
-	}
-	if count != 2 {
-		return fmt.Errorf("地点 %d 或 %d 不存在，或不属于当前小说", a, b)
-	}
-	return nil
 }
 
 // ── 格式化 ──────────────────────────────────────────────

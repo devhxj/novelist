@@ -134,8 +134,8 @@ func formatReaderPerspective(known, suspenses, misconceptions []reader.ReaderPer
 
 // ── create_reader_perspective_entry ──────────────────────
 
-// CreateReaderPerspectiveEntryArgs 是 create_reader_perspective_entry 的参数。
-type CreateReaderPerspectiveEntryArgs struct {
+// CreateReaderPerspectiveEntryItem 是 create_reader_perspective_entry 的单条参数。
+type CreateReaderPerspectiveEntryItem struct {
 	Type                 string `json:"type" jsonschema:"required,description=条目类型,enum=known,enum=suspense,enum=misconception" validate:"required,oneof=known suspense misconception"`
 	Content              string `json:"content" jsonschema:"required,description=内容描述"          validate:"required"`
 	PlantedChapter       int    `json:"planted_chapter" jsonschema:"required,description=种下的章节号"    validate:"required,min=1"`
@@ -143,12 +143,17 @@ type CreateReaderPerspectiveEntryArgs struct {
 	PlannedRevealChapter int    `json:"planned_reveal_chapter" jsonschema:"description=仅 suspense/misconception：计划在哪章揭露或回收"`
 }
 
+// CreateReaderPerspectiveEntryArgs 是 create_reader_perspective_entry 的参数。
+type CreateReaderPerspectiveEntryArgs struct {
+	Entries []CreateReaderPerspectiveEntryItem `json:"entries" jsonschema:"required,description=要创建的读者认知条目（1-10个）" validate:"required,min=1,max=10,dive"`
+}
+
 // CreateReaderPerspectiveEntryTool 创建一条读者认知条目。
 type CreateReaderPerspectiveEntryTool struct{}
 
 func (t *CreateReaderPerspectiveEntryTool) Name() string { return "create_reader_perspective_entry" }
 func (t *CreateReaderPerspectiveEntryTool) Description() string {
-	return "添加一条读者认知条目。三种类型：\n" +
+	return "批量添加读者认知条目（1-10个）。所有条目在一次批量 INSERT 中写入，单语句保证原子性。三种类型：\n" +
 		"- known：读者在某章之后知道了什么\n" +
 		"- suspense：读者当前在等待解答的悬念\n" +
 		"- misconception：读者以为的情况（用于未来反转）\n" +
@@ -166,30 +171,40 @@ func (t *CreateReaderPerspectiveEntryTool) NewArgs() any     { return &CreateRea
 func (t *CreateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
 	a := args.(*CreateReaderPerspectiveEntryArgs)
 
-	// 业务校验：misconception 必须提供 related_truth
-	if a.Type == reader.TypeMisconception && a.RelatedTruth == "" {
-		return &ToolResult{Success: false, Error: "misconception 类型必须提供 related_truth（实际真相）"}, nil
+	// 预校验：misconception 必须提供 related_truth
+	for _, item := range a.Entries {
+		if item.Type == reader.TypeMisconception && item.RelatedTruth == "" {
+			return &ToolResult{Success: false, Error: "misconception 类型必须提供 related_truth（实际真相）"}, nil
+		}
 	}
 
-	entry := reader.ReaderPerspective{
-		NovelID:        tc.NovelID,
-		Type:           a.Type,
-		Content:        a.Content,
-		PlantedChapter: a.PlantedChapter,
-		RelatedTruth:   a.RelatedTruth,
+	items := make([]reader.ReaderPerspective, len(a.Entries))
+	for i, item := range a.Entries {
+		entry := reader.ReaderPerspective{
+			NovelID:        tc.NovelID,
+			Type:           item.Type,
+			Content:        item.Content,
+			PlantedChapter: item.PlantedChapter,
+			RelatedTruth:   item.RelatedTruth,
+		}
+		if item.Type == reader.TypeSuspense || item.Type == reader.TypeMisconception {
+			entry.RevealedChapter = item.PlannedRevealChapter
+		}
+		items[i] = entry
 	}
 
-	if a.Type == reader.TypeSuspense || a.Type == reader.TypeMisconception {
-		entry.RevealedChapter = a.PlannedRevealChapter
+	if err := tc.DB.WithContext(ctx).Create(&items).Error; err != nil {
+		return nil, fmt.Errorf("create reader perspective: %w", err)
 	}
 
-	if err := tc.DB.WithContext(ctx).Create(&entry).Error; err != nil {
-		return nil, fmt.Errorf("create perspective entry: %w", err)
+	ids := make([]int64, len(items))
+	for i := range items {
+		ids[i] = items[i].ID
 	}
 
 	return &ToolResult{
 		Success: true,
-		Data:    map[string]any{"id": entry.ID, "type": a.Type},
+		Data:    map[string]any{"ids": ids, "count": len(ids)},
 	}, nil
 }
 

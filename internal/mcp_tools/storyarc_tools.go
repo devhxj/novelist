@@ -140,12 +140,17 @@ func (t *GetStoryArcsTool) executeFull(ctx context.Context, a *GetStoryArcsArgs,
 
 // ── create_story_arc ───────────────────────────────────
 
-// CreateStoryArcArgs 是 create_story_arc 的参数。
-type CreateStoryArcArgs struct {
+// CreateStoryArcItem 是 create_story_arc 的单条参数。
+type CreateStoryArcItem struct {
 	Name        string `json:"name" jsonschema:"required,description=弧线名称，如'复仇之路'"                          validate:"required"`
 	ArcType     string `json:"arc_type" jsonschema:"required,description=弧线类型,enum=main,enum=sub,enum=character,enum=background" validate:"required,oneof=main sub character background"`
 	Description string `json:"description" jsonschema:"description=弧线整体描述"`
 	Importance  int    `json:"importance" jsonschema:"description=重要度1-5,default=1,minimum=1,maximum=5"          validate:"omitempty,min=1,max=5"`
+}
+
+// CreateStoryArcArgs 是 create_story_arc 的参数。
+type CreateStoryArcArgs struct {
+	StoryArcs []CreateStoryArcItem `json:"story_arcs" jsonschema:"required,description=要创建的弧线列表（1-5个）" validate:"required,min=1,max=5,dive"`
 }
 
 // CreateStoryArcTool 创建新叙事弧线。
@@ -153,7 +158,8 @@ type CreateStoryArcTool struct{}
 
 func (t *CreateStoryArcTool) Name() string { return "create_story_arc" }
 func (t *CreateStoryArcTool) Description() string {
-	return "创建一条新的叙事弧线（主线/支线/角色线/背景线）。" +
+	return "批量创建叙事弧线（1-5个）。所有弧线在一次批量 INSERT 中写入，单语句保证原子性。" +
+		"弧线类型：main（主线）/ sub（支线）/ character（角色线）/ background（背景线）。" +
 		"弧线是跨越多章节的故事线容器，内部节点通过 create_arc_node 添加。"
 }
 func (t *CreateStoryArcTool) Category() ToolCategory { return CategoryWritingAssistant }
@@ -165,24 +171,32 @@ func (t *CreateStoryArcTool) NewArgs() any                { return &CreateStoryA
 func (t *CreateStoryArcTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
 	a := args.(*CreateStoryArcArgs)
 
-	arc := storyarc.StoryArc{
-		NovelID:     tc.NovelID,
-		Name:        a.Name,
-		ArcType:     a.ArcType,
-		Description: a.Description,
-		Importance:  a.Importance,
-		Status:      "active",
+	items := make([]storyarc.StoryArc, len(a.StoryArcs))
+	for i, item := range a.StoryArcs {
+		importance := item.Importance
+		if importance == 0 {
+			importance = 1
+		}
+		items[i] = storyarc.StoryArc{
+			NovelID:     tc.NovelID,
+			Name:        item.Name,
+			ArcType:     item.ArcType,
+			Description: item.Description,
+			Importance:  importance,
+			Status:      "active",
+		}
 	}
 
-	if arc.Importance == 0 {
-		arc.Importance = 1
+	if err := tc.DB.WithContext(ctx).Create(&items).Error; err != nil {
+		return nil, fmt.Errorf("create arcs: %w", err)
 	}
 
-	if err := tc.DB.WithContext(ctx).Create(&arc).Error; err != nil {
-		return nil, fmt.Errorf("create arc: %w", err)
+	ids := make([]int64, len(items))
+	for i := range items {
+		ids[i] = items[i].ID
 	}
 
-	return &ToolResult{Success: true, Data: map[string]any{"id": arc.ID}}, nil
+	return &ToolResult{Success: true, Data: map[string]any{"ids": ids, "count": len(ids)}}, nil
 }
 
 // ── update_story_arc ───────────────────────────────────
@@ -240,12 +254,17 @@ func (t *UpdateStoryArcTool) Execute(ctx context.Context, args any, tc ToolConte
 
 // ── create_arc_node ────────────────────────────────────
 
-// CreateArcNodeArgs 是 create_arc_node 的参数。
-type CreateArcNodeArgs struct {
+// CreateArcNodeItem 是 create_arc_node 的单条参数。
+type CreateArcNodeItem struct {
 	StoryArcID    int64  `json:"story_arc_id" jsonschema:"required,description=所属弧线ID"                  validate:"required,min=1"`
 	Title         string `json:"title" jsonschema:"required,description=节点标题，如'发现仇人身份'"              validate:"required"`
 	Description   string `json:"description" jsonschema:"description=节点详情"`
 	TargetChapter int    `json:"target_chapter" jsonschema:"required,description=预计发生章节号（不准确不要紧）"       validate:"required,min=1"`
+}
+
+// CreateArcNodeArgs 是 create_arc_node 的参数。
+type CreateArcNodeArgs struct {
+	ArcNodes []CreateArcNodeItem `json:"arc_nodes" jsonschema:"required,description=要创建的节点列表（1-10个）" validate:"required,min=1,max=10,dive"`
 }
 
 // CreateArcNodeTool 新建弧线节点。
@@ -253,7 +272,8 @@ type CreateArcNodeTool struct{}
 
 func (t *CreateArcNodeTool) Name() string { return "create_arc_node" }
 func (t *CreateArcNodeTool) Description() string {
-	return "向弧线中添加一个新节点。target_chapter 为预计发生的章节号（不准确不要紧，后续可通过 update_arc_node 调整）。" +
+	return "批量向弧线添加节点（1-10个）。所有节点在一次批量 INSERT 中写入，单语句保证原子性。" +
+		"target_chapter 为预计发生的章节号（不准确不要紧，后续可通过 update_arc_node 调整）。" +
 		"节点按 target_chapter 排序构成弧线演进链。"
 }
 func (t *CreateArcNodeTool) Category() ToolCategory { return CategoryWritingAssistant }
@@ -265,31 +285,47 @@ func (t *CreateArcNodeTool) NewArgs() any                { return &CreateArcNode
 func (t *CreateArcNodeTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
 	a := args.(*CreateArcNodeArgs)
 
-	// 校验弧线存在且属于当前小说
-	var arc storyarc.StoryArc
-	if err := tc.DB.WithContext(ctx).
-		Where("id = ? AND novel_id = ?", a.StoryArcID, tc.NovelID).
-		First(&arc).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return &ToolResult{Success: false, Error: fmt.Sprintf("弧线 %d 不存在", a.StoryArcID)}, nil
+	// 预校验：批量验证所有弧线存在且属于当前小说
+	arcIDSet := make(map[int64]bool)
+	for _, item := range a.ArcNodes {
+		arcIDSet[item.StoryArcID] = true
+	}
+	arcIDs := make([]int64, 0, len(arcIDSet))
+	for id := range arcIDSet {
+		arcIDs = append(arcIDs, id)
+	}
+	var count int64
+	if err := tc.DB.WithContext(ctx).Model(&storyarc.StoryArc{}).
+		Where("id IN ? AND novel_id = ?", arcIDs, tc.NovelID).
+		Count(&count).Error; err != nil {
+		return nil, fmt.Errorf("verify arcs: %w", err)
+	}
+	if int(count) != len(arcIDs) {
+		return &ToolResult{Success: false, Error: "部分弧线不存在或不属于当前小说"}, nil
+	}
+
+	items := make([]storyarc.ArcNode, len(a.ArcNodes))
+	for i, item := range a.ArcNodes {
+		items[i] = storyarc.ArcNode{
+			NovelID:       tc.NovelID,
+			StoryArcID:    item.StoryArcID,
+			Title:         item.Title,
+			Description:   item.Description,
+			TargetChapter: item.TargetChapter,
+			Status:        "pending",
 		}
-		return nil, fmt.Errorf("verify arc: %w", err)
 	}
 
-	node := storyarc.ArcNode{
-		NovelID:       tc.NovelID,
-		StoryArcID:    a.StoryArcID,
-		Title:         a.Title,
-		Description:   a.Description,
-		TargetChapter: a.TargetChapter,
-		Status:        "pending",
+	if err := tc.DB.WithContext(ctx).Create(&items).Error; err != nil {
+		return nil, fmt.Errorf("create arc nodes: %w", err)
 	}
 
-	if err := tc.DB.WithContext(ctx).Create(&node).Error; err != nil {
-		return nil, fmt.Errorf("create node: %w", err)
+	ids := make([]int64, len(items))
+	for i := range items {
+		ids[i] = items[i].ID
 	}
 
-	return &ToolResult{Success: true, Data: map[string]any{"id": node.ID}}, nil
+	return &ToolResult{Success: true, Data: map[string]any{"ids": ids, "count": len(ids)}}, nil
 }
 
 // ── update_arc_node ────────────────────────────────────

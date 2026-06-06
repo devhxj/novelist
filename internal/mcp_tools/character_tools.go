@@ -150,11 +150,16 @@ func formatRelationEdges(rels []character.CharacterRelation, nameMap map[int64]s
 
 // ── create_character ──────────────────────────────────
 
-// CreateCharacterArgs 是 create_character 的参数。
-type CreateCharacterArgs struct {
+// CreateCharacterItem 是 create_character 的单条参数。
+type CreateCharacterItem struct {
 	Name        string `json:"name"        jsonschema:"required,description=角色名称"               validate:"required"`
 	Personality string `json:"personality" jsonschema:"description=自由JSON对象，描述角色性格/定位/背景等，如{\"traits\":[\"勇敢\"],\"brief\":\"热血青年\"}"`
 	Abilities   string `json:"abilities"   jsonschema:"description=JSON数组，角色能力/技能列表，如[\"剑术\",\"隐身\"]"`
+}
+
+// CreateCharacterArgs 是 create_character 的参数。
+type CreateCharacterArgs struct {
+	Characters []CreateCharacterItem `json:"characters" jsonschema:"required,description=要创建的角色列表（1-10个）" validate:"required,min=1,max=10,dive"`
 }
 
 // CreateCharacterTool 创建新角色。
@@ -162,7 +167,8 @@ type CreateCharacterTool struct{}
 
 func (t *CreateCharacterTool) Name() string { return "create_character" }
 func (t *CreateCharacterTool) Description() string {
-	return "为当前小说创建一个新角色。name 必填；personality 为自由 JSON，建议包含 role/traits/background/motivation；" +
+	return "批量创建角色（1-10个）。所有角色在一次批量 INSERT 中写入，单语句保证原子性。" +
+		"name 必填；personality 为自由 JSON，建议包含 role/traits/background/motivation；" +
 		"abilities 为 JSON 数组。创建后可用 get_characters 查看。"
 }
 func (t *CreateCharacterTool) Category() ToolCategory { return CategoryNovelManagement }
@@ -174,20 +180,28 @@ func (t *CreateCharacterTool) NewArgs() any                { return &CreateChara
 func (t *CreateCharacterTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
 	a := args.(*CreateCharacterArgs)
 
-	ch := character.Character{
-		NovelID:     tc.NovelID,
-		Name:        a.Name,
-		Personality: a.Personality,
-		Abilities:   a.Abilities,
+	items := make([]character.Character, len(a.Characters))
+	for i, item := range a.Characters {
+		items[i] = character.Character{
+			NovelID:     tc.NovelID,
+			Name:        item.Name,
+			Personality: item.Personality,
+			Abilities:   item.Abilities,
+		}
 	}
 
-	if err := tc.DB.WithContext(ctx).Create(&ch).Error; err != nil {
-		return nil, fmt.Errorf("create character: %w", err)
+	if err := tc.DB.WithContext(ctx).Create(&items).Error; err != nil {
+		return nil, fmt.Errorf("create characters: %w", err)
+	}
+
+	ids := make([]int64, len(items))
+	for i := range items {
+		ids[i] = items[i].ID
 	}
 
 	return &ToolResult{
 		Success: true,
-		Data:    map[string]any{"id": ch.ID},
+		Data:    map[string]any{"ids": ids, "count": len(ids)},
 	}, nil
 }
 
