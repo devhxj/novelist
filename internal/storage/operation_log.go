@@ -315,7 +315,7 @@ func serializeDest(db *gorm.DB) string {
 
 // skipOperLog 跳过对操作日志表、消息表和全局配置表的操作。
 // 操作日志永不被追踪（防递归）；消息通过 turn_id 列直接 DELETE 回退，不走日志；
-// 应用配置与 turn 无关，无需回退。
+// 应用配置与 turn 无关，无需回退；turn_commits 由 rollback 包自行清理。
 func skipOperLog(db *gorm.DB) bool {
 	if db.Statement.Schema == nil {
 		return true // Schema 不存在则无法判断表名，安全做法是跳过
@@ -344,52 +344,48 @@ func toJSON(v any) string {
 //   - 消息：直接 DELETE WHERE turn_id >= targetTurn
 //   - 回退自身的日志记录一并清理
 //
-// 整个操作在单个事务内完成。
-func RollbackTo(ctx context.Context, db *gorm.DB, sessionID string, targetTurn int) error {
+// 整个操作在单个事务内完成。调用方若已持有事务，应使用 RollbackInTx 传入 tx。
+func RollbackTo(ctx context.Context, db *gorm.DB, sessionID string, targetTurn, lastTurn int) error {
 	return db.WithContext(withoutTurn(ctx)).Transaction(func(tx *gorm.DB) error {
-		// 1. 获取当前最新 turn
-		var lastTurn int
-		if err := tx.Raw("SELECT last_turn_id FROM sessions WHERE session_id = ?", sessionID).
-			Scan(&lastTurn).Error; err != nil {
-			return fmt.Errorf("oplog: get last_turn_id: %w", err)
-		}
-		if lastTurn < targetTurn {
-			return nil
-		}
-
-		// 2. 取出待回退的日志（倒序：从最新到最早）
-		var records []OperationLogRecord
-		if err := tx.Where("session_id = ? AND turn_id >= ? AND turn_id <= ?",
-			sessionID, targetTurn, lastTurn).
-			Order("id DESC").
-			Find(&records).Error; err != nil {
-			return fmt.Errorf("oplog: query operation_log: %w", err)
-		}
-
-		// 3. 逐条逆向执行领域实体变更
-		for _, r := range records {
-			if err := reverseOne(tx, r); err != nil {
-				return fmt.Errorf("oplog: reverse failed (id=%d, op=%s, table=%s): %w",
-					r.ID, r.Operation, r.Table, err)
-			}
-		}
-
-		// 4. 删除该区间的 messages（通过 turn_id 列直接定位）
-		if err := tx.Table("messages").
-			Where("session_id = ? AND turn_id >= ? AND turn_id <= ?", sessionID, targetTurn, lastTurn).
-			Delete(nil).Error; err != nil {
-			return fmt.Errorf("oplog: delete messages: %w", err)
-		}
-
-		// 5. 清理已回退的操作日志
-		if err := tx.Where("session_id = ? AND turn_id >= ? AND turn_id <= ?",
-			sessionID, targetTurn, lastTurn).
-			Delete(&OperationLogRecord{}).Error; err != nil {
-			return fmt.Errorf("oplog: cleanup operation_log: %w", err)
-		}
-
-		return nil
+		return RollbackInTx(ctx, tx, sessionID, targetTurn, lastTurn)
 	})
+}
+
+// RollbackInTx 是 RollbackTo 的事务内版本，供外部已有事务时复用（如 rollback.RollbackBeforeTurn）。
+// 回退 [targetTurn, lastTurn] 区间内领域实体、messages、operation_log 自身的记录。
+func RollbackInTx(ctx context.Context, tx *gorm.DB, sessionID string, targetTurn, lastTurn int) error {
+	// 1. 取出待回退的日志（倒序：从最新到最早）
+	var records []OperationLogRecord
+	if err := tx.Where("session_id = ? AND turn_id >= ? AND turn_id <= ?",
+		sessionID, targetTurn, lastTurn).
+		Order("id DESC").
+		Find(&records).Error; err != nil {
+		return fmt.Errorf("oplog: query operation_log: %w", err)
+	}
+
+	// 2. 逐条逆向执行领域实体变更
+	for _, r := range records {
+		if err := reverseOne(tx, r); err != nil {
+			return fmt.Errorf("oplog: reverse failed (id=%d, op=%s, table=%s): %w",
+				r.ID, r.Operation, r.Table, err)
+		}
+	}
+
+	// 3. 删除该区间的 messages（通过 turn_id 列直接定位）
+	if err := tx.Table("messages").
+		Where("session_id = ? AND turn_id >= ? AND turn_id <= ?", sessionID, targetTurn, lastTurn).
+		Delete(nil).Error; err != nil {
+		return fmt.Errorf("oplog: delete messages: %w", err)
+	}
+
+	// 4. 清理已回退的操作日志
+	if err := tx.Where("session_id = ? AND turn_id >= ? AND turn_id <= ?",
+		sessionID, targetTurn, lastTurn).
+		Delete(&OperationLogRecord{}).Error; err != nil {
+		return fmt.Errorf("oplog: cleanup operation_log: %w", err)
+	}
+
+	return nil
 }
 
 // reverseOne 对单条操作日志执行逆向操作。

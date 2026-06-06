@@ -12,7 +12,7 @@ import (
 	"novel/internal/agentcfg"
 	"novel/internal/git"
 	"novel/internal/session"
-	"novel/internal/turncommit"
+	"novel/internal/rollback"
 )
 
 // ChatInput 是一次对话请求的入参。
@@ -386,7 +386,7 @@ func (a *App) doCommit(repo *git.Repo, turnID int, sessionID, commitType, msg st
 		return
 	}
 
-	tc := &turncommit.TurnCommit{
+	tc := &rollback.TurnCommit{
 		SessionID:  sessionID,
 		TurnID:     turnID,
 		CommitType: commitType,
