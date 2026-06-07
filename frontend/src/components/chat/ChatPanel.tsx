@@ -403,6 +403,7 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
             if (subIdx >= 0) {
               segments[subIdx] = {
                 ...segments[subIdx],
+                agentType,
                 status: toolStatus === 'executing' ? 'streaming' : toolStatus === 'failed' ? 'failed' : 'done',
                 toolStatus,
               }
