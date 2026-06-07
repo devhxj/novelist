@@ -69,7 +69,7 @@ export default function StatusBar({ content }: Props) {
   }
 
   return (
-    <div className="relative h-7 flex items-center justify-between px-4 border-t bg-muted/20 text-xs text-muted-foreground select-none">
+    <div className="relative h-7 flex items-center justify-between px-4 border-t bg-sidebar text-xs text-muted-foreground select-none">
       <div className="flex items-center gap-4">
         <span
           className="cursor-default"

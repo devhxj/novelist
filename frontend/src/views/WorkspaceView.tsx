@@ -81,6 +81,9 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   async function handleSelectNovel(n: novel.Novel) {
     setActiveNovelId(n.id)
     setActivePanel('chapters')
+    contentRef.current?.closeAllTabs()
+    setTabTarget(null)
+    setActiveContent('')
     await app.SetActiveNovel({ novel_id: n.id })
   }
 
@@ -102,7 +105,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
 
   return (
     <div className="h-screen flex flex-col">
-      <header className="h-11 flex items-center justify-between pl-4 pr-2 border-b bg-muted/10 shrink-0">
+      <header className="h-11 flex items-center justify-between pl-4 pr-2 border-b bg-sidebar shrink-0">
         <span className="text-sm font-medium">
           {activeNovel?.title ?? 'Goink'}
         </span>

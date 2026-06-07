@@ -13,6 +13,7 @@ import type { EditorTab } from './types'
 
 export interface ContentPanelHandle {
   openFile: (path: string, title: string) => void
+  closeAllTabs: () => void
   handleDiffApprove: (toolId: string) => Promise<void>
   handleDiffReject: (toolId: string) => void
 }
@@ -28,7 +29,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   const app = useApp()
   const {
     tabs, activeTab, activeTabId,
-    openTab, closeTab, setActiveTabId,
+    openTab, closeTab, closeAllTabs, setActiveTabId,
     updateTab, openDiffTab,
   } = useEditorTabs()
 
@@ -226,9 +227,10 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
 
   useImperativeHandle(ref, () => ({
     openFile: doOpenFile,
+    closeAllTabs,
     handleDiffApprove,
     handleDiffReject,
-  }), [doOpenFile, handleDiffApprove, handleDiffReject])
+  }), [doOpenFile, closeAllTabs, handleDiffApprove, handleDiffReject])
 
   // ── approval:requested 监听 ─────────────────────────────
 

@@ -699,7 +699,7 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
       : '输入消息...'
 
   return (
-    <aside className="shrink-0 flex flex-col bg-background border-l relative" style={{ width }}>
+    <aside className="shrink-0 flex flex-col bg-sidebar border-l relative" style={{ width }}>
       <div
         className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/30 transition-colors z-10"
         style={{ marginLeft: -2 }}

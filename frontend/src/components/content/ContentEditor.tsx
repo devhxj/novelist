@@ -10,14 +10,14 @@ export default function ContentEditor({ value, onChange, onMount }: Props) {
   return (
     <Editor
       height="100%"
-      language="markdown"
+      language="plaintext"
       theme="light"
       value={value}
       onChange={onChange}
       onMount={onMount}
       options={{
         minimap: { enabled: false },
-        lineNumbers: 'on',
+        lineNumbers: 'off',
         scrollBeyondLastLine: false,
         fontSize: 17,
         lineHeight: 30,
@@ -25,6 +25,9 @@ export default function ContentEditor({ value, onChange, onMount }: Props) {
         wordWrap: 'on',
         automaticLayout: true,
         unicodeHighlight: { nonBasicASCII: false, ambiguousCharacters: false, invisibleCharacters: false },
+        suggestOnTriggerCharacters: false,
+        quickSuggestions: false,
+        wordBasedSuggestions: 'off',
       }}
     />
   )
