@@ -9,6 +9,7 @@ import ChatPanel from '@/components/chat/ChatPanel'
 import GitHubLink from '@/components/shell/GitHubLink'
 import SettingsDialog from '@/components/settings/SettingsDialog'
 import { Settings } from 'lucide-react'
+import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised, Quit } from '@/lib/wailsjs/runtime/runtime'
 
 interface Props {
   initialNovelId: number
@@ -27,7 +28,14 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   const [showSettings, setShowSettings] = useState(false)
   const [tabTarget, setTabTarget] = useState<{ path: string; title: string } | null>(null)
   const [activeContent, setActiveContent] = useState('')
+  const [isMaximised, setIsMaximised] = useState(false)
   const loadedRef = useRef(false)
+
+  // ── 窗口状态 ────────────────────────────────────────────
+
+  useEffect(() => {
+    WindowIsMaximised().then(setIsMaximised)
+  }, [])
 
   // ── 作品列表 ────────────────────────────────────────────
 
@@ -103,20 +111,52 @@ export default function WorkspaceView({ initialNovelId }: Props) {
 
   const activeNovel = novels.find(n => n.id === activeNovelId)
 
+  // ── 窗口按钮样式 ────────────────────────────────────────
+
+  const winBtn = 'flex items-center justify-center w-6 h-full cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors'
+
   return (
     <div className="h-screen flex flex-col">
-      <header className="h-11 flex items-center justify-between pl-4 pr-2 border-b bg-sidebar shrink-0">
-        <span className="text-sm font-medium">
+      <header
+        className="h-11 flex items-center border-b bg-sidebar shrink-0"
+        data-wails-drag
+      >
+        <span className="text-sm font-medium pl-3 flex-1">
           {activeNovel?.title ?? 'Goink'}
         </span>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 pr-1" style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}>
           <GitHubLink />
           <button
             onClick={() => setShowSettings(true)}
-            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center"
             title="设置"
           >
             <Settings className="w-5 h-5" />
+          </button>
+          <div className="w-px h-4 bg-border/30 mx-0.5" />
+          <button onClick={WindowMinimise} className={winBtn} title="最小化">
+            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 5h7" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/></svg>
+          </button>
+          <button
+            onClick={() => { WindowToggleMaximise(); setIsMaximised(!isMaximised) }}
+            className={winBtn}
+            title={isMaximised ? '还原' : '最大化'}
+          >
+            {isMaximised ? (
+              <svg width="10" height="10" viewBox="0 0 10 10">
+                <rect x="3" y="1.5" width="6" height="6" rx="1" fill="none" stroke="currentColor" strokeWidth=".85" />
+                <rect x="1" y="2.5" width="6" height="6" rx="1" fill="var(--color-sidebar)" stroke="currentColor" strokeWidth=".85" />
+              </svg>
+            ) : (
+              <svg width="10" height="10" viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7" stroke="currentColor" strokeWidth=".9" rx=".5" fill="none" /></svg>
+            )}
+          </button>
+          <button
+            onClick={Quit}
+            className={`${winBtn} hover:!bg-red-500 hover:!text-white`}
+            title="关闭"
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth=".9" strokeLinecap="round"/></svg>
           </button>
         </div>
       </header>
