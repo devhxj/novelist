@@ -25,6 +25,7 @@ import (
 	"novel/internal/storage"
 	"novel/internal/storyarc"
 	"novel/internal/timeline"
+	"novel/internal/rollback"
 )
 
 // App 是 Wails 绑定的根对象。前端通过 window.go.main.App 调用其导出方法。
@@ -49,8 +50,9 @@ type App struct {
 	session   *session.Store
 	timeline  *timeline.Store
 	storyarc  *storyarc.Store
-	location  *location.Store
-	reader    *reader.Store
+	location   *location.Store
+	reader     *reader.Store
+	turnCommit *rollback.Store
 }
 
 // New 创建 App 实例。初始化在 OnStartup 中完成。
@@ -156,6 +158,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 	a.storyarc = storyarc.NewStore(db, a.logger)
 	a.location = location.NewStore(db, a.logger)
 	a.reader = reader.NewStore(db, a.logger)
+	a.turnCommit = rollback.NewStore(db, a.logger)
 
 	// 6. 初始化 MCP 工具注册表
 	a.registry = mcp_tools.NewRegistry(a.logger)

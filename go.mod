@@ -10,6 +10,7 @@ require (
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/wailsapp/wails/v2 v2.12.0
 	github.com/yalue/onnxruntime_go v1.30.1
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
 )

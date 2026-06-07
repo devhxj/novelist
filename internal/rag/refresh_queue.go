@@ -29,7 +29,7 @@ type RefreshQueue struct {
 	logger     *slog.Logger
 
 	ch      chan RefreshTask
-	pending map[int]RefreshTask
+	pending map[string]RefreshTask
 	mu      sync.Mutex
 
 	ctx    context.Context
@@ -54,7 +54,7 @@ func InitRefreshQueue(vs *VectorStore, chStore *chapter.Store, novelStore *novel
 			novelStore: novelStore,
 			logger:     logger,
 			ch:         make(chan RefreshTask, 256),
-			pending:    make(map[int]RefreshTask),
+			pending:    make(map[string]RefreshTask),
 			ctx:        ctx,
 			cancel:     cancel,
 		}
@@ -93,8 +93,12 @@ func (q *RefreshQueue) Submit(task RefreshTask) {
 	select {
 	case q.ch <- task:
 	default:
-		q.logger.Warn("向量刷新队列已满，丢弃任务", "chapter_id", task.ChapterNumber)
+		q.logger.Warn("向量刷新队列已满，丢弃任务", "chapter_number", task.ChapterNumber)
 	}
+}
+
+func pendingKey(task RefreshTask) string {
+	return fmt.Sprintf("%d:%d", task.NovelID, task.ChapterNumber)
 }
 
 // consumer 是后台消费者，500ms 内同一章节的重复提交合并为一次。
@@ -115,13 +119,13 @@ func (q *RefreshQueue) consumer() {
 			for _, task := range q.pending {
 				q.doRefresh(task)
 			}
-			q.pending = make(map[int]RefreshTask)
+			q.pending = make(map[string]RefreshTask)
 			q.mu.Unlock()
 			return
 
 		case task := <-q.ch:
 			q.mu.Lock()
-			q.pending[task.ChapterNumber] = task
+			q.pending[pendingKey(task)] = task
 			if !timerActive {
 				timer.Reset(500 * time.Millisecond)
 				timerActive = true
@@ -132,7 +136,7 @@ func (q *RefreshQueue) consumer() {
 			q.mu.Lock()
 			timerActive = false
 			tasks := q.pending
-			q.pending = make(map[int]RefreshTask)
+			q.pending = make(map[string]RefreshTask)
 			q.mu.Unlock()
 
 			for _, task := range tasks {

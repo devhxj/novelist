@@ -16,6 +16,7 @@ import (
 	"novel/internal/storage"
 	"novel/internal/storyarc"
 	"novel/internal/timeline"
+	"novel/internal/rollback"
 )
 
 // Run 自动创建/更新全部数据表，幂等安全。
@@ -37,6 +38,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&session.Session{},
 		&session.Message{},
 		&storage.OperationLogRecord{},
+		&rollback.TurnCommit{},
 	}
 
 	for _, m := range models {

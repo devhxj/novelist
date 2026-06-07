@@ -54,8 +54,6 @@ func (c *Client) ChatStream(
 	model string,
 	opts *CallOptions,
 ) <-chan StreamEvent {
-	ch := make(chan StreamEvent, 8)
-
 	c.mu.RLock()
 	p, ok := c.providers[providerName]
 	c.mu.RUnlock()
@@ -66,6 +64,7 @@ func (c *Client) ChatStream(
 		return ch
 	}
 
+	ch := make(chan StreamEvent, 8)
 	go func() {
 		defer close(ch)
 

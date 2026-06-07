@@ -25,19 +25,30 @@ func (a *App) GetModels() []llm.AvailableModel {
 	return llm.Models(a.llmClient.Providers())
 }
 
-// GetSessions 分页查询当前小说的对话历史。
-func (a *App) GetSessions(novelID int64, page int, size int) (*storage.PageResult[SessionMeta], error) {
+// GetSessionsInput 是 GetSessions 的入参。
+type GetSessionsInput struct {
+	NovelID int64  `json:"novel_id"`
+	Page    int    `json:"page"`
+	Size    int    `json:"size"`
+	Search  string `json:"search"`
+}
+
+// GetSessions 分页查询当前小说的对话历史。search 非空时搜索消息内容。
+func (a *App) GetSessions(input GetSessionsInput) (*storage.PageResult[SessionMeta], error) {
 	if a.session == nil {
 		return nil, nil
 	}
-	sessions, total, err := a.session.ListSessions(a.ctx, novelID, page, size)
+	result, err := a.session.ListSessions(a.ctx, input.NovelID, session.ListSessionsOptions{
+		PageParams: storage.PageParams{Page: input.Page, Size: input.Size},
+		Search:     input.Search,
+	})
 	if err != nil {
-		a.logger.Error("failed to list sessions", "novel_id", novelID, "page", page, "err", err)
+		a.logger.Error("failed to list sessions", "novel_id", input.NovelID, "search", input.Search, "err", err)
 		return nil, fmt.Errorf("app: list sessions: %w", err)
 	}
 
-	metas := make([]SessionMeta, 0, len(sessions))
-	for _, s := range sessions {
+	metas := make([]SessionMeta, 0, len(result.Items))
+	for _, s := range result.Items {
 		metas = append(metas, SessionMeta{
 			SessionID: s.SessionID,
 			Title:     s.Title,
@@ -45,7 +56,7 @@ func (a *App) GetSessions(novelID int64, page int, size int) (*storage.PageResul
 			UpdatedAt: s.UpdatedAt.Format("2006-01-02T15:04:05"),
 		})
 	}
-	return storage.NewPageResult(metas, total, page, size), nil
+	return storage.NewPageResult(metas, result.Total, input.Page, input.Size), nil
 }
 
 // GetSessionMessages 加载指定 session 的全部前端可见消息。

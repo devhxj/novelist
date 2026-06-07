@@ -88,10 +88,10 @@ func (s *Store) ListByNovel(ctx context.Context, novelID int64, opts ListByNovel
 }
 
 // ListBefore 取 target_chapter < beforeChapter 的最近 limit 条，不论状态。
-func (s *Store) ListBefore(ctx context.Context, novelID int64, ChapterID int, limit int) ([]TimelineEntry, error) {
+func (s *Store) ListBefore(ctx context.Context, novelID int64, chapterNum int, limit int) ([]TimelineEntry, error) {
 	var entries []TimelineEntry
 	if err := s.DB.WithContext(ctx).
-		Where("novel_id = ? AND target_chapter < ?", novelID, ChapterID).
+		Where("novel_id = ? AND target_chapter < ?", novelID, chapterNum).
 		Order("target_chapter DESC").
 		Limit(limit).
 		Find(&entries).Error; err != nil {
@@ -100,12 +100,12 @@ func (s *Store) ListBefore(ctx context.Context, novelID int64, ChapterID int, li
 	return entries, nil
 }
 
-// ListPendingBefore 取 target_chapter < ChapterID 且 pending 的全部条目，兜底截断 100。
+// ListPendingBefore 取 target_chapter < chapterNum 且 pending 的全部条目，兜底截断 100。
 // 按 target_chapter DESC——最近的在前，远古的在后，先展示最相关的。
-func (s *Store) ListPendingBefore(ctx context.Context, novelID int64, ChapterID int) ([]TimelineEntry, error) {
+func (s *Store) ListPendingBefore(ctx context.Context, novelID int64, chapterNum int) ([]TimelineEntry, error) {
 	var entries []TimelineEntry
 	if err := s.DB.WithContext(ctx).
-		Where("novel_id = ? AND target_chapter < ? AND status = ?", novelID, ChapterID, "pending").
+		Where("novel_id = ? AND target_chapter < ? AND status = ?", novelID, chapterNum, "pending").
 		Order("target_chapter DESC").
 		Limit(100).
 		Find(&entries).Error; err != nil {
@@ -115,10 +115,10 @@ func (s *Store) ListPendingBefore(ctx context.Context, novelID int64, ChapterID 
 }
 
 // ListAfter 取 target_chapter >= fromChapter 的全部条目，不论状态，兜底截断 100。
-func (s *Store) ListAfter(ctx context.Context, novelID int64, ChapterID int) ([]TimelineEntry, error) {
+func (s *Store) ListAfter(ctx context.Context, novelID int64, chapterNum int) ([]TimelineEntry, error) {
 	var entries []TimelineEntry
 	if err := s.DB.WithContext(ctx).
-		Where("novel_id = ? AND target_chapter >= ?", novelID, ChapterID).
+		Where("novel_id = ? AND target_chapter >= ?", novelID, chapterNum).
 		Order("target_chapter ASC").
 		Limit(100).
 		Find(&entries).Error; err != nil {

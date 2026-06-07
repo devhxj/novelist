@@ -31,8 +31,10 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
   const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(false)
   const [hasMore, setHasMore] = useState(true)
+  const [search, setSearch] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
   const loadingRef = useRef(false)
+  const searchRef = useRef('')
 
   const loadPageRef = useRef<(p: number) => void>(null as any)
 
@@ -47,12 +49,26 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
     }
   }, [open])
 
+  // 搜索防抖 300ms
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchRef.current !== search) {
+        searchRef.current = search
+        setSessions([])
+        setPage(1)
+        setHasMore(true)
+        loadPageRef.current?.(1)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [search])
+
   loadPageRef.current = async (p: number) => {
     if (loadingRef.current) return
     loadingRef.current = true
     setIsLoading(true)
     try {
-      const result = await app.GetSessions(novelId, p, 20)
+      const result = await app.GetSessions({ novel_id: novelId, page: p, size: 20, search: searchRef.current })
       if (result?.items) {
         setSessions(prev => p === 1 ? result.items : [...prev, ...result.items])
         setTotal(result.total)
@@ -68,6 +84,8 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
 
   useEffect(() => {
     if (!open) return
+    setSearch('')
+    searchRef.current = ''
     setSessions([])
     setPage(1)
     setHasMore(true)
@@ -103,12 +121,12 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
         </div>
       </div>
 
-      {/* 搜索框（占位） */}
       <div className="px-4 py-2 shrink-0">
         <input
-          disabled
+          value={search}
+          onChange={e => setSearch(e.target.value)}
           placeholder="搜索会话..."
-          className="w-full h-7 rounded-md border bg-muted/30 px-2.5 text-xs text-muted-foreground"
+          className="w-full h-7 rounded-md border bg-muted/30 px-2.5 text-xs"
         />
       </div>
 
@@ -121,6 +139,10 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
         {sessions.length === 0 && isLoading ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+          </div>
+        ) : sessions.length === 0 && searchRef.current ? (
+          <div className="flex items-center justify-center h-full">
+            <span className="text-xs text-muted-foreground">无匹配会话</span>
           </div>
         ) : (
           <div className="space-y-0.5">

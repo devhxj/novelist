@@ -103,7 +103,7 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
     setActiveSessionId(undefined)
     setTurns([])
     setSessionId('')
-    app.GetSessions(novelId, 1, 5).then(r => {
+    app.GetSessions({ novel_id: novelId, page: 1, size: 5, search: '' }).then(r => {
       if (r) {
         setSessions(r.items)
         setSessionsTotal(r.total)
@@ -180,7 +180,7 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
     setActiveSessionId(null)
     setTurns([])
     setSessionId('')
-    app.GetSessions(novelId, 1, 5).then(r => {
+    app.GetSessions({ novel_id: novelId, page: 1, size: 5, search: '' }).then(r => {
       if (r) { setSessions(r.items); setSessionsTotal(r.total) }
     }).catch(() => {})
   }, [novelId, app])
@@ -403,6 +403,7 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
             if (subIdx >= 0) {
               segments[subIdx] = {
                 ...segments[subIdx],
+                agentType,
                 status: toolStatus === 'executing' ? 'streaming' : toolStatus === 'failed' ? 'failed' : 'done',
                 toolStatus,
               }
@@ -636,7 +637,7 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
         reasoning_effort: reasoningEffort,
       })
       // 刷新会话列表
-      app.GetSessions(novelId, 1, 5).then(r => {
+      app.GetSessions({ novel_id: novelId, page: 1, size: 5, search: '' }).then(r => {
         if (r) { setSessions(r.items); setSessionsTotal(r.total) }
       }).catch(() => {})
     } catch (err) {

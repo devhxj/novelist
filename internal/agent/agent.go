@@ -393,7 +393,9 @@ func (a *Agent) appendMsg(role, content, thinkingContent string, extra map[strin
 		ToFrontend:      role == "assistant",
 	}
 	a.logger.Debug("appendMsg", "role", role, "agentType", opts.AgentType, "subTaskID", opts.SubTaskID, "turnID", opts.TurnID)
-	a.db.Create(msg)
+	if err := a.db.Create(msg).Error; err != nil {
+		a.logger.Error("持久化消息失败", "role", role, "turnID", opts.TurnID, "err", err)
+	}
 
 	apiFormat := msg.ToAPIFormat()
 	opts.Messages = append(opts.Messages, apiFormat)

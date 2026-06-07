@@ -10,7 +10,9 @@ import (
 
 	"novel/internal/agent"
 	"novel/internal/agentcfg"
+	"novel/internal/git"
 	"novel/internal/session"
+	"novel/internal/rollback"
 )
 
 // ChatInput 是一次对话请求的入参。
@@ -61,7 +63,16 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		return nil, fmt.Errorf("获取 turn ID 失败: %w", err)
 	}
 
-	// 5. 新 session 写入 System1 + System2
+	// 5. 打开 git 仓库，提交用户在对话间隙的手动编辑
+	repo, repoErr := git.New(input.NovelID)
+	if repoErr != nil {
+		a.logger.Warn("auto-commit: 打开 git 仓库失败，跳过本轮自动提交", "err", repoErr)
+	} else {
+		a.commitUserChanges(repo, turnID, sess.SessionID)
+		defer a.commitAIChanges(repo, turnID, sess.SessionID, model.Name)
+	}
+
+	// 6. 新 session 写入 System1 + System2
 	if isNew {
 		if err := a.writeSystemMessages(ctx, sess.SessionID, input.NovelID, turnID); err != nil {
 			return nil, fmt.Errorf("写入系统消息失败: %w", err)
@@ -328,4 +339,63 @@ func (a *App) CompressContext(input CompressInput) (*CompressResult, error) {
 		return nil, err
 	}
 	return &CompressResult{TurnID: turnID}, nil
+}
+
+// commitUserChanges 在 turn 开始时提交用户在对话间隙对章节文件的手动修改。
+// git 操作失败只记日志，不阻塞对话流程。
+func (a *App) commitUserChanges(repo *git.Repo, turnID int, sessionID string) {
+	has, err := repo.HasUncommitted()
+	if err != nil {
+		a.logger.Warn("auto-commit: 检查未提交变更失败", "err", err)
+		return
+	}
+	if !has {
+		return
+	}
+
+	msg := fmt.Sprintf("turn %d: user manual changes\n\nSession: %s", turnID, sessionID)
+	a.doCommit(repo, turnID, sessionID, "user", msg)
+}
+
+// commitAIChanges 在 turn 结束时提交 AI 对章节文件的所有修改。
+// 通过 defer 调用，确保正常结束、用户打断、异常退出时都会执行。
+func (a *App) commitAIChanges(repo *git.Repo, turnID int, sessionID string, modelName string) {
+	has, err := repo.HasUncommitted()
+	if err != nil {
+		a.logger.Warn("auto-commit: 检查未提交变更失败", "err", err)
+		return
+	}
+	if !has {
+		return
+	}
+
+	msg := fmt.Sprintf("turn %d: AI changes\n\nSession: %s\n\nCo-authored-by: Goink (%s)", turnID, sessionID, modelName)
+	a.doCommit(repo, turnID, sessionID, "ai", msg)
+}
+
+// doCommit 执行 git add + commit，并将 hash 写入 turn_commits 表。
+func (a *App) doCommit(repo *git.Repo, turnID int, sessionID, commitType, msg string) {
+	if err := repo.StageAll(); err != nil {
+		a.logger.Warn("auto-commit: git add 失败", "err", err)
+		return
+	}
+
+	hash, err := repo.Commit(msg)
+	if err != nil {
+		a.logger.Warn("auto-commit: git commit 失败", "err", err)
+		return
+	}
+
+	tc := &rollback.TurnCommit{
+		SessionID:  sessionID,
+		TurnID:     turnID,
+		CommitType: commitType,
+		CommitHash: hash,
+	}
+	if err := a.db.Create(tc).Error; err != nil {
+		a.logger.Warn("auto-commit: 写入 turn_commits 失败", "err", err)
+		return
+	}
+
+	a.logger.Info("auto-commit: 提交成功", "turn", turnID, "type", commitType, "hash", hash[:7])
 }

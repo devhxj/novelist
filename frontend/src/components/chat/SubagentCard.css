@@ -3,18 +3,17 @@
   border-radius: var(--radius-lg);
   overflow: hidden;
   transition: box-shadow 0.4s ease;
+  background: hsl(var(--muted) / 0.15);
 }
 
 /* ── Memory: amber ── */
 .subagent-memory {
   border-left: 3px solid #d4880f;
-  background: #fffbe6;
 }
 
 /* ── Review: teal ── */
 .subagent-review {
   border-left: 3px solid #008874;
-  background: #e6f7f5;
 }
 
 /* ── Streaming glow ── */

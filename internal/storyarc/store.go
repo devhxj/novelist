@@ -97,14 +97,14 @@ func (s *Store) ListByArcs(ctx context.Context, arcIDs []int64) ([]ArcNode, erro
 	return nodes, nil
 }
 
-// ListNodesBeforeByArc 对每条弧线分别取 target_chapter < chapterID 的最近 limit 条节点。
+// ListNodesBeforeByArc 对每条弧线分别取 target_chapter < chapterNum 的最近 limit 条节点。
 // 返回 map[arcID]nodes，保证每条弧线独占窗口。
-func (s *Store) ListNodesBeforeByArc(ctx context.Context, arcIDs []int64, chapterID int, limit int) (map[int64][]ArcNode, error) {
+func (s *Store) ListNodesBeforeByArc(ctx context.Context, arcIDs []int64, chapterNum int, limit int) (map[int64][]ArcNode, error) {
 	result := make(map[int64][]ArcNode)
 	for _, id := range arcIDs {
 		var nodes []ArcNode
 		if err := s.DB.WithContext(ctx).
-			Where("story_arc_id = ? AND target_chapter < ?", id, chapterID).
+			Where("story_arc_id = ? AND target_chapter < ?", id, chapterNum).
 			Order("target_chapter DESC").
 			Limit(limit).
 			Find(&nodes).Error; err != nil {
@@ -115,13 +115,13 @@ func (s *Store) ListNodesBeforeByArc(ctx context.Context, arcIDs []int64, chapte
 	return result, nil
 }
 
-// ListPendingNodesBeforeByArc 对每条弧线分别取 target_chapter < chapterID 且 pending 的全部节点，兜底截断 100。
-func (s *Store) ListPendingNodesBeforeByArc(ctx context.Context, arcIDs []int64, chapterID int) (map[int64][]ArcNode, error) {
+// ListPendingNodesBeforeByArc 对每条弧线分别取 target_chapter < chapterNum 且 pending 的全部节点，兜底截断 100。
+func (s *Store) ListPendingNodesBeforeByArc(ctx context.Context, arcIDs []int64, chapterNum int) (map[int64][]ArcNode, error) {
 	result := make(map[int64][]ArcNode)
 	for _, id := range arcIDs {
 		var nodes []ArcNode
 		if err := s.DB.WithContext(ctx).
-			Where("story_arc_id = ? AND target_chapter < ? AND status = ?", id, chapterID, "pending").
+			Where("story_arc_id = ? AND target_chapter < ? AND status = ?", id, chapterNum, "pending").
 			Order("target_chapter ASC").
 			Limit(100).
 			Find(&nodes).Error; err != nil {
@@ -132,13 +132,13 @@ func (s *Store) ListPendingNodesBeforeByArc(ctx context.Context, arcIDs []int64,
 	return result, nil
 }
 
-// ListNodesAfterByArc 对每条弧线分别取 target_chapter >= chapterID 的全部节点，兜底截断 100。
-func (s *Store) ListNodesAfterByArc(ctx context.Context, arcIDs []int64, chapterID int) (map[int64][]ArcNode, error) {
+// ListNodesAfterByArc 对每条弧线分别取 target_chapter >= chapterNum 的全部节点，兜底截断 100。
+func (s *Store) ListNodesAfterByArc(ctx context.Context, arcIDs []int64, chapterNum int) (map[int64][]ArcNode, error) {
 	result := make(map[int64][]ArcNode)
 	for _, id := range arcIDs {
 		var nodes []ArcNode
 		if err := s.DB.WithContext(ctx).
-			Where("story_arc_id = ? AND target_chapter >= ?", id, chapterID).
+			Where("story_arc_id = ? AND target_chapter >= ?", id, chapterNum).
 			Order("target_chapter ASC").
 			Limit(100).
 			Find(&nodes).Error; err != nil {
