@@ -94,6 +94,24 @@ export namespace app {
 	        this.description = source["description"];
 	    }
 	}
+	export class GetSessionsInput {
+	    novel_id: number;
+	    page: number;
+	    size: number;
+	    search: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GetSessionsInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	        this.page = source["page"];
+	        this.size = source["size"];
+	        this.search = source["search"];
+	    }
+	}
 	export class SaveContentInput {
 	    novel_id: number;
 	    path: string;

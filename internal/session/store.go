@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"time"
 
+	"novel/internal/storage"
+
 	"gorm.io/gorm"
 )
 
@@ -22,37 +24,56 @@ func NewStore(db *gorm.DB, logger *slog.Logger) *Store {
 
 // ========== Session 查询 ==========
 
-// ListSessions 按小说列出会话，updated_at 倒序，分页。
-func (s *Store) ListSessions(ctx context.Context, novelID int64, page, size int) ([]Session, int64, error) {
-	if page < 1 {
-		page = 1
+// ListSessionsOptions 是 ListSessions 的可选参数。
+type ListSessionsOptions struct {
+	PageParams storage.PageParams
+	Search     string // 空=全部，非空=按消息内容 LIKE 模糊匹配
+}
+
+// ListSessions 按小说列出会话，updated_at 倒序，分页。Search 非空时搜索消息内容。
+func (s *Store) ListSessions(ctx context.Context, novelID int64, opts ListSessionsOptions) (*storage.PageResult[Session], error) {
+	pp := opts.PageParams
+	pp.Normalize()
+
+	if opts.Search == "" {
+		return s.listAll(ctx, novelID, pp)
 	}
-	if size < 1 || size > 100 {
-		size = 20
+	return s.search(ctx, novelID, opts.Search)
+}
+
+func (s *Store) listAll(ctx context.Context, novelID int64, pp storage.PageParams) (*storage.PageResult[Session], error) {
+	q := s.DB.WithContext(ctx).Model(&Session{}).Where("novel_id = ?", novelID)
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, fmt.Errorf("session store: count sessions: %w", err)
 	}
 
 	var sessions []Session
-	var total int64
-
-	if err := s.DB.WithContext(ctx).
-		Model(&Session{}).
-		Where("novel_id = ?", novelID).
-		Count(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("session store: count sessions: %w", err)
+	offset := (pp.Page - 1) * pp.Size
+	if err := q.Order("updated_at DESC").Offset(offset).Limit(pp.Size).Find(&sessions).Error; err != nil {
+		return nil, fmt.Errorf("session store: list sessions: %w", err)
 	}
 
-	offset := (page - 1) * size
+	s.logger.Debug("session store: listed sessions", "novel_id", novelID, "total", total, "page", pp.Page)
+	return storage.NewPageResult(sessions, total, pp.Page, pp.Size), nil
+}
+
+func (s *Store) search(ctx context.Context, novelID int64, search string) (*storage.PageResult[Session], error) {
+	var sessions []Session
 	if err := s.DB.WithContext(ctx).
-		Where("novel_id = ?", novelID).
-		Order("updated_at DESC").
-		Offset(offset).
-		Limit(size).
+		Distinct("sessions.*").
+		Joins("JOIN messages ON messages.session_id = sessions.session_id").
+		Where("sessions.novel_id = ? AND messages.content LIKE ?", novelID, "%"+search+"%").
+		Order("sessions.updated_at DESC").
+		Limit(100).
 		Find(&sessions).Error; err != nil {
-		return nil, 0, fmt.Errorf("session store: list sessions: %w", err)
+		return nil, fmt.Errorf("session store: search sessions: %w", err)
 	}
 
-	s.logger.Debug("session store: listed sessions", "novel_id", novelID, "total", total, "page", page)
-	return sessions, total, nil
+	total := int64(len(sessions))
+	s.logger.Debug("session store: searched sessions", "novel_id", novelID, "search", search, "total", total)
+	return storage.NewPageResult(sessions, total, 1, 100), nil
 }
 
 // ========== Session 更新 ==========

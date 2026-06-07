@@ -36,7 +36,7 @@ export function GetPlatform():Promise<Record<string, any>>;
 
 export function GetSessionMessages(arg1:string):Promise<Array<session.Message>>;
 
-export function GetSessions(arg1:number,arg2:number,arg3:number):Promise<storage.PageResult_novel_app_SessionMeta_>;
+export function GetSessions(arg1:app.GetSessionsInput):Promise<storage.PageResult_novel_app_SessionMeta_>;
 
 export function GetSettings():Promise<config.AppSettings>;
 

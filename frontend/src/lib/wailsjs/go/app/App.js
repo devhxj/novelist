@@ -58,8 +58,8 @@ export function GetSessionMessages(arg1) {
   return window['go']['app']['App']['GetSessionMessages'](arg1);
 }
 
-export function GetSessions(arg1, arg2, arg3) {
-  return window['go']['app']['App']['GetSessions'](arg1, arg2, arg3);
+export function GetSessions(arg1) {
+  return window['go']['app']['App']['GetSessions'](arg1);
 }
 
 export function GetSettings() {
