@@ -26,6 +26,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   const [description, setDescription] = useState('')
   const [showSettings, setShowSettings] = useState(false)
   const [tabTarget, setTabTarget] = useState<{ path: string; title: string } | null>(null)
+  const [activeContent, setActiveContent] = useState('')
   const loadedRef = useRef(false)
 
   // ── 作品列表 ────────────────────────────────────────────
@@ -137,12 +138,12 @@ export default function WorkspaceView({ initialNovelId }: Props) {
           onCreateNovel={handleCreateNovel}
         />
 
-        <ContentPanel ref={contentRef} novelId={activeNovelId} />
+        <ContentPanel ref={contentRef} novelId={activeNovelId} onContentChange={setActiveContent} />
 
         <ChatPanel novelId={activeNovelId} onApprove={handleApprove} onReject={handleReject} />
       </div>
 
-      <StatusBar />
+      <StatusBar content={activeContent} />
 
       <SettingsDialog
         open={showSettings}

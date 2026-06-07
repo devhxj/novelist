@@ -14,6 +14,7 @@ import (
 	"novel/internal/chapter"
 	"novel/internal/git"
 	"novel/internal/rag"
+	"novel/internal/text"
 )
 
 // ── edit ──────────────────────────────────────────────────
@@ -153,9 +154,16 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 		"path":     a.Path,
 	})
 
-	// 异步刷新章节向量
+	// 异步刷新章节向量 + 更新字数
 	if isChapterPath(a.Path) {
-		rag.SubmitRefresh(tc.NovelID, parseChapterNum(a.Path), proposed)
+		chapNum := parseChapterNum(a.Path)
+		rag.SubmitRefresh(tc.NovelID, chapNum, proposed)
+		stats := text.ComputeStats(proposed)
+		tc.DB.WithContext(ctx).
+			Model(&chapter.Chapter{}).
+			Where("novel_id = ? AND chapter_number = ?", tc.NovelID, chapNum).
+			Update("word_count", stats.WordCount)
+
 	}
 
 	// 8. inject 维护提醒（章节全量替换且 >500 字时）
