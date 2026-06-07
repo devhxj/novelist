@@ -150,10 +150,9 @@ func (r *Repo) HasUncommitted() (bool, error) {
 	return strings.TrimSpace(out) != "", nil
 }
 
-func (r *Repo) Revert(hashes []string) error {
-	// 逆序使用 --no-commit，全部成功后再统一 commit，保证原子性。
-	// 某步冲突则 --abort 丢弃所有暂存的 revert。
-	//未来可实现冲突处理
+// RevertNoCommit 逆序 revert 所有 hash，仅暂存不提交。冲突时自动 abort。
+// 调用方负责最终 commit（或 abort）。
+func (r *Repo) RevertNoCommit(hashes []string) error {
 	for i := len(hashes) - 1; i >= 0; i-- {
 		_, stderr, err := r.runInDir("revert", "--no-commit", hashes[i])
 		if err != nil {
@@ -163,9 +162,14 @@ func (r *Repo) Revert(hashes []string) error {
 			return fmt.Errorf("git: revert %s: %s: %w", hashes[i], stderr, err)
 		}
 	}
-	_, stderr, err := r.runInDir("commit", "-m", "revert turns")
+	return nil
+}
+
+// RevertAbort 取消进行中的 revert，丢弃所有暂存的 revert 内容。
+func (r *Repo) RevertAbort() error {
+	_, stderr, err := r.runInDir("revert", "--abort")
 	if err != nil {
-		return fmt.Errorf("git: commit revert: %s: %w", stderr, err)
+		return fmt.Errorf("git: revert --abort: %s: %w", stderr, err)
 	}
 	return nil
 }
