@@ -1,10 +1,126 @@
-export default function StatusBar() {
+import { useMemo, useState, useRef } from 'react'
+
+interface Props {
+  content: string
+}
+
+interface DetailedStats {
+  wordCount: number
+  lineCount: number
+  chineseChars: number
+  englishWords: number
+  charCountSpace: number
+  charCountNoSpace: number
+  paragraphCount: number
+}
+
+function computeStats(text: string): DetailedStats {
+  if (!text) {
+    return { wordCount: 0, lineCount: 0, chineseChars: 0, englishWords: 0, charCountSpace: 0, charCountNoSpace: 0, paragraphCount: 0 }
+  }
+
+  let chineseChars = 0
+  let spaces = 0
+  let paragraphCount = 0
+  let inPara = false
+
+  for (const ch of text) {
+    const cp = ch.codePointAt(0)!
+    if ((cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0x3400 && cp <= 0x4DBF) || (cp >= 0x20000 && cp <= 0x2A6DF) || (cp >= 0xF900 && cp <= 0xFAFF)) {
+      chineseChars++
+    } else if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      spaces++
+    }
+
+    if (ch === '\n') {
+      if (inPara) { paragraphCount++; inPara = false }
+    } else if (ch !== ' ' && ch !== '\t' && ch !== '\r') {
+      inPara = true
+    }
+  }
+  if (inPara) paragraphCount++
+
+  const englishWords = (text.match(/[a-zA-Z]+(?:'[a-zA-Z]+)?/g) || []).length
+  const lineCount = text ? text.split('\n').length : 0
+
+  return {
+    wordCount: chineseChars + englishWords,
+    lineCount,
+    chineseChars,
+    englishWords,
+    charCountSpace: [...text].length,
+    charCountNoSpace: [...text].length - spaces,
+    paragraphCount,
+  }
+}
+
+export default function StatusBar({ content }: Props) {
+  const stats = useMemo(() => computeStats(content), [content])
+  const [showDetail, setShowDetail] = useState(false)
+  const hoverTimer = useRef<ReturnType<typeof setTimeout>>(0)
+
+  function handleMouseEnter() {
+    hoverTimer.current = setTimeout(() => setShowDetail(true), 150)
+  }
+
+  function handleMouseLeave() {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current)
+    setShowDetail(false)
+  }
+
   return (
-    <div className="h-7 flex items-center justify-between px-4 border-t bg-muted/20 text-xs text-muted-foreground select-none">
+    <div className="relative h-7 flex items-center justify-between px-4 border-t bg-sidebar text-xs text-muted-foreground select-none">
       <div className="flex items-center gap-4">
-        <span>字数 0</span>
-        <span>行数 0</span>
+        <span
+          className="cursor-default"
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        >
+          字数 {stats.wordCount}
+        </span>
+        <span>行数 {stats.lineCount}</span>
       </div>
+
+      {showDetail && (
+        <div
+          className="absolute bottom-0 left-0 mb-7 ml-4 bg-popover border rounded-lg shadow-lg p-4 text-sm space-y-1.5 z-50 min-w-[220px]"
+          onMouseEnter={() => { if (hoverTimer.current) clearTimeout(hoverTimer.current); setShowDetail(true) }}
+          onMouseLeave={handleMouseLeave}
+        >
+          <div className="font-medium text-foreground mb-2">字数统计</div>
+          <div className="flex justify-between gap-8">
+            <span>字数</span>
+            <span className="tabular-nums">{stats.wordCount}</span>
+          </div>
+          <div className="flex justify-between gap-8">
+            <span className="pl-3">中文字符</span>
+            <span className="tabular-nums">{stats.chineseChars}</span>
+          </div>
+          <div className="flex justify-between gap-8">
+            <span className="pl-3">英文单词</span>
+            <span className="tabular-nums">{stats.englishWords}</span>
+          </div>
+          <div className="border-t my-1.5" />
+          <div className="flex justify-between gap-8">
+            <span>字符数（不计空格）</span>
+            <span className="tabular-nums">{stats.charCountNoSpace}</span>
+          </div>
+          <div className="flex justify-between gap-8">
+            <span>字符数（计空格）</span>
+            <span className="tabular-nums">{stats.charCountSpace}</span>
+          </div>
+          <div className="border-t my-1.5" />
+          <div className="flex justify-between gap-8">
+            <span>行数</span>
+            <span className="tabular-nums">{stats.lineCount}</span>
+          </div>
+          <div className="flex justify-between gap-8">
+            <span>段落数</span>
+            <span className="tabular-nums">{stats.paragraphCount}</span>
+          </div>
+        </div>
+      )}
+
       <span className="flex items-center gap-1">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
         已保存

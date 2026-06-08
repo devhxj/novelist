@@ -20,6 +20,11 @@ export function useEditorTabs() {
     setActiveTabId(id)
   }, [])
 
+  const closeAllTabs = useCallback(() => {
+    setTabs([])
+    setActiveTabId(null)
+  }, [])
+
   const closeTab = useCallback((id: string) => {
     setTabs(prev => {
       if (prev.length <= 1) {
@@ -52,7 +57,7 @@ export function useEditorTabs() {
 
   return {
     tabs, activeTab, activeTabId,
-    openTab, closeTab, setActiveTabId,
+    openTab, closeTab, closeAllTabs, setActiveTabId,
     updateTab, openDiffTab,
   }
 }

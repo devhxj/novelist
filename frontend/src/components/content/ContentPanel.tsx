@@ -13,21 +13,23 @@ import type { EditorTab } from './types'
 
 export interface ContentPanelHandle {
   openFile: (path: string, title: string) => void
+  closeAllTabs: () => void
   handleDiffApprove: (toolId: string) => Promise<void>
   handleDiffReject: (toolId: string) => void
 }
 
 interface Props {
   novelId: number
+  onContentChange?: (content: string) => void
 }
 
 const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel(
-  { novelId }, ref
+  { novelId, onContentChange }, ref
 ) {
   const app = useApp()
   const {
     tabs, activeTab, activeTabId,
-    openTab, closeTab, setActiveTabId,
+    openTab, closeTab, closeAllTabs, setActiveTabId,
     updateTab, openDiffTab,
   } = useEditorTabs()
 
@@ -44,6 +46,12 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   useEffect(() => {
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
   }, [])
+
+  useEffect(() => {
+    if (activeTab?.type === 'file') {
+      onContentChange?.(activeTab.content ?? '')
+    }
+  }, [activeTab, onContentChange])
 
   // ── 切换 viewMode：按需加载大纲内容 ──────────────────────
 
@@ -79,6 +87,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   const handleEditorChange = useCallback((tabId: string, value: string | undefined) => {
     const content = value ?? ''
     updateTab(tabId, { content, isDirty: true })
+    onContentChange?.(content)
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     const tab = tabs.find(t => t.id === tabId)
@@ -89,7 +98,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       const s = savingRef.current
       doSave(s.id, s.path, s.content)
     }, 500)
-  }, [tabs, updateTab, doSave])
+  }, [tabs, updateTab, doSave, onContentChange])
 
   const handleEditorMount: OnMount = useCallback((editor) => {
     editorRef.current = editor
@@ -154,15 +163,22 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   const doOpenFile = useCallback((path: string, title?: string) => {
     const display = title || titleFromPath(path)
     const existing = tabs.find(t => t.path === path && t.type === 'file')
-    if (existing) { setActiveTabId(existing.id); return }
+    if (existing) {
+      setActiveTabId(existing.id)
+      onContentChange?.(existing.content ?? '')
+      return
+    }
 
     setIsLoading(true)
     app.GetContent(novelId, path).then(content => {
-      openTab({ type: 'file', path, title: display, content: content ?? '', isDirty: false, viewMode: 'content' })
+      const c = content ?? ''
+      openTab({ type: 'file', path, title: display, content: c, isDirty: false, viewMode: 'content' })
+      onContentChange?.(c)
     }).catch(() => {
       openTab({ type: 'file', path, title: display, content: '', isDirty: false, viewMode: 'content' })
+      onContentChange?.('')
     }).finally(() => setIsLoading(false))
-  }, [novelId, tabs, app, openTab, setActiveTabId])
+  }, [novelId, tabs, app, openTab, setActiveTabId, onContentChange])
 
   function filePathFromDiff(diffPath: string): { filePath: string; viewMode: 'content' | 'outline' } {
     if (isOutlinePath(diffPath)) {
@@ -211,9 +227,10 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
 
   useImperativeHandle(ref, () => ({
     openFile: doOpenFile,
+    closeAllTabs,
     handleDiffApprove,
     handleDiffReject,
-  }), [doOpenFile, handleDiffApprove, handleDiffReject])
+  }), [doOpenFile, closeAllTabs, handleDiffApprove, handleDiffReject])
 
   // ── approval:requested 监听 ─────────────────────────────
 

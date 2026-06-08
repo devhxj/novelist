@@ -4,6 +4,7 @@ import (
 	"embed"
 	"log/slog"
 	"os"
+	"runtime"
 
 	ort "github.com/yalue/onnxruntime_go"
 
@@ -37,6 +38,7 @@ func main() {
 		Height:    900,
 		MinWidth:  900,
 		MinHeight: 600,
+		Frameless: runtime.GOOS != "darwin", // macOS 用原生标题栏
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

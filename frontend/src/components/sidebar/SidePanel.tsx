@@ -27,7 +27,7 @@ export default function SidePanel({
   onCreateNovel,
 }: Props) {
   return (
-    <aside className="w-56 border-r bg-background flex flex-col shrink-0">
+    <aside className="w-56 border-r bg-sidebar flex flex-col shrink-0">
       {activePanel === 'novels' ? (
         <NovelList
           novels={novels}

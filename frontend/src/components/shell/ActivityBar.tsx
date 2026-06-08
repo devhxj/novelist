@@ -22,7 +22,7 @@ interface Props {
 
 export default function ActivityBar({ activeId, onSelect }: Props) {
   return (
-    <nav className="w-12 flex flex-col items-center py-3 gap-1.5 border-r bg-muted/20">
+    <nav className="w-12 flex flex-col items-center py-3 gap-1.5 border-r bg-sidebar">
       {activities.map((a, i) => {
         const isActive = a.id === activeId
         return (

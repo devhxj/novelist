@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -163,8 +164,15 @@ type ToolInfo struct {
 // OpenAI 生成 OpenAI Function Calling 格式的工具列表。
 // allowed=nil 表示全部 expose_to_llm=true 的工具；非 nil 只取白名单内的。
 func (r *Registry) OpenAI(allowed map[string]bool) []map[string]any {
+	keys := make([]string, 0, len(r.tools))
+	for k := range r.tools {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	var list []map[string]any
-	for _, t := range r.tools {
+	for _, k := range keys {
+		t := r.tools[k]
 		if !t.ExposeToLLM() || !allow(allowed, t.Name()) {
 			continue
 		}

@@ -5,8 +5,10 @@ import (
 	"regexp"
 	"strconv"
 
+	"novel/internal/chapter"
 	"novel/internal/git"
 	"novel/internal/rag"
+	"novel/internal/text"
 )
 
 // SaveContentInput 是保存文件内容的入参。
@@ -39,6 +41,13 @@ func (a *App) SaveContent(input SaveContentInput) error {
 	if m := chPathRe.FindStringSubmatch(input.Path); m != nil {
 		chapNum, _ := strconv.Atoi(m[1])
 		rag.SubmitRefresh(input.NovelID, chapNum, input.Content)
+		stats := text.ComputeStats(input.Content)
+		if err := a.chapter.DB.WithContext(a.ctx).
+			Model(&chapter.Chapter{}).
+			Where("novel_id = ? AND chapter_number = ?", input.NovelID, chapNum).
+			Update("word_count", stats.WordCount).Error; err != nil {
+			a.logger.Warn("更新字数失败", "novel_id", input.NovelID, "chapter", chapNum, "err", err)
+		}
 	}
 	return nil
 }

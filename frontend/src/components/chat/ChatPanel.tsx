@@ -174,12 +174,20 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
 
   const handleSelectSession = useCallback((sid: string) => {
     setActiveSessionId(sid)
-  }, [])
+    app.GetSession(sid).then(detail => {
+      if (detail?.usage) {
+        setLastUsage(detail.usage as unknown as UsageInfo)
+      } else {
+        setLastUsage(null)
+      }
+    }).catch(() => setLastUsage(null))
+  }, [app])
 
   const handleNewChat = useCallback(() => {
     setActiveSessionId(null)
     setTurns([])
     setSessionId('')
+    setLastUsage(null)
     app.GetSessions({ novel_id: novelId, page: 1, size: 5, search: '' }).then(r => {
       if (r) { setSessions(r.items); setSessionsTotal(r.total) }
     }).catch(() => {})
@@ -699,7 +707,7 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
       : '输入消息...'
 
   return (
-    <aside className="shrink-0 flex flex-col bg-background border-l relative" style={{ width }}>
+    <aside className="shrink-0 flex flex-col bg-sidebar border-l relative" style={{ width }}>
       <div
         className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/30 transition-colors z-10"
         style={{ marginLeft: -2 }}

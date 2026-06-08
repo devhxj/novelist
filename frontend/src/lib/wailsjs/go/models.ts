@@ -140,10 +140,37 @@ export namespace app {
 	
 	    }
 	}
-	export class SessionMeta {
+	export class SessionDetail {
 	    session_id: string;
 	    title: string;
 	    model: string;
+	    reasoning_effort: string;
+	    active_version: number;
+	    last_turn_id: number;
+	    usage?: number[];
+	    created_at: string;
+	    updated_at: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionDetail(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.session_id = source["session_id"];
+	        this.title = source["title"];
+	        this.model = source["model"];
+	        this.reasoning_effort = source["reasoning_effort"];
+	        this.active_version = source["active_version"];
+	        this.last_turn_id = source["last_turn_id"];
+	        this.usage = source["usage"];
+	        this.created_at = source["created_at"];
+	        this.updated_at = source["updated_at"];
+	    }
+	}
+	export class SessionMeta {
+	    session_id: string;
+	    title: string;
 	    updated_at: string;
 	
 	    static createFrom(source: any = {}) {
@@ -154,7 +181,6 @@ export namespace app {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.session_id = source["session_id"];
 	        this.title = source["title"];
-	        this.model = source["model"];
 	        this.updated_at = source["updated_at"];
 	    }
 	}

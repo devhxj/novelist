@@ -54,6 +54,10 @@ export function GetPlatform() {
   return window['go']['app']['App']['GetPlatform']();
 }
 
+export function GetSession(arg1) {
+  return window['go']['app']['App']['GetSession'](arg1);
+}
+
 export function GetSessionMessages(arg1) {
   return window['go']['app']['App']['GetSessionMessages'](arg1);
 }
