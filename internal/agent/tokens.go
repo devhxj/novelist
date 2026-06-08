@@ -28,6 +28,7 @@ func (a *Agent) InitRunningTokens(messages []map[string]any) map[string]int {
 }
 
 // updateUsage 计算 usage_ratio + 分角色 detail → 持久化到 session + 推送前端。
+// 缓存命中 token 做 session 级累计，每次请求累加到历史值上。
 func (a *Agent) updateUsage(ctx context.Context, apiUsage map[string]any, runningTokens map[string]int, opts RunOptions) {
 	localTotal := runningTokens["system"] + runningTokens["user"] + runningTokens["assistant"] + runningTokens["tool"]
 	apiTotal, _ := apiUsage["total_tokens"].(float64)
@@ -41,15 +42,40 @@ func (a *Agent) updateUsage(ctx context.Context, apiUsage map[string]any, runnin
 		}
 	}
 
+	// 累计 session 级缓存命中/未命中 token
+	accHit, accMiss := float64(0), float64(0)
+	if sess, err := a.session.GetSession(ctx, opts.SessionID); err == nil && sess.Usage != "" {
+		var old map[string]any
+		if json.Unmarshal([]byte(sess.Usage), &old) == nil {
+			if v, _ := old["prompt_cache_hit_tokens"].(float64); v > 0 {
+				accHit = v
+			}
+			if v, _ := old["prompt_cache_miss_tokens"].(float64); v > 0 {
+				accMiss = v
+			}
+		}
+	}
+	if hit, _ := apiUsage["prompt_cache_hit_tokens"].(float64); hit > 0 {
+		accHit += hit
+	}
+	if miss, _ := apiUsage["prompt_cache_miss_tokens"].(float64); miss > 0 {
+		accMiss += miss
+	}
+
 	usage := map[string]any{
-		"prompt_tokens":     apiUsage["prompt_tokens"],
-		"completion_tokens": apiUsage["completion_tokens"],
-		"total_tokens":      apiUsage["total_tokens"],
-		"context_window":    opts.Model.ContextWindow,
-		"detail":            detail,
+		"prompt_tokens":            apiUsage["prompt_tokens"],
+		"completion_tokens":        apiUsage["completion_tokens"],
+		"total_tokens":             apiUsage["total_tokens"],
+		"prompt_cache_hit_tokens":  accHit,
+		"prompt_cache_miss_tokens": accMiss,
+		"context_window":           opts.Model.ContextWindow,
+		"detail":                   detail,
 	}
 	if opts.Model.ContextWindow > 0 {
 		usage["usage_ratio"] = float64(int(apiTotal)) / float64(opts.Model.ContextWindow) * 100
+	}
+	if accHit+accMiss > 0 {
+		usage["cache_hit_ratio"] = accHit / (accHit + accMiss) * 100
 	}
 
 	if b, err := json.Marshal(usage); err == nil {

@@ -174,12 +174,20 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
 
   const handleSelectSession = useCallback((sid: string) => {
     setActiveSessionId(sid)
-  }, [])
+    app.GetSession(sid).then(detail => {
+      if (detail?.usage) {
+        setLastUsage(detail.usage as unknown as UsageInfo)
+      } else {
+        setLastUsage(null)
+      }
+    }).catch(() => setLastUsage(null))
+  }, [app])
 
   const handleNewChat = useCallback(() => {
     setActiveSessionId(null)
     setTurns([])
     setSessionId('')
+    setLastUsage(null)
     app.GetSessions({ novel_id: novelId, page: 1, size: 5, search: '' }).then(r => {
       if (r) { setSessions(r.items); setSessionsTotal(r.total) }
     }).catch(() => {})

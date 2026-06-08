@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"novel/internal/config"
@@ -13,8 +14,20 @@ import (
 type SessionMeta struct {
 	SessionID string `json:"session_id"`
 	Title     string `json:"title"`
-	Model     string `json:"model"`
 	UpdatedAt string `json:"updated_at"` // ISO 8601
+}
+
+// SessionDetail 是单个会话的完整元数据视图，含用量、推理程度等。
+type SessionDetail struct {
+	SessionID       string          `json:"session_id"`
+	Title           string          `json:"title"`
+	Model           string          `json:"model"`
+	ReasoningEffort string          `json:"reasoning_effort"`
+	ActiveVersion   int             `json:"active_version"`
+	LastTurnID      int             `json:"last_turn_id"`
+	Usage           json.RawMessage `json:"usage,omitempty"`
+	CreatedAt       string          `json:"created_at"`
+	UpdatedAt       string          `json:"updated_at"`
 }
 
 // GetModels 返回所有可用模型列表，由后端决定能力和推理程度。
@@ -52,11 +65,32 @@ func (a *App) GetSessions(input GetSessionsInput) (*storage.PageResult[SessionMe
 		metas = append(metas, SessionMeta{
 			SessionID: s.SessionID,
 			Title:     s.Title,
-			Model:     s.Model,
 			UpdatedAt: s.UpdatedAt.Format("2006-01-02T15:04:05"),
 		})
 	}
 	return storage.NewPageResult(metas, result.Total, input.Page, input.Size), nil
+}
+
+// GetSession 加载单个会话的完整元数据，含用量、推理程度等。
+func (a *App) GetSession(sessionID string) (*SessionDetail, error) {
+	if a.session == nil {
+		return nil, nil
+	}
+	s, err := a.session.GetSession(a.ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("app: get session: %w", err)
+	}
+	return &SessionDetail{
+		SessionID:       s.SessionID,
+		Title:           s.Title,
+		Model:           s.Model,
+		ReasoningEffort: s.ReasoningEffort,
+		ActiveVersion:   s.ActiveVersion,
+		LastTurnID:      s.LastTurnID,
+		Usage:           json.RawMessage(s.Usage),
+		CreatedAt:       s.CreatedAt.Format("2006-01-02T15:04:05"),
+		UpdatedAt:       s.UpdatedAt.Format("2006-01-02T15:04:05"),
+	}, nil
 }
 
 // GetSessionMessages 加载指定 session 的全部前端可见消息。

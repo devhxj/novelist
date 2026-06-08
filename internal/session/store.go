@@ -24,6 +24,15 @@ func NewStore(db *gorm.DB, logger *slog.Logger) *Store {
 
 // ========== Session 查询 ==========
 
+// GetSession 按 session_id 加载单个 session。
+func (s *Store) GetSession(ctx context.Context, sessionID string) (*Session, error) {
+	var sess Session
+	if err := s.DB.WithContext(ctx).Where("session_id = ?", sessionID).First(&sess).Error; err != nil {
+		return nil, fmt.Errorf("session store: get session: %w", err)
+	}
+	return &sess, nil
+}
+
 // ListSessionsOptions 是 ListSessions 的可选参数。
 type ListSessionsOptions struct {
 	PageParams storage.PageParams

@@ -5,6 +5,9 @@ export interface UsageInfo {
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
+  prompt_cache_hit_tokens: number
+  prompt_cache_miss_tokens: number
+  cache_hit_ratio: number
   context_window: number
   usage_ratio: number
   detail: {
@@ -89,8 +92,11 @@ export default function ContextRing({ usage, onCompress, isTurnRunning, isCompre
 
       {showPopover && (
         <div className="absolute bottom-full right-0 mb-2 z-50 flex flex-col gap-2.5 bg-background text-foreground rounded-xl p-3 min-w-[240px] shadow-lg border">
-          <div className="text-[13px] font-semibold">
-            上下文占用: {ratio.toFixed(1)}%
+          <div className="flex gap-4 text-[13px] font-semibold">
+            <span>上下文占用: {ratio.toFixed(1)}%</span>
+            {hasUsage && usage.cache_hit_ratio > 0 && (
+              <span>缓存命中率: {usage.cache_hit_ratio.toFixed(1)}%</span>
+            )}
           </div>
           <div className="h-1.5 rounded-sm bg-muted overflow-hidden">
             <div

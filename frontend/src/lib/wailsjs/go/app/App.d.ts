@@ -34,6 +34,8 @@ export function GetNovels():Promise<Array<novel.Novel>>;
 
 export function GetPlatform():Promise<Record<string, any>>;
 
+export function GetSession(arg1:string):Promise<app.SessionDetail>;
+
 export function GetSessionMessages(arg1:string):Promise<Array<session.Message>>;
 
 export function GetSessions(arg1:app.GetSessionsInput):Promise<storage.PageResult_novel_app_SessionMeta_>;
