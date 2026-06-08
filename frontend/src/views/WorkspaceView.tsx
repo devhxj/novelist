@@ -133,7 +133,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
           <GitHubLink />
           <button
             onClick={() => setShowSettings(true)}
-            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center mr-1"
+            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center ml-2 mr-1"
             title="设置"
           >
             <Settings className="w-5 h-5" />
