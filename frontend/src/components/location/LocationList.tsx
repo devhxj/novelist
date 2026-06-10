@@ -66,11 +66,10 @@ export default function LocationList({ novelId }: Props) {
     const { location: loc } = node
     const isExpanded = expandedIds.has(loc.id)
     const hasChildren = node.children.length > 0
-
     return (
       <div key={loc.id}>
         <button
-          onClick={() => hasChildren && toggle(loc.id)}
+          onClick={() => { if (hasChildren) toggle(loc.id) }}
           className="w-full flex items-center gap-1.5 px-3 py-1.5 text-left hover:bg-muted/50 transition-colors"
           style={{ paddingLeft: `${12 + depth * 16}px` }}
         >

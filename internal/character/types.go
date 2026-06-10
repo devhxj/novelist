@@ -8,8 +8,9 @@ type Character struct {
 	ID          int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
 	NovelID     int64     `gorm:"column:novel_id;not null;index"    json:"novel_id"`
 	Name        string    `gorm:"column:name;not null;index"        json:"name"`
-	Personality string    `gorm:"column:personality"                json:"personality"` // JSON 自由格式，LLM 填写。如 {"traits":["勇敢","冲动"],"brief":"一个热血青年"}
-	Abilities   string    `gorm:"column:abilities"                  json:"abilities"`   // JSON 数组，如 ["剑术","隐身"]
+	Description string    `gorm:"column:description"                json:"description"`  // 自然语言描述，LLM 填写
+	Personality string    `gorm:"column:personality"                json:"personality"`  // JSON 自由格式，LLM 填写。如 {"traits":["勇敢","冲动"],"brief":"一个热血青年"}
+	Abilities   string    `gorm:"column:abilities"                  json:"abilities"`    // JSON 数组，如 ["剑术","隐身"]
 	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime"  json:"created_at"`
 	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime"  json:"updated_at"`
 }

@@ -54,6 +54,7 @@ func (t *GetCharactersTool) Execute(ctx context.Context, args any, tc ToolContex
 		items[i] = map[string]any{
 			"id":          ch.ID,
 			"name":        ch.Name,
+			"description": ch.Description,
 			"personality": parseJSONField(ch.Personality),
 			"abilities":   parseJSONField(ch.Abilities),
 		}
@@ -153,6 +154,7 @@ func formatRelationEdges(rels []character.CharacterRelation, nameMap map[int64]s
 // CreateCharacterItem 是 create_character 的单条参数。
 type CreateCharacterItem struct {
 	Name        string `json:"name"        jsonschema:"required,description=角色名称"               validate:"required"`
+	Description string `json:"description"  jsonschema:"description=角色自然语言描述，如外貌、身份、背景故事等"`
 	Personality string `json:"personality" jsonschema:"description=自由JSON对象，描述角色性格/定位/背景等，如{\"traits\":[\"勇敢\"],\"brief\":\"热血青年\"}"`
 	Abilities   string `json:"abilities"   jsonschema:"description=JSON数组，角色能力/技能列表，如[\"剑术\",\"隐身\"]"`
 }
@@ -185,6 +187,7 @@ func (t *CreateCharacterTool) Execute(ctx context.Context, args any, tc ToolCont
 		items[i] = character.Character{
 			NovelID:     tc.NovelID,
 			Name:        item.Name,
+			Description: item.Description,
 			Personality: item.Personality,
 			Abilities:   item.Abilities,
 		}
@@ -211,6 +214,7 @@ func (t *CreateCharacterTool) Execute(ctx context.Context, args any, tc ToolCont
 type UpdateCharacterArgs struct {
 	CharacterID int64  `json:"character_id" jsonschema:"required,description=角色ID"     validate:"required,min=1"`
 	Name        string `json:"name"         jsonschema:"description=新的名称"`
+	Description string `json:"description"  jsonschema:"description=新的自然语言描述（完全替换旧的）"`
 	Personality string `json:"personality"  jsonschema:"description=新的性格/设定JSON（完全替换旧的）"`
 	Abilities   string `json:"abilities"    jsonschema:"description=新的能力列表JSON（完全替换旧的）"`
 }
@@ -232,7 +236,7 @@ func (t *UpdateCharacterTool) NewArgs() any                { return &UpdateChara
 func (t *UpdateCharacterTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
 	a := args.(*UpdateCharacterArgs)
 
-	if a.Name == "" && a.Personality == "" && a.Abilities == "" {
+	if a.Name == "" && a.Description == "" && a.Personality == "" && a.Abilities == "" {
 		return &ToolResult{Success: false, Error: "至少需要提供一个要修改的字段"}, nil
 	}
 

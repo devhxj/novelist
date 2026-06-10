@@ -258,6 +258,7 @@ export namespace character {
 	    id: number;
 	    novel_id: number;
 	    name: string;
+	    description: string;
 	    personality: string;
 	    abilities: string;
 	    // Go type: time
@@ -274,6 +275,7 @@ export namespace character {
 	        this.id = source["id"];
 	        this.novel_id = source["novel_id"];
 	        this.name = source["name"];
+	        this.description = source["description"];
 	        this.personality = source["personality"];
 	        this.abilities = source["abilities"];
 	        this.created_at = this.convertValues(source["created_at"], null);

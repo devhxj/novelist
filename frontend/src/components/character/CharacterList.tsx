@@ -57,7 +57,7 @@ export default function CharacterList({ novelId }: Props) {
           </div>
         ) : (
           filtered.map(c => (
-            <button
+            <div
               key={c.id}
               className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left hover:bg-muted/50 transition-colors"
             >
@@ -65,7 +65,7 @@ export default function CharacterList({ novelId }: Props) {
                 {c.name.charAt(0)}
               </span>
               <span className="flex-1 text-sm truncate">{c.name}</span>
-            </button>
+            </div>
           ))
         )}
       </div>
