@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Library, List, Users, MapPin } from 'lucide-react'
+import { Library, List, Users, MapPin, GitBranch, History } from 'lucide-react'
 
 interface Activity {
   id: string
@@ -13,6 +13,8 @@ const activities: Activity[] = [
   { id: 'chapters', icon: List, label: '章节' },
   { id: 'characters', icon: Users, label: '角色' },
   { id: 'locations', icon: MapPin, label: '地点' },
+  { id: 'storyarcs', icon: GitBranch, label: '弧线' },
+  { id: 'timeline', icon: History, label: '时间线' },
 ]
 
 interface Props {

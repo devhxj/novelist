@@ -3,6 +3,8 @@
 import {app} from '../models';
 import {chapter} from '../models';
 import {novel} from '../models';
+import {storyarc} from '../models';
+import {timeline} from '../models';
 import {character} from '../models';
 import {llm} from '../models';
 import {location} from '../models';
@@ -24,6 +26,10 @@ export function CreateNovel(arg1:app.CreateNovelInput):Promise<novel.Novel>;
 
 export function GetAppConfig():Promise<Record<string, any>>;
 
+export function GetArcNodes(arg1:number,arg2:number,arg3:number):Promise<Array<storyarc.ArcNode>>;
+
+export function GetChapterPlans(arg1:number):Promise<Array<timeline.ChapterPlan>>;
+
 export function GetChapters(arg1:number):Promise<Array<chapter.Chapter>>;
 
 export function GetCharacterRelations(arg1:number):Promise<Array<character.CharacterRelation>>;
@@ -38,6 +44,8 @@ export function GetLocationRelations(arg1:number):Promise<Array<location.Locatio
 
 export function GetLocations(arg1:number):Promise<Array<location.Location>>;
 
+export function GetMaxChapterNumber(arg1:number):Promise<number>;
+
 export function GetModels():Promise<Array<llm.AvailableModel>>;
 
 export function GetNovels():Promise<Array<novel.Novel>>;
@@ -51,6 +59,10 @@ export function GetSessionMessages(arg1:string):Promise<Array<session.Message>>;
 export function GetSessions(arg1:app.GetSessionsInput):Promise<storage.PageResult_novel_app_SessionMeta_>;
 
 export function GetSettings():Promise<config.AppSettings>;
+
+export function GetStoryArcs(arg1:number):Promise<Array<storyarc.StoryArc>>;
+
+export function GetTimelineEntries(arg1:number,arg2:number,arg3:number):Promise<Array<timeline.TimelineEntry>>;
 
 export function Initialize(arg1:string):Promise<void>;
 

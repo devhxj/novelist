@@ -29,8 +29,13 @@ import {
   GetSessionMessages,
   SaveLLMConfig,
   UpdateDataDir,
+  GetMaxChapterNumber,
+  GetStoryArcs,
+  GetArcNodes,
+  GetChapterPlans,
+  GetTimelineEntries,
 } from '@/lib/wailsjs/go/app/App'
-import type { app, novel, chapter, config, llm, session, character, location } from '@/lib/wailsjs/go/models'
+import type { app, novel, chapter, config, llm, session, character, location, storyarc, timeline } from '@/lib/wailsjs/go/models'
 
 export function useApp() {
   return useMemo(() => ({
@@ -63,7 +68,12 @@ export function useApp() {
     GetLLMConfig,
     SaveLLMConfig,
     UpdateDataDir,
+    GetMaxChapterNumber,
+    GetStoryArcs,
+    GetArcNodes,
+    GetChapterPlans,
+    GetTimelineEntries,
   }), [])
 }
 
-export type { app, novel, chapter, config, llm, session, character, location }
+export type { app, novel, chapter, config, llm, session, character, location, storyarc, timeline }

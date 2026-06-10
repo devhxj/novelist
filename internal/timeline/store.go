@@ -58,6 +58,22 @@ type ListByNovelOptions struct {
 	Status     string // 空字符串=不过滤，"pending"/"resolved"/"abandoned"
 }
 
+// ListByChapterRange 按章节窗口获取伏笔/用户指令。from/to 为 0 表示不限。
+func (s *Store) ListByChapterRange(ctx context.Context, novelID int64, fromChapter, toChapter int) ([]TimelineEntry, error) {
+	q := s.DB.WithContext(ctx).Where("novel_id = ?", novelID)
+	if fromChapter > 0 {
+		q = q.Where("target_chapter >= ?", fromChapter)
+	}
+	if toChapter > 0 {
+		q = q.Where("target_chapter <= ?", toChapter)
+	}
+	var entries []TimelineEntry
+	if err := q.Order("target_chapter ASC, importance DESC").Find(&entries).Error; err != nil {
+		return nil, fmt.Errorf("timeline store: list by chapter range: %w", err)
+	}
+	return entries, nil
+}
+
 // ListByNovel 分页列出某小说的伏笔/用户指令，支持分类和状态过滤。前端管理页用。
 func (s *Store) ListByNovel(ctx context.Context, novelID int64, opts ListByNovelOptions) (*storage.PageResult[TimelineEntry], error) {
 	pp := opts.PageParams

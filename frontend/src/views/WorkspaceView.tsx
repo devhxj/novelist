@@ -7,6 +7,8 @@ import SidePanel from '@/components/sidebar/SidePanel'
 import ContentPanel, { type ContentPanelHandle } from '@/components/content/ContentPanel'
 import CharacterGraph from '@/components/character/CharacterGraph'
 import LocationGraph from '@/components/location/LocationGraph'
+import StoryArcGraph from '@/components/storyarc/StoryArcGraph'
+import TimelineView from '@/components/timeline/TimelineView'
 import ChatPanel from '@/components/chat/ChatPanel'
 import GitHubLink from '@/components/shell/GitHubLink'
 import SettingsDialog from '@/components/settings/SettingsDialog'
@@ -187,7 +189,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
           onCreateNovel={handleCreateNovel}
         />
 
-        {activePanel !== 'characters' && activePanel !== 'locations' && (
+        {activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && (
           <ContentPanel ref={contentRef} novelId={activeNovelId} onContentChange={setActiveContent} />
         )}
 
@@ -195,6 +197,10 @@ export default function WorkspaceView({ initialNovelId }: Props) {
           <CharacterGraph novelId={activeNovelId} />
         ) : activePanel === 'locations' ? (
           <LocationGraph novelId={activeNovelId} />
+        ) : activePanel === 'storyarcs' ? (
+          <StoryArcGraph novelId={activeNovelId} />
+        ) : activePanel === 'timeline' ? (
+          <TimelineView novelId={activeNovelId} />
         ) : null}
 
         <ChatPanel novelId={activeNovelId} onApprove={handleApprove} onReject={handleReject} />

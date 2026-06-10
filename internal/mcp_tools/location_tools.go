@@ -498,7 +498,7 @@ func formatLocationDetail(loc location.Location, parentName string, children []l
 	var parts []string
 
 	// 标题
-	parts = append(parts, fmt.Sprintf("### %s", loc.Name))
+	parts = append(parts, fmt.Sprintf("### %s [location_id:%d]", loc.Name, loc.ID))
 
 	// 基本信息
 	if loc.LocationType != "" {
@@ -521,7 +521,7 @@ func formatLocationDetail(loc location.Location, parentName string, children []l
 	if len(children) > 0 {
 		lines := []string{fmt.Sprintf("\n#### 子地点（%d个）", len(children))}
 		for _, ch := range children {
-			lines = append(lines, fmt.Sprintf("- %s", ch.Name))
+			lines = append(lines, fmt.Sprintf("- %s [location_id:%d]", ch.Name, ch.ID))
 		}
 		parts = append(parts, strings.Join(lines, "\n"))
 	}
@@ -552,9 +552,9 @@ func formatLocationNetwork(roots []location.Location, rootRels []location.Locati
 	for _, r := range roots {
 		n := childCounts[r.ID]
 		if n > 0 {
-			rootDescs = append(rootDescs, fmt.Sprintf("%s（含%d个子地点）", r.Name, n))
+			rootDescs = append(rootDescs, fmt.Sprintf("%s [location_id:%d]（含%d个子地点）", r.Name, r.ID, n))
 		} else {
-			rootDescs = append(rootDescs, r.Name)
+			rootDescs = append(rootDescs, fmt.Sprintf("%s [location_id:%d]", r.Name, r.ID))
 		}
 	}
 	parts = append(parts, fmt.Sprintf("\n共 %d 个根节点：%s。", len(roots), strings.Join(rootDescs, "、")))

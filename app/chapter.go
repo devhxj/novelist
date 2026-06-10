@@ -24,6 +24,11 @@ func (a *App) GetChapters(novelID int64) ([]chapter.Chapter, error) {
 	return chapters, nil
 }
 
+// GetMaxChapterNumber 返回该小说当前最大章节号，无章节时返回 0。前端确定写作进度用。
+func (a *App) GetMaxChapterNumber(novelID int64) (int, error) {
+	return a.chapter.GetLatestNumber(a.ctx, novelID)
+}
+
 // CreateChapter 创建新章节，章节号自动递增。同时创建空正文文件。
 func (a *App) CreateChapter(input CreateChapterInput) (*chapter.Chapter, error) {
 	latest, err := a.chapter.GetLatestNumber(a.ctx, input.NovelID)

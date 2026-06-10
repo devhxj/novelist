@@ -54,6 +54,14 @@ export default function SidePanel({
         <CharacterList novelId={novelId} />
       ) : activePanel === 'locations' ? (
         <LocationList novelId={novelId} />
+      ) : activePanel === 'storyarcs' ? (
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-xs text-muted-foreground">故事弧线</p>
+        </div>
+      ) : activePanel === 'timeline' ? (
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-xs text-muted-foreground">时间线</p>
+        </div>
       ) : (
         <div className="flex-1 flex items-center justify-center">
           <p className="text-xs text-muted-foreground">即将推出</p>

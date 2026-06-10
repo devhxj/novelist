@@ -30,6 +30,14 @@ export function GetAppConfig() {
   return window['go']['app']['App']['GetAppConfig']();
 }
 
+export function GetArcNodes(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetArcNodes'](arg1, arg2, arg3);
+}
+
+export function GetChapterPlans(arg1) {
+  return window['go']['app']['App']['GetChapterPlans'](arg1);
+}
+
 export function GetChapters(arg1) {
   return window['go']['app']['App']['GetChapters'](arg1);
 }
@@ -58,6 +66,10 @@ export function GetLocations(arg1) {
   return window['go']['app']['App']['GetLocations'](arg1);
 }
 
+export function GetMaxChapterNumber(arg1) {
+  return window['go']['app']['App']['GetMaxChapterNumber'](arg1);
+}
+
 export function GetModels() {
   return window['go']['app']['App']['GetModels']();
 }
@@ -84,6 +96,14 @@ export function GetSessions(arg1) {
 
 export function GetSettings() {
   return window['go']['app']['App']['GetSettings']();
+}
+
+export function GetStoryArcs(arg1) {
+  return window['go']['app']['App']['GetStoryArcs'](arg1);
+}
+
+export function GetTimelineEntries(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetTimelineEntries'](arg1, arg2, arg3);
 }
 
 export function Initialize(arg1) {

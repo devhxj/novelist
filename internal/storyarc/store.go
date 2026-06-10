@@ -97,6 +97,22 @@ func (s *Store) ListByArcs(ctx context.Context, arcIDs []int64) ([]ArcNode, erro
 	return nodes, nil
 }
 
+// ListNodesByChapterRange 按章节范围取某小说的全部弧线节点。from/to 为 0 表示不限。
+func (s *Store) ListNodesByChapterRange(ctx context.Context, novelID int64, fromChapter, toChapter int) ([]ArcNode, error) {
+	q := s.DB.WithContext(ctx).Where("novel_id = ?", novelID)
+	if fromChapter > 0 {
+		q = q.Where("target_chapter >= ?", fromChapter)
+	}
+	if toChapter > 0 {
+		q = q.Where("target_chapter <= ?", toChapter)
+	}
+	var nodes []ArcNode
+	if err := q.Order("story_arc_id, target_chapter ASC, id ASC").Find(&nodes).Error; err != nil {
+		return nil, fmt.Errorf("storyarc store: list nodes by chapter range: %w", err)
+	}
+	return nodes, nil
+}
+
 // ListNodesBeforeByArc 对每条弧线分别取 target_chapter < chapterNum 的最近 limit 条节点。
 // 返回 map[arcID]nodes，保证每条弧线独占窗口。
 func (s *Store) ListNodesBeforeByArc(ctx context.Context, arcIDs []int64, chapterNum int, limit int) (map[int64][]ArcNode, error) {

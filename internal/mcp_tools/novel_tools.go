@@ -220,7 +220,7 @@ func formatPreferences(items []novel.PreferenceItem) string {
 
 	var globalLines, novelLines []string
 	for _, item := range items {
-		line := fmt.Sprintf("- [preference_id:%d] 【%s】%s", item.ID, item.Category, item.Content)
+		line := fmt.Sprintf("- 【%s】%s [preference_id:%d]", item.Category, item.Content, item.ID)
 		if item.IsGlobal {
 			globalLines = append(globalLines, line)
 		} else {

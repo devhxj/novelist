@@ -323,7 +323,7 @@ func formatTimelineContext(plans []timeline.ChapterPlan, history, anomalies, fut
 			}
 			cat := catLabel(e.Category)
 			st := statusLabel(e.Status)
-			line := fmt.Sprintf("- [entry_id:%d] %s %s — 目标第%d章 — %s", e.ID, cat, e.Title, e.TargetChapter, st)
+			line := fmt.Sprintf("- %s %s [entry_id:%d] — 目标第%d章 — %s", cat, e.Title, e.ID, e.TargetChapter, st)
 			lines = append(lines, line)
 		}
 		parts = append(parts, strings.Join(lines, "\n"))
@@ -336,11 +336,11 @@ func formatTimelineContext(plans []timeline.ChapterPlan, history, anomalies, fut
 		for _, e := range anomalies {
 			cat := catLabel(e.Category)
 			if e.Status == "pending" && e.TargetChapter < currentChapter {
-				lines = append(lines, fmt.Sprintf("- [entry_id:%d] %s %s — 目标第%d章但仍为pending，应在第%d章前回收",
-					e.ID, cat, e.Title, e.TargetChapter, currentChapter))
+				lines = append(lines, fmt.Sprintf("- %s %s [entry_id:%d] — 目标第%d章但仍为pending，应在第%d章前回收",
+					cat, e.Title, e.ID, e.TargetChapter, currentChapter))
 			} else if e.Status == "resolved" && e.TargetChapter >= currentChapter {
-				lines = append(lines, fmt.Sprintf("- [entry_id:%d] %s %s — 目标第%d章但已标记resolved，可能提前回收",
-					e.ID, cat, e.Title, e.TargetChapter))
+				lines = append(lines, fmt.Sprintf("- %s %s [entry_id:%d] — 目标第%d章但已标记resolved，可能提前回收",
+					cat, e.Title, e.ID, e.TargetChapter))
 			}
 		}
 		parts = append(parts, strings.Join(lines, "\n"))
@@ -353,7 +353,7 @@ func formatTimelineContext(plans []timeline.ChapterPlan, history, anomalies, fut
 			if e.Status == "resolved" {
 				continue // 已在异常区展示
 			}
-			line := fmt.Sprintf("- [entry_id:%d] 第%d章 %s %s", e.ID, e.TargetChapter, catLabel(e.Category), e.Title)
+			line := fmt.Sprintf("- %s %s [entry_id:%d] 第%d章", catLabel(e.Category), e.Title, e.ID, e.TargetChapter)
 			if e.Importance > 0 {
 				line += fmt.Sprintf(" [重要度:%d]", e.Importance)
 			}
@@ -378,8 +378,8 @@ func formatTimelineFull(entries []timeline.TimelineEntry) string {
 	if len(entries) > 0 {
 		lines := []string{fmt.Sprintf("### 伏笔与用户指令（%d条）", len(entries))}
 		for _, e := range entries {
-			line := fmt.Sprintf("- [entry_id:%d] 第%d章 %s %s — %s",
-				e.ID, e.TargetChapter, catLabel(e.Category), e.Title, statusLabel(e.Status))
+			line := fmt.Sprintf("- %s %s [entry_id:%d] 第%d章 — %s",
+				catLabel(e.Category), e.Title, e.ID, e.TargetChapter, statusLabel(e.Status))
 			if e.Importance > 0 {
 				line += fmt.Sprintf(" [重要度:%d]", e.Importance)
 			}

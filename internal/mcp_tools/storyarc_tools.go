@@ -408,8 +408,8 @@ func formatArcsAll(activeArcs []storyarc.StoryArc, beforeByArc, anomalyByArc, af
 
 func formatActiveArc(arc storyarc.StoryArc, before, anomalies, after []storyarc.ArcNode, currentChapter int) string {
 	var parts []string
-	parts = append(parts, fmt.Sprintf("\n#### %s (%s) — %s %s",
-		arc.Name, arc.ArcType, arc.Status, importanceStars(arc.Importance)))
+	parts = append(parts, fmt.Sprintf("\n#### %s [arc_id:%d] (%s) — %s %s",
+		arc.Name, arc.ID, arc.ArcType, arc.Status, importanceStars(arc.Importance)))
 	if arc.Description != "" {
 		parts = append(parts, arc.Description)
 	}
@@ -430,8 +430,8 @@ func formatActiveArc(arc storyarc.StoryArc, before, anomalies, after []storyarc.
 	if len(anomalies) > 0 {
 		lines := []string{"\n##### ⚠️ 异常", "以下节点需要关注和修正："}
 		for _, n := range anomalies {
-			lines = append(lines, fmt.Sprintf("- [node_id:%d] %s — 目标第%d章但仍pending，应在第%d章前完成",
-				n.ID, n.Title, n.TargetChapter, currentChapter))
+			lines = append(lines, fmt.Sprintf("- %s [node_id:%d] — 目标第%d章但仍pending，应在第%d章前完成",
+				n.Title, n.ID, n.TargetChapter, currentChapter))
 		}
 		parts = append(parts, strings.Join(lines, "\n"))
 	}
@@ -449,8 +449,8 @@ func formatActiveArc(arc storyarc.StoryArc, before, anomalies, after []storyarc.
 
 func formatPausedArc(arc storyarc.StoryArc, before, pending []storyarc.ArcNode) string {
 	var parts []string
-	parts = append(parts, fmt.Sprintf("\n#### %s (%s) — paused %s",
-		arc.Name, arc.ArcType, importanceStars(arc.Importance)))
+	parts = append(parts, fmt.Sprintf("\n#### %s [arc_id:%d] (%s) — paused %s",
+		arc.Name, arc.ID, arc.ArcType, importanceStars(arc.Importance)))
 	if arc.ReactivateAt != "" {
 		parts = append(parts, fmt.Sprintf("恢复条件：%s", arc.ReactivateAt))
 	}
@@ -465,13 +465,13 @@ func formatPausedArc(arc storyarc.StoryArc, before, pending []storyarc.ArcNode) 
 		if ch == 0 {
 			ch = n.TargetChapter
 		}
-		parts = append(parts, fmt.Sprintf("- [node_id:%d] %s — 第%d章 ✓", n.ID, n.Title, ch))
+		parts = append(parts, fmt.Sprintf("- %s [node_id:%d] — 第%d章 ✓", n.Title, n.ID, ch))
 	}
 	for i, n := range pending {
 		if i == 0 {
-			parts = append(parts, fmt.Sprintf("- [node_id:%d] ▶ %s — 目标第%d章", n.ID, n.Title, n.TargetChapter))
+			parts = append(parts, fmt.Sprintf("- ▶ %s [node_id:%d] — 目标第%d章", n.Title, n.ID, n.TargetChapter))
 		} else {
-			parts = append(parts, fmt.Sprintf("- [node_id:%d] %s — 目标第%d章", n.ID, n.Title, n.TargetChapter))
+			parts = append(parts, fmt.Sprintf("- %s [node_id:%d] — 目标第%d章", n.Title, n.ID, n.TargetChapter))
 		}
 	}
 
@@ -479,8 +479,8 @@ func formatPausedArc(arc storyarc.StoryArc, before, pending []storyarc.ArcNode) 
 }
 
 func formatArchivedArc(arc storyarc.StoryArc) string {
-	return fmt.Sprintf("\n#### %s (%s) — %s %s",
-		arc.Name, arc.ArcType, arc.Status, importanceStars(arc.Importance))
+	return fmt.Sprintf("\n#### %s [arc_id:%d] (%s) — %s %s",
+		arc.Name, arc.ID, arc.ArcType, arc.Status, importanceStars(arc.Importance))
 }
 
 func formatArcsFull(arcs []storyarc.StoryArc, nodes []storyarc.ArcNode) string {
@@ -494,8 +494,8 @@ func formatArcsFull(arcs []storyarc.StoryArc, nodes []storyarc.ArcNode) string {
 	nodesByArc := groupNodesByArc(nodes)
 
 	for _, arc := range arcs {
-		parts = append(parts, fmt.Sprintf("\n#### %s (%s) — %s %s",
-			arc.Name, arc.ArcType, arc.Status, importanceStars(arc.Importance)))
+		parts = append(parts, fmt.Sprintf("\n#### %s [arc_id:%d] (%s) — %s %s",
+			arc.Name, arc.ID, arc.ArcType, arc.Status, importanceStars(arc.Importance)))
 		if arc.Description != "" {
 			parts = append(parts, arc.Description)
 		}
@@ -527,7 +527,7 @@ func formatNode(n storyarc.ArcNode, showStatus bool) string {
 		statusStr += " — 已废弃"
 	}
 
-	return fmt.Sprintf("- [node_id:%d] %s%s", n.ID, n.Title, statusStr)
+	return fmt.Sprintf("- %s [node_id:%d]%s", n.Title, n.ID, statusStr)
 }
 
 func groupNodesByArc(nodes []storyarc.ArcNode) map[int64][]storyarc.ArcNode {
