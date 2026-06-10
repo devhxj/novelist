@@ -55,6 +55,16 @@ func (s *Store) ListByNovel(ctx context.Context, novelID int64, opts ListByNovel
 	return storage.NewPageResult(chars, total, pp.Page, pp.Size), nil
 }
 
+// ListAllByNovel 返回某小说的全部角色（不分页），供前端侧边栏和关系图渲染。
+func (s *Store) ListAllByNovel(ctx context.Context, novelID int64) ([]Character, error) {
+	var chars []Character
+	if err := s.DB.WithContext(ctx).Where("novel_id = ?", novelID).Order("name ASC").Find(&chars).Error; err != nil {
+		return nil, fmt.Errorf("character store: list all: %w", err)
+	}
+	s.logger.Debug("character store: list all", "novel_id", novelID, "count", len(chars))
+	return chars, nil
+}
+
 // GetByIDs 批量按 ID 取角色，用于关系查询时解析角色名。
 func (s *Store) GetByIDs(ctx context.Context, ids []int64) ([]Character, error) {
 	if len(ids) == 0 {

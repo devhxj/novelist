@@ -60,6 +60,16 @@ func (s *Store) ListByNovel(ctx context.Context, novelID int64, opts ListByNovel
 	return storage.NewPageResult(locs, total, pp.Page, pp.Size), nil
 }
 
+// ListAllByNovel 返回某小说的全部地点（不分页），供前端侧边栏嵌套树和关系图渲染。
+func (s *Store) ListAllByNovel(ctx context.Context, novelID int64) ([]Location, error) {
+	var locs []Location
+	if err := s.DB.WithContext(ctx).Where("novel_id = ?", novelID).Order("name ASC").Find(&locs).Error; err != nil {
+		return nil, fmt.Errorf("location store: list all: %w", err)
+	}
+	s.logger.Debug("location store: list all", "novel_id", novelID, "count", len(locs))
+	return locs, nil
+}
+
 // GetChildren 返回某地点的直接子地点。
 func (s *Store) GetChildren(ctx context.Context, parentID int64) ([]Location, error) {
 	var children []Location
