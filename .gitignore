@@ -33,5 +33,5 @@ Thumbs.db
 .env
 .env.local
 
-release/
+/release/
 docs.local/
