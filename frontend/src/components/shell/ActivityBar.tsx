@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Library, List, Users, MapPin, GitBranch, History, Eye } from 'lucide-react'
+import { Library, List, Settings, Users, MapPin, GitBranch, History, Eye } from 'lucide-react'
 
 interface Activity {
   id: string
@@ -11,6 +11,7 @@ interface Activity {
 const activities: Activity[] = [
   { id: 'novels', icon: Library, label: '书架' },
   { id: 'chapters', icon: List, label: '章节' },
+  { id: 'preferences', icon: Settings, label: '偏好' },
   { id: 'characters', icon: Users, label: '角色' },
   { id: 'locations', icon: MapPin, label: '地点' },
   { id: 'storyarcs', icon: GitBranch, label: '弧线' },
@@ -30,7 +31,7 @@ export default function ActivityBar({ activeId, onSelect }: Props) {
         const isActive = a.id === activeId
         return (
           <div key={a.id}>
-            {i === 1 && <div className="w-6 h-px bg-border my-1 mx-auto" />}
+            {i === 2 && <div className="w-6 h-px bg-border my-1 mx-auto" />}
             <button
               disabled={a.disabled}
               onClick={() => onSelect(a.id)}

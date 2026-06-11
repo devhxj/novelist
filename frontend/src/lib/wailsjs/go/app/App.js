@@ -26,6 +26,14 @@ export function CreateNovel(arg1) {
   return window['go']['app']['App']['CreateNovel'](arg1);
 }
 
+export function CreatePreference(arg1, arg2) {
+  return window['go']['app']['App']['CreatePreference'](arg1, arg2);
+}
+
+export function DeletePreference(arg1) {
+  return window['go']['app']['App']['DeletePreference'](arg1);
+}
+
 export function GetAppConfig() {
   return window['go']['app']['App']['GetAppConfig']();
 }
@@ -80,6 +88,10 @@ export function GetNovels() {
 
 export function GetPlatform() {
   return window['go']['app']['App']['GetPlatform']();
+}
+
+export function GetPreferences(arg1) {
+  return window['go']['app']['App']['GetPreferences'](arg1);
 }
 
 export function GetReaderPerspectives(arg1) {
@@ -140,4 +152,8 @@ export function SetApprovalMode(arg1) {
 
 export function UpdateDataDir(arg1) {
   return window['go']['app']['App']['UpdateDataDir'](arg1);
+}
+
+export function UpdatePreference(arg1, arg2) {
+  return window['go']['app']['App']['UpdatePreference'](arg1, arg2);
 }

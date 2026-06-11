@@ -35,6 +35,10 @@ import {
   GetChapterPlans,
   GetTimelineEntries,
   GetReaderPerspectives,
+  GetPreferences,
+  CreatePreference,
+  UpdatePreference,
+  DeletePreference,
 } from '@/lib/wailsjs/go/app/App'
 import type { app, novel, chapter, config, llm, session, character, location, storyarc, timeline, reader } from '@/lib/wailsjs/go/models'
 
@@ -75,6 +79,10 @@ export function useApp() {
     GetChapterPlans,
     GetTimelineEntries,
     GetReaderPerspectives,
+    GetPreferences,
+    CreatePreference,
+    UpdatePreference,
+    DeletePreference,
   }), [])
 }
 

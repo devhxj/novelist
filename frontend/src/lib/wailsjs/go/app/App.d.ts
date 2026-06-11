@@ -25,6 +25,10 @@ export function CreateChapter(arg1:app.CreateChapterInput):Promise<chapter.Chapt
 
 export function CreateNovel(arg1:app.CreateNovelInput):Promise<novel.Novel>;
 
+export function CreatePreference(arg1:number,arg2:app.CreatePreferenceInput):Promise<novel.PreferenceItem>;
+
+export function DeletePreference(arg1:number):Promise<void>;
+
 export function GetAppConfig():Promise<Record<string, any>>;
 
 export function GetArcNodes(arg1:number,arg2:number,arg3:number):Promise<Array<storyarc.ArcNode>>;
@@ -52,6 +56,8 @@ export function GetModels():Promise<Array<llm.AvailableModel>>;
 export function GetNovels():Promise<Array<novel.Novel>>;
 
 export function GetPlatform():Promise<Record<string, any>>;
+
+export function GetPreferences(arg1:number):Promise<app.PreferenceResult>;
 
 export function GetReaderPerspectives(arg1:number):Promise<Array<reader.ReaderPerspective>>;
 
@@ -82,3 +88,5 @@ export function SetActiveNovel(arg1:app.SetActiveNovelInput):Promise<void>;
 export function SetApprovalMode(arg1:string):Promise<void>;
 
 export function UpdateDataDir(arg1:string):Promise<void>;
+
+export function UpdatePreference(arg1:number,arg2:app.UpdatePreferenceInput):Promise<novel.PreferenceItem>;
