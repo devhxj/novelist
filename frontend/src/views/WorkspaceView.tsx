@@ -7,7 +7,7 @@ import SidePanel from '@/components/sidebar/SidePanel'
 import ContentPanel, { type ContentPanelHandle } from '@/components/content/ContentPanel'
 import CharacterGraph from '@/components/character/CharacterGraph'
 import LocationGraph from '@/components/location/LocationGraph'
-import StoryArcGraph from '@/components/storyarc/StoryArcGraph'
+import ArcListView from '@/components/storyarc/ArcListView'
 import TimelineView from '@/components/timeline/TimelineView'
 import ChatPanel from '@/components/chat/ChatPanel'
 import GitHubLink from '@/components/shell/GitHubLink'
@@ -198,7 +198,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
         ) : activePanel === 'locations' ? (
           <LocationGraph novelId={activeNovelId} />
         ) : activePanel === 'storyarcs' ? (
-          <StoryArcGraph novelId={activeNovelId} />
+          <ArcListView novelId={activeNovelId} />
         ) : activePanel === 'timeline' ? (
           <TimelineView novelId={activeNovelId} />
         ) : null}

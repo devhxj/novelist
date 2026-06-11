@@ -56,6 +56,7 @@ export default function StoryArcGraph({ novelId }: Props) {
   const windowToRef = useRef(windowTo)
   windowFromRef.current = windowFrom
   windowToRef.current = windowTo
+  const autoExpandRef = useRef(false)
 
   const load = useCallback(async () => {
     if (!novelId) { setArcs([]); setAllNodes([]); return }
@@ -212,47 +213,83 @@ export default function StoryArcGraph({ novelId }: Props) {
       })
     }
 
+    // Ghost anchors at window edges for off-screen connections
+    const rightEdgeX = LEFT_MARGIN + (windowTo - windowFrom + 1) * CH_W
+    arcs.forEach((arc, i) => {
+      const y = i * LANE_H + LANE_H / 2
+      for (const side of ['l', 'r']) {
+        gNodes.push({
+          id: `ghost-${side}-${arc.id}`,
+          type: 'rect',
+          style: {
+            size: [1, 1],
+            x: side === 'l' ? LEFT_MARGIN : rightEdgeX,
+            y,
+            fill: 'transparent',
+            stroke: 'transparent',
+            opacity: 0,
+            cursor: 'default',
+          },
+          data: {},
+        })
+      }
+    })
+
+    function edgeStyle(src: storyarc.ArcNode, tgt: storyarc.ArcNode) {
+      const color = PALETTE[arcs.findIndex(a => a.id === src.story_arc_id) % PALETTE.length]
+      let stroke = color.edge
+      let lineDash: number[] | undefined
+      let opacity = 1
+      let arrow = false
+      if (src.status === 'abandoned' || tgt.status === 'abandoned') {
+        stroke = '#94a3b8'
+        lineDash = [4, 4]
+        opacity = 0.5
+      } else if (src.status === 'pending' && tgt.status === 'pending') {
+        lineDash = [6, 4]
+        opacity = 0.7
+      } else if (src.status === 'completed' && tgt.status === 'pending') {
+        arrow = true
+      }
+      return { stroke, lineDash, opacity, arrow }
+    }
+
     // Edges
     for (const arc of arcs) {
       const ns = nodesByArc.get(arc.id)
       if (!ns || ns.length < 2) continue
-      const color = PALETTE[arcs.findIndex(a => a.id === arc.id) % PALETTE.length]
 
       for (let i = 0; i < ns.length - 1; i++) {
         const src = ns[i]
         const tgt = ns[i + 1]
-        const srcVis = src.target_chapter >= windowFrom && src.target_chapter <= windowTo
-        const tgtVis = tgt.target_chapter >= windowFrom && tgt.target_chapter <= windowTo
-        if (!srcVis || !tgtVis) continue
+        const srcCh = src.target_chapter
+        const tgtCh = tgt.target_chapter
 
-        let stroke = color.edge
-        let lineDash: number[] | undefined
-        let opacity = 1
-        let arrow = false
+        // Both outside window on same side — skip
+        if (srcCh > windowTo && tgtCh > windowTo) continue
+        if (srcCh < windowFrom && tgtCh < windowFrom) continue
 
-        if (src.status === 'abandoned' || tgt.status === 'abandoned') {
-          stroke = '#cbd5e1'
-          lineDash = [4, 4]
-          opacity = 0.4
-        } else if (src.status === 'pending' && tgt.status === 'pending') {
-          lineDash = [4, 3]
-          opacity = 0.5
-        } else if (src.status === 'completed' && tgt.status === 'pending') {
-          arrow = true
-        }
+        const srcVis = srcCh >= windowFrom && srcCh <= windowTo
+        const tgtVis = tgtCh >= windowFrom && tgtCh <= windowTo
+
+        const sourceId = srcVis ? nid(src.id) : `ghost-l-${arc.id}`
+        const targetId = tgtVis ? nid(tgt.id) : `ghost-r-${arc.id}`
+        const crossing = !srcVis && !tgtVis
+
+        const style = edgeStyle(src, tgt)
 
         gEdges.push({
           id: eid(src.id, tgt.id),
-          source: nid(src.id),
-          target: nid(tgt.id),
+          source: sourceId,
+          target: targetId,
           type: 'line',
           style: {
-            stroke,
+            stroke: style.stroke,
             lineWidth: 2,
-            lineDash,
-            opacity,
-            endArrow: arrow,
-            endArrowSize: arrow ? 8 : 0,
+            lineDash: crossing ? [6, 4] : style.lineDash,
+            opacity: crossing ? 0.5 : style.opacity,
+            endArrow: crossing ? false : style.arrow,
+            endArrowSize: style.arrow && !crossing ? 8 : 0,
           },
         })
       }
@@ -322,8 +359,10 @@ export default function StoryArcGraph({ novelId }: Props) {
       const ch = Math.round((vp[0] - LEFT_MARGIN) / CH_W) + wf
       const margin = Math.max(3, Math.floor(WINDOW / 6))
       if (ch < wf + margin) {
+        autoExpandRef.current = true
         setWindowCenter(prev => Math.max(WINDOW + 1, prev - Math.floor(WINDOW / 2)))
       } else if (ch > wt - margin) {
+        autoExpandRef.current = true
         setWindowCenter(prev => Math.min(tc - WINDOW, prev + Math.floor(WINDOW / 2)))
       }
     })
@@ -363,7 +402,11 @@ export default function StoryArcGraph({ novelId }: Props) {
     const graph = graphRef.current
     if (!graph || arcs.length === 0) return
     graph.setData(graphData)
-    graph.render().then(() => {
+    graph.draw().then(() => {
+      if (autoExpandRef.current) {
+        autoExpandRef.current = false
+        return
+      }
       const cw = containerRef.current?.clientWidth ?? 800
       const ch = containerRef.current?.clientHeight ?? 600
       centerOnChapter(graph, cw, ch, windowCenter, windowFrom, arcs.length)
@@ -438,7 +481,7 @@ export default function StoryArcGraph({ novelId }: Props) {
       </div>
 
       {/* Legend */}
-      <div className="absolute right-5 bottom-5 z-10 rounded-md border border-slate-200 bg-white/90 px-3 py-2.5 text-xs text-slate-600 shadow-sm backdrop-blur space-y-2.5">
+      <div className="absolute right-0 bottom-0 z-10 rounded-md border border-slate-200 bg-white/90 px-3 py-2.5 text-xs text-slate-600 shadow-sm backdrop-blur space-y-2.5">
         <div>
           <span className="text-slate-400 text-[10px] uppercase tracking-wider">节点</span>
           <div className="flex items-center gap-3 mt-1.5">
@@ -464,11 +507,11 @@ export default function StoryArcGraph({ novelId }: Props) {
               已发生
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block h-0 w-7 border-t-2 border-dashed border-blue-300/60" />
+              <span className="inline-block h-0 w-7 border-t-2 border-dashed border-blue-400" />
               未发生
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block h-0 w-7 border-t-2 border-dashed border-slate-300" />
+              <span className="inline-block h-0 w-7 border-t-2 border-dashed border-slate-400" />
               断裂
             </span>
           </div>
