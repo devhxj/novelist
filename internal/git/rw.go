@@ -26,7 +26,7 @@ func GoinkPath() string {
 
 func ReadFile(novelID int64, path string) (string, error) {
 	dir := novelDir(novelID)
-	fullPath, err := safePath(dir, path)
+	fullPath, err := SafePath(dir, path)
 	if err != nil {
 		return "", err
 	}
@@ -42,7 +42,7 @@ func ReadFile(novelID int64, path string) (string, error) {
 
 func WriteFile(novelID int64, path, content string) error {
 	dir := novelDir(novelID)
-	fullPath, err := safePath(dir, path)
+	fullPath, err := SafePath(dir, path)
 	if err != nil {
 		return err
 	}
@@ -61,8 +61,8 @@ func novelDir(novelID int64) string {
 	return config.NovelDirPath(novelID)
 }
 
-// safePath 对给定的上级目录和相对路径求最终路径，如果路径跳出上级目录则返回 error。
-func safePath(base, rel string) (string, error) {
+// SafePath 对给定的上级目录和相对路径求最终路径，如果路径跳出上级目录则返回 error。
+func SafePath(base, rel string) (string, error) {
 	absBase, err := filepath.Abs(base)
 	if err != nil {
 		return "", fmt.Errorf("git: resolve base: %w", err)

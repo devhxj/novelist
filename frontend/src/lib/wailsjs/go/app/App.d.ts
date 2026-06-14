@@ -27,6 +27,8 @@ export function CreateNovel(arg1:app.CreateNovelInput):Promise<novel.Novel>;
 
 export function CreatePreference(arg1:number,arg2:app.CreatePreferenceInput):Promise<novel.PreferenceItem>;
 
+export function DeleteNovel(arg1:number):Promise<void>;
+
 export function DeletePreference(arg1:number):Promise<void>;
 
 export function GetAppConfig():Promise<Record<string, any>>;
@@ -90,5 +92,7 @@ export function SetApprovalMode(arg1:string):Promise<void>;
 export function TestConnection(arg1:app.TestConnectionInput):Promise<void>;
 
 export function UpdateDataDir(arg1:string):Promise<void>;
+
+export function UpdateNovel(arg1:number,arg2:app.UpdateNovelInput):Promise<novel.Novel>;
 
 export function UpdatePreference(arg1:number,arg2:app.UpdatePreferenceInput):Promise<novel.PreferenceItem>;

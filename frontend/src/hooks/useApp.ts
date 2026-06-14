@@ -40,6 +40,8 @@ import {
   CreatePreference,
   UpdatePreference,
   DeletePreference,
+  DeleteNovel,
+  UpdateNovel,
 } from '@/lib/wailsjs/go/app/App'
 import type { app, novel, chapter, config, llm, session, character, location, storyarc, timeline, reader } from '@/lib/wailsjs/go/models'
 
@@ -85,6 +87,8 @@ export function useApp() {
     CreatePreference,
     UpdatePreference,
     DeletePreference,
+    DeleteNovel,
+    UpdateNovel,
   }), [])
 }
 

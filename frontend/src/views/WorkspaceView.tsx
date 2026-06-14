@@ -11,6 +11,9 @@ import ArcListView from '@/components/storyarc/ArcListView'
 import TimelineView from '@/components/timeline/TimelineView'
 import ReaderView from '@/components/reader/ReaderView'
 import PreferenceView from '@/components/preference/PreferenceView'
+import BookshelfView from '@/components/novel/BookshelfView'
+import NovelEditDialog from '@/components/novel/NovelEditDialog'
+import NovelDeleteDialog from '@/components/novel/NovelDeleteDialog'
 import ChatPanel from '@/components/chat/ChatPanel'
 import GitHubLink from '@/components/shell/GitHubLink'
 import SettingsDialog from '@/components/settings/SettingsDialog'
@@ -37,6 +40,11 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   const [isMaximised, setIsMaximised] = useState(false)
   const [platformOS, setPlatformOS] = useState('')
   const loadedRef = useRef(false)
+
+  // ── 书籍管理弹窗 ──────────────────────────────────────
+  const [editingNovel, setEditingNovel] = useState<novel.Novel | null>(null)
+  const [deletingNovel, setDeletingNovel] = useState<novel.Novel | null>(null)
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
 
   // ── 窗口状态 ────────────────────────────────────────────
 
@@ -119,6 +127,31 @@ export default function WorkspaceView({ initialNovelId }: Props) {
     }
   }
 
+  async function handleCreateNovelFromDialog(input: { title: string; description: string; genre: string }) {
+    const n = await app.CreateNovel({ title: input.title, description: input.description, genre: input.genre })
+    if (n) {
+      setShowCreateDialog(false)
+      await loadNovels()
+      setActiveNovelId(n.id)
+      setActivePanel('chapters')
+      await app.SetActiveNovel({ novel_id: n.id })
+    }
+  }
+
+  async function handleUpdateNovel(input: { title: string; description: string; genre: string }) {
+    if (!editingNovel) return
+    await app.UpdateNovel(editingNovel.id, input)
+    setEditingNovel(null)
+    await loadNovels()
+  }
+
+  async function handleDeleteNovel() {
+    if (!deletingNovel) return
+    await app.DeleteNovel(deletingNovel.id)
+    setDeletingNovel(null)
+    await loadNovels()
+  }
+
   const activeNovel = novels.find(n => n.id === activeNovelId)
 
   // ── 窗口按钮样式 ────────────────────────────────────────
@@ -191,7 +224,16 @@ export default function WorkspaceView({ initialNovelId }: Props) {
           onCreateNovel={handleCreateNovel}
         />
 
-        {activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && (
+        {activePanel === 'novels' ? (
+          <BookshelfView
+            novels={novels}
+            activeNovelId={activeNovelId}
+            onSelectNovel={handleSelectNovel}
+            onEditNovel={setEditingNovel}
+            onDeleteNovel={setDeletingNovel}
+            onCreateNovel={() => setShowCreateDialog(true)}
+          />
+        ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && (
           <ContentPanel ref={contentRef} novelId={activeNovelId} onContentChange={setActiveContent} />
         )}
 
@@ -218,6 +260,24 @@ export default function WorkspaceView({ initialNovelId }: Props) {
         open={showSettings}
         onClose={() => setShowSettings(false)}
         initialTab="general"
+      />
+
+      <NovelEditDialog
+        open={showCreateDialog}
+        onClose={() => setShowCreateDialog(false)}
+        onSave={handleCreateNovelFromDialog}
+      />
+      <NovelEditDialog
+        open={!!editingNovel}
+        novel={editingNovel}
+        onClose={() => setEditingNovel(null)}
+        onSave={handleUpdateNovel}
+      />
+      <NovelDeleteDialog
+        open={!!deletingNovel}
+        novelTitle={deletingNovel?.title ?? ''}
+        onClose={() => setDeletingNovel(null)}
+        onConfirm={handleDeleteNovel}
       />
     </div>
   )

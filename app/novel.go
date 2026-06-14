@@ -2,10 +2,21 @@ package app
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
+	"gorm.io/gorm"
+
+	"novel/internal/chapter"
+	"novel/internal/character"
 	"novel/internal/config"
 	"novel/internal/git"
+	"novel/internal/location"
 	"novel/internal/novel"
+	"novel/internal/reader"
+	"novel/internal/session"
+	"novel/internal/storyarc"
+	"novel/internal/timeline"
 )
 
 // ── 小说 ──────────────────────────────────────────────────
@@ -30,6 +41,7 @@ func (a *App) GetNovels() ([]novel.Novel, error) {
 type CreateNovelInput struct {
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
+	Genre       string `json:"genre,omitempty"`
 }
 
 // CreateNovel 创建一部新小说。
@@ -37,19 +49,15 @@ func (a *App) CreateNovel(input CreateNovelInput) (*novel.Novel, error) {
 	n := novel.Novel{
 		Title:       input.Title,
 		Description: input.Description,
+		Genre:       input.Genre,
 	}
 	if err := a.novel.DB.WithContext(a.ctx).Create(&n).Error; err != nil {
 		return nil, fmt.Errorf("failed to create novel: %w", err)
 	}
 
-	n.DirPath = config.NovelDirPath(n.ID)
 	if _, err := git.New(n.ID); err != nil {
 		a.novel.DB.WithContext(a.ctx).Delete(&n) // 回滚孤儿 DB 记录
 		return nil, fmt.Errorf("failed to init novel repo: %w", err)
-	}
-
-	if err := a.novel.DB.WithContext(a.ctx).Model(&n).Update("dir_path", n.DirPath).Error; err != nil {
-		return nil, fmt.Errorf("failed to update novel path: %w", err)
 	}
 
 	// 为新小说创建 goink.md 空文件
@@ -64,6 +72,104 @@ func (a *App) CreateNovel(input CreateNovelInput) (*novel.Novel, error) {
 func (a *App) SetActiveNovel(input SetActiveNovelInput) error {
 	a.settings.LastNovelID = input.NovelID
 	return config.SaveSettings(a.db, a.settings)
+}
+
+// UpdateNovelInput 是更新小说的入参，空字段不更新（PATCH 语义）。
+type UpdateNovelInput struct {
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Genre       string `json:"genre,omitempty"`
+}
+
+// UpdateNovel 更新小说信息。
+func (a *App) UpdateNovel(novelID int64, input UpdateNovelInput) (*novel.Novel, error) {
+	var n novel.Novel
+	if err := a.novel.DB.WithContext(a.ctx).First(&n, novelID).Error; err != nil {
+		return nil, fmt.Errorf("update novel: %w", err)
+	}
+	if input.Title != "" {
+		n.Title = input.Title
+	}
+	if input.Description != "" {
+		n.Description = input.Description
+	}
+	if input.Genre != "" {
+		n.Genre = input.Genre
+	}
+	if err := a.novel.DB.WithContext(a.ctx).Save(&n).Error; err != nil {
+		return nil, fmt.Errorf("update novel: %w", err)
+	}
+	return &n, nil
+}
+
+// DeleteNovel 删除小说，级联清理所有关联数据、Git 仓库目录。
+func (a *App) DeleteNovel(novelID int64) error {
+	var n novel.Novel
+	if err := a.novel.DB.WithContext(a.ctx).First(&n, novelID).Error; err != nil {
+		return fmt.Errorf("delete novel: %w", err)
+	}
+
+	// 用 SafePath 从 novelID 重新计算待删目录
+	novelsParent := filepath.Join(config.DataDirPath(), "novels")
+	safeDir, err := git.SafePath(novelsParent, fmt.Sprintf("%d", novelID))
+	if err != nil {
+		return fmt.Errorf("delete novel: unsafe path: %w", err)
+	}
+
+	// 在事务中先删子表再删主表
+	err = a.novel.DB.WithContext(a.ctx).Transaction(func(tx *gorm.DB) error {
+		// 仅删小说专属偏好，保留全局偏好
+		if err := tx.Where("is_global = ? AND novel_id = ?", false, novelID).Delete(&novel.PreferenceItem{}).Error; err != nil {
+			return fmt.Errorf("preferences: %w", err)
+		}
+		for _, op := range []struct {
+			label string
+			fn    func(*gorm.DB) error
+		}{
+			{"characters", func(tx *gorm.DB) error { return tx.Where("novel_id = ?", novelID).Delete(&character.Character{}).Error }},
+			{"character_relations", func(tx *gorm.DB) error {
+				return tx.Where("novel_id = ?", novelID).Delete(&character.CharacterRelation{}).Error
+			}},
+			{"chapters", func(tx *gorm.DB) error { return tx.Where("novel_id = ?", novelID).Delete(&chapter.Chapter{}).Error }},
+			{"locations", func(tx *gorm.DB) error { return tx.Where("novel_id = ?", novelID).Delete(&location.Location{}).Error }},
+			{"location_relations", func(tx *gorm.DB) error {
+				return tx.Where("novel_id = ?", novelID).Delete(&location.LocationRelation{}).Error
+			}},
+			{"chapter_plans", func(tx *gorm.DB) error {
+				return tx.Where("novel_id = ?", novelID).Delete(&timeline.ChapterPlan{}).Error
+			}},
+			{"time_entries", func(tx *gorm.DB) error {
+				return tx.Where("novel_id = ?", novelID).Delete(&timeline.TimelineEntry{}).Error
+			}},
+			{"story_arcs", func(tx *gorm.DB) error { return tx.Where("novel_id = ?", novelID).Delete(&storyarc.StoryArc{}).Error }},
+			{"arc_nodes", func(tx *gorm.DB) error { return tx.Where("novel_id = ?", novelID).Delete(&storyarc.ArcNode{}).Error }},
+			{"reader_perspectives", func(tx *gorm.DB) error {
+				return tx.Where("novel_id = ?", novelID).Delete(&reader.ReaderPerspective{}).Error
+			}},
+			{"sessions", func(tx *gorm.DB) error { return tx.Where("novel_id = ?", novelID).Delete(&session.Session{}).Error }},
+		} {
+			if err := op.fn(tx); err != nil {
+				return fmt.Errorf("%s: %w", op.label, err)
+			}
+		}
+		return tx.Delete(&n).Error
+	})
+	if err != nil {
+		return fmt.Errorf("delete novel: %w", err)
+	}
+
+	if err := os.RemoveAll(safeDir); err != nil {
+		return fmt.Errorf("delete novel dir: %w", err)
+	}
+
+	// 如果删除的是当前活跃书籍，清除记录
+	if a.settings.LastNovelID == novelID {
+		a.settings.LastNovelID = 0
+		if err := config.SaveSettings(a.db, a.settings); err != nil {
+			return fmt.Errorf("delete novel: clear last novel: %w", err)
+		}
+	}
+	return nil
 }
 
 // ── 创作偏好 ──────────────────────────────────────────────

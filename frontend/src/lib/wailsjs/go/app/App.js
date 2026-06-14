@@ -30,6 +30,10 @@ export function CreatePreference(arg1, arg2) {
   return window['go']['app']['App']['CreatePreference'](arg1, arg2);
 }
 
+export function DeleteNovel(arg1) {
+  return window['go']['app']['App']['DeleteNovel'](arg1);
+}
+
 export function DeletePreference(arg1) {
   return window['go']['app']['App']['DeletePreference'](arg1);
 }
@@ -156,6 +160,10 @@ export function TestConnection(arg1) {
 
 export function UpdateDataDir(arg1) {
   return window['go']['app']['App']['UpdateDataDir'](arg1);
+}
+
+export function UpdateNovel(arg1, arg2) {
+  return window['go']['app']['App']['UpdateNovel'](arg1, arg2);
 }
 
 export function UpdatePreference(arg1, arg2) {

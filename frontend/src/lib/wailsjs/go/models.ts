@@ -83,6 +83,7 @@ export namespace app {
 	export class CreateNovelInput {
 	    title: string;
 	    description?: string;
+	    genre?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new CreateNovelInput(source);
@@ -92,6 +93,7 @@ export namespace app {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.title = source["title"];
 	        this.description = source["description"];
+	        this.genre = source["genre"];
 	    }
 	}
 	export class CreatePreferenceInput {
@@ -260,6 +262,22 @@ export namespace app {
 	        this.chat_url = source["chat_url"];
 	        this.api_key = source["api_key"];
 	        this.model_id = source["model_id"];
+	    }
+	}
+	export class UpdateNovelInput {
+	    title?: string;
+	    description?: string;
+	    genre?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateNovelInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.genre = source["genre"];
 	    }
 	}
 	export class UpdatePreferenceInput {
@@ -689,7 +707,6 @@ export namespace novel {
 	    title: string;
 	    genre: string;
 	    description: string;
-	    dir_path: string;
 	    // Go type: time
 	    created_at: any;
 	    // Go type: time
@@ -705,7 +722,6 @@ export namespace novel {
 	        this.title = source["title"];
 	        this.genre = source["genre"];
 	        this.description = source["description"];
-	        this.dir_path = source["dir_path"];
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.updated_at = this.convertValues(source["updated_at"], null);
 	    }
