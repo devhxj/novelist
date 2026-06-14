@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/natefinch/lumberjack.v2"
 
-	"novel/internal/platform"
+	"novel/internal/config"
 )
 
 // New 创建结构化日志器。
@@ -38,7 +38,7 @@ func New(level slog.Level, format string, out io.Writer) *slog.Logger {
 // 文件日志自动轮转：单文件 10MB，保留 3 个备份，超过 30 天自动删除。
 // stderr 写入失败（如 Windows GUI 无控制台）不影响文件日志。
 func Default() *slog.Logger {
-	logPath := filepath.Join(platform.DataDir(), "goink.log")
+	logPath := filepath.Join(config.DataDirPath(), "goink.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0700); err != nil {
 		return New(slog.LevelDebug, "text", os.Stderr)
 	}

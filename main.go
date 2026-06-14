@@ -17,6 +17,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 
 	"novel/app"
+	"novel/internal/config"
 	"novel/internal/logger"
 	"novel/internal/platform"
 )
@@ -53,7 +54,7 @@ func main() {
 							http.NotFound(w, r)
 							return
 						}
-						coverPath := filepath.Join(platform.DataDir(), "novels",
+						coverPath := filepath.Join(config.DataDirPath(), "novels",
 							strconv.FormatInt(novelID, 10), "cover.jpg")
 						http.ServeFile(w, r, coverPath)
 						return

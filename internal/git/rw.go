@@ -12,7 +12,7 @@ import (
 )
 
 // ── 文件路径 ──────────────────────────────────────────────
-
+// 此处都是相对路径，位于小说目录之下的，小说目录由config决定
 func ChapterPath(num int) string {
 	return fmt.Sprintf("chapters/%03d.md", num)
 }
@@ -27,6 +27,10 @@ func CoverPath() string {
 
 func PlanPath(scope string) string {
 	return fmt.Sprintf("plans/%s.md", scope)
+}
+
+func OutlinePath(num int) string {
+	return fmt.Sprintf("outlines/%03d.md", num)
 }
 
 // ── 文件读写 ──────────────────────────────────────────────
