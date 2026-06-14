@@ -43,11 +43,12 @@ type RunSubAgentFunc func(ctx context.Context, req SubAgentRequest) (report stri
 
 // ToolContext 是工具执行时注入的上下文。
 type ToolContext struct {
-	DB       *gorm.DB
-	NovelID  int64
-	ToolID   string
-	RawArgs  json.RawMessage   // 原始 JSON，update 工具用于 PATCH DB 实体
-	Approver approval.Approver // 审批能力，nil 表示工具无需审批
+	DB           *gorm.DB
+	NovelID      int64
+	ToolID       string
+	RawArgs      json.RawMessage                                                  // 原始 JSON，update 工具用于 PATCH DB 实体
+	Approver     approval.Approver                                                // 审批能力，nil 表示工具无需审批
+	EmitApproval func(toolID string, approvalType string, payload map[string]any) // 向 agent 事件流推送审批事件（EventToolCall, phase="awaiting_approval"）
 
 	RunSubAgent RunSubAgentFunc // 子 Agent 运行器，由 agent 包注入
 }
@@ -61,7 +62,7 @@ type ToolResult struct {
 	Error    string          `json:"error,omitempty"`
 	ErrKind  string          `json:"err_kind,omitempty"` // "" = 业务错误，"system" = 系统错误
 	Metadata map[string]any  `json:"metadata,omitempty"`
-	Inject    []InjectMessage `json:"inject,omitempty"`
+	Inject   []InjectMessage `json:"inject,omitempty"`
 }
 
 // InjectMessage 由工具返回，agent loop 会后追加到对话流。固定 to_api=true, to_frontend=false。

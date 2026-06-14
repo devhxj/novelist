@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-
-	wails "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // Approval 是用户对一次审批请求的响应。
@@ -60,12 +58,6 @@ func (s *Service) RequestApproval(ctx context.Context, toolID string, payload an
 	ch := make(chan Approval, 1)
 	s.pend[toolID] = ch
 	s.mu.Unlock()
-
-	// 通知前端展示审批 UI
-	wails.EventsEmit(ctx, "approval:requested", map[string]any{
-		"tool_id": toolID,
-		"payload": payload,
-	})
 
 	// defer 确保无论怎么退出都清理
 	defer func() {

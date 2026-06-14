@@ -86,13 +86,17 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 
 	// 4. 审批（阻塞等待用户确认）
 	if tc.Approver != nil {
-		approval, err := tc.Approver.RequestApproval(ctx, tc.ToolID, map[string]any{
+		payload := map[string]any{
 			"original":    current,
 			"modified":    proposed,
 			"path":        a.Path,
 			"change_type": a.ChangeType,
 			"reason":      a.Reason,
-		})
+		}
+		if tc.EmitApproval != nil {
+			tc.EmitApproval(tc.ToolID, "file_edit", payload)
+		}
+		approval, err := tc.Approver.RequestApproval(ctx, tc.ToolID, payload)
 		if err != nil {
 			return nil, fmt.Errorf("approval: %w", err)
 		}

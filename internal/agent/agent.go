@@ -262,6 +262,17 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						NovelID:  opts.NovelID,
 						ToolID:   id,
 						Approver: a.approver,
+						EmitApproval: func(toolID string, approvalType string, payload map[string]any) {
+							emit(AgentEvent{
+								TurnID: opts.TurnID, Type: EventToolCall,
+								ToolName: name, ToolID: toolID, Phase: "awaiting_approval",
+								Metadata: map[string]any{
+									"approval_type": approvalType,
+									"payload":       payload,
+								},
+								Timestamp: time.Now(),
+							})
+						},
 						RunSubAgent: func(ctx context.Context, req mcp_tools.SubAgentRequest) (string, error) {
 							return a.RunSubAgent(ctx, opts, req)
 						},
