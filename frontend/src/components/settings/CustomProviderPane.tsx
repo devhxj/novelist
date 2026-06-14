@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Plus, X, Loader2 } from 'lucide-react'
 import type { llm } from '@/hooks/useApp'
+import TemperatureInfo from './TemperatureInfo'
 
 interface Props {
   providers: llm.ProviderView[]
@@ -194,7 +195,7 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
           )}
 
           <div className="flex items-center gap-3">
-            <label className="text-xs text-muted-foreground w-16 shrink-0">创意度</label>
+            <label className="text-xs text-muted-foreground w-16 shrink-0 flex items-center gap-1">创意度<TemperatureInfo /></label>
             <input
               type="range"
               min="0"
