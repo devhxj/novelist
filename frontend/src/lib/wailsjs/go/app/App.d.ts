@@ -27,6 +27,8 @@ export function CreateNovel(arg1:app.CreateNovelInput):Promise<novel.Novel>;
 
 export function CreatePreference(arg1:number,arg2:app.CreatePreferenceInput):Promise<novel.PreferenceItem>;
 
+export function DeleteCover(arg1:number):Promise<void>;
+
 export function DeleteNovel(arg1:number):Promise<void>;
 
 export function DeletePreference(arg1:number):Promise<void>;
@@ -80,6 +82,8 @@ export function Initialize(arg1:string):Promise<void>;
 export function IsInitialized():Promise<boolean>;
 
 export function SaveContent(arg1:app.SaveContentInput):Promise<void>;
+
+export function SaveCover(arg1:number,arg2:Array<number>):Promise<void>;
 
 export function SaveLLMConfig(arg1:llm.LLMConfigView):Promise<void>;
 

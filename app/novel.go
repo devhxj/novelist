@@ -246,3 +246,54 @@ func (a *App) DeletePreference(id int64) error {
 	}
 	return nil
 }
+
+// ── 封面 ──────────────────────────────────────────────────
+
+// SaveCover 保存小说封面并提交到 Git 仓库。
+func (a *App) SaveCover(novelID int64, data []byte) error {
+	repo, err := git.New(novelID)
+	if err != nil {
+		return fmt.Errorf("save cover: %w", err)
+	}
+	dir := config.NovelDirPath(novelID)
+	coverPath, err := git.SafePath(dir, git.CoverPath())
+	if err != nil {
+		return fmt.Errorf("save cover: %w", err)
+	}
+	if err := os.WriteFile(coverPath, data, 0644); err != nil {
+		return fmt.Errorf("save cover: %w", err)
+	}
+	if err := repo.StageAll(); err != nil {
+		return fmt.Errorf("save cover: %w", err)
+	}
+	if _, err := repo.Commit("update cover"); err != nil {
+		return fmt.Errorf("save cover: %w", err)
+	}
+	return nil
+}
+
+// DeleteCover 删除小说封面并提交到 Git 仓库。
+func (a *App) DeleteCover(novelID int64) error {
+	repo, err := git.New(novelID)
+	if err != nil {
+		return fmt.Errorf("delete cover: %w", err)
+	}
+	dir := config.NovelDirPath(novelID)
+	coverPath, err := git.SafePath(dir, git.CoverPath())
+	if err != nil {
+		return fmt.Errorf("delete cover: %w", err)
+	}
+	if err := os.Remove(coverPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("delete cover: %w", err)
+	}
+	if err := repo.StageAll(); err != nil {
+		return fmt.Errorf("delete cover: %w", err)
+	}
+	if _, err := repo.Commit("remove cover"); err != nil {
+		return fmt.Errorf("delete cover: %w", err)
+	}
+	return nil
+}

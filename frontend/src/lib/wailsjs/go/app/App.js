@@ -30,6 +30,10 @@ export function CreatePreference(arg1, arg2) {
   return window['go']['app']['App']['CreatePreference'](arg1, arg2);
 }
 
+export function DeleteCover(arg1) {
+  return window['go']['app']['App']['DeleteCover'](arg1);
+}
+
 export function DeleteNovel(arg1) {
   return window['go']['app']['App']['DeleteNovel'](arg1);
 }
@@ -136,6 +140,10 @@ export function IsInitialized() {
 
 export function SaveContent(arg1) {
   return window['go']['app']['App']['SaveContent'](arg1);
+}
+
+export function SaveCover(arg1, arg2) {
+  return window['go']['app']['App']['SaveCover'](arg1, arg2);
 }
 
 export function SaveLLMConfig(arg1) {

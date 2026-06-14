@@ -1,4 +1,5 @@
-import { Plus, Pencil, Trash2, BookOpen } from 'lucide-react'
+import { useState, useRef } from 'react'
+import { Plus, Pencil, Trash2, BookOpen, Camera } from 'lucide-react'
 import BookCover from '@/components/sidebar/BookCover'
 import type { novel } from '@/hooks/useApp'
 
@@ -9,14 +10,45 @@ interface Props {
   onEditNovel: (n: novel.Novel) => void
   onDeleteNovel: (n: novel.Novel) => void
   onCreateNovel: () => void
+  onSaveCover: (novelID: number, file: File) => Promise<void>
 }
 
 export default function BookshelfView({
   novels, activeNovelId,
   onSelectNovel, onEditNovel, onDeleteNovel, onCreateNovel,
+  onSaveCover,
 }: Props) {
+  const [coverKeys, setCoverKeys] = useState<Record<number, number>>({})
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadingRef = useRef<number | null>(null)
+
+  function handleCoverClick(novelID: number, e: React.MouseEvent) {
+    e.stopPropagation()
+    uploadingRef.current = novelID
+    fileInputRef.current?.click()
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || uploadingRef.current == null) return
+    const novelID = uploadingRef.current
+    uploadingRef.current = null
+    // 清空 input 以便重复选同一文件
+    e.target.value = ''
+    await onSaveCover(novelID, file)
+    setCoverKeys(prev => ({ ...prev, [novelID]: (prev[novelID] ?? 0) + 1 }))
+  }
+
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-background">
+      {/* 隐藏文件选择器 */}
+      <input
+        ref={fileInputRef}
+        type="file" accept="image/*"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
       {/* 顶部工具栏 */}
       <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
         <span className="text-sm text-muted-foreground">
@@ -52,8 +84,16 @@ export default function BookshelfView({
                   className="flex flex-col flex-1 p-3"
                   onClick={() => onSelectNovel(n)}
                 >
-                  <div className="w-full aspect-[3/4] mb-3 rounded-sm overflow-hidden">
-                    <BookCover />
+                  <div className="w-full aspect-[3/4] mb-3 rounded-sm overflow-hidden relative">
+                    <BookCover novelId={n.id} refreshKey={coverKeys[n.id]} />
+                    {/* 悬浮封面上传按钮 */}
+                    <button
+                      onClick={(e) => handleCoverClick(n.id, e)}
+                      className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="更换封面"
+                    >
+                      <Camera className="w-5 h-5 text-white" />
+                    </button>
                   </div>
                   <h3 className="text-sm font-medium truncate mb-1">{n.title}</h3>
                   {n.genre ? (

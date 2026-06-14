@@ -21,6 +21,10 @@ func GoinkPath() string {
 	return "goink.md"
 }
 
+func CoverPath() string {
+	return "cover.jpg"
+}
+
 func PlanPath(scope string) string {
 	return fmt.Sprintf("plans/%s.md", scope)
 }

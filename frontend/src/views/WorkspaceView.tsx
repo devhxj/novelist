@@ -152,6 +152,11 @@ export default function WorkspaceView({ initialNovelId }: Props) {
     await loadNovels()
   }
 
+  async function handleSaveCover(novelID: number, file: File) {
+    const buf = await file.arrayBuffer()
+    await app.SaveCover(novelID, Array.from(new Uint8Array(buf)))
+  }
+
   const activeNovel = novels.find(n => n.id === activeNovelId)
 
   // ── 窗口按钮样式 ────────────────────────────────────────
@@ -232,6 +237,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
             onEditNovel={setEditingNovel}
             onDeleteNovel={setDeletingNovel}
             onCreateNovel={() => setShowCreateDialog(true)}
+            onSaveCover={handleSaveCover}
           />
         ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && (
           <ContentPanel ref={contentRef} novelId={activeNovelId} onContentChange={setActiveContent} />

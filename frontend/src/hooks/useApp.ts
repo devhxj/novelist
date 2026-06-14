@@ -42,6 +42,8 @@ import {
   DeletePreference,
   DeleteNovel,
   UpdateNovel,
+  DeleteCover,
+  SaveCover,
 } from '@/lib/wailsjs/go/app/App'
 import type { app, novel, chapter, config, llm, session, character, location, storyarc, timeline, reader } from '@/lib/wailsjs/go/models'
 
@@ -89,6 +91,8 @@ export function useApp() {
     DeletePreference,
     DeleteNovel,
     UpdateNovel,
+    DeleteCover,
+    SaveCover,
   }), [])
 }
 
