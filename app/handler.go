@@ -23,6 +23,7 @@ import (
 	"novel/internal/reader"
 	"novel/internal/rollback"
 	"novel/internal/session"
+	"novel/internal/skill"
 	"novel/internal/storage"
 	"novel/internal/storyarc"
 	"novel/internal/timeline"
@@ -48,6 +49,7 @@ type App struct {
 	chapter    *chapter.Store
 	character  *character.Store
 	session    *session.Store
+	skill      *skill.Store
 	timeline   *timeline.Store
 	storyarc   *storyarc.Store
 	location   *location.Store
@@ -162,6 +164,12 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 	a.location = location.NewStore(db, a.logger)
 	a.reader = reader.NewStore(db, a.logger)
 	a.turnCommit = rollback.NewStore(db, a.logger)
+	s, err := skill.NewStore(a.logger, config.UserSkillsDir())
+	if err != nil {
+		a.logger.Error("初始化 skill store 失败", "err", err)
+	} else {
+		a.skill = s
+	}
 
 	// 7. 初始化 MCP 工具注册表
 	a.registry = mcp_tools.NewRegistry(a.logger)
