@@ -21,6 +21,10 @@ func GoinkPath() string {
 	return "goink.md"
 }
 
+func PlanPath(scope string) string {
+	return fmt.Sprintf("plans/%s.md", scope)
+}
+
 // ── 文件读写 ──────────────────────────────────────────────
 // path 为相对于小说仓库根目录的路径，如 "chapters/001.md"、"goink.md"。
 

@@ -321,7 +321,8 @@ func skipOperLog(db *gorm.DB) bool {
 		return true // Schema 不存在则无法判断表名，安全做法是跳过
 	}
 	t := db.Statement.Schema.Table
-	return t == "operation_log" || t == "messages" || t == "app_config" || t == "turn_commits"
+	return t == "operation_log" || t == "messages" || t == "app_config" || t == "turn_commits" ||
+		t == "sessions" || t == "novels"
 }
 
 // toJSON 将任意值序列化为 JSON 字符串。

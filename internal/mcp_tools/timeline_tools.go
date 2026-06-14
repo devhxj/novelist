@@ -281,8 +281,8 @@ func (t *UpdateChapterPlanTool) Execute(ctx context.Context, args any, tc ToolCo
 		Content: a.Content,
 	}
 
-	if err := timeline.NewStore(tc.DB, slog.Default()).UpsertPlan(ctx, &plan); err != nil {
-		return nil, fmt.Errorf("upsert plan: %w", err)
+	if err := timeline.NewStore(tc.DB, slog.Default()).SavePlan(ctx, &plan); err != nil {
+		return nil, fmt.Errorf("save plan: %w", err)
 	}
 
 	return &ToolResult{

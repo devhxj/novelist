@@ -23,15 +23,10 @@ import "time"
 //   - add_timeline_entry：scope="next"/"near"/"far" 时 UPSERT（ON CONFLICT (novel_id, scope) DO UPDATE）
 //   - update_timeline_entry：按 (novel_id, scope) 定位并更新 content
 type ChapterPlan struct {
-	NovelID   int64     `gorm:"column:novel_id;uniqueIndex:uk_novel_scope;not null" json:"novel_id"`
-	Scope     string    `gorm:"column:scope;uniqueIndex:uk_novel_scope;not null"    json:"scope"`    // "next" | "near" | "far"
-	Content   string    `gorm:"column:content;not null"                              json:"content"` // 计划内容，自然语言，LLM 填写
-	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime"                     json:"created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime"                     json:"updated_at"`
+	NovelID int64  `json:"novel_id"`
+	Scope   string `json:"scope"`   // "next" | "near" | "far"
+	Content string `json:"content"` // 计划内容，自然语言，LLM 填写
 }
-
-// TableName 指定 GORM 表名。
-func (ChapterPlan) TableName() string { return "chapter_plans" }
 
 // TimelineEntry 是伏笔和用户创作意图的追踪条目。
 //

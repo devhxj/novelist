@@ -6,17 +6,17 @@ import (
 
 	"gorm.io/gorm"
 
-	"novel/internal/character"
 	"novel/internal/chapter"
+	"novel/internal/character"
 	"novel/internal/config"
 	"novel/internal/location"
 	"novel/internal/novel"
 	"novel/internal/reader"
+	"novel/internal/rollback"
 	"novel/internal/session"
 	"novel/internal/storage"
 	"novel/internal/storyarc"
 	"novel/internal/timeline"
-	"novel/internal/rollback"
 )
 
 // Run 自动创建/更新全部数据表，幂等安全。
@@ -33,7 +33,6 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&chapter.Chapter{},
 		&character.Character{},
 		&character.CharacterRelation{},
-		&timeline.ChapterPlan{},
 		&timeline.TimelineEntry{},
 		&storyarc.StoryArc{},
 		&storyarc.ArcNode{},

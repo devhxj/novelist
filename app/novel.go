@@ -135,9 +135,6 @@ func (a *App) DeleteNovel(novelID int64) error {
 			{"location_relations", func(tx *gorm.DB) error {
 				return tx.Where("novel_id = ?", novelID).Delete(&location.LocationRelation{}).Error
 			}},
-			{"chapter_plans", func(tx *gorm.DB) error {
-				return tx.Where("novel_id = ?", novelID).Delete(&timeline.ChapterPlan{}).Error
-			}},
 			{"time_entries", func(tx *gorm.DB) error {
 				return tx.Where("novel_id = ?", novelID).Delete(&timeline.TimelineEntry{}).Error
 			}},

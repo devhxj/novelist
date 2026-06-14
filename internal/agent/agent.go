@@ -18,6 +18,7 @@ import (
 	"novel/internal/approval"
 	"novel/internal/llm"
 	"novel/internal/mcp_tools"
+	"novel/internal/storage"
 	"novel/internal/session"
 )
 
@@ -134,6 +135,8 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 	if opts.Model == nil {
 		return AgentLoopResult{}, errors.New("agent: Model is required in RunOptions")
 	}
+
+	ctx = storage.WithTurn(ctx, opts.SessionID, opts.TurnID)
 
 	loopCount := 0
 	fullResponse := ""

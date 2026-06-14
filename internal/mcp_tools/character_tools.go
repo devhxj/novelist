@@ -357,12 +357,18 @@ func (t *UpdateCharacterRelationshipTool) evolveRelation(ctx context.Context, a 
 
 	var newRel character.CharacterRelation
 	err = tc.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 将同向旧关系标记为非当前（append-only）
-		if err := tx.Model(&character.CharacterRelation{}).
-			Where("source_character_id = ? AND target_character_id = ? AND is_current = ?",
-				a.SourceCharacterID, a.TargetCharacterID, true).
-			Update("is_current", false).Error; err != nil {
-			return fmt.Errorf("deactivate old relations: %w", err)
+		// 将同向旧关系标记为非当前（append-only），逐行 Save 以触发操作日志回调
+		var oldRels []character.CharacterRelation
+		if err := tx.Where("source_character_id = ? AND target_character_id = ? AND is_current = ?",
+			a.SourceCharacterID, a.TargetCharacterID, true).
+			Find(&oldRels).Error; err != nil {
+			return fmt.Errorf("query old relations: %w", err)
+		}
+		for i := range oldRels {
+			oldRels[i].IsCurrent = false
+			if err := tx.Save(&oldRels[i]).Error; err != nil {
+				return fmt.Errorf("deactivate old relation: %w", err)
+			}
 		}
 
 		newRel = character.CharacterRelation{

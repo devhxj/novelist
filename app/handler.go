@@ -21,11 +21,11 @@ import (
 	"novel/internal/novel"
 	"novel/internal/rag"
 	"novel/internal/reader"
+	"novel/internal/rollback"
 	"novel/internal/session"
 	"novel/internal/storage"
 	"novel/internal/storyarc"
 	"novel/internal/timeline"
-	"novel/internal/rollback"
 )
 
 // App 是 Wails 绑定的根对象。前端通过 window.go.main.App 调用其导出方法。
@@ -44,12 +44,12 @@ type App struct {
 	approvals   *approval.Service
 	vectorStore *rag.VectorStore
 
-	novel     *novel.Store
-	chapter   *chapter.Store
-	character *character.Store
-	session   *session.Store
-	timeline  *timeline.Store
-	storyarc  *storyarc.Store
+	novel      *novel.Store
+	chapter    *chapter.Store
+	character  *character.Store
+	session    *session.Store
+	timeline   *timeline.Store
+	storyarc   *storyarc.Store
 	location   *location.Store
 	reader     *reader.Store
 	turnCommit *rollback.Store
@@ -149,7 +149,10 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 	}
 	a.settings = settings
 
-	// 5. 创建所有领域 store
+	// 5. 注册操作日志钩子
+	storage.RegisterOplogHooks(db)
+
+	// 6. 创建所有领域 store
 	a.novel = novel.NewStore(db, a.logger)
 	a.chapter = chapter.NewStore(db, a.logger)
 	a.character = character.NewStore(db, a.logger)
@@ -160,11 +163,11 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 	a.reader = reader.NewStore(db, a.logger)
 	a.turnCommit = rollback.NewStore(db, a.logger)
 
-	// 6. 初始化 MCP 工具注册表
+	// 7. 初始化 MCP 工具注册表
 	a.registry = mcp_tools.NewRegistry(a.logger)
 	mcp_tools.RegisterAllTools(a.registry)
 
-	// 7. 初始化 LLM 客户端
+	// 8. 初始化 LLM 客户端
 	userConfig, err := llm.LoadUserConfig(config.LLMConfigPath())
 	if err != nil {
 		a.logger.Warn("加载 LLM 配置失败，使用空配置", "err", err)
@@ -173,10 +176,10 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 	providers := llm.Merge(llm.Builtin, userConfig)
 	a.llmClient = llm.NewClient(providers, a.logger)
 
-	// 8. 初始化审批服务
+	// 9. 初始化审批服务
 	a.approvals = approval.NewService(a.logger)
 
-	// 9. 异步初始化向量存储（不阻塞 UI）
+	// 10. 异步初始化向量存储（不阻塞 UI）
 	go func() {
 		emb, err := rag.GetEmbedder()
 		if err != nil {
@@ -203,7 +206,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 		}
 	}()
 
-	// 10. 创建 Agent 实例（全局复用）
+	// 11. 创建 Agent 实例（全局复用）
 	a.agent = agent.New(a.llmClient, a.registry, a.session, a.db, a.approvals, a.logger)
 
 	a.cfg = cfg

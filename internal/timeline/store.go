@@ -2,12 +2,14 @@ package timeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
+	"novel/internal/git"
 	"novel/internal/storage"
 )
 
@@ -25,28 +27,27 @@ func NewStore(db *gorm.DB, logger *slog.Logger) *Store {
 // ── ChapterPlan ──────────────────────────────────────
 
 // GetPlans 返回某小说的全部章节计划（next/near/far 三个槽位）。
+// 从 plans/{scope}.md 文件读取，文件不存在时 content 为空字符串。
 func (s *Store) GetPlans(ctx context.Context, novelID int64) ([]ChapterPlan, error) {
-	var plans []ChapterPlan
-	if err := s.DB.WithContext(ctx).
-		Where("novel_id = ?", novelID).
-		Order("CASE scope WHEN 'next' THEN 1 WHEN 'near' THEN 2 ELSE 3 END").
-		Find(&plans).Error; err != nil {
-		return nil, fmt.Errorf("timeline store: get plans: %w", err)
+	scopes := []string{"next", "near", "far"}
+	plans := make([]ChapterPlan, 0, 3)
+	for _, scope := range scopes {
+		content, err := git.ReadFile(novelID, git.PlanPath(scope))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("timeline store: read plan %s: %w", scope, err)
+		}
+		plans = append(plans, ChapterPlan{
+			NovelID: novelID,
+			Scope:   scope,
+			Content: content,
+		})
 	}
 	return plans, nil
 }
 
-// UpsertPlan 插入或更新章节计划。(novel_id, scope) 唯一约束下 ON CONFLICT DO UPDATE。
-func (s *Store) UpsertPlan(ctx context.Context, plan *ChapterPlan) error {
-	if err := s.DB.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "novel_id"}, {Name: "scope"}},
-			DoUpdates: clause.AssignmentColumns([]string{"content", "updated_at"}),
-		}).
-		Create(plan).Error; err != nil {
-		return fmt.Errorf("timeline store: upsert plan: %w", err)
-	}
-	return nil
+// SavePlan 将章节计划写入 plans/{scope}.md 文件，全量替换。
+func (s *Store) SavePlan(ctx context.Context, plan *ChapterPlan) error {
+	return git.WriteFile(plan.NovelID, git.PlanPath(plan.Scope), plan.Content)
 }
 
 // ── TimelineEntry ────────────────────────────────────
