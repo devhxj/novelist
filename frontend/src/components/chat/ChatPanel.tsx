@@ -864,6 +864,13 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
                         </div>
                       </div>
                     )}
+                    {turn.status === 'interrupted' && (
+                      <div className="flex justify-start">
+                        <div className="bg-amber-50/50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-600 max-w-[80%]">
+                          对话被中断
+                        </div>
+                      </div>
+                    )}
                     {turn.status === 'streaming' && turn.segments.length === 0 && (
                       <div className="flex justify-start">
                         <div className="bg-muted rounded-lg rounded-bl-sm px-3 py-2">

@@ -45,6 +45,7 @@ var toolDisplayNames = map[string]string{
 	"create_preference":               "创建创作偏好",
 	"update_preference":               "更新创作偏好",
 	"lint_chapter":                    "章节文本检查",
+	"delete_record":                   "删除记录",
 	"edit":                            "编辑文件内容",
 	"read":                            "读取文件内容",
 }
@@ -87,6 +88,7 @@ var toolActivityKinds = map[string]string{
 	"create_preference":               "create",
 	"update_preference":               "edit",
 	"lint_chapter":                    "review",
+	"delete_record":                   "delete",
 	"edit":                            "write",
 	"read":                            "view",
 }

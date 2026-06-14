@@ -25,6 +25,7 @@ var mainAgentTools = []string{
 	"create_arc_node", "update_arc_node",
 	"get_reader_perspective", "create_reader_perspective_entry", "update_reader_perspective_entry",
 	"get_preferences", "create_preference", "update_preference",
+	"delete_record",
 	"edit",
 	"read",
 	"search_story_memory",

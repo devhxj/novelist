@@ -164,6 +164,8 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 		wails.EventsEmit(ctx, agentEventName, event)
 	}
 
+	interrupted := false
+
 	for loopCount < opts.MaxTurns {
 		toolOutputs := make([]toolOutput, 0)
 		pendingInjects := make(map[string][]mcp_tools.InjectMessage)
@@ -187,16 +189,8 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 		for {
 			select {
 			case <-ctx.Done():
-				// 中断时保存当前轮 partial
-				if responseBuffer != "" || thinkingBuffer != "" {
-					a.appendMsg("assistant", responseBuffer, thinkingBuffer,
-						nil, &opts, runningTokens)
-				}
-				partial := responseBuffer
-				if partial == "" {
-					partial = fullResponse
-				}
-				return AgentLoopResult{FinalText: partial, ThinkingContent: thinkingBuffer, TurnCount: loopCount}, ctx.Err()
+				interrupted = true
+				break streamLoop
 
 			case event, ok := <-stream:
 				if !ok {
@@ -366,6 +360,10 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 			}
 		}
 
+		if interrupted {
+			break
+		}
+
 		// 4. 死循环检测
 		patterns := append(recentPatterns, toolPattern(toolOutputs))
 		if len(patterns) > 6 {
@@ -387,6 +385,9 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 		loopCount++
 	}
 
+	if interrupted {
+		return AgentLoopResult{FinalText: fullResponse, ThinkingContent: thinkingBuffer, TurnCount: loopCount}, ctx.Err()
+	}
 	return AgentLoopResult{FinalText: fullResponse, ThinkingContent: thinkingBuffer, TurnCount: loopCount}, nil
 }
 

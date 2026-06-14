@@ -122,6 +122,17 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 	// 9. 最终回复已由 agent.Run() 内部 appendMsg 持久化，此处不重复存储
 	if runErr != nil {
 		a.logger.Error("对话失败", "err", runErr)
+		// 写入中断标记，前端 rebuildTurns 识别后将 turn 状态设为 interrupted
+		a.session.DB.WithContext(ctx).Create(&session.Message{
+			SessionID:  sess.SessionID,
+			TurnID:     turnID,
+			Role:       "system",
+			EventType:  "interrupt",
+			Content:    agent.FriendlyError(runErr),
+			ToFrontend: true,
+			ToAPI:      false,
+			AgentType:  "main",
+		})
 		return &ChatResult{
 			SessionID: sess.SessionID,
 			TurnID:    turnID,

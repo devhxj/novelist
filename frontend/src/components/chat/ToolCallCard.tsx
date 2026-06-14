@@ -1,4 +1,4 @@
-import { Loader2, CheckCircle2, XCircle, Eye, Plus, Pencil, Brain, FileText, Wrench, Check, AlertTriangle } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, Eye, Plus, Pencil, Brain, FileText, Wrench, Check, AlertTriangle, Trash2 } from 'lucide-react'
 import { memo, useState } from 'react'
 import './ToolCallCard.css'
 
@@ -23,6 +23,7 @@ function activityIcon(kind?: string) {
     case 'write': case 'edit': return Pencil
     case 'memory': return Brain
     case 'review': return CheckCircle2
+    case 'delete': return Trash2
     case 'plan': return FileText
     default: return Wrench
   }
@@ -34,6 +35,7 @@ function activityBadge(kind?: string): string {
     case 'create': return '创建中'
     case 'write': return '写作中'
     case 'edit': return '编辑中'
+    case 'delete': return '删除中'
     case 'memory': return '检索中'
     case 'review': return '审阅中'
     case 'plan': return '规划中'
