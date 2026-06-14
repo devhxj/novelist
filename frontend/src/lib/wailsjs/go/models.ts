@@ -486,6 +486,7 @@ export namespace llm {
 	    name: string;
 	    chat_url: string;
 	    api_key: string;
+	    temperature: number;
 	    source: string;
 	    builtin_models: ModelInfo[];
 	    custom_models: ModelInfo[];
@@ -500,6 +501,7 @@ export namespace llm {
 	        this.name = source["name"];
 	        this.chat_url = source["chat_url"];
 	        this.api_key = source["api_key"];
+	        this.temperature = source["temperature"];
 	        this.source = source["source"];
 	        this.builtin_models = this.convertValues(source["builtin_models"], ModelInfo);
 	        this.custom_models = this.convertValues(source["custom_models"], ModelInfo);

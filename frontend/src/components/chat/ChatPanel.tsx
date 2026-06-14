@@ -890,7 +890,20 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
 
       <SettingsDialog
         open={showSettings}
-        onClose={() => setShowSettings(false)}
+        onClose={() => {
+          setShowSettings(false)
+          app.GetModels().then(list => {
+            if (list && list.length > 0) {
+              setModels(list)
+              if (!list.find(m => m.Key === selectedKey)) {
+                setSelectedKey(list[0].Key)
+                if (list[0].ReasoningLevels?.length) {
+                  setReasoningEffort(list[0].ReasoningLevels[0])
+                }
+              }
+            }
+          }).catch(() => {})
+        }}
         initialTab="model"
       />
     </aside>

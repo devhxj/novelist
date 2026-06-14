@@ -156,6 +156,9 @@ func (c *Client) buildPayload(
 	}
 
 	temperature := 0.7
+	if p.Temperature != nil {
+		temperature = *p.Temperature
+	}
 	maxTokens := 4096
 	if opts != nil && opts.Temperature != nil {
 		temperature = *opts.Temperature

@@ -68,6 +68,21 @@ export default function BuiltinProviderPane({ providers, onUpdate, onAddCustomMo
         />
       </div>
 
+      {/* Temperature */}
+      <div className="flex items-center gap-3">
+        <label className="text-xs text-muted-foreground w-14 shrink-0">创意度</label>
+        <input
+          type="range"
+          min="0"
+          max="2"
+          step="0.1"
+          value={provider.temperature}
+          onChange={e => onUpdate(selectedKey, { temperature: parseFloat(e.target.value) })}
+          className="flex-1 h-8"
+        />
+        <span className="text-xs text-muted-foreground w-8 text-right">{provider.temperature.toFixed(1)}</span>
+      </div>
+
       {/* 内置模型 */}
       {provider.builtin_models && provider.builtin_models.length > 0 && (
         <div>

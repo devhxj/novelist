@@ -174,6 +174,20 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
             />
           </div>
 
+          <div className="flex items-center gap-3">
+            <label className="text-xs text-muted-foreground w-16 shrink-0">创意度</label>
+            <input
+              type="range"
+              min="0"
+              max="2"
+              step="0.1"
+              value={provider.temperature}
+              onChange={e => onUpdate(selectedKey, { temperature: parseFloat(e.target.value) })}
+              className="flex-1 h-8"
+            />
+            <span className="text-xs text-muted-foreground w-8 text-right">{provider.temperature.toFixed(1)}</span>
+          </div>
+
           {/* 模型列表 */}
           <div>
             <div className="flex items-center justify-between mb-2">

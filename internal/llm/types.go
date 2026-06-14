@@ -13,6 +13,7 @@ type Provider struct {
 	ChatURL      string                                          `json:"chat_url"`                        // 聊天补全端点
 	APIKey       string                                          `json:"api_key,omitempty"`               // API 密钥
 	Models       []ModelInfo                                     `json:"models"`                          // 可用模型列表
+	Temperature  *float64                                        `json:"temperature,omitempty"`           // 默认创意度 0~2，nil 表示未设置，运行时取内置默认
 	BuildRequest func(payload map[string]any) map[string]any     `json:"-"` // 发送前改造请求体，nil 则原样发送
 	BuildHeaders func(base map[string]string) map[string]string  `json:"-"` // 发送前改造请求头，nil 则使用默认 Bearer 鉴权
 	ParseError   func(body []byte) error                         `json:"-"` // 解析非标准错误响应体，nil 则使用默认 OpenAI 格式解析

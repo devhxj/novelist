@@ -18,30 +18,12 @@ type AvailableModel struct {
 }
 
 // Builtin 内置 provider 模板。APIKey 留空，运行时由用户配置注入。
-var Builtin = map[string]Provider{
-	"deepseek": {
-		Name:    "DeepSeek",
-		ChatURL: "https://api.deepseek.com/v1/chat/completions",
-		Models: []ModelInfo{
-			{
-				ID:              "deepseek-v4-flash",
-				Name:            "DeepSeek V4 Flash",
-				ContextWindow:   1_000_000,
-				MaxOutputTokens: 384_000,
-				ReasoningLevels: []string{"high", "max"},
-				SupportsVision:  false,
-			},
-			{
-				ID:              "deepseek-v4-pro",
-				Name:            "DeepSeek V4 Pro",
-				ContextWindow:   1_000_000,
-				MaxOutputTokens: 384_000,
-				ReasoningLevels: []string{"high", "max"},
-				SupportsVision:  false,
-			},
-		},
-		BuildRequest: nil, // 默认 OpenAI 兼容格式，无需额外改造
-	},
+func floatPtr(f float64) *float64 { return &f }
+func derefOrZero(p *float64) float64 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // Merge 合并内置模板和用户配置，返回组装完成的 Provider map。
@@ -57,6 +39,9 @@ func Merge(builtin map[string]Provider, user *UserLLMConfig) map[string]Provider
 		if isBuiltin {
 			if p.ChatURL == "" {
 				p.ChatURL = bp.ChatURL
+			}
+			if p.Temperature == nil {
+				p.Temperature = bp.Temperature
 			}
 			p.BuildRequest = bp.BuildRequest
 			p.BuildHeaders = bp.BuildHeaders
@@ -86,13 +71,14 @@ type LLMConfigView struct {
 
 // ProviderView 是单个 provider 的前端展示视图。
 type ProviderView struct {
-	Key           string      `json:"key"`             // provider 标识符，如 "deepseek"
-	Name          string      `json:"name"`            // 显示名称
-	ChatURL       string      `json:"chat_url"`        // API 端点
-	APIKey        string      `json:"api_key"`         // 用户配置的 key，空表示未配置
-	Source        string      `json:"source"`          // "builtin" | "custom"
-	BuiltinModels []ModelInfo `json:"builtin_models"`  // 内置模型，自定义 provider 为 nil
-	CustomModels  []ModelInfo `json:"custom_models"`   // 用户添加的自定义模型
+	Key           string      `json:"key"`            // provider 标识符，如 "deepseek"
+	Name          string      `json:"name"`           // 显示名称
+	ChatURL       string      `json:"chat_url"`       // API 端点
+	APIKey        string      `json:"api_key"`        // 用户配置的 key，空表示未配置
+	Temperature   float64     `json:"temperature"`    // 默认创意度 0~2
+	Source        string      `json:"source"`         // "builtin" | "custom"
+	BuiltinModels []ModelInfo `json:"builtin_models"` // 内置模型，自定义 provider 为 nil
+	CustomModels  []ModelInfo `json:"custom_models"`  // 用户添加的自定义模型
 }
 
 // BuildConfigView 合并内置模板和用户配置，生成前端可用的完整视图。
@@ -115,6 +101,7 @@ func BuildConfigView(user *UserLLMConfig) *LLMConfigView {
 			Name:          bp.Name,
 			ChatURL:       bp.ChatURL,
 			APIKey:        apiKey,
+			Temperature:   derefOrZero(bp.Temperature),
 			Source:        "builtin",
 			BuiltinModels: append([]ModelInfo{}, bp.Models...),
 			CustomModels:  append([]ModelInfo{}, customModels...),
@@ -129,6 +116,7 @@ func BuildConfigView(user *UserLLMConfig) *LLMConfigView {
 				Name:          up.Name,
 				ChatURL:       up.ChatURL,
 				APIKey:        up.APIKey,
+				Temperature:   derefOrZero(up.Temperature),
 				Source:        "custom",
 				BuiltinModels: nil,
 				CustomModels:  append([]ModelInfo{}, up.Models...),
@@ -156,6 +144,7 @@ func (v *LLMConfigView) ToUserConfig() *UserLLMConfig {
 		if pv.Source != "builtin" {
 			p.ChatURL = pv.ChatURL
 		}
+		p.Temperature = floatPtr(pv.Temperature)
 		providers = append(providers, p)
 	}
 	return &UserLLMConfig{Providers: providers}
