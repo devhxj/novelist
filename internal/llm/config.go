@@ -8,13 +8,14 @@ type UserLLMConfig struct {
 
 // AvailableModel 是前端下拉列表的模型选项。
 type AvailableModel struct {
-	Key             string // "deepseek/deepseek-v4-pro"
-	ProviderName    string // "DeepSeek"
-	ModelName       string // "DeepSeek V4 Pro"
-	ContextWindow   int
-	MaxOutputTokens int
-	ReasoningLevels []string
-	SupportsVision  bool
+	Key              string   // "deepseek/deepseek-v4-pro"
+	ProviderName     string   // "DeepSeek"
+	ModelName        string   // "DeepSeek V4 Pro"
+	ContextWindow    int
+	MaxOutputTokens  int
+	SupportsThinking bool
+	ReasoningLevels  []string
+	SupportsVision   bool
 }
 
 // Builtin 内置 provider 模板。APIKey 留空，运行时由用户配置注入。
@@ -156,13 +157,14 @@ func Models(providers map[string]Provider) []AvailableModel {
 	for name, p := range providers {
 		for _, m := range p.Models {
 			list = append(list, AvailableModel{
-				Key:             name + "/" + m.ID,
-				ProviderName:    p.Name,
-				ModelName:       m.Name,
-				ContextWindow:   m.ContextWindow,
-				MaxOutputTokens: m.MaxOutputTokens,
-				ReasoningLevels: m.ReasoningLevels,
-				SupportsVision:  m.SupportsVision,
+				Key:              name + "/" + m.ID,
+				ProviderName:     p.Name,
+				ModelName:        m.Name,
+				ContextWindow:    m.ContextWindow,
+				MaxOutputTokens:  m.MaxOutputTokens,
+				SupportsThinking: m.SupportsThinking,
+				ReasoningLevels:  m.ReasoningLevels,
+				SupportsVision:   m.SupportsVision,
 			})
 		}
 	}

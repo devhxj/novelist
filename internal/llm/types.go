@@ -21,12 +21,13 @@ type Provider struct {
 
 // ModelInfo 描述一个具体模型的元信息。
 type ModelInfo struct {
-	ID              string   `json:"id"`                                  // 模型标识，如 "deepseek-v4-pro"
-	Name            string   `json:"name"`                                // 显示名称，如 "DeepSeek V4 Pro"
-	ContextWindow   int      `json:"context_window"`                      // 上下文窗口大小（token 数）
-	MaxOutputTokens int      `json:"max_output_tokens"`                   // 最大输出 token 数
-	ReasoningLevels []string `json:"reasoning_levels,omitempty"`          // 支持的推理等级，如 ["low","high","max"]，无推理能力留空
-	SupportsVision  bool     `json:"supports_vision"`                     // 是否支持图片输入
+	ID               string   `json:"id"`                                  // 模型标识，如 "deepseek-v4-pro"
+	Name             string   `json:"name"`                                // 显示名称，如 "DeepSeek V4 Pro"
+	ContextWindow    int      `json:"context_window"`                      // 上下文窗口大小（token 数）
+	MaxOutputTokens  int      `json:"max_output_tokens"`                   // 最大输出 token 数
+	SupportsThinking bool     `json:"supports_thinking"`                   // 是否支持思考模式
+	ReasoningLevels  []string `json:"reasoning_levels,omitempty"`          // 多级推理等级，如 ["low","high","max"]；nil=二值开关
+	SupportsVision   bool     `json:"supports_vision"`                     // 是否支持图片输入
 }
 
 // APIError 表示 LLM API 的调用错误，包含可重试标记。

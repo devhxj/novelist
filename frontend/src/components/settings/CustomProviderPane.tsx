@@ -24,6 +24,10 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
   const [showAddModel, setShowAddModel] = useState(false)
   const [newModelId, setNewModelId] = useState('')
   const [newModelName, setNewModelName] = useState('')
+  const [newCtx, setNewCtx] = useState('')
+  const [newMaxOut, setNewMaxOut] = useState('')
+  const [newThinks, setNewThinks] = useState(true)
+  const [newVision, setNewVision] = useState(false)
 
   const provider = providers.find(p => p.key === selectedKey)
   const isTesting = testing[selectedKey]
@@ -50,16 +54,22 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
 
   const handleAddModel = () => {
     if (!selectedKey || !newModelId.trim() || !newModelName.trim()) return
+    const ctx = parseInt(newCtx, 10) || 0
+    const maxOut = parseInt(newMaxOut, 10) || 0
     onAddCustomModel(selectedKey, {
       id: newModelId.trim(),
       name: newModelName.trim(),
-      context_window: 0,
-      max_output_tokens: 0,
-      reasoning_levels: [],
-      supports_vision: false,
+      context_window: ctx,
+      max_output_tokens: maxOut,
+      supports_thinking: newThinks,
+      supports_vision: newVision,
     } as unknown as llm.ModelInfo)
     setNewModelId('')
     setNewModelName('')
+    setNewCtx('')
+    setNewMaxOut('')
+    setNewThinks(true)
+    setNewVision(false)
     setShowAddModel(false)
   }
 
@@ -224,7 +234,18 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
               <div className="rounded-md border divide-y mb-2">
                 {provider.custom_models.map(m => (
                   <div key={m.id} className="flex items-center justify-between px-3 py-2">
-                    <span className="text-sm">{m.name || m.id}</span>
+                    <div>
+                      <span className="text-sm">{m.name || m.id}</span>
+                      {(m.context_window > 0 || m.max_output_tokens > 0) && (
+                        <span className="text-xs text-muted-foreground ml-2">
+                          {m.context_window > 0 && (m.context_window >= 1_000_000 ? (m.context_window / 1_000_000).toFixed(0) + 'M' : (m.context_window / 1_000).toFixed(0) + 'K')}
+                          {m.max_output_tokens > 0 && <> · {(m.max_output_tokens / 1_000).toFixed(0)}K 输出</>}
+                          {m.supports_thinking ? <> · 思考</> : null}
+                          {m.reasoning_levels?.length ? <> · 等级: {m.reasoning_levels.join(',')}</> : null}
+                          {m.supports_vision ? <> · 视觉</> : null}
+                        </span>
+                      )}
+                    </div>
                     <button
                       onClick={() => onRemoveCustomModel(selectedKey, m.id)}
                       className="text-muted-foreground hover:text-red-500 transition-colors"
@@ -237,22 +258,43 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
             )}
 
             {showAddModel && (
-              <div className="flex items-center gap-2">
-                <input
-                  value={newModelId}
-                  onChange={e => setNewModelId(e.target.value)}
-                  placeholder="模型 ID"
-                  className="flex-1 h-8 rounded-md border bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                />
-                <input
-                  value={newModelName}
-                  onChange={e => setNewModelName(e.target.value)}
-                  placeholder="名称"
-                  className="flex-1 h-8 rounded-md border bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                />
-                <button onClick={handleAddModel} className="h-8 px-3 rounded-md bg-primary text-primary-foreground text-xs shrink-0">
-                  确认
-                </button>
+              <div className="border rounded-md p-3 space-y-2">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-0.5 block">模型 ID</label>
+                  <input value={newModelId} onChange={e => setNewModelId(e.target.value)}
+                    className="w-full h-8 rounded-md border bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-0.5 block">名称</label>
+                  <input value={newModelName} onChange={e => setNewModelName(e.target.value)}
+                    className="w-full h-8 rounded-md border bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-0.5 block">上下文窗口 (tokens)</label>
+                    <input value={newCtx} onChange={e => setNewCtx(e.target.value)}
+                      className="w-full h-8 rounded-md border bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-0.5 block">最大输出 (tokens)</label>
+                    <input value={newMaxOut} onChange={e => setNewMaxOut(e.target.value)}
+                      className="w-full h-8 rounded-md border bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50" />
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1 text-xs">
+                    <input type="checkbox" checked={newThinks} onChange={e => setNewThinks(e.target.checked)} className="rounded" />
+                    支持深度思考
+                  </label>
+                  <label className="flex items-center gap-1 text-xs">
+                    <input type="checkbox" checked={newVision} onChange={e => setNewVision(e.target.checked)} className="rounded" />
+                    视觉
+                  </label>
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <button onClick={() => setShowAddModel(false)} className="h-8 px-3 rounded-md border text-xs text-muted-foreground">取消</button>
+                  <button onClick={handleAddModel} className="h-8 px-3 rounded-md bg-primary text-primary-foreground text-xs">确认</button>
+                </div>
               </div>
             )}
           </div>

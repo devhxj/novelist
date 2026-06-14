@@ -459,6 +459,7 @@ export namespace llm {
 	    ModelName: string;
 	    ContextWindow: number;
 	    MaxOutputTokens: number;
+	    SupportsThinking: boolean;
 	    ReasoningLevels: string[];
 	    SupportsVision: boolean;
 	
@@ -473,6 +474,7 @@ export namespace llm {
 	        this.ModelName = source["ModelName"];
 	        this.ContextWindow = source["ContextWindow"];
 	        this.MaxOutputTokens = source["MaxOutputTokens"];
+	        this.SupportsThinking = source["SupportsThinking"];
 	        this.ReasoningLevels = source["ReasoningLevels"];
 	        this.SupportsVision = source["SupportsVision"];
 	    }
@@ -482,6 +484,7 @@ export namespace llm {
 	    name: string;
 	    context_window: number;
 	    max_output_tokens: number;
+	    supports_thinking: boolean;
 	    reasoning_levels?: string[];
 	    supports_vision: boolean;
 	
@@ -495,6 +498,7 @@ export namespace llm {
 	        this.name = source["name"];
 	        this.context_window = source["context_window"];
 	        this.max_output_tokens = source["max_output_tokens"];
+	        this.supports_thinking = source["supports_thinking"];
 	        this.reasoning_levels = source["reasoning_levels"];
 	        this.supports_vision = source["supports_vision"];
 	    }

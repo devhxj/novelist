@@ -182,9 +182,11 @@ func (c *Client) buildPayload(
 		thinkingEnabled = *opts.ThinkingEnabled
 	}
 
-	if thinkingEnabled && reasoningEffort != "" {
+	if thinkingEnabled {
 		payload["thinking"] = map[string]string{"type": "enabled"}
-		payload["reasoning_effort"] = reasoningEffort
+		if reasoningEffort != "" {
+			payload["reasoning_effort"] = reasoningEffort
+		}
 	}
 
 	// Provider 钩子改造
