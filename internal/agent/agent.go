@@ -190,6 +190,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 			select {
 			case <-ctx.Done():
 				interrupted = true
+				a.flushInterruptedTools(stream, &opts, &toolOutputs)
 				break streamLoop
 
 			case event, ok := <-stream:

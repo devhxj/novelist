@@ -676,9 +676,11 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
         if (r) { setSessions(r.items); setSessionsTotal(r.total) }
       }).catch(() => {})
     } catch (err) {
-      setTurns(prev => prev.map(t =>
-        t.id === turnId ? { ...t, status: 'failed' as const, errorMessage: String(err) } : t
-      ))
+      setTurns(prev => prev.map(t => {
+        if (t.id !== turnId) return t
+        if (t.status === 'stopped') return t
+        return { ...t, status: 'interrupted' as const, errorMessage: String(err) }
+      }))
     } finally {
       eventQueuesRef.current.forEach((queue, queuedTurnId) => {
         if (queue.flushTimer) clearTimeout(queue.flushTimer)
@@ -865,9 +867,16 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
                       </div>
                     )}
                     {turn.status === 'interrupted' && (
-                      <div className="flex justify-start">
-                        <div className="bg-amber-50/50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-600 max-w-[80%]">
+                      <div className="flex justify-center">
+                        <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-500 max-w-[80%]">
                           对话被中断
+                        </div>
+                      </div>
+                    )}
+                    {turn.status === 'stopped' && (
+                      <div className="flex justify-center">
+                        <div className="bg-muted/50 border rounded-lg px-3 py-2 text-xs text-muted-foreground max-w-[80%]">
+                          对话已停止
                         </div>
                       </div>
                     )}
@@ -893,7 +902,14 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
         isLoading={isLoading}
         placeholder={inputPlaceholder}
         onSend={handleSend}
-        onStop={() => app.CancelChat(sessionId)}
+        onStop={() => {
+          setTurns(prev => prev.map(t =>
+            t.status === 'streaming'
+              ? { ...t, status: 'stopped' as const }
+              : t
+          ))
+          app.CancelChat(sessionId)
+        }}
       />
 
       <div className="border-t mx-4" />

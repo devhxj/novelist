@@ -84,7 +84,7 @@ export interface Turn {
   turnId: number
   userMessage: string
   segments: TurnSegment[]
-  status: 'streaming' | 'done' | 'failed' | 'interrupted'
+  status: 'streaming' | 'done' | 'failed' | 'interrupted' | 'stopped'
   errorMessage?: string
   compressionOnly?: boolean // 纯压缩 turn（手动压缩），无用户消息
 }
@@ -96,10 +96,12 @@ export function rebuildTurns(messages: session.Message[]): Turn[] {
   const subagentCache = new Map<string, TurnSegment>()
 
   for (const msg of messages) {
-    // 中断标记：将对应 turn 状态设为 interrupted
-    if (msg.event_type === 'interrupt') {
+    // 中断标记：根据 event_type 区分用户停止和系统中断
+    if (msg.event_type === 'user_stopped' || msg.event_type === 'system_interrupted') {
       const target = turns.find(t => t.turnId === msg.turn_id)
-      if (target) target.status = 'interrupted'
+      if (target) {
+        target.status = msg.event_type === 'user_stopped' ? 'stopped' : 'interrupted'
+      }
       continue
     }
 

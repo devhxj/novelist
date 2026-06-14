@@ -3,6 +3,7 @@ package mcp_tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -90,6 +91,9 @@ func requestDeleteApproval(ctx context.Context, tc ToolContext, payload map[stri
 	}
 	approval, err := tc.Approver.RequestApproval(ctx, tc.ToolID, payload)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return &ToolResult{Success: false, Error: "操作被中断"}, nil
+		}
 		return nil, fmt.Errorf("approval: %w", err)
 	}
 	if !approval.Approved {

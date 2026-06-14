@@ -98,6 +98,9 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 		}
 		approval, err := tc.Approver.RequestApproval(ctx, tc.ToolID, payload)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return &ToolResult{Success: false, Error: "操作被中断"}, nil
+			}
 			return nil, fmt.Errorf("approval: %w", err)
 		}
 		if !approval.Approved {
