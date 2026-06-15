@@ -7,12 +7,13 @@ import { EventsOn } from '@/lib/wailsjs/runtime/runtime'
 import TabBar from './TabBar'
 import ContentEditor from './ContentEditor'
 import OutlineViewer from './OutlineViewer'
+import SkillPreview from './SkillPreview'
 import Markdown from '@/components/Markdown'
-import { outlinePath, isContentPath, isOutlinePath } from './types'
+import { outlinePath, isContentPath, isOutlinePath, isSkillPath, skillNameFromPath } from './types'
 import type { EditorTab } from './types'
 
 export interface ContentPanelHandle {
-  openFile: (path: string, title: string) => void
+  openFile: (path: string, title: string, readOnly?: boolean) => void
   closeAllTabs: () => void
   openDiffTab: (data: {
     path: string; title: string; diff: string; original: string; modified: string
@@ -161,10 +162,11 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       return `第${num}章`
     }
     if (p === 'goink.md') return '故事状态'
+    if (isSkillPath(p)) return `技能: ${skillNameFromPath(p)}`
     return p
   }
 
-  const doOpenFile = useCallback((path: string, title?: string) => {
+  const doOpenFile = useCallback((path: string, title?: string, readOnly?: boolean) => {
     const display = title || titleFromPath(path)
     const existing = tabs.find(t => t.path === path && t.type === 'file')
     if (existing) {
@@ -173,13 +175,16 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       return
     }
 
+    const skReadOnly = readOnly ?? path.startsWith('builtin/skills/')
+    const initialMode = skReadOnly ? 'preview' : (isSkillPath(path) ? 'content' : 'content') as 'content' | 'outline' | 'preview'
+
     setIsLoading(true)
     app.GetContent(novelId, path).then(content => {
       const c = content ?? ''
-      openTab({ type: 'file', path, title: display, content: c, isDirty: false, viewMode: 'content' })
+      openTab({ type: 'file', path, title: display, content: c, isDirty: false, viewMode: initialMode, readOnly: skReadOnly })
       onContentChange?.(c)
     }).catch(() => {
-      openTab({ type: 'file', path, title: display, content: '', isDirty: false, viewMode: 'content' })
+      openTab({ type: 'file', path, title: display, content: '', isDirty: false, viewMode: initialMode, readOnly: skReadOnly })
       onContentChange?.('')
     }).finally(() => setIsLoading(false))
   }, [novelId, tabs, app, openTab, setActiveTabId, onContentChange])
@@ -248,7 +253,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   // 空状态
   if (!activeTab) {
     return (
-      <main className="flex-1 bg-background flex flex-col min-w-0 border-r">
+      <main className="flex-1 bg-background flex flex-col min-w-0 min-h-0 border-r overflow-hidden">
         <TabBar tabs={tabs} activeTabId={activeTabId} onSelect={setActiveTabId} onClose={closeTab} />
         <div className="flex-1 flex items-center justify-center">
           {tabs.length === 0 ? (
@@ -272,7 +277,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     const isOutline = activeTab.path?.startsWith('outlines/')
 
     return (
-      <main className="flex-1 bg-background flex flex-col min-w-0 border-r">
+      <main className="flex-1 bg-background flex flex-col min-w-0 min-h-0 border-r overflow-hidden">
         <TabBar tabs={tabs} activeTabId={activeTabId} onSelect={setActiveTabId} onClose={closeTab} />
         <div className="flex items-center px-4 py-2 border-b shrink-0">
           <span className="text-sm font-medium truncate">{activeTab.title}</span>
@@ -317,31 +322,51 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   // File tab
   const viewMode = activeTab.viewMode || 'content'
   return (
-    <main className="flex-1 bg-background flex flex-col min-w-0 border-r">
+    <main className="flex-1 bg-background flex flex-col min-w-0 min-h-0 border-r overflow-hidden">
       <TabBar tabs={tabs} activeTabId={activeTabId} onSelect={setActiveTabId} onClose={closeTab} />
       <div className="flex items-center justify-between px-4 py-2 border-b shrink-0">
         <span className="text-sm font-medium truncate">{activeTab.title}</span>
         <div className="flex items-center gap-0.5 shrink-0">
-          <button onClick={() => handleSetViewMode(activeTab.id, 'content')} className={tabBtnClass(viewMode === 'content')}>
-            正文
-          </button>
-          <button onClick={() => handleSetViewMode(activeTab.id, 'outline')} className={tabBtnClass(viewMode === 'outline')}>
-            大纲
-          </button>
+          {isSkillPath(activeTab.path) ? (
+            <button
+              onClick={() => {
+                const newMode = activeTab.viewMode === 'preview' ? 'content' : 'preview'
+                updateTab(activeTab.id, { viewMode: newMode })
+              }}
+              className={tabBtnClass(viewMode === 'preview')}
+            >
+              预览
+            </button>
+          ) : (
+            <>
+              <button onClick={() => handleSetViewMode(activeTab.id, 'content')} className={tabBtnClass(viewMode === 'content')}>
+                正文
+              </button>
+              <button onClick={() => handleSetViewMode(activeTab.id, 'outline')} className={tabBtnClass(viewMode === 'outline')}>
+                大纲
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      <div className="flex-1">
+      <div className="flex-1 min-h-0">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
           </div>
+        ) : viewMode === 'preview' ? (
+          <SkillPreview content={activeTab.content ?? ''} />
         ) : viewMode === 'content' ? (
-          <ContentEditor
-            value={activeTab.content ?? ''}
-            onChange={v => handleEditorChange(activeTab.id, v)}
-            onMount={handleEditorMount}
-          />
+          activeTab.readOnly ? (
+            <SkillPreview content={activeTab.content ?? ''} />
+          ) : (
+            <ContentEditor
+              value={activeTab.content ?? ''}
+              onChange={v => handleEditorChange(activeTab.id, v)}
+              onMount={handleEditorMount}
+            />
+          )
         ) : (
           <OutlineViewer content={activeTab.outlineContent ?? ''} />
         )}

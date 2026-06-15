@@ -37,6 +37,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   const [showSettings, setShowSettings] = useState(false)
   const [tabTarget, setTabTarget] = useState<{ path: string; title: string } | null>(null)
   const [activeContent, setActiveContent] = useState('')
+  const [activeSkillName, setActiveSkillName] = useState<string | null>(null)
   const [isMaximised, setIsMaximised] = useState(false)
   const [platformOS, setPlatformOS] = useState('')
   const loadedRef = useRef(false)
@@ -234,6 +235,15 @@ export default function WorkspaceView({ initialNovelId }: Props) {
           description={description}
           setDescription={setDescription}
           onCreateNovel={handleCreateNovel}
+          activeSkillName={activeSkillName}
+          onSelectSkill={(path, title, readOnly) => {
+            setActiveSkillName(title)
+            contentRef.current?.openFile(path, title, readOnly)
+          }}
+          onNewSkill={(name) => {
+            setActiveSkillName(`技能: ${name}`)
+            contentRef.current?.openFile(`skills/${name}.md`, `技能: ${name}`)
+          }}
         />
 
         {activePanel === 'novels' ? (

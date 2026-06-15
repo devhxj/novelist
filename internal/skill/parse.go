@@ -115,6 +115,7 @@ func scanFS(fsys fs.FS, dir string) ([]Skill, error) {
 }
 
 // scanDir 扫描目录下所有 .md 文件并解析为 Skill 切片。
+// YAML name 与文件名不一致时以 YAML name 为准重命名文件。
 // 目录不存在时返回空切片（不报错）。
 func scanDir(dir string) ([]Skill, error) {
 	entries, err := os.ReadDir(dir)
@@ -132,7 +133,15 @@ func scanDir(dir string) ([]Skill, error) {
 		}
 		sk, err := ParseFile(filepath.Join(dir, entry.Name()))
 		if err != nil {
-			continue // 跳过解析失败的文件
+			continue
+		}
+		fileBase := strings.TrimSuffix(entry.Name(), ".md")
+		if sk.Name != "" && sk.Name != fileBase {
+			oldPath := filepath.Join(dir, entry.Name())
+			newPath := filepath.Join(dir, sk.Name+".md")
+			if err := os.Rename(oldPath, newPath); err != nil {
+				return nil, fmt.Errorf("重命名 skill 文件失败 %s -> %s: %w", oldPath, newPath, err)
+			}
 		}
 		skills = append(skills, *sk)
 	}

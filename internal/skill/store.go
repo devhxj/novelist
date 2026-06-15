@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+
+	"novel/internal/config"
 )
 
 // Store 在内存中管理三层 skill（内置、用户、小说），支持热重载。
@@ -29,7 +31,7 @@ func NewStore(logger *slog.Logger, userSkillsDir string) (*Store, error) {
 		novel:   make(map[int64][]Skill),
 	}
 	if err := s.loadUser(userSkillsDir); err != nil {
-		return nil, fmt.Errorf("skill: 初始加载用户 skill 失败: %w", err)
+		logger.Warn("初始加载用户 skill 失败，将以空列表继续", "err", err)
 	}
 	return s, nil
 }
@@ -54,7 +56,11 @@ func (s *Store) Get(novelID int64, name string) (*Skill, bool) {
 }
 
 // ListMeta 返回所有可用 skill 的元数据，按 name 去重（novel > user > builtin）。
+// 每次调用自动刷新磁盘数据。
 func (s *Store) ListMeta(novelID int64) []SkillMeta {
+	s.ReloadUser(config.UserSkillsDir())
+	s.ReloadNovel(novelID, config.NovelSkillsDir(novelID))
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

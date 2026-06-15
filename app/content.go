@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"novel/internal/chapter"
-	"novel/internal/config"
 	"novel/internal/git"
 	"novel/internal/rag"
 	"novel/internal/text"
@@ -65,14 +64,5 @@ func (a *App) SaveContent(input SaveContentInput) error {
 		}
 	}
 
-	// skill 文件写入后重载内存
-	if a.skill != nil {
-		switch {
-		case strings.HasPrefix(input.Path, "skills/"):
-			a.skill.ReloadNovel(input.NovelID, config.NovelSkillsDir(input.NovelID))
-		case strings.HasPrefix(input.Path, "~/.goink/skills/"):
-			a.skill.ReloadUser(config.UserSkillsDir())
-		}
-	}
 	return nil
 }
