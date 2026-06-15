@@ -77,16 +77,20 @@ func (a *Agent) Compress(ctx context.Context, opts *RunOptions, runningTokens ma
 	msgs = msgs[:len(opts.Messages)]
 	retained := retainMessages(msgs)
 
-	// 5. 重建 System2（获取最新小说状态快照）
+	// 5. 重建 System2 + System3
 	sys1 := agentcfg.System1(agentcfg.MainAgent)
-	sys2, err := agentcfg.System2(a.db, opts.NovelID)
+	var sys2 string
+	if a.skillStore != nil {
+		sys2 = agentcfg.BuildSkillCatalog(a.skillStore.ListMeta(opts.NovelID))
+	}
+	sys3, err := agentcfg.System2(a.db, opts.NovelID)
 	if err != nil {
-		a.logger.Warn("压缩时 System2 构建失败", "novel_id", opts.NovelID, "err", err)
-		sys2 = ""
+		a.logger.Warn("压缩时 System3 构建失败", "novel_id", opts.NovelID, "err", err)
+		sys3 = ""
 	}
 
 	// 6. 在事务中完成版本递增 + 全部 DB 写入
-	newVersion, err := a.persistCompression(ctx, opts, sys1, sys2, summary, retained)
+	newVersion, err := a.persistCompression(ctx, opts, sys1, sys2, sys3, summary, retained)
 	if err != nil {
 		return fmt.Errorf("compress: persist failed: %w", err)
 	}
@@ -118,7 +122,7 @@ func (a *Agent) Compress(ctx context.Context, opts *RunOptions, runningTokens ma
 }
 
 // persistCompression 在事务中递增 active_version 并写入所有压缩消息。
-func (a *Agent) persistCompression(ctx context.Context, opts *RunOptions, sys1, sys2, summary string, retained []map[string]any) (int, error) {
+func (a *Agent) persistCompression(ctx context.Context, opts *RunOptions, sys1, sys2, sys3, summary string, retained []map[string]any) (int, error) {
 	var newVersion int
 
 	err := a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -150,10 +154,16 @@ func (a *Agent) persistCompression(ctx context.Context, opts *RunOptions, sys1, 
 		if err := msg("system", sys1, true, false, ""); err != nil {
 			return fmt.Errorf("写入 System1 失败: %w", err)
 		}
-		// System2
+		// System2: Skill Catalog
 		if sys2 != "" {
 			if err := msg("system", sys2, true, false, ""); err != nil {
 				return fmt.Errorf("写入 System2 失败: %w", err)
+			}
+		}
+		// System3: 小说上下文
+		if sys3 != "" {
+			if err := msg("system", sys3, true, false, ""); err != nil {
+				return fmt.Errorf("写入 System3 失败: %w", err)
 			}
 		}
 		// 提醒语
@@ -242,10 +252,10 @@ func retainMessages(messages []map[string]any) []map[string]any {
 		return nil
 	}
 
-	// 跳过前 2 条 system 消息（System1/System2）
+	// 跳过前 3 条 system 消息（System1/System2/System3）
 	sysEnd := 0
 	for i, m := range messages {
-		if i >= 2 {
+		if i >= 3 {
 			break
 		}
 		role, _ := m["role"].(string)

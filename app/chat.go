@@ -9,6 +9,8 @@ import (
 
 	wails "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"gorm.io/gorm"
+
 	"novel/internal/agent"
 	"novel/internal/agentcfg"
 	"novel/internal/git"
@@ -178,46 +180,38 @@ func (a *App) loadOrCreateSession(ctx context.Context, input ChatInput) (*sessio
 	return sess, true, nil
 }
 
-// writeSystemMessages 为新 session 写入 System1 和 System2 到 messages 表。
+// writeSystemMessages 为新 session 写入 System1 ， System2 和 System3 到 messages 表。
 func (a *App) writeSystemMessages(ctx context.Context, sessionID string, novelID int64, turnID int) error {
-	db := a.session.DB.WithContext(ctx)
-
-	sys1 := &session.Message{
-		SessionID:  sessionID,
-		TurnID:     turnID,
-		Role:       "system",
-		Content:    agentcfg.System1(agentcfg.MainAgent),
-		Version:    1,
-		ToAPI:      true,
-		ToFrontend: false,
-		AgentType:  "main",
-	}
-	if err := db.Create(sys1).Error; err != nil {
-		return fmt.Errorf("写入 System1 失败: %w", err)
+	sysMsg := func(content string) *session.Message {
+		return &session.Message{
+			SessionID: sessionID, TurnID: turnID, Role: "system", Content: content,
+			Version: 1, ToAPI: true, ToFrontend: false, AgentType: "main",
+		}
 	}
 
-	sys2Content, err := agentcfg.System2(a.db, novelID)
+	sys1 := agentcfg.System1(agentcfg.MainAgent)
+
+	var sys2 string
+	if a.skill != nil {
+		sys2 = agentcfg.BuildSkillCatalog(a.skill.ListMeta(novelID))
+	}
+
+	sys3, err := agentcfg.System2(a.db, novelID)
 	if err != nil {
-		a.logger.Warn("System2 构建失败，写入空消息", "novel_id", novelID, "err", err)
-		sys2Content = ""
-	}
-	if sys2Content != "" {
-		sys2 := &session.Message{
-			SessionID:  sessionID,
-			TurnID:     turnID,
-			Role:       "system",
-			Content:    sys2Content,
-			Version:    1,
-			ToAPI:      true,
-			ToFrontend: false,
-			AgentType:  "main",
-		}
-		if err := db.Create(sys2).Error; err != nil {
-			return fmt.Errorf("写入 System2 失败: %w", err)
-		}
+		a.logger.Warn("System3 构建失败，写入空消息", "novel_id", novelID, "err", err)
+		sys3 = ""
 	}
 
-	return nil
+	return a.session.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, c := range []string{sys1, sys2, sys3} {
+			if c != "" {
+				if err := tx.Create(sysMsg(c)).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 // loadAPIMessages 加载指定 version 的所有 to_api 消息，转为 map 格式。
