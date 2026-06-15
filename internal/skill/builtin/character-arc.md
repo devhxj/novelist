@@ -1,7 +1,7 @@
 ---
 name: character-arc
 description: 角色弧光设计方法论，含成长型、堕落型、平面型弧光
-tags: [角色, 人物, 成长]
+category: 角色
 mode: on_demand
 author: builtin
 version: 1

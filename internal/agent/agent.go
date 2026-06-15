@@ -19,19 +19,21 @@ import (
 	"novel/internal/llm"
 	"novel/internal/mcp_tools"
 	"novel/internal/session"
+	"novel/internal/skill"
 	"novel/internal/storage"
 )
 
 // Agent 是对话编排核心，持有运行所需的所有基础设施。
 type Agent struct {
-	llm      *llm.Client
-	registry *mcp_tools.Registry
-	session  *session.Store
-	db       *gorm.DB
-	approver approval.Approver
-	logger   *slog.Logger
-	cancels  map[string]context.CancelFunc // sessionID → cancel
-	mu       sync.Mutex
+	llm        *llm.Client
+	registry   *mcp_tools.Registry
+	session    *session.Store
+	db         *gorm.DB
+	approver   approval.Approver
+	logger     *slog.Logger
+	skillStore *skill.Store
+	cancels    map[string]context.CancelFunc // sessionID → cancel
+	mu         sync.Mutex
 }
 
 // RunOptions 是单次 Run() 的参数。
@@ -51,15 +53,16 @@ type RunOptions struct {
 }
 
 // New 创建 Agent 实例。
-func New(llmClient *llm.Client, registry *mcp_tools.Registry, session *session.Store, db *gorm.DB, approver approval.Approver, logger *slog.Logger) *Agent {
+func New(llmClient *llm.Client, registry *mcp_tools.Registry, session *session.Store, db *gorm.DB, approver approval.Approver, logger *slog.Logger, skillStore *skill.Store) *Agent {
 	return &Agent{
-		llm:      llmClient,
-		registry: registry,
-		session:  session,
-		db:       db,
-		approver: approver,
-		logger:   logger,
-		cancels:  make(map[string]context.CancelFunc),
+		llm:        llmClient,
+		registry:   registry,
+		session:    session,
+		db:         db,
+		approver:   approver,
+		logger:     logger,
+		skillStore: skillStore,
+		cancels:    make(map[string]context.CancelFunc),
 	}
 }
 
@@ -271,6 +274,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						RunSubAgent: func(ctx context.Context, req mcp_tools.SubAgentRequest) (string, error) {
 							return a.RunSubAgent(ctx, opts, req)
 						},
+						SkillStore: a.skillStore,
 					}
 					result := a.registry.Execute(ctx, name, rawArgs, tc, opts.AllowedTools)
 					a.logger.Info("tool executed", "tool", name, "success", result.Success, "phase", map[bool]string{true: "completed", false: "failed"}[result.Success])

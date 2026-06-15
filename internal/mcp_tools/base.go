@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"novel/internal/approval"
+	"novel/internal/skill"
 	"novel/internal/storage"
 )
 
@@ -51,6 +52,7 @@ type ToolContext struct {
 	EmitApproval func(toolID string, approvalType string, payload map[string]any) // 向 agent 事件流推送审批事件（EventToolCall, phase="awaiting_approval"）
 
 	RunSubAgent RunSubAgentFunc // 子 Agent 运行器，由 agent 包注入
+	SkillStore  *skill.Store    // 技能存储，read 工具用于读取内置 skill
 }
 
 // ── 结果 ──────────────────────────────────────────────

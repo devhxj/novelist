@@ -215,7 +215,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 	}()
 
 	// 11. 创建 Agent 实例（全局复用）
-	a.agent = agent.New(a.llmClient, a.registry, a.session, a.db, a.approvals, a.logger)
+	a.agent = agent.New(a.llmClient, a.registry, a.session, a.db, a.approvals, a.logger, a.skill)
 
 	a.cfg = cfg
 	a.logger.Info("应用初始化完成", "data_dir", config.DataDirPath())

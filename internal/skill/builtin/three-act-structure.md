@@ -1,7 +1,7 @@
 ---
 name: three-act-structure
 description: 经典三幕剧结构方法论，含情节点设计和节奏控制
-tags: [结构, 情节, 剧作]
+category: 结构
 mode: on_demand
 author: builtin
 version: 1

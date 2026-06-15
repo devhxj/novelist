@@ -9,6 +9,7 @@ import (
 // Store 在内存中管理三层 skill（内置、用户、小说），支持热重载。
 type Store struct {
 	mu      sync.RWMutex
+	logger  *slog.Logger
 	builtin []Skill
 	user    []Skill
 	novel   map[int64][]Skill
@@ -23,6 +24,7 @@ func NewStore(logger *slog.Logger, userSkillsDir string) (*Store, error) {
 	}
 
 	s := &Store{
+		logger:  logger,
 		builtin: builtin,
 		novel:   make(map[int64][]Skill),
 	}
