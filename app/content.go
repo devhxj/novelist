@@ -4,8 +4,10 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"novel/internal/chapter"
+	"novel/internal/config"
 	"novel/internal/git"
 	"novel/internal/rag"
 	"novel/internal/text"
@@ -19,7 +21,20 @@ type SaveContentInput struct {
 }
 
 // GetContent 返回小说仓库中指定路径的文件内容。文件不存在时返回空字符串。
+// 内置 skill 路径（builtin/skills/）从内存读取。
 func (a *App) GetContent(novelID int64, path string) (string, error) {
+	if strings.HasPrefix(path, "builtin/skills/") {
+		name := strings.TrimSuffix(strings.TrimPrefix(path, "builtin/skills/"), ".md")
+		if a.skill == nil {
+			return "", os.ErrNotExist
+		}
+		sk, ok := a.skill.Get(novelID, name)
+		if !ok {
+			return "", os.ErrNotExist
+		}
+		return sk.RawContent, nil
+	}
+
 	content, err := git.ReadFile(novelID, path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -47,6 +62,16 @@ func (a *App) SaveContent(input SaveContentInput) error {
 			Where("novel_id = ? AND chapter_number = ?", input.NovelID, chapNum).
 			Update("word_count", stats.WordCount).Error; err != nil {
 			a.logger.Warn("更新字数失败", "novel_id", input.NovelID, "chapter", chapNum, "err", err)
+		}
+	}
+
+	// skill 文件写入后重载内存
+	if a.skill != nil {
+		switch {
+		case strings.HasPrefix(input.Path, "skills/"):
+			a.skill.ReloadNovel(input.NovelID, config.NovelSkillsDir(input.NovelID))
+		case strings.HasPrefix(input.Path, "~/.goink/skills/"):
+			a.skill.ReloadUser(config.UserSkillsDir())
 		}
 	}
 	return nil

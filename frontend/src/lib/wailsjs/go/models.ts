@@ -130,6 +130,18 @@ export namespace app {
 	        this.search = source["search"];
 	    }
 	}
+	export class ListSkillsInput {
+	    novel_id: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListSkillsInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	    }
+	}
 	export class PreferenceResult {
 	    global: novel.PreferenceItem[];
 	    novel: novel.PreferenceItem[];
@@ -898,6 +910,35 @@ export namespace session {
 		    }
 		    return a;
 		}
+	}
+
+}
+
+export namespace skill {
+	
+	export class SkillMeta {
+	    name: string;
+	    description: string;
+	    category: string;
+	    mode: string;
+	    author: string;
+	    version: number;
+	    source: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillMeta(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.category = source["category"];
+	        this.mode = source["mode"];
+	        this.author = source["author"];
+	        this.version = source["version"];
+	        this.source = source["source"];
+	    }
 	}
 
 }

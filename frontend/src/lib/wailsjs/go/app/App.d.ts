@@ -12,6 +12,7 @@ import {reader} from '../models';
 import {session} from '../models';
 import {storage} from '../models';
 import {config} from '../models';
+import {skill} from '../models';
 
 export function ApproveTool(arg1:string,arg2:boolean,arg3:string):Promise<void>;
 
@@ -80,6 +81,8 @@ export function GetTimelineEntries(arg1:number,arg2:number,arg3:number):Promise<
 export function Initialize(arg1:string):Promise<void>;
 
 export function IsInitialized():Promise<boolean>;
+
+export function ListSkills(arg1:app.ListSkillsInput):Promise<Array<skill.SkillMeta>>;
 
 export function SaveContent(arg1:app.SaveContentInput):Promise<void>;
 

@@ -59,6 +59,7 @@ func ParseBytes(data []byte, defaultAuthor string) (*Skill, error) {
 		sk.Author = defaultAuthor
 	}
 	sk.Content = body
+	sk.RawContent = string(data)
 	return sk, nil
 }
 

@@ -9,6 +9,7 @@ type Skill struct {
 	Author      string `json:"author" yaml:"author"`
 	Version     int    `json:"version" yaml:"version"`
 	Content     string `json:"content" yaml:"-"`
+	RawContent  string `json:"raw_content,omitempty" yaml:"-"` // 原始 markdown 全文（含 YAML frontmatter）
 }
 
 // SkillMeta 是去除了正文的 skill 元数据，用于列表展示。

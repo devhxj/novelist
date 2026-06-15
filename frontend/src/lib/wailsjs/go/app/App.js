@@ -138,6 +138,10 @@ export function IsInitialized() {
   return window['go']['app']['App']['IsInitialized']();
 }
 
+export function ListSkills(arg1) {
+  return window['go']['app']['App']['ListSkills'](arg1);
+}
+
 export function SaveContent(arg1) {
   return window['go']['app']['App']['SaveContent'](arg1);
 }

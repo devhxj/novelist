@@ -12,6 +12,7 @@ import (
 	wails "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"novel/internal/chapter"
+	"novel/internal/config"
 	"novel/internal/git"
 	"novel/internal/rag"
 	"novel/internal/text"
@@ -165,6 +166,16 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 		"novel_id": tc.NovelID,
 		"path":     a.Path,
 	})
+
+	// skill 文件写入后重载内存
+	if tc.SkillStore != nil {
+		switch {
+		case strings.HasPrefix(a.Path, "skills/"):
+			tc.SkillStore.ReloadNovel(tc.NovelID, config.NovelSkillsDir(tc.NovelID))
+		case strings.HasPrefix(a.Path, "~/.goink/skills/"):
+			tc.SkillStore.ReloadUser(config.UserSkillsDir())
+		}
+	}
 
 	// 异步刷新章节向量 + 更新字数
 	if isChapterPath(a.Path) {
@@ -439,7 +450,7 @@ func (t *ReadTool) readBuiltinSkill(a *ReadArgs, tc ToolContext) (*ToolResult, e
 	return &ToolResult{Success: true, Data: map[string]any{
 		"path":    a.Path,
 		"display": fmt.Sprintf("技能: %s", sk.Name),
-		"content": sk.Content,
+		"content": sk.RawContent,
 	}}, nil
 }
 
