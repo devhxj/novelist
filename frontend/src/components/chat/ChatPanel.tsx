@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { MessageSquare, Loader2, History, Plus } from 'lucide-react'
 import { EventsOn } from '@/lib/wailsjs/runtime/runtime'
 import { useApp } from '@/hooks/useApp'
-import type { llm, app } from '@/hooks/useApp'
+import type { llm, app, skill } from '@/hooks/useApp'
 import type { AgentEvent, Turn } from './types'
 import { AgentEventType, emptySegment, rebuildTurns } from './types'
 import ChatInput from './ChatInput'
@@ -65,6 +65,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
   const [sessionsTotal, setSessionsTotal] = useState(0)
   const [showHistoryPanel, setShowHistoryPanel] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const [skills, setSkills] = useState<skill.SkillMeta[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
@@ -192,6 +193,16 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
   const handleCloseHistory = useCallback(() => {
     setShowHistoryPanel(false)
   }, [])
+
+  const loadSkills = useCallback(async () => {
+    if (!novelId) { setSkills([]); return }
+    try {
+      const list = await app.ListSkills({ novel_id: novelId })
+      setSkills(list ?? [])
+    } catch { /* ignore */ }
+  }, [app, novelId])
+
+  useEffect(() => { loadSkills() }, [loadSkills])
 
   const applyAgentEvent = useCallback((turnId: number, event: AgentEvent) => {
     switch (event.type) {
@@ -719,7 +730,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
     ? '请先选择作品'
     : !selectedKey
       ? '请先配置模型'
-      : '输入消息...'
+      : '输入消息，按 / 调用技能...'
 
   return (
     <aside className="shrink-0 flex flex-col bg-sidebar border-l relative" style={{ width }}>
@@ -901,7 +912,9 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
         disabled={!hasNovel || !selectedKey}
         isLoading={isLoading}
         placeholder={inputPlaceholder}
+        skills={skills}
         onSend={handleSend}
+        onListSkills={loadSkills}
         onStop={() => {
           setTurns(prev => prev.map(t =>
             t.status === 'streaming'

@@ -37,10 +37,16 @@ type ChatResult struct {
 
 // Chat 是对话入口。Wails 绑定，前端调用后同步执行，期间通过 EventsEmit 推流。
 func (a *App) Chat(input ChatInput) (*ChatResult, error) {
+	// 1. 验证模型（最早失败，不污染 DB）
+	model, ok := a.llmClient.ProviderModel(input.ProviderName, input.ModelID)
+	if !ok {
+		return nil, fmt.Errorf("模型未找到: %s/%s", input.ProviderName, input.ModelID)
+	}
+
 	ctx, cancel := context.WithCancel(a.ctx)
 	defer cancel()
 
-	// 1. 加载或创建 Session
+	// 2. 加载或创建 Session
 	sess, isNew, err := a.loadOrCreateSession(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("session 初始化失败: %w", err)
@@ -49,15 +55,9 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 	a.agent.RegisterCancel(sess.SessionID, cancel)
 	defer a.agent.UnregisterCancel(sess.SessionID)
 
-	// 2. 新会话自动生成标题（异步，与 agent LLM 调用并发）
+	// 3. 新会话自动生成标题（异步，与 agent LLM 调用并发）
 	if isNew && sess.Title == "" {
 		go a.generateTitle(sess.SessionID, input.Message, input.ProviderName, input.ModelID)
-	}
-
-	// 3. 查找模型元信息
-	model, ok := a.llmClient.ProviderModel(input.ProviderName, input.ModelID)
-	if !ok {
-		return nil, fmt.Errorf("模型未找到: %s/%s", input.ProviderName, input.ModelID)
 	}
 
 	// 4. 获取下一个 turn ID
@@ -75,14 +75,25 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		defer a.commitAIChanges(repo, turnID, sess.SessionID, model.Name)
 	}
 
-	// 6. 新 session 写入 System1 + System2
-	if isNew {
-		if err := a.writeSystemMessages(ctx, sess.SessionID, input.NovelID, turnID); err != nil {
-			return nil, fmt.Errorf("写入系统消息失败: %w", err)
+	// 6. 构建 skill inject（如果需要）
+	var skillInject string
+	var injectLogName string
+	if a.skill != nil && strings.HasPrefix(input.Message, "/") {
+		parts := strings.Fields(input.Message)
+		if len(parts) > 0 {
+			skillName := strings.TrimPrefix(parts[0], "/")
+			if sk, ok := a.skill.Get(input.NovelID, skillName); ok {
+				content := fmt.Sprintf(
+					"用户启用了技能「%s」。请根据该技能的定义和用户需求进行工作。\n\n---\n%s\n---",
+					sk.Name, sk.RawContent,
+				)
+				skillInject = "<system-reminder>\n" + content + "\n</system-reminder>"
+				injectLogName = sk.Name
+			}
 		}
 	}
 
-	// 6. 持久化用户消息
+	// 7. 持久化本轮消息（事务：System 消息 + skill inject + 用户消息原子写入）
 	userMsg := &session.Message{
 		SessionID:  sess.SessionID,
 		TurnID:     turnID,
@@ -93,17 +104,42 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		ToFrontend: true,
 		AgentType:  "main",
 	}
-	if err := a.session.DB.WithContext(ctx).Create(userMsg).Error; err != nil {
-		return nil, fmt.Errorf("持久化用户消息失败: %w", err)
+	if err := a.session.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if isNew {
+			if err := a.writeSystemMessages(tx, sess.SessionID, input.NovelID, turnID); err != nil {
+				return err
+			}
+		}
+		if skillInject != "" {
+			if err := tx.Create(&session.Message{
+				SessionID:  sess.SessionID,
+				TurnID:     turnID,
+				Role:       "user",
+				Content:    skillInject,
+				Version:    sess.ActiveVersion,
+				ToAPI:      true,
+				ToFrontend: false,
+				AgentType:  "main",
+			}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Create(userMsg).Error
+	}); err != nil {
+		return nil, fmt.Errorf("持久化消息失败: %w", err)
 	}
 
-	// 7. 构建消息列表：全部来自 DB（含 System1/System2/历史/用户消息）
+	if injectLogName != "" {
+		a.logger.Info("skill injected", "skill", injectLogName, "session", sess.SessionID)
+	}
+
+	// 8. 构建消息列表：全部来自 DB（含 System1/System2/历史/用户消息）
 	messages, err := a.loadAPIMessages(ctx, sess.SessionID, sess.ActiveVersion)
 	if err != nil {
 		return nil, fmt.Errorf("加载 API 消息失败: %w", err)
 	}
 
-	// 8. 运行 Agent 循环
+	// 9. 运行 Agent 循环
 	wails.EventsEmit(ctx, "chat:started", map[string]any{
 		"session_id": sess.SessionID,
 		"turn_id":    turnID,
@@ -122,7 +158,7 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		MaxTurns:      50,
 	})
 
-	// 9. 最终回复已由 agent.Run() 内部 appendMsg 持久化，此处不重复存储
+	// 10. 最终回复已由 agent.Run() 内部 appendMsg 持久化，此处不重复存储
 	if runErr != nil {
 		a.logger.Error("对话失败", "err", runErr)
 		eventType := "system_interrupted"
@@ -180,8 +216,8 @@ func (a *App) loadOrCreateSession(ctx context.Context, input ChatInput) (*sessio
 	return sess, true, nil
 }
 
-// writeSystemMessages 为新 session 写入 System1 ， System2 和 System3 到 messages 表。
-func (a *App) writeSystemMessages(ctx context.Context, sessionID string, novelID int64, turnID int) error {
+// writeSystemMessages 为新 session 写入 System1、System2、System3 到 messages 表。使用传入的 tx 以保证与同一 turn 的其他消息在同一事务中。
+func (a *App) writeSystemMessages(tx *gorm.DB, sessionID string, novelID int64, turnID int) error {
 	sysMsg := func(content string) *session.Message {
 		return &session.Message{
 			SessionID: sessionID, TurnID: turnID, Role: "system", Content: content,
@@ -202,16 +238,14 @@ func (a *App) writeSystemMessages(ctx context.Context, sessionID string, novelID
 		sys3 = ""
 	}
 
-	return a.session.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, c := range []string{sys1, sys2, sys3} {
-			if c != "" {
-				if err := tx.Create(sysMsg(c)).Error; err != nil {
-					return err
-				}
+	for _, c := range []string{sys1, sys2, sys3} {
+		if c != "" {
+			if err := tx.Create(sysMsg(c)).Error; err != nil {
+				return err
 			}
 		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // loadAPIMessages 加载指定 version 的所有 to_api 消息，转为 map 格式。

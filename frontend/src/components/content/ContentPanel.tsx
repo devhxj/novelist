@@ -58,6 +58,22 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     }
   }, [activeTab, onContentChange])
 
+  // Ctrl+Shift+V 切换技能预览
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'V') {
+        const tab = tabs.find(t => t.id === activeTabId)
+        if (tab?.type === 'file' && isSkillPath(tab.path)) {
+          e.preventDefault()
+          const newMode = tab.viewMode === 'preview' ? 'content' : 'preview'
+          updateTab(tab.id, { viewMode: newMode })
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [tabs, activeTabId, updateTab])
+
   // ── 切换 viewMode：按需加载大纲内容 ──────────────────────
 
   const handleSetViewMode = useCallback((tabId: string, mode: 'content' | 'outline') => {
