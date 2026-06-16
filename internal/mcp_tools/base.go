@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -294,11 +295,10 @@ var schemaReflector = &jsonschema.Reflector{
 }
 
 // SchemaOf 从带 jsonschema tag 的 struct 生成 OpenAI function calling 兼容的 JSON Schema。
-// 内部用 github.com/invopop/jsonschema 生成，然后白名单只取 type/properties/required。
+// 内部用 github.com/invopop/jsonschema 生成，取 type/properties/required 并将 $defs 内联到 $ref 位置。
 func SchemaOf(v any) json.RawMessage {
 	s := schemaReflector.Reflect(v)
 
-	// 先 marshal 再 unmarshal 为 map，只挑顶层三个 key
 	b, _ := json.Marshal(s)
 	var full map[string]any
 	json.Unmarshal(b, &full)
@@ -310,7 +310,40 @@ func SchemaOf(v any) json.RawMessage {
 	if req, ok := full["required"]; ok {
 		clean["required"] = req
 	}
+	if defs, ok := full["$defs"]; ok {
+		clean["$defs"] = defs
+	}
 
-	raw, _ := json.Marshal(clean)
+	resolved := inlineDefs(clean)
+	raw, _ := json.Marshal(resolved)
 	return raw
+}
+
+// inlineDefs 将 $defs 中的定义递归替换到 $ref 引用位置，消除跨节点跳转。
+func inlineDefs(schema map[string]any) map[string]any {
+	defs, _ := schema["$defs"].(map[string]any)
+	delete(schema, "$defs")
+	return resolveRefs(schema, defs).(map[string]any)
+}
+
+func resolveRefs(node any, defs map[string]any) any {
+	switch v := node.(type) {
+	case map[string]any:
+		if ref, ok := v["$ref"].(string); ok && defs != nil {
+			name := strings.TrimPrefix(ref, "#/$defs/")
+			if def, ok := defs[name].(map[string]any); ok {
+				return resolveRefs(def, defs)
+			}
+		}
+		for k, val := range v {
+			v[k] = resolveRefs(val, defs)
+		}
+		return v
+	case []any:
+		for i, val := range v {
+			v[i] = resolveRefs(val, defs)
+		}
+		return v
+	}
+	return node
 }

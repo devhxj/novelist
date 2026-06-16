@@ -216,7 +216,7 @@ func (a *App) loadOrCreateSession(ctx context.Context, input ChatInput) (*sessio
 	return sess, true, nil
 }
 
-// writeSystemMessages 为新 session 写入 System1、System2、System3 到 messages 表。使用传入的 tx 以保证与同一 turn 的其他消息在同一事务中。
+// writeSystemMessages 在新 session 的事务内写入 System1、System2、System3 和技能目录到 messages 表。
 func (a *App) writeSystemMessages(tx *gorm.DB, sessionID string, novelID int64, turnID int) error {
 	sysMsg := func(content string) *session.Message {
 		return &session.Message{
@@ -232,7 +232,7 @@ func (a *App) writeSystemMessages(tx *gorm.DB, sessionID string, novelID int64, 
 		sys2 = agentcfg.BuildSkillCatalog(a.skill.ListMeta(novelID))
 	}
 
-	sys3, err := agentcfg.System2(a.db, novelID)
+	sys3, err := agentcfg.System3(tx, novelID)
 	if err != nil {
 		a.logger.Warn("System3 构建失败，写入空消息", "novel_id", novelID, "err", err)
 		sys3 = ""

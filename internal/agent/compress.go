@@ -83,7 +83,7 @@ func (a *Agent) Compress(ctx context.Context, opts *RunOptions, runningTokens ma
 	if a.skillStore != nil {
 		sys2 = agentcfg.BuildSkillCatalog(a.skillStore.ListMeta(opts.NovelID))
 	}
-	sys3, err := agentcfg.System2(a.db, opts.NovelID)
+	sys3, err := agentcfg.System3(a.db, opts.NovelID)
 	if err != nil {
 		a.logger.Warn("压缩时 System3 构建失败", "novel_id", opts.NovelID, "err", err)
 		sys3 = ""

@@ -204,10 +204,10 @@ func (t *GetLocationsTool) executeNetwork(ctx context.Context, tc ToolContext, s
 // CreateLocationItem 是 create_location 的单条参数。
 type CreateLocationItem struct {
 	Name             string `json:"name" jsonschema:"required,description=地点名称"             validate:"required"`
-	LocationType     string `json:"location_type" jsonschema:"description=地点类型，自由文本，如'森林''城市''洞穴'"`
+	LocationType     string `json:"location_type" jsonschema:"description=地点类型，自由文本，如'森林'、'城市'、'洞穴'"`
 	Description      string `json:"description" jsonschema:"description=环境氛围、特色等描述"`
-	DetailJSON       string `json:"detail_json" jsonschema:"description=JSON自由格式，结构化信息：气候、氛围、历史事件等"`
-	Tags             string `json:"tags" jsonschema:"description=JSON数组，自由标签，如[\"危险\",\"神秘\"]"`
+	DetailJSON       string `json:"detail_json" jsonschema:"description=字符串形式的JSON对象，结构化信息：气候、氛围、历史事件等"`
+	Tags             string `json:"tags" jsonschema:"description=字符串形式的JSON数组，自由标签，如[\"危险\"，\"神秘\"]"`
 	ParentLocationID *int64 `json:"parent_location_id" jsonschema:"description=父级地点ID，用于构建层级树"`
 }
 
@@ -270,8 +270,8 @@ type UpdateLocationArgs struct {
 	Name             string `json:"name" jsonschema:"description=新的名称"`
 	LocationType     string `json:"location_type" jsonschema:"description=新的类型"`
 	Description      string `json:"description" jsonschema:"description=新的描述"`
-	DetailJSON       string `json:"detail_json" jsonschema:"description=新的结构化信息JSON（完全替换旧的）"`
-	Tags             string `json:"tags" jsonschema:"description=新的标签JSON数组（完全替换旧的）"`
+	DetailJSON       string `json:"detail_json" jsonschema:"description=新的结构化信息，字符串形式JSON（完全替换旧的）"`
+	Tags             string `json:"tags" jsonschema:"description=新的标签，字符串形式JSON数组（完全替换旧的）"`
 	ParentLocationID *int64 `json:"parent_location_id" jsonschema:"description=新的父级地点ID（不传不变，传null变根节点）"`
 }
 
