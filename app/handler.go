@@ -33,6 +33,7 @@ import (
 // 各领域方法按文件拆分（novel.go / chapter.go 等），均接收 *App。
 type App struct {
 	ctx    context.Context
+	cancel context.CancelFunc
 	logger *slog.Logger
 
 	cfg      *config.AppConfig
@@ -66,7 +67,7 @@ func New(logger *slog.Logger) *App {
 
 // OnStartup 在 Wails 窗口创建后调用，完成基础设施初始化。
 func (a *App) OnStartup(ctx context.Context) {
-	a.ctx = ctx
+	a.ctx, a.cancel = context.WithCancel(ctx)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -91,9 +92,25 @@ func (a *App) OnStartup(ctx context.Context) {
 }
 
 // OnShutdown 在 Wails 窗口关闭前调用，释放资源。
-func (a *App) OnShutdown(_ context.Context) {
+func (a *App) OnShutdown(shutdownCtx context.Context) {
+	a.logger.Info("应用关闭，释放资源")
+
+	// 1. 取消根上下文，通知所有运行中的 agent 停止
+	if a.cancel != nil {
+		a.cancel()
+	}
+
+	// 2. 停止 RAG 后台消费者
+	if q := rag.GetRefreshQueue(); q != nil {
+		q.Stop()
+	}
+	// 3. 释放 ONNX embedder
+	if emb, err := rag.GetEmbedder(); err == nil && emb != nil {
+		_ = emb.Close()
+	}
+
+	// 4. 关闭数据库（放在最后，确保上述清理中的 DB 操作已完成）
 	if a.db != nil {
-		a.logger.Info("应用关闭，释放资源")
 		if err := storage.Close(a.db); err != nil {
 			a.logger.Error("关闭数据库失败", "err", err)
 		}
