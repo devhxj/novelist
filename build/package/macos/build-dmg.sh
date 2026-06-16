@@ -56,6 +56,6 @@ EOF
 # 生成 DMG
 mkdir -p build/dist
 hdiutil create -volname "Goink" -srcfolder "$APP_BUNDLE" -ov -format UDZO \
-    "build/dist/goink-${VERSION}-macos-universal.dmg"
+    "build/dist/goink-v${VERSION}-macos-arm64.dmg"
 
-echo "DMG → build/dist/goink-${VERSION}-macos-universal.dmg"
+echo "DMG → build/dist/goink-v${VERSION}-macos-arm64.dmg"
