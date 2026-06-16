@@ -14,9 +14,9 @@ type Skill struct {
 
 // SkillMeta 是去除了正文的 skill 元数据，用于列表展示。
 type SkillMeta struct {
-	Name        string `json:"name"` //name和description给llm其余的保留作为元数据
-	Description string `json:"description"`
-	Category    string `json:"category"` // 分类，未来可基于不同分类组合实现 skill 矩阵
+	Name        string `json:"name"`        //name和description给llm其余的保留作为元数据
+	Description string `json:"description"` //先写技能的简要介绍，然后写何时invoke
+	Category    string `json:"category"`    // 分类，未来可基于不同分类组合实现 skill 矩阵
 	Mode        string `json:"mode"`
 	Author      string `json:"author"`
 	Version     int    `json:"version"`
