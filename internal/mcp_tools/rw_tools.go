@@ -90,7 +90,14 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 		}, nil
 	}
 
-	// 4. 审批（阻塞等待用户确认）
+	// 4. 校验 skill 格式（在审批前，格式不对直接返回 LLM 修正）
+	if isSkillPath(a.Path) {
+		if _, err := skill.ParseBytes([]byte(proposed), ""); err != nil {
+			return &ToolResult{Success: false, Error: fmt.Sprintf("skill 格式错误: %s", err.Error())}, nil
+		}
+	}
+
+	// 5. 审批（阻塞等待用户确认）
 	if tc.Approver != nil {
 		payload := map[string]any{
 			"original":    current,
@@ -127,7 +134,7 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 		}
 	}
 
-	// 5. 自动创建 DB 记录（文件不存在且为章节/大纲路径时）
+	// 6. 自动创建 DB 记录（文件不存在且为章节/大纲路径时）
 	if !fileExists && (isChapterPath(a.Path) || isOutlinePath(a.Path)) {
 		chapNum := parseChapterNum(a.Path)
 		if chapNum == 0 {
@@ -149,16 +156,9 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 		}
 	}
 
-	// 6. 写入前重读对比，阻止并发冲突
+	// 7. 写入前重读对比，阻止并发冲突
 	if fresh, err := git.ReadFile(tc.NovelID, a.Path); err == nil && fresh != current {
 		return &ToolResult{Success: false, Error: "文件已被修改，请重新读取最新内容后重试"}, nil
-	}
-
-	// 7 校验 skill 格式
-	if isSkillPath(a.Path) {
-		if _, err := skill.ParseBytes([]byte(proposed), ""); err != nil {
-			return &ToolResult{Success: false, Error: fmt.Sprintf("skill 格式错误: %s", err.Error())}, nil
-		}
 	}
 
 	// 8. 写入文件
