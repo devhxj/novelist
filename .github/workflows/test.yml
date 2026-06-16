@@ -17,4 +17,4 @@ jobs:
           go-version: "1.25"
 
       - name: Run tests
-        run: go test ./internal/rag/ ./internal/mcp_tools/
+        run: go test ./... -count=1

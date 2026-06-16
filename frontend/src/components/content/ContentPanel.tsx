@@ -311,11 +311,14 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
               original={activeTab.original}
               modified={activeTab.modified}
               onMount={editor => {
-                editor.getOriginalEditor().updateOptions({ wordWrap: 'on' })
-                const changes = editor.getLineChanges()
-                if (changes?.length) {
-                  editor.revealLine(changes[0].modifiedStartLineNumber)
-                }
+                setTimeout(() => {
+                  const modified = editor.getModifiedEditor()
+                  const changes = editor.getLineChanges()
+                  if (changes?.length) {
+                    modified.revealLineInCenter(changes[0].modifiedStartLineNumber)
+                    modified.setPosition({ lineNumber: changes[0].modifiedStartLineNumber, column: 1 })
+                  }
+                }, 100)
               }}
               options={{
                 minimap: { enabled: false },
@@ -323,10 +326,12 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
                 fontSize: 15,
                 lineHeight: 26,
                 fontFamily: "'Noto Serif SC', 'Source Han Serif SC', serif",
+                lineNumbers: 'off',
                 wordWrap: 'on',
                 automaticLayout: true,
                 readOnly: true,
-                renderSideBySide: true,
+                renderSideBySide: false,
+                renderIndicators: true,
               }}
             />
           )}

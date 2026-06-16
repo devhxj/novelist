@@ -201,15 +201,56 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 		})
 	}
 
+	data := map[string]any{
+		"path":        a.Path,
+		"change_type": a.ChangeType,
+		"approved":    true,
+	}
+	if a.ChangeType == "line_range_replace" {
+		afterEnd := a.StartLine + strings.Count(a.NewContent, "\n")
+		data["before"] = linePreview(current, a.StartLine, a.EndLine)
+		data["after"] = linePreview(proposed, a.StartLine, afterEnd)
+	}
 	return &ToolResult{
 		Success: true,
-		Data: map[string]any{
-			"path":        a.Path,
-			"change_type": a.ChangeType,
-			"approved":    true,
-		},
-		Inject: injects,
+		Data:    data,
+		Inject:  injects,
 	}, nil
+}
+
+// linePreview 返回指定行范围的前后上下文预览，带行号。区间 1-based 闭区间。
+func linePreview(content string, start, end int) string {
+	lines := strings.Split(content, "\n")
+	ctxStart := start - 1
+	if ctxStart < 0 {
+		ctxStart = 0
+	}
+	ctxEnd := end
+	if ctxEnd > len(lines) {
+		ctxEnd = len(lines)
+	}
+
+	// 前后各多取一行上下文
+	preStart := ctxStart - 1
+	if preStart < 0 {
+		preStart = 0
+	}
+	postEnd := ctxEnd + 1
+	if postEnd > len(lines) {
+		postEnd = len(lines)
+	}
+
+	var b strings.Builder
+	for i := preStart; i < postEnd; i++ {
+		if i == ctxStart {
+			b.WriteString("─── 改动区间 ───\n")
+		}
+		b.WriteString(fmt.Sprintf("%d|%s\n", i+1, lines[i]))
+		if i == ctxEnd-1 {
+			b.WriteString("─── 改动结束 ───\n")
+		}
+	}
+	return b.String()
 }
 
 // ── 编辑操作 ──────────────────────────────────────────────
@@ -223,8 +264,11 @@ func applyChange(a *EditArgs, current string) (string, error) {
 		if a.SearchText == "" {
 			return "", fmt.Errorf("search_replace 模式需要提供 search_text")
 		}
-		result, found := searchReplace(current, a.SearchText, a.NewContent, a.ReplaceAll)
+		result, found, hint := searchReplace(current, a.SearchText, a.NewContent, a.ReplaceAll)
 		if !found {
+			if hint != "" {
+				return "", fmt.Errorf("%s", hint)
+			}
 			return "", fmt.Errorf("未找到匹配文本，请用精确文本重试")
 		}
 		return result, nil
@@ -244,36 +288,193 @@ func applyChange(a *EditArgs, current string) (string, error) {
 }
 
 // searchReplace 在 content 中查找 searchText 并替换为 newContent。
-// replaceAll=false 时仅替换第一个匹配。返回修改后的内容和是否找到匹配。
-func searchReplace(content, searchText, newContent string, replaceAll bool) (string, bool) {
+// replaceAll=false 时仅替换第一个匹配。返回修改后的内容、是否找到匹配、以及失败时的模糊匹配提示。
+func searchReplace(content, searchText, newContent string, replaceAll bool) (result string, found bool, hint string) {
 	searchText = strings.TrimRight(searchText, "\n")
 
-	// 精确匹配
-	if strings.Contains(content, searchText) {
+	// 层 1：精确匹配
+	if idx := strings.Index(content, searchText); idx >= 0 {
 		n := 1
 		if replaceAll {
 			n = -1
 		}
-		return strings.Replace(content, searchText, newContent, n), true
+		return strings.Replace(content, searchText, newContent, n), true, ""
 	}
 
-	// TrimSpace 兜底：LLM 多复制了首尾空白时仍能匹配
+	// 层 2：TrimSpace 后精确匹配
 	trimmedSearch := strings.TrimSpace(searchText)
-	if trimmedSearch != searchText && strings.Contains(content, trimmedSearch) {
-		n := 1
-		if replaceAll {
-			n = -1
+	if trimmedSearch != searchText {
+		if idx := strings.Index(content, trimmedSearch); idx >= 0 {
+			n := 1
+			if replaceAll {
+				n = -1
+			}
+			return strings.Replace(content, trimmedSearch, newContent, n), true, ""
 		}
-		return strings.Replace(content, trimmedSearch, newContent, n), true
 	}
 
-	return "", false
+	// 层 3：标点归一化后匹配（引号变体统一再比）
+	// 只要两边有一方被归一化改变就重新比对
+	normSearch := normalizePunctuation(searchText)
+	normContent := normalizePunctuation(content)
+	if normSearch != searchText || normContent != content {
+		// 归一化后字符宽度可能不同（弯引号 3 字节 → ASCII 1 字节），必须按 rune 对齐
+		normCRunes := []rune(normContent)
+		normSRunes := []rune(normSearch)
+		if pos := runeIndex(normCRunes, normSRunes); pos >= 0 {
+			origRunes := []rune(content)
+			original := string(origRunes[pos : pos+len(normSRunes)])
+			n := 1
+			if replaceAll {
+				n = -1
+			}
+			return strings.Replace(content, original, newContent, n), true, ""
+		}
+	}
+
+	// 层 4：模糊匹配反馈（不替换，只告诉 LLM 正确文本长什么样）
+	hint = fuzzyHint(searchText, content)
+	return "", false, hint
+}
+
+// normalizePunctuation 将中文标点变体统一映射为 ASCII 等效字符。
+// 仅在查找匹配时使用，不修改文件内容。
+var quoteReplace = strings.NewReplacer(
+	"“", `"`, "”", `"`, // " " 弯引号
+	"「", `"`, "」", `"`, // 「 」 直角引号
+	"『", `"`, "』", `"`, // 『 』 双直角引号
+	"＂", `"`, // ＂ 全角引号
+	"‘", `'`, "’", `'`, // ' ' 弯单引号
+	"＇", `'`, // ＇ 全角单引号
+)
+
+func normalizePunctuation(s string) string {
+	return quoteReplace.Replace(s)
+}
+
+// runeIndex 在 rune 切片 a 中查找子切片 b，返回首位置，未找到返回 -1。
+func runeIndex(a, b []rune) int {
+	for i := 0; i <= len(a)-len(b); i++ {
+		match := true
+		for j, r := range b {
+			if a[i+j] != r {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
+}
+
+// fuzzyHint 在 content 中找到与 searchText 最相似的段落，返回格式化的提示信息。
+// 失败时调用，帮助 LLM 根据实际内容修正 search_text 后重试。
+func fuzzyHint(searchText, content string) string {
+	searchLines := strings.Split(strings.TrimSpace(searchText), "\n")
+	contentLines := strings.Split(content, "\n")
+	if len(searchLines) == 0 || len(contentLines) == 0 {
+		return ""
+	}
+
+	w := len(searchLines)
+	bestScore := 0.0
+	bestStart := 0
+	bestW := w
+
+	// 滑动窗口逐段比较
+	for i := 0; i <= len(contentLines)-w; i++ {
+		candidate := strings.Join(contentLines[i:i+w], "\n")
+		score := partialRatio(searchText, candidate)
+		if score > bestScore {
+			bestScore = score
+			bestStart = i
+		}
+	}
+	// 也尝试窗口 ±2 行
+	for _, delta := range []int{2, -2, 1, -1} {
+		ws := w + delta
+		if ws <= 0 || ws > len(contentLines) {
+			continue
+		}
+		for i := 0; i <= len(contentLines)-ws; i++ {
+			candidate := strings.Join(contentLines[i:i+ws], "\n")
+			score := partialRatio(searchText, candidate)
+			if score > bestScore {
+				bestScore = score
+				bestStart = i
+				bestW = ws
+			}
+		}
+	}
+
+	if bestScore < 0.4 {
+		return "未找到任何相似内容，请用精确文本或 line_range_replace 重试。"
+	}
+
+	contextStart := bestStart
+	if contextStart > 2 {
+		contextStart -= 2
+	}
+	contextEnd := bestStart + bestW
+	if contextEnd+2 < len(contentLines) {
+		contextEnd += 2
+	} else {
+		contextEnd = len(contentLines)
+	}
+	// 取匹配行 + 前后各 2 行上下文
+	contextLines := contentLines[contextStart:contextEnd]
+	if len(contextLines) > 8 {
+		contextLines = contextLines[:8]
+	}
+	nearby := strings.Join(contextLines, "\n")
+
+	return fmt.Sprintf(
+		"未找到精确匹配。以下为模糊匹配到的最相似片段（相似度 %.0f%%，第 %d-%d 行附近），仅供参考——请自行判断是否就是你想要修改的位置：\n%s\n如果确认就是此处，可直接用 line_range_replace(start_line=%d, end_line=%d) 修改，或根据实际内容修正 search_text 后重新调用 search_replace。",
+		bestScore*100, bestStart+1, bestStart+bestW, nearby, bestStart+1, bestStart+bestW,
+	)
+}
+
+// partialRatio 计算两段文本的字符级相似度（0.0~1.0）。
+// 使用滑动窗口在较长的文本中找与较短文本最匹配的片段。
+func partialRatio(a, b string) float64 {
+	short, long := a, b
+	if len(a) > len(b) {
+		short, long = b, a
+	}
+	if len(short) == 0 {
+		if len(long) == 0 {
+			return 1.0
+		}
+		return 0
+	}
+	shortRunes := []rune(short)
+	longRunes := []rune(long)
+	if len(longRunes) < len(shortRunes) {
+		longRunes, shortRunes = shortRunes, longRunes
+	}
+
+	best := 0.0
+	for i := 0; i <= len(longRunes)-len(shortRunes); i++ {
+		matches := 0
+		for j, sr := range shortRunes {
+			if sr == longRunes[i+j] {
+				matches++
+			}
+		}
+		score := float64(matches) / float64(len(shortRunes))
+		if score > best {
+			best = score
+		}
+	}
+	return best
 }
 
 // lineRangeReplace 替换 [startLine, endLine] 区间（1-based，含两端）。
 func lineRangeReplace(content string, startLine, endLine int, newContent string) (string, error) {
 	lines := strings.Split(content, "\n")
-	if startLine < 1 || endLine > len(lines) {
+	if startLine < 1 || endLine > len(lines) || startLine > endLine {
 		return "", fmt.Errorf("行号超出范围: start=%d end=%d 总行数=%d", startLine, endLine, len(lines))
 	}
 
@@ -323,7 +524,7 @@ func parseOutlineNum(p string) int {
 const editDescription = `编辑小说文件（章节正文或大纲或故事状态 goink.md 或技能文件）。支持三种编辑模式：
 
 1. **full_replace** — 全文替换整个文件。new_content 为完整的替换后内容。
-2. **search_replace** — 查找并替换指定文本。search_text 为要查找的原文片段（请从文件中精确复制），new_content 为替换后的文本。replace_all=false（默认）仅替换第一个匹配项，replace_all=true 替换所有匹配。
+2. **search_replace** — 查找并替换指定文本。search_text 为要查找的原文片段（请从文件中精确复制），new_content 为替换后的文本。replace_all=false（默认）仅替换第一个匹配项，replace_all=true 替换所有匹配。如果连续两次 search_replace 因"未找到匹配"失败，直接用 line_range_replace 代替——不要在同一种模式上反复重试。
 3. **line_range_replace** — 替换指定行范围。start_line 和 end_line 为 1-based 行号（含两端），new_content 为插入的新内容。
 
 路径格式：
