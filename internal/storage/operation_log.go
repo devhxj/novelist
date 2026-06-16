@@ -386,6 +386,15 @@ func RollbackInTx(ctx context.Context, tx *gorm.DB, sessionID string, targetTurn
 		return fmt.Errorf("oplog: cleanup operation_log: %w", err)
 	}
 
+	// 5. 将 active_version 回退到剩余消息的最大版本号
+	if err := tx.Exec(`
+		UPDATE sessions
+		SET active_version = (SELECT COALESCE(MAX(version), 1) FROM messages WHERE session_id = ? AND to_api = 1)
+		WHERE session_id = ?
+	`, sessionID, sessionID).Error; err != nil {
+		return fmt.Errorf("oplog: rollback active_version: %w", err)
+	}
+
 	return nil
 }
 
