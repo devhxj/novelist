@@ -1,16 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="520" height="140" viewBox="0 0 520 140">
-  <defs>
-    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#8187f3"/>
-      <stop offset="100%" stop-color="#6366f1"/>
-    </linearGradient>
-  </defs>
-  <circle cx="70" cy="70" r="48" fill="url(#g)" opacity="0.15"/>
-  <g transform="translate(32, 35)">
-    <path d="M38 0 L48 15 L44 28 L38 50 L32 28 L28 15 Z" fill="url(#g)"/>
-    <path d="M38 0 L38 30" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-    <path d="M38 50 L34 62" stroke="url(#g)" stroke-width="2.5" stroke-linecap="round"/>
-  </g>
-  <text x="140" y="68" font-family="system-ui, -apple-system, sans-serif" font-size="52" font-weight="bold" fill="#f1f5f9">Goink</text>
-  <text x="140" y="98" font-family="system-ui, -apple-system, sans-serif" font-size="16" fill="#94a3b8" font-weight="500">writes novels so you can just go ink</text>
+  <text x="260" y="65" font-family="system-ui, -apple-system, sans-serif" font-size="52" font-weight="bold" fill="#f1f5f9" text-anchor="middle">Goink</text>
+  <text x="260" y="95" font-family="system-ui, -apple-system, sans-serif" font-size="16" fill="#94a3b8" font-weight="500" text-anchor="middle">writes novels so you can just go ink</text>
 </svg>

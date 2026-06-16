@@ -195,10 +195,10 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 	}
 	if a.ChangeType == "full_replace" && isChapterPath(a.Path) && len([]rune(proposed)) > 500 {
 		chapNum := parseChapterNum(a.Path)
-		injects = []InjectMessage{{
+		injects = append(injects, InjectMessage{
 			Role:    "user",
 			Content: fmt.Sprintf("你刚刚完成了第%d章的全量替换。请执行以下维护操作：\n1. 检查并更新角色设定（性格变化、新能力、身份转变等）\n2. 更新故事时间线（伏笔回收、新伏笔记录、章节计划推进）\n3. 更新读者认知（新悬念、已回收悬念）\n4. 更新故事弧线节点进度\n完成后向用户汇报修改摘要。", chapNum),
-		}}
+		})
 	}
 
 	return &ToolResult{
