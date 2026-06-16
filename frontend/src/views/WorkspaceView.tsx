@@ -176,7 +176,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
     <div className="h-screen flex flex-col">
       <header
         className="h-11 flex items-center border-b bg-sidebar shrink-0"
-        data-wails-drag
+        style={{ '--wails-draggable': 'drag' } as React.CSSProperties}
       >
         <span className="text-sm font-medium pl-3 flex-1">
           {activeNovel?.title ?? 'Goink'}

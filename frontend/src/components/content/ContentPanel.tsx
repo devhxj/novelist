@@ -63,7 +63,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'V') {
         const tab = tabs.find(t => t.id === activeTabId)
-        if (tab?.type === 'file' && isSkillPath(tab.path)) {
+        if (tab?.type === 'file' && (isSkillPath(tab.path) || tab.path === 'goink.md')) {
           e.preventDefault()
           const newMode = tab.viewMode === 'preview' ? 'content' : 'preview'
           updateTab(tab.id, { viewMode: newMode })
@@ -343,7 +343,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       <div className="flex items-center justify-between px-4 py-2 border-b shrink-0">
         <span className="text-sm font-medium truncate">{activeTab.title}</span>
         <div className="flex items-center gap-0.5 shrink-0">
-          {isSkillPath(activeTab.path) ? (
+          {(isSkillPath(activeTab.path) || activeTab.path === 'goink.md') ? (
             <button
               onClick={() => {
                 const newMode = activeTab.viewMode === 'preview' ? 'content' : 'preview'
