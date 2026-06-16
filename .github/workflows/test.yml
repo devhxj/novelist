@@ -17,4 +17,4 @@ jobs:
           go-version: "1.25"
 
       - name: Run tests
-        run: go test $(go list ./... | grep -v '^novel$') -count=1
+        run: go test $(go list ./internal/... ./app/...) -count=1
