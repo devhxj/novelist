@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"novel/internal/chapter"
 	"novel/internal/git"
 	"novel/internal/rag"
+	"novel/internal/skill"
 	"novel/internal/text"
 )
 
@@ -48,6 +50,12 @@ var chPathRe = regexp.MustCompile(`^chapters/(\d{1,6})\.md$`)
 
 // SaveContent 保存小说仓库中指定路径的文件内容。
 func (a *App) SaveContent(input SaveContentInput) error {
+	if isSkillPath(input.Path) {
+		if _, err := skill.ParseBytes([]byte(input.Content), ""); err != nil {
+			return fmt.Errorf("skill 格式错误: %w", err)
+		}
+	}
+
 	if err := git.WriteFile(input.NovelID, input.Path, input.Content); err != nil {
 		return err
 	}
@@ -65,4 +73,8 @@ func (a *App) SaveContent(input SaveContentInput) error {
 	}
 
 	return nil
+}
+
+func isSkillPath(p string) bool {
+	return strings.HasPrefix(p, "skills/") || strings.HasPrefix(p, "~/.goink/skills/")
 }

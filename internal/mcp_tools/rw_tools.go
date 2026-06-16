@@ -14,6 +14,7 @@ import (
 	"novel/internal/chapter"
 	"novel/internal/git"
 	"novel/internal/rag"
+	"novel/internal/skill"
 	"novel/internal/text"
 )
 
@@ -153,7 +154,14 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 		return &ToolResult{Success: false, Error: "文件已被修改，请重新读取最新内容后重试"}, nil
 	}
 
-	// 7. 写入文件
+	// 7 校验 skill 格式
+	if isSkillPath(a.Path) {
+		if _, err := skill.ParseBytes([]byte(proposed), ""); err != nil {
+			return &ToolResult{Success: false, Error: fmt.Sprintf("skill 格式错误: %s", err.Error())}, nil
+		}
+	}
+
+	// 8. 写入文件
 	if err := git.WriteFile(tc.NovelID, a.Path, proposed); err != nil {
 		if errors.Is(err, git.ErrPathEscape) {
 			return &ToolResult{Success: false, Error: "路径非法: " + a.Path}, nil
@@ -178,7 +186,7 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 
 	}
 
-	// 8. inject 维护提醒（章节全量替换且 >500 字时）
+	// 9. inject 维护提醒（章节全量替换且 >500 字时）
 	var injects []InjectMessage
 	if a.ChangeType == "full_replace" && isChapterPath(a.Path) && len([]rune(proposed)) > 500 {
 		chapNum := parseChapterNum(a.Path)
@@ -293,6 +301,10 @@ func parseChapterNum(p string) int {
 
 func isOutlinePath(p string) bool {
 	return strings.HasPrefix(p, "outlines/")
+}
+
+func isSkillPath(p string) bool {
+	return strings.HasPrefix(p, "skills/") || strings.HasPrefix(p, "~/.goink/skills/")
 }
 
 func parseOutlineNum(p string) int {
