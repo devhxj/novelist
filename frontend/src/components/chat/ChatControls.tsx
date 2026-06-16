@@ -61,18 +61,18 @@ export default function ChatControls({
         />
       )}
 
+      <div className="flex-1" />
+
       <button
         onClick={onToggleApproval}
         className={`h-[30px] rounded-lg border px-2.5 text-xs transition-colors shrink-0 ${
           approvalMode === 'auto'
             ? 'bg-primary/10 text-primary border-primary/30'
-            : 'bg-background text-muted-foreground'
+            : 'text-muted-foreground'
         }`}
       >
-        {approvalMode === 'auto' ? '自动' : '手动'}
+        自动
       </button>
-
-      <div className="flex-1" />
 
       <ContextRing usage={usage} onCompress={onCompress} isTurnRunning={isTurnRunning} isCompressing={isCompressing} />
     </div>

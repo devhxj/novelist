@@ -9,23 +9,25 @@ import (
 // 默认行为走 OpenAI 兼容格式，钩子函数用于处理供应商差异。
 // 同时用作用户配置的 JSON 格式（Hooks 不参与序列化，反序列化后为 nil）。
 type Provider struct {
-	Name         string                                          `json:"name"`                            // 供应商名称，如 "DeepSeek"
-	ChatURL      string                                          `json:"chat_url"`                        // 聊天补全端点
-	APIKey       string                                          `json:"api_key,omitempty"`               // API 密钥
-	Models       []ModelInfo                                     `json:"models"`                          // 可用模型列表
-	BuildRequest func(payload map[string]any) map[string]any     `json:"-"` // 发送前改造请求体，nil 则原样发送
-	BuildHeaders func(base map[string]string) map[string]string  `json:"-"` // 发送前改造请求头，nil 则使用默认 Bearer 鉴权
-	ParseError   func(body []byte) error                         `json:"-"` // 解析非标准错误响应体，nil 则使用默认 OpenAI 格式解析
+	Name         string                                         `json:"name"`                  // 供应商名称，如 "DeepSeek"
+	ChatURL      string                                         `json:"chat_url"`              // 聊天补全端点
+	APIKey       string                                         `json:"api_key,omitempty"`     // API 密钥
+	Models       []ModelInfo                                    `json:"models"`                // 可用模型列表
+	Temperature  *float64                                       `json:"temperature,omitempty"` // 默认创意度 0~2，nil 表示未设置，运行时取内置默认
+	BuildRequest func(payload map[string]any) map[string]any    `json:"-"`                     // 发送前改造请求体，nil 则原样发送
+	BuildHeaders func(base map[string]string) map[string]string `json:"-"`                     // 发送前改造请求头，nil 则使用默认 Bearer 鉴权
+	ParseError   func(body []byte) error                        `json:"-"`                     // 解析非标准错误响应体，nil 则使用默认 OpenAI 格式解析
 }
 
 // ModelInfo 描述一个具体模型的元信息。
 type ModelInfo struct {
-	ID              string   `json:"id"`                                  // 模型标识，如 "deepseek-v4-pro"
-	Name            string   `json:"name"`                                // 显示名称，如 "DeepSeek V4 Pro"
-	ContextWindow   int      `json:"context_window"`                      // 上下文窗口大小（token 数）
-	MaxOutputTokens int      `json:"max_output_tokens"`                   // 最大输出 token 数
-	ReasoningLevels []string `json:"reasoning_levels,omitempty"`          // 支持的推理等级，如 ["low","high","max"]，无推理能力留空
-	SupportsVision  bool     `json:"supports_vision"`                     // 是否支持图片输入
+	ID               string   `json:"id"`                         // 模型标识，如 "deepseek-v4-pro"
+	Name             string   `json:"name"`                       // 显示名称，如 "DeepSeek V4 Pro"
+	ContextWindow    int      `json:"context_window"`             // 上下文窗口大小（token 数）
+	MaxOutputTokens  int      `json:"max_output_tokens"`          // 最大输出 token 数
+	SupportsThinking bool     `json:"supports_thinking"`          // 是否支持思考模式
+	ReasoningLevels  []string `json:"reasoning_levels,omitempty"` // 多级推理等级，如 ["low","high","max"]；nil=二值开关
+	SupportsVision   bool     `json:"supports_vision"`            // 是否支持图片输入
 }
 
 // APIError 表示 LLM API 的调用错误，包含可重试标记。
@@ -75,8 +77,8 @@ type StreamEvent struct {
 // 工具调用通过 SSE 流分多次下发：先来 ID 和名称，再逐片来 arguments 字符串。
 // 客户端内部维护按 index 的累积缓冲区，流结束后校验并发送原始 JSON。
 type ToolCallDelta struct {
-	ToolName      string         // EventToolCallStart 时填充
-	ToolID        string         // EventToolCallStart 时填充
-	ArgumentsText string         // EventToolCallArguments 时，累积后的完整 JSON 字符串
+	ToolName      string          // EventToolCallStart 时填充
+	ToolID        string          // EventToolCallStart 时填充
+	ArgumentsText string          // EventToolCallArguments 时，累积后的完整 JSON 字符串
 	ArgumentsJSON json.RawMessage // EventToolCallEnd 时，原始 JSON 字节，由调用方按需反序列化
 }

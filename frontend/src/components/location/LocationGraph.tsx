@@ -105,16 +105,16 @@ export default function LocationGraph({ novelId }: Props) {
     )
     const spaceEdges = relations
       .filter(r => {
-        if (!locIds.has(r.location_a) || !locIds.has(r.location_b)) return false
-        if (r.location_a === r.location_b) return false
-        if (containPairs.has(`${r.location_a}-${r.location_b}`)) return false
-        if (containPairs.has(`${r.location_b}-${r.location_a}`)) return false
+        if (!locIds.has(r.location_a_id) || !locIds.has(r.location_b_id)) return false
+        if (r.location_a_id === r.location_b_id) return false
+        if (containPairs.has(`${r.location_a_id}-${r.location_b_id}`)) return false
+        if (containPairs.has(`${r.location_b_id}-${r.location_a_id}`)) return false
         return true
       })
       .map((r, i) => ({
         id: `space-${r.id || i}`,
-        source: nodeId(r.location_a),
-        target: nodeId(r.location_b),
+        source: nodeId(r.location_a_id),
+        target: nodeId(r.location_b_id),
         type: 'line',
         data: { relation: r },
         style: {

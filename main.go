@@ -3,8 +3,12 @@ package main
 import (
 	"embed"
 	"log/slog"
+	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 
 	ort "github.com/yalue/onnxruntime_go"
 
@@ -13,6 +17,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 
 	"novel/app"
+	"novel/internal/config"
 	"novel/internal/logger"
 	"novel/internal/platform"
 )
@@ -41,6 +46,22 @@ func main() {
 		Frameless: runtime.GOOS != "darwin", // macOS 用原生标题栏
 		AssetServer: &assetserver.Options{
 			Assets: assets,
+			Middleware: func(next http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if idStr, ok := strings.CutPrefix(r.URL.Path, "/covers/"); ok {
+						novelID, err := strconv.ParseInt(idStr, 10, 64)
+						if err != nil || novelID <= 0 {
+							http.NotFound(w, r)
+							return
+						}
+						coverPath := filepath.Join(config.DataDirPath(), "novels",
+							strconv.FormatInt(novelID, 10), "cover.jpg")
+						http.ServeFile(w, r, coverPath)
+						return
+					}
+					next.ServeHTTP(w, r)
+				})
+			},
 		},
 		OnStartup:  wapp.OnStartup,
 		OnShutdown: wapp.OnShutdown,

@@ -165,7 +165,6 @@ func (s *Store) ListNodesAfterByArc(ctx context.Context, arcIDs []int64, chapter
 	return result, nil
 }
 
-
 // GetBreakpoint 返回暂停弧线的断点及其前后节点：
 //   - before: 最近 2 个已完成/废弃节点（target_chapter 升序）
 //   - pending: 断点 + 下一个 pending（最多 2 个，pending[0] 为断点）

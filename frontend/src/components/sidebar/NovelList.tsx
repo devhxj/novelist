@@ -68,7 +68,7 @@ export default function NovelList({
               <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
             )}
             <div className="w-8 shrink-0 rounded-sm overflow-hidden">
-              <BookCover />
+              <BookCover novelId={n.id} />
             </div>
             <span className={`flex-1 text-sm truncate ${n.id === novelId ? 'font-medium' : ''}`}>{n.title}</span>
           </button>

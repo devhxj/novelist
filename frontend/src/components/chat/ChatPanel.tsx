@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { MessageSquare, Loader2, History, Plus } from 'lucide-react'
-import { EventsOn, EventsOff } from '@/lib/wailsjs/runtime/runtime'
+import { EventsOn } from '@/lib/wailsjs/runtime/runtime'
 import { useApp } from '@/hooks/useApp'
-import type { llm, app } from '@/hooks/useApp'
+import type { llm, app, skill } from '@/hooks/useApp'
 import type { AgentEvent, Turn } from './types'
 import { AgentEventType, emptySegment, rebuildTurns } from './types'
 import ChatInput from './ChatInput'
@@ -21,6 +21,10 @@ interface Props {
   novelId: number
   onApprove: (toolId: string, feedback: string) => Promise<void>
   onReject: (toolId: string, feedback: string) => Promise<void>
+  onApprovalFileEdit?: (payload: {
+    path: string; title: string; diff: string; original: string; modified: string
+    changeType: string; reason: string; toolId: string
+  }) => void
 }
 
 const MIN_WIDTH = 280
@@ -39,7 +43,7 @@ interface ChatStartedEvent {
   turn_id: number
 }
 
-export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
+export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFileEdit }: Props) {
   const app = useApp()
   const [width, setWidth] = useState(DEFAULT_WIDTH)
   const [isDragging, setIsDragging] = useState(false)
@@ -60,21 +64,8 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
   const [sessions, setSessions] = useState<app.SessionMeta[]>([])
   const [sessionsTotal, setSessionsTotal] = useState(0)
   const [showHistoryPanel, setShowHistoryPanel] = useState(false)
-  const [activeApproval, setActiveApproval] = useState<{ toolId: string; path: string; changeType: string } | null>(null)
-
-  // 监听审批请求，更新工具卡片状态和输入区审批栏
-  useEffect(() => {
-    EventsOn('approval:requested', (data: any) => {
-      const toolId = data?.tool_id ?? ''
-      setActiveApproval({
-        toolId,
-        path: data?.payload?.path ?? '',
-        changeType: data?.payload?.change_type ?? '',
-      })
-    })
-    return () => { EventsOff('approval:requested') }
-  }, [])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const [skills, setSkills] = useState<skill.SkillMeta[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
@@ -82,6 +73,8 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
   const startedUnsubRef = useRef<(() => void) | null>(null)
   const agentUnsubRef = useRef<(() => void) | null>(null)
   const eventQueuesRef = useRef<Map<number, EventQueue>>(new Map())
+  const onApprovalFileEditRef = useRef(onApprovalFileEdit)
+  useEffect(() => { onApprovalFileEditRef.current = onApprovalFileEdit }, [onApprovalFileEdit])
 
   // 加载模型列表
   useEffect(() => {
@@ -200,6 +193,16 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
   const handleCloseHistory = useCallback(() => {
     setShowHistoryPanel(false)
   }, [])
+
+  const loadSkills = useCallback(async () => {
+    if (!novelId) { setSkills([]); return }
+    try {
+      const list = await app.ListSkills({ novel_id: novelId })
+      setSkills(list ?? [])
+    } catch { /* ignore */ }
+  }, [app, novelId])
+
+  useEffect(() => { loadSkills() }, [loadSkills])
 
   const applyAgentEvent = useCallback((turnId: number, event: AgentEvent) => {
     switch (event.type) {
@@ -392,14 +395,11 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
 
         case AgentEventType.ToolCall: {
           const isSubagent = event.tool_name === 'run_subagent'
-          const toolStatus = event.phase === 'completed' ? 'completed' as const
+          const toolStatus =
+            event.phase === 'awaiting_approval' ? 'awaiting_approval' as const
+            : event.phase === 'completed' ? 'completed' as const
             : event.phase === 'failed' ? 'failed' as const
             : 'executing' as const
-
-          // 工具结束即清除审批等待标记
-          if (toolStatus !== 'executing' && event.tool_id) {
-            setActiveApproval(prev => prev?.toolId === event.tool_id ? null : prev)
-          }
 
           // run_subagent：维护对应的 subagent segment
           if (isSubagent) {
@@ -438,6 +438,13 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
             seg.type === 'tool' && event.tool_id && seg.toolId === event.tool_id
           )
 
+          const approvalType = toolStatus === 'awaiting_approval'
+            ? (event.metadata?.approval_type as string | undefined)
+            : undefined
+          const approvalPayload = toolStatus === 'awaiting_approval'
+            ? (event.metadata?.payload as Record<string, unknown> | undefined)
+            : undefined
+
           if (idx >= 0) {
             segments[idx] = {
               ...segments[idx],
@@ -445,6 +452,8 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
               displayText: event.display_text || segments[idx].displayText,
               activityKind: event.activity_kind || segments[idx].activityKind || '',
               error: event.error || '',
+              approvalType: approvalType ?? segments[idx].approvalType,
+              approvalPayload: approvalPayload ?? segments[idx].approvalPayload,
             }
           } else {
             segments.push({
@@ -456,8 +465,37 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
               displayText: event.display_text || event.tool_name || '',
               activityKind: event.activity_kind || '',
               error: event.error || '',
+              approvalType,
+              approvalPayload,
             })
           }
+
+          // 文件编辑审批 → 通知 ContentPanel 打开 diff 标签页
+          if (toolStatus === 'awaiting_approval' && approvalType === 'file_edit' && approvalPayload) {
+            const p = approvalPayload
+            const path = (p.path as string) || ''
+            let title = `diff: ${path}`
+            if (path.startsWith('chapters/')) {
+              const num = path.replace('chapters/', '').replace('.md', '')
+              title = `diff: 第${parseInt(num)}章`
+            } else if (path === 'goink.md') {
+              title = 'diff: 故事状态'
+            } else if (path.startsWith('outlines/')) {
+              const num = path.replace('outlines/', '').replace('.md', '')
+              title = `diff: 第${parseInt(num)}章大纲`
+            }
+            onApprovalFileEditRef.current?.({
+              path,
+              title,
+              diff: '',
+              original: (p.original as string) || '',
+              modified: (p.modified as string) || '',
+              changeType: (p.change_type as string) || '',
+              reason: (p.reason as string) || '',
+              toolId: (event.tool_id as string) || '',
+            })
+          }
+
           return { ...turn, segments }
         }
 
@@ -649,9 +687,11 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
         if (r) { setSessions(r.items); setSessionsTotal(r.total) }
       }).catch(() => {})
     } catch (err) {
-      setTurns(prev => prev.map(t =>
-        t.id === turnId ? { ...t, status: 'failed' as const, errorMessage: String(err) } : t
-      ))
+      setTurns(prev => prev.map(t => {
+        if (t.id !== turnId) return t
+        if (t.status === 'stopped') return t
+        return { ...t, status: 'interrupted' as const, errorMessage: String(err) }
+      }))
     } finally {
       eventQueuesRef.current.forEach((queue, queuedTurnId) => {
         if (queue.flushTimer) clearTimeout(queue.flushTimer)
@@ -686,25 +726,11 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
   const showRecent = !hasActiveSession && !hasTurns && !isLoading
 
 
-  const handleApprovalApprove = useCallback(async (feedback: string) => {
-    if (!activeApproval) return
-    const toolId = activeApproval.toolId
-    setActiveApproval(null)
-    await onApprove(toolId, feedback)
-  }, [activeApproval, onApprove])
-
-  const handleApprovalReject = useCallback(async (feedback: string) => {
-    if (!activeApproval) return
-    const toolId = activeApproval.toolId
-    setActiveApproval(null)
-    await onReject(toolId, feedback)
-  }, [activeApproval, onReject])
-
   const inputPlaceholder = !hasNovel
     ? '请先选择作品'
     : !selectedKey
       ? '请先配置模型'
-      : '输入消息...'
+      : '输入消息，按 / 调用技能...'
 
   return (
     <aside className="shrink-0 flex flex-col bg-sidebar border-l relative" style={{ width }}>
@@ -802,6 +828,18 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
                             status={seg.toolStatus}
                             activityKind={seg.activityKind}
                             error={seg.error}
+                            approvalType={seg.approvalType}
+                            approvalPayload={seg.approvalPayload}
+                            onApprove={
+                              seg.toolStatus === 'awaiting_approval'
+                                ? (feedback: string) => onApprove(seg.toolId, feedback)
+                                : undefined
+                            }
+                            onReject={
+                              seg.toolStatus === 'awaiting_approval'
+                                ? (feedback: string) => onReject(seg.toolId, feedback)
+                                : undefined
+                            }
                           />
                         )
                       }
@@ -839,6 +877,20 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
                         </div>
                       </div>
                     )}
+                    {turn.status === 'interrupted' && (
+                      <div className="flex justify-center">
+                        <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-500 max-w-[80%]">
+                          对话被中断
+                        </div>
+                      </div>
+                    )}
+                    {turn.status === 'stopped' && (
+                      <div className="flex justify-center">
+                        <div className="bg-muted/50 border rounded-lg px-3 py-2 text-xs text-muted-foreground max-w-[80%]">
+                          对话已停止
+                        </div>
+                      </div>
+                    )}
                     {turn.status === 'streaming' && turn.segments.length === 0 && (
                       <div className="flex justify-start">
                         <div className="bg-muted rounded-lg rounded-bl-sm px-3 py-2">
@@ -860,11 +912,17 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
         disabled={!hasNovel || !selectedKey}
         isLoading={isLoading}
         placeholder={inputPlaceholder}
+        skills={skills}
         onSend={handleSend}
-        onStop={() => app.CancelChat(sessionId)}
-        approval={activeApproval}
-        onApprove={handleApprovalApprove}
-        onReject={handleApprovalReject}
+        onListSkills={loadSkills}
+        onStop={() => {
+          setTurns(prev => prev.map(t =>
+            t.status === 'streaming'
+              ? { ...t, status: 'stopped' as const }
+              : t
+          ))
+          app.CancelChat(sessionId)
+        }}
       />
 
       <div className="border-t mx-4" />
@@ -891,6 +949,19 @@ export default function ChatPanel({ novelId, onApprove, onReject }: Props) {
       <SettingsDialog
         open={showSettings}
         onClose={() => setShowSettings(false)}
+        onSaved={() => {
+          app.GetModels().then(list => {
+            if (list && list.length > 0) {
+              setModels(list)
+              if (!list.find(m => m.Key === selectedKey)) {
+                setSelectedKey(list[0].Key)
+                if (list[0].ReasoningLevels?.length) {
+                  setReasoningEffort(list[0].ReasoningLevels[0])
+                }
+              }
+            }
+          }).catch(() => {})
+        }}
         initialTab="model"
       />
     </aside>

@@ -21,7 +21,7 @@ type GetLocationsArgs struct {
 	LocationID   int64  `json:"location_id" jsonschema:"description=地点ID（detail模式必填）"                                                                    validate:"omitempty,min=1"`
 	LocationType string `json:"location_type" jsonschema:"description=按类型筛选（list模式可选）"`
 	Search       string `json:"search" jsonschema:"description=按名称搜索（list模式可选）"`
-	PageArgs             // 嵌入分页参数
+	PageArgs            // 嵌入分页参数
 }
 
 // GetLocationsTool 获取地点信息，支持三种模式。
@@ -204,10 +204,10 @@ func (t *GetLocationsTool) executeNetwork(ctx context.Context, tc ToolContext, s
 // CreateLocationItem 是 create_location 的单条参数。
 type CreateLocationItem struct {
 	Name             string `json:"name" jsonschema:"required,description=地点名称"             validate:"required"`
-	LocationType     string `json:"location_type" jsonschema:"description=地点类型，自由文本，如'森林''城市''洞穴'"`
+	LocationType     string `json:"location_type" jsonschema:"description=地点类型，自由文本，如'森林'、'城市'、'洞穴'"`
 	Description      string `json:"description" jsonschema:"description=环境氛围、特色等描述"`
-	DetailJSON       string `json:"detail_json" jsonschema:"description=JSON自由格式，结构化信息：气候、氛围、历史事件等"`
-	Tags             string `json:"tags" jsonschema:"description=JSON数组，自由标签，如[\"危险\",\"神秘\"]"`
+	DetailJSON       string `json:"detail_json" jsonschema:"description=字符串形式的JSON对象，结构化信息：气候、氛围、历史事件等"`
+	Tags             string `json:"tags" jsonschema:"description=字符串形式的JSON数组，自由标签，如[\"危险\"，\"神秘\"]"`
 	ParentLocationID *int64 `json:"parent_location_id" jsonschema:"description=父级地点ID，用于构建层级树"`
 }
 
@@ -270,8 +270,8 @@ type UpdateLocationArgs struct {
 	Name             string `json:"name" jsonschema:"description=新的名称"`
 	LocationType     string `json:"location_type" jsonschema:"description=新的类型"`
 	Description      string `json:"description" jsonschema:"description=新的描述"`
-	DetailJSON       string `json:"detail_json" jsonschema:"description=新的结构化信息JSON（完全替换旧的）"`
-	Tags             string `json:"tags" jsonschema:"description=新的标签JSON数组（完全替换旧的）"`
+	DetailJSON       string `json:"detail_json" jsonschema:"description=新的结构化信息，字符串形式JSON（完全替换旧的）"`
+	Tags             string `json:"tags" jsonschema:"description=新的标签，字符串形式JSON数组（完全替换旧的）"`
 	ParentLocationID *int64 `json:"parent_location_id" jsonschema:"description=新的父级地点ID（不传不变，传null变根节点）"`
 }
 
@@ -326,8 +326,8 @@ func (t *UpdateLocationTool) Execute(ctx context.Context, args any, tc ToolConte
 
 // CreateLocationRelationItem 是 create_location_relation 的单条参数。
 type CreateLocationRelationItem struct {
-	LocationA    int64  `json:"location_a" jsonschema:"required,description=地点A的ID"               validate:"required,min=1"`
-	LocationB    int64  `json:"location_b" jsonschema:"required,description=地点B的ID"               validate:"required,min=1"`
+	LocationA    int64  `json:"location_a_id" jsonschema:"required,description=地点A的ID"               validate:"required,min=1"`
+	LocationB    int64  `json:"location_b_id" jsonschema:"required,description=地点B的ID"               validate:"required,min=1"`
 	RelationType string `json:"relation_type" jsonschema:"required,description=空间关系描述，如'相邻''由山路连通'" validate:"required"`
 	Description  string `json:"description" jsonschema:"description=补充细节"`
 }

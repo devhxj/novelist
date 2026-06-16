@@ -102,8 +102,8 @@ func (t *SearchStoryMemoryTool) Execute(ctx context.Context, args any, tc ToolCo
 	var chapters []chapter.Chapter
 	if len(chapterNums) > 0 {
 		if err := tc.DB.WithContext(ctx).
-				Where("novel_id = ? AND chapter_number IN ?", tc.NovelID, chapterNums).
-				Find(&chapters).Error; err != nil {
+			Where("novel_id = ? AND chapter_number IN ?", tc.NovelID, chapterNums).
+			Find(&chapters).Error; err != nil {
 			return nil, fmt.Errorf("查询章节元数据失败: %w", err)
 		}
 	}

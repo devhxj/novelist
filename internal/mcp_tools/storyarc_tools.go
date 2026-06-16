@@ -256,7 +256,7 @@ func (t *UpdateStoryArcTool) Execute(ctx context.Context, args any, tc ToolConte
 
 // CreateArcNodeItem 是 create_arc_node 的单条参数。
 type CreateArcNodeItem struct {
-	StoryArcID    int64  `json:"story_arc_id" jsonschema:"required,description=所属弧线ID"                  validate:"required,min=1"`
+	StoryArcID    int64  `json:"arc_id" jsonschema:"required,description=所属弧线ID"                  validate:"required,min=1"`
 	Title         string `json:"title" jsonschema:"required,description=节点标题，如'发现仇人身份'"              validate:"required"`
 	Description   string `json:"description" jsonschema:"description=节点详情"`
 	TargetChapter int    `json:"target_chapter" jsonschema:"required,description=预计发生章节号（不准确不要紧）"       validate:"required,min=1"`

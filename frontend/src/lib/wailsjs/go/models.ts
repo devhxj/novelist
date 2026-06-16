@@ -83,6 +83,7 @@ export namespace app {
 	export class CreateNovelInput {
 	    title: string;
 	    description?: string;
+	    genre?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new CreateNovelInput(source);
@@ -92,6 +93,7 @@ export namespace app {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.title = source["title"];
 	        this.description = source["description"];
+	        this.genre = source["genre"];
 	    }
 	}
 	export class CreatePreferenceInput {
@@ -126,6 +128,18 @@ export namespace app {
 	        this.page = source["page"];
 	        this.size = source["size"];
 	        this.search = source["search"];
+	    }
+	}
+	export class ListSkillsInput {
+	    novel_id: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListSkillsInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
 	    }
 	}
 	export class PreferenceResult {
@@ -242,6 +256,40 @@ export namespace app {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.novel_id = source["novel_id"];
+	    }
+	}
+	export class TestConnectionInput {
+	    provider_name: string;
+	    chat_url: string;
+	    api_key: string;
+	    model_id: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TestConnectionInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider_name = source["provider_name"];
+	        this.chat_url = source["chat_url"];
+	        this.api_key = source["api_key"];
+	        this.model_id = source["model_id"];
+	    }
+	}
+	export class UpdateNovelInput {
+	    title?: string;
+	    description?: string;
+	    genre?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateNovelInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.genre = source["genre"];
 	    }
 	}
 	export class UpdatePreferenceInput {
@@ -441,6 +489,7 @@ export namespace llm {
 	    ModelName: string;
 	    ContextWindow: number;
 	    MaxOutputTokens: number;
+	    SupportsThinking: boolean;
 	    ReasoningLevels: string[];
 	    SupportsVision: boolean;
 	
@@ -455,6 +504,7 @@ export namespace llm {
 	        this.ModelName = source["ModelName"];
 	        this.ContextWindow = source["ContextWindow"];
 	        this.MaxOutputTokens = source["MaxOutputTokens"];
+	        this.SupportsThinking = source["SupportsThinking"];
 	        this.ReasoningLevels = source["ReasoningLevels"];
 	        this.SupportsVision = source["SupportsVision"];
 	    }
@@ -464,6 +514,7 @@ export namespace llm {
 	    name: string;
 	    context_window: number;
 	    max_output_tokens: number;
+	    supports_thinking: boolean;
 	    reasoning_levels?: string[];
 	    supports_vision: boolean;
 	
@@ -477,6 +528,7 @@ export namespace llm {
 	        this.name = source["name"];
 	        this.context_window = source["context_window"];
 	        this.max_output_tokens = source["max_output_tokens"];
+	        this.supports_thinking = source["supports_thinking"];
 	        this.reasoning_levels = source["reasoning_levels"];
 	        this.supports_vision = source["supports_vision"];
 	    }
@@ -486,6 +538,7 @@ export namespace llm {
 	    name: string;
 	    chat_url: string;
 	    api_key: string;
+	    temperature: number;
 	    source: string;
 	    builtin_models: ModelInfo[];
 	    custom_models: ModelInfo[];
@@ -500,6 +553,7 @@ export namespace llm {
 	        this.name = source["name"];
 	        this.chat_url = source["chat_url"];
 	        this.api_key = source["api_key"];
+	        this.temperature = source["temperature"];
 	        this.source = source["source"];
 	        this.builtin_models = this.convertValues(source["builtin_models"], ModelInfo);
 	        this.custom_models = this.convertValues(source["custom_models"], ModelInfo);
@@ -612,8 +666,8 @@ export namespace location {
 	export class LocationRelation {
 	    id: number;
 	    novel_id: number;
-	    location_a: number;
-	    location_b: number;
+	    location_a_id: number;
+	    location_b_id: number;
 	    relation_type: string;
 	    description: string;
 	    // Go type: time
@@ -629,8 +683,8 @@ export namespace location {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.novel_id = source["novel_id"];
-	        this.location_a = source["location_a"];
-	        this.location_b = source["location_b"];
+	        this.location_a_id = source["location_a_id"];
+	        this.location_b_id = source["location_b_id"];
 	        this.relation_type = source["relation_type"];
 	        this.description = source["description"];
 	        this.created_at = this.convertValues(source["created_at"], null);
@@ -665,7 +719,6 @@ export namespace novel {
 	    title: string;
 	    genre: string;
 	    description: string;
-	    dir_path: string;
 	    // Go type: time
 	    created_at: any;
 	    // Go type: time
@@ -681,7 +734,6 @@ export namespace novel {
 	        this.title = source["title"];
 	        this.genre = source["genre"];
 	        this.description = source["description"];
-	        this.dir_path = source["dir_path"];
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.updated_at = this.convertValues(source["updated_at"], null);
 	    }
@@ -862,6 +914,35 @@ export namespace session {
 
 }
 
+export namespace skill {
+	
+	export class SkillMeta {
+	    name: string;
+	    description: string;
+	    category: string;
+	    mode: string;
+	    author: string;
+	    version: number;
+	    source: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillMeta(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.category = source["category"];
+	        this.mode = source["mode"];
+	        this.author = source["author"];
+	        this.version = source["version"];
+	        this.source = source["source"];
+	    }
+	}
+
+}
+
 export namespace storage {
 	
 	export class PageResult_novel_app_SessionMeta_ {
@@ -1016,10 +1097,6 @@ export namespace timeline {
 	    novel_id: number;
 	    scope: string;
 	    content: string;
-	    // Go type: time
-	    created_at: any;
-	    // Go type: time
-	    updated_at: any;
 	
 	    static createFrom(source: any = {}) {
 	        return new ChapterPlan(source);
@@ -1030,27 +1107,7 @@ export namespace timeline {
 	        this.novel_id = source["novel_id"];
 	        this.scope = source["scope"];
 	        this.content = source["content"];
-	        this.created_at = this.convertValues(source["created_at"], null);
-	        this.updated_at = this.convertValues(source["updated_at"], null);
 	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class TimelineEntry {
 	    id: number;

@@ -19,46 +19,50 @@ import (
 	"novel/internal/llm"
 	"novel/internal/mcp_tools"
 	"novel/internal/session"
+	"novel/internal/skill"
+	"novel/internal/storage"
 )
 
 // Agent 是对话编排核心，持有运行所需的所有基础设施。
 type Agent struct {
-	llm      *llm.Client
-	registry *mcp_tools.Registry
-	session  *session.Store
-	db       *gorm.DB
-	approver approval.Approver
-	logger   *slog.Logger
-	cancels  map[string]context.CancelFunc // sessionID → cancel
-	mu       sync.Mutex
+	llm        *llm.Client
+	registry   *mcp_tools.Registry
+	session    *session.Store
+	db         *gorm.DB
+	approver   approval.Approver
+	logger     *slog.Logger
+	skillStore *skill.Store
+	cancels    map[string]context.CancelFunc // sessionID → cancel
+	mu         sync.Mutex
 }
 
 // RunOptions 是单次 Run() 的参数。
 type RunOptions struct {
-	TurnID           int
-	SessionID        string
-	NovelID          int64
-	Messages         []map[string]any
-	AllowedTools     map[string]bool
-	ActiveVersion    int
-	Model            *llm.ModelInfo
-	ProviderName     string
-	AgentType        string
-	SubTaskID        string // 子 Agent 事件路由 ID
-	EventSeq         *int   // 共享事件序号，nil 时自建（主Agent）；子Agent传入父的指针
-	MaxTurns int
+	TurnID        int
+	SessionID     string
+	NovelID       int64
+	Messages      []map[string]any
+	AllowedTools  map[string]bool
+	ActiveVersion int
+	Model         *llm.ModelInfo
+	ProviderName  string
+	AgentType     string
+	SubTaskID     string // 子 Agent 事件路由 ID
+	EventSeq      *int   // 共享事件序号，nil 时自建（主Agent）；子Agent传入父的指针
+	MaxTurns      int
 }
 
 // New 创建 Agent 实例。
-func New(llmClient *llm.Client, registry *mcp_tools.Registry, session *session.Store, db *gorm.DB, approver approval.Approver, logger *slog.Logger) *Agent {
+func New(llmClient *llm.Client, registry *mcp_tools.Registry, session *session.Store, db *gorm.DB, approver approval.Approver, logger *slog.Logger, skillStore *skill.Store) *Agent {
 	return &Agent{
-		llm:      llmClient,
-		registry: registry,
-		session:  session,
-		db:       db,
-		approver: approver,
-		logger:   logger,
-		cancels:  make(map[string]context.CancelFunc),
+		llm:        llmClient,
+		registry:   registry,
+		session:    session,
+		db:         db,
+		approver:   approver,
+		logger:     logger,
+		skillStore: skillStore,
+		cancels:    make(map[string]context.CancelFunc),
 	}
 }
 
@@ -135,6 +139,8 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 		return AgentLoopResult{}, errors.New("agent: Model is required in RunOptions")
 	}
 
+	ctx = storage.WithTurn(ctx, opts.SessionID, opts.TurnID)
+
 	loopCount := 0
 	fullResponse := ""
 	responseBuffer := ""
@@ -161,6 +167,8 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 		wails.EventsEmit(ctx, agentEventName, event)
 	}
 
+	interrupted := false
+
 	for loopCount < opts.MaxTurns {
 		toolOutputs := make([]toolOutput, 0)
 		pendingInjects := make(map[string][]mcp_tools.InjectMessage)
@@ -184,16 +192,9 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 		for {
 			select {
 			case <-ctx.Done():
-				// 中断时保存当前轮 partial
-				if responseBuffer != "" || thinkingBuffer != "" {
-					a.appendMsg("assistant", responseBuffer, thinkingBuffer,
-						nil, &opts, runningTokens)
-				}
-				partial := responseBuffer
-				if partial == "" {
-					partial = fullResponse
-				}
-				return AgentLoopResult{FinalText: partial, ThinkingContent: thinkingBuffer, TurnCount: loopCount}, ctx.Err()
+				interrupted = true
+				a.flushInterruptedTools(stream, &opts, &toolOutputs)
+				break streamLoop
 
 			case event, ok := <-stream:
 				if !ok {
@@ -259,9 +260,21 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						NovelID:  opts.NovelID,
 						ToolID:   id,
 						Approver: a.approver,
+						EmitApproval: func(toolID string, approvalType string, payload map[string]any) {
+							emit(AgentEvent{
+								TurnID: opts.TurnID, Type: EventToolCall,
+								ToolName: name, ToolID: toolID, Phase: "awaiting_approval",
+								Metadata: map[string]any{
+									"approval_type": approvalType,
+									"payload":       payload,
+								},
+								Timestamp: time.Now(),
+							})
+						},
 						RunSubAgent: func(ctx context.Context, req mcp_tools.SubAgentRequest) (string, error) {
 							return a.RunSubAgent(ctx, opts, req)
 						},
+						SkillStore: a.skillStore,
 					}
 					result := a.registry.Execute(ctx, name, rawArgs, tc, opts.AllowedTools)
 					a.logger.Info("tool executed", "tool", name, "success", result.Success, "phase", map[bool]string{true: "completed", false: "failed"}[result.Success])
@@ -352,6 +365,10 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 			}
 		}
 
+		if interrupted {
+			break
+		}
+
 		// 4. 死循环检测
 		patterns := append(recentPatterns, toolPattern(toolOutputs))
 		if len(patterns) > 6 {
@@ -373,6 +390,9 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 		loopCount++
 	}
 
+	if interrupted {
+		return AgentLoopResult{FinalText: fullResponse, ThinkingContent: thinkingBuffer, TurnCount: loopCount}, ctx.Err()
+	}
 	return AgentLoopResult{FinalText: fullResponse, ThinkingContent: thinkingBuffer, TurnCount: loopCount}, nil
 }
 

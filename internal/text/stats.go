@@ -10,13 +10,13 @@ var enWordRe = regexp.MustCompile(`[a-zA-Z]+(?:'[a-zA-Z]+)?`)
 
 // Stats 是文本的详细统计信息。
 type Stats struct {
-	ChineseChars    int `json:"chinese_chars"`
-	EnglishWords    int `json:"english_words"`
-	WordCount       int `json:"word_count"`        // 中文字符 + 英文单词
-	LineCount       int `json:"line_count"`
-	CharCountSpace  int `json:"char_count_space"`  // 计空格
+	ChineseChars     int `json:"chinese_chars"`
+	EnglishWords     int `json:"english_words"`
+	WordCount        int `json:"word_count"` // 中文字符 + 英文单词
+	LineCount        int `json:"line_count"`
+	CharCountSpace   int `json:"char_count_space"`   // 计空格
 	CharCountNoSpace int `json:"char_count_nospace"` // 不计空格
-	ParagraphCount  int `json:"paragraph_count"`
+	ParagraphCount   int `json:"paragraph_count"`
 }
 
 // ComputeStats 返回文本的详细统计。单次遍历处理字符分类。

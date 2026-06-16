@@ -1,0 +1,112 @@
+package llm
+
+// Builtin 内置 provider 模板。APIKey 留空，运行时由用户配置注入。
+var Builtin = map[string]Provider{
+	"deepseek": {
+		Name:        "DeepSeek",
+		ChatURL:     "https://api.deepseek.com/v1/chat/completions",
+		Temperature: floatPtr(0.7),
+		Models: []ModelInfo{
+			{
+				ID:               "deepseek-v4-flash",
+				Name:             "DeepSeek V4 Flash",
+				ContextWindow:    1_000_000,
+				MaxOutputTokens:  384_000,
+				SupportsThinking: true,
+				ReasoningLevels:  []string{"high", "max"},
+				SupportsVision:   false,
+			},
+			{
+				ID:               "deepseek-v4-pro",
+				Name:             "DeepSeek V4 Pro",
+				ContextWindow:    1_000_000,
+				MaxOutputTokens:  384_000,
+				SupportsThinking: true,
+				ReasoningLevels:  []string{"high", "max"},
+				SupportsVision:   false,
+			},
+		},
+		BuildRequest: nil,
+	},
+	"zhipu": {
+		Name:        "GLM",
+		ChatURL:     "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+		Temperature: floatPtr(1.0),
+		Models: []ModelInfo{
+			{
+				ID:               "glm-5.1",
+				Name:             "GLM-5.1",
+				ContextWindow:    200_000,
+				MaxOutputTokens:  128_000,
+				SupportsThinking: true,
+				SupportsVision:   false,
+			},
+			{
+				ID:               "glm-5",
+				Name:             "GLM-5",
+				ContextWindow:    200_000,
+				MaxOutputTokens:  128_000,
+				SupportsThinking: true,
+				SupportsVision:   false,
+			},
+			{
+				ID:               "glm-5-turbo",
+				Name:             "GLM-5-Turbo",
+				ContextWindow:    200_000,
+				MaxOutputTokens:  128_000,
+				SupportsThinking: true,
+				SupportsVision:   false,
+			},
+			{
+				ID:               "glm-4.7",
+				Name:             "GLM-4.7",
+				ContextWindow:    200_000,
+				MaxOutputTokens:  128_000,
+				SupportsThinking: true,
+				SupportsVision:   false,
+			},
+			{
+				ID:               "glm-4.7-flashx",
+				Name:             "GLM-4.7-FlashX",
+				ContextWindow:    200_000,
+				MaxOutputTokens:  128_000,
+				SupportsThinking: true,
+				SupportsVision:   false,
+			},
+			{
+				ID:               "glm-4.7-flash",
+				Name:             "GLM-4.7 Flash",
+				ContextWindow:    200_000,
+				MaxOutputTokens:  128_000,
+				SupportsThinking: true,
+				SupportsVision:   false,
+			},
+		},
+		BuildRequest: nil,
+	},
+	"mimo": {
+		Name:         "MiMo",
+		ChatURL:      "https://api.xiaomimimo.com/v1/chat/completions",
+		Temperature:  floatPtr(1.0),
+		BuildHeaders: mimoBuildHeaders,
+		Models: []ModelInfo{
+			{
+				ID:               "mimo-v2.5-pro",
+				Name:             "MiMo V2.5 Pro",
+				ContextWindow:    1_000_000,
+				MaxOutputTokens:  128_000,
+				SupportsThinking: true,
+				SupportsVision:   false,
+			},
+			{
+				ID:               "mimo-v2.5",
+				Name:             "MiMo V2.5",
+				ContextWindow:    1_000_000,
+				MaxOutputTokens:  128_000,
+				SupportsThinking: true,
+				SupportsVision:   false,
+			},
+		},
+		BuildRequest: nil,
+	},
+}

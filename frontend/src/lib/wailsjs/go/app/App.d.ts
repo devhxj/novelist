@@ -12,6 +12,7 @@ import {reader} from '../models';
 import {session} from '../models';
 import {storage} from '../models';
 import {config} from '../models';
+import {skill} from '../models';
 
 export function ApproveTool(arg1:string,arg2:boolean,arg3:string):Promise<void>;
 
@@ -26,6 +27,10 @@ export function CreateChapter(arg1:app.CreateChapterInput):Promise<chapter.Chapt
 export function CreateNovel(arg1:app.CreateNovelInput):Promise<novel.Novel>;
 
 export function CreatePreference(arg1:number,arg2:app.CreatePreferenceInput):Promise<novel.PreferenceItem>;
+
+export function DeleteCover(arg1:number):Promise<void>;
+
+export function DeleteNovel(arg1:number):Promise<void>;
 
 export function DeletePreference(arg1:number):Promise<void>;
 
@@ -77,7 +82,11 @@ export function Initialize(arg1:string):Promise<void>;
 
 export function IsInitialized():Promise<boolean>;
 
+export function ListSkills(arg1:app.ListSkillsInput):Promise<Array<skill.SkillMeta>>;
+
 export function SaveContent(arg1:app.SaveContentInput):Promise<void>;
+
+export function SaveCover(arg1:number,arg2:Array<number>):Promise<void>;
 
 export function SaveLLMConfig(arg1:llm.LLMConfigView):Promise<void>;
 
@@ -87,6 +96,10 @@ export function SetActiveNovel(arg1:app.SetActiveNovelInput):Promise<void>;
 
 export function SetApprovalMode(arg1:string):Promise<void>;
 
+export function TestConnection(arg1:app.TestConnectionInput):Promise<void>;
+
 export function UpdateDataDir(arg1:string):Promise<void>;
+
+export function UpdateNovel(arg1:number,arg2:app.UpdateNovelInput):Promise<novel.Novel>;
 
 export function UpdatePreference(arg1:number,arg2:app.UpdatePreferenceInput):Promise<novel.PreferenceItem>;

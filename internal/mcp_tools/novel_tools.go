@@ -24,8 +24,10 @@ type GetChapterListArgs struct {
 // GetChapterListTool 获取章节列表，按章节号降序。
 type GetChapterListTool struct{}
 
-func (t *GetChapterListTool) Name() string        { return "get_chapter_list" }
-func (t *GetChapterListTool) Description() string { return "获取小说的章节列表，支持分页。按章节号降序排列（最新的在前）。返回每章的 id、章节号、标题、字数、摘要。" }
+func (t *GetChapterListTool) Name() string { return "get_chapter_list" }
+func (t *GetChapterListTool) Description() string {
+	return "获取小说的章节列表，支持分页。按章节号降序排列（最新的在前）。返回每章的 id、章节号、标题、字数、摘要。"
+}
 func (t *GetChapterListTool) Category() ToolCategory { return CategoryNovelManagement }
 
 func (t *GetChapterListTool) JSONSchema() json.RawMessage {
@@ -33,7 +35,7 @@ func (t *GetChapterListTool) JSONSchema() json.RawMessage {
 }
 
 func (t *GetChapterListTool) ExposeToLLM() bool { return true }
-func (t *GetChapterListTool) NewArgs() any     { return &GetChapterListArgs{} }
+func (t *GetChapterListTool) NewArgs() any      { return &GetChapterListArgs{} }
 
 func (t *GetChapterListTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
 	a := args.(*GetChapterListArgs)
@@ -78,8 +80,10 @@ type GetPreferencesArgs struct{}
 // GetPreferencesTool 获取创作偏好，包括全局偏好和当前小说的专属偏好。
 type GetPreferencesTool struct{}
 
-func (t *GetPreferencesTool) Name() string        { return "get_preferences" }
-func (t *GetPreferencesTool) Description() string { return "获取所有创作偏好，包括全局偏好（所有小说生效）和当前小说的专属偏好。返回格式化文本，按全局→小说专属分组展示。当需要确认长期创作规则、风格约束、用户指令时调用。" }
+func (t *GetPreferencesTool) Name() string { return "get_preferences" }
+func (t *GetPreferencesTool) Description() string {
+	return "获取所有创作偏好，包括全局偏好（所有小说生效）和当前小说的专属偏好。返回格式化文本，按全局→小说专属分组展示。当需要确认长期创作规则、风格约束、用户指令时调用。"
+}
 func (t *GetPreferencesTool) Category() ToolCategory { return CategoryMemoryRetrieval }
 
 func (t *GetPreferencesTool) JSONSchema() json.RawMessage { return SchemaOf(GetPreferencesArgs{}) }

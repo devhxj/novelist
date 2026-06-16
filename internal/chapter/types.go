@@ -9,7 +9,7 @@ type Chapter struct {
 	NovelID       int64     `gorm:"column:novel_id;not null;uniqueIndex:uk_novel_chapter;index"           json:"novel_id"`
 	ChapterNumber int       `gorm:"column:chapter_number;not null;uniqueIndex:uk_novel_chapter"           json:"chapter_number"`
 	Title         string    `gorm:"column:title"                                                          json:"title"`
-	Summary       string    `gorm:"column:summary"                                                        json:"summary"`   // AI 生成的章节简介
+	Summary       string    `gorm:"column:summary"                                                        json:"summary"` // AI 生成的章节简介
 	WordCount     int       `gorm:"column:word_count;default:0"                                           json:"word_count"`
 	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime"                                      json:"created_at"`
 	UpdatedAt     time.Time `gorm:"column:updated_at;autoUpdateTime"                                      json:"updated_at"`

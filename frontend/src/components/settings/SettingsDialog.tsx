@@ -8,10 +8,11 @@ type Tab = 'general' | 'model'
 interface Props {
   open: boolean
   onClose: () => void
+  onSaved?: () => void
   initialTab?: Tab
 }
 
-export default function SettingsDialog({ open, onClose, initialTab = 'model' }: Props) {
+export default function SettingsDialog({ open, onClose, onSaved, initialTab = 'model' }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>(initialTab)
 
   if (!open) return null
@@ -58,7 +59,7 @@ export default function SettingsDialog({ open, onClose, initialTab = 'model' }: 
           </button>
 
           {activeTab === 'model' ? (
-            <ModelConfigTab />
+            <ModelConfigTab onSaved={onSaved} />
           ) : (
             <GeneralConfigTab />
           )}

@@ -321,7 +321,8 @@ func skipOperLog(db *gorm.DB) bool {
 		return true // Schema 不存在则无法判断表名，安全做法是跳过
 	}
 	t := db.Statement.Schema.Table
-	return t == "operation_log" || t == "messages" || t == "app_config" || t == "turn_commits"
+	return t == "operation_log" || t == "messages" || t == "app_config" || t == "turn_commits" ||
+		t == "sessions" || t == "novels"
 }
 
 // toJSON 将任意值序列化为 JSON 字符串。
@@ -383,6 +384,15 @@ func RollbackInTx(ctx context.Context, tx *gorm.DB, sessionID string, targetTurn
 		sessionID, targetTurn, lastTurn).
 		Delete(&OperationLogRecord{}).Error; err != nil {
 		return fmt.Errorf("oplog: cleanup operation_log: %w", err)
+	}
+
+	// 5. 将 active_version 回退到剩余消息的最大版本号
+	if err := tx.Exec(`
+		UPDATE sessions
+		SET active_version = (SELECT COALESCE(MAX(version), 1) FROM messages WHERE session_id = ? AND to_api = 1)
+		WHERE session_id = ?
+	`, sessionID, sessionID).Error; err != nil {
+		return fmt.Errorf("oplog: rollback active_version: %w", err)
 	}
 
 	return nil

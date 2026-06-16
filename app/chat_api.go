@@ -135,3 +135,21 @@ func (a *App) SaveLLMConfig(input llm.LLMConfigView) error {
 	a.logger.Info("LLM config saved and hot-reloaded")
 	return nil
 }
+
+// TestConnectionInput 是连通性测试的入参。
+type TestConnectionInput struct {
+	ProviderName string `json:"provider_name"`
+	ChatURL      string `json:"chat_url"`
+	APIKey       string `json:"api_key"`
+	ModelID      string `json:"model_id"`
+}
+
+// TestConnection 发送最小化请求验证 provider 连通性，返回 nil 表示成功。
+func (a *App) TestConnection(input TestConnectionInput) error {
+	return llm.TestConnection(a.ctx, llm.Builtin, llm.TestConnectionInput{
+		ProviderName: input.ProviderName,
+		ChatURL:      input.ChatURL,
+		APIKey:       input.APIKey,
+		ModelID:      input.ModelID,
+	})
+}

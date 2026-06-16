@@ -117,12 +117,12 @@ func BuildChapterChunks(params ChapterChunkParams, t *Tokenizer) []Chunk {
 	// summary chunk
 	if summary != "" {
 		chunks = append(chunks, Chunk{
-			ID:         fmt.Sprintf("%d_summary", params.ChapterNumber),
-			Content:    summary,
-			ChapterNumber:  params.ChapterNumber,
-			ChunkType:  "summary",
-			ChunkIndex: 0,
-			Metadata:   baseMeta,
+			ID:            fmt.Sprintf("%d_summary", params.ChapterNumber),
+			Content:       summary,
+			ChapterNumber: params.ChapterNumber,
+			ChunkType:     "summary",
+			ChunkIndex:    0,
+			Metadata:      baseMeta,
 		})
 	}
 
@@ -142,24 +142,24 @@ func BuildChapterChunks(params ChapterChunkParams, t *Tokenizer) []Chunk {
 	brief := strings.Join(briefParts, "\n")
 	if brief != "" {
 		chunks = append(chunks, Chunk{
-			ID:         fmt.Sprintf("%d_brief", params.ChapterNumber),
-			Content:    brief,
-			ChapterNumber:  params.ChapterNumber,
-			ChunkType:  "chapter_brief",
-			ChunkIndex: 0,
-			Metadata:   baseMeta,
+			ID:            fmt.Sprintf("%d_brief", params.ChapterNumber),
+			Content:       brief,
+			ChapterNumber: params.ChapterNumber,
+			ChunkType:     "chapter_brief",
+			ChunkIndex:    0,
+			Metadata:      baseMeta,
 		})
 	}
 
 	// content chunks
 	for i, chunk := range SplitText(content, DefaultChunkSize, DefaultOverlap, t) {
 		chunks = append(chunks, Chunk{
-			ID:         fmt.Sprintf("%d_%d", params.ChapterNumber, i),
-			Content:    chunk,
-			ChapterNumber:  params.ChapterNumber,
-			ChunkType:  "content",
-			ChunkIndex: i,
-			Metadata:   baseMeta,
+			ID:            fmt.Sprintf("%d_%d", params.ChapterNumber, i),
+			Content:       chunk,
+			ChapterNumber: params.ChapterNumber,
+			ChunkType:     "content",
+			ChunkIndex:    i,
+			Metadata:      baseMeta,
 		})
 	}
 

@@ -3,6 +3,7 @@ import NovelList from './NovelList'
 import ChapterList from './ChapterList'
 import CharacterList from '@/components/character/CharacterList'
 import LocationList from '@/components/location/LocationList'
+import SkillList from '@/components/skill/SkillList'
 
 interface Props {
   activePanel: string
@@ -19,6 +20,9 @@ interface Props {
   description: string
   setDescription: (v: string) => void
   onCreateNovel: () => void
+  activeSkillName: string | null
+  onSelectSkill: (path: string, title: string, readOnly: boolean) => void
+  onNewSkill: (name: string) => void
 }
 
 export default function SidePanel({
@@ -27,10 +31,18 @@ export default function SidePanel({
   onSelectChapter, onSelectGoink, target,
   showCreate, setShowCreate, title, setTitle, description, setDescription,
   onCreateNovel,
+  activeSkillName, onSelectSkill, onNewSkill,
 }: Props) {
   return (
     <aside className="w-56 border-r bg-sidebar flex flex-col shrink-0">
-      {activePanel === 'novels' ? (
+      {activePanel === 'skills' ? (
+        <SkillList
+          novelId={novelId}
+          activeSkillName={activeSkillName}
+          onSelectSkill={onSelectSkill}
+          onNewSkill={onNewSkill}
+        />
+      ) : activePanel === 'novels' ? (
         <NovelList
           novels={novels}
           novelId={novelId}

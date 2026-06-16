@@ -175,12 +175,12 @@ func (s *VectorStore) Search(ctx context.Context, novelID int64, query string, t
 			relevance = 0
 		}
 		results = append(results, SearchResult{
-			ChunkID:    chunkID,
-			Content:    content,
-			SourceType: chunkType,
-			ChapterNumber:   chapterNumber,
-			Distance:   distance,
-			Relevance:  relevance,
+			ChunkID:       chunkID,
+			Content:       content,
+			SourceType:    chunkType,
+			ChapterNumber: chapterNumber,
+			Distance:      distance,
+			Relevance:     relevance,
 		})
 	}
 

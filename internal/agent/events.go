@@ -18,21 +18,21 @@ const (
 // AgentEvent 是 loop 推送给前端的单次事件，对标 Python WebSocket push dict。
 // 仅包含前端展示所需字段，不引用任何内部类型。
 type AgentEvent struct {
-	TurnID       int            `json:"turn_id"`
-	SubTaskID    string         `json:"sub_task_id,omitempty"` // 子 Agent 事件路由 ID（对应 run_subagent 的 tool call ID）
-	Seq          int            `json:"seq,omitempty"`         // turn 内事件序号，前端用于纠正 dev 模式 WebSocket 乱序
-	Type         AgentEventType `json:"type"`
-	Data         string         `json:"data,omitempty"`          // thinking / content 文本 chunk
-	ToolName     string         `json:"tool_name,omitempty"`     // EventToolCall 时
-	ToolID       string         `json:"tool_id,omitempty"`       // EventToolCall 时
-	Phase        string         `json:"phase,omitempty"`         // "selected" | "executing" | "completed" | "failed" | "cancelled" | "loop_detected"
-	ToolArgs     map[string]any `json:"tool_args,omitempty"`     // 工具参数快照
-	Success      bool           `json:"success,omitempty"`       // 工具执行结果摘要
-	ErrMsg       string         `json:"error,omitempty"`         // 失败时的错误信息
-	DisplayText  string         `json:"display_text,omitempty"`  // buildDisplay 产出的展示文本
-	ActivityKind string         `json:"activity_kind,omitempty"` // 展示类别
-	Metadata     map[string]any `json:"metadata,omitempty"`      // buildDisplay 产出的附加信息（如 sub_agent_type）
-	Usage            map[string]any `json:"usage,omitempty"`              // token 用量详情（含 usage_ratio / detail）
+	TurnID           int            `json:"turn_id"`
+	SubTaskID        string         `json:"sub_task_id,omitempty"` // 子 Agent 事件路由 ID（对应 run_subagent 的 tool call ID）
+	Seq              int            `json:"seq,omitempty"`         // turn 内事件序号，前端用于纠正 dev 模式 WebSocket 乱序
+	Type             AgentEventType `json:"type"`
+	Data             string         `json:"data,omitempty"`              // thinking / content 文本 chunk
+	ToolName         string         `json:"tool_name,omitempty"`         // EventToolCall 时
+	ToolID           string         `json:"tool_id,omitempty"`           // EventToolCall 时
+	Phase            string         `json:"phase,omitempty"`             // "selected" | "executing" | "awaiting_approval" | "completed" | "failed" | "cancelled" | "loop_detected"
+	ToolArgs         map[string]any `json:"tool_args,omitempty"`         // 工具参数快照
+	Success          bool           `json:"success,omitempty"`           // 工具执行结果摘要
+	ErrMsg           string         `json:"error,omitempty"`             // 失败时的错误信息
+	DisplayText      string         `json:"display_text,omitempty"`      // buildDisplay 产出的展示文本
+	ActivityKind     string         `json:"activity_kind,omitempty"`     // 展示类别
+	Metadata         map[string]any `json:"metadata,omitempty"`          // buildDisplay 产出的附加信息（如 sub_agent_type）
+	Usage            map[string]any `json:"usage,omitempty"`             // token 用量详情（含 usage_ratio / detail）
 	CompressionPhase string         `json:"compression_phase,omitempty"` // "started" | "done"
 	Summary          string         `json:"summary,omitempty"`           // 压缩摘要文本
 	Timestamp        time.Time      `json:"timestamp"`                   // 事件生成时间

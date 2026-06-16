@@ -1,13 +1,16 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"novel/internal/chapter"
 	"novel/internal/git"
 	"novel/internal/rag"
+	"novel/internal/skill"
 	"novel/internal/text"
 )
 
@@ -19,7 +22,20 @@ type SaveContentInput struct {
 }
 
 // GetContent 返回小说仓库中指定路径的文件内容。文件不存在时返回空字符串。
+// 内置 skill 路径（builtin/skills/）从内存读取。
 func (a *App) GetContent(novelID int64, path string) (string, error) {
+	if strings.HasPrefix(path, "builtin/skills/") {
+		name := strings.TrimSuffix(strings.TrimPrefix(path, "builtin/skills/"), ".md")
+		if a.skill == nil {
+			return "", os.ErrNotExist
+		}
+		sk, ok := a.skill.Get(novelID, name)
+		if !ok {
+			return "", os.ErrNotExist
+		}
+		return sk.RawContent, nil
+	}
+
 	content, err := git.ReadFile(novelID, path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -34,6 +50,12 @@ var chPathRe = regexp.MustCompile(`^chapters/(\d{1,6})\.md$`)
 
 // SaveContent 保存小说仓库中指定路径的文件内容。
 func (a *App) SaveContent(input SaveContentInput) error {
+	if isSkillPath(input.Path) {
+		if _, err := skill.ParseBytes([]byte(input.Content), ""); err != nil {
+			return fmt.Errorf("skill 格式错误: %w", err)
+		}
+	}
+
 	if err := git.WriteFile(input.NovelID, input.Path, input.Content); err != nil {
 		return err
 	}
@@ -49,5 +71,10 @@ func (a *App) SaveContent(input SaveContentInput) error {
 			a.logger.Warn("更新字数失败", "novel_id", input.NovelID, "chapter", chapNum, "err", err)
 		}
 	}
+
 	return nil
+}
+
+func isSkillPath(p string) bool {
+	return strings.HasPrefix(p, "skills/") || strings.HasPrefix(p, "~/.goink/skills/")
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { llm } from '@/hooks/useApp'
@@ -7,7 +7,11 @@ import CustomProviderPane from './CustomProviderPane'
 
 type SubNav = 'builtin' | 'custom'
 
-export default function ModelConfigTab() {
+interface Props {
+  onSaved?: () => void
+}
+
+export default function ModelConfigTab({ onSaved }: Props) {
   const app = useApp()
   const [providers, setProviders] = useState<llm.ProviderView[]>([])
   const [subNav, setSubNav] = useState<SubNav>('builtin')
@@ -15,10 +19,21 @@ export default function ModelConfigTab() {
   const [isSaving, setIsSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
 
+  // 测试状态：{ providerKey: { ok, msg, apiKey } }
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; msg?: string; keySnapshot: string } | undefined>>({})
+  const [testing, setTesting] = useState<Record<string, boolean>>({})
+  // 保存过后的配置哈希，用于判断 key 是否被修改
+  const savedKeysRef = useRef<Record<string, string>>({})
+
   useEffect(() => {
     app.GetLLMConfig().then(config => {
       if (config?.providers) {
         setProviders(config.providers)
+        const keys: Record<string, string> = {}
+        for (const p of config.providers) {
+          if (p.api_key) keys[p.key] = p.api_key
+        }
+        savedKeysRef.current = keys
       }
     }).catch(() => {}).finally(() => setIsLoading(false))
   }, [])
@@ -28,6 +43,15 @@ export default function ModelConfigTab() {
 
   const handleUpdateProvider = useCallback((key: string, patch: Partial<llm.ProviderView>) => {
     setProviders(prev => prev.map(p => p.key === key ? { ...p, ...patch } as unknown as llm.ProviderView : p))
+    // key 变了就清除旧测试结果
+    if ('api_key' in patch) {
+      setTestResults(prev => {
+        if (prev[key]?.keySnapshot === patch.api_key) return prev
+        const next = { ...prev }
+        delete next[key]
+        return next
+      })
+    }
   }, [])
 
   const handleAddCustomProvider = useCallback((provider: llm.ProviderView) => {
@@ -54,28 +78,81 @@ export default function ModelConfigTab() {
     }))
   }, [])
 
+  // 测试连通性，返回错误消息或 null
+  const handleTest = useCallback(async (providerKey: string): Promise<string | null> => {
+    const provider = providers.find(p => p.key === providerKey)
+    if (!provider || !provider.api_key) return '未配置 API Key'
+
+    const models = provider.builtin_models?.length ? provider.builtin_models : provider.custom_models
+    const modelId = models?.[0]?.id
+    if (!modelId) return '没有可用模型'
+
+    setTesting(prev => ({ ...prev, [providerKey]: true }))
+    try {
+      await app.TestConnection({
+        provider_name: providerKey,
+        chat_url: provider.chat_url,
+        api_key: provider.api_key,
+        model_id: modelId,
+      })
+      setTestResults(prev => ({ ...prev, [providerKey]: { ok: true, keySnapshot: provider.api_key } }))
+      return null
+    } catch (err: any) {
+      const msg = String(err).replace(/^app: test connection: /, '')
+      setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, keySnapshot: provider.api_key } }))
+      return msg
+    } finally {
+      setTesting(prev => ({ ...prev, [providerKey]: false }))
+    }
+  }, [providers, app])
+
   const handleSave = useCallback(async () => {
-    // 检查有自定义模型但没配 key 的 provider
-    const missingKey = providers.filter(p => p.custom_models?.length > 0 && !p.api_key)
-    if (missingKey.length > 0) {
-      const names = missingKey.map(p => p.name).join('、')
-      setSaveMsg(`"${names}" 添加了自定义模型但未配置 API Key，将不会被保存`)
-      setTimeout(() => setSaveMsg(''), 4000)
+    // 收集有 key 的 provider
+    const withKey = providers.filter(p => p.api_key)
+    if (withKey.length === 0) {
+      setSaveMsg('请先配置至少一个服务商的 API Key')
+      setTimeout(() => setSaveMsg(''), 3000)
       return
+    }
+
+    // 找出需要测试的：从未测试过，或 key 跟上次测试/保存时不一致
+    const needTest = withKey.filter(p => {
+      const tr = testResults[p.key]
+      if (!tr || !tr.ok) return true // 从未测试或上次失败
+      if (tr.keySnapshot !== p.api_key) return true // key 变了
+      return false
+    })
+
+    if (needTest.length > 0) {
+      setSaveMsg('正在测试连通性...')
+      for (const p of needTest) {
+        const err = await handleTest(p.key)
+        if (err) {
+          setSaveMsg(`${p.name} 连通性测试失败: ${err}`)
+          setTimeout(() => setSaveMsg(''), 5000)
+          return
+        }
+      }
     }
 
     setIsSaving(true)
     setSaveMsg('')
     try {
       await app.SaveLLMConfig({ providers } as unknown as llm.LLMConfigView)
+      const keys: Record<string, string> = {}
+      for (const p of providers) {
+        if (p.api_key) keys[p.key] = p.api_key
+      }
+      savedKeysRef.current = keys
       setSaveMsg('配置已保存')
+      onSaved?.()
       setTimeout(() => setSaveMsg(''), 2000)
     } catch (err) {
       setSaveMsg(`保存失败: ${String(err)}`)
     } finally {
       setIsSaving(false)
     }
-  }, [providers, app])
+  }, [providers, app, testResults, handleTest])
 
   if (isLoading) {
     return (
@@ -119,6 +196,9 @@ export default function ModelConfigTab() {
             onUpdate={handleUpdateProvider}
             onAddCustomModel={handleAddCustomModel}
             onRemoveCustomModel={handleRemoveCustomModel}
+            onTest={handleTest}
+            testResults={testResults}
+            testing={testing}
           />
         ) : (
           <CustomProviderPane
@@ -128,6 +208,9 @@ export default function ModelConfigTab() {
             onRemove={handleRemoveCustomProvider}
             onAddCustomModel={handleAddCustomModel}
             onRemoveCustomModel={handleRemoveCustomModel}
+            onTest={handleTest}
+            testResults={testResults}
+            testing={testing}
           />
         )}
       </div>
@@ -135,7 +218,7 @@ export default function ModelConfigTab() {
       {/* 底部保存栏 */}
       <div className="flex items-center justify-end gap-3 pt-4 border-t mt-4">
         {saveMsg && (
-          <span className={`text-xs ${saveMsg.startsWith('保存失败') ? 'text-red-500' : 'text-emerald-600'}`}>
+          <span className={`text-xs ${saveMsg.includes('失败') || saveMsg.includes('测试') ? 'text-red-500' : 'text-emerald-600'}`}>
             {saveMsg}
           </span>
         )}

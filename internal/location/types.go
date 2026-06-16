@@ -36,20 +36,21 @@ import "time"
 //   - update_location_relation：(location_a, location_b) 联合唯一约束 UPSERT 无向空间边，旧值直接覆盖
 //
 // 图结构说明：
-//   地点系统形成两种边：
-//     - 包含树（Location.parent_location_id）：父→子层级，如 王宫→大殿→密室
-//     - 空间图（LocationRelation 表）：无向空间关系，如 迷雾森林—黑铁城堡 由山路连通
-//   get_locations(mode="detail", location_id=X) 返回子地点列表和连通关系列表，
-//   AI 可查询"当前地点周围有哪些地方"来辅助空间推理。
+//
+//	地点系统形成两种边：
+//	  - 包含树（Location.parent_location_id）：父→子层级，如 王宫→大殿→密室
+//	  - 空间图（LocationRelation 表）：无向空间关系，如 迷雾森林—黑铁城堡 由山路连通
+//	get_locations(mode="detail", location_id=X) 返回子地点列表和连通关系列表，
+//	AI 可查询"当前地点周围有哪些地方"来辅助空间推理。
 type Location struct {
 	ID               int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
 	NovelID          int64     `gorm:"column:novel_id;not null;index"    json:"novel_id"`
-	Name             string    `gorm:"column:name;not null;index"        json:"name"`          // 地点名称，如"迷雾森林""黑铁城堡"
-	LocationType     string    `gorm:"column:location_type;index"        json:"location_type"`  // 自由文本，LLM 自行填写，如"森林""洞穴""城市""战场"
-	Description      string    `gorm:"column:description"                json:"description"`    // 自然语言描述，环境氛围、特色等
-	DetailJSON       string    `gorm:"column:detail_json"                json:"detail_json"`    // JSON 自由格式，AI 填写结构化信息：气候、氛围、历史事件、常驻NPC 等
+	Name             string    `gorm:"column:name;not null;index"        json:"name"`               // 地点名称，如"迷雾森林""黑铁城堡"
+	LocationType     string    `gorm:"column:location_type;index"        json:"location_type"`      // 自由文本，LLM 自行填写，如"森林""洞穴""城市""战场"
+	Description      string    `gorm:"column:description"                json:"description"`        // 自然语言描述，环境氛围、特色等
+	DetailJSON       string    `gorm:"column:detail_json"                json:"detail_json"`        // JSON 自由格式，AI 填写结构化信息：气候、氛围、历史事件、常驻NPC 等
 	ParentLocationID *int64    `gorm:"column:parent_location_id;index"   json:"parent_location_id"` // 父级地点 ID，构建树形包含关系。NULL=根节点，自引用 FK
-	Tags             string    `gorm:"column:tags"                       json:"tags"`           // JSON 数组自由标签，如 ["危险","神秘","主角出生地"]
+	Tags             string    `gorm:"column:tags"                       json:"tags"`               // JSON 数组自由标签，如 ["危险","神秘","主角出生地"]
 	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime"  json:"created_at"`
 	UpdatedAt        time.Time `gorm:"column:updated_at;autoUpdateTime"  json:"updated_at"`
 }
@@ -78,10 +79,10 @@ func (Location) TableName() string { return "locations" }
 type LocationRelation struct {
 	ID           int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
 	NovelID      int64     `gorm:"column:novel_id;not null;index"              json:"novel_id"`
-	LocationA    int64     `gorm:"column:location_a;uniqueIndex:uk_location_pair;not null" json:"location_a"` // 总是较小 ID
-	LocationB    int64     `gorm:"column:location_b;uniqueIndex:uk_location_pair;not null" json:"location_b"` // 总是较大 ID
-	RelationType string    `gorm:"column:relation_type;not null"              json:"relation_type"`           // 自由文本："相邻""由山路连通""可望见"
-	Description  string    `gorm:"column:description"                          json:"description"`             // 补充细节
+	LocationA    int64     `gorm:"column:location_a;uniqueIndex:uk_location_pair;not null" json:"location_a_id"` // 总是较小 ID
+	LocationB    int64     `gorm:"column:location_b;uniqueIndex:uk_location_pair;not null" json:"location_b_id"` // 总是较大 ID
+	RelationType string    `gorm:"column:relation_type;not null"              json:"relation_type"`              // 自由文本："相邻""由山路连通""可望见"
+	Description  string    `gorm:"column:description"                          json:"description"`               // 补充细节
 	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime"            json:"created_at"`
 	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime"            json:"updated_at"`
 }

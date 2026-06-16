@@ -156,6 +156,9 @@ func (c *Client) buildPayload(
 	}
 
 	temperature := 0.7
+	if p.Temperature != nil {
+		temperature = *p.Temperature
+	}
 	maxTokens := 4096
 	if opts != nil && opts.Temperature != nil {
 		temperature = *opts.Temperature
@@ -179,9 +182,11 @@ func (c *Client) buildPayload(
 		thinkingEnabled = *opts.ThinkingEnabled
 	}
 
-	if thinkingEnabled && reasoningEffort != "" {
+	if thinkingEnabled {
 		payload["thinking"] = map[string]string{"type": "enabled"}
-		payload["reasoning_effort"] = reasoningEffort
+		if reasoningEffort != "" {
+			payload["reasoning_effort"] = reasoningEffort
+		}
 	}
 
 	// Provider 钩子改造

@@ -61,6 +61,17 @@ func LLMConfigPath() string {
 	return filepath.Join(dir, "llm_config.enc")
 }
 
+// UserSkillsDir 返回用户级 skill 目录 ~/.goink/skills/。
+func UserSkillsDir() string {
+	dir, _ := configDir()
+	return filepath.Join(dir, "skills")
+}
+
+// NovelSkillsDir 返回指定小说的 skill 目录。
+func NovelSkillsDir(novelID int64) string {
+	return filepath.Join(NovelDirPath(novelID), "skills")
+}
+
 // ModelsDir 返回 ONNX 模型目录路径。
 // 优先查安装包自带的 runtime/models/，找不到再 fallback 到用户数据目录。
 func ModelsDir() string {

@@ -9,6 +9,10 @@
   border-left: 3px solid oklch(0.62 0.19 250); /* blue */
   background: oklch(0.97 0.01 250);
 }
+.tool-card.awaiting-approval {
+  border-left: 3px solid oklch(0.7 0.15 80); /* amber */
+  background: oklch(0.98 0.02 85);
+}
 .tool-card.completed {
   border-left: 3px solid oklch(0.5 0.15 155); /* green */
   background: oklch(0.97 0.02 155);
@@ -20,12 +24,16 @@
 }
 
 .tool-card.compact {
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   max-width: none;
 }
 .tool-card.compact.executing {
   border-left-color: oklch(0.6 0.12 250);
   background: oklch(0.98 0.01 250);
+}
+.tool-card.compact.awaiting-approval {
+  border-left-color: oklch(0.65 0.12 80);
+  background: oklch(0.98 0.01 85);
 }
 .tool-card.compact.completed {
   border-left-color: oklch(0.45 0.08 155);
@@ -52,9 +60,10 @@
 .tool-icon {
   flex-shrink: 0;
 }
-.tool-card.executing .tool-icon { color: oklch(0.62 0.19 250); }
-.tool-card.completed .tool-icon { color: oklch(0.5 0.15 155); }
-.tool-card.failed     .tool-icon { color: oklch(0.58 0.22 27); }
+.tool-card.executing        .tool-icon { color: oklch(0.62 0.19 250); }
+.tool-card.awaiting-approval .tool-icon { color: oklch(0.7 0.15 80); }
+.tool-card.completed        .tool-icon { color: oklch(0.5 0.15 155); }
+.tool-card.failed           .tool-icon { color: oklch(0.58 0.22 27); }
 
 /* ── Label ── */
 .tool-label {
@@ -76,12 +85,16 @@
   gap: 0.2rem;
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
-  font-size: 0.6rem;
+  font-size: 0.65rem;
   font-weight: 500;
 }
 .tool-card.executing .tool-badge {
   color: oklch(0.62 0.19 250);
   background: oklch(0.94 0.04 250);
+}
+.tool-badge-approval {
+  color: oklch(0.6 0.12 70);
+  background: oklch(0.95 0.04 85);
 }
 .tool-badge-done {
   color: #389e0d;
@@ -95,10 +108,81 @@
 /* ── Error line ── */
 .tool-error {
   padding: 0.15rem 0.6rem 0.35rem;
-  color: oklch(0.58 0.22 27 / 0.7);
-  font-size: 0.6rem;
+  color: oklch(0.45 0.15 27);
+  font-size: 0.68rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   border-top: 1px solid oklch(0.58 0.22 27 / 0.1);
+}
+
+/* ── Approval body ── */
+.approval-body {
+  padding: 0.4rem 0.6rem 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: oklch(0.3 0 0);
+  border-top: 1px solid oklch(0.7 0.15 80 / 0.2);
+}
+
+.approval-summary {
+  font-weight: 600;
+}
+
+.approval-reason {
+  margin-top: 0.25rem;
+  color: oklch(0.35 0 0);
+  font-size: 0.75rem;
+}
+
+.approval-feedback {
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid oklch(0.8 0.02 0);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  outline: none;
+  resize: none;
+  background: white;
+}
+
+.approval-feedback:focus {
+  border-color: oklch(0.7 0.15 80);
+}
+
+.approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.approval-reject-btn,
+.approval-accept-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  border: none;
+  transition: background 0.15s ease;
+}
+
+.approval-reject-btn {
+  color: #dc2626;
+  background: #fef2f2;
+}
+.approval-reject-btn:hover {
+  background: #fee2e2;
+}
+
+.approval-accept-btn {
+  color: #16a34a;
+  background: #f0fdf4;
+}
+.approval-accept-btn:hover {
+  background: #dcfce7;
 }

@@ -152,3 +152,14 @@ body {
   }
 }
 
+/* Window drag: allow dragging by header, prevent drag on interactive elements */
+[data-wails-drag] {
+  -webkit-app-region: drag;
+}
+[data-wails-drag] button,
+[data-wails-drag] a,
+[data-wails-drag] input,
+[data-wails-drag] [style*="no-drag"] {
+  -webkit-app-region: no-drag;
+}
+

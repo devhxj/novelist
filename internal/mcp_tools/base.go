@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -12,6 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	"novel/internal/approval"
+	"novel/internal/skill"
 	"novel/internal/storage"
 )
 
@@ -43,13 +45,15 @@ type RunSubAgentFunc func(ctx context.Context, req SubAgentRequest) (report stri
 
 // ToolContext 是工具执行时注入的上下文。
 type ToolContext struct {
-	DB       *gorm.DB
-	NovelID  int64
-	ToolID   string
-	RawArgs  json.RawMessage   // 原始 JSON，update 工具用于 PATCH DB 实体
-	Approver approval.Approver // 审批能力，nil 表示工具无需审批
+	DB           *gorm.DB
+	NovelID      int64
+	ToolID       string
+	RawArgs      json.RawMessage                                                  // 原始 JSON，update 工具用于 PATCH DB 实体
+	Approver     approval.Approver                                                // 审批能力，nil 表示工具无需审批
+	EmitApproval func(toolID string, approvalType string, payload map[string]any) // 向 agent 事件流推送审批事件（EventToolCall, phase="awaiting_approval"）
 
 	RunSubAgent RunSubAgentFunc // 子 Agent 运行器，由 agent 包注入
+	SkillStore  *skill.Store    // 技能存储，read 工具用于读取内置 skill
 }
 
 // ── 结果 ──────────────────────────────────────────────
@@ -61,7 +65,7 @@ type ToolResult struct {
 	Error    string          `json:"error,omitempty"`
 	ErrKind  string          `json:"err_kind,omitempty"` // "" = 业务错误，"system" = 系统错误
 	Metadata map[string]any  `json:"metadata,omitempty"`
-	Inject    []InjectMessage `json:"inject,omitempty"`
+	Inject   []InjectMessage `json:"inject,omitempty"`
 }
 
 // InjectMessage 由工具返回，agent loop 会后追加到对话流。固定 to_api=true, to_frontend=false。
@@ -277,6 +281,7 @@ func PageMeta[T any](r *storage.PageResult[T]) map[string]any {
 		"size":        r.Size,
 		"total":       r.Total,
 		"total_pages": r.TotalPages,
+		"truncated":   r.Total > int64(r.Page*r.Size),
 	}
 }
 
@@ -290,11 +295,10 @@ var schemaReflector = &jsonschema.Reflector{
 }
 
 // SchemaOf 从带 jsonschema tag 的 struct 生成 OpenAI function calling 兼容的 JSON Schema。
-// 内部用 github.com/invopop/jsonschema 生成，然后白名单只取 type/properties/required。
+// 内部用 github.com/invopop/jsonschema 生成，取 type/properties/required 并将 $defs 内联到 $ref 位置。
 func SchemaOf(v any) json.RawMessage {
 	s := schemaReflector.Reflect(v)
 
-	// 先 marshal 再 unmarshal 为 map，只挑顶层三个 key
 	b, _ := json.Marshal(s)
 	var full map[string]any
 	json.Unmarshal(b, &full)
@@ -306,7 +310,40 @@ func SchemaOf(v any) json.RawMessage {
 	if req, ok := full["required"]; ok {
 		clean["required"] = req
 	}
+	if defs, ok := full["$defs"]; ok {
+		clean["$defs"] = defs
+	}
 
-	raw, _ := json.Marshal(clean)
+	resolved := inlineDefs(clean)
+	raw, _ := json.Marshal(resolved)
 	return raw
+}
+
+// inlineDefs 将 $defs 中的定义递归替换到 $ref 引用位置，消除跨节点跳转。
+func inlineDefs(schema map[string]any) map[string]any {
+	defs, _ := schema["$defs"].(map[string]any)
+	delete(schema, "$defs")
+	return resolveRefs(schema, defs).(map[string]any)
+}
+
+func resolveRefs(node any, defs map[string]any) any {
+	switch v := node.(type) {
+	case map[string]any:
+		if ref, ok := v["$ref"].(string); ok && defs != nil {
+			name := strings.TrimPrefix(ref, "#/$defs/")
+			if def, ok := defs[name].(map[string]any); ok {
+				return resolveRefs(def, defs)
+			}
+		}
+		for k, val := range v {
+			v[k] = resolveRefs(val, defs)
+		}
+		return v
+	case []any:
+		for i, val := range v {
+			v[i] = resolveRefs(val, defs)
+		}
+		return v
+	}
+	return node
 }

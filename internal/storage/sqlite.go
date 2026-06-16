@@ -32,9 +32,9 @@ func Open(dsn string, log *slog.Logger) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("storage: 获取 sql.DB 失败: %w", err)
 	}
-	sqlDB.SetMaxOpenConns(1)                    // SQLite 写串行，单连接最安全
-	sqlDB.SetMaxIdleConns(1)                    // 至少保留一个空闲连接
-	sqlDB.SetConnMaxLifetime(time.Hour)         // 连接最长存活 1 小时
+	sqlDB.SetMaxOpenConns(1)            // SQLite 写串行，单连接最安全
+	sqlDB.SetMaxIdleConns(1)            // 至少保留一个空闲连接
+	sqlDB.SetConnMaxLifetime(time.Hour) // 连接最长存活 1 小时
 
 	if err := enableWAL(sqlDB); err != nil {
 		return nil, fmt.Errorf("storage: 启用 WAL 失败: %w", err)

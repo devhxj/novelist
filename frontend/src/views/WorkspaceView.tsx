@@ -11,6 +11,9 @@ import ArcListView from '@/components/storyarc/ArcListView'
 import TimelineView from '@/components/timeline/TimelineView'
 import ReaderView from '@/components/reader/ReaderView'
 import PreferenceView from '@/components/preference/PreferenceView'
+import BookshelfView from '@/components/novel/BookshelfView'
+import NovelEditDialog from '@/components/novel/NovelEditDialog'
+import NovelDeleteDialog from '@/components/novel/NovelDeleteDialog'
 import ChatPanel from '@/components/chat/ChatPanel'
 import GitHubLink from '@/components/shell/GitHubLink'
 import SettingsDialog from '@/components/settings/SettingsDialog'
@@ -34,9 +37,15 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   const [showSettings, setShowSettings] = useState(false)
   const [tabTarget, setTabTarget] = useState<{ path: string; title: string } | null>(null)
   const [activeContent, setActiveContent] = useState('')
+  const [activeSkillName, setActiveSkillName] = useState<string | null>(null)
   const [isMaximised, setIsMaximised] = useState(false)
   const [platformOS, setPlatformOS] = useState('')
   const loadedRef = useRef(false)
+
+  // ── 书籍管理弹窗 ──────────────────────────────────────
+  const [editingNovel, setEditingNovel] = useState<novel.Novel | null>(null)
+  const [deletingNovel, setDeletingNovel] = useState<novel.Novel | null>(null)
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
 
   // ── 窗口状态 ────────────────────────────────────────────
 
@@ -81,6 +90,13 @@ export default function WorkspaceView({ initialNovelId }: Props) {
     contentRef.current?.handleDiffReject(toolId)
   }
 
+  function handleApprovalFileEdit(data: {
+    path: string; title: string; diff: string; original: string; modified: string
+    changeType: string; reason: string; toolId: string
+  }) {
+    contentRef.current?.openDiffTab(data)
+  }
+
   // ── 自动选择小说 ────────────────────────────────────────
 
   useEffect(() => {
@@ -117,6 +133,36 @@ export default function WorkspaceView({ initialNovelId }: Props) {
       setActivePanel('chapters')
       await app.SetActiveNovel({ novel_id: n.id })
     }
+  }
+
+  async function handleCreateNovelFromDialog(input: { title: string; description: string; genre: string }) {
+    const n = await app.CreateNovel({ title: input.title, description: input.description, genre: input.genre })
+    if (n) {
+      setShowCreateDialog(false)
+      await loadNovels()
+      setActiveNovelId(n.id)
+      setActivePanel('chapters')
+      await app.SetActiveNovel({ novel_id: n.id })
+    }
+  }
+
+  async function handleUpdateNovel(input: { title: string; description: string; genre: string }) {
+    if (!editingNovel) return
+    await app.UpdateNovel(editingNovel.id, input)
+    setEditingNovel(null)
+    await loadNovels()
+  }
+
+  async function handleDeleteNovel() {
+    if (!deletingNovel) return
+    await app.DeleteNovel(deletingNovel.id)
+    setDeletingNovel(null)
+    await loadNovels()
+  }
+
+  async function handleSaveCover(novelID: number, file: File) {
+    const buf = await file.arrayBuffer()
+    await app.SaveCover(novelID, Array.from(new Uint8Array(buf)))
   }
 
   const activeNovel = novels.find(n => n.id === activeNovelId)
@@ -189,9 +235,28 @@ export default function WorkspaceView({ initialNovelId }: Props) {
           description={description}
           setDescription={setDescription}
           onCreateNovel={handleCreateNovel}
+          activeSkillName={activeSkillName}
+          onSelectSkill={(path, title, readOnly) => {
+            setActiveSkillName(title)
+            contentRef.current?.openFile(path, title, readOnly)
+          }}
+          onNewSkill={(name) => {
+            setActiveSkillName(`技能: ${name}`)
+            contentRef.current?.openFile(`skills/${name}.md`, `技能: ${name}`)
+          }}
         />
 
-        {activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && (
+        {activePanel === 'novels' ? (
+          <BookshelfView
+            novels={novels}
+            activeNovelId={activeNovelId}
+            onSelectNovel={handleSelectNovel}
+            onEditNovel={setEditingNovel}
+            onDeleteNovel={setDeletingNovel}
+            onCreateNovel={() => setShowCreateDialog(true)}
+            onSaveCover={handleSaveCover}
+          />
+        ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && (
           <ContentPanel ref={contentRef} novelId={activeNovelId} onContentChange={setActiveContent} />
         )}
 
@@ -209,7 +274,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
           <PreferenceView novelId={activeNovelId} />
         ) : null}
 
-        <ChatPanel novelId={activeNovelId} onApprove={handleApprove} onReject={handleReject} />
+        <ChatPanel novelId={activeNovelId} onApprove={handleApprove} onReject={handleReject} onApprovalFileEdit={handleApprovalFileEdit} />
       </div>
 
       <StatusBar content={activeContent} />
@@ -218,6 +283,24 @@ export default function WorkspaceView({ initialNovelId }: Props) {
         open={showSettings}
         onClose={() => setShowSettings(false)}
         initialTab="general"
+      />
+
+      <NovelEditDialog
+        open={showCreateDialog}
+        onClose={() => setShowCreateDialog(false)}
+        onSave={handleCreateNovelFromDialog}
+      />
+      <NovelEditDialog
+        open={!!editingNovel}
+        novel={editingNovel}
+        onClose={() => setEditingNovel(null)}
+        onSave={handleUpdateNovel}
+      />
+      <NovelDeleteDialog
+        open={!!deletingNovel}
+        novelTitle={deletingNovel?.title ?? ''}
+        onClose={() => setDeletingNovel(null)}
+        onConfirm={handleDeleteNovel}
       />
     </div>
   )
