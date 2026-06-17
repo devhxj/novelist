@@ -17,7 +17,8 @@ import NovelDeleteDialog from '@/components/novel/NovelDeleteDialog'
 import ChatPanel from '@/components/chat/ChatPanel'
 import GitHubLink from '@/components/shell/GitHubLink'
 import SettingsDialog from '@/components/settings/SettingsDialog'
-import { Settings } from 'lucide-react'
+import ProfileView from '@/components/profile/ProfileView'
+import { Settings, User } from 'lucide-react'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised, Quit } from '@/lib/wailsjs/runtime/runtime'
 
 interface Props {
@@ -184,8 +185,15 @@ export default function WorkspaceView({ initialNovelId }: Props) {
         <div className="flex items-center h-full" style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}>
           <GitHubLink />
           <button
+            onClick={() => setActivePanel('profile')}
+            className={`text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center ml-2 ${activePanel === 'profile' ? 'text-foreground' : ''}`}
+            title="个人中心"
+          >
+            <User className="w-5 h-5" />
+          </button>
+          <button
             onClick={() => setShowSettings(true)}
-            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center ml-2 mr-1"
+            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center mr-1"
             title="设置"
           >
             <Settings className="w-5 h-5" />
@@ -256,7 +264,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
             onCreateNovel={() => setShowCreateDialog(true)}
             onSaveCover={handleSaveCover}
           />
-        ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && (
+        ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && activePanel !== 'profile' && (
           <ContentPanel ref={contentRef} novelId={activeNovelId} onContentChange={setActiveContent} />
         )}
 
@@ -272,9 +280,13 @@ export default function WorkspaceView({ initialNovelId }: Props) {
           <ReaderView novelId={activeNovelId} />
         ) : activePanel === 'preferences' ? (
           <PreferenceView novelId={activeNovelId} />
+        ) : activePanel === 'profile' ? (
+          <ProfileView />
         ) : null}
 
-        <ChatPanel novelId={activeNovelId} onApprove={handleApprove} onReject={handleReject} onApprovalFileEdit={handleApprovalFileEdit} />
+        {activePanel !== 'profile' && (
+          <ChatPanel novelId={activeNovelId} onApprove={handleApprove} onReject={handleReject} onApprovalFileEdit={handleApprovalFileEdit} />
+        )}
       </div>
 
       <StatusBar content={activeContent} />

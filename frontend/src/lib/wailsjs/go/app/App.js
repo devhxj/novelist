@@ -130,6 +130,14 @@ export function GetTimelineEntries(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetTimelineEntries'](arg1, arg2, arg3);
 }
 
+export function GetWritingActivity(arg1) {
+  return window['go']['app']['App']['GetWritingActivity'](arg1);
+}
+
+export function GetWritingStats() {
+  return window['go']['app']['App']['GetWritingStats']();
+}
+
 export function Initialize(arg1) {
   return window['go']['app']['App']['Initialize'](arg1);
 }

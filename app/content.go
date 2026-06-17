@@ -64,6 +64,24 @@ func (a *App) SaveContent(input SaveContentInput) error {
 		chapNum, _ := strconv.Atoi(m[1])
 		rag.SubmitRefresh(input.NovelID, chapNum, input.Content)
 		stats := text.ComputeStats(input.Content)
+
+		// 记录字数变化
+		var oldWC int
+		a.chapter.DB.WithContext(a.ctx).
+			Model(&chapter.Chapter{}).
+			Select("COALESCE(word_count, 0)").
+			Where("novel_id = ? AND chapter_number = ?", input.NovelID, chapNum).
+			Scan(&oldWC)
+		if delta := stats.WordCount - oldWC; delta != 0 && a.writing != nil {
+			var chapID int64
+			a.chapter.DB.WithContext(a.ctx).
+				Model(&chapter.Chapter{}).
+				Select("id").
+				Where("novel_id = ? AND chapter_number = ?", input.NovelID, chapNum).
+				Scan(&chapID)
+			a.writing.LogDelta(a.ctx, input.NovelID, chapID, delta)
+		}
+
 		if err := a.chapter.DB.WithContext(a.ctx).
 			Model(&chapter.Chapter{}).
 			Where("novel_id = ? AND chapter_number = ?", input.NovelID, chapNum).

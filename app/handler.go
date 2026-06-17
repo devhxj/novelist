@@ -27,6 +27,7 @@ import (
 	"novel/internal/storage"
 	"novel/internal/storyarc"
 	"novel/internal/timeline"
+	"novel/internal/writing"
 )
 
 // App 是 Wails 绑定的根对象。前端通过 window.go.main.App 调用其导出方法。
@@ -56,6 +57,7 @@ type App struct {
 	location   *location.Store
 	reader     *reader.Store
 	turnCommit *rollback.Store
+	writing    *writing.Store
 }
 
 // New 创建 App 实例。初始化在 OnStartup 中完成。
@@ -181,6 +183,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 	a.location = location.NewStore(db, a.logger)
 	a.reader = reader.NewStore(db, a.logger)
 	a.turnCommit = rollback.NewStore(db, a.logger)
+		a.writing = writing.NewStore(db, a.logger)
 	s, err := skill.NewStore(a.logger, config.UserSkillsDir())
 	if err != nil {
 		a.logger.Error("初始化 skill store 失败", "err", err)

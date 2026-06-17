@@ -12,6 +12,7 @@ import {reader} from '../models';
 import {session} from '../models';
 import {storage} from '../models';
 import {config} from '../models';
+import {writing} from '../models';
 import {skill} from '../models';
 
 export function ApproveTool(arg1:string,arg2:boolean,arg3:string):Promise<void>;
@@ -77,6 +78,10 @@ export function GetSettings():Promise<config.AppSettings>;
 export function GetStoryArcs(arg1:number):Promise<Array<storyarc.StoryArc>>;
 
 export function GetTimelineEntries(arg1:number,arg2:number,arg3:number):Promise<Array<timeline.TimelineEntry>>;
+
+export function GetWritingActivity(arg1:number):Promise<Array<writing.DailyActivity>>;
+
+export function GetWritingStats():Promise<writing.WritingStats>;
 
 export function Initialize(arg1:string):Promise<void>;
 

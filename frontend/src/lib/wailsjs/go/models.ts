@@ -1170,3 +1170,44 @@ export namespace timeline {
 
 }
 
+export namespace writing {
+	
+	export class DailyActivity {
+	    date: string;
+	    words: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DailyActivity(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.date = source["date"];
+	        this.words = source["words"];
+	    }
+	}
+	export class WritingStats {
+	    total_words: number;
+	    total_days_active: number;
+	    current_streak: number;
+	    longest_streak: number;
+	    total_novels: number;
+	    total_chapters: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new WritingStats(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.total_words = source["total_words"];
+	        this.total_days_active = source["total_days_active"];
+	        this.current_streak = source["current_streak"];
+	        this.longest_streak = source["longest_streak"];
+	        this.total_novels = source["total_novels"];
+	        this.total_chapters = source["total_chapters"];
+	    }
+	}
+
+}
+
