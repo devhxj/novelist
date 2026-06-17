@@ -151,7 +151,7 @@ func (s *VectorStore) Search(ctx context.Context, novelID int64, query string, t
 	}
 
 	querySQL := fmt.Sprintf(
-		`SELECT chunk_id, content, chunk_type, chapter_number, distance FROM %s WHERE embedding MATCH ?%s ORDER BY distance LIMIT ?`,
+		`SELECT chunk_id, content, chunk_type, chapter_number, distance, embedding FROM %s WHERE embedding MATCH ?%s ORDER BY distance LIMIT ?`,
 		tableName, whereSQL,
 	)
 	args = append(args, topK)
@@ -167,7 +167,8 @@ func (s *VectorStore) Search(ctx context.Context, novelID int64, query string, t
 		var chunkID, content, chunkType string
 		var chapterNumber int
 		var distance float64
-		if err := rows.Scan(&chunkID, &content, &chunkType, &chapterNumber, &distance); err != nil {
+		var embBlob []byte
+		if err := rows.Scan(&chunkID, &content, &chunkType, &chapterNumber, &distance, &embBlob); err != nil {
 			return nil, fmt.Errorf("rag: scan result: %w", err)
 		}
 		relevance := 1.0 - distance
@@ -181,6 +182,7 @@ func (s *VectorStore) Search(ctx context.Context, novelID int64, query string, t
 			ChapterNumber: chapterNumber,
 			Distance:      distance,
 			Relevance:     relevance,
+			Embedding:     deserializeFloat32(embBlob),
 		})
 	}
 

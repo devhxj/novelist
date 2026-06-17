@@ -28,6 +28,7 @@ type SearchResult struct {
 	ChapterNumber int
 	Distance      float64
 	Relevance     float64
+	Embedding     []float32 // 512维向量，用于MMR多样性计算
 }
 
 // SearchFilter 限定检索范围。
