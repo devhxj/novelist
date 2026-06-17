@@ -205,7 +205,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 	a.llmClient = llm.NewClient(providers, a.logger)
 
 	// 9. 初始化审批服务
-	a.approvals = approval.NewService(a.logger)
+	a.approvals = approval.NewService(a.logger, a.settings.ApprovalMode)
 
 	// 10. 异步初始化向量存储（不阻塞 UI）
 	go func() {

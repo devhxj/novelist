@@ -204,6 +204,7 @@ export namespace app {
 	}
 	export class SessionDetail {
 	    session_id: string;
+	    novel_id: number;
 	    title: string;
 	    model: string;
 	    reasoning_effort: string;
@@ -220,6 +221,7 @@ export namespace app {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.session_id = source["session_id"];
+	        this.novel_id = source["novel_id"];
 	        this.title = source["title"];
 	        this.model = source["model"];
 	        this.reasoning_effort = source["reasoning_effort"];
@@ -467,6 +469,11 @@ export namespace config {
 	export class AppSettings {
 	    ID: number;
 	    last_novel_id: number;
+	    selected_model_key: string;
+	    reasoning_effort: string;
+	    approval_mode: string;
+	    chat_panel_width: number;
+	    last_session_id: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
@@ -476,6 +483,11 @@ export namespace config {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
 	        this.last_novel_id = source["last_novel_id"];
+	        this.selected_model_key = source["selected_model_key"];
+	        this.reasoning_effort = source["reasoning_effort"];
+	        this.approval_mode = source["approval_mode"];
+	        this.chat_panel_width = source["chat_panel_width"];
+	        this.last_session_id = source["last_session_id"];
 	    }
 	}
 

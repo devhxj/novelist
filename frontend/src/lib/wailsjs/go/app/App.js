@@ -174,6 +174,22 @@ export function SetApprovalMode(arg1) {
   return window['go']['app']['App']['SetApprovalMode'](arg1);
 }
 
+export function SetChatPanelWidth(arg1) {
+  return window['go']['app']['App']['SetChatPanelWidth'](arg1);
+}
+
+export function SetLastSession(arg1) {
+  return window['go']['app']['App']['SetLastSession'](arg1);
+}
+
+export function SetReasoningEffort(arg1) {
+  return window['go']['app']['App']['SetReasoningEffort'](arg1);
+}
+
+export function SetSelectedModel(arg1, arg2) {
+  return window['go']['app']['App']['SetSelectedModel'](arg1, arg2);
+}
+
 export function TestConnection(arg1) {
   return window['go']['app']['App']['TestConnection'](arg1);
 }

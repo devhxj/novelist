@@ -13,6 +13,7 @@ import (
 
 	"novel/internal/agent"
 	"novel/internal/agentcfg"
+	"novel/internal/config"
 	"novel/internal/git"
 	"novel/internal/rollback"
 	"novel/internal/session"
@@ -304,9 +305,11 @@ func (a *App) ApproveTool(toolID string, approved bool, feedback string) error {
 	return a.approvals.Complete(toolID, approved, feedback)
 }
 
-// SetApprovalMode 前端调用，切换审批模式。"auto" 自动批准，"manual" 等待用户操作。
-func (a *App) SetApprovalMode(mode string) {
+// SetApprovalMode 前端调用，切换审批模式并持久化。"auto" 自动批准，"manual" 等待用户操作。
+func (a *App) SetApprovalMode(mode string) error {
 	a.approvals.SetMode(mode)
+	a.settings.ApprovalMode = mode
+	return config.SaveSettings(a.db, a.settings)
 }
 
 // CancelChat 前端调用，取消一个正在进行的对话。

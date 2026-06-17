@@ -75,17 +75,49 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
   const eventQueuesRef = useRef<Map<number, EventQueue>>(new Map())
   const onApprovalFileEditRef = useRef(onApprovalFileEdit)
   useEffect(() => { onApprovalFileEditRef.current = onApprovalFileEdit }, [onApprovalFileEdit])
+  const lastSessionIdRef = useRef('')
 
-  // 加载模型列表
+  // 加载模型列表并恢复持久化设置
   useEffect(() => {
-    app.GetModels().then(list => {
-      if (list && list.length > 0) {
-        setModels(list)
-        const first = list[0]
-        setSelectedKey(first.Key)
-        if (first.ReasoningLevels?.length) {
-          setReasoningEffort(first.ReasoningLevels[0])
+    Promise.all([
+      app.GetModels(),
+      app.GetSettings(),
+    ]).then(([modelList, settings]) => {
+      if (modelList && modelList.length > 0) {
+        setModels(modelList)
+
+        // 恢复模型选择（验证 key 仍存在）
+        let key = settings?.selected_model_key || ''
+        let model = modelList.find(m => m.Key === key)
+        if (!model) {
+          model = modelList[0]
+          key = model.Key
         }
+        setSelectedKey(key)
+
+        // 恢复推理程度（验证级别仍合法）
+        let effort = settings?.reasoning_effort || ''
+        if (!effort || !model.ReasoningLevels?.includes(effort)) {
+          effort = model.ReasoningLevels?.[0] || ''
+        }
+        setReasoningEffort(effort)
+      }
+
+      // 恢复审批模式
+      const mode = settings?.approval_mode
+      if (mode === 'manual' || mode === 'auto') {
+        setApprovalMode(mode)
+      }
+
+      // 恢复面板宽度
+      const w = settings?.chat_panel_width
+      if (w && w >= MIN_WIDTH && w <= MAX_WIDTH) {
+        setWidth(w)
+      }
+
+      // 暂存上次会话 ID，等 novelId 加载后恢复
+      if (settings?.last_session_id) {
+        lastSessionIdRef.current = settings.last_session_id
       }
     }).catch(() => {})
   }, [])
@@ -102,6 +134,19 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
         setSessionsTotal(r.total)
       }
     }).catch(() => {})
+
+    // 尝试恢复上次活跃会话（仅恢复一次，通过 ref 标记）
+    const sid = lastSessionIdRef.current
+    if (sid && novelId) {
+      lastSessionIdRef.current = ''
+      app.GetSession(sid).then(detail => {
+        if (detail && detail.novel_id === novelId) {
+          setActiveSessionId(sid)
+        }
+      }).catch(() => {
+        app.SetLastSession('').catch(() => {})
+      })
+    }
   }, [novelId])
 
   // 加载历史消息
@@ -130,14 +175,17 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
       const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidthRef.current - delta))
       setWidth(newWidth)
     }
-    const handleMouseUp = () => setIsDragging(false)
+    const handleMouseUp = () => {
+      setIsDragging(false)
+      app.SetChatPanelWidth(Math.round(width)).catch(() => {})
+    }
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
     return () => {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isDragging])
+  }, [isDragging, width, app])
 
   // 清理事件监听器
   useEffect(() => {
@@ -167,6 +215,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
 
   const handleSelectSession = useCallback((sid: string) => {
     setActiveSessionId(sid)
+    app.SetLastSession(sid).catch(() => {})
     app.GetSession(sid).then(detail => {
       if (detail?.usage) {
         setLastUsage(detail.usage as unknown as UsageInfo)
@@ -569,19 +618,23 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
   const handleSelectModel = useCallback((key: string) => {
     setSelectedKey(key)
     const m = models.find(x => x.Key === key)
+    let effort = ''
     if (m?.ReasoningLevels?.length) {
-      setReasoningEffort(m.ReasoningLevels[0])
+      effort = m.ReasoningLevels[0]
+      setReasoningEffort(effort)
     }
-  }, [models])
+    app.SetSelectedModel(key, effort).catch(() => {})
+  }, [models, app])
 
   const handleSelectEffort = useCallback((effort: string) => {
     setReasoningEffort(effort)
-  }, [])
+    app.SetReasoningEffort(effort).catch(() => {})
+  }, [app])
 
   const handleToggleApproval = useCallback(() => {
     const next = approvalMode === 'manual' ? 'auto' : 'manual'
     setApprovalMode(next)
-    app.SetApprovalMode(next)
+    app.SetApprovalMode(next).catch(() => {})
   }, [approvalMode, app])
 
   const handleCompress = useCallback(async () => {
@@ -660,6 +713,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
       if (data.session_id) {
         setSessionId(data.session_id)
         setActiveSessionId(data.session_id)
+        app.SetLastSession(data.session_id).catch(() => {})
       }
 
       // 更新 turn 的 turnId 为后端分配的真实值

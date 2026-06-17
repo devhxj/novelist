@@ -101,6 +101,14 @@ export function SetActiveNovel(arg1:app.SetActiveNovelInput):Promise<void>;
 
 export function SetApprovalMode(arg1:string):Promise<void>;
 
+export function SetChatPanelWidth(arg1:number):Promise<void>;
+
+export function SetLastSession(arg1:string):Promise<void>;
+
+export function SetReasoningEffort(arg1:string):Promise<void>;
+
+export function SetSelectedModel(arg1:string,arg2:string):Promise<void>;
+
 export function TestConnection(arg1:app.TestConnectionInput):Promise<void>;
 
 export function UpdateDataDir(arg1:string):Promise<void>;
