@@ -474,6 +474,7 @@ export namespace config {
 	    approval_mode: string;
 	    chat_panel_width: number;
 	    last_session_id: string;
+	    editor_tabs: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
@@ -488,6 +489,7 @@ export namespace config {
 	        this.approval_mode = source["approval_mode"];
 	        this.chat_panel_width = source["chat_panel_width"];
 	        this.last_session_id = source["last_session_id"];
+	        this.editor_tabs = source["editor_tabs"];
 	    }
 	}
 

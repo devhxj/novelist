@@ -178,6 +178,10 @@ export function SetChatPanelWidth(arg1) {
   return window['go']['app']['App']['SetChatPanelWidth'](arg1);
 }
 
+export function SetEditorTabs(arg1) {
+  return window['go']['app']['App']['SetEditorTabs'](arg1);
+}
+
 export function SetLastSession(arg1) {
   return window['go']['app']['App']['SetLastSession'](arg1);
 }

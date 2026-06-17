@@ -45,3 +45,9 @@ func (a *App) SetLastSession(sessionID string) error {
 	a.settings.LastSessionID = sessionID
 	return config.SaveSettings(a.db, a.settings)
 }
+
+// SetEditorTabs 保存编辑器标签页元数据（per-novel JSON）。
+func (a *App) SetEditorTabs(data string) error {
+	a.settings.EditorTabs = data
+	return config.SaveSettings(a.db, a.settings)
+}

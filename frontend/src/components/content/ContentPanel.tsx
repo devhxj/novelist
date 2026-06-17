@@ -36,7 +36,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     tabs, activeTab, activeTabId,
     openTab, closeTab, closeAllTabs, setActiveTabId,
     updateTab, openDiffTab,
-  } = useEditorTabs()
+  } = useEditorTabs(novelId)
 
   const [isLoading, setIsLoading] = useState(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)

@@ -103,6 +103,8 @@ export function SetApprovalMode(arg1:string):Promise<void>;
 
 export function SetChatPanelWidth(arg1:number):Promise<void>;
 
+export function SetEditorTabs(arg1:string):Promise<void>;
+
 export function SetLastSession(arg1:string):Promise<void>;
 
 export function SetReasoningEffort(arg1:string):Promise<void>;
