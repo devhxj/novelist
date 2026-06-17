@@ -32,6 +32,13 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   const [novels, setNovels] = useState<novel.Novel[]>([])
   const [activeNovelId, setActiveNovelId] = useState(initialNovelId)
   const [activePanel, setActivePanel] = useState(initialNovelId ? 'chapters' : 'novels')
+  const [sidebarPanel, setSidebarPanel] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<Array<{ type: string; id: number; title: string; subtitle: string; chapter_num: number; file_path: string; match_context: string; match_highlight: string; relevance: number; panel_id: string }>>([])
+  const [characterFocusId, setCharacterFocusId] = useState<number>(0)
+  const [locationFocusId, setLocationFocusId] = useState<number>(0)
+  const [timelineFocusId, setTimelineFocusId] = useState<number>(0)
+  const [arcFocusId, setArcFocusId] = useState<number>(0)
   const [showCreate, setShowCreate] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -112,6 +119,34 @@ export default function WorkspaceView({ initialNovelId }: Props) {
       setActivePanel('novels')
     }
   }, [novels, activeNovelId])
+
+  function handleActivitySelect(id: string) {
+    if (id === 'search') {
+      setSidebarPanel('search')
+    } else {
+      setSidebarPanel(null)
+      setActivePanel(id)
+    }
+  }
+
+  function handleSearchNavigateEntity(panelId: string, entityId: number) {
+    setCharacterFocusId(0)
+    setLocationFocusId(0)
+    setTimelineFocusId(0)
+    setArcFocusId(0)
+    switch (panelId) {
+      case 'characters': setCharacterFocusId(entityId); break
+      case 'locations': setLocationFocusId(entityId); break
+      case 'timeline': setTimelineFocusId(entityId); break
+      case 'storyarcs': setArcFocusId(entityId); break
+    }
+    setActivePanel(panelId)
+  }
+
+  function handleSearchNavigateChapter(filePath: string, title: string, _chapterNum: number) {
+    setActivePanel('chapters')
+    contentRef.current?.openFile(filePath, title)
+  }
 
   async function handleSelectNovel(n: novel.Novel) {
     setActiveNovelId(n.id)
@@ -226,10 +261,10 @@ export default function WorkspaceView({ initialNovelId }: Props) {
       </header>
 
       <div className="flex-1 flex min-h-0">
-        <ActivityBar activeId={activePanel} onSelect={setActivePanel} />
+        <ActivityBar activeId={sidebarPanel ?? activePanel} onSelect={handleActivitySelect} />
 
         <SidePanel
-          activePanel={activePanel}
+          activePanel={sidebarPanel ?? activePanel}
           novels={novels}
           novelId={activeNovelId}
           onSelectNovel={handleSelectNovel}
@@ -252,6 +287,11 @@ export default function WorkspaceView({ initialNovelId }: Props) {
             setActiveSkillName(`技能: ${name}`)
             contentRef.current?.openFile(`skills/${name}.md`, `技能: ${name}`)
           }}
+          onSearchNavigateEntity={handleSearchNavigateEntity}
+          onSearchNavigateChapter={handleSearchNavigateChapter}
+          searchQuery={searchQuery}
+          searchResults={searchResults}
+          onSearchChange={(q, r) => { setSearchQuery(q); setSearchResults(r) }}
         />
 
         {activePanel === 'novels' ? (
@@ -269,13 +309,13 @@ export default function WorkspaceView({ initialNovelId }: Props) {
         )}
 
         {activePanel === 'characters' ? (
-          <CharacterGraph novelId={activeNovelId} />
+          <CharacterGraph novelId={activeNovelId} focusId={characterFocusId} />
         ) : activePanel === 'locations' ? (
-          <LocationGraph novelId={activeNovelId} />
+          <LocationGraph novelId={activeNovelId} focusId={locationFocusId} />
         ) : activePanel === 'storyarcs' ? (
-          <ArcListView novelId={activeNovelId} />
+          <ArcListView novelId={activeNovelId} focusArcId={arcFocusId} />
         ) : activePanel === 'timeline' ? (
-          <TimelineView novelId={activeNovelId} />
+          <TimelineView novelId={activeNovelId} focusEntryId={timelineFocusId} />
         ) : activePanel === 'reader' ? (
           <ReaderView novelId={activeNovelId} />
         ) : activePanel === 'preferences' ? (

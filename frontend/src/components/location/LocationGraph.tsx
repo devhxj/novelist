@@ -6,6 +6,7 @@ import type { location } from '@/hooks/useApp'
 
 interface Props {
   novelId: number
+  focusId?: number
 }
 
 const NODE_COLOR = { fill: '#dbeafe', stroke: '#3b82f6', text: '#1d4ed8' }
@@ -31,7 +32,7 @@ function buildTreeData(locs: location.Location[]) {
   return { id: '__root__', data: { name: '', type: '' }, children: roots }
 }
 
-export default function LocationGraph({ novelId }: Props) {
+export default function LocationGraph({ novelId, focusId }: Props) {
   const app = useApp()
   const containerRef = useRef<HTMLDivElement>(null)
   const graphRef = useRef<Graph | null>(null)
@@ -62,6 +63,13 @@ export default function LocationGraph({ novelId }: Props) {
   }, [app, novelId])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (focusId && focusId > 0 && locations.length > 0) {
+      const loc = locations.find(l => l.id === focusId)
+      if (loc) setSelectedLocation(loc)
+    }
+  }, [focusId, locations])
 
   const graphData = useMemo(() => {
     const locIds = new Set(locations.map(l => l.id))

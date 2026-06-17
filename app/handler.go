@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync/atomic"
 
 	"gorm.io/gorm"
 
@@ -22,6 +23,7 @@ import (
 	"novel/internal/rag"
 	"novel/internal/reader"
 	"novel/internal/rollback"
+	"novel/internal/search"
 	"novel/internal/session"
 	"novel/internal/skill"
 	"novel/internal/storage"
@@ -41,11 +43,12 @@ type App struct {
 	settings *config.AppSettings
 	db       *gorm.DB
 
-	llmClient   *llm.Client
-	agent       *agent.Agent
-	registry    *mcp_tools.Registry
-	approvals   *approval.Service
-	vectorStore *rag.VectorStore
+	llmClient     *llm.Client
+	agent         *agent.Agent
+	registry      *mcp_tools.Registry
+	approvals     *approval.Service
+	vectorStore   *rag.VectorStore
+	searchService atomic.Pointer[search.Service]
 
 	novel      *novel.Store
 	chapter    *chapter.Store
@@ -183,7 +186,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 	a.location = location.NewStore(db, a.logger)
 	a.reader = reader.NewStore(db, a.logger)
 	a.turnCommit = rollback.NewStore(db, a.logger)
-		a.writing = writing.NewStore(db, a.logger)
+	a.writing = writing.NewStore(db, a.logger)
 	s, err := skill.NewStore(a.logger, config.UserSkillsDir())
 	if err != nil {
 		a.logger.Error("初始化 skill store 失败", "err", err)
@@ -207,9 +210,16 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 	// 9. 初始化审批服务
 	a.approvals = approval.NewService(a.logger, a.settings.ApprovalMode)
 
-	// 10. 异步初始化向量存储（不阻塞 UI）
+	// 10. 创建 Agent 实例（全局复用）
+	a.agent = agent.New(a.llmClient, a.registry, a.session, a.db, a.approvals, a.logger, a.skill)
+
+	// 11. 异步初始化向量存储和搜索服务（不阻塞 UI）
 	go func() {
 		emb, err := rag.GetEmbedder()
+		svc := search.NewService(a.logger, a.character, a.location,
+			a.timeline, a.storyarc, a.chapter, nil)
+		a.searchService.Store(svc)
+		a.agent.SetSearchService(svc)
 		if err != nil {
 			a.logger.Error("获取 Embedder 失败，向量检索不可用", "err", err)
 			return
@@ -223,6 +233,12 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 		a.vectorStore = rag.GetVectorStore()
 		a.logger.Info("向量存储初始化完成")
 
+		// 初始化搜索服务
+		svc = search.NewService(a.logger, a.character, a.location,
+			a.timeline, a.storyarc, a.chapter, a.vectorStore)
+		a.searchService.Store(svc)
+		a.agent.SetSearchService(svc)
+
 		// 初始化刷新队列并启动
 		rag.InitRefreshQueue(a.vectorStore, a.chapter, a.novel, a.logger)
 		rag.GetRefreshQueue().Start()
@@ -233,9 +249,6 @@ func (a *App) initWithConfig(cfg *config.AppConfig) {
 			a.logger.Error("全量向量索引失败", "err", err)
 		}
 	}()
-
-	// 11. 创建 Agent 实例（全局复用）
-	a.agent = agent.New(a.llmClient, a.registry, a.session, a.db, a.approvals, a.logger, a.skill)
 
 	a.cfg = cfg
 	a.logger.Info("应用初始化完成", "data_dir", config.DataDirPath())

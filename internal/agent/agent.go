@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	wails "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -18,6 +19,7 @@ import (
 	"novel/internal/approval"
 	"novel/internal/llm"
 	"novel/internal/mcp_tools"
+	"novel/internal/search"
 	"novel/internal/session"
 	"novel/internal/skill"
 	"novel/internal/storage"
@@ -31,8 +33,9 @@ type Agent struct {
 	db         *gorm.DB
 	approver   approval.Approver
 	logger     *slog.Logger
-	skillStore *skill.Store
-	cancels    map[string]context.CancelFunc // sessionID → cancel
+	skillStore    *skill.Store
+	searchService atomic.Pointer[search.Service]
+	cancels       map[string]context.CancelFunc // sessionID → cancel
 	mu         sync.Mutex
 }
 
@@ -65,6 +68,9 @@ func New(llmClient *llm.Client, registry *mcp_tools.Registry, session *session.S
 		cancels:    make(map[string]context.CancelFunc),
 	}
 }
+
+// SetSearchService 设置搜索服务，在搜索服务初始化完成后由 App 调用。
+func (a *Agent) SetSearchService(s *search.Service) { a.searchService.Store(s) }
 
 // RegisterCancel 注册一个可取消的对话。
 func (a *Agent) RegisterCancel(sessionID string, cancel context.CancelFunc) {
@@ -275,6 +281,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 							return a.RunSubAgent(ctx, opts, req)
 						},
 						SkillStore: a.skillStore,
+						SearchService: a.searchService.Load(),
 					}
 					result := a.registry.Execute(ctx, name, rawArgs, tc, opts.AllowedTools)
 					a.logger.Info("tool executed", "tool", name, "success", result.Success, "phase", map[bool]string{true: "completed", false: "failed"}[result.Success])

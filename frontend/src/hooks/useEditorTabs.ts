@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { useApp } from '@/hooks/useApp'
 import type { EditorTab } from '@/components/content/types'
 
 let idSeq = 0
@@ -8,41 +7,42 @@ function nextId(prefix: string) { return `${prefix}_${++idSeq}` }
 type TabMeta = Pick<EditorTab, 'path' | 'title' | 'type' | 'viewMode'>
 
 export function useEditorTabs(novelId: number) {
-  const app = useApp()
   const [tabs, setTabs] = useState<EditorTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const prevNovelIdRef = useRef(novelId)
-  const allTabsRef = useRef<Record<string, TabMeta[]>>({})
+  const allMetasRef = useRef<Record<string, TabMeta[]>>({})
   const initRef = useRef(false)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const activeTabIdRef = useRef(activeTabId)
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
 
-  const persist = useCallback((data: Record<string, TabMeta[]>) => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
-      app.SetEditorTabs(JSON.stringify(data)).catch(() => {})
-    }, 300)
-  }, [app])
-
-  // 启动加载
+  // 启动加载：从 localStorage 恢复
   useEffect(() => {
-    app.GetSettings().then(s => {
-      if (s?.editor_tabs) {
-        try { allTabsRef.current = JSON.parse(s.editor_tabs) } catch {}
-      }
-      const key = String(novelId)
-      const saved = allTabsRef.current[key]
-      if (saved?.length) {
-        const restored: EditorTab[] = saved.map(t => ({
-          ...t,
-          id: nextId(t.type === 'diff' ? 'diff' : 'file'),
-        }))
-        setTabs(restored)
-        setActiveTabId(restored[0].id)
-      }
-      initRef.current = true
-    }).catch(() => { initRef.current = true })
+    try {
+      const raw = localStorage.getItem('goink_tabs_all')
+      if (raw) allMetasRef.current = JSON.parse(raw)
+    } catch {}
+    const key = String(novelId)
+    const saved = allMetasRef.current[key]
+    if (saved?.length) {
+      const restored: EditorTab[] = saved.map(t => ({
+        ...t,
+        id: nextId(t.type === 'diff' ? 'diff' : 'file'),
+      }))
+      setTabs(restored)
+      setActiveTabId(restored[0].id)
+    }
+    initRef.current = true
+  }, [])
+
+  // beforeunload 时保存到 localStorage
+  useEffect(() => {
+    function save() {
+      try {
+        localStorage.setItem('goink_tabs_all', JSON.stringify(allMetasRef.current))
+      } catch {}
+    }
+    window.addEventListener('beforeunload', save)
+    return () => window.removeEventListener('beforeunload', save)
   }, [])
 
   // novelId 变化：切换标签集
@@ -53,7 +53,7 @@ export function useEditorTabs(novelId: number) {
     if (oldKey === newKey) return
 
     prevNovelIdRef.current = novelId
-    const saved = allTabsRef.current[newKey]
+    const saved = allMetasRef.current[newKey]
     if (saved?.length) {
       const restored: EditorTab[] = saved.map(t => ({
         ...t,
@@ -67,18 +67,17 @@ export function useEditorTabs(novelId: number) {
     }
   }, [novelId])
 
-  // tabs 变化时自动保存
+  // tabs 变化时更新内存缓存（不立即写磁盘，beforeunload 时统一写）
   useEffect(() => {
     if (!initRef.current) return
     const key = String(prevNovelIdRef.current)
     const metas: TabMeta[] = tabs.map(t => ({ path: t.path, title: t.title, type: t.type, viewMode: t.viewMode }))
     if (metas.length > 0) {
-      allTabsRef.current[key] = metas
+      allMetasRef.current[key] = metas
     } else {
-      delete allTabsRef.current[key]
+      delete allMetasRef.current[key]
     }
-    persist(allTabsRef.current)
-  }, [tabs, persist])
+  }, [tabs])
 
   const activeTab = tabs.find(t => t.id === activeTabId) ?? null
 
@@ -131,7 +130,6 @@ export function useEditorTabs(novelId: number) {
     tabs, activeTab, activeTabId,
     openTab, closeTab, closeAllTabs, setActiveTabId,
     updateTab, openDiffTab,
+    initRef,
   }
 }
-
-export type { EditorTab }

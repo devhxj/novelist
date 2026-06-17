@@ -14,6 +14,7 @@ import {storage} from '../models';
 import {config} from '../models';
 import {writing} from '../models';
 import {skill} from '../models';
+import {search} from '../models';
 
 export function ApproveTool(arg1:string,arg2:boolean,arg3:string):Promise<void>;
 
@@ -97,13 +98,13 @@ export function SaveLLMConfig(arg1:llm.LLMConfigView):Promise<void>;
 
 export function SaveSettings(arg1:app.SaveSettingsInput):Promise<void>;
 
+export function SearchAll(arg1:number,arg2:string):Promise<Array<search.Result>>;
+
 export function SetActiveNovel(arg1:app.SetActiveNovelInput):Promise<void>;
 
 export function SetApprovalMode(arg1:string):Promise<void>;
 
 export function SetChatPanelWidth(arg1:number):Promise<void>;
-
-export function SetEditorTabs(arg1:string):Promise<void>;
 
 export function SetLastSession(arg1:string):Promise<void>;
 

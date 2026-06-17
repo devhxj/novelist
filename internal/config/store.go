@@ -16,7 +16,6 @@ type AppSettings struct {
 	ApprovalMode     string `gorm:"column:approval_mode;default:manual"   json:"approval_mode"`
 	ChatPanelWidth   int    `gorm:"column:chat_panel_width;default:360"   json:"chat_panel_width"`
 	LastSessionID    string `gorm:"column:last_session_id;default:''"     json:"last_session_id"`
-	EditorTabs       string `gorm:"column:editor_tabs;default:''"          json:"editor_tabs"`
 }
 
 func (AppSettings) TableName() string { return "app_config" }

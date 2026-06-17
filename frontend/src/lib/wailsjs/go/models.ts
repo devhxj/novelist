@@ -474,7 +474,6 @@ export namespace config {
 	    approval_mode: string;
 	    chat_panel_width: number;
 	    last_session_id: string;
-	    editor_tabs: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
@@ -489,7 +488,6 @@ export namespace config {
 	        this.approval_mode = source["approval_mode"];
 	        this.chat_panel_width = source["chat_panel_width"];
 	        this.last_session_id = source["last_session_id"];
-	        this.editor_tabs = source["editor_tabs"];
 	    }
 	}
 
@@ -860,6 +858,41 @@ export namespace reader {
 		    }
 		    return a;
 		}
+	}
+
+}
+
+export namespace search {
+	
+	export class Result {
+	    type: string;
+	    id: number;
+	    title: string;
+	    subtitle: string;
+	    chapter_num: number;
+	    file_path: string;
+	    match_context: string;
+	    match_highlight: string;
+	    relevance: number;
+	    panel_id: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Result(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.subtitle = source["subtitle"];
+	        this.chapter_num = source["chapter_num"];
+	        this.file_path = source["file_path"];
+	        this.match_context = source["match_context"];
+	        this.match_highlight = source["match_highlight"];
+	        this.relevance = source["relevance"];
+	        this.panel_id = source["panel_id"];
+	    }
 	}
 
 }

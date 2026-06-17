@@ -4,7 +4,7 @@ import { useApp } from '@/hooks/useApp'
 import type { storyarc } from '@/hooks/useApp'
 import StoryArcGraph from '@/components/storyarc/StoryArcGraph'
 
-interface Props { novelId: number }
+interface Props { novelId: number; focusArcId?: number }
 
 type ViewTab = 'list' | 'swimlane'
 
@@ -28,7 +28,7 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'abandoned', label: '已废弃' },
 ]
 
-export default function ArcListView({ novelId }: Props) {
+export default function ArcListView({ novelId, focusArcId }: Props) {
   const app = useApp()
 
   const [arcs, setArcs] = useState<storyarc.StoryArc[]>([])
@@ -62,6 +62,17 @@ export default function ArcListView({ novelId }: Props) {
   }, [app, novelId])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (focusArcId && focusArcId > 0 && allNodes.length > 0) {
+      const arcNodes = allNodes.filter(n => n.story_arc_id === focusArcId)
+      if (arcNodes.length > 0) {
+        const firstNode = arcNodes[0]
+        setWindowCenter(firstNode.target_chapter || firstNode.actual_chapter || 1)
+        setExpandedId(firstNode.id)
+      }
+    }
+  }, [focusArcId, allNodes])
 
   const windowFrom = Math.max(1, windowCenter - WINDOW)
   const windowTo = windowCenter + WINDOW

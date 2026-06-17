@@ -166,6 +166,10 @@ export function SaveSettings(arg1) {
   return window['go']['app']['App']['SaveSettings'](arg1);
 }
 
+export function SearchAll(arg1, arg2) {
+  return window['go']['app']['App']['SearchAll'](arg1, arg2);
+}
+
 export function SetActiveNovel(arg1) {
   return window['go']['app']['App']['SetActiveNovel'](arg1);
 }
@@ -176,10 +180,6 @@ export function SetApprovalMode(arg1) {
 
 export function SetChatPanelWidth(arg1) {
   return window['go']['app']['App']['SetChatPanelWidth'](arg1);
-}
-
-export function SetEditorTabs(arg1) {
-  return window['go']['app']['App']['SetEditorTabs'](arg1);
 }
 
 export function SetLastSession(arg1) {

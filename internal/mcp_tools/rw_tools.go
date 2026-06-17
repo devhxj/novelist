@@ -182,6 +182,9 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 	if isChapterPath(a.Path) {
 		chapNum := parseChapterNum(a.Path)
 		rag.SubmitRefresh(tc.NovelID, chapNum, proposed)
+			if tc.SearchService != nil {
+				tc.SearchService.UpdateCachedChapter(tc.NovelID, chapNum, proposed)
+			}
 		stats := text.ComputeStats(proposed)
 
 		// 记录字数变化

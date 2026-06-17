@@ -35,7 +35,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   const {
     tabs, activeTab, activeTabId,
     openTab, closeTab, closeAllTabs, setActiveTabId,
-    updateTab, openDiffTab,
+    updateTab, openDiffTab, initRef,
   } = useEditorTabs(novelId)
 
   const [isLoading, setIsLoading] = useState(false)
@@ -57,6 +57,24 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       onContentChange?.(activeTab.content ?? '')
     }
   }, [activeTab, onContentChange])
+
+  // 从 localStorage 恢复 tab 后，自动加载文件内容
+  const loadedRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    // novelId 变化时重置
+    loadedRef.current.clear()
+  }, [novelId])
+  useEffect(() => {
+    if (!initRef.current) return
+    const needsLoad = tabs.filter(t => t.type === 'file' && t.content == null && !loadedRef.current.has(t.id))
+    if (needsLoad.length === 0) return
+    for (const t of needsLoad) {
+      loadedRef.current.add(t.id)
+      app.GetContent(novelId, t.path).then(content => {
+        updateTab(t.id, { content: content ?? '' })
+      }).catch(() => {})
+    }
+  }, [tabs, novelId, initRef.current])
 
   // Ctrl+Shift+V 切换技能预览
   useEffect(() => {

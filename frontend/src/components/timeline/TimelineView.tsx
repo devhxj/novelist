@@ -3,7 +3,7 @@ import { AlertTriangle, BookOpen, Flag, Lightbulb, Target } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { timeline } from '@/hooks/useApp'
 
-interface Props { novelId: number }
+interface Props { novelId: number; focusEntryId?: number }
 
 type Tab = 'next' | 'near' | 'far'
 type Filter = 'all' | 'pending' | 'resolved' | 'abandoned'
@@ -26,7 +26,7 @@ function importStars(v: number) {
   return '★'.repeat(Math.max(0, Math.min(5, v)))
 }
 
-export default function TimelineView({ novelId }: Props) {
+export default function TimelineView({ novelId, focusEntryId }: Props) {
   const app = useApp()
 
   const [plans, setPlans] = useState<timeline.ChapterPlan[]>([])
@@ -60,6 +60,16 @@ export default function TimelineView({ novelId }: Props) {
   }, [app, novelId])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (focusEntryId && focusEntryId > 0 && entries.length > 0) {
+      const entry = entries.find(e => e.id === focusEntryId)
+      if (entry) {
+        setWindowCenter(entry.target_chapter || entry.source_chapter_id || 1)
+        setExpandedId(focusEntryId)
+      }
+    }
+  }, [focusEntryId, entries])
 
   const windowFrom = Math.max(1, windowCenter - ENTRY_WINDOW)
   const windowTo = windowCenter + ENTRY_WINDOW

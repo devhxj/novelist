@@ -4,6 +4,8 @@ import ChapterList from './ChapterList'
 import CharacterList from '@/components/character/CharacterList'
 import LocationList from '@/components/location/LocationList'
 import SkillList from '@/components/skill/SkillList'
+import SearchPanel from '@/components/search/SearchPanel'
+import type { SearchResult } from '@/components/search/SearchPanel'
 
 interface Props {
   activePanel: string
@@ -23,6 +25,11 @@ interface Props {
   activeSkillName: string | null
   onSelectSkill: (path: string, title: string, readOnly: boolean) => void
   onNewSkill: (name: string) => void
+  onSearchNavigateEntity: (panelId: string, entityId: number) => void
+  onSearchNavigateChapter: (filePath: string, title: string, chapterNum: number) => void
+  searchQuery: string
+  searchResults: SearchResult[]
+  onSearchChange: (query: string, results: SearchResult[]) => void
 }
 
 export default function SidePanel({
@@ -32,10 +39,21 @@ export default function SidePanel({
   showCreate, setShowCreate, title, setTitle, description, setDescription,
   onCreateNovel,
   activeSkillName, onSelectSkill, onNewSkill,
+  onSearchNavigateEntity, onSearchNavigateChapter,
+  searchQuery, searchResults, onSearchChange,
 }: Props) {
   return (
     <aside className="w-56 border-r bg-sidebar flex flex-col shrink-0">
-      {activePanel === 'skills' ? (
+      {activePanel === 'search' ? (
+        <SearchPanel
+          novelId={novelId}
+          query={searchQuery}
+          results={searchResults}
+          onResultsChange={onSearchChange}
+          onNavigateEntity={onSearchNavigateEntity}
+          onNavigateChapter={onSearchNavigateChapter}
+        />
+      ) : activePanel === 'skills' ? (
         <SkillList
           novelId={novelId}
           activeSkillName={activeSkillName}
