@@ -59,6 +59,8 @@ export interface TurnSegment {
   finalText?: string
   // compression
   compressionPhase?: 'compressing' | 'done'
+  // web_search / web_fetch 的富文本结果
+  result?: Record<string, unknown>
 }
 
 export function emptySegment(id: string): TurnSegment {
@@ -221,6 +223,7 @@ export function rebuildTurns(messages: session.Message[]): Turn[] {
           displayText: td.display_text || td.tool_name,
           activityKind: td.activity_kind || '',
           error: '',
+          result: td.result,
         })
       }
     }
@@ -235,6 +238,7 @@ interface ToolDisplay {
   display_text: string
   activity_kind: string
   phase: string
+  result?: Record<string, unknown>
 }
 
 function parseToolDisplays(extraMetadata?: string): ToolDisplay[] {

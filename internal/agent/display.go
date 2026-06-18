@@ -233,13 +233,17 @@ func buildToolDisplay(toolOutputs []toolOutput) []map[string]any {
 		if !to.result.Success {
 			phase = "failed"
 		}
-		toolDisplays = append(toolDisplays, map[string]any{
+		entry := map[string]any{
 			"tool_id":       to.id,
 			"tool_name":     to.name,
 			"display_text":  to.displayText,
 			"activity_kind": to.activityKind,
 			"phase":         phase,
-		})
+		}
+		if (to.name == "web_search" || to.name == "web_fetch") && to.result != nil && to.result.Success && to.result.Data != nil {
+			entry["result"] = to.result.Data
+		}
+		toolDisplays = append(toolDisplays, entry)
 	}
 	return toolDisplays
 }

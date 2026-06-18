@@ -27,16 +27,16 @@ import (
 
 // Agent 是对话编排核心，持有运行所需的所有基础设施。
 type Agent struct {
-	llm        *llm.Client
-	registry   *mcp_tools.Registry
-	session    *session.Store
-	db         *gorm.DB
-	approver   approval.Approver
-	logger     *slog.Logger
+	llm           *llm.Client
+	registry      *mcp_tools.Registry
+	session       *session.Store
+	db            *gorm.DB
+	approver      approval.Approver
+	logger        *slog.Logger
 	skillStore    *skill.Store
 	searchService atomic.Pointer[search.Service]
 	cancels       map[string]context.CancelFunc // sessionID → cancel
-	mu         sync.Mutex
+	mu            sync.Mutex
 }
 
 // RunOptions 是单次 Run() 的参数。
@@ -280,7 +280,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						RunSubAgent: func(ctx context.Context, req mcp_tools.SubAgentRequest) (string, error) {
 							return a.RunSubAgent(ctx, opts, req)
 						},
-						SkillStore: a.skillStore,
+						SkillStore:    a.skillStore,
 						SearchService: a.searchService.Load(),
 						WebSearch:     a.buildWebSearch(),
 					}
@@ -292,12 +292,21 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						phase = "failed"
 					}
 					display = a.buildDisplay(name, args, displayPhase(phase), opts.NovelID)
+					metadata := display.Metadata
+					if (name == "web_search" || name == "web_fetch") && result.Success && result.Data != nil {
+						if metadata == nil {
+							metadata = make(map[string]any)
+						}
+						for k, v := range result.Data {
+							metadata[k] = v
+						}
+					}
 					emit(AgentEvent{
 						TurnID: opts.TurnID, Type: EventToolCall,
 						ToolName: name, ToolID: id, Phase: phase,
 						ToolArgs: args, Success: result.Success, ErrMsg: result.Error,
 						DisplayText: display.DisplayText, ActivityKind: display.ActivityKind,
-						Metadata: display.Metadata, Timestamp: time.Now(),
+						Metadata: metadata, Timestamp: time.Now(),
 					})
 
 					// 失败计数：仅系统异常计入

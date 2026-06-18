@@ -1,24 +1,32 @@
 package web
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"time"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/PuerkitoBio/goquery"
+	readability "codeberg.org/readeck/go-readability/v2"
 )
 
 const (
 	fetchTimeout   = 30 * time.Second
 	fetchMaxChars  = 32000
 	fetchMaxBytes  = 10 << 20 // 10 MB
-	fetchUserAgent = "Goink/1.0 (AI writing assistant; web fetch tool)"
+	fetchDelayMin  = 500 * time.Millisecond
+	fetchDelayMax  = 1500 * time.Millisecond
+	fetchUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
+
+var cookieJar, _ = cookiejar.New(nil)
 
 // FetchResult 是网页抓取结果。
 type FetchResult struct {
@@ -34,8 +42,11 @@ func Fetch(rawURL string) (*FetchResult, error) {
 		return nil, err
 	}
 
+	time.Sleep(fetchDelayMin + rand.N(fetchDelayMax-fetchDelayMin))
+
 	client := &http.Client{
 		Timeout: fetchTimeout,
+		Jar:     cookieJar,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return fmt.Errorf("重定向次数过多")
@@ -52,6 +63,15 @@ func Fetch(rawURL string) (*FetchResult, error) {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
 	}
 	req.Header.Set("User-Agent", fetchUserAgent)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set("Sec-Ch-Ua", `"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"`)
+	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-Site", "none")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -71,25 +91,37 @@ func Fetch(rawURL string) (*FetchResult, error) {
 		return nil, fmt.Errorf("网页过大，超过 %d MB", fetchMaxBytes>>20)
 	}
 
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
-	if err != nil {
-		return nil, fmt.Errorf("解析 HTML 失败: %w", err)
-	}
-
-	title := strings.TrimSpace(doc.Find("title").First().Text())
-
-	doc.Find("script, style, nav, iframe, noscript, svg, head, footer, " +
-		"[role=\"navigation\"], [role=\"banner\"], [role=\"contentinfo\"], " +
-		".sidebar, .nav, .footer, .header, .menu, .ad, .advertisement").Remove()
-
-	contentSel := doc.Find("body")
-	if contentSel.Length() == 0 {
-		contentSel = doc.Find("html")
-	}
-
-	contentHTML, err := contentSel.Html()
+	// 先用 readability 提取正文区域
+	article, err := readability.FromReader(bytes.NewReader(body), u)
 	if err != nil {
 		return nil, fmt.Errorf("提取正文失败: %w", err)
+	}
+
+	title := strings.TrimSpace(article.Title())
+
+	// 将提取的正文 node 渲染为 HTML
+	var contentBuf bytes.Buffer
+	if article.Node != nil {
+		if renderErr := article.RenderHTML(&contentBuf); renderErr != nil {
+			return nil, fmt.Errorf("渲染正文失败: %w", renderErr)
+		}
+	}
+	contentHTML := contentBuf.String()
+
+	// readability 没提取到正文时回退用全文
+	if strings.TrimSpace(contentHTML) == "" {
+		doc, docErr := goquery.NewDocumentFromReader(bytes.NewReader(body))
+		if docErr != nil {
+			return nil, fmt.Errorf("解析 HTML 失败: %w", docErr)
+		}
+		contentSel := doc.Find("body")
+		if contentSel.Length() == 0 {
+			contentSel = doc.Find("html")
+		}
+		contentHTML, docErr = contentSel.Html()
+		if docErr != nil {
+			return nil, fmt.Errorf("提取正文失败: %w", docErr)
+		}
 	}
 
 	converter := md.NewConverter("", true, nil)
@@ -139,10 +171,10 @@ func validateHost(host string) error {
 
 	// 阻止云 metadata 端点
 	blocked := map[string]bool{
-		"169.254.169.254":            true,
-		"metadata.google.internal":   true,
-		"metadata.tencentyun.com":    true,
-		"100.100.100.200":            true,
+		"169.254.169.254":          true,
+		"metadata.google.internal": true,
+		"metadata.tencentyun.com":  true,
+		"100.100.100.200":          true,
 	}
 	if blocked[host] {
 		return fmt.Errorf("禁止访问该地址")

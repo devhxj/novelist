@@ -10,6 +10,8 @@ import ChatControls from './ChatControls'
 import MessageBubble from './MessageBubble'
 import ThinkingBlock from './ThinkingBlock'
 import ToolCallCard from './ToolCallCard'
+import WebSearchCard from './WebSearchCard'
+import WebFetchCard from './WebFetchCard'
 import SubagentCard from './SubagentCard'
 import CompressionBlock from './CompressionBlock'
 import type { UsageInfo } from './ContextRing'
@@ -515,12 +517,15 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
           if (idx >= 0) {
             segments[idx] = {
               ...segments[idx],
+              toolName: event.tool_name || segments[idx].toolName,
+              toolId: event.tool_id || segments[idx].toolId,
               toolStatus,
               displayText: event.display_text || segments[idx].displayText,
               activityKind: event.activity_kind || segments[idx].activityKind || '',
               error: event.error || '',
               approvalType: approvalType ?? segments[idx].approvalType,
               approvalPayload: approvalPayload ?? segments[idx].approvalPayload,
+              result: toolStatus === 'completed' ? (event.metadata || segments[idx].result) : segments[idx].result,
             }
           } else {
             segments.push({
@@ -534,6 +539,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
               error: event.error || '',
               approvalType,
               approvalPayload,
+              result: toolStatus === 'completed' ? event.metadata : undefined,
             })
           }
 
@@ -917,6 +923,13 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
                       if (seg.type === 'tool') {
                         // run_subagent 已由 subagent 段渲染，跳过纯工具卡
                         if (seg.toolName === 'run_subagent') return null
+
+                        if (seg.toolName === 'web_search' && seg.toolStatus === 'completed' && seg.result) {
+                          return <WebSearchCard key={seg.id} result={seg.result} />
+                        }
+                        if (seg.toolName === 'web_fetch' && seg.toolStatus === 'completed' && seg.result) {
+                          return <WebFetchCard key={seg.id} result={seg.result} displayText={seg.displayText} />
+                        }
 
                         return (
                           <ToolCallCard
