@@ -135,11 +135,15 @@ func afterCreate(db *gorm.DB) {
 			return
 		}
 		record := buildRecord(db, info, "update", oldJSON, newJSON)
-		db.Session(&gorm.Session{NewDB: true, SkipHooks: true}).Create(&record)
+		if err := db.Session(&gorm.Session{NewDB: true, SkipHooks: true}).Create(&record).Error; err != nil {
+			db.AddError(fmt.Errorf("operation log write (update upsert): %w", err))
+		}
 	} else {
 		// 真正的 INSERT
 		record := buildRecord(db, info, "create", "", newJSON)
-		db.Session(&gorm.Session{NewDB: true, SkipHooks: true}).Create(&record)
+		if err := db.Session(&gorm.Session{NewDB: true, SkipHooks: true}).Create(&record).Error; err != nil {
+			db.AddError(fmt.Errorf("operation log write (create): %w", err))
+		}
 	}
 }
 
@@ -178,7 +182,9 @@ func afterUpdate(db *gorm.DB) {
 	}
 
 	record := buildRecord(db, info, "update", oldJSON, newJSON)
-	db.Session(&gorm.Session{NewDB: true, SkipHooks: true}).Create(&record)
+	if err := db.Session(&gorm.Session{NewDB: true, SkipHooks: true}).Create(&record).Error; err != nil {
+		db.AddError(fmt.Errorf("operation log write (update): %w", err))
+	}
 }
 
 // ── Delete 回调 ─────────────────────────────────────────────
@@ -208,7 +214,9 @@ func afterDelete(db *gorm.DB) {
 	}
 
 	record := buildRecord(db, info, "delete", oldJSON, "")
-	db.Session(&gorm.Session{NewDB: true, SkipHooks: true}).Create(&record)
+	if err := db.Session(&gorm.Session{NewDB: true, SkipHooks: true}).Create(&record).Error; err != nil {
+		db.AddError(fmt.Errorf("operation log write (delete): %w", err))
+	}
 }
 
 // ── 回调辅助 ────────────────────────────────────────────────
@@ -322,7 +330,7 @@ func skipOperLog(db *gorm.DB) bool {
 	}
 	t := db.Statement.Schema.Table
 	return t == "operation_log" || t == "messages" || t == "app_config" || t == "turn_commits" ||
-		t == "sessions" || t == "novels"
+		t == "sessions" || t == "novels" || t == "writing_log"
 }
 
 // toJSON 将任意值序列化为 JSON 字符串。

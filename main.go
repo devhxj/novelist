@@ -59,6 +59,11 @@ func main() {
 						http.ServeFile(w, r, coverPath)
 						return
 					}
+					if r.URL.Path == "/avatar" {
+						avatarPath := filepath.Join(config.DataDirPath(), "user", "avatar.jpg")
+						http.ServeFile(w, r, avatarPath)
+						return
+					}
 					next.ServeHTTP(w, r)
 				})
 			},

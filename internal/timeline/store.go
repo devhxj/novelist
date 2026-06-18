@@ -147,3 +147,16 @@ func (s *Store) ListAfter(ctx context.Context, novelID int64, chapterNum int) ([
 //具体来说 构造上下文的时候拿到前10条历史+未来100条，以及前边的所有pending的（状态异常了，也可以不给，等review的时候再传递），未来如果有显示已经完成的，也算作状态异常，状态异常的
 //需要提醒llm进行修正，确保之前的全部结束，之后的全部pending，targetchapter是用来作为一个大概的锚点的，llm根据章节进度，实时维护，后续提供reviewagent一个专属
 //工具。专门用来查询各种异常状态的，用以提醒
+
+// SearchByNovel 按关键词搜索某小说的伏笔/用户指令，匹配标题和内容。
+func (s *Store) SearchByNovel(ctx context.Context, novelID int64, query string, limit int) ([]TimelineEntry, error) {
+	var entries []TimelineEntry
+	if err := s.DB.WithContext(ctx).
+		Where("novel_id = ? AND (title LIKE ? OR content LIKE ?)", novelID, "%"+query+"%", "%"+query+"%").
+		Order("importance DESC").
+		Limit(limit).
+		Find(&entries).Error; err != nil {
+		return nil, fmt.Errorf("timeline store: search: %w", err)
+	}
+	return entries, nil
+}

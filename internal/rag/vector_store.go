@@ -37,14 +37,26 @@ func (s *VectorStore) ensureTable(ctx context.Context, novelID int64) error {
 		return nil
 	}
 
+	tableName := s.tableName(novelID)
+	// 迁移：旧表无 start_position 列时重建。列不存在和查询出错需区分处理。
+	hasCol, colErr := tableHasColumn(ctx, s.db, tableName, "start_position")
+	if colErr != nil {
+		s.log.Warn("rag: 检查列失败，跳过迁移", "table", tableName, "err", colErr)
+	} else if !hasCol {
+		s.log.Info("rag: 旧表缺少 start_position 列，重建中", "table", tableName)
+		if _, err := s.db.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", tableName)); err != nil {
+			return fmt.Errorf("rag: drop old vec table %s: %w", tableName, err)
+		}
+	}
 	sql := fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS %s USING vec0(
 		embedding float[512] distance_metric=cosine,
 		chunk_id text,
 		content text,
 		chunk_type text,
 		chapter_number integer,
-		chunk_index integer
-	)`, s.tableName(novelID))
+		chunk_index integer,
+		start_position integer
+	)`, tableName)
 
 	_, err := s.db.ExecContext(ctx, sql)
 	if err != nil {
@@ -88,8 +100,8 @@ func (s *VectorStore) IndexChunks(ctx context.Context, novelID int64, chunks []C
 		}
 
 		_, err = tx.ExecContext(ctx,
-			fmt.Sprintf(`INSERT INTO %s (embedding, chunk_id, content, chunk_type, chapter_number, chunk_index) VALUES (?, ?, ?, ?, ?, ?)`, tableName),
-			v, chunk.ID, chunk.Content, chunk.ChunkType, chunk.ChapterNumber, chunk.ChunkIndex,
+			fmt.Sprintf(`INSERT INTO %s (embedding, chunk_id, content, chunk_type, chapter_number, chunk_index, start_position) VALUES (?, ?, ?, ?, ?, ?, ?)`, tableName),
+			v, chunk.ID, chunk.Content, chunk.ChunkType, chunk.ChapterNumber, chunk.ChunkIndex, chunk.StartRunePos,
 		)
 		if err != nil {
 			return fmt.Errorf("rag: insert chunk %s: %w", chunk.ID, err)
@@ -151,7 +163,7 @@ func (s *VectorStore) Search(ctx context.Context, novelID int64, query string, t
 	}
 
 	querySQL := fmt.Sprintf(
-		`SELECT chunk_id, content, chunk_type, chapter_number, distance FROM %s WHERE embedding MATCH ?%s ORDER BY distance LIMIT ?`,
+		`SELECT chunk_id, content, chunk_type, chapter_number, distance, start_position, embedding FROM %s WHERE embedding MATCH ?%s ORDER BY distance LIMIT ?`,
 		tableName, whereSQL,
 	)
 	args = append(args, topK)
@@ -165,9 +177,10 @@ func (s *VectorStore) Search(ctx context.Context, novelID int64, query string, t
 	var results []SearchResult
 	for rows.Next() {
 		var chunkID, content, chunkType string
-		var chapterNumber int
+		var chapterNumber, startRunePos int
 		var distance float64
-		if err := rows.Scan(&chunkID, &content, &chunkType, &chapterNumber, &distance); err != nil {
+		var embBlob []byte
+		if err := rows.Scan(&chunkID, &content, &chunkType, &chapterNumber, &distance, &startRunePos, &embBlob); err != nil {
 			return nil, fmt.Errorf("rag: scan result: %w", err)
 		}
 		relevance := 1.0 - distance
@@ -179,8 +192,10 @@ func (s *VectorStore) Search(ctx context.Context, novelID int64, query string, t
 			Content:       content,
 			SourceType:    chunkType,
 			ChapterNumber: chapterNumber,
+			StartRunePos:  startRunePos,
 			Distance:      distance,
 			Relevance:     relevance,
+			Embedding:     deserializeFloat32(embBlob),
 		})
 	}
 
@@ -243,6 +258,26 @@ func InitVectorStore(db *sql.DB, embedder Embedder, log *slog.Logger) {
 	globalVSOnce.Do(func() {
 		globalVS = NewVectorStore(db, embedder, log)
 	})
+}
+
+// tableHasColumn 检查虚拟表中是否存在指定列。vec0 不支持 PRAGMA，
+// 所以通过查询后 Columns() 判断。返回 (exists, error)。
+func tableHasColumn(ctx context.Context, db *sql.DB, tableName, col string) (bool, error) {
+	rows, err := db.QueryContext(ctx, fmt.Sprintf("SELECT * FROM %s LIMIT 0", tableName))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return false, err
+	}
+	for _, c := range cols {
+		if strings.EqualFold(c, col) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // GetVectorStore 返回全局 VectorStore，未初始化时返回 nil。

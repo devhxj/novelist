@@ -20,6 +20,7 @@ type SessionMeta struct {
 // SessionDetail 是单个会话的完整元数据视图，含用量、推理程度等。
 type SessionDetail struct {
 	SessionID       string          `json:"session_id"`
+	NovelID         int64           `json:"novel_id"`
 	Title           string          `json:"title"`
 	Model           string          `json:"model"`
 	ReasoningEffort string          `json:"reasoning_effort"`
@@ -82,6 +83,7 @@ func (a *App) GetSession(sessionID string) (*SessionDetail, error) {
 	}
 	return &SessionDetail{
 		SessionID:       s.SessionID,
+		NovelID:         s.NovelID,
 		Title:           s.Title,
 		Model:           s.Model,
 		ReasoningEffort: s.ReasoningEffort,

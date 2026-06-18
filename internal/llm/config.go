@@ -1,5 +1,7 @@
 package llm
 
+import "sort"
+
 // UserLLMConfig 是用户 LLM 配置的持久化格式（加密 JSON）。
 // 一个 provider 一个 key，内置模型随代码自动更新，自定义模型需完整填写信息。
 type UserLLMConfig struct {
@@ -168,6 +170,12 @@ func Models(providers map[string]Provider) []AvailableModel {
 			})
 		}
 	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].ProviderName != list[j].ProviderName {
+			return list[i].ProviderName < list[j].ProviderName
+		}
+		return list[i].ModelName < list[j].ModelName
+	})
 	return list
 }
 

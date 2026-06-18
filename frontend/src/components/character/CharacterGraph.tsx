@@ -6,6 +6,7 @@ import type { character } from '@/hooks/useApp'
 
 interface Props {
   novelId: number
+  focusId?: number
 }
 
 const NODE_COLOR = { fill: '#e0f2fe', stroke: '#38a8df', text: '#0c4a6e' }
@@ -78,7 +79,7 @@ function buildCharacterTree(characters: character.Character[], relations: charac
   return { treeData, nonTreeEdges }
 }
 
-export default function CharacterGraph({ novelId }: Props) {
+export default function CharacterGraph({ novelId, focusId }: Props) {
   const app = useApp()
   const containerRef = useRef<HTMLDivElement>(null)
   const graphRef = useRef<Graph | null>(null)
@@ -109,6 +110,13 @@ export default function CharacterGraph({ novelId }: Props) {
   }, [app, novelId])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (focusId && focusId > 0 && characters.length > 0) {
+      const char = characters.find(c => c.id === focusId)
+      if (char) setSelectedCharacter(char)
+    }
+  }, [focusId, characters])
 
   const graphData = useMemo(() => {
     const charIds = new Set(characters.map(c => c.id))

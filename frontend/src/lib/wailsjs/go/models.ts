@@ -204,6 +204,7 @@ export namespace app {
 	}
 	export class SessionDetail {
 	    session_id: string;
+	    novel_id: number;
 	    title: string;
 	    model: string;
 	    reasoning_effort: string;
@@ -220,6 +221,7 @@ export namespace app {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.session_id = source["session_id"];
+	        this.novel_id = source["novel_id"];
 	        this.title = source["title"];
 	        this.model = source["model"];
 	        this.reasoning_effort = source["reasoning_effort"];
@@ -467,6 +469,12 @@ export namespace config {
 	export class AppSettings {
 	    ID: number;
 	    last_novel_id: number;
+	    selected_model_key: string;
+	    reasoning_effort: string;
+	    approval_mode: string;
+	    chat_panel_width: number;
+	    last_session_id: string;
+	    user_name: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
@@ -476,6 +484,12 @@ export namespace config {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
 	        this.last_novel_id = source["last_novel_id"];
+	        this.selected_model_key = source["selected_model_key"];
+	        this.reasoning_effort = source["reasoning_effort"];
+	        this.approval_mode = source["approval_mode"];
+	        this.chat_panel_width = source["chat_panel_width"];
+	        this.last_session_id = source["last_session_id"];
+	        this.user_name = source["user_name"];
 	    }
 	}
 
@@ -850,6 +864,43 @@ export namespace reader {
 
 }
 
+export namespace search {
+	
+	export class Result {
+	    type: string;
+	    id: number;
+	    title: string;
+	    subtitle: string;
+	    chapter_num: number;
+	    file_path: string;
+	    match_context: string;
+	    match_position: number;
+	    match_len: number;
+	    relevance: number;
+	    panel_id: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Result(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.subtitle = source["subtitle"];
+	        this.chapter_num = source["chapter_num"];
+	        this.file_path = source["file_path"];
+	        this.match_context = source["match_context"];
+	        this.match_position = source["match_position"];
+	        this.match_len = source["match_len"];
+	        this.relevance = source["relevance"];
+	        this.panel_id = source["panel_id"];
+	    }
+	}
+
+}
+
 export namespace session {
 	
 	export class Message {
@@ -1166,6 +1217,47 @@ export namespace timeline {
 		    }
 		    return a;
 		}
+	}
+
+}
+
+export namespace writing {
+	
+	export class DailyActivity {
+	    date: string;
+	    words: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DailyActivity(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.date = source["date"];
+	        this.words = source["words"];
+	    }
+	}
+	export class WritingStats {
+	    total_words: number;
+	    total_days_active: number;
+	    current_streak: number;
+	    longest_streak: number;
+	    total_novels: number;
+	    total_chapters: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new WritingStats(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.total_words = source["total_words"];
+	        this.total_days_active = source["total_days_active"];
+	        this.current_streak = source["current_streak"];
+	        this.longest_streak = source["longest_streak"];
+	        this.total_novels = source["total_novels"];
+	        this.total_chapters = source["total_chapters"];
+	    }
 	}
 
 }

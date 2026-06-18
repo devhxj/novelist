@@ -165,6 +165,19 @@ func (s *Store) ListNodesAfterByArc(ctx context.Context, arcIDs []int64, chapter
 	return result, nil
 }
 
+// SearchByNovel 按关键词搜索某小说的叙事弧线，匹配名称和描述。
+func (s *Store) SearchByNovel(ctx context.Context, novelID int64, query string, limit int) ([]StoryArc, error) {
+	var arcs []StoryArc
+	if err := s.DB.WithContext(ctx).
+		Where("novel_id = ? AND (name LIKE ? OR description LIKE ?)", novelID, "%"+query+"%", "%"+query+"%").
+		Order("importance DESC").
+		Limit(limit).
+		Find(&arcs).Error; err != nil {
+		return nil, fmt.Errorf("storyarc store: search: %w", err)
+	}
+	return arcs, nil
+}
+
 // GetBreakpoint 返回暂停弧线的断点及其前后节点：
 //   - before: 最近 2 个已完成/废弃节点（target_chapter 升序）
 //   - pending: 断点 + 下一个 pending（最多 2 个，pending[0] 为断点）

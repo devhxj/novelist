@@ -103,6 +103,22 @@ func (s *Store) GetLatestNumber(ctx context.Context, novelID int64) (int, error)
 	return maxNum, nil
 }
 
+// SearchByNovel 按关键词搜索某小说的章节，匹配标题和摘要。
+func (s *Store) SearchByNovel(ctx context.Context, novelID int64, query string, limit int) ([]Chapter, error) {
+	var chapters []Chapter
+	if err := s.DB.WithContext(ctx).
+		Where("novel_id = ? AND (title LIKE ? OR summary LIKE ?)", novelID, "%"+query+"%", "%"+query+"%").
+		Order("chapter_number ASC").
+		Limit(limit).
+		Find(&chapters).Error; err != nil {
+		return nil, fmt.Errorf("chapter store: search: %w", err)
+	}
+	for i := range chapters {
+		chapters[i].FilePath = git.ChapterPath(chapters[i].ChapterNumber)
+	}
+	return chapters, nil
+}
+
 // GetRecent 取最近 N 章，按 chapter_number 降序。
 func (s *Store) GetRecent(ctx context.Context, novelID int64, limit int) ([]Chapter, error) {
 	var chapters []Chapter

@@ -10,6 +10,10 @@ import {
   SaveContent,
   SetActiveNovel,
   SetApprovalMode,
+  SetChatPanelWidth,
+  SetLastSession,
+  SetReasoningEffort,
+  SetSelectedModel,
   GetAppConfig,
   GetChapters,
   GetCharacters,
@@ -44,7 +48,12 @@ import {
   UpdateNovel,
   DeleteCover,
   SaveCover,
+  SaveAvatar,
+  SaveUserName,
   ListSkills,
+  GetWritingActivity,
+  GetWritingStats,
+  RebuildNovelIndex,
 } from '@/lib/wailsjs/go/app/App'
 import type { app, novel, chapter, config, llm, session, character, location, storyarc, timeline, reader, skill } from '@/lib/wailsjs/go/models'
 
@@ -76,6 +85,10 @@ export function useApp() {
     GetSessionMessages,
     ApproveTool,
     SetApprovalMode,
+    SetChatPanelWidth,
+    SetLastSession,
+    SetReasoningEffort,
+    SetSelectedModel,
     GetLLMConfig,
     SaveLLMConfig,
     TestConnection,
@@ -94,7 +107,12 @@ export function useApp() {
     UpdateNovel,
     DeleteCover,
     SaveCover,
+    SaveAvatar,
+    SaveUserName,
     ListSkills,
+    GetWritingActivity,
+    GetWritingStats,
+    RebuildNovelIndex,
   }), [])
 }
 

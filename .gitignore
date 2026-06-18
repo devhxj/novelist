@@ -13,6 +13,7 @@ models/
 # Build output
 /build/bin/
 /build/runtime/
+!/build/runtime/models/vocab.txt
 /build/dist/
 /build/*.AppDir/
 goink

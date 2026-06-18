@@ -29,11 +29,14 @@ type Service struct {
 	logger *slog.Logger
 }
 
-// NewService 创建审批服务，默认手动模式。
-func NewService(logger *slog.Logger) *Service {
+// NewService 创建审批服务，默认手动模式。initialMode 为空时默认 "manual"。
+func NewService(logger *slog.Logger, initialMode string) *Service {
+	if initialMode == "" {
+		initialMode = "manual"
+	}
 	return &Service{
 		pend:   make(map[string]chan Approval),
-		mode:   "manual",
+		mode:   initialMode,
 		logger: logger,
 	}
 }

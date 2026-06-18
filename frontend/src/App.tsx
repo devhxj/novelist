@@ -19,6 +19,9 @@ export default function App() {
       } else {
         setView('init')
       }
+    }).catch((err) => {
+      console.error('App initialization failed', err)
+      setView('init')
     })
   }, [])
 

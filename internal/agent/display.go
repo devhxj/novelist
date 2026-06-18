@@ -48,6 +48,8 @@ var toolDisplayNames = map[string]string{
 	"delete_record":                   "删除记录",
 	"edit":                            "编辑文件内容",
 	"read":                            "读取文件内容",
+	"web_search":                      "搜索网络信息",
+	"web_fetch":                       "抓取网页内容",
 }
 
 // toolActivityKinds 工具名 → 前端展示类别。
@@ -91,6 +93,8 @@ var toolActivityKinds = map[string]string{
 	"delete_record":                   "delete",
 	"edit":                            "write",
 	"read":                            "view",
+	"web_search":                      "browse",
+	"web_fetch":                       "view",
 }
 
 // chapterTools 需要查章节标题的工具集。
@@ -229,13 +233,17 @@ func buildToolDisplay(toolOutputs []toolOutput) []map[string]any {
 		if !to.result.Success {
 			phase = "failed"
 		}
-		toolDisplays = append(toolDisplays, map[string]any{
+		entry := map[string]any{
 			"tool_id":       to.id,
 			"tool_name":     to.name,
 			"display_text":  to.displayText,
 			"activity_kind": to.activityKind,
 			"phase":         phase,
-		})
+		}
+		if (to.name == "web_search" || to.name == "web_fetch") && to.result != nil && to.result.Success && to.result.Data != nil {
+			entry["result"] = to.result.Data
+		}
+		toolDisplays = append(toolDisplays, entry)
 	}
 	return toolDisplays
 }

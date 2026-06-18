@@ -10,6 +10,8 @@ import ChatControls from './ChatControls'
 import MessageBubble from './MessageBubble'
 import ThinkingBlock from './ThinkingBlock'
 import ToolCallCard from './ToolCallCard'
+import WebSearchCard from './WebSearchCard'
+import WebFetchCard from './WebFetchCard'
 import SubagentCard from './SubagentCard'
 import CompressionBlock from './CompressionBlock'
 import type { UsageInfo } from './ContextRing'
@@ -65,6 +67,10 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
   const [sessionsTotal, setSessionsTotal] = useState(0)
   const [showHistoryPanel, setShowHistoryPanel] = useState(false)
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const [initLoadError, setInitLoadError] = useState(false)
+  const [initLoadRetry, setInitLoadRetry] = useState(0)
+  const [historyLoadError, setHistoryLoadError] = useState(false)
+  const [historyLoadRetry, setHistoryLoadRetry] = useState(0)
   const [skills, setSkills] = useState<skill.SkillMeta[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -75,20 +81,56 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
   const eventQueuesRef = useRef<Map<number, EventQueue>>(new Map())
   const onApprovalFileEditRef = useRef(onApprovalFileEdit)
   useEffect(() => { onApprovalFileEditRef.current = onApprovalFileEdit }, [onApprovalFileEdit])
+  const lastSessionIdRef = useRef('')
 
-  // 加载模型列表
+  // 加载模型列表并恢复持久化设置
   useEffect(() => {
-    app.GetModels().then(list => {
-      if (list && list.length > 0) {
-        setModels(list)
-        const first = list[0]
-        setSelectedKey(first.Key)
-        if (first.ReasoningLevels?.length) {
-          setReasoningEffort(first.ReasoningLevels[0])
+    setInitLoadError(false)
+    Promise.all([
+      app.GetModels(),
+      app.GetSettings(),
+    ]).then(([modelList, settings]) => {
+      if (modelList && modelList.length > 0) {
+        setModels(modelList)
+
+        // 恢复模型选择（验证 key 仍存在）
+        let key = settings?.selected_model_key || ''
+        let model = modelList.find(m => m.Key === key)
+        if (!model) {
+          model = modelList[0]
+          key = model.Key
         }
+        setSelectedKey(key)
+
+        // 恢复推理程度（验证级别仍合法）
+        let effort = settings?.reasoning_effort || ''
+        if (!effort || !model.ReasoningLevels?.includes(effort)) {
+          effort = model.ReasoningLevels?.[0] || ''
+        }
+        setReasoningEffort(effort)
       }
-    }).catch(() => {})
-  }, [])
+
+      // 恢复审批模式
+      const mode = settings?.approval_mode
+      if (mode === 'manual' || mode === 'auto') {
+        setApprovalMode(mode)
+      }
+
+      // 恢复面板宽度
+      const w = settings?.chat_panel_width
+      if (w && w >= MIN_WIDTH && w <= MAX_WIDTH) {
+        setWidth(w)
+      }
+
+      // 暂存上次会话 ID，等 novelId 加载后恢复
+      if (settings?.last_session_id) {
+        lastSessionIdRef.current = settings.last_session_id
+      }
+    }).catch((err) => {
+      console.error('Load models/settings failed', err)
+      setInitLoadError(true)
+    })
+  }, [initLoadRetry])
 
   // 加载会话列表
   useEffect(() => {
@@ -101,20 +143,39 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
         setSessions(r.items)
         setSessionsTotal(r.total)
       }
-    }).catch(() => {})
+    }).catch((err) => {
+      console.error('Load sessions failed', err)
+    })
+
+    // 尝试恢复上次活跃会话（仅恢复一次，通过 ref 标记）
+    const sid = lastSessionIdRef.current
+    if (sid && novelId) {
+      lastSessionIdRef.current = ''
+      app.GetSession(sid).then(detail => {
+        if (detail && detail.novel_id === novelId) {
+          setActiveSessionId(sid)
+        }
+      }).catch(() => {
+        app.SetLastSession('').catch(() => {})
+      })
+    }
   }, [novelId])
 
   // 加载历史消息
   useEffect(() => {
     if (!activeSessionId || !novelId) return
     setSessionId(activeSessionId)
+    setHistoryLoadError(false)
     setIsLoadingHistory(true)
     app.GetSessionMessages(activeSessionId).then(msgs => {
       if (msgs) {
         setTurns(rebuildTurns(msgs))
       }
-    }).catch(() => {}).finally(() => setIsLoadingHistory(false))
-  }, [activeSessionId, novelId])
+    }).catch((err) => {
+      console.error('Load messages failed', err)
+      setHistoryLoadError(true)
+    }).finally(() => setIsLoadingHistory(false))
+  }, [activeSessionId, novelId, historyLoadRetry])
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -130,14 +191,17 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
       const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidthRef.current - delta))
       setWidth(newWidth)
     }
-    const handleMouseUp = () => setIsDragging(false)
+    const handleMouseUp = () => {
+      setIsDragging(false)
+      app.SetChatPanelWidth(Math.round(width)).catch(() => {})
+    }
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
     return () => {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isDragging])
+  }, [isDragging, width, app])
 
   // 清理事件监听器
   useEffect(() => {
@@ -167,6 +231,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
 
   const handleSelectSession = useCallback((sid: string) => {
     setActiveSessionId(sid)
+    app.SetLastSession(sid).catch(() => {})
     app.GetSession(sid).then(detail => {
       if (detail?.usage) {
         setLastUsage(detail.usage as unknown as UsageInfo)
@@ -183,7 +248,9 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
     setLastUsage(null)
     app.GetSessions({ novel_id: novelId, page: 1, size: 5, search: '' }).then(r => {
       if (r) { setSessions(r.items); setSessionsTotal(r.total) }
-    }).catch(() => {})
+    }).catch((err) => {
+      console.error('Refresh sessions failed', err)
+    })
   }, [novelId, app])
 
   const handleOpenHistory = useCallback(() => {
@@ -199,7 +266,9 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
     try {
       const list = await app.ListSkills({ novel_id: novelId })
       setSkills(list ?? [])
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error('Load skills failed', err)
+    }
   }, [app, novelId])
 
   useEffect(() => { loadSkills() }, [loadSkills])
@@ -448,12 +517,15 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
           if (idx >= 0) {
             segments[idx] = {
               ...segments[idx],
+              toolName: event.tool_name || segments[idx].toolName,
+              toolId: event.tool_id || segments[idx].toolId,
               toolStatus,
               displayText: event.display_text || segments[idx].displayText,
               activityKind: event.activity_kind || segments[idx].activityKind || '',
               error: event.error || '',
               approvalType: approvalType ?? segments[idx].approvalType,
               approvalPayload: approvalPayload ?? segments[idx].approvalPayload,
+              result: toolStatus === 'completed' ? (event.metadata || segments[idx].result) : segments[idx].result,
             }
           } else {
             segments.push({
@@ -467,6 +539,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
               error: event.error || '',
               approvalType,
               approvalPayload,
+              result: toolStatus === 'completed' ? event.metadata : undefined,
             })
           }
 
@@ -569,19 +642,23 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
   const handleSelectModel = useCallback((key: string) => {
     setSelectedKey(key)
     const m = models.find(x => x.Key === key)
+    let effort = ''
     if (m?.ReasoningLevels?.length) {
-      setReasoningEffort(m.ReasoningLevels[0])
+      effort = m.ReasoningLevels[0]
+      setReasoningEffort(effort)
     }
-  }, [models])
+    app.SetSelectedModel(key, effort).catch(() => {})
+  }, [models, app])
 
   const handleSelectEffort = useCallback((effort: string) => {
     setReasoningEffort(effort)
-  }, [])
+    app.SetReasoningEffort(effort).catch(() => {})
+  }, [app])
 
   const handleToggleApproval = useCallback(() => {
     const next = approvalMode === 'manual' ? 'auto' : 'manual'
     setApprovalMode(next)
-    app.SetApprovalMode(next)
+    app.SetApprovalMode(next).catch(() => {})
   }, [approvalMode, app])
 
   const handleCompress = useCallback(async () => {
@@ -660,6 +737,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
       if (data.session_id) {
         setSessionId(data.session_id)
         setActiveSessionId(data.session_id)
+        app.SetLastSession(data.session_id).catch(() => {})
       }
 
       // 更新 turn 的 turnId 为后端分配的真实值
@@ -685,7 +763,9 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
       // 刷新会话列表
       app.GetSessions({ novel_id: novelId, page: 1, size: 5, search: '' }).then(r => {
         if (r) { setSessions(r.items); setSessionsTotal(r.total) }
-      }).catch(() => {})
+      }).catch((err) => {
+        console.error('Post-send refresh sessions failed', err)
+      })
     } catch (err) {
       setTurns(prev => prev.map(t => {
         if (t.id !== turnId) return t
@@ -758,6 +838,18 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
         </div>
       </div>
 
+      {initLoadError && (
+        <div className="px-4 py-2 bg-red-50 border-b border-red-200 text-xs text-red-600 flex items-center justify-between shrink-0">
+          <span>加载设置失败，模型列表和偏好可能不准确</span>
+          <button
+            onClick={() => setInitLoadRetry(n => n + 1)}
+            className="underline hover:text-red-800 cursor-pointer"
+          >
+            重试
+          </button>
+        </div>
+      )}
+
       <div className="absolute left-0 right-0 top-[41px] bottom-0 pointer-events-none z-30">
         <SessionHistory
           open={showHistoryPanel}
@@ -789,7 +881,19 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
         ) : (
           <>
             {/* 消息列表 */}
-            {!hasTurns && !isLoading ? (
+            {historyLoadError ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <p className="text-sm text-red-500 mb-2">加载消息失败</p>
+                  <button
+                    onClick={() => setHistoryLoadRetry(n => n + 1)}
+                    className="text-xs text-primary underline cursor-pointer"
+                  >
+                    重试
+                  </button>
+                </div>
+              </div>
+            ) : !hasTurns && !isLoading ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">
                   <MessageSquare className="w-10 h-10 text-muted-foreground/20 mx-auto mb-3" />
@@ -819,6 +923,13 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
                       if (seg.type === 'tool') {
                         // run_subagent 已由 subagent 段渲染，跳过纯工具卡
                         if (seg.toolName === 'run_subagent') return null
+
+                        if (seg.toolName === 'web_search' && seg.toolStatus === 'completed' && seg.result) {
+                          return <WebSearchCard key={seg.id} result={seg.result} />
+                        }
+                        if (seg.toolName === 'web_fetch' && seg.toolStatus === 'completed' && seg.result) {
+                          return <WebFetchCard key={seg.id} result={seg.result} displayText={seg.displayText} />
+                        }
 
                         return (
                           <ToolCallCard
@@ -960,7 +1071,9 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
                 }
               }
             }
-          }).catch(() => {})
+          }).catch((err) => {
+            console.error('Refresh models failed', err)
+          })
         }}
         initialTab="model"
       />

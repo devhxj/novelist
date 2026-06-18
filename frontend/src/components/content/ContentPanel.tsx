@@ -11,9 +11,12 @@ import SkillPreview from './SkillPreview'
 import Markdown from '@/components/Markdown'
 import { outlinePath, isContentPath, isOutlinePath, isSkillPath, skillNameFromPath } from './types'
 import type { EditorTab } from './types'
+import './ContentPanel.css'
 
 export interface ContentPanelHandle {
   openFile: (path: string, title: string, readOnly?: boolean) => void
+  openFileWithHighlight: (path: string, title: string, matchPos: number, matchLen: number) => void
+  clearHighlight: () => void
   closeAllTabs: () => void
   openDiffTab: (data: {
     path: string; title: string; diff: string; original: string; modified: string
@@ -35,13 +38,15 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   const {
     tabs, activeTab, activeTabId,
     openTab, closeTab, closeAllTabs, setActiveTabId,
-    updateTab, openDiffTab,
-  } = useEditorTabs()
+    updateTab, openDiffTab, initRef,
+  } = useEditorTabs(novelId)
 
   const [isLoading, setIsLoading] = useState(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const savingRef = useRef<{ id: string; path: string; content: string } | null>(null)
+  const pendingHighlightRef = useRef<{ matchPos: number; matchLen: number } | null>(null)
+  const didApplyHighlightRef = useRef(false) // handleEditorMount 已应用高亮时跳过清除
   const novelIdRef = useRef(novelId)
   const tabsRef = useRef(tabs)
 
@@ -57,6 +62,26 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       onContentChange?.(activeTab.content ?? '')
     }
   }, [activeTab, onContentChange])
+
+  // 从 localStorage 恢复 tab 后，自动加载文件内容
+  const loadedRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    // novelId 变化时重置
+    loadedRef.current.clear()
+  }, [novelId])
+  useEffect(() => {
+    if (!initRef.current) return
+    const needsLoad = tabs.filter(t => t.type === 'file' && t.content == null && !loadedRef.current.has(t.id))
+    if (needsLoad.length === 0) return
+    for (const t of needsLoad) {
+      loadedRef.current.add(t.id)
+      app.GetContent(novelId, t.path).then(content => {
+        updateTab(t.id, { content: content ?? '' })
+      }).catch(() => {
+        updateTab(t.id, { content: '加载失败，请关闭标签页后重试' })
+      })
+    }
+  }, [tabs, novelId, initRef.current])
 
   // Ctrl+Shift+V 切换技能预览
   useEffect(() => {
@@ -121,15 +146,71 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     }, 500)
   }, [tabs, updateTab, doSave, onContentChange])
 
-  const handleEditorMount: OnMount = useCallback((editor) => {
+  const monacoRef = useRef<any>(null)
+
+  // 将 rune 偏移转为 Monaco 行列号（1-based）
+  function runeOffsetToMonaco(text: string, runeOffset: number): { line: number; col: number } {
+    let runeCount = 0
+    const lines = text.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const lineRunes = [...lines[i]].length
+      if (runeCount + lineRunes >= runeOffset) {
+        return { line: i + 1, col: (runeOffset - runeCount) + 1 }
+      }
+      runeCount += lineRunes + 1 // +1 for \n
+    }
+    return { line: lines.length, col: 1 }
+  }
+
+  const doHighlight = useCallback((editor: Parameters<OnMount>[0], content: string, matchPos: number, matchLen: number) => {
+    const monaco = monacoRef.current
+    if (!monaco || !editor.getModel()) return
+
+    const totalLines = editor.getModel()!.getLineCount()
+    const { line, col } = runeOffsetToMonaco(content, matchPos)
+    const clampedEnd = Math.min(matchPos + matchLen, [...content].length)
+    const { line: endLine, col: endCol } = runeOffsetToMonaco(content, clampedEnd)
+    const ctxEnd = Math.min(endLine + 1, totalLines)
+
+    const decorations: any[] = [
+      {
+        range: new monaco.Range(Math.max(1, line - 1), 1, ctxEnd, 1),
+        options: { isWholeLine: true, className: 'search-context-highlight' },
+      },
+      {
+        range: new monaco.Range(line, col, endLine, endCol),
+        options: { className: 'search-keyword-highlight' },
+      },
+    ]
+
+    const collection = (editor as any)._searchDecorations
+    if (collection) collection.clear()
+    ;(editor as any)._searchDecorations = editor.createDecorationsCollection(decorations)
+
+    editor.revealPositionInCenter({ lineNumber: line, column: col })
+    editor.setPosition({ lineNumber: line, column: col })
+  }, [])
+
+  const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
+    monacoRef.current = monaco
     editor.onDidBlurEditorText(() => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
       const s = savingRef.current
       if (!s) return
       doSave(s.id, s.path, s.content)
     })
-  }, [doSave])
+    // 编辑器挂载后检查待处理高亮（直接取 Monaco model 内容，避免 ref 时序问题）。
+    const pending = pendingHighlightRef.current
+    if (pending) {
+      const content = editor.getModel()?.getValue()
+      if (content) {
+        doHighlight(editor, content, pending.matchPos, pending.matchLen)
+        pendingHighlightRef.current = null
+        didApplyHighlightRef.current = true
+      }
+    }
+  }, [doSave, doHighlight])
 
   // ── file:changed 事件监听 ─────────────────────────────────
   // 用 ref 读取最新 tabs，避免因 tabs 变化频繁重建订阅丢失事件
@@ -205,6 +286,58 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     }).finally(() => setIsLoading(false))
   }, [novelId, tabs, app, openTab, setActiveTabId, onContentChange])
 
+
+  const clearHighlight = useCallback(() => {
+    const editor = editorRef.current as any
+    if (editor?._searchDecorations) {
+      editor._searchDecorations.clear()
+      editor._searchDecorations = null
+    }
+  }, [])
+
+  const doOpenFileWithHighlight = useCallback((path: string, title: string, matchPos: number, matchLen: number) => {
+    if (matchPos < 0) {
+      doOpenFile(path, title)
+      return
+    }
+    const existing = tabs.find(t => t.path === path && t.type === 'file')
+    // 当前激活的 tab：直接应用高亮，不走 pending（setActiveTabId 同值不触发 effect）
+    if (existing && existing.id === activeTabId && existing.content && editorRef.current) {
+      doHighlight(editorRef.current, existing.content, matchPos, matchLen)
+      return
+    }
+    pendingHighlightRef.current = { matchPos, matchLen }
+    if (existing) {
+      setActiveTabId(existing.id)
+      return
+    }
+    doOpenFile(path, title)
+  }, [doOpenFile, tabs, activeTabId, setActiveTabId, doHighlight])
+
+  // tab 切换 / 内容就绪：有 pending 且 editor model 存活就应用高亮，否则清除旧高亮。
+  // didApplyHighlightRef：handleEditorMount 在 layout effect 阶段消费 pending 后，
+  // 标记跳过后续 effect 的清除，避免刚设的高亮被擦除。
+  useEffect(() => {
+    if (didApplyHighlightRef.current) {
+      didApplyHighlightRef.current = false
+      return
+    }
+    const editor = editorRef.current as any
+    const pending = pendingHighlightRef.current
+    // 必须检查 editor.getModel()：key 变化导致 ContentEditor 重建时，
+    // unmount/remount 之间 editorRef 可能指向已销毁的旧 editor（model 为 null），
+    // 此时不应消费 pending，留给 handleEditorMount 处理。
+    if (pending && activeTab?.content && editor?.getModel()) {
+      doHighlight(editor, activeTab.content, pending.matchPos, pending.matchLen)
+      pendingHighlightRef.current = null
+      return
+    }
+    if (editor?._searchDecorations) {
+      editor._searchDecorations.clear()
+      editor._searchDecorations = null
+    }
+  }, [activeTab?.id, activeTab?.content, doHighlight])
+
   function filePathFromDiff(diffPath: string): { filePath: string; viewMode: 'content' | 'outline' } {
     if (isOutlinePath(diffPath)) {
       return { filePath: diffPath.replace('outlines/', 'chapters/'), viewMode: 'outline' }
@@ -252,11 +385,13 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
 
   useImperativeHandle(ref, () => ({
     openFile: doOpenFile,
+    openFileWithHighlight: doOpenFileWithHighlight,
+    clearHighlight,
     closeAllTabs,
     openDiffTab,
     handleDiffApprove,
     handleDiffReject,
-  }), [doOpenFile, closeAllTabs, openDiffTab, handleDiffApprove, handleDiffReject])
+  }), [doOpenFile, doOpenFileWithHighlight, clearHighlight, closeAllTabs, openDiffTab, handleDiffApprove, handleDiffReject])
 
 
   // ── 渲染 ────────────────────────────────────────────────

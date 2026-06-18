@@ -1,0 +1,9 @@
+.search-context-highlight {
+  background: rgba(59, 130, 246, 0.08) !important;
+}
+
+.search-keyword-highlight {
+  background: rgba(30, 64, 175, 0.22) !important;
+  border-radius: 2px;
+  border-bottom: 2px solid rgba(30, 64, 175, 0.45);
+}

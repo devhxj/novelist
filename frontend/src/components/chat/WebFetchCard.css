@@ -1,0 +1,132 @@
+.fetch-card {
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  font-size: 0.75rem;
+  max-width: 85%;
+  border-left: 3px solid oklch(0.5 0.15 155);
+  background: oklch(0.97 0.02 155);
+  opacity: 0.85;
+}
+
+.fetch-card-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem 0.35rem 0.6rem;
+}
+
+.fetch-card-icon {
+  flex-shrink: 0;
+  color: oklch(0.5 0.15 155);
+}
+
+.fetch-card-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: oklch(0.5 0 0);
+  line-height: 1.35;
+}
+
+.fetch-card-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 500;
+}
+
+.fetch-card-badge-done {
+  color: #389e0d;
+  background: rgba(82, 196, 26, 0.1);
+}
+
+/* ── meta (title + url) ── */
+.fetch-card-meta {
+  padding: 0.2rem 0.6rem 0.35rem;
+}
+
+.fetch-card-title-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
+.fetch-card-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: oklch(0.3 0 0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fetch-card-ext-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: oklch(0.45 0 0);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.fetch-card-ext-btn:hover {
+  background: oklch(0.94 0.02 240);
+  color: oklch(0.55 0.15 240);
+}
+
+.fetch-card-url {
+  display: block;
+  font-size: 0.62rem;
+  color: oklch(0.45 0 0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 0.15rem;
+}
+
+/* ── content ── */
+.fetch-card-content {
+  border-top: 1px solid oklch(0.85 0.01 0);
+}
+
+.fetch-card-content-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.35rem 0.6rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: oklch(0.4 0 0);
+  transition: color 0.15s ease;
+}
+
+.fetch-card-content-toggle:hover {
+  color: oklch(0.55 0.15 240);
+}
+
+.fetch-card-content-body {
+  padding: 0.2rem 0.6rem 0.5rem;
+  max-height: 20rem;
+  overflow-y: auto;
+}
+
+.fetch-card-content-body .prose {
+  font-size: 0.72rem;
+}

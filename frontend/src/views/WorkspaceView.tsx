@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { flushSync } from 'react-dom'
 import { useApp } from '@/hooks/useApp'
 import type { novel, chapter } from '@/hooks/useApp'
 import ActivityBar from '@/components/shell/ActivityBar'
@@ -17,8 +18,11 @@ import NovelDeleteDialog from '@/components/novel/NovelDeleteDialog'
 import ChatPanel from '@/components/chat/ChatPanel'
 import GitHubLink from '@/components/shell/GitHubLink'
 import SettingsDialog from '@/components/settings/SettingsDialog'
-import { Settings } from 'lucide-react'
+import ProfileView from '@/components/profile/ProfileView'
+import { search } from '@/lib/wailsjs/go/models'
+import { Settings, User } from 'lucide-react'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised, Quit } from '@/lib/wailsjs/runtime/runtime'
+import logo from '@/assets/logo.svg'
 
 interface Props {
   initialNovelId: number
@@ -31,6 +35,13 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   const [novels, setNovels] = useState<novel.Novel[]>([])
   const [activeNovelId, setActiveNovelId] = useState(initialNovelId)
   const [activePanel, setActivePanel] = useState(initialNovelId ? 'chapters' : 'novels')
+  const [sidebarPanel, setSidebarPanel] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<search.Result[]>([])
+  const [characterFocusId, setCharacterFocusId] = useState<number>(0)
+  const [locationFocusId, setLocationFocusId] = useState<number>(0)
+  const [timelineFocusId, setTimelineFocusId] = useState<number>(0)
+  const [arcFocusId, setArcFocusId] = useState<number>(0)
   const [showCreate, setShowCreate] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -112,6 +123,39 @@ export default function WorkspaceView({ initialNovelId }: Props) {
     }
   }, [novels, activeNovelId])
 
+  function handleActivitySelect(id: string) {
+    if (id === 'search') {
+      setSidebarPanel('search')
+    } else {
+      setSidebarPanel(null)
+      setActivePanel(id)
+      contentRef.current?.clearHighlight()
+    }
+  }
+
+  function handleSearchNavigateEntity(panelId: string, entityId: number) {
+    setCharacterFocusId(0)
+    setLocationFocusId(0)
+    setTimelineFocusId(0)
+    setArcFocusId(0)
+    switch (panelId) {
+      case 'characters': setCharacterFocusId(entityId); break
+      case 'locations': setLocationFocusId(entityId); break
+      case 'timeline': setTimelineFocusId(entityId); break
+      case 'storyarcs': setArcFocusId(entityId); break
+    }
+    setActivePanel(panelId)
+  }
+
+  function handleSearchNavigateChapter(filePath: string, title: string, _chapterNum: number, matchPos: number, matchLen: number) {
+    flushSync(() => setActivePanel('chapters'))
+    if (matchPos >= 0 && matchLen > 0) {
+      contentRef.current?.openFileWithHighlight(filePath, title, matchPos, matchLen)
+    } else {
+      contentRef.current?.openFile(filePath, title)
+    }
+  }
+
   async function handleSelectNovel(n: novel.Novel) {
     setActiveNovelId(n.id)
     setActivePanel('chapters')
@@ -178,14 +222,22 @@ export default function WorkspaceView({ initialNovelId }: Props) {
         className="h-11 flex items-center border-b bg-sidebar shrink-0"
         style={{ '--wails-draggable': 'drag' } as React.CSSProperties}
       >
-        <span className="text-sm font-medium pl-3 flex-1">
+        <img src={logo} alt="Goink" className="h-7 w-7 ml-3 shrink-0" />
+        <span className="text-sm font-medium pl-2 flex-1">
           {activeNovel?.title ?? 'Goink'}
         </span>
         <div className="flex items-center h-full" style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}>
           <GitHubLink />
           <button
+            onClick={() => setActivePanel('profile')}
+            className={`text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center ml-2 ${activePanel === 'profile' ? 'text-foreground' : ''}`}
+            title="个人中心"
+          >
+            <User className="w-5 h-5" />
+          </button>
+          <button
             onClick={() => setShowSettings(true)}
-            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center ml-2 mr-1"
+            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center mr-1"
             title="设置"
           >
             <Settings className="w-5 h-5" />
@@ -218,10 +270,10 @@ export default function WorkspaceView({ initialNovelId }: Props) {
       </header>
 
       <div className="flex-1 flex min-h-0">
-        <ActivityBar activeId={activePanel} onSelect={setActivePanel} />
+        <ActivityBar activeId={sidebarPanel ?? activePanel} onSelect={handleActivitySelect} />
 
         <SidePanel
-          activePanel={activePanel}
+          activePanel={sidebarPanel ?? activePanel}
           novels={novels}
           novelId={activeNovelId}
           onSelectNovel={handleSelectNovel}
@@ -244,6 +296,11 @@ export default function WorkspaceView({ initialNovelId }: Props) {
             setActiveSkillName(`技能: ${name}`)
             contentRef.current?.openFile(`skills/${name}.md`, `技能: ${name}`)
           }}
+          onSearchNavigateEntity={handleSearchNavigateEntity}
+          onSearchNavigateChapter={handleSearchNavigateChapter}
+          searchQuery={searchQuery}
+          searchResults={searchResults}
+          onSearchChange={(q, r) => { setSearchQuery(q); setSearchResults(r) }}
         />
 
         {activePanel === 'novels' ? (
@@ -256,25 +313,29 @@ export default function WorkspaceView({ initialNovelId }: Props) {
             onCreateNovel={() => setShowCreateDialog(true)}
             onSaveCover={handleSaveCover}
           />
-        ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && (
+        ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && activePanel !== 'profile' && (
           <ContentPanel ref={contentRef} novelId={activeNovelId} onContentChange={setActiveContent} />
         )}
 
         {activePanel === 'characters' ? (
-          <CharacterGraph novelId={activeNovelId} />
+          <CharacterGraph novelId={activeNovelId} focusId={characterFocusId} />
         ) : activePanel === 'locations' ? (
-          <LocationGraph novelId={activeNovelId} />
+          <LocationGraph novelId={activeNovelId} focusId={locationFocusId} />
         ) : activePanel === 'storyarcs' ? (
-          <ArcListView novelId={activeNovelId} />
+          <ArcListView novelId={activeNovelId} focusArcId={arcFocusId} />
         ) : activePanel === 'timeline' ? (
-          <TimelineView novelId={activeNovelId} />
+          <TimelineView novelId={activeNovelId} focusEntryId={timelineFocusId} />
         ) : activePanel === 'reader' ? (
           <ReaderView novelId={activeNovelId} />
         ) : activePanel === 'preferences' ? (
           <PreferenceView novelId={activeNovelId} />
+        ) : activePanel === 'profile' ? (
+          <ProfileView />
         ) : null}
 
-        <ChatPanel novelId={activeNovelId} onApprove={handleApprove} onReject={handleReject} onApprovalFileEdit={handleApprovalFileEdit} />
+        {activePanel !== 'profile' && (
+          <ChatPanel novelId={activeNovelId} onApprove={handleApprove} onReject={handleReject} onApprovalFileEdit={handleApprovalFileEdit} />
+        )}
       </div>
 
       <StatusBar content={activeContent} />

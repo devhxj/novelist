@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	wails "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -18,6 +19,7 @@ import (
 	"novel/internal/approval"
 	"novel/internal/llm"
 	"novel/internal/mcp_tools"
+	"novel/internal/search"
 	"novel/internal/session"
 	"novel/internal/skill"
 	"novel/internal/storage"
@@ -25,15 +27,16 @@ import (
 
 // Agent 是对话编排核心，持有运行所需的所有基础设施。
 type Agent struct {
-	llm        *llm.Client
-	registry   *mcp_tools.Registry
-	session    *session.Store
-	db         *gorm.DB
-	approver   approval.Approver
-	logger     *slog.Logger
-	skillStore *skill.Store
-	cancels    map[string]context.CancelFunc // sessionID → cancel
-	mu         sync.Mutex
+	llm           *llm.Client
+	registry      *mcp_tools.Registry
+	session       *session.Store
+	db            *gorm.DB
+	approver      approval.Approver
+	logger        *slog.Logger
+	skillStore    *skill.Store
+	searchService atomic.Pointer[search.Service]
+	cancels       map[string]context.CancelFunc // sessionID → cancel
+	mu            sync.Mutex
 }
 
 // RunOptions 是单次 Run() 的参数。
@@ -65,6 +68,9 @@ func New(llmClient *llm.Client, registry *mcp_tools.Registry, session *session.S
 		cancels:    make(map[string]context.CancelFunc),
 	}
 }
+
+// SetSearchService 设置搜索服务，在搜索服务初始化完成后由 App 调用。
+func (a *Agent) SetSearchService(s *search.Service) { a.searchService.Store(s) }
 
 // RegisterCancel 注册一个可取消的对话。
 func (a *Agent) RegisterCancel(sessionID string, cancel context.CancelFunc) {
@@ -274,7 +280,9 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						RunSubAgent: func(ctx context.Context, req mcp_tools.SubAgentRequest) (string, error) {
 							return a.RunSubAgent(ctx, opts, req)
 						},
-						SkillStore: a.skillStore,
+						SkillStore:    a.skillStore,
+						SearchService: a.searchService.Load(),
+						WebSearch:     a.buildWebSearch(),
 					}
 					result := a.registry.Execute(ctx, name, rawArgs, tc, opts.AllowedTools)
 					a.logger.Info("tool executed", "tool", name, "success", result.Success, "phase", map[bool]string{true: "completed", false: "failed"}[result.Success])
@@ -284,12 +292,21 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						phase = "failed"
 					}
 					display = a.buildDisplay(name, args, displayPhase(phase), opts.NovelID)
+					metadata := display.Metadata
+					if (name == "web_search" || name == "web_fetch") && result.Success && result.Data != nil {
+						if metadata == nil {
+							metadata = make(map[string]any)
+						}
+						for k, v := range result.Data {
+							metadata[k] = v
+						}
+					}
 					emit(AgentEvent{
 						TurnID: opts.TurnID, Type: EventToolCall,
 						ToolName: name, ToolID: id, Phase: phase,
 						ToolArgs: args, Success: result.Success, ErrMsg: result.Error,
 						DisplayText: display.DisplayText, ActivityKind: display.ActivityKind,
-						Metadata: display.Metadata, Timestamp: time.Now(),
+						Metadata: metadata, Timestamp: time.Now(),
 					})
 
 					// 失败计数：仅系统异常计入
@@ -444,6 +461,19 @@ func displayPhase(phase string) mcp_tools.DisplayPhase {
 		return mcp_tools.PhaseFailed
 	}
 	return mcp_tools.PhaseCompleted
+}
+
+// buildWebSearch 构建 WebSearch 闭包，从当前 providers 中读取 DeepSeek 配置。
+func (a *Agent) buildWebSearch() func(ctx context.Context, query string) (*llm.WebSearchResult, error) {
+	providers := a.llm.Providers()
+	ds, ok := providers["deepseek"]
+	if !ok || ds.APIKey == "" {
+		return nil
+	}
+	apiKey := ds.APIKey
+	return func(ctx context.Context, query string) (*llm.WebSearchResult, error) {
+		return llm.SearchWeb(ctx, apiKey, "", query)
+	}
 }
 
 // extraJSON 将 map 序列化为 JSON 字符串存入 ExtraMetadata。

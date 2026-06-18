@@ -130,6 +130,14 @@ export function GetTimelineEntries(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetTimelineEntries'](arg1, arg2, arg3);
 }
 
+export function GetWritingActivity(arg1) {
+  return window['go']['app']['App']['GetWritingActivity'](arg1);
+}
+
+export function GetWritingStats() {
+  return window['go']['app']['App']['GetWritingStats']();
+}
+
 export function Initialize(arg1) {
   return window['go']['app']['App']['Initialize'](arg1);
 }
@@ -140,6 +148,14 @@ export function IsInitialized() {
 
 export function ListSkills(arg1) {
   return window['go']['app']['App']['ListSkills'](arg1);
+}
+
+export function RebuildNovelIndex(arg1) {
+  return window['go']['app']['App']['RebuildNovelIndex'](arg1);
+}
+
+export function SaveAvatar(arg1) {
+  return window['go']['app']['App']['SaveAvatar'](arg1);
 }
 
 export function SaveContent(arg1) {
@@ -158,12 +174,36 @@ export function SaveSettings(arg1) {
   return window['go']['app']['App']['SaveSettings'](arg1);
 }
 
+export function SaveUserName(arg1) {
+  return window['go']['app']['App']['SaveUserName'](arg1);
+}
+
+export function SearchAll(arg1, arg2) {
+  return window['go']['app']['App']['SearchAll'](arg1, arg2);
+}
+
 export function SetActiveNovel(arg1) {
   return window['go']['app']['App']['SetActiveNovel'](arg1);
 }
 
 export function SetApprovalMode(arg1) {
   return window['go']['app']['App']['SetApprovalMode'](arg1);
+}
+
+export function SetChatPanelWidth(arg1) {
+  return window['go']['app']['App']['SetChatPanelWidth'](arg1);
+}
+
+export function SetLastSession(arg1) {
+  return window['go']['app']['App']['SetLastSession'](arg1);
+}
+
+export function SetReasoningEffort(arg1) {
+  return window['go']['app']['App']['SetReasoningEffort'](arg1);
+}
+
+export function SetSelectedModel(arg1, arg2) {
+  return window['go']['app']['App']['SetSelectedModel'](arg1, arg2);
 }
 
 export function TestConnection(arg1) {
