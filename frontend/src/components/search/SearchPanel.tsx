@@ -102,7 +102,8 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
 
   function selectResult(r: SearchResult) {
     if (r.type === 'content' || r.type === 'rag' || r.type === 'chapter') {
-      onNavigateChapter(r.file_path, r.title || `第${r.chapter_num}章`, r.chapter_num, r.match_position || 0, r.match_len || 0)
+      const displayTitle = r.title ? `第${r.chapter_num}章 ${r.title}` : `第${r.chapter_num}章`
+      onNavigateChapter(r.file_path, displayTitle, r.chapter_num, r.match_position ?? 0, r.match_len ?? 0)
     } else {
       onNavigateEntity(r.panel_id, r.id)
     }

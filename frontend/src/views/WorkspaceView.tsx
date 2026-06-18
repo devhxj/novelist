@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { flushSync } from 'react-dom'
 import { useApp } from '@/hooks/useApp'
 import type { novel, chapter } from '@/hooks/useApp'
 import ActivityBar from '@/components/shell/ActivityBar'
@@ -146,15 +147,12 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   }
 
   function handleSearchNavigateChapter(filePath: string, title: string, _chapterNum: number, matchPos: number, matchLen: number) {
-    setActivePanel('chapters')
-    // 延迟到下一帧，确保 ContentPanel 已挂载、ref 已就绪
-    setTimeout(() => {
-      if (matchPos >= 0 && matchLen > 0) {
-        contentRef.current?.openFileWithHighlight(filePath, title, matchPos, matchLen)
-      } else {
-        contentRef.current?.openFile(filePath, title)
-      }
-    }, 0)
+    flushSync(() => setActivePanel('chapters'))
+    if (matchPos >= 0 && matchLen > 0) {
+      contentRef.current?.openFileWithHighlight(filePath, title, matchPos, matchLen)
+    } else {
+      contentRef.current?.openFile(filePath, title)
+    }
   }
 
   async function handleSelectNovel(n: novel.Novel) {

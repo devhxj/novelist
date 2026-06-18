@@ -46,6 +46,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const savingRef = useRef<{ id: string; path: string; content: string } | null>(null)
   const pendingHighlightRef = useRef<{ matchPos: number; matchLen: number } | null>(null)
+  const didApplyHighlightRef = useRef(false) // handleEditorMount 已应用高亮时跳过清除
   const novelIdRef = useRef(novelId)
   const tabsRef = useRef(tabs)
 
@@ -197,16 +198,17 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       if (!s) return
       doSave(s.id, s.path, s.content)
     })
-    // 编辑器挂载后检查待处理高亮
+    // 编辑器挂载后检查待处理高亮（直接取 Monaco model 内容，避免 ref 时序问题）。
     const pending = pendingHighlightRef.current
     if (pending) {
-      const tab = tabsRef.current.find(t => t.id === activeTabId)
-      if (tab?.content) {
-        doHighlight(editor, tab.content, pending.matchPos, pending.matchLen)
+      const content = editor.getModel()?.getValue()
+      if (content) {
+        doHighlight(editor, content, pending.matchPos, pending.matchLen)
         pendingHighlightRef.current = null
+        didApplyHighlightRef.current = true
       }
     }
-  }, [doSave, doHighlight, activeTabId])
+  }, [doSave, doHighlight])
 
   // ── file:changed 事件监听 ─────────────────────────────────
   // 用 ref 读取最新 tabs，避免因 tabs 变化频繁重建订阅丢失事件
@@ -310,23 +312,29 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     doOpenFile(path, title)
   }, [doOpenFile, tabs, activeTabId, setActiveTabId, doHighlight])
 
-  // 编辑器就绪（content 到位 / tab 切换完成）时应用待处理高亮
+  // tab 切换 / 内容就绪：有 pending 且 editor model 存活就应用高亮，否则清除旧高亮。
+  // didApplyHighlightRef：handleEditorMount 在 layout effect 阶段消费 pending 后，
+  // 标记跳过后续 effect 的清除，避免刚设的高亮被擦除。
   useEffect(() => {
-    const pending = pendingHighlightRef.current
-    if (!pending || !activeTab?.content || !editorRef.current) return
-    doHighlight(editorRef.current, activeTab.content, pending.matchPos, pending.matchLen)
-    pendingHighlightRef.current = null
-  }, [activeTab?.id, activeTab?.content, doHighlight])
-
-  // 切换 tab 时清除旧高亮（pending 标记由上方 effect 或 handleEditorMount 消费）
-  useEffect(() => {
-    if (pendingHighlightRef.current) return
+    if (didApplyHighlightRef.current) {
+      didApplyHighlightRef.current = false
+      return
+    }
     const editor = editorRef.current as any
+    const pending = pendingHighlightRef.current
+    // 必须检查 editor.getModel()：key 变化导致 ContentEditor 重建时，
+    // unmount/remount 之间 editorRef 可能指向已销毁的旧 editor（model 为 null），
+    // 此时不应消费 pending，留给 handleEditorMount 处理。
+    if (pending && activeTab?.content && editor?.getModel()) {
+      doHighlight(editor, activeTab.content, pending.matchPos, pending.matchLen)
+      pendingHighlightRef.current = null
+      return
+    }
     if (editor?._searchDecorations) {
       editor._searchDecorations.clear()
       editor._searchDecorations = null
     }
-  }, [activeTab?.id])
+  }, [activeTab?.id, activeTab?.content, doHighlight])
 
   function filePathFromDiff(diffPath: string): { filePath: string; viewMode: 'content' | 'outline' } {
     if (isOutlinePath(diffPath)) {
