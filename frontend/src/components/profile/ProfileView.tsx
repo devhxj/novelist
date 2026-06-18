@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '@/hooks/useApp'
 import ContributionGrid from './ContributionGrid'
-import { PenLine, CalendarDays, Flame, User } from 'lucide-react'
+import { PenLine, CalendarDays, Flame, User, Camera } from 'lucide-react'
+import type { config } from '@/lib/wailsjs/go/models'
 
 interface WritingStats {
   total_words: number
@@ -18,14 +19,21 @@ export default function ProfileView() {
   const [error, setError] = useState<string | null>(null)
   const [activity, setActivity] = useState<Record<string, number>>({})
   const [stats, setStats] = useState<WritingStats | null>(null)
+  const [settings, setSettings] = useState<config.AppSettings | null>(null)
+  const [avatarKey, setAvatarKey] = useState(0)
+  const [editingName, setEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState('')
+  const [avatarErrored, setAvatarErrored] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const [act, st] = await Promise.all([
+      const [act, st, cfg] = await Promise.all([
         app.GetWritingActivity(12),
         app.GetWritingStats(),
+        app.GetSettings(),
       ])
       const dict: Record<string, number> = {}
       if (act) {
@@ -35,6 +43,7 @@ export default function ProfileView() {
       }
       setActivity(dict)
       setStats(st as WritingStats)
+      setSettings(cfg as config.AppSettings)
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败')
     } finally {
@@ -43,6 +52,34 @@ export default function ProfileView() {
   }, [app])
 
   useEffect(() => { load() }, [load])
+
+  function handleAvatarClick() {
+    fileInputRef.current?.click()
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    const buf = await file.arrayBuffer()
+    await app.SaveAvatar(Array.from(new Uint8Array(buf)))
+    setAvatarErrored(false)
+    setAvatarKey(prev => prev + 1)
+  }
+
+  async function handleNameSave() {
+    const name = nameDraft.trim()
+    if (name && name !== settings?.user_name) {
+      await app.SaveUserName(name)
+      setSettings(prev => prev ? { ...prev, user_name: name } : null)
+    }
+    setEditingName(false)
+  }
+
+  function startEditName() {
+    setNameDraft(settings?.user_name ?? '')
+    setEditingName(true)
+  }
 
   if (loading) {
     return (
@@ -62,16 +99,50 @@ export default function ProfileView() {
 
   return (
     <main className="flex-1 min-w-0 overflow-y-auto bg-[#fafbfc] dark:bg-background">
+      <input
+        ref={fileInputRef}
+        type="file" accept="image/*"
+        className="hidden"
+        onChange={handleFileChange}
+      />
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-8">
         {/* 头像 + 问候 */}
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center flex-shrink-0">
-            <User className="w-7 h-7 text-slate-400 dark:text-slate-500" />
+          <div className="relative group flex-shrink-0 cursor-pointer" onClick={handleAvatarClick}>
+            {avatarErrored ? (
+              <div className="w-14 h-14 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center">
+                <User className="w-7 h-7 text-slate-400 dark:text-slate-500" />
+              </div>
+            ) : (
+              <img
+                src={`/avatar?v=${avatarKey}`}
+                alt=""
+                onError={() => setAvatarErrored(true)}
+                className="w-14 h-14 rounded-full object-cover"
+              />
+            )}
+            <div className="absolute inset-0 rounded-full flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Camera className="w-5 h-5 text-white" />
+            </div>
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-slate-800 dark:text-foreground">
-              我的书房
-            </h1>
+            {editingName ? (
+              <input
+                autoFocus
+                value={nameDraft}
+                onChange={e => setNameDraft(e.target.value)}
+                onBlur={handleNameSave}
+                onKeyDown={e => { if (e.key === 'Enter') handleNameSave(); if (e.key === 'Escape') setEditingName(false) }}
+                className="text-lg font-semibold bg-transparent border-b border-primary outline-none text-slate-800 dark:text-foreground max-w-[200px]"
+              />
+            ) : (
+              <h1
+                onClick={startEditName}
+                className={`text-lg font-semibold cursor-pointer hover:text-primary transition-colors ${settings?.user_name ? 'text-slate-800 dark:text-foreground' : 'text-slate-400 dark:text-slate-500'}`}
+              >
+                {settings?.user_name || '未设置昵称'}
+              </h1>
+            )}
             <p className="text-xs text-slate-500 mt-0.5">
               过去一年 · {Object.keys(activity).length} 天有写作记录
             </p>

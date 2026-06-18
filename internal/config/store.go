@@ -16,6 +16,7 @@ type AppSettings struct {
 	ApprovalMode     string `gorm:"column:approval_mode;default:manual"   json:"approval_mode"`
 	ChatPanelWidth   int    `gorm:"column:chat_panel_width;default:360"   json:"chat_panel_width"`
 	LastSessionID    string `gorm:"column:last_session_id;default:''"     json:"last_session_id"`
+	UserName         string `gorm:"column:user_name;default:''"            json:"user_name"`
 }
 
 func (AppSettings) TableName() string { return "app_config" }

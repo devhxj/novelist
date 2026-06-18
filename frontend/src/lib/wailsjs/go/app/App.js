@@ -150,6 +150,10 @@ export function ListSkills(arg1) {
   return window['go']['app']['App']['ListSkills'](arg1);
 }
 
+export function SaveAvatar(arg1) {
+  return window['go']['app']['App']['SaveAvatar'](arg1);
+}
+
 export function SaveContent(arg1) {
   return window['go']['app']['App']['SaveContent'](arg1);
 }
@@ -164,6 +168,10 @@ export function SaveLLMConfig(arg1) {
 
 export function SaveSettings(arg1) {
   return window['go']['app']['App']['SaveSettings'](arg1);
+}
+
+export function SaveUserName(arg1) {
+  return window['go']['app']['App']['SaveUserName'](arg1);
 }
 
 export function SearchAll(arg1, arg2) {

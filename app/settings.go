@@ -1,6 +1,10 @@
 package app
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+
 	"novel/internal/config"
 )
 
@@ -44,5 +48,21 @@ func (a *App) SetChatPanelWidth(width int) error {
 func (a *App) SetLastSession(sessionID string) error {
 	a.settings.LastSessionID = sessionID
 	return config.SaveSettings(a.db, a.settings)
+}
+
+// SaveUserName 保存用户名称。
+func (a *App) SaveUserName(name string) error {
+	a.settings.UserName = name
+	return config.SaveSettings(a.db, a.settings)
+}
+
+// SaveAvatar 保存用户头像到数据目录。
+func (a *App) SaveAvatar(data []byte) error {
+	userDir := filepath.Join(config.DataDirPath(), "user")
+	if err := os.MkdirAll(userDir, 0700); err != nil {
+		return fmt.Errorf("save avatar: %w", err)
+	}
+	avatarPath := filepath.Join(userDir, "avatar.jpg")
+	return os.WriteFile(avatarPath, data, 0644)
 }
 

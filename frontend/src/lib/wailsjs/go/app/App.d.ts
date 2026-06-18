@@ -90,6 +90,8 @@ export function IsInitialized():Promise<boolean>;
 
 export function ListSkills(arg1:app.ListSkillsInput):Promise<Array<skill.SkillMeta>>;
 
+export function SaveAvatar(arg1:Array<number>):Promise<void>;
+
 export function SaveContent(arg1:app.SaveContentInput):Promise<void>;
 
 export function SaveCover(arg1:number,arg2:Array<number>):Promise<void>;
@@ -97,6 +99,8 @@ export function SaveCover(arg1:number,arg2:Array<number>):Promise<void>;
 export function SaveLLMConfig(arg1:llm.LLMConfigView):Promise<void>;
 
 export function SaveSettings(arg1:app.SaveSettingsInput):Promise<void>;
+
+export function SaveUserName(arg1:string):Promise<void>;
 
 export function SearchAll(arg1:number,arg2:string):Promise<Array<search.Result>>;
 
