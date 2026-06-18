@@ -1,11 +1,14 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"novel/internal/config"
+	"novel/internal/rag"
 )
 
 // SaveSettingsInput 是保存设置的入参。
@@ -64,5 +67,16 @@ func (a *App) SaveAvatar(data []byte) error {
 	}
 	avatarPath := filepath.Join(userDir, "avatar.jpg")
 	return os.WriteFile(avatarPath, data, 0644)
+}
+
+// RebuildNovelIndex 无条件全量重建指定小说的向量索引，用于数据异常时的手动兜底。
+func (a *App) RebuildNovelIndex(novelID int64) error {
+	rq := rag.GetRefreshQueue()
+	if rq == nil {
+		return fmt.Errorf("向量索引服务未初始化")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	return rq.RebuildNovel(ctx, novelID)
 }
 

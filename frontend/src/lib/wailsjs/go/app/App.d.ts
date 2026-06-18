@@ -90,6 +90,8 @@ export function IsInitialized():Promise<boolean>;
 
 export function ListSkills(arg1:app.ListSkillsInput):Promise<Array<skill.SkillMeta>>;
 
+export function RebuildNovelIndex(arg1:number):Promise<void>;
+
 export function SaveAvatar(arg1:Array<number>):Promise<void>;
 
 export function SaveContent(arg1:app.SaveContentInput):Promise<void>;

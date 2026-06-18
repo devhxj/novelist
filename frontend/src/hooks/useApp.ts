@@ -53,6 +53,7 @@ import {
   ListSkills,
   GetWritingActivity,
   GetWritingStats,
+  RebuildNovelIndex,
 } from '@/lib/wailsjs/go/app/App'
 import type { app, novel, chapter, config, llm, session, character, location, storyarc, timeline, reader, skill } from '@/lib/wailsjs/go/models'
 
@@ -111,6 +112,7 @@ export function useApp() {
     ListSkills,
     GetWritingActivity,
     GetWritingStats,
+    RebuildNovelIndex,
   }), [])
 }
 

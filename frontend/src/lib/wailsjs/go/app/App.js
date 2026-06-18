@@ -150,6 +150,10 @@ export function ListSkills(arg1) {
   return window['go']['app']['App']['ListSkills'](arg1);
 }
 
+export function RebuildNovelIndex(arg1) {
+  return window['go']['app']['App']['RebuildNovelIndex'](arg1);
+}
+
 export function SaveAvatar(arg1) {
   return window['go']['app']['App']['SaveAvatar'](arg1);
 }
