@@ -398,6 +398,84 @@ func TestSearchContent_NoCache(t *testing.T) {
 	}
 }
 
+// ── searchContent 位置验证 ─────────────────────────────
+
+func TestSearchContent_MatchPosition(t *testing.T) {
+	db := openSearchDB(t)
+	svc := newTestService(db)
+	ctx := context.Background()
+
+	content := "第一章 开端\n\n张三走进了房间，看到李四正在等待。\n\n他缓缓开口：\"你来了。\""
+	query := "李四"
+	// 查询在 rune 偏移 16 处（"看到"后面）
+	queryRunePos := utf8.RuneCountInString(content[:strings.Index(content, query)])
+
+	// 直接注入缓存
+	svc.mu.Lock()
+	svc.cache[1] = map[int]string{1: content}
+	svc.mu.Unlock()
+
+	results := svc.searchContent(ctx, 1, query)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	r := results[0]
+	if r.MatchPosition != queryRunePos {
+		t.Errorf("MatchPosition = %d, want %d", r.MatchPosition, queryRunePos)
+	}
+	if r.MatchLen != utf8.RuneCountInString(query) {
+		t.Errorf("MatchLen = %d, want %d", r.MatchLen, utf8.RuneCountInString(query))
+	}
+	if r.Type != "content" {
+		t.Errorf("Type = %q, want content", r.Type)
+	}
+}
+
+func TestSearchContent_MultipleMatches(t *testing.T) {
+	db := openSearchDB(t)
+	svc := newTestService(db)
+	ctx := context.Background()
+
+	content := "张三走来。\n张三离开。"
+	query := "张三"
+
+	svc.mu.Lock()
+	svc.cache[2] = map[int]string{1: content}
+	svc.mu.Unlock()
+
+	results := svc.searchContent(ctx, 2, query)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	// 第一个匹配在位置 0
+	if results[0].MatchPosition != 0 {
+		t.Errorf("first match position = %d, want 0", results[0].MatchPosition)
+	}
+	// 第二个匹配在 "张三走来。\n" 之后
+	secondPos := utf8.RuneCountInString(content[:strings.LastIndex(content, query)])
+	if results[1].MatchPosition != secondPos {
+		t.Errorf("second match position = %d, want %d", results[1].MatchPosition, secondPos)
+	}
+}
+
+// ── Result 字段 ─────────────────────────────────────────
+
+func TestResult_MatchPositionFields(t *testing.T) {
+	// 验证 RAG 结果通过 MatchPosition/MatchLen 传递位置信息
+	r := Result{
+		Type:          "rag",
+		MatchPosition: 42,
+		MatchLen:      380,
+		Relevance:     0.85,
+	}
+	if r.MatchPosition != 42 {
+		t.Errorf("MatchPosition = %d", r.MatchPosition)
+	}
+	if r.MatchLen != 380 {
+		t.Errorf("MatchLen = %d", r.MatchLen)
+	}
+}
+
 // ── RAG results ──────────────────────────────────────────
 
 func TestSearchRAG_EmptyResults(t *testing.T) {

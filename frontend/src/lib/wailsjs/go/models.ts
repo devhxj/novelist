@@ -872,7 +872,8 @@ export namespace search {
 	    chapter_num: number;
 	    file_path: string;
 	    match_context: string;
-	    match_highlight: string;
+	    match_position: number;
+	    match_len: number;
 	    relevance: number;
 	    panel_id: string;
 	
@@ -889,7 +890,8 @@ export namespace search {
 	        this.chapter_num = source["chapter_num"];
 	        this.file_path = source["file_path"];
 	        this.match_context = source["match_context"];
-	        this.match_highlight = source["match_highlight"];
+	        this.match_position = source["match_position"];
+	        this.match_len = source["match_len"];
 	        this.relevance = source["relevance"];
 	        this.panel_id = source["panel_id"];
 	    }

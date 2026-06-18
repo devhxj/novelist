@@ -18,6 +18,7 @@ import ChatPanel from '@/components/chat/ChatPanel'
 import GitHubLink from '@/components/shell/GitHubLink'
 import SettingsDialog from '@/components/settings/SettingsDialog'
 import ProfileView from '@/components/profile/ProfileView'
+import { search } from '@/lib/wailsjs/go/models'
 import { Settings, User } from 'lucide-react'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised, Quit } from '@/lib/wailsjs/runtime/runtime'
 
@@ -34,7 +35,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   const [activePanel, setActivePanel] = useState(initialNovelId ? 'chapters' : 'novels')
   const [sidebarPanel, setSidebarPanel] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<Array<{ type: string; id: number; title: string; subtitle: string; chapter_num: number; file_path: string; match_context: string; match_highlight: string; relevance: number; panel_id: string }>>([])
+  const [searchResults, setSearchResults] = useState<search.Result[]>([])
   const [characterFocusId, setCharacterFocusId] = useState<number>(0)
   const [locationFocusId, setLocationFocusId] = useState<number>(0)
   const [timelineFocusId, setTimelineFocusId] = useState<number>(0)
@@ -126,6 +127,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
     } else {
       setSidebarPanel(null)
       setActivePanel(id)
+      contentRef.current?.clearHighlight()
     }
   }
 
@@ -143,9 +145,16 @@ export default function WorkspaceView({ initialNovelId }: Props) {
     setActivePanel(panelId)
   }
 
-  function handleSearchNavigateChapter(filePath: string, title: string, _chapterNum: number) {
+  function handleSearchNavigateChapter(filePath: string, title: string, _chapterNum: number, matchPos: number, matchLen: number) {
     setActivePanel('chapters')
-    contentRef.current?.openFile(filePath, title)
+    // 延迟到下一帧，确保 ContentPanel 已挂载、ref 已就绪
+    setTimeout(() => {
+      if (matchPos >= 0 && matchLen > 0) {
+        contentRef.current?.openFileWithHighlight(filePath, title, matchPos, matchLen)
+      } else {
+        contentRef.current?.openFile(filePath, title)
+      }
+    }, 0)
   }
 
   async function handleSelectNovel(n: novel.Novel) {

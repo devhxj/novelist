@@ -15,27 +15,38 @@ const (
 // SplitText 将文本分割成指定大小的重叠块，优先在段落/句子边界切分。
 // chunkSize 为 token 数上限，tokenizer 用于精确 BERT token 计数。
 // overlap 字符从上一块的末尾复制到下一块的开头，防止语义在块边界被切断。
-func SplitText(text string, chunkSize, overlap int, t *Tokenizer) []string {
+// 返回每个块及其第一个内容段落在原文中的 rune 偏移。
+func SplitText(text string, chunkSize, overlap int, t *Tokenizer) ([]string, []int) {
 	if text == "" {
-		return nil
+		return nil, nil
 	}
 
 	paragraphs := splitParagraphs(text)
 	if len(paragraphs) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	var chunks []string
+	var positions []int
 	current := ""
 	curLen := 0
+	currentStartByte := -1
 
-	for _, para := range paragraphs {
-		para = trimSpace(para)
+	flush := func() {
+		if current != "" {
+			chunks = append(chunks, current)
+			positions = append(positions, utf8.RuneCountInString(text[:currentStartByte]))
+		}
+	}
+
+	for _, pi := range paragraphs {
+		para := trimSpace(pi.text)
 		if para == "" {
 			continue
 		}
 
 		paraLen := t.TokenCount(para)
+		paraBytePos := pi.bytePos + leadingSpaceBytes(pi.text)
 
 		if curLen+paraLen+1 <= chunkSize {
 			if current != "" {
@@ -44,19 +55,20 @@ func SplitText(text string, chunkSize, overlap int, t *Tokenizer) []string {
 			} else {
 				current = para
 				curLen = paraLen
+				currentStartByte = paraBytePos
 			}
 		} else {
-			if current != "" {
-				chunks = append(chunks, current)
-			}
+			flush()
 
 			if paraLen <= chunkSize {
 				current = para
 				curLen = paraLen
+				currentStartByte = paraBytePos
 			} else {
 				sentences := splitSentences(para)
 				current = ""
 				curLen = 0
+				sentOffset := 0
 				for _, sentence := range sentences {
 					sentLen := t.TokenCount(sentence)
 					if curLen+sentLen <= chunkSize {
@@ -66,35 +78,36 @@ func SplitText(text string, chunkSize, overlap int, t *Tokenizer) []string {
 						} else {
 							current = sentence
 							curLen = sentLen
+							currentStartByte = paraBytePos + sentOffset
 						}
 					} else {
-						if current != "" {
-							chunks = append(chunks, current)
-						}
+						flush()
 						current = sentence
 						curLen = sentLen
+						currentStartByte = paraBytePos + sentOffset
 					}
+					sentOffset += len(sentence)
 				}
 			}
 		}
 	}
 
-	if current != "" {
-		chunks = append(chunks, current)
-	}
+	flush()
 
-	// 重叠处理：从上一块尾部复制 overlap 个字符到下一块开头
+	// 重叠处理：从上一块尾部复制 overlap 个字符到下一块开头。
+	// 同时修正位置：chunk 文本前插了 overlap 前缀，起始位置需前移。
 	if overlap > 0 && len(chunks) > 1 {
 		overlapped := make([]string, 0, len(chunks))
 		overlapped = append(overlapped, chunks[0])
 		for i := 1; i < len(chunks); i++ {
 			prefix := tailRunes(chunks[i-1], overlap)
 			overlapped = append(overlapped, prefix+chunks[i])
+			positions[i] -= utf8.RuneCountInString(prefix)
 		}
 		chunks = overlapped
 	}
 
-	return chunks
+	return chunks, positions
 }
 
 // BuildChapterChunks 为章节构建多层记忆块：summary、chapter_brief、正文分块。
@@ -151,14 +164,16 @@ func BuildChapterChunks(params ChapterChunkParams, t *Tokenizer) []Chunk {
 		})
 	}
 
-	// content chunks
-	for i, chunk := range SplitText(content, DefaultChunkSize, DefaultOverlap, t) {
+	// content chunks——位置基于原文（含首尾空白），与前端编辑器内容对齐
+	chunkTexts, positions := SplitText(params.Content, DefaultChunkSize, DefaultOverlap, t)
+	for i, chunk := range chunkTexts {
 		chunks = append(chunks, Chunk{
 			ID:            fmt.Sprintf("%d_%d", params.ChapterNumber, i),
 			Content:       chunk,
 			ChapterNumber: params.ChapterNumber,
 			ChunkType:     "content",
 			ChunkIndex:    i,
+			StartRunePos:  positions[i],
 			Metadata:      baseMeta,
 		})
 	}
@@ -168,17 +183,22 @@ func BuildChapterChunks(params ChapterChunkParams, t *Tokenizer) []Chunk {
 
 // ── helpers ──────────────────────────────────────────────
 
-func splitParagraphs(text string) []string {
-	parts := make([]string, 0)
+type paraInfo struct {
+	text    string
+	bytePos int
+}
+
+func splitParagraphs(text string) []paraInfo {
+	parts := make([]paraInfo, 0)
 	start := 0
 	for i, r := range text {
 		if r == '\n' {
-			parts = append(parts, text[start:i])
+			parts = append(parts, paraInfo{text: text[start:i], bytePos: start})
 			start = i + 1
 		}
 	}
 	if start < len(text) {
-		parts = append(parts, text[start:])
+		parts = append(parts, paraInfo{text: text[start:], bytePos: start})
 	}
 	return parts
 }
@@ -227,6 +247,19 @@ func trimSpace(s string) string {
 
 func isSpace(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '　'
+}
+
+// leadingSpaceBytes 返回 s 开头空白字符的字节数，与 trimSpace 行为一致。
+func leadingSpaceBytes(s string) int {
+	pos := 0
+	for pos < len(s) {
+		r, size := utf8.DecodeRuneInString(s[pos:])
+		if !isSpace(r) {
+			break
+		}
+		pos += size
+	}
+	return pos
 }
 
 // tailRunes 返回 s 末尾 n 个 rune，不做整串 []rune 转换。

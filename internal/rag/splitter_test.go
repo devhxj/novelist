@@ -3,27 +3,73 @@ package rag
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // testTokenizer 加载真实词表供测试使用。若 vocab.txt 不可用则跳过。
 func testTokenizer(t *testing.T) *Tokenizer {
 	t.Helper()
-	tok, err := NewTokenizer("../../models/vocab.txt")
+	tok, err := NewTokenizer("../../build/runtime/models/vocab.txt")
 	if err != nil {
 		t.Skipf("skipping: cannot load vocab.txt: %v", err)
 	}
 	return tok
 }
 
+// verifyPositions 检查 positions 基本性质：非负、递增、不越界。
+func verifyPositions(t *testing.T, text string, positions []int, chunks []string, overlap int) {
+	t.Helper()
+	if len(positions) != len(chunks) {
+		t.Fatalf("positions len %d != chunks len %d", len(positions), len(chunks))
+	}
+	contentRunes := []rune(text)
+	for i := range chunks {
+		pos := positions[i]
+		if pos < 0 {
+			t.Errorf("chunk %d: negative position %d", i, pos)
+		}
+		if pos > len(contentRunes) {
+			t.Errorf("chunk %d: position %d beyond content length %d", i, pos, len(contentRunes))
+		}
+		if i > 0 && pos <= positions[i-1] {
+			t.Errorf("chunk %d: position %d <= previous %d", i, pos, positions[i-1])
+		}
+		// 取跳过 overlap 后的 chunk 内容前 10 字，检查是否在原文 pos+overlap 附近
+		chunkRunes := []rune(chunks[i])
+		skip := 0
+		if i > 0 {
+			skip = min(overlap, len(chunkRunes))
+		}
+		if skip >= len(chunkRunes) {
+			continue
+		}
+		bodyStart := skip
+		bodyEnd := min(bodyStart+10, len(chunkRunes))
+		body := string(chunkRunes[bodyStart:bodyEnd])
+		searchPos := pos + utf8.RuneCountInString(string(chunkRunes[:skip]))
+		if searchPos >= len(contentRunes) {
+			continue
+		}
+		searchEnd := min(searchPos+len(body)+20, len(contentRunes))
+		region := string(contentRunes[searchPos:searchEnd])
+		if !strings.Contains(region, body) {
+			t.Errorf("chunk %d: chunk body %q not found near original pos %d (search region: …%s…)", i, body, searchPos, region[:min(30, len(region))])
+		}
+	}
+}
+
 func TestSplitText_Short(t *testing.T) {
 	tok := testTokenizer(t)
 	text := "主角张三走进房间，看到李四正在等待。"
-	chunks := SplitText(text, 500, 50, tok)
+	chunks, positions := SplitText(text, 500, 50, tok)
 	if len(chunks) != 1 {
 		t.Fatalf("expected 1 chunk, got %d: %v", len(chunks), chunks)
 	}
 	if chunks[0] != text {
 		t.Errorf("content mismatch: %q", chunks[0])
+	}
+	if positions[0] != 0 {
+		t.Errorf("expected position 0 for single chunk, got %d", positions[0])
 	}
 }
 
@@ -33,20 +79,22 @@ func TestSplitText_LongParagraph(t *testing.T) {
 	p2 := strings.Repeat("第二章内容。", 50)
 	text := p1 + "\n" + p2
 
-	chunks := SplitText(text, 350, 50, tok)
+	chunks, positions := SplitText(text, 350, 50, tok)
 	if len(chunks) < 2 {
 		t.Fatalf("expected >=2 chunks, got %d", len(chunks))
 	}
+	verifyPositions(t, text, positions, chunks, 50)
 }
 
 func TestSplitText_SentenceSplit(t *testing.T) {
 	tok := testTokenizer(t)
 	text := strings.Repeat("这是一句很长的话反复说。", 60)
 
-	chunks := SplitText(text, 500, 50, tok)
+	chunks, positions := SplitText(text, 500, 50, tok)
 	if len(chunks) < 2 {
 		t.Fatalf("expected >=2 chunks for long sentence, got %d", len(chunks))
 	}
+	verifyPositions(t, text, positions, chunks, 50)
 	// 有重叠的情况下，chunk 可能略超 chunkSize
 	for i, c := range chunks {
 		if tok.TokenCount(c) > 600 {
@@ -57,8 +105,8 @@ func TestSplitText_SentenceSplit(t *testing.T) {
 
 func TestSplitText_Empty(t *testing.T) {
 	tok := testTokenizer(t)
-	if chunks := SplitText("", 500, 50, tok); chunks != nil {
-		t.Errorf("expected nil for empty text, got %v", chunks)
+	if chunks, positions := SplitText("", 500, 50, tok); chunks != nil || positions != nil {
+		t.Errorf("expected nil,nil for empty text, got chunks=%v positions=%v", chunks, positions)
 	}
 }
 
@@ -70,10 +118,11 @@ func TestSplitText_Overlap(t *testing.T) {
 	p3 := strings.Repeat("段落三内容。", 30)
 	text := p1 + "\n" + p2 + "\n" + p3
 
-	chunks := SplitText(text, 500, 80, tok)
+	chunks, positions := SplitText(text, 500, 80, tok)
 	if len(chunks) < 2 {
 		t.Fatalf("expected >=2 chunks, got %d", len(chunks))
 	}
+	verifyPositions(t, text, positions, chunks, 80)
 
 	// 验证第二块的开头包含第一块的尾部内容
 	for i := 1; i < len(chunks); i++ {
@@ -139,6 +188,20 @@ func TestBuildChapterChunks(t *testing.T) {
 	if !briefFound {
 		t.Error("chapter_brief chunk not found")
 	}
+
+	// 验证 content chunk 的 StartRunePos
+	contentRunes := []rune(params.Content)
+	for _, c := range chunks {
+		if c.ChunkType != "content" {
+			continue
+		}
+		if c.StartRunePos < 0 {
+			t.Errorf("content chunk %s: negative StartRunePos %d", c.ID, c.StartRunePos)
+		}
+		if c.StartRunePos > len(contentRunes) {
+			t.Errorf("content chunk %s: StartRunePos %d beyond content length %d", c.ID, c.StartRunePos, len(contentRunes))
+		}
+	}
 }
 
 func TestBuildChapterChunks_NoSummary(t *testing.T) {
@@ -195,11 +258,14 @@ func TestSplitText_NoEmptySentences(t *testing.T) {
 	tok := testTokenizer(t)
 	// 连续标点不应产生空句子
 	text := "你好！！世界"
-	chunks := SplitText(text, 500, 0, tok)
+	chunks, positions := SplitText(text, 500, 0, tok)
 	if len(chunks) != 1 {
 		t.Fatalf("expected 1 chunk, got %d", len(chunks))
 	}
 	if chunks[0] != text {
 		t.Errorf("content mismatch: %q", chunks[0])
+	}
+	if positions[0] != 0 {
+		t.Errorf("expected position 0, got %d", positions[0])
 	}
 }

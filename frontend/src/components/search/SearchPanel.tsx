@@ -11,7 +11,7 @@ interface Props {
   results: SearchResult[]
   onResultsChange: (query: string, results: SearchResult[]) => void
   onNavigateEntity: (panelId: string, entityId: number) => void
-  onNavigateChapter: (filePath: string, title: string, chapterNum: number) => void
+  onNavigateChapter: (filePath: string, title: string, chapterNum: number, matchPos: number, matchLen: number) => void
 }
 
 const TYPE_CONFIG: Record<string, { icon: typeof Search; label: string }> = {
@@ -102,7 +102,7 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
 
   function selectResult(r: SearchResult) {
     if (r.type === 'content' || r.type === 'rag' || r.type === 'chapter') {
-      onNavigateChapter(r.file_path, r.title || `第${r.chapter_num}章`, r.chapter_num)
+      onNavigateChapter(r.file_path, r.title || `第${r.chapter_num}章`, r.chapter_num, r.match_position || 0, r.match_len || 0)
     } else {
       onNavigateEntity(r.panel_id, r.id)
     }

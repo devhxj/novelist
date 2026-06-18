@@ -17,6 +17,7 @@ type Chunk struct {
 	ChapterNumber int
 	ChunkType     string // "summary" / "chapter_brief" / "content"
 	ChunkIndex    int
+	StartRunePos  int // chunk 在原始正文中的 rune 偏移
 	Metadata      map[string]any
 }
 
@@ -26,6 +27,7 @@ type SearchResult struct {
 	Content       string
 	SourceType    string
 	ChapterNumber int
+	StartRunePos  int     // chunk 在原始正文中的 rune 偏移
 	Distance      float64
 	Relevance     float64
 	Embedding     []float32 // 512维向量，用于MMR多样性计算

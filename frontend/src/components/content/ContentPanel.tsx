@@ -11,9 +11,12 @@ import SkillPreview from './SkillPreview'
 import Markdown from '@/components/Markdown'
 import { outlinePath, isContentPath, isOutlinePath, isSkillPath, skillNameFromPath } from './types'
 import type { EditorTab } from './types'
+import './ContentPanel.css'
 
 export interface ContentPanelHandle {
   openFile: (path: string, title: string, readOnly?: boolean) => void
+  openFileWithHighlight: (path: string, title: string, matchPos: number, matchLen: number) => void
+  clearHighlight: () => void
   closeAllTabs: () => void
   openDiffTab: (data: {
     path: string; title: string; diff: string; original: string; modified: string
@@ -42,6 +45,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const savingRef = useRef<{ id: string; path: string; content: string } | null>(null)
+  const pendingHighlightRef = useRef<{ matchPos: number; matchLen: number } | null>(null)
   const novelIdRef = useRef(novelId)
   const tabsRef = useRef(tabs)
 
@@ -139,15 +143,70 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     }, 500)
   }, [tabs, updateTab, doSave, onContentChange])
 
-  const handleEditorMount: OnMount = useCallback((editor) => {
+  const monacoRef = useRef<any>(null)
+
+  // 将 rune 偏移转为 Monaco 行列号（1-based）
+  function runeOffsetToMonaco(text: string, runeOffset: number): { line: number; col: number } {
+    let runeCount = 0
+    const lines = text.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const lineRunes = [...lines[i]].length
+      if (runeCount + lineRunes >= runeOffset) {
+        return { line: i + 1, col: (runeOffset - runeCount) + 1 }
+      }
+      runeCount += lineRunes + 1 // +1 for \n
+    }
+    return { line: lines.length, col: 1 }
+  }
+
+  const doHighlight = useCallback((editor: Parameters<OnMount>[0], content: string, matchPos: number, matchLen: number) => {
+    const monaco = monacoRef.current
+    if (!monaco || !editor.getModel()) return
+
+    const totalLines = editor.getModel()!.getLineCount()
+    const { line, col } = runeOffsetToMonaco(content, matchPos)
+    const clampedEnd = Math.min(matchPos + matchLen, [...content].length)
+    const { line: endLine, col: endCol } = runeOffsetToMonaco(content, clampedEnd)
+    const ctxEnd = Math.min(endLine + 1, totalLines)
+
+    const decorations: any[] = [
+      {
+        range: new monaco.Range(Math.max(1, line - 1), 1, ctxEnd, 1),
+        options: { isWholeLine: true, className: 'search-context-highlight' },
+      },
+      {
+        range: new monaco.Range(line, col, endLine, endCol),
+        options: { className: 'search-keyword-highlight' },
+      },
+    ]
+
+    const collection = (editor as any)._searchDecorations
+    if (collection) collection.clear()
+    ;(editor as any)._searchDecorations = editor.createDecorationsCollection(decorations)
+
+    editor.revealPositionInCenter({ lineNumber: line, column: col })
+    editor.setPosition({ lineNumber: line, column: col })
+  }, [])
+
+  const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
+    monacoRef.current = monaco
     editor.onDidBlurEditorText(() => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
       const s = savingRef.current
       if (!s) return
       doSave(s.id, s.path, s.content)
     })
-  }, [doSave])
+    // 编辑器挂载后检查待处理高亮
+    const pending = pendingHighlightRef.current
+    if (pending) {
+      const tab = tabsRef.current.find(t => t.id === activeTabId)
+      if (tab?.content) {
+        doHighlight(editor, tab.content, pending.matchPos, pending.matchLen)
+        pendingHighlightRef.current = null
+      }
+    }
+  }, [doSave, doHighlight, activeTabId])
 
   // ── file:changed 事件监听 ─────────────────────────────────
   // 用 ref 读取最新 tabs，避免因 tabs 变化频繁重建订阅丢失事件
@@ -223,6 +282,52 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     }).finally(() => setIsLoading(false))
   }, [novelId, tabs, app, openTab, setActiveTabId, onContentChange])
 
+
+  const clearHighlight = useCallback(() => {
+    const editor = editorRef.current as any
+    if (editor?._searchDecorations) {
+      editor._searchDecorations.clear()
+      editor._searchDecorations = null
+    }
+  }, [])
+
+  const doOpenFileWithHighlight = useCallback((path: string, title: string, matchPos: number, matchLen: number) => {
+    if (matchPos < 0) {
+      doOpenFile(path, title)
+      return
+    }
+    const existing = tabs.find(t => t.path === path && t.type === 'file')
+    // 当前激活的 tab：直接应用高亮，不走 pending（setActiveTabId 同值不触发 effect）
+    if (existing && existing.id === activeTabId && existing.content && editorRef.current) {
+      doHighlight(editorRef.current, existing.content, matchPos, matchLen)
+      return
+    }
+    pendingHighlightRef.current = { matchPos, matchLen }
+    if (existing) {
+      setActiveTabId(existing.id)
+      return
+    }
+    doOpenFile(path, title)
+  }, [doOpenFile, tabs, activeTabId, setActiveTabId, doHighlight])
+
+  // 编辑器就绪（content 到位 / tab 切换完成）时应用待处理高亮
+  useEffect(() => {
+    const pending = pendingHighlightRef.current
+    if (!pending || !activeTab?.content || !editorRef.current) return
+    doHighlight(editorRef.current, activeTab.content, pending.matchPos, pending.matchLen)
+    pendingHighlightRef.current = null
+  }, [activeTab?.id, activeTab?.content, doHighlight])
+
+  // 切换 tab 时清除旧高亮（pending 标记由上方 effect 或 handleEditorMount 消费）
+  useEffect(() => {
+    if (pendingHighlightRef.current) return
+    const editor = editorRef.current as any
+    if (editor?._searchDecorations) {
+      editor._searchDecorations.clear()
+      editor._searchDecorations = null
+    }
+  }, [activeTab?.id])
+
   function filePathFromDiff(diffPath: string): { filePath: string; viewMode: 'content' | 'outline' } {
     if (isOutlinePath(diffPath)) {
       return { filePath: diffPath.replace('outlines/', 'chapters/'), viewMode: 'outline' }
@@ -270,11 +375,13 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
 
   useImperativeHandle(ref, () => ({
     openFile: doOpenFile,
+    openFileWithHighlight: doOpenFileWithHighlight,
+    clearHighlight,
     closeAllTabs,
     openDiffTab,
     handleDiffApprove,
     handleDiffReject,
-  }), [doOpenFile, closeAllTabs, openDiffTab, handleDiffApprove, handleDiffReject])
+  }), [doOpenFile, doOpenFileWithHighlight, clearHighlight, closeAllTabs, openDiffTab, handleDiffApprove, handleDiffReject])
 
 
   // ── 渲染 ────────────────────────────────────────────────

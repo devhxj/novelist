@@ -26,7 +26,7 @@ interface Props {
   onSelectSkill: (path: string, title: string, readOnly: boolean) => void
   onNewSkill: (name: string) => void
   onSearchNavigateEntity: (panelId: string, entityId: number) => void
-  onSearchNavigateChapter: (filePath: string, title: string, chapterNum: number) => void
+  onSearchNavigateChapter: (filePath: string, title: string, chapterNum: number, matchPos: number, matchLen: number) => void
   searchQuery: string
   searchResults: SearchResult[]
   onSearchChange: (query: string, results: SearchResult[]) => void

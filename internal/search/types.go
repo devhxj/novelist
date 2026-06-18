@@ -9,7 +9,8 @@ type Result struct {
 	ChapterNum     int     `json:"chapter_num"`     // 关联章节号
 	FilePath       string  `json:"file_path"`       // 章节文件路径
 	MatchContext   string  `json:"match_context"`   // 命中上下文（含 <mark> 高亮）
-	MatchHighlight string  `json:"match_highlight"` // 命中关键词
+	MatchPosition  int     `json:"match_position"`  // 命中 rune 偏移，用于编辑器定位
+	MatchLen       int     `json:"match_len"`       // 命中长度（rune），精确搜索=关键词长，RAG=chunk长
 	Relevance      float64 `json:"relevance"`       // 相关度 0-1（精确搜索为 1）
 	PanelID        string  `json:"panel_id"`        // 跳转目标面板 ID
 }

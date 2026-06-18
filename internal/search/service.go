@@ -234,15 +234,16 @@ func (s *Service) searchContent(ctx context.Context, novelID int64, query string
 		ctxStr := buildContext(content, m.position, query)
 		meta := chapMeta[m.chapNum]
 		results = append(results, Result{
-			Type:           "content",
-			ID:             0,
-			Title:          meta.Title,
-			ChapterNum:     m.chapNum,
-			FilePath:       git.ChapterPath(m.chapNum),
-			MatchContext:   ctxStr,
-			MatchHighlight: query,
-			Relevance:      1,
-			PanelID:        "chapters",
+			Type:          "content",
+			ID:            0,
+			Title:         meta.Title,
+			ChapterNum:    m.chapNum,
+			FilePath:      git.ChapterPath(m.chapNum),
+			MatchContext:  ctxStr,
+			MatchPosition: m.position,
+			MatchLen:      utf8.RuneCountInString(query),
+			Relevance:     1,
+			PanelID:       "chapters",
 		})
 	}
 
@@ -369,15 +370,18 @@ func (s *Service) searchRAG(ctx context.Context, novelID int64, query string) []
 		if len(runes) > 200 {
 			contentPreview = string(runes[:200]) + "..."
 		}
+
 		results = append(results, Result{
-			Type:         "rag",
-			ID:           0,
-			Title:        meta.Title,
-			ChapterNum:   r.ChapterNumber,
-			FilePath:     git.ChapterPath(r.ChapterNumber),
-			MatchContext: contentPreview,
-			Relevance:    r.Relevance,
-			PanelID:      "chapters",
+			Type:          "rag",
+			ID:            0,
+			Title:         meta.Title,
+			ChapterNum:    r.ChapterNumber,
+			FilePath:      git.ChapterPath(r.ChapterNumber),
+			MatchContext:  contentPreview,
+			MatchLen:      utf8.RuneCountInString(r.Content),
+			MatchPosition: r.StartRunePos,
+			Relevance:     r.Relevance,
+			PanelID:       "chapters",
 		})
 	}
 
