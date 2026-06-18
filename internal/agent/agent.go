@@ -282,6 +282,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						},
 						SkillStore: a.skillStore,
 						SearchService: a.searchService.Load(),
+						WebSearch:     a.buildWebSearch(),
 					}
 					result := a.registry.Execute(ctx, name, rawArgs, tc, opts.AllowedTools)
 					a.logger.Info("tool executed", "tool", name, "success", result.Success, "phase", map[bool]string{true: "completed", false: "failed"}[result.Success])
@@ -451,6 +452,19 @@ func displayPhase(phase string) mcp_tools.DisplayPhase {
 		return mcp_tools.PhaseFailed
 	}
 	return mcp_tools.PhaseCompleted
+}
+
+// buildWebSearch 构建 WebSearch 闭包，从当前 providers 中读取 DeepSeek 配置。
+func (a *Agent) buildWebSearch() func(ctx context.Context, query string) (*llm.WebSearchResult, error) {
+	providers := a.llm.Providers()
+	ds, ok := providers["deepseek"]
+	if !ok || ds.APIKey == "" {
+		return nil
+	}
+	apiKey := ds.APIKey
+	return func(ctx context.Context, query string) (*llm.WebSearchResult, error) {
+		return llm.SearchWeb(ctx, apiKey, "", query)
+	}
 }
 
 // extraJSON 将 map 序列化为 JSON 字符串存入 ExtraMetadata。

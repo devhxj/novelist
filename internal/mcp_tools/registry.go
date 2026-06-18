@@ -13,4 +13,5 @@ func RegisterAllTools(r *Registry) {
 	RegisterMemoryTools(r)
 	RegisterSubagentTools(r)
 	RegisterDeleteTools(r)
+	RegisterWebSearchTools(r)
 }

@@ -48,6 +48,7 @@ var toolDisplayNames = map[string]string{
 	"delete_record":                   "删除记录",
 	"edit":                            "编辑文件内容",
 	"read":                            "读取文件内容",
+	"web_search":                      "搜索网络信息",
 }
 
 // toolActivityKinds 工具名 → 前端展示类别。
@@ -91,6 +92,7 @@ var toolActivityKinds = map[string]string{
 	"delete_record":                   "delete",
 	"edit":                            "write",
 	"read":                            "view",
+	"web_search":                      "browse",
 }
 
 // chapterTools 需要查章节标题的工具集。
