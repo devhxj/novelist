@@ -22,6 +22,7 @@ import ProfileView from '@/components/profile/ProfileView'
 import { search } from '@/lib/wailsjs/go/models'
 import { Settings, User } from 'lucide-react'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised, Quit } from '@/lib/wailsjs/runtime/runtime'
+import logo from '@/assets/logo.svg'
 
 interface Props {
   initialNovelId: number
@@ -221,7 +222,8 @@ export default function WorkspaceView({ initialNovelId }: Props) {
         className="h-11 flex items-center border-b bg-sidebar shrink-0"
         style={{ '--wails-draggable': 'drag' } as React.CSSProperties}
       >
-        <span className="text-sm font-medium pl-3 flex-1">
+        <img src={logo} alt="Goink" className="h-7 w-7 ml-3 shrink-0" />
+        <span className="text-sm font-medium pl-2 flex-1">
           {activeNovel?.title ?? 'Goink'}
         </span>
         <div className="flex items-center h-full" style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}>
