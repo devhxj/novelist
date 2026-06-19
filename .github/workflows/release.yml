@@ -61,10 +61,6 @@ jobs:
           export VERSION="${GITHUB_REF_NAME#v}"
           iscc build/package/windows/setup.iss
 
-      - name: Checksum
-        shell: bash
-        run: cd build/dist && sha256sum *.exe > sha256sums.txt
-
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -108,9 +104,6 @@ jobs:
       - name: Package (AppImage)
         run: bash build/package/linux/build-appimage.sh ${GITHUB_REF_NAME#v}
 
-      - name: Checksum
-        run: cd build/dist && sha256sum *.AppImage > sha256sums.txt
-
       - uses: actions/upload-artifact@v4
         with:
           name: linux
@@ -151,9 +144,6 @@ jobs:
       - name: Package (DMG)
         run: bash build/package/macos/build-dmg.sh ${GITHUB_REF_NAME#v}
 
-      - name: Checksum
-        run: cd build/dist && shasum -a 256 *.dmg > sha256sums.txt
-
       - uses: actions/upload-artifact@v4
         with:
           name: macos
@@ -174,6 +164,7 @@ jobs:
           cp windows/* dist/ 2>/dev/null || true
           cp linux/* dist/ 2>/dev/null || true
           cp macos/* dist/ 2>/dev/null || true
+          cd dist && sha256sum *.{exe,AppImage,dmg} > sha256sums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
