@@ -51,7 +51,7 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 	a := args.(*EditArgs)
 
 	// 内置 skill 只读
-	if strings.HasPrefix(a.Path, "builtin/skills/") {
+	if strings.HasPrefix(a.Path, "/builtin/skills/") {
 		return &ToolResult{Success: false, Error: "内置 skill 为只读，不可编辑"}, nil
 	}
 
@@ -511,7 +511,7 @@ func lineRangeReplace(content string, startLine, endLine int, newContent string)
 
 // ── 路径校验 ──────────────────────────────────────────────
 
-var pathRe = regexp.MustCompile(`^(chapters/\d{1,6}\.md|goink\.md|outlines/\d{1,6}\.md|skills/[^/]+\.md|~/.goink/skills/[^/]+\.md)$`)
+var pathRe = regexp.MustCompile(`^(chapters/\d{3,6}\.md|goink\.md|outlines/\d{3,6}\.md|skills/[^/]+\.md|~/.goink/skills/[^/]+\.md)$`)
 
 func validPath(p string) bool {
 	return pathRe.MatchString(p)
@@ -585,12 +585,12 @@ func (t *ReadTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 	a := args.(*ReadArgs)
 
 	// builtin skill 走 store 内存
-	if strings.HasPrefix(a.Path, "builtin/skills/") {
+	if strings.HasPrefix(a.Path, "/builtin/skills/") {
 		return t.readBuiltinSkill(a, tc)
 	}
 
 	if !validPath(a.Path) {
-		return &ToolResult{Success: false, Error: "无效文件路径，支持 chapters/001.md ~ chapters/999999.md、outlines/001.md ~ outlines/999999.md、goink.md、skills/<name>.md、~/.goink/skills/<name>.md、builtin/skills/<name>.md（只读）"}, nil
+		return &ToolResult{Success: false, Error: "无效文件路径，支持 chapters/001.md ~ chapters/999999.md、outlines/001.md ~ outlines/999999.md、goink.md、skills/<name>.md、~/.goink/skills/<name>.md、/builtin/skills/<name>.md（只读）"}, nil
 	}
 
 	content, err := git.ReadFile(tc.NovelID, a.Path)
@@ -666,7 +666,7 @@ func (t *ReadTool) readBuiltinSkill(a *ReadArgs, tc ToolContext) (*ToolResult, e
 		return &ToolResult{Success: false, Error: "skill store 未初始化"}, nil
 	}
 
-	name := strings.TrimSuffix(strings.TrimPrefix(a.Path, "builtin/skills/"), ".md")
+	name := strings.TrimSuffix(strings.TrimPrefix(a.Path, "/builtin/skills/"), ".md")
 	if name == "" {
 		return &ToolResult{Success: false, Error: "无效的 skill 路径: " + a.Path}, nil
 	}
@@ -693,7 +693,7 @@ const readDescription = `读取小说文件或技能文件。
 - goink.md（故事状态文档）
 - skills/<name>.md（小说级技能）
 - ~/.goink/skills/<name>.md（用户级技能）
-- builtin/skills/<name>.md（内置技能，只读）
+- /builtin/skills/<name>.md（内置技能，只读）
 特性：
 - 默认添加行号前缀（123|），方便后续 edit 工具进行 line_range_replace 和 search_replace
 - start_line 和 end_line 支持行范围读取：默认读前 2000 行，可通过调整参数翻页或精确引用
