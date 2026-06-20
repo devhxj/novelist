@@ -146,7 +146,7 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
       </div>
 
       {/* 结果区 */}
-      <div ref={listRef} className="flex-1 overflow-y-auto">
+      <div ref={listRef} className="flex-1 overflow-y-auto overscroll-contain">
         {!query.trim() ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-xs text-muted-foreground">输入关键词搜索</p>

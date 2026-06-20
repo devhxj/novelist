@@ -83,7 +83,7 @@ export default function ProfileView() {
 
   if (loading) {
     return (
-      <main className="flex-1 min-w-0 overflow-y-auto bg-[#fafbfc] dark:bg-background">
+      <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-[#fafbfc] dark:bg-background">
         <div className="flex h-full items-center justify-center text-sm text-slate-500">加载中...</div>
       </main>
     )
@@ -91,14 +91,14 @@ export default function ProfileView() {
 
   if (error) {
     return (
-      <main className="flex-1 min-w-0 overflow-y-auto bg-[#fafbfc] dark:bg-background">
+      <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-[#fafbfc] dark:bg-background">
         <div className="flex h-full items-center justify-center text-sm text-rose-500">{error}</div>
       </main>
     )
   }
 
   return (
-    <main className="flex-1 min-w-0 overflow-y-auto bg-[#fafbfc] dark:bg-background">
+    <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-[#fafbfc] dark:bg-background">
       <input
         ref={fileInputRef}
         type="file" accept="image/*"

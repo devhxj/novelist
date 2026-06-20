@@ -272,7 +272,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       return
     }
 
-    const skReadOnly = readOnly ?? path.startsWith('builtin/skills/')
+    const skReadOnly = readOnly ?? path.startsWith('/builtin/skills/')
     const initialMode = skReadOnly ? 'preview' : (isSkillPath(path) ? 'content' : 'content') as 'content' | 'outline' | 'preview'
 
     setIsLoading(true)

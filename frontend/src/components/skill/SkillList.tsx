@@ -14,7 +14,7 @@ function skillPath(name: string, source: string): string {
   switch (source) {
     case 'novel': return `skills/${name}.md`
     case 'user': return `~/.goink/skills/${name}.md`
-    case 'builtin': return `builtin/skills/${name}.md`
+    case 'builtin': return `/builtin/skills/${name}.md`
     default: return `skills/${name}.md`
   }
 }
@@ -119,7 +119,7 @@ export default function SkillList({ novelId, activeSkillName, onSelectSkill, onN
           />
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto overscroll-contain">
         {loading ? (
           <div className="flex items-center justify-center py-8 text-xs text-muted-foreground">加载中...</div>
         ) : skills.length === 0 ? (

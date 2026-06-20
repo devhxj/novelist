@@ -65,7 +65,7 @@ export default function PreferenceView({ novelId }: Props) {
   }
 
   return (
-    <main className="flex-1 min-w-0 overflow-y-auto bg-[#fafbfc]">
+    <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-[#fafbfc]">
       {loading ? (
         <div className="flex h-full items-center justify-center text-sm text-slate-500">加载中...</div>
       ) : error ? (

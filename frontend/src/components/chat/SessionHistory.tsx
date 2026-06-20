@@ -134,7 +134,7 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
       <div
         ref={listRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-3 pb-2"
+        className="flex-1 overflow-y-auto overscroll-contain px-3 pb-2"
       >
         {sessions.length === 0 && isLoading ? (
           <div className="flex items-center justify-center h-full">

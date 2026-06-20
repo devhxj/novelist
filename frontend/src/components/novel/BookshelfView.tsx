@@ -71,7 +71,7 @@ export default function BookshelfView({
         </div>
       ) : (
         /* 书架网格 */
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-6">
           <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-5">
             {novels.map(n => (
               <div

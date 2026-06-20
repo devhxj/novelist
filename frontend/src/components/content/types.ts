@@ -40,7 +40,7 @@ export function isOutlinePath(p: string): boolean {
 }
 
 export function isSkillPath(p: string): boolean {
-  return p.startsWith('skills/') || p.startsWith('~/.goink/skills/') || p.startsWith('builtin/skills/')
+  return p.startsWith('skills/') || p.startsWith('~/.goink/skills/') || p.startsWith('/builtin/skills/')
 }
 
 export function skillNameFromPath(p: string): string {
