@@ -204,8 +204,8 @@ func (t *CreateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any
 type UpdateReaderPerspectiveEntryArgs struct {
 	EntryID         int    `json:"entry_id" jsonschema:"required,description=要更新的条目 ID" validate:"required,min=1"`
 	Content         string `json:"content" jsonschema:"description=更新后的完整内容描述"`
-	RevealedChapter int    `json:"revealed_chapter" jsonschema:"description=实际揭露或回收的章节号（设置后该条目不再出现在活跃列表中）"`
-	PlantedChapter  int    `json:"planted_chapter" jsonschema:"description=在哪章种下的章节号"`
+	RevealedChapter int    `json:"revealed_chapter" jsonschema:"description=实际揭露或回收的章节号（设置后该条目不再出现在活跃列表中）" validate:"omitempty,min=0"`
+	PlantedChapter  int    `json:"planted_chapter" jsonschema:"description=在哪章种下的章节号" validate:"omitempty,min=1"`
 	RelatedTruth    string `json:"related_truth" jsonschema:"description=作者视角的真实情况（支持所有类型）"`
 	Type            string `json:"type" jsonschema:"description=条目类型,enum=known,enum=suspense,enum=misconception"`
 }

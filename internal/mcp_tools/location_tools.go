@@ -247,6 +247,29 @@ func (t *CreateLocationTool) Execute(ctx context.Context, args any, tc ToolConte
 		}
 	}
 
+	// 预校验：批量验证父地点存在性
+	parentIDSet := make(map[int64]bool)
+	for _, item := range a.Locations {
+		if item.ParentLocationID != nil {
+			parentIDSet[*item.ParentLocationID] = true
+		}
+	}
+	if len(parentIDSet) > 0 {
+		parentIDs := make([]int64, 0, len(parentIDSet))
+		for id := range parentIDSet {
+			parentIDs = append(parentIDs, id)
+		}
+		var count int64
+		if err := tc.DB.WithContext(ctx).Model(&location.Location{}).
+			Where("id IN ? AND novel_id = ?", parentIDs, tc.NovelID).
+			Count(&count).Error; err != nil {
+			return nil, fmt.Errorf("verify parent locations: %w", err)
+		}
+		if int(count) != len(parentIDs) {
+			return &ToolResult{Success: false, Error: "父地点不存在或不属于当前小说"}, nil
+		}
+	}
+
 	if err := tc.DB.WithContext(ctx).Create(&items).Error; err != nil {
 		return nil, fmt.Errorf("create locations: %w", err)
 	}
@@ -308,6 +331,19 @@ func (t *UpdateLocationTool) Execute(ctx context.Context, args any, tc ToolConte
 			return &ToolResult{Success: false, Error: fmt.Sprintf("地点 %d 不存在", a.LocationID)}, nil
 		}
 		return nil, fmt.Errorf("query location: %w", err)
+	}
+
+	// 校验父地点存在性
+	if hasParent && a.ParentLocationID != nil {
+		var parentCount int64
+		if err := tc.DB.WithContext(ctx).Model(&location.Location{}).
+			Where("id = ? AND novel_id = ?", *a.ParentLocationID, tc.NovelID).
+			Count(&parentCount).Error; err != nil {
+			return nil, fmt.Errorf("verify parent location: %w", err)
+		}
+		if parentCount == 0 {
+			return &ToolResult{Success: false, Error: "父地点不存在或不属于当前小说"}, nil
+		}
 	}
 
 	json.Unmarshal(tc.RawArgs, &loc)

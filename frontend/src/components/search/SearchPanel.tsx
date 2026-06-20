@@ -193,11 +193,14 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
                             </span>
                           ) : null}
                         </div>
-                        {r.match_context ? (
-                          <p
-                            className="text-[11px] text-muted-foreground leading-relaxed mt-0.5"
-                            dangerouslySetInnerHTML={{ __html: r.match_context }}
-                          />
+                        {r.match_hit ? (
+                          <p className="text-[11px] text-muted-foreground leading-relaxed mt-0.5">
+                            {r.match_prefix ?? ''}<mark>{r.match_hit}</mark>{r.match_suffix ?? ''}
+                          </p>
+                        ) : r.match_prefix ? (
+                          <p className="text-[11px] text-muted-foreground leading-relaxed mt-0.5">
+                            {r.match_prefix}
+                          </p>
                         ) : null}
                       </button>
                     )

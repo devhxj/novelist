@@ -8,7 +8,9 @@ type Result struct {
 	Subtitle       string  `json:"subtitle"`        // 副标题（类型标签等）
 	ChapterNum     int     `json:"chapter_num"`     // 关联章节号
 	FilePath       string  `json:"file_path"`       // 章节文件路径
-	MatchContext   string  `json:"match_context"`   // 命中上下文（含 <mark> 高亮）
+	MatchPrefix    string  `json:"match_prefix"`    // 命中前上下文（纯文本）
+	MatchHit       string  `json:"match_hit"`       // 命中的文本（纯文本）
+	MatchSuffix    string  `json:"match_suffix"`    // 命中后上下文（纯文本）
 	MatchPosition  int     `json:"match_position"`  // 命中 rune 偏移，用于编辑器定位
 	MatchLen       int     `json:"match_len"`       // 命中长度（rune），精确搜索=关键词长，RAG=chunk长
 	Relevance      float64 `json:"relevance"`       // 相关度 0-1（精确搜索为 1）

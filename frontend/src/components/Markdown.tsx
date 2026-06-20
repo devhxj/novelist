@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
+import rehypeSanitize from 'rehype-sanitize'
 import hljs from 'highlight.js/lib/common'
 import 'katex/dist/katex.min.css'
 import './Markdown.css'
@@ -261,7 +262,7 @@ export default function Markdown({ content, className }: MarkdownProps) {
     <div className={`prose prose-sm max-w-none dark:prose-invert ${className || ''}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex, rehypeRaw]}
+        rehypePlugins={[rehypeKatex, rehypeRaw, rehypeSanitize]}
         components={components}
       >
         {normalizedContent}

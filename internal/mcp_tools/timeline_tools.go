@@ -17,7 +17,7 @@ import (
 
 // GetTimelineArgs 是 get_timeline 的参数。
 type GetTimelineArgs struct {
-	CurrentChapter int    `json:"current_chapter" jsonschema:"description=当前章节号。传入时自动收集附近条目并检测异常。写新章时必填"`
+	CurrentChapter int    `json:"current_chapter" jsonschema:"description=当前章节号。传入时自动收集附近条目并检测异常。写新章时必填" validate:"omitempty,min=1"`
 	Category       string `json:"category" jsonschema:"description=按分类筛选,enum=foreshadowing,enum=user_directive"`
 	Status         string `json:"status" jsonschema:"description=按状态筛选,enum=pending,enum=resolved,enum=abandoned"`
 	PageArgs              // 嵌入分页参数（仅不传 current_chapter 时生效）
@@ -193,7 +193,7 @@ type UpdateTimelineEntryArgs struct {
 	Title             string `json:"title" jsonschema:"description=新的标题"`
 	Content           string `json:"content" jsonschema:"description=新的描述"`
 	DetailJSON        string `json:"detail_json" jsonschema:"description=新的结构化数据（完全替换旧的）"`
-	TargetChapter     int    `json:"target_chapter" jsonschema:"description=新的目标章节号,minimum=1"`
+	TargetChapter     int    `json:"target_chapter" jsonschema:"description=新的目标章节号,minimum=1" validate:"omitempty,min=1"`
 	Importance        int    `json:"importance" jsonschema:"description=新的重要度1-5,minimum=1,maximum=5"`
 	Status            string `json:"status" jsonschema:"description=新状态,enum=pending,enum=resolved,enum=abandoned"`
 	ResolvedChapterID int64  `json:"resolved_chapter_id" jsonschema:"description=在哪章回收（标记resolved时填入）"`
