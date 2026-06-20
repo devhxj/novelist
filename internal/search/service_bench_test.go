@@ -158,7 +158,7 @@ func BenchmarkBuildContext(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = buildContext(content, matchRunePos, query)
+		_, _, _ = buildContext(content, matchRunePos, query)
 	}
 }
 

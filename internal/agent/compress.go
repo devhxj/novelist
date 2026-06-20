@@ -246,7 +246,7 @@ func (a *Agent) emitCompression(ctx context.Context, turnID int, phase, summary 
 }
 
 // retainMessages 筛选应保留的历史消息。
-// 跳过前 2 条 system 消息（System1/System2），后续应用保留规则。
+// 跳过前 3 条 system 消息（System1/System2/System3），后续应用保留规则。
 func retainMessages(messages []map[string]any) []map[string]any {
 	if len(messages) == 0 {
 		return nil

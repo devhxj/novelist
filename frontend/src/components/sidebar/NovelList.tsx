@@ -56,7 +56,7 @@ export default function NovelList({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto overscroll-contain">
         {novels.map(n => (
           <button
             key={n.id}

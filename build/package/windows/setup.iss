@@ -21,7 +21,7 @@ Source: "..\..\bin\goink.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs
 
 [Tasks]
-Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "快捷方式:"; Flags: checkedonce
+Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "快捷方式:"; Flags: checked
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

@@ -446,7 +446,7 @@ export default function StoryArcGraph({ novelId }: Props) {
             type="button"
             onClick={() => shift(-20)}
             disabled={!canShiftLeft}
-            className="flex h-7 w-7 items-center justify-center rounded text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:opacity-30 disabled:cursor-default"
+            className="flex h-7 w-7 items-center justify-center rounded text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:opacity-30 disabled:cursor-default select-none"
             title="前移 20 章"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
@@ -455,7 +455,7 @@ export default function StoryArcGraph({ novelId }: Props) {
             type="button"
             onClick={() => shift(20)}
             disabled={!canShiftRight}
-            className="flex h-7 w-7 items-center justify-center rounded text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:opacity-30 disabled:cursor-default"
+            className="flex h-7 w-7 items-center justify-center rounded text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:opacity-30 disabled:cursor-default select-none"
             title="后移 20 章"
           >
             <ArrowRight className="h-3.5 w-3.5" />

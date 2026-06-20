@@ -15,7 +15,7 @@ export default function TabBar({ tabs, activeTabId, onSelect, onClose }: Props) 
       {tabs.map(tab => (
         <div
           key={tab.id}
-          className={`group flex items-center gap-1 px-3 py-1.5 text-xs cursor-pointer border-r shrink-0 transition-colors ${
+          className={`group flex items-center gap-1 px-3 py-1.5 text-xs cursor-pointer border-r shrink-0 transition-colors select-none ${
             tab.id === activeTabId
               ? 'bg-background text-foreground border-t-2 border-t-blue-500 -mt-[1px]'
               : 'text-muted-foreground hover:bg-muted/50'

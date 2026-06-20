@@ -272,7 +272,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       return
     }
 
-    const skReadOnly = readOnly ?? path.startsWith('builtin/skills/')
+    const skReadOnly = readOnly ?? path.startsWith('/builtin/skills/')
     const initialMode = skReadOnly ? 'preview' : (isSkillPath(path) ? 'content' : 'content') as 'content' | 'outline' | 'preview'
 
     setIsLoading(true)
@@ -430,7 +430,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     return (
       <main className="flex-1 bg-background flex flex-col min-w-0 min-h-0 border-r overflow-hidden">
         <TabBar tabs={tabs} activeTabId={activeTabId} onSelect={setActiveTabId} onClose={closeTab} />
-        <div className="flex items-center px-4 py-2 border-b shrink-0">
+        <div className="flex items-center px-4 py-2 border-b shrink-0 select-none">
           <span className="text-sm font-medium truncate">{activeTab.title}</span>
         </div>
         <div className="flex-1 overflow-auto">
@@ -480,7 +480,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   return (
     <main className="flex-1 bg-background flex flex-col min-w-0 min-h-0 border-r overflow-hidden">
       <TabBar tabs={tabs} activeTabId={activeTabId} onSelect={setActiveTabId} onClose={closeTab} />
-      <div className="flex items-center justify-between px-4 py-2 border-b shrink-0">
+      <div className="flex items-center justify-between px-4 py-2 border-b shrink-0 select-none">
         <span className="text-sm font-medium truncate">{activeTab.title}</span>
         <div className="flex items-center gap-0.5 shrink-0">
           {(isSkillPath(activeTab.path) || activeTab.path === 'goink.md') ? (

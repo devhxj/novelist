@@ -64,7 +64,7 @@ func BuildSkillCatalog(meta []skill.SkillMeta) string {
 	b.WriteString("使用 read 工具加载技能完整内容：\n")
 	b.WriteString("- skills/<name>.md（小说技能）\n")
 	b.WriteString("- ~/.goink/skills/<name>.md（用户技能）\n")
-	b.WriteString("- builtin/skills/<name>.md（内置技能，只读）\n")
+	b.WriteString("- /builtin/skills/<name>.md（内置技能，只读）\n")
 	b.WriteString("使用 edit 工具创建或修改技能。内置技能不可编辑。\n")
 	b.WriteString("</available_skills>")
 

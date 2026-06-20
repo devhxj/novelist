@@ -69,7 +69,7 @@ export default function ContextRing({ usage, onCompress, isTurnRunning, isCompre
 
   return (
     <span
-      className="relative inline-flex items-center justify-center cursor-pointer shrink-0"
+      className="relative inline-flex items-center justify-center cursor-pointer shrink-0 select-none"
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
     >

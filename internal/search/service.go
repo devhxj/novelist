@@ -243,7 +243,7 @@ func (s *Service) searchContent(ctx context.Context, novelID int64, query string
 	var results []Result
 	for _, m := range matches {
 		content := chapMap[m.chapNum]
-		ctxStr := buildContext(content, m.position, query)
+		prefix, hit, suffix := buildContext(content, m.position, query)
 		meta := chapMeta[m.chapNum]
 		results = append(results, Result{
 			Type:          "content",
@@ -251,7 +251,9 @@ func (s *Service) searchContent(ctx context.Context, novelID int64, query string
 			Title:         meta.Title,
 			ChapterNum:    m.chapNum,
 			FilePath:      git.ChapterPath(m.chapNum),
-			MatchContext:  ctxStr,
+			MatchPrefix:   prefix,
+			MatchHit:      hit,
+			MatchSuffix:   suffix,
 			MatchPosition: m.position,
 			MatchLen:      utf8.RuneCountInString(query),
 			Relevance:     1,
@@ -262,8 +264,9 @@ func (s *Service) searchContent(ctx context.Context, novelID int64, query string
 	return results
 }
 
-// buildContext 提取命中位置前后 ContextRadius 个中文字符的上下文，并用 <mark> 包裹命中词。
-func buildContext(content string, matchRunePos int, query string) string {
+// buildContext 提取命中位置前后 ContextRadius 个中文字符的上下文，返回前缀、命中词、后缀。
+// 前端负责用 JSX 渲染高亮，避免 dangerouslySetInnerHTML。
+func buildContext(content string, matchRunePos int, query string) (prefix, hit, suffix string) {
 	runes := []rune(content)
 	total := len(runes)
 	qLen := utf8.RuneCountInString(query)
@@ -277,20 +280,17 @@ func buildContext(content string, matchRunePos int, query string) string {
 		end = total
 	}
 
-	prefix := string(runes[start:matchRunePos])
-	hit := string(runes[matchRunePos : matchRunePos+qLen])
-	suffix := string(runes[matchRunePos+qLen : end])
-
-	ellipsisStart := "..."
-	if start == 0 {
-		ellipsisStart = ""
+	if start > 0 {
+		prefix = "..."
 	}
-	ellipsisEnd := "..."
-	if end == total {
-		ellipsisEnd = ""
+	prefix += string(runes[start:matchRunePos])
+	hit = string(runes[matchRunePos : matchRunePos+qLen])
+	suffix = string(runes[matchRunePos+qLen : end])
+	if end < total {
+		suffix += "..."
 	}
 
-	return ellipsisStart + prefix + "<mark>" + hit + "</mark>" + suffix + ellipsisEnd
+	return prefix, hit, suffix
 }
 
 // ensureContentCache 懒加载指定小说的全部章节内容到内存。
@@ -391,7 +391,7 @@ func (s *Service) searchRAG(ctx context.Context, novelID int64, query string) []
 			Title:         meta.Title,
 			ChapterNum:    r.ChapterNumber,
 			FilePath:      git.ChapterPath(r.ChapterNumber),
-			MatchContext:  contentPreview,
+			MatchPrefix:   contentPreview,
 			MatchLen:      utf8.RuneCountInString(r.Content),
 			MatchPosition: r.StartRunePos,
 			Relevance:     r.Relevance,

@@ -107,7 +107,7 @@ export default function ContributionGrid({ data, months = 12 }: Props) {
               {week.map((day, di) => (
                 <div
                   key={di}
-                  className={`w-[13px] h-[13px] rounded-[2px] ${levelClass(day.words)} cursor-pointer`}
+                  className={`w-[13px] h-[13px] rounded-[2px] ${levelClass(day.words)} cursor-pointer select-none`}
                   onMouseEnter={(e) => showTooltip(e, day.date, day.words)}
                   onMouseLeave={() => setTooltip(null)}
                 />

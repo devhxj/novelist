@@ -134,7 +134,7 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
       <div
         ref={listRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-3 pb-2"
+        className="flex-1 overflow-y-auto overscroll-contain px-3 pb-2"
       >
         {sessions.length === 0 && isLoading ? (
           <div className="flex items-center justify-center h-full">
@@ -150,7 +150,7 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
               <button
                 key={s.session_id}
                 onClick={() => { onSelectSession(s.session_id); onClose() }}
-                className="w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-left hover:bg-muted/50 transition-colors cursor-pointer"
+                className="w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-left hover:bg-muted/50 transition-colors cursor-pointer select-none"
               >
                 <MessageSquare className="w-4 h-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">

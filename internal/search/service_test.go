@@ -69,23 +69,26 @@ func TestBuildContext_Basic(t *testing.T) {
 	query := "张三"
 	bytePos := strings.Index(content, query)
 	matchRunePos := utf8.RuneCountInString(content[:bytePos])
-	result := buildContext(content, matchRunePos, query)
+	prefix, hit, _ := buildContext(content, matchRunePos, query)
 
-	if !strings.Contains(result, "<mark>张三</mark>") {
-		t.Errorf("expected <mark>张三</mark> in context, got: %s", result)
+	if hit != "张三" {
+		t.Errorf("expected hit 张三, got: %s", hit)
 	}
-	if !strings.Contains(result, "缓步走来") {
-		t.Errorf("expected prefix near mark in context, got: %s", result)
+	if !strings.Contains(prefix, "缓步走来") {
+		t.Errorf("expected prefix near hit in context, got: %s", prefix)
 	}
 }
 
 func TestBuildContext_AtStart(t *testing.T) {
 	content := "张三心头一凛，这人的步伐他认得，是当年在华山见过的那人。夜色中那人缓步走来。"
 	query := "张三"
-	result := buildContext(content, 0, query)
+	prefix, hit, _ := buildContext(content, 0, query)
 
-	if !strings.HasPrefix(result, "<mark>张三</mark>") {
-		t.Errorf("expected no ellipsis at start, got: %s", result)
+	if hit != "张三" {
+		t.Errorf("expected hit 张三, got: %s", hit)
+	}
+	if strings.HasPrefix(prefix, "...") {
+		t.Errorf("expected no ellipsis at start, got: %s", prefix)
 	}
 }
 
@@ -94,10 +97,13 @@ func TestBuildContext_AtEnd(t *testing.T) {
 	query := "张三"
 	bytePos := strings.Index(content, query)
 	matchRunePos := utf8.RuneCountInString(content[:bytePos])
-	result := buildContext(content, matchRunePos, query)
+	_, hit, suffix := buildContext(content, matchRunePos, query)
 
-	if !strings.HasSuffix(result, "</mark>") {
-		t.Errorf("expected no ellipsis at end, got: %s", result)
+	if hit != "张三" {
+		t.Errorf("expected hit 张三, got: %s", hit)
+	}
+	if strings.HasSuffix(suffix, "...") {
+		t.Errorf("expected no ellipsis at end, got: %s", suffix)
 	}
 }
 
@@ -596,11 +602,11 @@ func TestSearchAll_RealisticNovel(t *testing.T) {
 			}
 			if r.Type == "content" {
 				foundContent = true
-				if r.MatchContext == "" {
-					t.Error("content result should have match_context")
+				if r.MatchHit == "" {
+					t.Error("content result should have match_hit")
 				}
-				if !strings.Contains(r.MatchContext, "<mark>张三</mark>") {
-					t.Errorf("match_context should contain marked keyword, got: %s", r.MatchContext)
+				if r.MatchHit != "张三" {
+					t.Errorf("match_hit should be 张三, got: %s", r.MatchHit)
 				}
 			}
 		}
@@ -624,7 +630,7 @@ func TestSearchAll_RealisticNovel(t *testing.T) {
 			if r.Type == "location" && r.Title == "华山" {
 				foundLoc = true
 			}
-			if r.Type == "content" && strings.Contains(r.MatchContext, "<mark>华山</mark>") {
+			if r.Type == "content" && r.MatchHit == "华山" {
 				foundContent = true
 			}
 		}
@@ -656,7 +662,7 @@ func TestSearchAll_RealisticNovel(t *testing.T) {
 					foundArc = true
 				}
 			case "content":
-				if strings.Contains(r.MatchContext, "<mark>青龙刀</mark>") {
+				if r.MatchHit == "青龙刀" {
 					foundContent = true
 				}
 			}
@@ -728,7 +734,7 @@ func TestSearchAll_RealisticNovel(t *testing.T) {
 		}
 		found := false
 		for _, r := range results {
-			if r.Type == "content" && strings.Contains(r.MatchContext, "<mark>新武器</mark>") {
+			if r.Type == "content" && r.MatchHit == "新武器" {
 				found = true
 			}
 		}
@@ -746,7 +752,7 @@ func TestSearchAll_RealisticNovel(t *testing.T) {
 		}
 		for _, r := range results {
 			if r.ChapterNum == 1 && r.Type == "content" {
-				t.Errorf("chapter 1 content was replaced, should not find old text, got: %s", r.MatchContext)
+				t.Errorf("chapter 1 content was replaced, should not find old text, got: %s", r.MatchHit)
 			}
 		}
 	})
@@ -774,10 +780,10 @@ func TestSearchAll_RealisticNovel(t *testing.T) {
 		}
 		found := false
 		for _, r := range results {
-			if r.Type == "content" && strings.Contains(r.MatchContext, "<mark>龙泉剑</mark>") {
+			if r.Type == "content" && r.MatchHit == "龙泉剑" {
 				found = true
-				// 验证 mark 不在开头也不是唯一内容
-				if strings.HasPrefix(r.MatchContext, "<mark>") && strings.HasSuffix(r.MatchContext, "</mark>") {
+				// 验证 hit 不在开头也不是唯一内容
+				if r.MatchPrefix == "" && r.MatchSuffix == "" {
 					t.Error("context should have surrounding text, not just the keyword")
 				}
 			}

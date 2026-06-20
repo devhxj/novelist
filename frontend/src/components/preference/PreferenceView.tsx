@@ -65,7 +65,7 @@ export default function PreferenceView({ novelId }: Props) {
   }
 
   return (
-    <main className="flex-1 min-w-0 overflow-y-auto bg-[#fafbfc]">
+    <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-[#fafbfc]">
       {loading ? (
         <div className="flex h-full items-center justify-center text-sm text-slate-500">加载中...</div>
       ) : error ? (
@@ -198,14 +198,14 @@ function PreferenceCard({
             value={editing!.category}
             onChange={e => setEditingCategory(e.target.value)}
             placeholder="分类"
-            className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-slate-300"
+            className="w-full text-xs border border-border rounded px-2 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
           <textarea
             value={editing!.content}
             onChange={e => setEditingContent(e.target.value)}
             placeholder="偏好内容"
             rows={3}
-            className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-slate-300 resize-none"
+            className="w-full text-xs border border-border rounded px-2 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
           />
           <div className="flex items-center gap-2">
             <button
@@ -228,18 +228,18 @@ function PreferenceCard({
             {item.category || '未分类'}
           </span>
           <p className="flex-1 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{item.content}</p>
-          <div className="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="shrink-0 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               onClick={() => onEdit(item)}
-              className="text-[10px] text-slate-400 hover:text-slate-600 transition-colors"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
               编辑
             </button>
             <button
               onClick={() => onDelete(item.id)}
-              className="text-slate-300 hover:text-rose-500 transition-colors"
+              className="text-muted-foreground hover:text-rose-500 transition-colors"
             >
-              <Trash2 className="h-3 w-3" />
+              <Trash2 className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
@@ -264,14 +264,14 @@ function AddForm({
         value={category}
         onChange={e => onCategoryChange(e.target.value)}
         placeholder="分类（如：风格、对话、世界观）"
-        className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-slate-300"
+        className="w-full text-xs border border-border rounded px-2 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
       <textarea
         value={content}
         onChange={e => onContentChange(e.target.value)}
         placeholder="偏好内容"
         rows={3}
-        className="w-full text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-slate-300 resize-none"
+        className="w-full text-xs border border-border rounded px-2 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
       />
       <div className="flex items-center gap-2">
         <button

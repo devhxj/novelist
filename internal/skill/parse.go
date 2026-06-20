@@ -106,7 +106,7 @@ func scanFS(logger *slog.Logger, fsys fs.FS, dir string) ([]Skill, error) {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
 			continue
 		}
-		sk, err := ParseFS(fsys, dir+"/"+entry.Name())
+		sk, err := ParseFS(fsys, filepath.Join(dir, entry.Name()))
 		if err != nil {
 			logger.Warn("skill: 解析内置 skill 失败，已跳过", "file", entry.Name(), "err", err)
 			continue

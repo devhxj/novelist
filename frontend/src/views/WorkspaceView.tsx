@@ -217,10 +217,11 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   const closeBtn = 'w-12 h-full flex items-center justify-center cursor-pointer text-foreground/80 hover:text-white hover:bg-red-500 transition-colors'
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-screen flex flex-col overflow-hidden">
       <header
-        className="h-11 flex items-center border-b bg-sidebar shrink-0"
+        className="h-11 flex items-center border-b bg-sidebar shrink-0 select-none cursor-default"
         style={{ '--wails-draggable': 'drag' } as React.CSSProperties}
+        onDoubleClick={() => { WindowToggleMaximise(); setIsMaximised(!isMaximised) }}
       >
         <img src={logo} alt="Goink" className="h-7 w-7 ml-3 shrink-0" />
         <span className="text-sm font-medium pl-2 flex-1">
@@ -269,7 +270,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
         </div>
       </header>
 
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         <ActivityBar activeId={sidebarPanel ?? activePanel} onSelect={handleActivitySelect} />
 
         <SidePanel

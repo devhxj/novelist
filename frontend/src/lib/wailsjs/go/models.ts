@@ -873,7 +873,9 @@ export namespace search {
 	    subtitle: string;
 	    chapter_num: number;
 	    file_path: string;
-	    match_context: string;
+	    match_prefix: string;
+	    match_hit: string;
+	    match_suffix: string;
 	    match_position: number;
 	    match_len: number;
 	    relevance: number;
@@ -891,7 +893,9 @@ export namespace search {
 	        this.subtitle = source["subtitle"];
 	        this.chapter_num = source["chapter_num"];
 	        this.file_path = source["file_path"];
-	        this.match_context = source["match_context"];
+	        this.match_prefix = source["match_prefix"];
+	        this.match_hit = source["match_hit"];
+	        this.match_suffix = source["match_suffix"];
 	        this.match_position = source["match_position"];
 	        this.match_len = source["match_len"];
 	        this.relevance = source["relevance"];

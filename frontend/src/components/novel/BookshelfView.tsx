@@ -71,12 +71,12 @@ export default function BookshelfView({
         </div>
       ) : (
         /* 书架网格 */
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-6">
           <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-5">
             {novels.map(n => (
               <div
                 key={n.id}
-                className={`group relative flex flex-col rounded-lg border bg-card hover:shadow-md transition-shadow cursor-pointer
+                className={`group relative flex flex-col rounded-lg border bg-card hover:shadow-md transition-shadow cursor-pointer select-none
                   ${n.id === activeNovelId ? 'ring-2 ring-primary' : ''}`}
               >
                 {/* 点击卡片主体切换书 */}

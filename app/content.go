@@ -22,10 +22,10 @@ type SaveContentInput struct {
 }
 
 // GetContent 返回小说仓库中指定路径的文件内容。文件不存在时返回空字符串。
-// 内置 skill 路径（builtin/skills/）从内存读取。
+// 内置 skill 路径（/builtin/skills/）从内存读取。
 func (a *App) GetContent(novelID int64, path string) (string, error) {
-	if strings.HasPrefix(path, "builtin/skills/") {
-		name := strings.TrimSuffix(strings.TrimPrefix(path, "builtin/skills/"), ".md")
+	if strings.HasPrefix(path, "/builtin/skills/") {
+		name := strings.TrimSuffix(strings.TrimPrefix(path, "/builtin/skills/"), ".md")
 		if a.skill == nil {
 			return "", os.ErrNotExist
 		}

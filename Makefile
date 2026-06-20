@@ -27,7 +27,7 @@ frontend:
 
 # 生产构建（需先 deps）
 build: deps frontend
-	wails build -tags webkit2_41
+	wails build -tags webkit2_41 -o $(APP_NAME)
 
 # 纯前端开发（浏览器模式，后端不可用）
 frontend-dev:
@@ -46,9 +46,9 @@ package:
 		*) echo "请使用 package-windows / package-linux / package-macos"; exit 1 ;; \
 	esac
 
-# Windows NSIS 安装包
+# Windows Inno Setup 安装包
 package-windows: build
-	makensis -DVERSION=$(VERSION) $(BUILD_DIR)/package/windows/installer.nsi
+	export VERSION=$(VERSION) && iscc $(BUILD_DIR)/package/windows/setup.iss
 
 # Linux AppImage
 package-linux: build

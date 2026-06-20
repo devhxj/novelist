@@ -813,14 +813,14 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
       : '输入消息，按 / 调用技能...'
 
   return (
-    <aside className="shrink-0 flex flex-col bg-sidebar border-l relative" style={{ width }}>
+    <aside className="shrink-0 flex flex-col bg-sidebar border-l relative overflow-hidden" style={{ width }}>
       <div
-        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/30 transition-colors z-10"
+        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/30 transition-colors z-10 select-none"
         style={{ marginLeft: -2 }}
         onMouseDown={handleMouseDown}
       />
 
-      <div className="px-4 py-2.5 border-b shrink-0 flex items-center justify-between">
+      <div className="px-4 py-2.5 border-b shrink-0 flex items-center justify-between select-none">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">AI 对话</span>
         <div className="flex items-center gap-2">
           <button
@@ -859,7 +859,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
         />
       </div>
 
-      <div ref={scrollContainerRef} onScroll={handleMessagesScroll} className="flex-1 overflow-y-auto px-3 py-3 relative">
+      <div ref={scrollContainerRef} onScroll={handleMessagesScroll} className="flex-1 overflow-y-auto overscroll-contain px-3 py-3 relative">
         {!hasNovel ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">

@@ -83,7 +83,7 @@ export default function ProfileView() {
 
   if (loading) {
     return (
-      <main className="flex-1 min-w-0 overflow-y-auto bg-[#fafbfc] dark:bg-background">
+      <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-[#fafbfc] dark:bg-background">
         <div className="flex h-full items-center justify-center text-sm text-slate-500">加载中...</div>
       </main>
     )
@@ -91,14 +91,14 @@ export default function ProfileView() {
 
   if (error) {
     return (
-      <main className="flex-1 min-w-0 overflow-y-auto bg-[#fafbfc] dark:bg-background">
+      <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-[#fafbfc] dark:bg-background">
         <div className="flex h-full items-center justify-center text-sm text-rose-500">{error}</div>
       </main>
     )
   }
 
   return (
-    <main className="flex-1 min-w-0 overflow-y-auto bg-[#fafbfc] dark:bg-background">
+    <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-[#fafbfc] dark:bg-background">
       <input
         ref={fileInputRef}
         type="file" accept="image/*"
@@ -108,7 +108,7 @@ export default function ProfileView() {
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-8">
         {/* 头像 + 问候 */}
         <div className="flex items-center gap-4">
-          <div className="relative group flex-shrink-0 cursor-pointer" onClick={handleAvatarClick}>
+          <div className="relative group flex-shrink-0 cursor-pointer select-none" onClick={handleAvatarClick}>
             {avatarErrored ? (
               <div className="w-14 h-14 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center">
                 <User className="w-7 h-7 text-slate-400 dark:text-slate-500" />
@@ -138,7 +138,7 @@ export default function ProfileView() {
             ) : (
               <h1
                 onClick={startEditName}
-                className={`text-lg font-semibold cursor-pointer hover:text-primary transition-colors ${settings?.user_name ? 'text-slate-800 dark:text-foreground' : 'text-slate-400 dark:text-slate-500'}`}
+                className={`text-lg font-semibold cursor-pointer hover:text-primary transition-colors select-none ${settings?.user_name ? 'text-slate-800 dark:text-foreground' : 'text-slate-400 dark:text-slate-500'}`}
               >
                 {settings?.user_name || '未设置昵称'}
               </h1>

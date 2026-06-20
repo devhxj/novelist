@@ -130,13 +130,13 @@ export default memo(function ToolCallCard({ displayText, status, activityKind, e
           <div className="approval-actions">
             <button
               onClick={() => { onReject(feedback); setFeedback('') }}
-              className="approval-reject-btn cursor-pointer"
+              className="approval-reject-btn cursor-pointer select-none"
             >
               <XCircle size={13} /> 拒绝
             </button>
             <button
               onClick={() => { onApprove(feedback); setFeedback('') }}
-              className="approval-accept-btn cursor-pointer"
+              className="approval-accept-btn cursor-pointer select-none"
             >
               <Check size={13} /> 批准
             </button>

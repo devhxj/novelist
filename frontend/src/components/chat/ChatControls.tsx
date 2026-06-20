@@ -44,7 +44,7 @@ export default function ChatControls({
     : []
 
   return (
-    <div className="flex items-center gap-1.5 px-4 py-2 text-xs shrink-0">
+    <div className="flex items-center gap-1.5 px-4 py-2 text-xs shrink-0 select-none">
       <PopSelect
         value={selectedKey}
         options={modelOptions}
