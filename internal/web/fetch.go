@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -11,23 +12,24 @@ import (
 	"net/url"
 	"strings"
 	"time"
-	"unicode"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/PuerkitoBio/goquery"
-	"github.com/abadojack/whatlanggo"
 	readability "codeberg.org/readeck/go-readability/v2"
 )
 
 const (
 	fetchTimeout   = 30 * time.Second
-	fetchMaxChars  = 32000
+	fetchMaxChars  = 15000
 	fetchMaxBytes  = 10 << 20 // 10 MB
 	fetchDelayMin  = 500 * time.Millisecond
 	fetchDelayMax  = 1500 * time.Millisecond
 	fetchUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 	garbledMinTotal = 50 // 总字符数低于此值不检测（太短无法判断）
+
+	compressionMinBytes  = 1000 // 文本低于此字节不做压缩检测（gzip 开销在短文本中占比太大，压缩率失真）
+	compressionThreshold = 0.75 // 压缩比超过此值视为不可压缩（加密/随机数据）
 )
 
 var cookieJar, _ = cookiejar.New(nil)
@@ -87,6 +89,10 @@ func Fetch(rawURL string) (*FetchResult, error) {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
+	if isAntiCrawlHeaders(resp) {
+		return nil, fmt.Errorf("检测到反爬/CDN 防护响应头，无法抓取")
+	}
+
 	body, err := io.ReadAll(io.LimitReader(resp.Body, fetchMaxBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("读取响应失败: %w", err)
@@ -135,10 +141,14 @@ func Fetch(rawURL string) (*FetchResult, error) {
 	}
 
 	text = strings.TrimSpace(text)
-	if isGarbled(text) {
-		return nil, fmt.Errorf("网页内容为乱码，无法解析")
+	textLen := len([]rune(text))
+	if isEncodingGarbled(text) {
+		return nil, fmt.Errorf("网页编码异常，无法解析")
 	}
-	if len([]rune(text)) > fetchMaxChars {
+	if isAntiCrawl(title, textLen, len(body)) {
+		return nil, fmt.Errorf("网页可能为反爬验证页面，无法抓取有效内容")
+	}
+	if textLen > fetchMaxChars {
 		runes := []rune(text)
 		text = string(runes[:fetchMaxChars]) + "\n\n...[内容已截断]"
 	}
@@ -150,36 +160,132 @@ func Fetch(rawURL string) (*FetchResult, error) {
 	}, nil
 }
 
-// isGarbled 检测文本是否为乱码，综合语言检测和结构分析。
-func isGarbled(text string) bool {
+// isEncodingGarbled 检测编码错误或加密导致的乱码。
+//
+// 信号优先级：
+//  1. U+FFFD 替换字符 — Go 解码无效 UTF-8 字节时插入，确定性信号
+//  2. gzip 压缩率   — 自然语言有大量冗余（词频、语法），压缩率通常在 0.4-0.7；
+//     加密/随机数据几乎不可压缩，压缩率接近 1.0
+func isEncodingGarbled(text string) bool {
 	runes := []rune(text)
 	if len(runes) < garbledMinTotal {
 		return false
 	}
 
-	// 含替换字符 → 明确乱码
 	if strings.ContainsRune(text, '�') {
 		return true
 	}
 
-	// CJK 占比高 → 不可能是乱码（编码错误产不出大量有效汉字）
-	var cjk int
-	for _, r := range runes {
-		if unicode.Is(unicode.Han, r) ||
-			unicode.Is(unicode.Hiragana, r) ||
-			unicode.Is(unicode.Katakana, r) ||
-			unicode.Is(unicode.Hangul, r) {
-			cjk++
+	// 文本太短时 gzip 头部开销占比太大，不做压缩检测
+	textBytes := []byte(text)
+	if len(textBytes) >= compressionMinBytes {
+		if compressionRatio(textBytes) > compressionThreshold {
+			return true
 		}
 	}
-	if cjk > len(runes)/3 {
-		return false
+
+	return false
+}
+
+// compressionRatio 返回 gzip 压缩比（压缩后大小 / 原始大小）。
+// 自然语言通常 0.4-0.7，加密/随机数据通常 > 0.85。
+func compressionRatio(data []byte) float64 {
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	w.Write(data)
+	w.Close()
+	return float64(buf.Len()) / float64(len(data))
+}
+
+// 反爬/验证页面的典型标题关键词。
+var antiCrawlTitles = []string{
+	"just a moment",
+	"attention required",
+	"please verify",
+	"are you a robot",
+	"captcha",
+	"安全检查",
+	"请完成验证",
+	"请验证您是",
+	"正在检查您的浏览器",
+	"请稍候",
+	"访问被拒绝",
+	"access denied",
+	"403 forbidden",
+	"请启用javascript",
+	"please enable javascript",
+	"您的浏览器需要",
+	"系统检测到",
+}
+
+// isAntiCrawl 检测反爬或验证页面。
+// 这类页面返回正常 HTML 和 200 状态码，但没有实际文章内容。
+func isAntiCrawl(title string, extractedLen, bodyLen int) bool {
+	lowerTitle := strings.ToLower(title)
+	for _, kw := range antiCrawlTitles {
+		if strings.Contains(lowerTitle, kw) {
+			return true
+		}
 	}
 
-	// 语言检测：乱码的可信度通常极低
-	info := whatlanggo.Detect(text)
-	if info.Confidence < 0.3 {
+	// HTML 很大但 readability 几乎没提取到内容 → 大概率是反爬/加密页面
+	if bodyLen > 5000 && extractedLen < 200 {
 		return true
+	}
+
+	return false
+}
+
+// 反爬/CDN 防护的 HTTP 响应头指纹。
+var antiCrawlHeaders = []string{
+	"cf-chl-bypass",
+	"cf-mitigated",
+	"x-sucuri-id",
+	"x-sucuri-cache",
+	"x-iinfo",
+	"x-datadome",
+	"x-fw-version",
+	"x-edgeconnect-mid",
+	"x-akamai-transformed",
+}
+
+var antiCrawlServerTokens = []string{
+	"cloudflare-nginx",
+	"sucuri",
+	"incapsula",
+	"imperva",
+}
+
+var antiCrawlCookies = []string{
+	"cf_ob_info",  // Cloudflare 验证页面
+	"cf_use_ob",   // Cloudflare 验证页面
+	"incap_ses",   // Incapsula
+	"visid_incap", // Incapsula
+	"ak_bmsc",     // Akamai Bot Manager
+}
+// 注意：__cf_bm 是 Cloudflare Bot Management 的普适令牌，正常页面也会设置，不能作为拦截信号
+
+// isAntiCrawlHeaders 检测 HTTP 响应头中是否包含反爬/CDN 防护指纹。
+func isAntiCrawlHeaders(resp *http.Response) bool {
+	for _, key := range antiCrawlHeaders {
+		if resp.Header.Get(key) != "" {
+			return true
+		}
+	}
+
+	lowerServer := strings.ToLower(resp.Header.Get("server"))
+	for _, tk := range antiCrawlServerTokens {
+		if strings.Contains(lowerServer, tk) {
+			return true
+		}
+	}
+
+	for _, ck := range antiCrawlCookies {
+		for _, c := range resp.Cookies() {
+			if strings.EqualFold(c.Name, ck) {
+				return true
+			}
+		}
 	}
 
 	return false
