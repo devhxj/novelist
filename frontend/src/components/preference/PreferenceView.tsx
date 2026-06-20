@@ -228,18 +228,18 @@ function PreferenceCard({
             {item.category || '未分类'}
           </span>
           <p className="flex-1 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{item.content}</p>
-          <div className="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="shrink-0 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               onClick={() => onEdit(item)}
-              className="text-[10px] text-slate-400 hover:text-slate-600 transition-colors"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
               编辑
             </button>
             <button
               onClick={() => onDelete(item.id)}
-              className="text-slate-300 hover:text-rose-500 transition-colors"
+              className="text-muted-foreground hover:text-rose-500 transition-colors"
             >
-              <Trash2 className="h-3 w-3" />
+              <Trash2 className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
