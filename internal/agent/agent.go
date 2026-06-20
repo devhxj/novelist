@@ -41,18 +41,19 @@ type Agent struct {
 
 // RunOptions 是单次 Run() 的参数。
 type RunOptions struct {
-	TurnID        int
-	SessionID     string
-	NovelID       int64
-	Messages      []map[string]any
-	AllowedTools  map[string]bool
-	ActiveVersion int
-	Model         *llm.ModelInfo
-	ProviderName  string
-	AgentType     string
-	SubTaskID     string // 子 Agent 事件路由 ID
-	EventSeq      *int   // 共享事件序号，nil 时自建（主Agent）；子Agent传入父的指针
-	MaxTurns      int
+	TurnID          int
+	SessionID       string
+	NovelID         int64
+	Messages        []map[string]any
+	AllowedTools    map[string]bool
+	ActiveVersion   int
+	SubAgentVersion int // 子 Agent 内存版本计数器，不持久化
+	Model           *llm.ModelInfo
+	ProviderName    string
+	AgentType       string
+	SubTaskID       string // 子 Agent 事件路由 ID
+	EventSeq        *int   // 共享事件序号，nil 时自建（主Agent）；子Agent传入父的指针
+	MaxTurns        int
 }
 
 // New 创建 Agent 实例。
@@ -104,21 +105,25 @@ func (a *Agent) RunSubAgent(ctx context.Context, parentOpts RunOptions, req mcp_
 
 	msgs := []map[string]any{
 		{"role": "system", "content": sysPrompt},
-		{"role": "user", "content": req.Instruction},
 	}
+	if sys3, err := agentcfg.System3(a.db, req.NovelID); err == nil && sys3 != "" {
+		msgs = append(msgs, map[string]any{"role": "system", "content": sys3})
+	}
+	msgs = append(msgs, map[string]any{"role": "user", "content": req.Instruction})
 
 	subOpts := RunOptions{
-		TurnID:       parentOpts.TurnID,
-		SessionID:    parentOpts.SessionID,
-		NovelID:      req.NovelID,
-		Messages:     msgs,
-		AllowedTools: allowed,
-		AgentType:    req.AgentType,
-		SubTaskID:    req.ToolID,
-		EventSeq:     parentOpts.EventSeq,
-		MaxTurns:     50,
-		Model:        parentOpts.Model,
-		ProviderName: parentOpts.ProviderName,
+		TurnID:        parentOpts.TurnID,
+		SessionID:     parentOpts.SessionID,
+		NovelID:       req.NovelID,
+		Messages:      msgs,
+		AllowedTools:  allowed,
+		ActiveVersion: parentOpts.ActiveVersion,
+		AgentType:     req.AgentType,
+		SubTaskID:     req.ToolID,
+		EventSeq:      parentOpts.EventSeq,
+		MaxTurns:      50,
+		Model:         parentOpts.Model,
+		ProviderName:  parentOpts.ProviderName,
 	}
 	result, err := a.Run(ctx, subOpts)
 	return result.FinalText, err
@@ -178,16 +183,24 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 	for loopCount < opts.MaxTurns {
 		toolOutputs := make([]toolOutput, 0)
 		pendingInjects := make(map[string][]mcp_tools.InjectMessage)
-
+		//TODO:
+		//降低阈值尝试触发子agent的压缩 进行测试
 		// token 预算检查：每轮开始时，超限触发压缩
 		if opts.Model.ContextWindow > 0 && float64(sumRunningTokens(runningTokens))/float64(opts.Model.ContextWindow) >= 0.8 {
 			a.logger.Warn("token budget exceeded, triggering compression",
 				"estimated", sumRunningTokens(runningTokens),
 				"context_window", opts.Model.ContextWindow,
 				"ratio", fmt.Sprintf("%.1f%%", float64(sumRunningTokens(runningTokens))/float64(opts.Model.ContextWindow)*100),
+				"agent_type", opts.AgentType,
 			)
-			if err := a.Compress(ctx, &opts, runningTokens); err != nil {
-				a.logger.Warn("compression failed, continuing with original context", "err", err)
+			var compressErr error
+			if opts.AgentType == "main" {
+				compressErr = a.Compress(ctx, &opts, runningTokens)
+			} else {
+				compressErr = a.compressInMemory(ctx, &opts, runningTokens)
+			}
+			if compressErr != nil {
+				a.logger.Warn("compression failed, continuing with original context", "err", compressErr)
 			}
 		}
 
