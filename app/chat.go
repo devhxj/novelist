@@ -53,8 +53,13 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		return nil, fmt.Errorf("session 初始化失败: %w", err)
 	}
 
+	a.agent.Cancel(sess.SessionID)
 	a.agent.RegisterCancel(sess.SessionID, cancel)
-	defer a.agent.UnregisterCancel(sess.SessionID)
+	defer func() {
+		if ctx.Err() == nil {
+			a.agent.UnregisterCancel(sess.SessionID)
+		}
+	}()
 
 	// 3. 新会话自动生成标题（异步，与 agent LLM 调用并发）
 	if isNew && sess.Title == "" {

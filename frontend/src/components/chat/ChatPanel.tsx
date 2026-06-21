@@ -61,6 +61,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
   const [lastUsage, setLastUsage] = useState<UsageInfo | null>(null)
   const [isCompressing, setIsCompressing] = useState(false)
   const compressingRef = useRef(false)
+  const activeCountRef = useRef(0)
   const [showSettings, setShowSettings] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string | null | undefined>(undefined)
   const [sessions, setSessions] = useState<app.SessionMeta[]>([])
@@ -753,6 +754,10 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
   const handleSend = useCallback(async (content: string) => {
     if (!selectedKey) return
     const [p, m] = selectedKey.split('/')
+    activeCountRef.current++
+    if (activeCountRef.current > 1) {
+      app.CancelChat(sessionId)
+    }
     setIsLoading(true)
 
     const turnId = `turn_${++counterRef.current}`
@@ -832,7 +837,10 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
             )}
           : t
       ))
-      setIsLoading(false)
+      activeCountRef.current--
+      if (activeCountRef.current === 0) {
+        setIsLoading(false)
+      }
       startedUnsubRef.current?.()
       startedUnsubRef.current = null
       agentUnsubRef.current?.()
