@@ -33,7 +33,7 @@ type AgentEvent struct {
 	ActivityKind     string         `json:"activity_kind,omitempty"`     // 展示类别
 	Metadata         map[string]any `json:"metadata,omitempty"`          // buildDisplay 产出的附加信息（如 sub_agent_type）
 	Usage            map[string]any `json:"usage,omitempty"`             // token 用量详情（含 usage_ratio / detail）
-	CompressionPhase string         `json:"compression_phase,omitempty"` // "started" | "done"
+	CompressionPhase string         `json:"compression_phase,omitempty"` // "compressing" | "done"
 	Summary          string         `json:"summary,omitempty"`           // 压缩摘要文本
 	Timestamp        time.Time      `json:"timestamp"`                   // 事件生成时间
 }

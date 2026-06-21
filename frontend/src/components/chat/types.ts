@@ -28,7 +28,7 @@ export interface AgentEvent {
   activity_kind?: string
   metadata?: Record<string, unknown>
   usage?: Record<string, unknown>
-  compression_phase?: string // "started" | "done"
+  compression_phase?: string // "compressing" | "done"
   summary?: string
   timestamp: string
 }
@@ -109,6 +109,25 @@ export function rebuildTurns(messages: session.Message[]): Turn[] {
 
     // 压缩边界标记：独立成一个纯压缩 turn
     if (msg.event_type === 'compression') {
+      if (msg.agent_type !== 'main' && msg.sub_task_id) {
+        const cached = subagentCache.get(msg.sub_task_id)
+        if (cached && cached.segments) {
+          cached.segments.push({
+            ...emptySegment(`seg_${segCounter++}`),
+            type: 'compression',
+            compressionPhase: 'done',
+          })
+        }
+        continue
+      }
+      if (current && current.turnId === msg.turn_id) {
+        current.segments.push({
+          ...emptySegment(`seg_${segCounter++}`),
+          type: 'compression',
+          compressionPhase: 'done',
+        })
+        continue
+      }
       turns.push({
         id: `comp_${msg.turn_id}`,
         turnId: msg.turn_id,

@@ -291,9 +291,49 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
       }
       case AgentEventType.Compression: {
         const phase = (event.compression_phase || 'started') as 'compressing' | 'done'
+        if (event.sub_task_id) {
+          setTurns(prev => prev.map(turn => {
+            if (turn.turnId !== turnId) return turn
+            const subIdx = turn.segments.findIndex(s =>
+              s.type === 'subagent' && s.taskId === event.sub_task_id
+            )
+            if (subIdx < 0) {
+              turn.segments.push({
+                ...emptySegment(`subagent_${event.sub_task_id}`),
+                type: 'subagent',
+                status: 'streaming',
+                agentType: 'review' as const,
+                taskId: event.sub_task_id,
+                segments: [{
+                  ...emptySegment(`comp_${++counterRef.current}`),
+                  type: 'compression',
+                  compressionPhase: phase,
+                }],
+              })
+              return turn
+            }
+            const subSeg = { ...turn.segments[subIdx] }
+            if (!subSeg.segments) subSeg.segments = []
+            const subSegs = [...subSeg.segments]
+            const compIdx = subSegs.findIndex(s => s.type === 'compression')
+            if (compIdx >= 0) {
+              subSegs[compIdx] = { ...subSegs[compIdx], compressionPhase: phase }
+            } else {
+              subSegs.push({
+                ...emptySegment(`comp_${++counterRef.current}`),
+                type: 'compression',
+                compressionPhase: phase,
+              })
+            }
+            subSeg.segments = subSegs
+            const newSegs = [...turn.segments]
+            newSegs[subIdx] = subSeg
+            return { ...turn, segments: newSegs }
+          }))
+          return
+        }
         setTurns(prev => prev.map(turn => {
           if (turn.turnId !== turnId) return turn
-          // 查找已有 compression segment，找不到则追加
           const compIdx = turn.segments.findIndex(s => s.type === 'compression')
           if (compIdx >= 0) {
             const segs = [...turn.segments]

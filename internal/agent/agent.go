@@ -183,8 +183,6 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 	for loopCount < opts.MaxTurns {
 		toolOutputs := make([]toolOutput, 0)
 		pendingInjects := make(map[string][]mcp_tools.InjectMessage)
-		//TODO:
-		//降低阈值尝试触发子agent的压缩 进行测试
 		// token 预算检查：每轮开始时，超限触发压缩
 		if opts.Model.ContextWindow > 0 && float64(sumRunningTokens(runningTokens))/float64(opts.Model.ContextWindow) >= 0.8 {
 			a.logger.Warn("token budget exceeded, triggering compression",

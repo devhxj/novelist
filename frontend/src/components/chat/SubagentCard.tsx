@@ -4,6 +4,7 @@ import type { TurnSegment } from './types'
 import ThinkingBlock from './ThinkingBlock'
 import MessageBubble from './MessageBubble'
 import ToolCallCard from './ToolCallCard'
+import CompressionBlock from './CompressionBlock'
 import './SubagentCard.css'
 
 interface Props {
@@ -93,6 +94,9 @@ export default memo(function SubagentCard({ agentType, segments, status }: Props
             )}
 
             {segments.map(seg => {
+              if (seg.type === 'compression') {
+                return <CompressionBlock key={seg.id} phase={seg.compressionPhase || 'done'} />
+              }
               if (seg.type === 'text') {
                 return (
                   <div key={seg.id} className="space-y-1">
