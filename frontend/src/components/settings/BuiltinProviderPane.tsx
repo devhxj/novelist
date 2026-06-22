@@ -110,7 +110,7 @@ export default function BuiltinProviderPane({ providers, onUpdate, onAddCustomMo
           onChange={e => onUpdate(selectedKey, { temperature: parseFloat(e.target.value) })}
           className="flex-1 h-8"
         />
-        <span className="text-xs text-muted-foreground w-8 text-right">{provider.temperature.toFixed(1)}</span>
+        <span className="text-xs text-muted-foreground w-8 text-right">{(provider.temperature ?? 0.7).toFixed(1)}</span>
       </div>
 
       {/* 内置模型 */}

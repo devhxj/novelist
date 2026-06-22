@@ -35,6 +35,8 @@ func TestConnection(ctx context.Context, builtin map[string]Provider, input Test
 		}
 	}
 
+	chatURL = normalizeURL(chatURL)
+
 	payload := map[string]any{
 		"model": input.ModelID,
 		"messages": []map[string]any{

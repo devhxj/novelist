@@ -1,6 +1,20 @@
 package llm
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
+
+// normalizeURL 为裸域名补全 https://。已有协议头的原样返回。
+func normalizeURL(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+		return raw
+	}
+	return "https://" + raw
+}
 
 // UserLLMConfig 是用户 LLM 配置的持久化格式（加密 JSON）。
 // 一个 provider 一个 key，内置模型随代码自动更新，自定义模型需完整填写信息。
@@ -117,7 +131,7 @@ func BuildConfigView(user *UserLLMConfig) *LLMConfigView {
 			view.Providers = append(view.Providers, ProviderView{
 				Key:           up.Name,
 				Name:          up.Name,
-				ChatURL:       up.ChatURL,
+				ChatURL:       normalizeURL(up.ChatURL),
 				APIKey:        up.APIKey,
 				Temperature:   derefOrZero(up.Temperature),
 				Source:        "custom",
@@ -145,7 +159,7 @@ func (v *LLMConfigView) ToUserConfig() *UserLLMConfig {
 			Models: append([]ModelInfo{}, pv.CustomModels...),
 		}
 		if pv.Source != "builtin" {
-			p.ChatURL = pv.ChatURL
+			p.ChatURL = normalizeURL(pv.ChatURL)
 		}
 		p.Temperature = floatPtr(pv.Temperature)
 		providers = append(providers, p)

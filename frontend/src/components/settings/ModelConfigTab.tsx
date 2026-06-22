@@ -81,17 +81,37 @@ export default function ModelConfigTab({ onSaved }: Props) {
   // 测试连通性，返回错误消息或 null
   const handleTest = useCallback(async (providerKey: string): Promise<string | null> => {
     const provider = providers.find(p => p.key === providerKey)
-    if (!provider || !provider.api_key) return '未配置 API Key'
+    if (!provider || !provider.api_key) {
+      const msg = '未配置 API Key'
+      setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, keySnapshot: '' } }))
+      return msg
+    }
+
+    let chatURL = provider.chat_url || ''
+    if (/^https?:\/\//.test(chatURL)) {
+      // 已有协议头，直接用
+    } else if (chatURL.includes('.')) {
+      // www.example.com 之类，补 https://
+      chatURL = 'https://' + chatURL
+    } else {
+      const msg = 'URL 格式不正确，需要以 http:// 或 https:// 开头'
+      setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, keySnapshot: provider.api_key } }))
+      return msg
+    }
 
     const models = provider.builtin_models?.length ? provider.builtin_models : provider.custom_models
     const modelId = models?.[0]?.id
-    if (!modelId) return '没有可用模型'
+    if (!modelId) {
+      const msg = '请先添加至少一个模型'
+      setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, keySnapshot: provider.api_key } }))
+      return msg
+    }
 
     setTesting(prev => ({ ...prev, [providerKey]: true }))
     try {
       await app.TestConnection({
         provider_name: providerKey,
-        chat_url: provider.chat_url,
+        chat_url: chatURL,
         api_key: provider.api_key,
         model_id: modelId,
       })

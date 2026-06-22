@@ -43,6 +43,7 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
       source: 'custom',
       builtin_models: [],
       custom_models: [],
+      temperature: 0.7,
     } as unknown as llm.ProviderView)
     setNewName('')
     setNewChatURL('')
@@ -215,7 +216,7 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
               onChange={e => onUpdate(selectedKey, { temperature: parseFloat(e.target.value) })}
               className="flex-1 h-8"
             />
-            <span className="text-xs text-muted-foreground w-8 text-right">{provider.temperature.toFixed(1)}</span>
+            <span className="text-xs text-muted-foreground w-8 text-right">{(provider.temperature ?? 0.7).toFixed(1)}</span>
           </div>
 
           {/* 模型列表 */}
