@@ -15,14 +15,20 @@ interface Props {
   value: string
   options: Option[]
   onChange: (value: string) => void
+  onOpen?: () => void
   className?: string
   minWidth?: string
   footerAction?: FooterAction
 }
 
-export default function PopSelect({ value, options, onChange, className = '', minWidth = '130px', footerAction }: Props) {
+export default function PopSelect({ value, options, onChange, onOpen, className = '', minWidth = '130px', footerAction }: Props) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  const handleToggle = () => {
+    if (!open && onOpen) onOpen()
+    setOpen(!open)
+  }
 
   useEffect(() => {
     if (!open) return
@@ -40,7 +46,7 @@ export default function PopSelect({ value, options, onChange, className = '', mi
   return (
     <div ref={containerRef} className={`relative ${className}`}>
       <button
-        onClick={() => setOpen(!open)}
+        onClick={handleToggle}
         style={{ minWidth }}
         className="h-[30px] rounded-lg border bg-background px-2.5 text-xs text-muted-foreground flex items-center justify-between gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       >

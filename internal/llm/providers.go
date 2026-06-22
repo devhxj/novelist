@@ -84,6 +84,38 @@ var Builtin = map[string]Provider{
 		},
 		BuildRequest: nil,
 	},
+	"minimax": {
+		Name:         "MiniMax",
+		ChatURL:      "https://api.minimaxi.com/v1/chat/completions",
+		Temperature:  floatPtr(1.0),
+		BuildRequest: minimaxBuildRequest,
+		Models: []ModelInfo{
+			{
+				ID:               "MiniMax-M3",
+				Name:             "MiniMax M3",
+				ContextWindow:    1_000_000,
+				MaxOutputTokens:  128_000,
+				SupportsThinking: true,
+				SupportsVision:   true,
+			},
+			{
+				ID:               "MiniMax-M2.7",
+				Name:             "MiniMax M2.7",
+				ContextWindow:    204_800,
+				MaxOutputTokens:  128_000,
+				SupportsThinking: true,
+				SupportsVision:   false,
+			},
+			{
+				ID:               "MiniMax-M2.5",
+				Name:             "MiniMax M2.5",
+				ContextWindow:    204_800,
+				MaxOutputTokens:  128_000,
+				SupportsThinking: true,
+				SupportsVision:   false,
+			},
+		},
+	},
 	"mimo": {
 		Name:         "MiMo",
 		ChatURL:      "https://api.xiaomimimo.com/v1/chat/completions",

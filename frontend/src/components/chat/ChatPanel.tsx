@@ -680,6 +680,12 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
 
   const handleConfigModel = useCallback(() => setShowSettings(true), [])
 
+  const refreshModels = useCallback(() => {
+    app.GetModels().then(list => {
+      if (list && list.length > 0) setModels(list)
+    }).catch(() => {})
+  }, [app])
+
   const handleSelectModel = useCallback((key: string) => {
     setSelectedKey(key)
     const m = models.find(x => x.Key === key)
@@ -1090,6 +1096,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
         models={models}
         selectedKey={selectedKey}
         onSelectModel={handleSelectModel}
+        onRefreshModels={refreshModels}
         reasoningEffort={reasoningEffort}
         onSelectEffort={handleSelectEffort}
         approvalMode={approvalMode}
@@ -1119,9 +1126,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
                 }
               }
             }
-          }).catch((err) => {
-            console.error('Refresh models failed', err)
-          })
+          }).catch(() => {})
         }}
         initialTab="model"
       />

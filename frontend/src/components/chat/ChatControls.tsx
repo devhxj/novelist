@@ -7,6 +7,7 @@ interface Props {
   models: llm.AvailableModel[]
   selectedKey: string
   onSelectModel: (key: string) => void
+  onRefreshModels?: () => void
   reasoningEffort: string
   onSelectEffort: (effort: string) => void
   approvalMode: 'manual' | 'auto'
@@ -22,6 +23,7 @@ export default function ChatControls({
   models,
   selectedKey,
   onSelectModel,
+  onRefreshModels,
   reasoningEffort,
   onSelectEffort,
   approvalMode,
@@ -49,6 +51,7 @@ export default function ChatControls({
         value={selectedKey}
         options={modelOptions}
         onChange={onSelectModel}
+        onOpen={onRefreshModels}
         footerAction={{ label: '配置模型...', onClick: onConfigModel }}
       />
 
