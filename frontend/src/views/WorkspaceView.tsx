@@ -18,9 +18,10 @@ import NovelDeleteDialog from '@/components/novel/NovelDeleteDialog'
 import ChatPanel from '@/components/chat/ChatPanel'
 import GitHubLink from '@/components/shell/GitHubLink'
 import SettingsDialog from '@/components/settings/SettingsDialog'
+import HelpDialog from '@/components/help/HelpDialog'
 import ProfileView from '@/components/profile/ProfileView'
 import { search } from '@/lib/wailsjs/go/models'
-import { Settings, User } from 'lucide-react'
+import { Settings, User, HelpCircle } from 'lucide-react'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised, Quit } from '@/lib/wailsjs/runtime/runtime'
 import logo from '@/assets/logo.svg'
 
@@ -46,6 +47,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [showSettings, setShowSettings] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   const [tabTarget, setTabTarget] = useState<{ path: string; title: string } | null>(null)
   const [activeContent, setActiveContent] = useState('')
   const [activeSkillName, setActiveSkillName] = useState<string | null>(null)
@@ -237,6 +239,13 @@ export default function WorkspaceView({ initialNovelId }: Props) {
             <User className="w-5 h-5" />
           </button>
           <button
+            onClick={() => setShowHelp(true)}
+            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center"
+            title="帮助"
+          >
+            <HelpCircle className="w-5 h-5" />
+          </button>
+          <button
             onClick={() => setShowSettings(true)}
             className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center mr-1"
             title="设置"
@@ -345,6 +354,11 @@ export default function WorkspaceView({ initialNovelId }: Props) {
         open={showSettings}
         onClose={() => setShowSettings(false)}
         initialTab="general"
+      />
+
+      <HelpDialog
+        open={showHelp}
+        onClose={() => setShowHelp(false)}
       />
 
       <NovelEditDialog
