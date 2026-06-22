@@ -142,6 +142,18 @@ export namespace app {
 	        this.novel_id = source["novel_id"];
 	    }
 	}
+	export class ListSlashCommandsInput {
+	    novel_id: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListSlashCommandsInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	    }
+	}
 	export class PreferenceResult {
 	    global: novel.PreferenceItem[];
 	    novel: novel.PreferenceItem[];
@@ -258,6 +270,22 @@ export namespace app {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.novel_id = source["novel_id"];
+	    }
+	}
+	export class SlashCommand {
+	    name: string;
+	    description: string;
+	    type: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SlashCommand(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.type = source["type"];
 	    }
 	}
 	export class TestConnectionInput {

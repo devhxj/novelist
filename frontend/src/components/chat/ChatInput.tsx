@@ -1,19 +1,19 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { ArrowUp, Square, Zap } from 'lucide-react'
-import type { skill } from '@/hooks/useApp'
-import SkillSlashMenu from './SkillSlashMenu'
+import { ArrowUp, Square, Zap, Play } from 'lucide-react'
+import type { app } from '@/hooks/useApp'
+import SlashMenu from './SlashMenu'
 
 interface Props {
   disabled: boolean
   isLoading: boolean
   placeholder: string
-  skills: skill.SkillMeta[]
+  slashItems: app.SlashCommand[]
   onSend: (message: string) => void
   onStop: () => void
-  onListSkills: () => void
+  onListSlash: () => void
 }
 
-export default function ChatInput({ disabled, isLoading, placeholder, skills, onSend, onStop, onListSkills }: Props) {
+export default function ChatInput({ disabled, isLoading, placeholder, slashItems, onSend, onStop, onListSlash }: Props) {
   const [hasContent, setHasContent] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -22,11 +22,11 @@ export default function ChatInput({ disabled, isLoading, placeholder, skills, on
   const [slashFilter, setSlashFilter] = useState('')
   const [slashIndex, setSlashIndex] = useState(0)
   const [slashPos, setSlashPos] = useState({ top: 0, left: 0, width: 0 })
-  const [activeSkill, setActiveSkill] = useState<skill.SkillMeta | null>(null)
+  const [activeCommand, setActiveCommand] = useState<app.SlashCommand | null>(null)
 
   const q = slashFilter.toLowerCase()
-  const filteredSkills = skills.filter(s =>
-    s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q)
+  const filteredItems = slashItems.filter(c =>
+    c.name.toLowerCase().includes(q) || c.description.toLowerCase().includes(q)
   )
 
   const closeSlash = useCallback(() => {
@@ -35,16 +35,16 @@ export default function ChatInput({ disabled, isLoading, placeholder, skills, on
     setSlashIndex(0)
   }, [])
 
-  const applySlashSelection = useCallback((sk: skill.SkillMeta) => {
+  const applySlashSelection = useCallback((cmd: app.SlashCommand) => {
     const textarea = textareaRef.current
     if (!textarea) return
-    textarea.value = '/' + sk.name + ' '
+    textarea.value = '/' + cmd.name + ' '
     textarea.focus()
     textarea.setSelectionRange(textarea.value.length, textarea.value.length)
     textarea.style.height = 'auto'
     textarea.style.height = Math.min(textarea.scrollHeight, 180) + 'px'
     setHasContent(true)
-    setActiveSkill(sk)
+    setActiveCommand(cmd)
     closeSlash()
   }, [closeSlash])
 
@@ -60,21 +60,21 @@ export default function ChatInput({ disabled, isLoading, placeholder, skills, on
       const spaceIdx = value.indexOf(' ')
       if (spaceIdx > 1) {
         const name = value.slice(1, spaceIdx)
-        setActiveSkill(skills.find(s => s.name === name) ?? null)
+        setActiveCommand(slashItems.find(c => c.name === name) ?? null)
         closeSlash()
         return
       }
-      setActiveSkill(null)
+      setActiveCommand(null)
       updateSlashPos()
       setSlashFilter(value.slice(1))
       setSlashIndex(0)
       setSlashOpen(true)
-      onListSkills()
+      onListSlash()
     } else {
-      setActiveSkill(null)
+      setActiveCommand(null)
       closeSlash()
     }
-  }, [closeSlash, updateSlashPos, onListSkills, skills])
+  }, [closeSlash, updateSlashPos, onListSlash, slashItems])
 
   // close slash on resize/scroll
   useEffect(() => {
@@ -89,20 +89,20 @@ export default function ChatInput({ disabled, isLoading, placeholder, skills, on
   }, [slashOpen, updateSlashPos])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (slashOpen && filteredSkills.length > 0) {
+    if (slashOpen && filteredItems.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setSlashIndex(i => (i + 1) % filteredSkills.length)
+        setSlashIndex(i => (i + 1) % filteredItems.length)
         return
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setSlashIndex(i => (i - 1 + filteredSkills.length) % filteredSkills.length)
+        setSlashIndex(i => (i - 1 + filteredItems.length) % filteredItems.length)
         return
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault()
-        applySlashSelection(filteredSkills[slashIndex])
+        applySlashSelection(filteredItems[slashIndex])
         return
       }
       if (e.key === 'Escape') {
@@ -121,11 +121,11 @@ export default function ChatInput({ disabled, isLoading, placeholder, skills, on
         textarea.value = ''
         textarea.style.height = 'auto'
         setHasContent(false)
-        setActiveSkill(null)
+        setActiveCommand(null)
         closeSlash()
       }
     }
-  }, [slashOpen, filteredSkills, slashIndex, disabled, onSend, applySlashSelection, closeSlash])
+  }, [slashOpen, filteredItems, slashIndex, disabled, onSend, applySlashSelection, closeSlash])
 
   const handleInput = useCallback((e: React.FormEvent<HTMLTextAreaElement>) => {
     const target = e.currentTarget
@@ -144,7 +144,7 @@ export default function ChatInput({ disabled, isLoading, placeholder, skills, on
       textarea.value = ''
       textarea.style.height = 'auto'
       setHasContent(false)
-      setActiveSkill(null)
+      setActiveCommand(null)
       closeSlash()
     }
   }, [disabled, onSend, closeSlash])
@@ -155,11 +155,15 @@ export default function ChatInput({ disabled, isLoading, placeholder, skills, on
 
   return (
     <div className="px-4 pt-2 shrink-0">
-      {activeSkill && (
+      {activeCommand && (
         <div className="flex items-center mb-1 px-1">
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 text-xs font-medium">
-            <Zap className="w-3 h-3" />
-            {activeSkill.name}
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${
+            activeCommand.type === 'command'
+              ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
+              : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+          }`}>
+            {activeCommand.type === 'command' ? <Play className="w-3 h-3" /> : <Zap className="w-3 h-3" />}
+            {activeCommand.name}
           </span>
         </div>
       )}
@@ -191,9 +195,9 @@ export default function ChatInput({ disabled, isLoading, placeholder, skills, on
         )}
       </div>
 
-      {slashOpen && filteredSkills.length > 0 && (
-        <SkillSlashMenu
-          skills={filteredSkills}
+      {slashOpen && filteredItems.length > 0 && (
+        <SlashMenu
+          slashItems={filteredItems}
           filterText={slashFilter}
           selectedIndex={slashIndex}
           position={slashPos}
