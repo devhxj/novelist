@@ -27,9 +27,10 @@ import logo from '@/assets/logo.svg'
 
 interface Props {
   initialNovelId: number
+  initialShowHelp?: boolean
 }
 
-export default function WorkspaceView({ initialNovelId }: Props) {
+export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props) {
   const app = useApp()
   const contentRef = useRef<ContentPanelHandle>(null)
 
@@ -68,6 +69,12 @@ export default function WorkspaceView({ initialNovelId }: Props) {
     })
     WindowIsMaximised().then(setIsMaximised)
   }, [])
+
+  // ── 首次进入自动弹帮助 ──────────────────────────────────
+
+  useEffect(() => {
+    if (initialShowHelp) setShowHelp(true)
+  }, [initialShowHelp])
 
   // ── 作品列表 ────────────────────────────────────────────
 

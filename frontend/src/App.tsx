@@ -8,6 +8,7 @@ type View = 'loading' | 'init' | 'workspace'
 export default function App() {
   const [view, setView] = useState<View>('loading')
   const [initialNovelId, setInitialNovelId] = useState(0)
+  const [fromInit, setFromInit] = useState(false)
   const app = useApp()
 
   useEffect(() => {
@@ -39,11 +40,12 @@ export default function App() {
         <InitView onInitialized={async () => {
           const settings = await app.GetSettings()
           setInitialNovelId(settings?.last_novel_id ?? 0)
+          setFromInit(true)
           setView('workspace')
         }} />
       )}
       {view === 'workspace' && (
-        <WorkspaceView initialNovelId={initialNovelId} />
+        <WorkspaceView initialNovelId={initialNovelId} initialShowHelp={fromInit} />
       )}
     </div>
   )
