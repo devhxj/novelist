@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Graph } from '@antv/g6'
 import { ArrowLeft, ArrowRight, GitBranch, LocateFixed, RefreshCw, X } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
+import { useGraphColors } from '@/components/graphColors'
+import { useTheme } from '@/hooks/useTheme'
 import type { storyarc } from '@/hooks/useApp'
 
 interface Props { novelId: number }
 
-const PALETTE = [
+const PALETTE_LIGHT = [
   { fill: '#dbeafe', stroke: '#3b82f6', text: '#1d4ed8', edge: '#60a5fa' },
   { fill: '#dcfce7', stroke: '#22c55e', text: '#166534', edge: '#4ade80' },
   { fill: '#fef3c7', stroke: '#f59e0b', text: '#92400e', edge: '#fbbf24' },
@@ -14,6 +16,16 @@ const PALETTE = [
   { fill: '#ffe4e6', stroke: '#f43f5e', text: '#9f1239', edge: '#fb7185' },
   { fill: '#ccfbf1', stroke: '#14b8a6', text: '#115e59', edge: '#2dd4bf' },
   { fill: '#ffedd5', stroke: '#f97316', text: '#9a3412', edge: '#fb923c' },
+]
+
+const PALETTE_DARK = [
+  { fill: 'oklch(0.58 0.15 255 / 0.15)', stroke: 'oklch(0.72 0.15 255)', text: 'oklch(0.78 0.1 255)', edge: 'oklch(0.72 0.15 255)' },
+  { fill: 'oklch(0.58 0.16 145 / 0.15)', stroke: 'oklch(0.72 0.15 145)', text: 'oklch(0.78 0.1 145)', edge: 'oklch(0.72 0.15 145)' },
+  { fill: 'oklch(0.62 0.18 80 / 0.15)', stroke: 'oklch(0.78 0.16 80)', text: 'oklch(0.82 0.1 80)', edge: 'oklch(0.78 0.16 80)' },
+  { fill: 'oklch(0.55 0.18 280 / 0.15)', stroke: 'oklch(0.72 0.15 280)', text: 'oklch(0.78 0.1 280)', edge: 'oklch(0.72 0.15 280)' },
+  { fill: 'oklch(0.5 0.18 15 / 0.15)', stroke: 'oklch(0.7 0.15 15)', text: 'oklch(0.76 0.1 15)', edge: 'oklch(0.7 0.15 15)' },
+  { fill: 'oklch(0.58 0.16 175 / 0.15)', stroke: 'oklch(0.72 0.15 175)', text: 'oklch(0.78 0.1 175)', edge: 'oklch(0.72 0.15 175)' },
+  { fill: 'oklch(0.62 0.18 45 / 0.15)', stroke: 'oklch(0.78 0.16 45)', text: 'oklch(0.82 0.1 45)', edge: 'oklch(0.78 0.16 45)' },
 ]
 
 const CH_W = 90
@@ -37,6 +49,9 @@ function centerOnChapter(graph: Graph, containerW: number, containerH: number, c
 
 export default function StoryArcGraph({ novelId }: Props) {
   const app = useApp()
+  const C = useGraphColors()
+  const { theme } = useTheme()
+  const PALETTE = { light: PALETTE_LIGHT, dark: PALETTE_DARK }[theme]
   const containerRef = useRef<HTMLDivElement>(null)
   const graphRef = useRef<Graph | null>(null)
 
@@ -123,14 +138,14 @@ export default function StoryArcGraph({ novelId }: Props) {
           size: [LEFT_MARGIN - 12, NODE_H],
           x: LEFT_MARGIN / 2,
           y: i * LANE_H + LANE_H / 2,
-          fill: dim ? '#f1f5f9' : color.fill,
-          stroke: dim ? '#cbd5e1' : color.stroke,
+          fill: dim ? C.dimFill : color.fill,
+          stroke: dim ? C.dimStroke : color.stroke,
           radius: 8,
           lineWidth: 2,
           labelText: arc.name + statusSuffix,
           labelFontSize: 12,
           labelFontWeight: 600,
-          labelFill: dim ? '#94a3b8' : color.text,
+          labelFill: dim ? C.dimText : color.text,
           labelPlacement: 'center' as const,
           cursor: 'pointer',
         },
@@ -149,14 +164,14 @@ export default function StoryArcGraph({ novelId }: Props) {
           size: [34, 22],
           x,
           y: 10,
-          fill: '#e2e8f0',
-          stroke: '#cbd5e1',
+          fill: C.dimFill,
+          stroke: C.dimStroke,
           radius: 4,
           lineWidth: 1,
           labelText: String(ch),
           labelFontSize: 12,
           labelFontWeight: 600,
-          labelFill: '#475569',
+          labelFill: C.dimText,
           labelPlacement: 'center' as const,
         },
         data: {},
@@ -178,11 +193,11 @@ export default function StoryArcGraph({ novelId }: Props) {
       let dash: number[] | undefined
 
       if (n.status === 'pending') {
-        fill = '#ffffff'
+        fill = C.card
       } else if (n.status === 'abandoned') {
-        fill = '#f8fafc'
-        strokeColor = '#cbd5e1'
-        textColor = '#94a3b8'
+        fill = C.bg
+        strokeColor = C.dimStroke
+        textColor = C.dimText
         opacity = 0.55
         dash = [3, 3]
       }
@@ -242,7 +257,7 @@ export default function StoryArcGraph({ novelId }: Props) {
       let opacity = 1
       let arrow = false
       if (src.status === 'abandoned' || tgt.status === 'abandoned') {
-        stroke = '#94a3b8'
+        stroke = C.dimText
         lineDash = [4, 4]
         opacity = 0.5
       } else if (src.status === 'pending' && tgt.status === 'pending') {
@@ -296,7 +311,7 @@ export default function StoryArcGraph({ novelId }: Props) {
     }
 
     return { nodes: gNodes, edges: gEdges }
-  }, [arcs, allNodes, windowFrom, windowTo, nodesByArc])
+  }, [arcs, allNodes, windowFrom, windowTo, nodesByArc, C, PALETTE])
 
   // Create G6 graph once on mount
   useEffect(() => {
@@ -306,7 +321,7 @@ export default function StoryArcGraph({ novelId }: Props) {
     const graph = new Graph({
       container,
       data: graphData,
-      background: '#fafbfc',
+      background: C.bg,
       animation: false,
       node: {
         type: 'rect',
@@ -429,24 +444,24 @@ export default function StoryArcGraph({ novelId }: Props) {
   }
 
   return (
-    <main className="relative flex-1 min-w-0 overflow-hidden bg-[#fafbfc]">
+    <main className="relative flex-1 min-w-0 overflow-hidden bg-background">
       {/* Toolbar */}
       <div className="absolute left-5 right-5 top-4 z-10 flex items-center justify-between">
         <div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-            <GitBranch className="h-4 w-4 text-purple-500" />
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <GitBranch className="h-4 w-4 text-tag-purple-foreground" />
             故事弧线
           </div>
-          <div className="mt-1 text-xs text-slate-500">
+          <div className="mt-1 text-xs text-muted-foreground">
             {arcs.length} 条弧线 · {allNodes.length} 个节点 · 第 {windowFrom}-{windowTo} 章（共 {totalChapters} 章）
           </div>
         </div>
-        <div className="flex items-center gap-1.5 rounded-md border border-slate-200/80 bg-white/82 p-1 shadow-sm backdrop-blur">
+        <div className="flex items-center gap-1.5 rounded-md border border-border/80 bg-card/82 p-1 shadow-sm backdrop-blur">
           <button
             type="button"
             onClick={() => shift(-20)}
             disabled={!canShiftLeft}
-            className="flex h-7 w-7 items-center justify-center rounded text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:opacity-30 disabled:cursor-default select-none"
+            className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:cursor-default select-none"
             title="前移 20 章"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
@@ -455,16 +470,16 @@ export default function StoryArcGraph({ novelId }: Props) {
             type="button"
             onClick={() => shift(20)}
             disabled={!canShiftRight}
-            className="flex h-7 w-7 items-center justify-center rounded text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:opacity-30 disabled:cursor-default select-none"
+            className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-30 disabled:cursor-default select-none"
             title="后移 20 章"
           >
             <ArrowRight className="h-3.5 w-3.5" />
           </button>
-          <div className="w-px h-4 bg-slate-200" />
+          <div className="w-px h-4 bg-muted" />
           <button
             type="button"
             onClick={() => graphRef.current?.fitView({ when: 'always' }, { duration: 360, easing: 'ease-in-out' })}
-            className="flex h-7 w-7 items-center justify-center rounded text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+            className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             title="适配视图"
           >
             <LocateFixed className="h-3.5 w-3.5" />
@@ -472,7 +487,7 @@ export default function StoryArcGraph({ novelId }: Props) {
           <button
             type="button"
             onClick={load}
-            className="flex h-7 w-7 items-center justify-center rounded text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+            className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             title="刷新"
           >
             <RefreshCw className="h-3.5 w-3.5" />
@@ -481,26 +496,26 @@ export default function StoryArcGraph({ novelId }: Props) {
       </div>
 
       {/* Legend */}
-      <div className="absolute right-0 bottom-0 z-10 rounded-md border border-slate-200 bg-white/90 px-3 py-2.5 text-xs text-slate-600 shadow-sm backdrop-blur space-y-2.5">
+      <div className="absolute right-0 bottom-0 z-10 rounded-md border border-border bg-card/90 px-3 py-2.5 text-xs text-muted-foreground shadow-sm backdrop-blur space-y-2.5">
         <div>
-          <span className="text-slate-400 text-[10px] uppercase tracking-wider">节点</span>
+          <span className="text-muted-foreground text-[10px] uppercase tracking-wider">节点</span>
           <div className="flex items-center gap-3 mt-1.5">
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block h-3.5 w-8 rounded-full bg-blue-400 border border-blue-500" />
               已完成
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block h-3.5 w-8 rounded-full border-2 border-blue-400 bg-white" />
+              <span className="inline-block h-3.5 w-8 rounded-full border-2 border-blue-400 bg-card" />
               进行中
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block h-3.5 w-8 rounded-full bg-slate-200 border border-dashed border-slate-300" />
+              <span className="inline-block h-3.5 w-8 rounded-full bg-muted border border-dashed border-border" />
               已废弃
             </span>
           </div>
         </div>
         <div>
-          <span className="text-slate-400 text-[10px] uppercase tracking-wider">连线</span>
+          <span className="text-muted-foreground text-[10px] uppercase tracking-wider">连线</span>
           <div className="flex items-center gap-3 mt-1.5">
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-block h-0.5 w-7 bg-blue-400 rounded" />
@@ -511,7 +526,7 @@ export default function StoryArcGraph({ novelId }: Props) {
               未发生
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block h-0 w-7 border-t-2 border-dashed border-slate-400" />
+              <span className="inline-block h-0 w-7 border-t-2 border-dashed border-border" />
               断裂
             </span>
           </div>
@@ -527,21 +542,21 @@ export default function StoryArcGraph({ novelId }: Props) {
           : `目标第${selectedNode.target_chapter}章`
         const arc = arcs.find(a => a.id === selectedNode.story_arc_id)
         return (
-          <div className="absolute left-5 bottom-5 z-10 w-64 rounded-lg border border-slate-200 bg-white/94 p-4 shadow-lg backdrop-blur text-sm">
+          <div className="absolute left-5 bottom-5 z-10 w-64 rounded-lg border border-border bg-card/94 p-4 shadow-lg backdrop-blur text-sm">
             <div className="flex items-start justify-between gap-2 mb-2">
-              <h3 className="font-semibold text-slate-800">{selectedNode.title}</h3>
+              <h3 className="font-semibold text-foreground">{selectedNode.title}</h3>
               <button
                 onClick={() => { setSelectedNode(null); setExpanded(false) }}
-                className="shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-muted-foreground hover:bg-secondary transition-colors"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
             {arc && (
-              <span className="inline-block rounded bg-purple-50 px-2 py-0.5 text-xs text-purple-600 mb-2">{arc.name}</span>
+              <span className="inline-block rounded bg-tag-purple px-2 py-0.5 text-xs text-tag-purple-foreground mb-2">{arc.name}</span>
             )}
-            <div className="text-xs text-slate-500 mb-2">
-              <span className={selectedNode.status === 'completed' ? 'text-green-600' : selectedNode.status === 'abandoned' ? 'text-slate-400 line-through' : 'text-blue-600'}>
+            <div className="text-xs text-muted-foreground mb-2">
+              <span className={selectedNode.status === 'completed' ? 'text-tag-green-foreground' : selectedNode.status === 'abandoned' ? 'text-muted-foreground line-through' : 'text-tag-blue-foreground'}>
                 {selectedNode.status === 'completed' ? '已完成' : selectedNode.status === 'abandoned' ? '已废弃' : '进行中'}
               </span>
               <span className="mx-1.5">·</span>
@@ -549,59 +564,59 @@ export default function StoryArcGraph({ novelId }: Props) {
             </div>
             {desc && (
               <div>
-                <p className="text-xs text-slate-500 leading-relaxed">
+                <p className="text-xs text-muted-foreground leading-relaxed">
                   {longDesc && !expanded ? desc.slice(0, 100) + '…' : desc}
                 </p>
                 {longDesc && (
                   <button
                     onClick={() => setExpanded(!expanded)}
-                    className="text-xs text-blue-500 hover:text-blue-600 mt-0.5"
+                    className="text-xs text-tag-blue-foreground hover:text-tag-blue-foreground mt-0.5"
                   >
                     {expanded ? '收起' : '展开'}
                   </button>
                 )}
               </div>
             )}
-            {!desc && <p className="text-xs text-slate-400">暂无详细描述</p>}
+            {!desc && <p className="text-xs text-muted-foreground">暂无详细描述</p>}
           </div>
         )
       })()}
 
       {/* Detail panel: selected arc */}
       {selectedArc && !selectedNode && (
-        <div className="absolute left-5 bottom-5 z-10 w-64 rounded-lg border border-slate-200 bg-white/94 p-4 shadow-lg backdrop-blur text-sm">
+        <div className="absolute left-5 bottom-5 z-10 w-64 rounded-lg border border-border bg-card/94 p-4 shadow-lg backdrop-blur text-sm">
           <div className="flex items-start justify-between gap-2 mb-2">
-            <h3 className="font-semibold text-slate-800">{selectedArc.name}</h3>
+            <h3 className="font-semibold text-foreground">{selectedArc.name}</h3>
             <button
               onClick={() => setSelectedArc(null)}
-              className="shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-muted-foreground hover:bg-secondary transition-colors"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
           <div className="flex items-center gap-2 mb-2">
-            <span className="inline-block rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{selectedArc.arc_type}</span>
+            <span className="inline-block rounded bg-secondary px-2 py-0.5 text-xs text-muted-foreground">{selectedArc.arc_type}</span>
             <span className={`
               inline-block rounded px-2 py-0.5 text-xs
-              ${selectedArc.status === 'active' ? 'bg-green-50 text-green-600' : ''}
-              ${selectedArc.status === 'paused' ? 'bg-amber-50 text-amber-600' : ''}
-              ${selectedArc.status === 'completed' ? 'bg-blue-50 text-blue-600' : ''}
-              ${selectedArc.status === 'abandoned' ? 'bg-slate-100 text-slate-400' : ''}
+              ${selectedArc.status === 'active' ? 'bg-tag-green text-tag-green-foreground' : ''}
+              ${selectedArc.status === 'paused' ? 'bg-tag-amber text-tag-amber-foreground' : ''}
+              ${selectedArc.status === 'completed' ? 'bg-tag-blue text-tag-blue-foreground' : ''}
+              ${selectedArc.status === 'abandoned' ? 'bg-secondary text-muted-foreground' : ''}
             `}>
               {selectedArc.status === 'active' ? '活跃' :
                selectedArc.status === 'paused' ? '暂停' :
                selectedArc.status === 'completed' ? '已完成' :
                selectedArc.status === 'abandoned' ? '已废弃' : selectedArc.status}
             </span>
-            <span className="text-xs text-slate-400">{'★'.repeat(selectedArc.importance)}</span>
+            <span className="text-xs text-muted-foreground">{'★'.repeat(selectedArc.importance)}</span>
           </div>
           {selectedArc.description && (
-            <p className="text-xs text-slate-500 leading-relaxed">{selectedArc.description}</p>
+            <p className="text-xs text-muted-foreground leading-relaxed">{selectedArc.description}</p>
           )}
           {selectedArc.status === 'paused' && selectedArc.reactivate_at && (
-            <div className="mt-2 pt-2 border-t border-slate-100">
-              <p className="text-xs text-slate-400 mb-0.5">恢复条件</p>
-              <p className="text-xs text-slate-500">{selectedArc.reactivate_at}</p>
+            <div className="mt-2 pt-2 border-t border-border">
+              <p className="text-xs text-muted-foreground mb-0.5">恢复条件</p>
+              <p className="text-xs text-muted-foreground">{selectedArc.reactivate_at}</p>
             </div>
           )}
         </div>
@@ -611,7 +626,7 @@ export default function StoryArcGraph({ novelId }: Props) {
       {edgeCounts.left > 0 && (
         <button
           onClick={() => shift(-WINDOW)}
-          className="absolute left-5 top-1/2 z-10 -translate-y-1/2 rounded-full border border-slate-200 bg-white/88 px-2 py-1.5 text-[10px] text-slate-500 shadow-sm backdrop-blur hover:bg-white hover:text-slate-700 transition-colors"
+          className="absolute left-5 top-1/2 z-10 -translate-y-1/2 rounded-full border border-border bg-card/88 px-2 py-1.5 text-[10px] text-muted-foreground shadow-sm backdrop-blur hover:bg-card hover:text-foreground transition-colors"
         >
           ← {edgeCounts.left} 个节点
         </button>
@@ -619,7 +634,7 @@ export default function StoryArcGraph({ novelId }: Props) {
       {edgeCounts.right > 0 && (
         <button
           onClick={() => shift(WINDOW)}
-          className="absolute right-5 top-1/2 z-10 -translate-y-1/2 rounded-full border border-slate-200 bg-white/88 px-2 py-1.5 text-[10px] text-slate-500 shadow-sm backdrop-blur hover:bg-white hover:text-slate-700 transition-colors"
+          className="absolute right-5 top-1/2 z-10 -translate-y-1/2 rounded-full border border-border bg-card/88 px-2 py-1.5 text-[10px] text-muted-foreground shadow-sm backdrop-blur hover:bg-card hover:text-foreground transition-colors"
         >
           {edgeCounts.right} 个节点 →
         </button>
@@ -629,14 +644,14 @@ export default function StoryArcGraph({ novelId }: Props) {
       {error ? (
         <div className="relative z-10 flex h-full items-center justify-center text-sm text-rose-500">{error}</div>
       ) : loading ? (
-        <div className="relative z-10 flex h-full items-center justify-center text-sm text-slate-500">加载中...</div>
+        <div className="relative z-10 flex h-full items-center justify-center text-sm text-muted-foreground">加载中...</div>
       ) : arcs.length === 0 ? (
         <div className="relative z-10 flex h-full items-center justify-center">
           <div className="text-center">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-purple-50 text-purple-500 shadow-sm">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-tag-purple text-tag-purple-foreground shadow-sm">
               <GitBranch className="h-6 w-6" />
             </div>
-            <div className="mt-3 text-sm font-medium text-slate-700">暂无叙事弧线</div>
+            <div className="mt-3 text-sm font-medium text-foreground">暂无叙事弧线</div>
           </div>
         </div>
       ) : (

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"sync/atomic"
 
 	"gorm.io/gorm"
@@ -77,17 +76,7 @@ func (a *App) OnStartup(ctx context.Context) {
 	cfg, err := config.Load()
 	if err != nil {
 		if errors.Is(err, config.ErrNotInitialized) {
-			// 首次启动，自动初始化平台默认数据目录
-			dataDir := config.DataDirPath()
-			if mkErr := os.MkdirAll(dataDir, 0700); mkErr != nil {
-				a.logger.Warn("创建数据目录失败", "err", mkErr)
-			}
-			if saveErr := config.Save(dataDir); saveErr != nil {
-				a.logger.Warn("保存初始化配置失败", "err", saveErr)
-			}
-
-			cfg = &config.AppConfig{}
-			a.initWithConfig(cfg)
+			// 首次启动，不自动初始化，等前端展示 InitView 再由用户手动触发
 			return
 		}
 		a.logger.Error("加载配置失败", "err", err)

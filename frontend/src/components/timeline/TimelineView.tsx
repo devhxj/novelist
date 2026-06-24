@@ -120,31 +120,31 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
   const statusStyle = (status: string) => {
     switch (status) {
       case 'pending':
-        return { bg: 'bg-blue-50', text: 'text-blue-600', label: '进行中' }
+        return { bg: 'bg-tag-blue', text: 'text-tag-blue-foreground', label: '进行中' }
       case 'resolved':
-        return { bg: 'bg-green-50', text: 'text-green-600', label: '已回收' }
+        return { bg: 'bg-tag-green', text: 'text-tag-green-foreground', label: '已回收' }
       case 'abandoned':
-        return { bg: 'bg-slate-100', text: 'text-slate-400', label: '已废弃' }
+        return { bg: 'bg-secondary', text: 'text-muted-foreground', label: '已废弃' }
       default:
-        return { bg: 'bg-slate-50', text: 'text-slate-500', label: status }
+        return { bg: 'bg-muted', text: 'text-muted-foreground', label: status }
     }
   }
 
   const catStyle = (category: string) => {
     switch (category) {
       case 'foreshadowing':
-        return { icon: Target, color: 'text-amber-500', bg: 'bg-amber-50', label: '伏笔' }
+        return { icon: Target, color: 'text-tag-amber-foreground', bg: 'bg-tag-amber', label: '伏笔' }
       case 'user_directive':
         return { icon: Lightbulb, color: 'text-violet-500', bg: 'bg-violet-50', label: '用户指令' }
       default:
-        return { icon: Flag, color: 'text-slate-500', bg: 'bg-slate-50', label: category }
+        return { icon: Flag, color: 'text-muted-foreground', bg: 'bg-muted', label: category }
     }
   }
 
   return (
-    <main className="relative flex-1 min-w-0 overflow-y-auto overscroll-contain bg-[#fafbfc]">
+    <main className="relative flex-1 min-w-0 overflow-y-auto overscroll-contain bg-background">
       {loading ? (
-        <div className="flex h-full items-center justify-center text-sm text-slate-500">加载中...</div>
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载中...</div>
       ) : error ? (
         <div className="flex h-full items-center justify-center text-sm text-rose-500">{error}</div>
       ) : (
@@ -152,8 +152,8 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
           {/* Chapter Plans */}
           <section>
             <div className="flex items-center gap-2 mb-3">
-              <BookOpen className="h-4 w-4 text-emerald-500" />
-              <h2 className="text-sm font-semibold text-slate-800">章节计划</h2>
+              <BookOpen className="h-4 w-4 text-tag-green-foreground" />
+              <h2 className="text-sm font-semibold text-foreground">章节计划</h2>
             </div>
             <div className="flex gap-1 mb-3">
               {(['next', 'near', 'far'] as Tab[]).map(tab => (
@@ -163,8 +163,8 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                   className={`
                     px-3 py-1.5 rounded text-xs font-medium transition-colors
                     ${planTab === tab
-                      ? 'bg-white border border-slate-200 text-slate-800 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700 hover:bg-white/60'
+                      ? 'bg-card border border-border text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-card/60'
                     }
                   `}
                 >
@@ -172,11 +172,11 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                 </button>
               ))}
             </div>
-            <div className="rounded-lg border border-slate-200 bg-white p-4 min-h-[80px]">
+            <div className="rounded-lg border border-border bg-card p-4 min-h-[80px]">
               {planMap[planTab] ? (
-                <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{planMap[planTab]}</p>
+                <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">{planMap[planTab]}</p>
               ) : (
-                <p className="text-sm text-slate-400">暂无{planLabels[planTab]}计划</p>
+                <p className="text-sm text-muted-foreground">暂无{planLabels[planTab]}计划</p>
               )}
             </div>
           </section>
@@ -185,19 +185,19 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
           <section>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                <h2 className="text-sm font-semibold text-slate-800">
+                <AlertTriangle className="h-4 w-4 text-tag-amber-foreground" />
+                <h2 className="text-sm font-semibold text-foreground">
                   伏笔与指令
-                  <span className="ml-2 text-xs font-normal text-slate-400">{entries.length} 条</span>
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">{entries.length} 条</span>
                 </h2>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[11px] text-slate-400">
+                <span className="text-[11px] text-muted-foreground">
                   第 {windowFrom}-{windowTo} 章 · 共 {minChapter}-{maxChapter} 章
                 </span>
                 <button
                   onClick={load}
-                  className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
+                  className="text-xs text-muted-foreground hover:text-muted-foreground transition-colors"
                 >
                   刷新
                 </button>
@@ -213,14 +213,14 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                   className={`
                     px-3 py-1 rounded text-xs transition-colors
                     ${filter === f.key
-                      ? 'bg-white border border-slate-200 text-slate-700 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700'
+                      ? 'bg-card border border-border text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
                     }
                   `}
                 >
                   {f.label}
                   {f.key !== 'all' && (
-                    <span className="ml-1 text-slate-400">
+                    <span className="ml-1 text-muted-foreground">
                       ({entries.filter(e => e.status === f.key).length})
                     </span>
                   )}
@@ -230,10 +230,10 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
 
             {grouped.length === 0 ? (
               <div className="text-center py-12">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-secondary text-muted-foreground">
                   <Target className="h-5 w-5" />
                 </div>
-                <p className="mt-2 text-sm text-slate-500">
+                <p className="mt-2 text-sm text-muted-foreground">
                   {filter === 'all' ? '暂无伏笔或用户指令' : '没有匹配的条目'}
                 </p>
               </div>
@@ -243,7 +243,7 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                 {beforeCount > 0 && (
                   <button
                     onClick={() => shiftWindow(-ENTRY_WINDOW)}
-                    className="w-full rounded-lg border border-dashed border-slate-200 bg-white/60 px-4 py-2.5 text-xs text-slate-500 hover:bg-white hover:border-slate-300 hover:text-slate-700 transition-colors"
+                    className="w-full rounded-lg border border-dashed border-border bg-card/60 px-4 py-2.5 text-xs text-muted-foreground hover:bg-card hover:border-border hover:text-foreground transition-colors"
                   >
                     ← 第 {beforeChapters[0]?.[0]}-{beforeChapters[beforeChapters.length - 1]?.[0]} 章 · {beforeCount} 条
                   </button>
@@ -253,8 +253,8 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                 {visibleChapters.map(([ch, items]) => (
                   <div key={ch}>
                     <div className="flex items-center gap-1.5 mb-2">
-                      <span className="text-xs font-medium text-slate-400">第 {ch} 章</span>
-                      <span className="text-[10px] text-slate-300">{items.length} 条</span>
+                      <span className="text-xs font-medium text-muted-foreground">第 {ch} 章</span>
+                      <span className="text-[10px] text-muted-foreground">{items.length} 条</span>
                     </div>
                     <div className="space-y-2">
                       {items.map(entry => {
@@ -271,8 +271,8 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                             key={entry.id}
                             onClick={() => setExpandedId(isExpanded ? null : entry.id)}
                             className={`
-                              rounded-lg border bg-white transition-shadow cursor-pointer
-                              ${isExpanded ? 'border-slate-300 shadow-sm' : 'border-slate-100 hover:border-slate-200 hover:shadow-sm'}
+                              rounded-lg border bg-card transition-shadow cursor-pointer
+                              ${isExpanded ? 'border-border shadow-sm' : 'border-border hover:border-border hover:shadow-sm'}
                             `}
                           >
                             <div className="flex items-center gap-3 px-4 py-3">
@@ -281,32 +281,32 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                               </span>
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-sm font-medium text-slate-800 truncate">{entry.title}</span>
+                                  <span className="text-sm font-medium text-foreground truncate">{entry.title}</span>
                                   <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${s.bg} ${s.text}`}>
                                     {s.label}
                                   </span>
                                 </div>
-                                <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400">
-                                  <span className="text-amber-400 text-[10px]">{importStars(entry.importance)}</span>
+                                <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground">
+                                  <span className="text-tag-amber-foreground text-[10px]">{importStars(entry.importance)}</span>
                                   <span>目标第 {entry.target_chapter} 章</span>
                                   {entry.source_chapter_id > 0 && (
                                     <span>· 埋于第 {entry.source_chapter_id} 章</span>
                                   )}
                                   {entry.resolved_chapter_id > 0 && (
-                                    <span className="text-green-500">· 回收于第 {entry.resolved_chapter_id} 章</span>
+                                    <span className="text-tag-green-foreground">· 回收于第 {entry.resolved_chapter_id} 章</span>
                                   )}
-                                  <span className="text-slate-300">· {entry.source === 'ai' ? 'AI' : '用户'}</span>
+                                  <span className="text-muted-foreground">· {entry.source === 'ai' ? 'AI' : '用户'}</span>
                                 </div>
                               </div>
                               <span className={`text-[10px] transition-transform ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
                             </div>
 
                             {isExpanded && hasContent && (
-                              <div className="border-t border-slate-100 px-4 py-3 space-y-3">
+                              <div className="border-t border-border px-4 py-3 space-y-3">
                                 {entry.content && (
                                   <div>
-                                    <p className="text-xs text-slate-400 mb-1">详情</p>
-                                    <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">{entry.content}</p>
+                                    <p className="text-xs text-muted-foreground mb-1">详情</p>
+                                    <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{entry.content}</p>
                                   </div>
                                 )}
                                 {detailKeys.length > 0 && (
@@ -316,8 +316,8 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                                       const display = typeof v === 'string' ? v : Array.isArray(v) ? v.join('、') : String(v)
                                       return (
                                         <div key={k} className="flex gap-2 text-xs">
-                                          <span className="text-slate-400 shrink-0">{k}</span>
-                                          <span className="text-slate-600">{display}</span>
+                                          <span className="text-muted-foreground shrink-0">{k}</span>
+                                          <span className="text-muted-foreground">{display}</span>
                                         </div>
                                       )
                                     })}
@@ -326,8 +326,8 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                               </div>
                             )}
                             {isExpanded && !hasContent && (
-                              <div className="border-t border-slate-100 px-4 py-3">
-                                <p className="text-xs text-slate-400">暂无详细内容</p>
+                              <div className="border-t border-border px-4 py-3">
+                                <p className="text-xs text-muted-foreground">暂无详细内容</p>
                               </div>
                             )}
                           </div>
@@ -341,7 +341,7 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                 {afterCount > 0 && (
                   <button
                     onClick={() => shiftWindow(ENTRY_WINDOW)}
-                    className="w-full rounded-lg border border-dashed border-slate-200 bg-white/60 px-4 py-2.5 text-xs text-slate-500 hover:bg-white hover:border-slate-300 hover:text-slate-700 transition-colors"
+                    className="w-full rounded-lg border border-dashed border-border bg-card/60 px-4 py-2.5 text-xs text-muted-foreground hover:bg-card hover:border-border hover:text-foreground transition-colors"
                   >
                     → 第 {afterChapters[0]?.[0]}-{afterChapters[afterChapters.length - 1]?.[0]} 章 · {afterCount} 条
                   </button>

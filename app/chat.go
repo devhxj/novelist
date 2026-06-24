@@ -81,25 +81,21 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		defer a.commitAIChanges(repo, turnID, sess.SessionID, model.Name)
 	}
 
-	// 6. 构建 skill inject（如果需要）
-	var skillInject string
-	var injectLogName string
-	if a.skill != nil && strings.HasPrefix(input.Message, "/") {
+	// 6. 解析 / 命令（skill 或 quick command），构建注入内容
+	var slashInject string
+	var injectName string
+	if strings.HasPrefix(input.Message, "/") {
 		parts := strings.Fields(input.Message)
 		if len(parts) > 0 {
-			skillName := strings.TrimPrefix(parts[0], "/")
-			if sk, ok := a.skill.Get(input.NovelID, skillName); ok {
-				content := fmt.Sprintf(
-					"用户启用了技能「%s」。请根据该技能的定义和用户需求进行工作。\n\n---\n%s\n---",
-					sk.Name, sk.RawContent,
-				)
-				skillInject = "<system-reminder>\n" + content + "\n</system-reminder>"
-				injectLogName = sk.Name
+			cmdName := strings.TrimPrefix(parts[0], "/")
+			if inj, name := a.resolveSlashCommand(input.NovelID, cmdName); inj != "" {
+				slashInject = inj
+				injectName = name
 			}
 		}
 	}
 
-	// 7. 持久化本轮消息（事务：System 消息 + skill inject + 用户消息原子写入）
+	// 7. 持久化本轮消息（事务：System 消息 + slash inject + 用户消息原子写入）
 	userMsg := &session.Message{
 		SessionID:  sess.SessionID,
 		TurnID:     turnID,
@@ -116,12 +112,12 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 				return err
 			}
 		}
-		if skillInject != "" {
+		if slashInject != "" {
 			if err := tx.Create(&session.Message{
 				SessionID:  sess.SessionID,
 				TurnID:     turnID,
 				Role:       "user",
-				Content:    skillInject,
+				Content:    slashInject,
 				Version:    sess.ActiveVersion,
 				ToAPI:      true,
 				ToFrontend: false,
@@ -135,8 +131,8 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		return nil, fmt.Errorf("持久化消息失败: %w", err)
 	}
 
-	if injectLogName != "" {
-		a.logger.Info("skill injected", "skill", injectLogName, "session", sess.SessionID)
+	if injectName != "" {
+		a.logger.Info("slash injected", "name", injectName, "session", sess.SessionID)
 	}
 
 	// 8. 构建消息列表：全部来自 DB（含 System1/System2/历史/用户消息）
@@ -161,7 +157,8 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		Model:         model,
 		ProviderName:  input.ProviderName,
 		AgentType:     "main",
-		MaxTurns:      50,
+		MaxTurns:        50,
+		ReasoningEffort: input.ReasoningEffort,
 	})
 
 	// 10. 最终回复已由 agent.Run() 内部 appendMsg 持久化，此处不重复存储

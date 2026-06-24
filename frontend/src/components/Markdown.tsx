@@ -259,7 +259,7 @@ export default function Markdown({ content, className }: MarkdownProps) {
   const normalizedContent = content.replace(/\r\n?/g, '\n').replace(/^\n+/, '')
 
   return (
-    <div className={`prose prose-sm max-w-none dark:prose-invert ${className || ''}`}>
+    <div className={`prose prose-sm max-w-none ${className || ''}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex, rehypeRaw, rehypeSanitize]}

@@ -32,7 +32,7 @@
   font-size: 0.83rem;
 }
 
-.dark .compression-shimmer {
+[data-theme="dark"] .compression-shimmer {
   background: linear-gradient(
     90deg,
     oklch(0.5 0.12 85) 0%,
@@ -74,6 +74,6 @@
   font-weight: 500;
 }
 
-.dark .compression-label {
+[data-theme="dark"] .compression-label {
   color: oklch(0.7 0.1 88);
 }

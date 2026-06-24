@@ -54,6 +54,7 @@ type RunOptions struct {
 	SubTaskID       string // 子 Agent 事件路由 ID
 	EventSeq        *int   // 共享事件序号，nil 时自建（主Agent）；子Agent传入父的指针
 	MaxTurns        int
+	ReasoningEffort string // 用户选择的推理等级
 }
 
 // New 创建 Agent 实例。
@@ -112,18 +113,19 @@ func (a *Agent) RunSubAgent(ctx context.Context, parentOpts RunOptions, req mcp_
 	msgs = append(msgs, map[string]any{"role": "user", "content": req.Instruction})
 
 	subOpts := RunOptions{
-		TurnID:        parentOpts.TurnID,
-		SessionID:     parentOpts.SessionID,
-		NovelID:       req.NovelID,
-		Messages:      msgs,
-		AllowedTools:  allowed,
-		ActiveVersion: parentOpts.ActiveVersion,
-		AgentType:     req.AgentType,
-		SubTaskID:     req.ToolID,
-		EventSeq:      parentOpts.EventSeq,
-		MaxTurns:      50,
-		Model:         parentOpts.Model,
-		ProviderName:  parentOpts.ProviderName,
+		TurnID:          parentOpts.TurnID,
+		SessionID:       parentOpts.SessionID,
+		NovelID:         req.NovelID,
+		Messages:        msgs,
+		AllowedTools:    allowed,
+		ActiveVersion:   parentOpts.ActiveVersion,
+		AgentType:       req.AgentType,
+		SubTaskID:       req.ToolID,
+		EventSeq:        parentOpts.EventSeq,
+		MaxTurns:        50,
+		Model:           parentOpts.Model,
+		ProviderName:    parentOpts.ProviderName,
+		ReasoningEffort: parentOpts.ReasoningEffort,
 	}
 	result, err := a.Run(ctx, subOpts)
 	return result.FinalText, err
@@ -202,7 +204,11 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 			}
 		}
 
-		stream := a.llm.ChatStream(ctx, opts.ProviderName, opts.Messages, tools, opts.Model.ID, nil)
+		callOpts := &llm.CallOptions{}
+		if opts.ReasoningEffort != "" {
+			callOpts.ReasoningEffort = &opts.ReasoningEffort
+		}
+		stream := a.llm.ChatStream(ctx, opts.ProviderName, opts.Messages, tools, opts.Model.ID, callOpts)
 
 		// ---- SSE 流处理 ----
 	streamLoop:

@@ -83,22 +83,22 @@ export default function ProfileView() {
 
   if (loading) {
     return (
-      <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-[#fafbfc] dark:bg-background">
-        <div className="flex h-full items-center justify-center text-sm text-slate-500">加载中...</div>
+      <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-background">
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载中...</div>
       </main>
     )
   }
 
   if (error) {
     return (
-      <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-[#fafbfc] dark:bg-background">
+      <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-background">
         <div className="flex h-full items-center justify-center text-sm text-rose-500">{error}</div>
       </main>
     )
   }
 
   return (
-    <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-[#fafbfc] dark:bg-background">
+    <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-background">
       <input
         ref={fileInputRef}
         type="file" accept="image/*"
@@ -110,8 +110,8 @@ export default function ProfileView() {
         <div className="flex items-center gap-4">
           <div className="relative group flex-shrink-0 cursor-pointer select-none" onClick={handleAvatarClick}>
             {avatarErrored ? (
-              <div className="w-14 h-14 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center">
-                <User className="w-7 h-7 text-slate-400 dark:text-slate-500" />
+              <div className="w-14 h-14 rounded-full bg-muted bg-secondary flex items-center justify-center">
+                <User className="w-7 h-7 text-muted-foreground" />
               </div>
             ) : (
               <img
@@ -133,17 +133,17 @@ export default function ProfileView() {
                 onChange={e => setNameDraft(e.target.value)}
                 onBlur={handleNameSave}
                 onKeyDown={e => { if (e.key === 'Enter') handleNameSave(); if (e.key === 'Escape') setEditingName(false) }}
-                className="text-lg font-semibold bg-transparent border-b border-primary outline-none text-slate-800 dark:text-foreground max-w-[200px]"
+                className="text-lg font-semibold bg-transparent border-b border-primary outline-none text-foreground max-w-[200px]"
               />
             ) : (
               <h1
                 onClick={startEditName}
-                className={`text-lg font-semibold cursor-pointer hover:text-primary transition-colors select-none ${settings?.user_name ? 'text-slate-800 dark:text-foreground' : 'text-slate-400 dark:text-slate-500'}`}
+                className={`text-lg font-semibold cursor-pointer hover:text-primary transition-colors select-none ${settings?.user_name ? 'text-foreground' : 'text-muted-foreground'}`}
               >
                 {settings?.user_name || '未设置昵称'}
               </h1>
             )}
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-muted-foreground mt-0.5">
               过去一年 · {Object.keys(activity).length} 天有写作记录
             </p>
           </div>
@@ -174,14 +174,14 @@ export default function ProfileView() {
         </div>
 
         {/* 作品/章节概览 */}
-        <div className="flex gap-6 text-xs text-slate-500">
-          <span>作品 <b className="text-slate-700 dark:text-foreground">{stats?.total_novels ?? 0}</b> 部</span>
-          <span>章节 <b className="text-slate-700 dark:text-foreground">{stats?.total_chapters ?? 0}</b> 章</span>
+        <div className="flex gap-6 text-xs text-muted-foreground">
+          <span>作品 <b className="text-foreground">{stats?.total_novels ?? 0}</b> 部</span>
+          <span>章节 <b className="text-foreground">{stats?.total_chapters ?? 0}</b> 章</span>
         </div>
 
         {/* 绿格子 */}
         <section>
-          <h2 className="text-sm font-medium text-slate-700 dark:text-foreground mb-4">
+          <h2 className="text-sm font-medium text-foreground mb-4">
             {new Date().getFullYear()} 年写作日历
           </h2>
           <div className="overflow-x-auto">
@@ -191,8 +191,8 @@ export default function ProfileView() {
 
         {Object.keys(activity).length === 0 && (
           <div className="text-center py-12">
-            <PenLine className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-600 mb-3" />
-            <p className="text-sm text-slate-500">
+            <PenLine className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
+            <p className="text-sm text-muted-foreground">
               还没有写作记录。开始写吧，每天的字数都会被记录下来。
             </p>
           </div>
@@ -204,12 +204,12 @@ export default function ProfileView() {
 
 function StatCard({ icon: Icon, label, value }: { icon: any; label: string; value: string }) {
   return (
-    <div className="rounded-lg border bg-white dark:bg-card px-4 py-3 space-y-1">
-      <div className="flex items-center gap-1.5 text-slate-400">
+    <div className="rounded-lg border bg-card px-4 py-3 space-y-1">
+      <div className="flex items-center gap-1.5 text-muted-foreground">
         <Icon className="w-3.5 h-3.5" />
         <span className="text-[11px]">{label}</span>
       </div>
-      <p className="text-lg font-semibold text-slate-800 dark:text-foreground">{value}</p>
+      <p className="text-lg font-semibold text-foreground">{value}</p>
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { type OnMount, DiffEditor } from '@monaco-editor/react'
 import { FileText, Loader2 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import { useEditorTabs } from '@/hooks/useEditorTabs'
+import { useTheme, type Theme } from '@/hooks/useTheme'
 import { EventsOn } from '@/lib/wailsjs/runtime/runtime'
 import TabBar from './TabBar'
 import ContentEditor from './ContentEditor'
@@ -12,6 +13,8 @@ import Markdown from '@/components/Markdown'
 import { outlinePath, isContentPath, isOutlinePath, isSkillPath, skillNameFromPath } from './types'
 import type { EditorTab } from './types'
 import './ContentPanel.css'
+
+const MONACO_THEME: Record<Theme, string> = { light: 'light', dark: 'vs-dark' }
 
 export interface ContentPanelHandle {
   openFile: (path: string, title: string, readOnly?: boolean) => void
@@ -41,6 +44,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     updateTab, openDiffTab, initRef,
   } = useEditorTabs(novelId)
 
+  const { theme } = useTheme()
   const [isLoading, setIsLoading] = useState(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
@@ -442,7 +446,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
             <DiffEditor
               height="100%"
               language="markdown"
-              theme="light"
+              theme={MONACO_THEME[theme]}
               original={activeTab.original}
               modified={activeTab.modified}
               onMount={editor => {
@@ -521,6 +525,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
               value={activeTab.content ?? ''}
               onChange={v => handleEditorChange(activeTab.id, v)}
               onMount={handleEditorMount}
+              editorTheme={MONACO_THEME[theme]}
             />
           )
         ) : (

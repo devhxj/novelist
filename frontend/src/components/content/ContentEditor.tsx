@@ -4,14 +4,15 @@ interface Props {
   value: string
   onChange: (value: string | undefined) => void
   onMount: OnMount
+  editorTheme?: string
 }
 
-export default function ContentEditor({ value, onChange, onMount }: Props) {
+export default function ContentEditor({ value, onChange, onMount, editorTheme }: Props) {
   return (
     <Editor
       height="100%"
       language="plaintext"
-      theme="light"
+      theme={editorTheme ?? 'light'}
       value={value}
       onChange={onChange}
       onMount={onMount}

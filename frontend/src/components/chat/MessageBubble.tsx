@@ -14,7 +14,7 @@ export default memo(function MessageBubble({ role, content }: Props) {
       <div
         className={`max-w-[85%] rounded-xl px-3.5 py-3 break-words ${
           isUser
-            ? 'bg-primary text-primary-foreground rounded-br-sm'
+            ? 'bg-bubble-user text-bubble-user-foreground rounded-br-sm'
             : 'bg-card border border-border/30 text-foreground rounded-bl-sm shadow-xs'
         }`}
       >

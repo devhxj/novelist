@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { MessageSquare, Loader2, History, Plus } from 'lucide-react'
 import { EventsOn } from '@/lib/wailsjs/runtime/runtime'
 import { useApp } from '@/hooks/useApp'
-import type { llm, app, skill } from '@/hooks/useApp'
+import type { llm, app } from '@/hooks/useApp'
 import type { AgentEvent, Turn } from './types'
 import { AgentEventType, emptySegment, rebuildTurns } from './types'
 import ChatInput from './ChatInput'
@@ -72,7 +72,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
   const [initLoadRetry, setInitLoadRetry] = useState(0)
   const [historyLoadError, setHistoryLoadError] = useState(false)
   const [historyLoadRetry, setHistoryLoadRetry] = useState(0)
-  const [skills, setSkills] = useState<skill.SkillMeta[]>([])
+  const [slashCommands, setSlashCommands] = useState<app.SlashCommand[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
@@ -262,17 +262,17 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
     setShowHistoryPanel(false)
   }, [])
 
-  const loadSkills = useCallback(async () => {
-    if (!novelId) { setSkills([]); return }
+  const loadSlash = useCallback(async () => {
+    if (!novelId) { setSlashCommands([]); return }
     try {
-      const list = await app.ListSkills({ novel_id: novelId })
-      setSkills(list ?? [])
+      const list = await app.ListSlashCommands({ novel_id: novelId })
+      setSlashCommands(list ?? [])
     } catch (err) {
-      console.error('Load skills failed', err)
+      console.error('Load slash commands failed', err)
     }
   }, [app, novelId])
 
-  useEffect(() => { loadSkills() }, [loadSkills])
+  useEffect(() => { loadSlash() }, [loadSlash])
 
   const applyAgentEvent = useCallback((turnId: number, event: AgentEvent) => {
     switch (event.type) {
@@ -1077,9 +1077,9 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
         disabled={!hasNovel || !selectedKey}
         isLoading={isLoading}
         placeholder={inputPlaceholder}
-        skills={skills}
+        slashItems={slashCommands}
         onSend={handleSend}
-        onListSkills={loadSkills}
+        onListSlash={loadSlash}
         onStop={() => {
           setTurns(prev => prev.map(t =>
             t.status === 'streaming'

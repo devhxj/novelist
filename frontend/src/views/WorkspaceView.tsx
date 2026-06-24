@@ -18,17 +18,23 @@ import NovelDeleteDialog from '@/components/novel/NovelDeleteDialog'
 import ChatPanel from '@/components/chat/ChatPanel'
 import GitHubLink from '@/components/shell/GitHubLink'
 import SettingsDialog from '@/components/settings/SettingsDialog'
+import HelpDialog from '@/components/help/HelpDialog'
 import ProfileView from '@/components/profile/ProfileView'
 import { search } from '@/lib/wailsjs/go/models'
-import { Settings, User } from 'lucide-react'
+import { Settings, User, HelpCircle, Moon, Sun } from 'lucide-react'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised, Quit } from '@/lib/wailsjs/runtime/runtime'
-import logo from '@/assets/logo.svg'
+import Logo from '@/components/Logo'
+import { useTheme, type Theme } from '@/hooks/useTheme'
+
+const THEME_ICON: Record<Theme, React.ReactNode> = { light: <Moon className="w-5 h-5" />, dark: <Sun className="w-5 h-5" /> }
+const THEME_LABEL: Record<Theme, string> = { light: '深色模式', dark: '浅色模式' }
 
 interface Props {
   initialNovelId: number
+  initialShowHelp?: boolean
 }
 
-export default function WorkspaceView({ initialNovelId }: Props) {
+export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props) {
   const app = useApp()
   const contentRef = useRef<ContentPanelHandle>(null)
 
@@ -46,12 +52,14 @@ export default function WorkspaceView({ initialNovelId }: Props) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [showSettings, setShowSettings] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   const [tabTarget, setTabTarget] = useState<{ path: string; title: string } | null>(null)
   const [activeContent, setActiveContent] = useState('')
   const [activeSkillName, setActiveSkillName] = useState<string | null>(null)
   const [isMaximised, setIsMaximised] = useState(false)
   const [platformOS, setPlatformOS] = useState('')
   const loadedRef = useRef(false)
+  const { theme, toggle: toggleTheme } = useTheme()
 
   // ── 书籍管理弹窗 ──────────────────────────────────────
   const [editingNovel, setEditingNovel] = useState<novel.Novel | null>(null)
@@ -66,6 +74,12 @@ export default function WorkspaceView({ initialNovelId }: Props) {
     })
     WindowIsMaximised().then(setIsMaximised)
   }, [])
+
+  // ── 首次进入自动弹帮助 ──────────────────────────────────
+
+  useEffect(() => {
+    if (initialShowHelp) setShowHelp(true)
+  }, [initialShowHelp])
 
   // ── 作品列表 ────────────────────────────────────────────
 
@@ -223,7 +237,7 @@ export default function WorkspaceView({ initialNovelId }: Props) {
         style={{ '--wails-draggable': 'drag' } as React.CSSProperties}
         onDoubleClick={() => { WindowToggleMaximise(); setIsMaximised(!isMaximised) }}
       >
-        <img src={logo} alt="Goink" className="h-7 w-7 ml-3 shrink-0" />
+        <Logo className="h-7 w-7 ml-3" />
         <span className="text-sm font-medium pl-2 flex-1">
           {activeNovel?.title ?? 'Goink'}
         </span>
@@ -235,6 +249,20 @@ export default function WorkspaceView({ initialNovelId }: Props) {
             title="个人中心"
           >
             <User className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => setShowHelp(true)}
+            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center"
+            title="帮助"
+          >
+            <HelpCircle className="w-5 h-5" />
+          </button>
+          <button
+            onClick={toggleTheme}
+            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center"
+            title={THEME_LABEL[theme]}
+          >
+            {THEME_ICON[theme]}
           </button>
           <button
             onClick={() => setShowSettings(true)}
@@ -345,6 +373,11 @@ export default function WorkspaceView({ initialNovelId }: Props) {
         open={showSettings}
         onClose={() => setShowSettings(false)}
         initialTab="general"
+      />
+
+      <HelpDialog
+        open={showHelp}
+        onClose={() => setShowHelp(false)}
       />
 
       <NovelEditDialog

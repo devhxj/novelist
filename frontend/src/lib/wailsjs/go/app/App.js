@@ -42,6 +42,10 @@ export function DeletePreference(arg1) {
   return window['go']['app']['App']['DeletePreference'](arg1);
 }
 
+export function DiscoverModels(arg1, arg2) {
+  return window['go']['app']['App']['DiscoverModels'](arg1, arg2);
+}
+
 export function GetAppConfig() {
   return window['go']['app']['App']['GetAppConfig']();
 }
@@ -148,6 +152,10 @@ export function IsInitialized() {
 
 export function ListSkills(arg1) {
   return window['go']['app']['App']['ListSkills'](arg1);
+}
+
+export function ListSlashCommands(arg1) {
+  return window['go']['app']['App']['ListSlashCommands'](arg1);
 }
 
 export function RebuildNovelIndex(arg1) {

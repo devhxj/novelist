@@ -171,15 +171,22 @@ func (c *Client) buildPayload(
 	payload["temperature"] = temperature
 	payload["max_tokens"] = maxTokens
 
-	// 推理/思考参数：ReasoningEffort 显式传入才启用，ModelInfo.ReasoningLevels 仅描述能力不预设行为
+	// 推理/思考参数：支持思考的模型默认开启，opts 可覆盖
 	thinkingEnabled := false
 	reasoningEffort := ""
-	if opts != nil && opts.ReasoningEffort != nil {
-		reasoningEffort = *opts.ReasoningEffort
+	if um != nil && um.SupportsThinking {
 		thinkingEnabled = true
+		if len(um.ReasoningLevels) > 0 {
+			reasoningEffort = um.ReasoningLevels[0]
+		}
 	}
-	if opts != nil && opts.ThinkingEnabled != nil {
-		thinkingEnabled = *opts.ThinkingEnabled
+	if opts != nil {
+		if opts.ThinkingEnabled != nil {
+			thinkingEnabled = *opts.ThinkingEnabled
+		}
+		if opts.ReasoningEffort != nil {
+			reasoningEffort = *opts.ReasoningEffort
+		}
 	}
 
 	if thinkingEnabled {

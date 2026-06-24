@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { GitBranch } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
+import { useTheme } from '@/hooks/useTheme'
 import type { storyarc } from '@/hooks/useApp'
 import StoryArcGraph from '@/components/storyarc/StoryArcGraph'
 
@@ -8,7 +9,7 @@ interface Props { novelId: number; focusArcId?: number }
 
 type ViewTab = 'list' | 'swimlane'
 
-const PALETTE = [
+const PALETTE_LIGHT = [
   { fill: '#dbeafe', stroke: '#3b82f6', text: '#1d4ed8' },
   { fill: '#dcfce7', stroke: '#22c55e', text: '#166534' },
   { fill: '#fef3c7', stroke: '#f59e0b', text: '#92400e' },
@@ -16,6 +17,16 @@ const PALETTE = [
   { fill: '#ffe4e6', stroke: '#f43f5e', text: '#9f1239' },
   { fill: '#ccfbf1', stroke: '#14b8a6', text: '#115e59' },
   { fill: '#ffedd5', stroke: '#f97316', text: '#9a3412' },
+]
+
+const PALETTE_DARK = [
+  { fill: 'oklch(0.58 0.15 255 / 0.15)', stroke: 'oklch(0.72 0.15 255)', text: 'oklch(0.78 0.1 255)' },
+  { fill: 'oklch(0.58 0.16 145 / 0.15)', stroke: 'oklch(0.72 0.15 145)', text: 'oklch(0.78 0.1 145)' },
+  { fill: 'oklch(0.62 0.18 80 / 0.15)', stroke: 'oklch(0.78 0.16 80)', text: 'oklch(0.82 0.1 80)' },
+  { fill: 'oklch(0.55 0.18 280 / 0.15)', stroke: 'oklch(0.72 0.15 280)', text: 'oklch(0.78 0.1 280)' },
+  { fill: 'oklch(0.5 0.18 15 / 0.15)', stroke: 'oklch(0.7 0.15 15)', text: 'oklch(0.76 0.1 15)' },
+  { fill: 'oklch(0.58 0.16 175 / 0.15)', stroke: 'oklch(0.72 0.15 175)', text: 'oklch(0.78 0.1 175)' },
+  { fill: 'oklch(0.62 0.18 45 / 0.15)', stroke: 'oklch(0.78 0.16 45)', text: 'oklch(0.82 0.1 45)' },
 ]
 
 type Filter = 'all' | 'pending' | 'completed' | 'abandoned'
@@ -30,6 +41,8 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 export default function ArcListView({ novelId, focusArcId }: Props) {
   const app = useApp()
+  const { theme } = useTheme()
+  const PALETTE = { light: PALETTE_LIGHT, dark: PALETTE_DARK }[theme]
 
   const [arcs, setArcs] = useState<storyarc.StoryArc[]>([])
   const [allNodes, setAllNodes] = useState<storyarc.ArcNode[]>([])
@@ -128,11 +141,11 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
   const nodeStatusStyle = (status: string) => {
     switch (status) {
       case 'completed':
-        return { bg: 'bg-green-50', text: 'text-green-600', label: '已完成' }
+        return { bg: 'bg-tag-green', text: 'text-tag-green-foreground', label: '已完成' }
       case 'abandoned':
-        return { bg: 'bg-slate-100', text: 'text-slate-400', label: '已废弃' }
+        return { bg: 'bg-secondary', text: 'text-muted-foreground', label: '已废弃' }
       default:
-        return { bg: 'bg-blue-50', text: 'text-blue-600', label: '进行中' }
+        return { bg: 'bg-tag-blue', text: 'text-tag-blue-foreground', label: '进行中' }
     }
   }
 
@@ -146,15 +159,15 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
   }
 
   return (
-    <main className="flex-1 min-w-0 flex flex-col overflow-hidden bg-[#fafbfc]">
+    <main className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
       {/* Tab bar */}
       <div className="flex items-center gap-1 px-5 pt-4 pb-2 shrink-0">
         <button
           onClick={() => setViewTab('list')}
           className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
             viewTab === 'list'
-              ? 'bg-white border border-slate-200 text-slate-800 shadow-sm'
-              : 'text-slate-500 hover:text-slate-700 hover:bg-white/60'
+              ? 'bg-card border border-border text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground hover:bg-card/60'
           }`}
         >
           列表
@@ -163,8 +176,8 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
           onClick={() => setViewTab('swimlane')}
           className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
             viewTab === 'swimlane'
-              ? 'bg-white border border-slate-200 text-slate-800 shadow-sm'
-              : 'text-slate-500 hover:text-slate-700 hover:bg-white/60'
+              ? 'bg-card border border-border text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground hover:bg-card/60'
           }`}
         >
           泳道图
@@ -174,7 +187,7 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
       {viewTab === 'swimlane' ? (
         <StoryArcGraph novelId={novelId} />
       ) : loading ? (
-        <div className="flex h-full items-center justify-center text-sm text-slate-500">加载中...</div>
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载中...</div>
       ) : error ? (
         <div className="flex h-full items-center justify-center text-sm text-rose-500">{error}</div>
       ) : (
@@ -183,19 +196,19 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
           {/* Header */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <GitBranch className="h-4 w-4 text-purple-500" />
-              <h2 className="text-sm font-semibold text-slate-800">
+              <GitBranch className="h-4 w-4 text-tag-purple-foreground" />
+              <h2 className="text-sm font-semibold text-foreground">
                 弧线节点
-                <span className="ml-2 text-xs font-normal text-slate-400">{filteredNodes.length} 个</span>
+                <span className="ml-2 text-xs font-normal text-muted-foreground">{filteredNodes.length} 个</span>
               </h2>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-400">
+              <span className="text-[11px] text-muted-foreground">
                 第 {windowFrom}-{windowTo} 章 · 共 {minChapter}-{maxChapter} 章
               </span>
               <button
                 onClick={load}
-                className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
+                className="text-xs text-muted-foreground hover:text-muted-foreground transition-colors"
               >
                 刷新
               </button>
@@ -209,8 +222,8 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
                 onClick={showAllArcs}
                 className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
                   hiddenArcIds.size === 0
-                    ? 'bg-white border border-slate-200 text-slate-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700 hover:bg-white/60'
+                    ? 'bg-card border border-border text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-card/60'
                 }`}
               >
                 全部
@@ -224,8 +237,8 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
                     onClick={() => toggleArc(arc.id)}
                     className={`px-3 py-1 rounded text-xs font-medium transition-colors border ${
                       hidden
-                        ? 'text-slate-400 border-transparent hover:text-slate-500 hover:bg-white/60'
-                        : 'border-slate-200 shadow-sm text-slate-700'
+                        ? 'text-muted-foreground border-transparent hover:text-muted-foreground hover:bg-card/60'
+                        : 'border-border shadow-sm text-foreground'
                     }`}
                     style={hidden ? {} : { backgroundColor: c.fill, borderColor: c.stroke, color: c.text }}
                   >
@@ -244,13 +257,13 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
                 onClick={() => setFilter(f.key)}
                 className={`px-3 py-1 rounded text-xs transition-colors ${
                   filter === f.key
-                    ? 'bg-white border border-slate-200 text-slate-700 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
+                    ? 'bg-card border border-border text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {f.label}
                 {f.key !== 'all' && (
-                  <span className="ml-1 text-slate-400">
+                  <span className="ml-1 text-muted-foreground">
                     ({allNodes.filter(n => activeArcIds.has(n.story_arc_id) && n.status === f.key).length})
                   </span>
                 )}
@@ -261,10 +274,10 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
           {/* Node list */}
           {grouped.length === 0 ? (
             <div className="text-center py-12">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-purple-50 text-purple-400">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-tag-purple text-purple-400">
                 <GitBranch className="h-5 w-5" />
               </div>
-              <p className="mt-2 text-sm text-slate-500">
+              <p className="mt-2 text-sm text-muted-foreground">
                 {arcs.length === 0 ? '暂无叙事弧线' : '没有匹配的节点'}
               </p>
             </div>
@@ -273,7 +286,7 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
               {beforeCount > 0 && (
                 <button
                   onClick={() => shiftWindow(-WINDOW)}
-                  className="w-full rounded-lg border border-dashed border-slate-200 bg-white/60 px-4 py-2.5 text-xs text-slate-500 hover:bg-white hover:border-slate-300 hover:text-slate-700 transition-colors"
+                  className="w-full rounded-lg border border-dashed border-border bg-card/60 px-4 py-2.5 text-xs text-muted-foreground hover:bg-card hover:border-border hover:text-foreground transition-colors"
                 >
                   ← 第 {beforeChapters[0]?.[0]}-{beforeChapters[beforeChapters.length - 1]?.[0]} 章 · {beforeCount} 个节点
                 </button>
@@ -282,8 +295,8 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
               {visibleChapters.map(([ch, items]) => (
                 <div key={ch}>
                   <div className="flex items-center gap-1.5 mb-2">
-                    <span className="text-xs font-medium text-slate-400">第 {ch} 章</span>
-                    <span className="text-[10px] text-slate-300">{items.length} 个节点</span>
+                    <span className="text-xs font-medium text-muted-foreground">第 {ch} 章</span>
+                    <span className="text-[10px] text-muted-foreground">{items.length} 个节点</span>
                   </div>
                   <div className="space-y-2">
                     {items.map(node => {
@@ -299,8 +312,8 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
                         <div
                           key={node.id}
                           onClick={() => setExpandedId(isExpanded ? null : node.id)}
-                          className={`rounded-lg border bg-white transition-shadow cursor-pointer ${
-                            isExpanded ? 'border-slate-300 shadow-sm' : 'border-slate-100 hover:border-slate-200 hover:shadow-sm'
+                          className={`rounded-lg border bg-card transition-shadow cursor-pointer ${
+                            isExpanded ? 'border-border shadow-sm' : 'border-border hover:border-border hover:shadow-sm'
                           }`}
                         >
                           <div className="flex items-center gap-3 px-4 py-3">
@@ -311,7 +324,7 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
                             />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-slate-800 truncate">{node.title}</span>
+                                <span className="text-sm font-medium text-foreground truncate">{node.title}</span>
                                 <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${s.bg} ${s.text}`}>
                                   {s.label}
                                 </span>
@@ -324,13 +337,13 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
                                   </span>
                                 )}
                               </div>
-                              <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400">
+                              <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground">
                                 <span>目标第 {node.target_chapter} 章</span>
                                 {node.actual_chapter > 0 && (
-                                  <span className="text-green-500">· 实际第 {node.actual_chapter} 章</span>
+                                  <span className="text-tag-green-foreground">· 实际第 {node.actual_chapter} 章</span>
                                 )}
                                 {arc && (
-                                  <span className="text-slate-300">· {arc.arc_type}</span>
+                                  <span className="text-muted-foreground">· {arc.arc_type}</span>
                                 )}
                               </div>
                             </div>
@@ -338,13 +351,13 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
                           </div>
 
                           {isExpanded && hasContent && (
-                            <div className="border-t border-slate-100 px-4 py-3">
-                              <p className="text-xs text-slate-500 leading-relaxed whitespace-pre-wrap">{desc}</p>
+                            <div className="border-t border-border px-4 py-3">
+                              <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{desc}</p>
                             </div>
                           )}
                           {isExpanded && !hasContent && (
-                            <div className="border-t border-slate-100 px-4 py-3">
-                              <p className="text-xs text-slate-400">暂无详细描述</p>
+                            <div className="border-t border-border px-4 py-3">
+                              <p className="text-xs text-muted-foreground">暂无详细描述</p>
                             </div>
                           )}
                         </div>
@@ -357,7 +370,7 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
               {afterCount > 0 && (
                 <button
                   onClick={() => shiftWindow(WINDOW)}
-                  className="w-full rounded-lg border border-dashed border-slate-200 bg-white/60 px-4 py-2.5 text-xs text-slate-500 hover:bg-white hover:border-slate-300 hover:text-slate-700 transition-colors"
+                  className="w-full rounded-lg border border-dashed border-border bg-card/60 px-4 py-2.5 text-xs text-muted-foreground hover:bg-card hover:border-border hover:text-foreground transition-colors"
                 >
                   → 第 {afterChapters[0]?.[0]}-{afterChapters[afterChapters.length - 1]?.[0]} 章 · {afterCount} 个节点
                 </button>

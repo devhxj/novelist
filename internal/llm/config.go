@@ -5,15 +5,19 @@ import (
 	"strings"
 )
 
-// normalizeURL 为裸域名补全 https://。已有协议头的原样返回。
+// normalizeURL 补全 https:// 协议头，并确保路径以 /chat/completions 结尾。
 func normalizeURL(raw string) string {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return raw
 	}
-	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
-		return raw
+	if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
+		raw = "https://" + raw
 	}
-	return "https://" + raw
+	if !strings.HasSuffix(raw, "/chat/completions") {
+		raw = strings.TrimRight(raw, "/") + "/chat/completions"
+	}
+	return raw
 }
 
 // UserLLMConfig 是用户 LLM 配置的持久化格式（加密 JSON）。
@@ -102,21 +106,27 @@ type ProviderView struct {
 func BuildConfigView(user *UserLLMConfig) *LLMConfigView {
 	view := &LLMConfigView{}
 
-	// 内置 provider：从 Builtin 取模板，从 user 取 key 和自定义模型
+	// 内置 provider：从 Builtin 取模板，从 user 取 key、URL 和自定义模型
 	for key, bp := range Builtin {
-		var apiKey string
+		var apiKey, chatURL string
 		var customModels []ModelInfo
 		for _, up := range user.Providers {
 			if up.Name == key {
 				apiKey = up.APIKey
+				if up.ChatURL != "" {
+					chatURL = up.ChatURL
+				}
 				customModels = up.Models
 				break
 			}
 		}
+		if chatURL == "" {
+			chatURL = bp.ChatURL
+		}
 		view.Providers = append(view.Providers, ProviderView{
 			Key:           key,
 			Name:          bp.Name,
-			ChatURL:       bp.ChatURL,
+			ChatURL:       chatURL,
 			APIKey:        apiKey,
 			Temperature:   derefOrZero(bp.Temperature),
 			Source:        "builtin",
@@ -141,6 +151,10 @@ func BuildConfigView(user *UserLLMConfig) *LLMConfigView {
 		}
 	}
 
+	sort.Slice(view.Providers, func(i, j int) bool {
+		return view.Providers[i].Key < view.Providers[j].Key
+	})
+
 	return view
 }
 
@@ -159,6 +173,8 @@ func (v *LLMConfigView) ToUserConfig() *UserLLMConfig {
 			Models: append([]ModelInfo{}, pv.CustomModels...),
 		}
 		if pv.Source != "builtin" {
+			p.ChatURL = normalizeURL(pv.ChatURL)
+		} else if bp, ok := Builtin[pv.Key]; ok && pv.ChatURL != bp.ChatURL {
 			p.ChatURL = normalizeURL(pv.ChatURL)
 		}
 		p.Temperature = floatPtr(pv.Temperature)

@@ -65,35 +65,35 @@ export default function PreferenceView({ novelId }: Props) {
   }
 
   return (
-    <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-[#fafbfc]">
+    <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-background">
       {loading ? (
-        <div className="flex h-full items-center justify-center text-sm text-slate-500">加载中...</div>
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载中...</div>
       ) : error ? (
         <div className="flex h-full items-center justify-center text-sm text-rose-500">{error}</div>
       ) : (
         <div className="max-w-3xl mx-auto px-5 py-6 space-y-8">
           {/* Header */}
           <div className="flex items-center gap-2">
-            <Settings className="h-4 w-4 text-slate-500" />
-            <h2 className="text-sm font-semibold text-slate-800">
+            <Settings className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">
               创作偏好
-              <span className="ml-2 text-xs font-normal text-slate-400">{global.length + novelPrefs.length} 条</span>
+              <span className="ml-2 text-xs font-normal text-muted-foreground">{global.length + novelPrefs.length} 条</span>
             </h2>
           </div>
 
           {/* 全局偏好 */}
           <section>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">全局偏好 · 所有小说生效</h3>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">全局偏好 · 所有小说生效</h3>
               <button
                 onClick={() => setAdding('global')}
-                className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-muted-foreground transition-colors"
               >
                 <Plus className="h-3 w-3" /> 添加
               </button>
             </div>
             {global.length === 0 ? (
-              <p className="text-xs text-slate-400 py-4">暂无全局偏好</p>
+              <p className="text-xs text-muted-foreground py-4">暂无全局偏好</p>
             ) : (
               <div className="space-y-2">
                 {global.map(item => (
@@ -124,21 +124,21 @@ export default function PreferenceView({ novelId }: Props) {
           </section>
 
           {/* 分隔 */}
-          <div className="border-t border-slate-200" />
+          <div className="border-t border-border" />
 
           {/* 本书偏好 */}
           <section>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">本书偏好 · 仅当前小说生效</h3>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">本书偏好 · 仅当前小说生效</h3>
               <button
                 onClick={() => setAdding('novel')}
-                className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-muted-foreground transition-colors"
               >
                 <Plus className="h-3 w-3" /> 添加
               </button>
             </div>
             {novelPrefs.length === 0 ? (
-              <p className="text-xs text-slate-400 py-4">暂无本书偏好</p>
+              <p className="text-xs text-muted-foreground py-4">暂无本书偏好</p>
             ) : (
               <div className="space-y-2">
                 {novelPrefs.map(item => (
@@ -191,7 +191,7 @@ function PreferenceCard({
   const isEditing = editing?.id === item.id
 
   return (
-    <div className={`rounded-lg border bg-white transition-shadow ${isEditing ? 'border-slate-300 shadow-sm' : 'border-slate-100'}`}>
+    <div className={`rounded-lg border bg-card transition-shadow ${isEditing ? 'border-border shadow-sm' : 'border-border'}`}>
       {isEditing ? (
         <div className="px-4 py-3 space-y-2">
           <input
@@ -210,13 +210,13 @@ function PreferenceCard({
           <div className="flex items-center gap-2">
             <button
               onClick={() => onSave(editing!)}
-              className="px-3 py-1 rounded text-xs font-medium bg-slate-800 text-white hover:bg-slate-700 transition-colors"
+              className="px-3 py-1 rounded text-xs font-medium bg-foreground text-background hover:bg-foreground/80 transition-colors"
             >
               保存
             </button>
             <button
               onClick={onCancel}
-              className="px-3 py-1 rounded text-xs text-slate-500 hover:text-slate-700 transition-colors"
+              className="px-3 py-1 rounded text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
               取消
             </button>
@@ -224,10 +224,10 @@ function PreferenceCard({
         </div>
       ) : (
         <div className="flex items-start gap-3 px-4 py-3 group">
-          <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-500">
+          <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-secondary text-muted-foreground">
             {item.category || '未分类'}
           </span>
-          <p className="flex-1 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{item.content}</p>
+          <p className="flex-1 text-sm text-foreground leading-relaxed whitespace-pre-wrap">{item.content}</p>
           <div className="shrink-0 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               onClick={() => onEdit(item)}
@@ -259,7 +259,7 @@ function AddForm({
   onCancel: () => void
 }) {
   return (
-    <div className="mt-2 rounded-lg border border-dashed border-slate-200 bg-white/60 px-4 py-3 space-y-2">
+    <div className="mt-2 rounded-lg border border-dashed border-border bg-card/60 px-4 py-3 space-y-2">
       <input
         value={category}
         onChange={e => onCategoryChange(e.target.value)}
@@ -277,13 +277,13 @@ function AddForm({
         <button
           onClick={onSave}
           disabled={!content.trim()}
-          className="px-3 py-1 rounded text-xs font-medium bg-slate-800 text-white hover:bg-slate-700 disabled:opacity-30 transition-colors"
+          className="px-3 py-1 rounded text-xs font-medium bg-foreground text-background hover:bg-foreground/80 disabled:opacity-30 transition-colors"
         >
           添加
         </button>
         <button
           onClick={onCancel}
-          className="px-3 py-1 rounded text-xs text-slate-500 hover:text-slate-700 transition-colors"
+          className="px-3 py-1 rounded text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           取消
         </button>

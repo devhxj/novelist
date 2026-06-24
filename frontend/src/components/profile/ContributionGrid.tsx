@@ -80,7 +80,7 @@ export default function ContributionGrid({ data, months = 12 }: Props) {
   return (
     <div className="relative select-none">
       {/* 月份标签 */}
-      <div className="flex text-[10px] text-slate-400 mb-1" style={{ paddingLeft: 28 }}>
+      <div className="flex text-[10px] text-muted-foreground mb-1" style={{ paddingLeft: 28 }}>
         {monthLabels.map((m, i) => (
           <span key={i} className="text-left" style={{ width: m.span * 16 }}>
             {m.label}
@@ -90,7 +90,7 @@ export default function ContributionGrid({ data, months = 12 }: Props) {
 
       <div className="flex gap-[3px]">
         {/* 星期标签 */}
-        <div className="flex flex-col gap-[3px] text-[10px] text-slate-400 pr-2" style={{ width: 22 }}>
+        <div className="flex flex-col gap-[3px] text-[10px] text-muted-foreground pr-2" style={{ width: 22 }}>
           <span className="h-[13px] leading-[13px]" />
           <span className="h-[13px] leading-[13px]">一</span>
           <span className="h-[13px] leading-[13px]" />
@@ -118,7 +118,7 @@ export default function ContributionGrid({ data, months = 12 }: Props) {
       </div>
 
       {/* 图例 */}
-      <div className="flex items-center gap-1 mt-2 justify-end text-[10px] text-slate-400">
+      <div className="flex items-center gap-1 mt-2 justify-end text-[10px] text-muted-foreground">
         <span>少</span>
         {LEVELS.map((l, i) => (
           <div key={i} className={`w-[10px] h-[10px] rounded-[2px] ${l.cls}`} />
@@ -129,7 +129,7 @@ export default function ContributionGrid({ data, months = 12 }: Props) {
       {/* Tooltip */}
       {tooltip && (
         <div
-          className="fixed z-50 px-2 py-1 rounded text-xs bg-slate-800 text-white whitespace-nowrap pointer-events-none -translate-x-1/2"
+          className="fixed z-50 px-2 py-1 rounded text-xs bg-foreground text-background whitespace-nowrap pointer-events-none -translate-x-1/2"
           style={{ left: tooltip.x, top: tooltip.y }}
         >
           {tooltip.words > 0 ? `${tooltip.words.toLocaleString()} 字` : '无写作'} · {formatDate(tooltip.date)}

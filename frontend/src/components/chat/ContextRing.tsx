@@ -130,7 +130,7 @@ export default function ContextRing({ usage, onCompress, isTurnRunning, isCompre
             <button
               className="w-full mt-1 py-1.5 rounded-lg text-xs font-medium border transition-colors
                 disabled:opacity-40 disabled:cursor-not-allowed
-                hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700
+                hover:bg-tag-amber hover:border-amber-300 hover:text-amber-700
                 dark:hover:bg-amber-950 dark:hover:border-amber-700 dark:hover:text-amber-300"
               disabled={isTurnRunning || isCompressing}
               onClick={(e) => { e.stopPropagation(); onCompress() }}

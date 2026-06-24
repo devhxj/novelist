@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Plus, X, Loader2 } from 'lucide-react'
 import type { llm } from '@/hooks/useApp'
 import TemperatureInfo from './TemperatureInfo'
+import ModelDiscoveryPanel from './ModelDiscoveryPanel'
 
 interface Props {
   providers: llm.ProviderView[]
@@ -21,14 +22,6 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
   const [newName, setNewName] = useState('')
   const [newChatURL, setNewChatURL] = useState('')
   const [newApiKey, setNewApiKey] = useState('')
-  const [showAddModel, setShowAddModel] = useState(false)
-  const [newModelId, setNewModelId] = useState('')
-  const [newModelName, setNewModelName] = useState('')
-  const [newCtx, setNewCtx] = useState('')
-  const [newMaxOut, setNewMaxOut] = useState('')
-  const [newThinks, setNewThinks] = useState(true)
-  const [newVision, setNewVision] = useState(false)
-
   const provider = providers.find(p => p.key === selectedKey)
   const isTesting = testing[selectedKey]
   const testResult = testResults[selectedKey]
@@ -51,27 +44,6 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
     setShowNewForm(false)
     // 选中新加的 provider
     setSelectedKey(newName.trim().toLowerCase().replace(/\s+/g, '-'))
-  }
-
-  const handleAddModel = () => {
-    if (!selectedKey || !newModelId.trim() || !newModelName.trim()) return
-    const ctx = parseInt(newCtx, 10) || 0
-    const maxOut = parseInt(newMaxOut, 10) || 0
-    onAddCustomModel(selectedKey, {
-      id: newModelId.trim(),
-      name: newModelName.trim(),
-      context_window: ctx,
-      max_output_tokens: maxOut,
-      supports_thinking: newThinks,
-      supports_vision: newVision,
-    } as unknown as llm.ModelInfo)
-    setNewModelId('')
-    setNewModelName('')
-    setNewCtx('')
-    setNewMaxOut('')
-    setNewThinks(true)
-    setNewVision(false)
-    setShowAddModel(false)
   }
 
   // 无自定义服务商且未展开新建表单
@@ -220,18 +192,9 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
           </div>
 
           {/* 模型列表 */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-muted-foreground">模型列表</span>
-              <button
-                onClick={() => setShowAddModel(!showAddModel)}
-                className="text-xs text-primary flex items-center gap-0.5 hover:underline"
-              >
-                <Plus className="w-3 h-3" /> 添加
-              </button>
-            </div>
-
-            {provider.custom_models && provider.custom_models.length > 0 && (
+          {provider.custom_models && provider.custom_models.length > 0 && (
+            <div>
+              <span className="text-xs text-muted-foreground mb-2 block">自定义模型</span>
               <div className="rounded-md border divide-y mb-2">
                 {provider.custom_models.map(m => (
                   <div key={m.id} className="flex items-center justify-between px-3 py-2">
@@ -256,49 +219,16 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
                   </div>
                 ))}
               </div>
-            )}
+            </div>
+          )}
 
-            {showAddModel && (
-              <div className="border rounded-md p-3 space-y-2">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-0.5 block">模型 ID</label>
-                  <input value={newModelId} onChange={e => setNewModelId(e.target.value)}
-                    className="w-full h-8 rounded-md border bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-0.5 block">名称</label>
-                  <input value={newModelName} onChange={e => setNewModelName(e.target.value)}
-                    className="w-full h-8 rounded-md border bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50" />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-0.5 block">上下文窗口 (tokens)</label>
-                    <input value={newCtx} onChange={e => setNewCtx(e.target.value)}
-                      className="w-full h-8 rounded-md border bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-0.5 block">最大输出 (tokens)</label>
-                    <input value={newMaxOut} onChange={e => setNewMaxOut(e.target.value)}
-                      className="w-full h-8 rounded-md border bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50" />
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-1 text-xs">
-                    <input type="checkbox" checked={newThinks} onChange={e => setNewThinks(e.target.checked)} className="rounded" />
-                    支持深度思考
-                  </label>
-                  <label className="flex items-center gap-1 text-xs">
-                    <input type="checkbox" checked={newVision} onChange={e => setNewVision(e.target.checked)} className="rounded" />
-                    视觉
-                  </label>
-                </div>
-                <div className="flex justify-end gap-2 pt-1">
-                  <button onClick={() => setShowAddModel(false)} className="h-8 px-3 rounded-md border text-xs text-muted-foreground">取消</button>
-                  <button onClick={handleAddModel} className="h-8 px-3 rounded-md bg-primary text-primary-foreground text-xs">确认</button>
-                </div>
-              </div>
-            )}
-          </div>
+          <ModelDiscoveryPanel
+            key={selectedKey}
+            chatUrl={provider.chat_url}
+            apiKey={provider.api_key}
+            existingIds={new Set((provider?.custom_models || []).map(m => m.id))}
+            onAddModel={m => onAddCustomModel(selectedKey, m)}
+          />
 
           {/* 删除 */}
           <div className="flex pt-1">

@@ -6,42 +6,26 @@
 }
 
 .tool-card.executing {
-  border-left: 3px solid oklch(0.62 0.19 250); /* blue */
-  background: oklch(0.97 0.01 250);
+  border-left: 3px solid var(--tool-blue-border);
+  background: var(--tool-blue);
 }
 .tool-card.awaiting-approval {
-  border-left: 3px solid oklch(0.7 0.15 80); /* amber */
-  background: oklch(0.98 0.02 85);
+  border-left: 3px solid var(--tool-amber-border);
+  background: var(--tool-amber);
 }
 .tool-card.completed {
-  border-left: 3px solid oklch(0.5 0.15 155); /* green */
-  background: oklch(0.97 0.02 155);
+  border-left: 3px solid var(--tool-green-border);
+  background: var(--tool-green);
   opacity: 0.85;
 }
 .tool-card.failed {
-  border-left: 3px solid oklch(0.58 0.22 27); /* red */
-  background: oklch(0.97 0.01 27);
+  border-left: 3px solid var(--tool-red-border);
+  background: var(--tool-red);
 }
 
 .tool-card.compact {
   font-size: 0.72rem;
   max-width: none;
-}
-.tool-card.compact.executing {
-  border-left-color: oklch(0.6 0.12 250);
-  background: oklch(0.98 0.01 250);
-}
-.tool-card.compact.awaiting-approval {
-  border-left-color: oklch(0.65 0.12 80);
-  background: oklch(0.98 0.01 85);
-}
-.tool-card.compact.completed {
-  border-left-color: oklch(0.45 0.08 155);
-  background: oklch(0.98 0.01 155);
-}
-.tool-card.compact.failed {
-  border-left-color: oklch(0.5 0.12 27);
-  background: oklch(0.98 0.01 27);
 }
 
 /* ── Row ── */
@@ -57,13 +41,11 @@
 }
 
 /* ── Icon ── */
-.tool-icon {
-  flex-shrink: 0;
-}
-.tool-card.executing        .tool-icon { color: oklch(0.62 0.19 250); }
-.tool-card.awaiting-approval .tool-icon { color: oklch(0.7 0.15 80); }
-.tool-card.completed        .tool-icon { color: oklch(0.5 0.15 155); }
-.tool-card.failed           .tool-icon { color: oklch(0.58 0.22 27); }
+.tool-icon { flex-shrink: 0; }
+.tool-card.executing          .tool-icon { color: var(--tool-blue-border); }
+.tool-card.awaiting-approval  .tool-icon { color: var(--tool-amber-border); }
+.tool-card.completed          .tool-icon { color: var(--tool-green-border); }
+.tool-card.failed             .tool-icon { color: var(--tool-red-border); }
 
 /* ── Label ── */
 .tool-label {
@@ -72,10 +54,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: oklch(0.35 0 0);
+  color: var(--foreground);
   line-height: 1.35;
 }
-.tool-card.completed .tool-label { color: oklch(0.5 0 0); }
+.tool-card.completed .tool-label { color: var(--muted-foreground); }
 
 /* ── Badge ── */
 .tool-badge {
@@ -89,31 +71,31 @@
   font-weight: 500;
 }
 .tool-card.executing .tool-badge {
-  color: oklch(0.62 0.19 250);
-  background: oklch(0.94 0.04 250);
+  color: var(--tool-blue-border);
+  background: color-mix(in oklab, var(--tool-blue-border) 18%, transparent);
 }
 .tool-badge-approval {
-  color: oklch(0.6 0.12 70);
-  background: oklch(0.95 0.04 85);
+  color: var(--tool-amber-border);
+  background: color-mix(in oklab, var(--tool-amber-border) 18%, transparent);
 }
 .tool-badge-done {
-  color: #389e0d;
-  background: rgba(82, 196, 26, 0.1);
+  color: var(--tool-green-border);
+  background: color-mix(in oklab, var(--tool-green-border) 10%, transparent);
 }
 .tool-badge-failed {
-  color: #cf1322;
-  background: rgba(255, 77, 79, 0.08);
+  color: var(--tool-red-border);
+  background: color-mix(in oklab, var(--tool-red-border) 8%, transparent);
 }
 
 /* ── Error line ── */
 .tool-error {
   padding: 0.15rem 0.6rem 0.35rem;
-  color: oklch(0.45 0.15 27);
+  color: color-mix(in oklab, var(--tool-red-border) 80%, var(--foreground));
   font-size: 0.68rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border-top: 1px solid oklch(0.58 0.22 27 / 0.1);
+  border-top: 1px solid color-mix(in oklab, var(--tool-red-border) 12%, transparent);
 }
 
 /* ── Approval body ── */
@@ -121,17 +103,15 @@
   padding: 0.4rem 0.6rem 0.5rem;
   font-size: 0.8rem;
   font-weight: 500;
-  color: oklch(0.3 0 0);
-  border-top: 1px solid oklch(0.7 0.15 80 / 0.2);
+  color: var(--foreground);
+  border-top: 1px solid color-mix(in oklab, var(--tool-amber-border) 20%, transparent);
 }
 
-.approval-summary {
-  font-weight: 600;
-}
+.approval-summary { font-weight: 600; }
 
 .approval-reason {
   margin-top: 0.25rem;
-  color: oklch(0.35 0 0);
+  color: var(--muted-foreground);
   font-size: 0.75rem;
 }
 
@@ -139,16 +119,17 @@
   width: 100%;
   margin-top: 0.4rem;
   padding: 0.3rem 0.5rem;
-  border: 1px solid oklch(0.8 0.02 0);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: 0.75rem;
   outline: none;
   resize: none;
-  background: white;
+  background: var(--card);
+  color: var(--foreground);
 }
 
 .approval-feedback:focus {
-  border-color: oklch(0.7 0.15 80);
+  border-color: var(--tool-amber-border);
 }
 
 .approval-actions {
@@ -169,20 +150,21 @@
   font-weight: 500;
   border: none;
   transition: background 0.15s ease;
+  cursor: pointer;
 }
 
 .approval-reject-btn {
-  color: #dc2626;
-  background: #fef2f2;
+  color: var(--tool-red-border);
+  background: color-mix(in oklab, var(--tool-red-border) 10%, transparent);
 }
 .approval-reject-btn:hover {
-  background: #fee2e2;
+  background: color-mix(in oklab, var(--tool-red-border) 20%, transparent);
 }
 
 .approval-accept-btn {
-  color: #16a34a;
-  background: #f0fdf4;
+  color: var(--tool-green-border);
+  background: color-mix(in oklab, var(--tool-green-border) 10%, transparent);
 }
 .approval-accept-btn:hover {
-  background: #dcfce7;
+  background: color-mix(in oklab, var(--tool-green-border) 20%, transparent);
 }
