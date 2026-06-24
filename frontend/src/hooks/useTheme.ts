@@ -27,7 +27,7 @@ function applyTheme(t: Theme) {
 }
 
 export function useTheme() {
-  const [theme, setTheme] = useState<Theme>(() => {
+  const [theme, setThemeState] = useState<Theme>(() => {
     const t = resolveTheme()
     applyTheme(t)
     return t
@@ -37,7 +37,7 @@ export function useTheme() {
   useEffect(() => {
     const observer = new MutationObserver(() => {
       const v = document.documentElement.getAttribute(ATTR)
-      if (isTheme(v)) setTheme(v)
+      if (isTheme(v)) setThemeState(v)
     })
     observer.observe(document.documentElement, { attributes: true, attributeFilter: [ATTR] })
     return () => observer.disconnect()
@@ -49,15 +49,21 @@ export function useTheme() {
       if (localStorage.getItem('theme') === null) {
         const t = sysTheme(mq.matches)
         applyTheme(t)
-        setTheme(t)
+        setThemeState(t)
       }
     }
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
   }, [])
 
+  const setTheme = useCallback((t: Theme) => {
+    applyTheme(t)
+    localStorage.setItem('theme', t)
+    setThemeState(t)
+  }, [])
+
   const toggle = useCallback(() => {
-    setTheme(prev => {
+    setThemeState(prev => {
       const next = NEXT[prev]
       applyTheme(next)
       localStorage.setItem('theme', next)
@@ -65,5 +71,5 @@ export function useTheme() {
     })
   }, [])
 
-  return { theme, toggle } as const
+  return { theme, setTheme, toggle } as const
 }
