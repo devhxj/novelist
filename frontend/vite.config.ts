@@ -14,7 +14,11 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
   },
+  css: {
+    transformer: 'postcss',
+  },
   build: {
+    cssMinify: 'esbuild',
     outDir: 'dist',
     assetsDir: 'assets',
   },

@@ -3,7 +3,7 @@
   border-radius: var(--radius-lg);
   overflow: hidden;
   transition: box-shadow 0.4s ease;
-  background: hsl(var(--muted) / 0.15);
+  background: color-mix(in oklab, var(--muted) 15%, transparent);
 }
 
 /* ── Memory: amber ── */
