@@ -349,12 +349,12 @@ export default function LocationListView({ novelId, focusId }: Props) {
                           </div>
                         </div>
                         {/* Hover actions */}
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                           <button onClick={() => openEdit(loc)} className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors" title="编辑">
-                            <Pencil className="h-3 w-3" />
+                            <Pencil className="h-3.5 w-3.5" />
                           </button>
                           <button onClick={() => handleDelete(loc.id)} className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors" title="删除">
-                            <Trash2 className="h-3 w-3" />
+                            <Trash2 className="h-3.5 w-3.5" />
                           </button>
                           {loc.parent_location_id && (
                             <button onClick={() => openCreate(loc.id)} className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors" title="添加子地点">

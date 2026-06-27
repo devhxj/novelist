@@ -7,6 +7,8 @@ import SkillList from '@/components/skill/SkillList'
 import SearchPanel from '@/components/search/SearchPanel'
 import TimelineList from '@/components/timeline/TimelineList'
 import ArcList from '@/components/storyarc/ArcList'
+import ReaderList from '@/components/reader/ReaderList'
+import PreferenceList from '@/components/preference/PreferenceList'
 import type { SearchResult } from '@/components/search/SearchPanel'
 
 interface Props {
@@ -93,13 +95,9 @@ export default function SidePanel({
       ) : activePanel === 'timeline' ? (
         <TimelineList novelId={novelId} />
       ) : activePanel === 'reader' ? (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-xs text-muted-foreground">读者视角</p>
-        </div>
+        <ReaderList novelId={novelId} />
       ) : activePanel === 'preferences' ? (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-xs text-muted-foreground">创作偏好</p>
-        </div>
+        <PreferenceList novelId={novelId} />
       ) : (
         <div className="flex-1 flex items-center justify-center">
           <p className="text-xs text-muted-foreground">即将推出</p>

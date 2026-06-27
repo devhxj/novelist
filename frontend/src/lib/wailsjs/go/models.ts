@@ -170,6 +170,26 @@ export namespace app {
 	        this.content = source["content"];
 	    }
 	}
+	export class CreateReaderPerspectiveInput {
+	    type: string;
+	    content: string;
+	    planted_chapter: number;
+	    related_truth?: string;
+	    revealed_chapter?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateReaderPerspectiveInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.content = source["content"];
+	        this.planted_chapter = source["planted_chapter"];
+	        this.related_truth = source["related_truth"];
+	        this.revealed_chapter = source["revealed_chapter"];
+	    }
+	}
 	export class CreateStoryArcInput {
 	    name: string;
 	    arc_type: string;
@@ -552,6 +572,26 @@ export namespace app {
 	        this.category = source["category"];
 	        this.content = source["content"];
 	        this.is_global = source["is_global"];
+	    }
+	}
+	export class UpdateReaderPerspectiveInput {
+	    type?: string;
+	    content?: string;
+	    planted_chapter?: number;
+	    related_truth?: string;
+	    revealed_chapter?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateReaderPerspectiveInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.content = source["content"];
+	        this.planted_chapter = source["planted_chapter"];
+	        this.related_truth = source["related_truth"];
+	        this.revealed_chapter = source["revealed_chapter"];
 	    }
 	}
 	export class UpdateStoryArcInput {

@@ -42,6 +42,10 @@ export function CreatePreference(arg1, arg2) {
   return window['go']['app']['App']['CreatePreference'](arg1, arg2);
 }
 
+export function CreateReaderPerspective(arg1, arg2) {
+  return window['go']['app']['App']['CreateReaderPerspective'](arg1, arg2);
+}
+
 export function CreateStoryArc(arg1, arg2) {
   return window['go']['app']['App']['CreateStoryArc'](arg1, arg2);
 }
@@ -72,6 +76,10 @@ export function DeleteNovel(arg1) {
 
 export function DeletePreference(arg1) {
   return window['go']['app']['App']['DeletePreference'](arg1);
+}
+
+export function DeleteReaderPerspective(arg1, arg2) {
+  return window['go']['app']['App']['DeleteReaderPerspective'](arg1, arg2);
 }
 
 export function DeleteStoryArc(arg1, arg2) {
@@ -296,6 +304,10 @@ export function UpdateNovel(arg1, arg2) {
 
 export function UpdatePreference(arg1, arg2) {
   return window['go']['app']['App']['UpdatePreference'](arg1, arg2);
+}
+
+export function UpdateReaderPerspective(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateReaderPerspective'](arg1, arg2, arg3);
 }
 
 export function UpdateStoryArc(arg1, arg2, arg3) {

@@ -75,6 +75,9 @@ import {
   CreateLocation,
   UpdateLocation,
   DeleteLocation,
+  CreateReaderPerspective,
+  UpdateReaderPerspective,
+  DeleteReaderPerspective,
 } from '@/lib/wailsjs/go/app/App'
 import type { app, novel, chapter, config, llm, session, character, location, storyarc, timeline, reader, skill } from '@/lib/wailsjs/go/models'
 
@@ -155,6 +158,9 @@ export function useApp() {
     CreateLocation,
     UpdateLocation,
     DeleteLocation,
+    CreateReaderPerspective,
+    UpdateReaderPerspective,
+    DeleteReaderPerspective,
   }), [])
 }
 

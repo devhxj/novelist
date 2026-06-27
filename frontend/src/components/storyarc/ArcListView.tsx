@@ -261,9 +261,10 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
     if (!nodeForm.target_chapter) { setError('请输入目标章节'); return }
     setSaving(true)
     try {
-      await app.CreateArcNode(novelId, nodeForm)
+      const created = await app.CreateArcNode(novelId, nodeForm)
       setEditMode(null)
       await load()
+      setExpandedId(created.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建节点失败')
     } finally {
@@ -274,11 +275,13 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
   async function handleUpdateNode() {
     if (!editMode || editMode.type !== 'edit_node') return
     if (!nodeForm.title.trim()) { setError('请输入节点标题'); return }
+    const nodeId = editMode.node.id
     setSaving(true)
     try {
-      await app.UpdateArcNode(novelId, editMode.node.id, nodeForm)
+      await app.UpdateArcNode(novelId, nodeId, nodeForm)
       setEditMode(null)
       await load()
+      setExpandedId(nodeId)
     } catch (err) {
       setError(err instanceof Error ? err.message : '更新节点失败')
     } finally {
@@ -546,20 +549,20 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
                 >
                   {arc.name}{arcStatusTag(arc.status)}
                   {/* Hover actions */}
-                  <span className="ml-1 opacity-0 group-hover:opacity-100 inline-flex items-center gap-0.5 transition-opacity" style={{ color: hidden ? undefined : c.text }}>
+                  <span className="ml-1 opacity-0 group-hover:opacity-100 inline-flex items-center gap-1 transition-opacity" style={{ color: hidden ? undefined : c.text }}>
                     <span
                       onClick={(e) => { e.stopPropagation(); openEditArc(arc) }}
                       className="p-0.5 rounded hover:opacity-70"
                       title="编辑"
                     >
-                      <Pencil className="h-2.5 w-2.5" />
+                      <Pencil className="h-3.5 w-3.5" />
                     </span>
                     <span
                       onClick={(e) => { e.stopPropagation(); handleDeleteArc(arc.id) }}
                       className="p-0.5 rounded hover:opacity-70"
                       title="删除"
                     >
-                      <Trash2 className="h-2.5 w-2.5" />
+                      <Trash2 className="h-3.5 w-3.5" />
                     </span>
                   </span>
                 </button>
@@ -699,17 +702,17 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
                               </div>
                             </div>
                             {/* Hover actions */}
-                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               {node.status === 'pending' && (
                                 <button onClick={() => handleQuickNodeStatus(node, 'completed')} className="p-1 rounded text-muted-foreground hover:text-tag-green-foreground hover:bg-tag-green/20 transition-colors" title="标记完成">
                                   <span className="text-[10px]">✓</span>
                                 </button>
                               )}
                               <button onClick={() => openEditNode(node)} className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors" title="编辑">
-                                <Pencil className="h-3 w-3" />
+                                <Pencil className="h-3.5 w-3.5" />
                               </button>
                               <button onClick={() => handleDeleteNode(node.id)} className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors" title="删除">
-                                <Trash2 className="h-3 w-3" />
+                                <Trash2 className="h-3.5 w-3.5" />
                               </button>
                             </div>
                             <span className={`text-[10px] transition-transform cursor-pointer ${isExpanded ? 'rotate-180' : ''}`} onClick={() => setExpandedId(isExpanded ? null : node.id)}>▼</span>

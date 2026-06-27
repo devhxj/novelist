@@ -49,6 +49,8 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
   const [locationFocusId, setLocationFocusId] = useState<number>(0)
   const [timelineFocusId, setTimelineFocusId] = useState<number>(0)
   const [arcFocusId, setArcFocusId] = useState<number>(0)
+  const [readerFocusId, setReaderFocusId] = useState<number>(0)
+  const [preferenceFocusId, setPreferenceFocusId] = useState<number>(0)
   const [showCreate, setShowCreate] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -155,11 +157,15 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
     setLocationFocusId(0)
     setTimelineFocusId(0)
     setArcFocusId(0)
+    setReaderFocusId(0)
+    setPreferenceFocusId(0)
     switch (panelId) {
       case 'characters': setCharacterFocusId(entityId); break
       case 'locations': setLocationFocusId(entityId); break
       case 'timeline': setTimelineFocusId(entityId); break
       case 'storyarcs': setArcFocusId(entityId); break
+      case 'reader': setReaderFocusId(entityId); break
+      case 'preferences': setPreferenceFocusId(entityId); break
     }
     setActivePanel(panelId)
   }
@@ -365,9 +371,9 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
         ) : activePanel === 'timeline' ? (
           <TimelineView novelId={activeNovelId} focusEntryId={timelineFocusId} />
         ) : activePanel === 'reader' ? (
-          <ReaderView novelId={activeNovelId} />
+          <ReaderView novelId={activeNovelId} focusId={readerFocusId} />
         ) : activePanel === 'preferences' ? (
-          <PreferenceView novelId={activeNovelId} />
+          <PreferenceView novelId={activeNovelId} focusId={preferenceFocusId} />
         ) : activePanel === 'profile' ? (
           <ProfileView />
         ) : null}

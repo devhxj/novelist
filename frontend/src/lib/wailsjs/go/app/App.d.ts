@@ -6,9 +6,9 @@ import {chapter} from '../models';
 import {character} from '../models';
 import {location} from '../models';
 import {novel} from '../models';
+import {reader} from '../models';
 import {timeline} from '../models';
 import {llm} from '../models';
-import {reader} from '../models';
 import {session} from '../models';
 import {storage} from '../models';
 import {config} from '../models';
@@ -36,6 +36,8 @@ export function CreateNovel(arg1:app.CreateNovelInput):Promise<novel.Novel>;
 
 export function CreatePreference(arg1:number,arg2:app.CreatePreferenceInput):Promise<novel.PreferenceItem>;
 
+export function CreateReaderPerspective(arg1:number,arg2:app.CreateReaderPerspectiveInput):Promise<reader.ReaderPerspective>;
+
 export function CreateStoryArc(arg1:number,arg2:app.CreateStoryArcInput):Promise<storyarc.StoryArc>;
 
 export function CreateTimelineEntry(arg1:number,arg2:app.CreateTimelineEntryInput):Promise<timeline.TimelineEntry>;
@@ -51,6 +53,8 @@ export function DeleteLocation(arg1:number,arg2:number):Promise<void>;
 export function DeleteNovel(arg1:number):Promise<void>;
 
 export function DeletePreference(arg1:number):Promise<void>;
+
+export function DeleteReaderPerspective(arg1:number,arg2:number):Promise<void>;
 
 export function DeleteStoryArc(arg1:number,arg2:number):Promise<void>;
 
@@ -163,6 +167,8 @@ export function UpdateLocation(arg1:number,arg2:number,arg3:app.UpdateLocationIn
 export function UpdateNovel(arg1:number,arg2:app.UpdateNovelInput):Promise<novel.Novel>;
 
 export function UpdatePreference(arg1:number,arg2:app.UpdatePreferenceInput):Promise<novel.PreferenceItem>;
+
+export function UpdateReaderPerspective(arg1:number,arg2:number,arg3:app.UpdateReaderPerspectiveInput):Promise<void>;
 
 export function UpdateStoryArc(arg1:number,arg2:number,arg3:app.UpdateStoryArcInput):Promise<void>;
 
