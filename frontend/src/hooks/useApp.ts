@@ -6,6 +6,7 @@ import {
   CompressContext,
   CreateChapter,
   CreateNovel,
+  ExtractStyle,
   GetContent,
   SaveContent,
   SetActiveNovel,
@@ -117,6 +118,7 @@ export function useApp() {
     GetWritingActivity,
     GetWritingStats,
     RebuildNovelIndex,
+    ExtractStyle,
   }), [])
 }
 

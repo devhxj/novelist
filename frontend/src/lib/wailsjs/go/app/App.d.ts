@@ -38,6 +38,8 @@ export function DeletePreference(arg1:number):Promise<void>;
 
 export function DiscoverModels(arg1:string,arg2:string):Promise<Array<llm.ModelInfo>>;
 
+export function ExtractStyle(arg1:app.ExtractStyleInput):Promise<app.ExtractStyleResult>;
+
 export function GetAppConfig():Promise<Record<string, any>>;
 
 export function GetArcNodes(arg1:number,arg2:number,arg3:number):Promise<Array<storyarc.ArcNode>>;

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Search, Plus } from 'lucide-react'
+import { Search, Plus, Sparkle } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { skill } from '@/hooks/useApp'
+import ExtractStyleDialog from './ExtractStyleDialog'
 
 interface Props {
   novelId: number
@@ -26,6 +27,7 @@ export default function SkillList({ novelId, activeSkillName, onSelectSkill, onN
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
+  const [dialogOpen, setDialogOpen] = useState(false)
 
   const load = useCallback(async () => {
     if (!novelId) { setSkills([]); return }
@@ -58,13 +60,22 @@ export default function SkillList({ novelId, activeSkillName, onSelectSkill, onN
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           技能 ({skills.length})
         </span>
-        <button
-          onClick={() => setCreating(true)}
-          className="p-0.5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-          title="新建技能"
-        >
-          <Plus className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={() => setDialogOpen(true)}
+            className="p-0.5 rounded hover:bg-muted/60 text-amber-500 hover:text-amber-600 transition-colors"
+            title="提取写作风格"
+          >
+            <Sparkle className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setCreating(true)}
+            className="p-0.5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+            title="新建技能"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
       {creating && (
         <div className="px-2 py-1.5 border-b flex gap-1">
@@ -138,6 +149,12 @@ export default function SkillList({ novelId, activeSkillName, onSelectSkill, onN
           </>
         )}
       </div>
+      <ExtractStyleDialog
+        open={dialogOpen}
+        novelId={novelId}
+        onClose={() => setDialogOpen(false)}
+        onSaved={load}
+      />
     </>
   )
 }

@@ -112,6 +112,44 @@ export namespace app {
 	        this.content = source["content"];
 	    }
 	}
+	export class ExtractStyleInput {
+	    novel_id: number;
+	    sample: string;
+	    provider_name: string;
+	    model_id: string;
+	    reasoning_effort: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExtractStyleInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	        this.sample = source["sample"];
+	        this.provider_name = source["provider_name"];
+	        this.model_id = source["model_id"];
+	        this.reasoning_effort = source["reasoning_effort"];
+	    }
+	}
+	export class ExtractStyleResult {
+	    name: string;
+	    description: string;
+	    raw_content: string;
+	    file_path: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExtractStyleResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.raw_content = source["raw_content"];
+	        this.file_path = source["file_path"];
+	    }
+	}
 	export class GetSessionsInput {
 	    novel_id: number;
 	    page: number;
