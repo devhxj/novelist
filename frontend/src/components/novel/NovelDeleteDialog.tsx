@@ -56,7 +56,7 @@ export default function NovelDeleteDialog({ open, novelTitle, onClose, onConfirm
         <h2 className="text-base font-semibold text-red-600 mb-3">删除作品</h2>
 
         {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2 mb-3">{error}</p>
+          <p className="text-sm text-red-600 bg-danger-bg border border-danger-border rounded-md px-3 py-2 mb-3">{error}</p>
         )}
 
         <p className="text-sm text-muted-foreground mb-1">

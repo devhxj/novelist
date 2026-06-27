@@ -134,7 +134,7 @@ export default function ExtractStyleDialog({ open, novelId, onClose, onSaved }: 
 
         {/* 错误提示 */}
         {error && (
-          <div className="mx-5 mt-3 px-3 py-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-md shrink-0">
+          <div className="mx-5 mt-3 px-3 py-2 text-xs text-red-600 bg-danger-bg border border-danger-border rounded-md shrink-0">
             {error}
           </div>
         )}

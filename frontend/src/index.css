@@ -70,6 +70,8 @@
   --tool-green-border: oklch(0.5 0.15 155);
   --tool-red: oklch(0.97 0.01 27);
   --tool-red-border: oklch(0.58 0.22 27);
+  --danger-bg: oklch(0.97 0.015 15);
+  --danger-border: oklch(0.88 0.06 18);
   --bubble-user: oklch(0.546 0.245 262.881);
   --bubble-user-foreground: oklch(0.985 0 0);
   --action-extract: oklch(0.62 0.18 80);
@@ -130,6 +132,8 @@
   --tool-green-border: oklch(0.55 0.15 145);
   --tool-red: oklch(0.5 0.18 15 / 0.1);
   --tool-red-border: oklch(0.55 0.18 22);
+  --danger-bg: oklch(0.48 0.18 15 / 0.12);
+  --danger-border: oklch(0.5 0.18 15 / 0.25);
   --bubble-user: oklch(0.546 0.245 262.881 / 0.2);
   --bubble-user-foreground: var(--foreground);
   --action-extract: oklch(0.42 0.12 80);
@@ -189,6 +193,8 @@ body {
   --color-action-extract-foreground: var(--action-extract-foreground);
   --color-action-save: var(--action-save);
   --color-action-save-foreground: var(--action-save-foreground);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-border: var(--danger-border);
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);

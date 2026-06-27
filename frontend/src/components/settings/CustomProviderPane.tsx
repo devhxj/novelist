@@ -239,7 +239,7 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
                 onRemove(selectedKey)
                 setSelectedKey(providers.filter(p => p.key !== selectedKey)[0]?.key || '')
               }}
-              className="h-8 px-3 rounded-md border border-red-200 text-red-500 text-xs hover:bg-red-50 transition-colors"
+              className="h-8 px-3 rounded-md border border-danger-border text-red-500 text-xs hover:bg-danger-bg transition-colors"
             >
               删除服务商
             </button>
