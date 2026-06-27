@@ -72,6 +72,10 @@
   --tool-red-border: oklch(0.58 0.22 27);
   --bubble-user: oklch(0.546 0.245 262.881);
   --bubble-user-foreground: oklch(0.985 0 0);
+  --action-extract: oklch(0.62 0.18 80);
+  --action-extract-foreground: oklch(0.985 0 0);
+  --action-save: oklch(0.48 0.14 155);
+  --action-save-foreground: oklch(0.985 0 0);
 }
 
 /* ── 深色主题 ────────────────────────────────────────────── */
@@ -128,6 +132,10 @@
   --tool-red-border: oklch(0.55 0.18 22);
   --bubble-user: oklch(0.546 0.245 262.881 / 0.2);
   --bubble-user-foreground: var(--foreground);
+  --action-extract: oklch(0.42 0.12 80);
+  --action-extract-foreground: oklch(0.95 0.02 90);
+  --action-save: oklch(0.34 0.09 155);
+  --action-save-foreground: oklch(0.95 0.02 150);
 }
 
 * {
@@ -177,6 +185,10 @@ body {
   --color-ring: var(--ring);
   --color-bubble-user: var(--bubble-user);
   --color-bubble-user-foreground: var(--bubble-user-foreground);
+  --color-action-extract: var(--action-extract);
+  --color-action-extract-foreground: var(--action-extract-foreground);
+  --color-action-save: var(--action-save);
+  --color-action-save-foreground: var(--action-save-foreground);
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);

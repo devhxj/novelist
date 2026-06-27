@@ -63,7 +63,7 @@ export default function SkillList({ novelId, activeSkillName, onSelectSkill, onN
         <div className="flex items-center gap-0.5">
           <button
             onClick={() => setDialogOpen(true)}
-            className="p-0.5 rounded hover:bg-muted/60 text-amber-500 hover:text-amber-600 transition-colors"
+            className="p-0.5 rounded hover:bg-muted/60 text-action-extract hover:text-action-extract/80 transition-colors"
             title="提取写作风格"
           >
             <Sparkle className="w-3.5 h-3.5" />
@@ -112,7 +112,7 @@ export default function SkillList({ novelId, activeSkillName, onSelectSkill, onN
               }
             }}
             disabled={!newName.trim()}
-            className="px-2 py-0.5 text-xs text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
+            className="px-2 py-0.5 text-xs text-action-save hover:text-action-save/80 disabled:opacity-50"
           >
             确定
           </button>

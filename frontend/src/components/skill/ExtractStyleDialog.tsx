@@ -120,7 +120,7 @@ export default function ExtractStyleDialog({ open, novelId, onClose, onSaved }: 
         {/* 标题栏 */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b shrink-0">
           <div className="flex items-center gap-2">
-            <Sparkle className="w-4 h-4 text-amber-500" />
+            <Sparkle className="w-4 h-4 text-action-extract" />
             <h2 className="text-sm font-semibold">提取写作风格</h2>
           </div>
           <button
@@ -162,7 +162,7 @@ export default function ExtractStyleDialog({ open, novelId, onClose, onSaved }: 
               <button
                 onClick={handleExtract}
                 disabled={!canExtract}
-                className="inline-flex items-center gap-1.5 h-9 px-5 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors disabled:opacity-40 shadow-sm"
+                className="inline-flex items-center gap-1.5 h-9 px-5 rounded-lg text-sm font-medium bg-action-extract text-action-extract-foreground hover:bg-action-extract/80 transition-colors disabled:opacity-40 shadow-sm"
               >
                 {phase === 'extracting' ? (
                   <>
@@ -226,7 +226,7 @@ export default function ExtractStyleDialog({ open, novelId, onClose, onSaved }: 
             <button
               onClick={handleSave}
               disabled={phase === 'saving'}
-              className="inline-flex items-center gap-1.5 h-9 px-5 rounded-md text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 h-9 px-5 rounded-md text-sm font-medium bg-action-save text-action-save-foreground hover:bg-action-save/80 transition-colors disabled:opacity-50"
             >
               {phase === 'saving' ? (
                 <>
