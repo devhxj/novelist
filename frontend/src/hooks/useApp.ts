@@ -59,6 +59,16 @@ import {
   GetWritingActivity,
   GetWritingStats,
   RebuildNovelIndex,
+  CreateTimelineEntry,
+  UpdateTimelineEntry,
+  DeleteTimelineEntry,
+  UpdateChapterPlan,
+  CreateStoryArc,
+  UpdateStoryArc,
+  DeleteStoryArc,
+  CreateArcNode,
+  UpdateArcNode,
+  DeleteArcNode,
 } from '@/lib/wailsjs/go/app/App'
 import type { app, novel, chapter, config, llm, session, character, location, storyarc, timeline, reader, skill } from '@/lib/wailsjs/go/models'
 
@@ -123,6 +133,16 @@ export function useApp() {
     GetWritingStats,
     RebuildNovelIndex,
     ExtractStyle,
+    CreateTimelineEntry,
+    UpdateTimelineEntry,
+    DeleteTimelineEntry,
+    UpdateChapterPlan,
+    CreateStoryArc,
+    UpdateStoryArc,
+    DeleteStoryArc,
+    CreateArcNode,
+    UpdateArcNode,
+    DeleteArcNode,
   }), [])
 }
 

@@ -18,6 +18,10 @@ export function CompressContext(arg1) {
   return window['go']['app']['App']['CompressContext'](arg1);
 }
 
+export function CreateArcNode(arg1, arg2) {
+  return window['go']['app']['App']['CreateArcNode'](arg1, arg2);
+}
+
 export function CreateChapter(arg1) {
   return window['go']['app']['App']['CreateChapter'](arg1);
 }
@@ -30,6 +34,18 @@ export function CreatePreference(arg1, arg2) {
   return window['go']['app']['App']['CreatePreference'](arg1, arg2);
 }
 
+export function CreateStoryArc(arg1, arg2) {
+  return window['go']['app']['App']['CreateStoryArc'](arg1, arg2);
+}
+
+export function CreateTimelineEntry(arg1, arg2) {
+  return window['go']['app']['App']['CreateTimelineEntry'](arg1, arg2);
+}
+
+export function DeleteArcNode(arg1, arg2) {
+  return window['go']['app']['App']['DeleteArcNode'](arg1, arg2);
+}
+
 export function DeleteCover(arg1) {
   return window['go']['app']['App']['DeleteCover'](arg1);
 }
@@ -40,6 +56,14 @@ export function DeleteNovel(arg1) {
 
 export function DeletePreference(arg1) {
   return window['go']['app']['App']['DeletePreference'](arg1);
+}
+
+export function DeleteStoryArc(arg1, arg2) {
+  return window['go']['app']['App']['DeleteStoryArc'](arg1, arg2);
+}
+
+export function DeleteTimelineEntry(arg1, arg2) {
+  return window['go']['app']['App']['DeleteTimelineEntry'](arg1, arg2);
 }
 
 export function DiscoverModels(arg1, arg2) {
@@ -226,6 +250,14 @@ export function TestConnection(arg1) {
   return window['go']['app']['App']['TestConnection'](arg1);
 }
 
+export function UpdateArcNode(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateArcNode'](arg1, arg2, arg3);
+}
+
+export function UpdateChapterPlan(arg1, arg2) {
+  return window['go']['app']['App']['UpdateChapterPlan'](arg1, arg2);
+}
+
 export function UpdateChapterTitle(arg1, arg2, arg3) {
   return window['go']['app']['App']['UpdateChapterTitle'](arg1, arg2, arg3);
 }
@@ -240,4 +272,12 @@ export function UpdateNovel(arg1, arg2) {
 
 export function UpdatePreference(arg1, arg2) {
   return window['go']['app']['App']['UpdatePreference'](arg1, arg2);
+}
+
+export function UpdateStoryArc(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateStoryArc'](arg1, arg2, arg3);
+}
+
+export function UpdateTimelineEntry(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateTimelineEntry'](arg1, arg2, arg3);
 }

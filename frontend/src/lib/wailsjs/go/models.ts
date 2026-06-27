@@ -66,6 +66,24 @@ export namespace app {
 	        this.turn_id = source["turn_id"];
 	    }
 	}
+	export class CreateArcNodeInput {
+	    story_arc_id: number;
+	    title: string;
+	    description?: string;
+	    target_chapter: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateArcNodeInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.story_arc_id = source["story_arc_id"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.target_chapter = source["target_chapter"];
+	    }
+	}
 	export class CreateChapterInput {
 	    novel_id: number;
 	    title: string;
@@ -110,6 +128,50 @@ export namespace app {
 	        this.is_global = source["is_global"];
 	        this.category = source["category"];
 	        this.content = source["content"];
+	    }
+	}
+	export class CreateStoryArcInput {
+	    name: string;
+	    arc_type: string;
+	    description?: string;
+	    importance?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateStoryArcInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.arc_type = source["arc_type"];
+	        this.description = source["description"];
+	        this.importance = source["importance"];
+	    }
+	}
+	export class CreateTimelineEntryInput {
+	    category: string;
+	    title: string;
+	    content?: string;
+	    detail_json?: string;
+	    target_chapter: number;
+	    importance?: number;
+	    source_chapter_id?: number;
+	    source?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateTimelineEntryInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.category = source["category"];
+	        this.title = source["title"];
+	        this.content = source["content"];
+	        this.detail_json = source["detail_json"];
+	        this.target_chapter = source["target_chapter"];
+	        this.importance = source["importance"];
+	        this.source_chapter_id = source["source_chapter_id"];
+	        this.source = source["source"];
 	    }
 	}
 	export class ExtractStyleInput {
@@ -344,6 +406,40 @@ export namespace app {
 	        this.model_id = source["model_id"];
 	    }
 	}
+	export class UpdateArcNodeInput {
+	    title?: string;
+	    description?: string;
+	    target_chapter?: number;
+	    actual_chapter?: number;
+	    status?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateArcNodeInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.target_chapter = source["target_chapter"];
+	        this.actual_chapter = source["actual_chapter"];
+	        this.status = source["status"];
+	    }
+	}
+	export class UpdateChapterPlanInput {
+	    scope?: string;
+	    content?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateChapterPlanInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.scope = source["scope"];
+	        this.content = source["content"];
+	    }
+	}
 	export class UpdateNovelInput {
 	    title?: string;
 	    description?: string;
@@ -374,6 +470,52 @@ export namespace app {
 	        this.category = source["category"];
 	        this.content = source["content"];
 	        this.is_global = source["is_global"];
+	    }
+	}
+	export class UpdateStoryArcInput {
+	    name?: string;
+	    description?: string;
+	    arc_type?: string;
+	    importance?: number;
+	    status?: string;
+	    reactivate_at?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateStoryArcInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.arc_type = source["arc_type"];
+	        this.importance = source["importance"];
+	        this.status = source["status"];
+	        this.reactivate_at = source["reactivate_at"];
+	    }
+	}
+	export class UpdateTimelineEntryInput {
+	    title?: string;
+	    content?: string;
+	    detail_json?: string;
+	    target_chapter?: number;
+	    importance?: number;
+	    status?: string;
+	    resolved_chapter_id?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateTimelineEntryInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.content = source["content"];
+	        this.detail_json = source["detail_json"];
+	        this.target_chapter = source["target_chapter"];
+	        this.importance = source["importance"];
+	        this.status = source["status"];
+	        this.resolved_chapter_id = source["resolved_chapter_id"];
 	    }
 	}
 
