@@ -60,6 +60,7 @@ frontend/         React 19 + TypeScript + Tailwind 4 + shadcn/ui
 - **Messages**: Append-only, versioned for compression. Three query paths: to_api / to_frontend / full audit
 - **Commit style**: English, specific, no Co-Authored-By, no emoji
 - **User communicates in Chinese** — respond in Chinese
+- **Edit tool + Chinese text**: When Edit tool fails on Go files with Chinese characters ("String to replace not found"), stretch `old_string` to include surrounding ASCII lines as anchors. Before editing, `gofmt -w file.go` and verify indentation with `cat -A`. See `docs/experience/edit-tool-unicode-match-failure.md`.
 
 ## CGO / ONNX notes
 
