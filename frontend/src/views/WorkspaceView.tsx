@@ -15,6 +15,7 @@ import PreferenceView from '@/components/preference/PreferenceView'
 import BookshelfView from '@/components/novel/BookshelfView'
 import NovelEditDialog from '@/components/novel/NovelEditDialog'
 import NovelDeleteDialog from '@/components/novel/NovelDeleteDialog'
+import ExportDialog from '@/components/export/ExportDialog'
 import ChatPanel from '@/components/chat/ChatPanel'
 import GitHubLink from '@/components/shell/GitHubLink'
 import SettingsDialog from '@/components/settings/SettingsDialog'
@@ -66,6 +67,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
   const [editingNovel, setEditingNovel] = useState<novel.Novel | null>(null)
   const [deletingNovel, setDeletingNovel] = useState<novel.Novel | null>(null)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [exportNovelId, setExportNovelId] = useState<number | null>(null)
 
   // ── 窗口状态 ────────────────────────────────────────────
 
@@ -219,6 +221,11 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
     await loadNovels()
   }
 
+  async function handleExportNovel(format: 'epub' | 'markdown' | 'txt') {
+    if (exportNovelId == null) return
+    await app.ExportNovel(exportNovelId, format)
+  }
+
   async function handleSaveCover(novelID: number, file: File) {
     const buf = await file.arrayBuffer()
     await app.SaveCover(novelID, Array.from(new Uint8Array(buf)))
@@ -309,6 +316,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
           onSelectNovel={handleSelectNovel}
           onSelectChapter={handleSelectChapter}
           onSelectGoink={handleSelectGoink}
+          onExportNovel={(id) => setExportNovelId(id)}
           target={tabTarget}
           showCreate={showCreate}
           setShowCreate={setShowCreate}
@@ -342,6 +350,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
             onDeleteNovel={setDeletingNovel}
             onCreateNovel={() => setShowCreateDialog(true)}
             onSaveCover={handleSaveCover}
+            onExportNovel={(n) => setExportNovelId(n.id)}
           />
         ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && activePanel !== 'profile' && (
           <ContentPanel ref={contentRef} novelId={activeNovelId} onContentChange={setActiveContent} onDirtyChange={setIsDirty} />
@@ -397,6 +406,13 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
         novelTitle={deletingNovel?.title ?? ''}
         onClose={() => setDeletingNovel(null)}
         onConfirm={handleDeleteNovel}
+      />
+
+      <ExportDialog
+        open={exportNovelId !== null}
+        novelTitle={novels.find(n => n.id === exportNovelId)?.title ?? ''}
+        onClose={() => setExportNovelId(null)}
+        onExport={handleExportNovel}
       />
     </div>
   )

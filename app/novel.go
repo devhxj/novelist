@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"gorm.io/gorm"
 
 	"novel/internal/chapter"
 	"novel/internal/character"
 	"novel/internal/config"
+	"novel/internal/export"
 	"novel/internal/git"
 	"novel/internal/location"
 	"novel/internal/novel"
@@ -268,6 +270,62 @@ func (a *App) SaveCover(novelID int64, data []byte) error {
 	}
 	if _, err := repo.Commit("update cover"); err != nil {
 		return fmt.Errorf("save cover: %w", err)
+	}
+	return nil
+}
+
+// ── 导出 ──────────────────────────────────────────────────
+
+// ExportNovel 将小说导出为指定格式，弹出保存对话框让用户选择保存位置。
+func (a *App) ExportNovel(novelID int64, format string) error {
+	var n novel.Novel
+	if err := a.novel.DB.WithContext(a.ctx).First(&n, novelID).Error; err != nil {
+		return fmt.Errorf("export novel: %w", err)
+	}
+
+	chapters, err := a.chapter.ListAllByNovel(a.ctx, novelID)
+	if err != nil {
+		return fmt.Errorf("export novel: %w", err)
+	}
+	if len(chapters) == 0 {
+		return fmt.Errorf("export novel: 没有可导出的章节")
+	}
+
+	var cc []export.ChapterWithContent
+	for _, ch := range chapters {
+		content, err := git.ReadFile(novelID, git.ChapterPath(ch.ChapterNumber))
+		if err != nil {
+			return fmt.Errorf("export novel: 读取第%d章失败: %w", ch.ChapterNumber, err)
+		}
+		cc = append(cc, export.ChapterWithContent{Chapter: ch, Content: content})
+	}
+
+	data, filename, err := export.ExportNovel(&n, cc, format, a.settings.UserName)
+	if err != nil {
+		return fmt.Errorf("export novel: %w", err)
+	}
+
+	filters := map[string][]runtime.FileFilter{
+		"epub":     {{DisplayName: "EPUB 电子书 (*.epub)", Pattern: "*.epub"}},
+		"markdown": {{DisplayName: "Markdown 文件 (*.md)", Pattern: "*.md"}},
+		"txt":      {{DisplayName: "文本文件 (*.txt)", Pattern: "*.txt"}},
+	}
+
+	savePath, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		DefaultFilename:      filename,
+		Title:                "导出小说",
+		Filters:              filters[format],
+		CanCreateDirectories: true,
+	})
+	if err != nil {
+		return fmt.Errorf("export novel: %w", err)
+	}
+	if savePath == "" {
+		return nil // 用户取消
+	}
+
+	if err := os.WriteFile(savePath, data, 0644); err != nil {
+		return fmt.Errorf("export novel: 写入文件失败: %w", err)
 	}
 	return nil
 }

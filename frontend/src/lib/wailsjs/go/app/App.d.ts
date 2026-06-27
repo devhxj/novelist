@@ -38,6 +38,8 @@ export function DeletePreference(arg1:number):Promise<void>;
 
 export function DiscoverModels(arg1:string,arg2:string):Promise<Array<llm.ModelInfo>>;
 
+export function ExportNovel(arg1:number,arg2:string):Promise<void>;
+
 export function ExtractStyle(arg1:app.ExtractStyleInput):Promise<app.ExtractStyleResult>;
 
 export function GetAppConfig():Promise<Record<string, any>>;

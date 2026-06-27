@@ -7,12 +7,14 @@ require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/PuerkitoBio/goquery v1.12.0
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
+	github.com/bmaupin/go-epub v1.1.0
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/invopop/jsonschema v0.14.0
 	github.com/mattn/go-sqlite3 v1.14.44
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/wailsapp/wails/v2 v2.12.0
 	github.com/yalue/onnxruntime_go v1.30.1
+	github.com/yuin/goldmark v1.8.2
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/sqlite v1.6.0
@@ -32,6 +34,7 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-shiori/dom v0.0.0-20230515143342-73569d674e1c // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
+	github.com/gofrs/uuid v3.1.0+incompatible // indirect
 	github.com/gogs/chardet v0.0.0-20211120154057-b7413eaefb8f // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
@@ -56,6 +59,7 @@ require (
 	github.com/tkrajina/go-reflector v0.5.8 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
+	github.com/vincent-petithory/dataurl v0.0.0-20191104211930-d1553a71de50 // indirect
 	github.com/wailsapp/go-webview2 v1.0.22 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect

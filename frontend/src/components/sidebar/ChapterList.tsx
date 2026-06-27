@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { ChevronRight, FileText, Pencil, Plus } from 'lucide-react'
+import { ChevronRight, FileText, Pencil, Plus, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useApp } from '@/hooks/useApp'
 import type { chapter } from '@/hooks/useApp'
@@ -10,11 +10,12 @@ interface Props {
   target: { path: string; title: string } | null
   onSelectChapter: (ch: chapter.Chapter) => void
   onSelectGoink: () => void
+  onExportNovel: () => void
 }
 
 const BLOCK_SIZE = 100
 
-export default function ChapterList({ novelId, target, onSelectChapter, onSelectGoink }: Props) {
+export default function ChapterList({ novelId, target, onSelectChapter, onSelectGoink, onExportNovel }: Props) {
   const app = useApp()
 
   const [chapters, setChapters] = useState<chapter.Chapter[]>([])
@@ -105,12 +106,21 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           章节 ({chapters.length})
         </span>
-        <button
-          onClick={() => setShowCreateChapter(true)}
-          className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={onExportNovel}
+            className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            title="导出"
+          >
+            <Download className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setShowCreateChapter(true)}
+            className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {showCreateChapter && (
