@@ -897,7 +897,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
           <span>加载设置失败，模型列表和偏好可能不准确</span>
           <button
             onClick={() => setInitLoadRetry(n => n + 1)}
-            className="underline hover:text-red-800 cursor-pointer"
+            className="underline hover:text-destructive cursor-pointer"
           >
             重试
           </button>

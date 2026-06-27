@@ -156,7 +156,7 @@ export default function ModelDiscoveryPanel({ chatUrl, apiKey, existingIds, onAd
               >导入选中</button>
               <button
                 onClick={() => { setDiscoveredModels([]); setDiscoverError('') }}
-                className="text-muted-foreground hover:text-red-500"
+                className="text-muted-foreground hover:text-destructive"
               ><X className="w-3.5 h-3.5" /></button>
             </div>
           </div>

@@ -134,7 +134,7 @@ export default function BookshelfView({
                     className="w-7 h-7 flex items-center justify-center rounded-md bg-background/90 border shadow-sm hover:bg-danger-bg hover:border-danger-border transition-colors"
                     title="删除"
                   >
-                    <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-red-600" />
+                    <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive" />
                   </button>
                 </div>
               </div>

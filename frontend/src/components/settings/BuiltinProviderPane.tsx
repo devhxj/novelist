@@ -140,7 +140,7 @@ export default function BuiltinProviderPane({ providers, onUpdate, onAddCustomMo
                 </div>
                 <button
                   onClick={() => onRemoveCustomModel(selectedKey, m.id)}
-                  className="text-muted-foreground hover:text-red-500 transition-colors"
+                  className="text-muted-foreground hover:text-destructive transition-colors"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>

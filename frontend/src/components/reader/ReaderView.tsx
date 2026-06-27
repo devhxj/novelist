@@ -14,7 +14,7 @@ const TYPE_FILTERS: { key: TypeFilter; label: string; icon: typeof BookOpen; col
   { key: 'all', label: '全部', icon: BookOpen, color: 'text-muted-foreground' },
   { key: 'known', label: '已知', icon: BookOpen, color: 'text-tag-green-foreground' },
   { key: 'suspense', label: '悬念', icon: Clock, color: 'text-tag-amber-foreground' },
-  { key: 'misconception', label: '误解', icon: AlertTriangle, color: 'text-rose-500' },
+  { key: 'misconception', label: '误解', icon: AlertTriangle, color: 'text-tag-rose-foreground' },
 ]
 
 const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
@@ -30,7 +30,7 @@ function typeMeta(type: string) {
     case 'suspense':
       return { icon: Clock, color: 'text-tag-amber-foreground', bg: 'bg-tag-amber', label: '悬念' }
     case 'misconception':
-      return { icon: AlertTriangle, color: 'text-rose-500', bg: 'bg-tag-rose', label: '误解' }
+      return { icon: AlertTriangle, color: 'text-tag-rose-foreground', bg: 'bg-tag-rose', label: '误解' }
     default:
       return { icon: BookOpen, color: 'text-muted-foreground', bg: 'bg-muted', label: type }
   }
