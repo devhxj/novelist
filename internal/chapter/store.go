@@ -134,3 +134,11 @@ func (s *Store) GetRecent(ctx context.Context, novelID int64, limit int) ([]Chap
 	}
 	return chapters, nil
 }
+
+// UpdateTitle 更新章节标题。
+func (s *Store) UpdateTitle(ctx context.Context, novelID int64, chapterNumber int, title string) error {
+	return s.DB.WithContext(ctx).
+		Model(&Chapter{}).
+		Where("novel_id = ? AND chapter_number = ?", novelID, chapterNumber).
+		Update("title", title).Error
+}

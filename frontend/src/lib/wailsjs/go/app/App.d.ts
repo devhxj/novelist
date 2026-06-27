@@ -126,6 +126,8 @@ export function SetSelectedModel(arg1:string,arg2:string):Promise<void>;
 
 export function TestConnection(arg1:app.TestConnectionInput):Promise<void>;
 
+export function UpdateChapterTitle(arg1:number,arg2:number,arg3:string):Promise<void>;
+
 export function UpdateDataDir(arg1:string):Promise<void>;
 
 export function UpdateNovel(arg1:number,arg2:app.UpdateNovelInput):Promise<novel.Novel>;

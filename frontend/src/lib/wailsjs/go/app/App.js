@@ -222,6 +222,10 @@ export function TestConnection(arg1) {
   return window['go']['app']['App']['TestConnection'](arg1);
 }
 
+export function UpdateChapterTitle(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateChapterTitle'](arg1, arg2, arg3);
+}
+
 export function UpdateDataDir(arg1) {
   return window['go']['app']['App']['UpdateDataDir'](arg1);
 }
