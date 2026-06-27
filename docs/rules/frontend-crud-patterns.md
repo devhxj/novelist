@@ -43,27 +43,25 @@ type UpdateXxxInput struct {
 
 所有字段 optional，PATCH 只传要改的字段。前端传完整对象也行（没改的字段原地覆盖，无影响）。
 
-### Update 方法用 Updates() 而非 First+if+Save
+### Update 方法用 Updates() 只返回 error
 
 ```go
-func (a *App) UpdateXxx(id int64, novelID int64, input UpdateXxxInput) (*xxx.Xxx, error) {
+func (a *App) UpdateXxx(id int64, novelID int64, input UpdateXxxInput) error {
     // 一次 UPDATE，只更新非零值字段
     if err := a.store.DB.WithContext(a.ctx).
         Model(&xxx.Xxx{}).
         Where("id = ? AND novel_id = ?", id, novelID).
         Updates(&input).Error; err != nil {
-        return nil, fmt.Errorf("update: %w", err)
+        return fmt.Errorf("update: %w", err)
     }
-    // 查回更新后的完整对象返回
-    var result xxx.Xxx
-    a.store.DB.WithContext(a.ctx).First(&result, id)
-    return &result, nil
+    return nil
 }
 ```
 
 - `Updates(struct)` 自动跳过零值字段（`""`、`0`），省掉手动 if 判断
 - 一次 UPDATE 而非 SELECT+UPDATE，更少 DB 请求，避免并发 race
 - Wails 机制上做不到真正的按 key PATCH，这个 trade-off 可接受
+- **不返回对象**：前端 Update 后一律 `load()` 全量刷新，不消费返回值。省掉无意义的 `First()` 查询
 
 ### Create 方法加校验
 

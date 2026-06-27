@@ -98,6 +98,46 @@ export namespace app {
 	        this.title = source["title"];
 	    }
 	}
+	export class CreateCharacterInput {
+	    name: string;
+	    description?: string;
+	    personality?: string;
+	    abilities?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateCharacterInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.personality = source["personality"];
+	        this.abilities = source["abilities"];
+	    }
+	}
+	export class CreateLocationInput {
+	    name: string;
+	    location_type?: string;
+	    description?: string;
+	    detail_json?: string;
+	    parent_location_id?: number;
+	    tags?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateLocationInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.location_type = source["location_type"];
+	        this.description = source["description"];
+	        this.detail_json = source["detail_json"];
+	        this.parent_location_id = source["parent_location_id"];
+	        this.tags = source["tags"];
+	    }
+	}
 	export class CreateNovelInput {
 	    title: string;
 	    description?: string;
@@ -438,6 +478,46 @@ export namespace app {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.scope = source["scope"];
 	        this.content = source["content"];
+	    }
+	}
+	export class UpdateCharacterInput {
+	    name?: string;
+	    description?: string;
+	    personality?: string;
+	    abilities?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateCharacterInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.personality = source["personality"];
+	        this.abilities = source["abilities"];
+	    }
+	}
+	export class UpdateLocationInput {
+	    name?: string;
+	    location_type?: string;
+	    description?: string;
+	    detail_json?: string;
+	    parent_location_id?: number;
+	    tags?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateLocationInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.location_type = source["location_type"];
+	        this.description = source["description"];
+	        this.detail_json = source["detail_json"];
+	        this.parent_location_id = source["parent_location_id"];
+	        this.tags = source["tags"];
 	    }
 	}
 	export class UpdateNovelInput {

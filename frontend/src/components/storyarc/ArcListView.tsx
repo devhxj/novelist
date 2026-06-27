@@ -500,7 +500,7 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
       ) : loading ? (
         <div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载中...</div>
       ) : error ? (
-        <div className="flex h-full items-center justify-center text-sm text-rose-500">{error}</div>
+        <div className="flex h-full items-center justify-center text-sm text-destructive">{error}</div>
       ) : (
         <div className="flex-1 overflow-y-auto overscroll-contain">
         <div className="max-w-3xl mx-auto px-5 py-6 space-y-6">
@@ -631,7 +631,7 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
           {/* Node list */}
           {grouped.length === 0 ? (
             <div className="text-center py-12">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-tag-purple text-purple-400">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-tag-purple text-tag-purple-foreground">
                 <GitBranch className="h-5 w-5" />
               </div>
               <p className="mt-2 text-sm text-muted-foreground">{arcs.length === 0 ? '暂无叙事弧线' : '没有匹配的节点'}</p>

@@ -1,0 +1,375 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ChevronRight, MapPin, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { useApp } from '@/hooks/useApp'
+import type { location } from '@/hooks/useApp'
+import LocationGraph from '@/components/location/LocationGraph'
+import TagInput from '@/components/shared/TagInput'
+
+interface Props { novelId: number; focusId?: number }
+
+type ViewTab = 'list' | 'graph'
+
+type EditMode =
+  | { type: 'create' }
+  | { type: 'edit'; item: location.Location }
+  | null
+
+type LocForm = {
+  name: string
+  location_type: string
+  description: string
+  parent_location_id?: number
+  tags: string[]
+}
+
+const EMPTY_FORM: LocForm = { name: '', location_type: '', description: '', tags: [] }
+
+function safeJson<T>(json: string, fallback: T): T {
+  try { return JSON.parse(json) }
+  catch { return fallback }
+}
+
+export default function LocationListView({ novelId, focusId }: Props) {
+  const app = useApp()
+
+  const [locations, setLocations] = useState<location.Location[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [viewTab, setViewTab] = useState<ViewTab>('list')
+  const [editMode, setEditMode] = useState<EditMode>(null)
+  const [form, setForm] = useState<LocForm>(EMPTY_FORM)
+  const [saving, setSaving] = useState(false)
+
+  const load = useCallback(async () => {
+    if (!novelId) { setLocations([]); return }
+    setLoading(true)
+    setError(null)
+    try {
+      const list = await app.GetLocations(novelId)
+      setLocations(list ?? [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [app, novelId])
+
+  useEffect(() => { load() }, [load])
+
+  const nameMap = useMemo(() => {
+    const m = new Map<number, string>()
+    for (const loc of locations) m.set(loc.id, loc.name)
+    return m
+  }, [locations])
+
+  const locationTypeTag = (t: string) => {
+    switch (t) {
+      case '森林': case '洞穴': case '山脉': case '沼泽': return 'bg-tag-green text-tag-green-foreground'
+      case '城市': case '城镇': case '村庄': case '市场': return 'bg-tag-amber text-tag-amber-foreground'
+      case '王宫': case '城堡': case '神殿': case ' dungeon': return 'bg-tag-purple text-tag-purple-foreground'
+      case '海洋': case '河流': case '湖泊': return 'bg-tag-blue text-tag-blue-foreground'
+      default: return 'bg-secondary text-muted-foreground'
+    }
+  }
+
+  // ── CRUD handlers ─────────────────────────────────────
+
+  function openCreate(parentId?: number) {
+    setError(null)
+    setForm({ ...EMPTY_FORM, parent_location_id: parentId })
+    setEditMode({ type: 'create' })
+  }
+
+  function openEdit(loc: location.Location) {
+    setError(null)
+    setForm({
+      name: loc.name,
+      location_type: loc.location_type || '',
+      description: loc.description || '',
+      parent_location_id: loc.parent_location_id ?? undefined,
+      tags: safeJson<string[]>(loc.tags, []),
+    })
+    setEditMode({ type: 'edit', item: loc })
+  }
+
+  function buildPayload(): { name: string; location_type: string; description: string; parent_location_id?: number; tags: string } {
+    return {
+      name: form.name,
+      location_type: form.location_type,
+      description: form.description,
+      parent_location_id: form.parent_location_id && form.parent_location_id !== 0 ? form.parent_location_id : undefined,
+      tags: JSON.stringify(form.tags),
+    }
+  }
+
+  async function handleCreate() {
+    if (!form.name.trim()) { setError('请输入地点名称'); return }
+    setSaving(true)
+    try {
+      await app.CreateLocation(novelId, buildPayload())
+      setEditMode(null)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '创建失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleUpdate() {
+    if (!editMode || editMode.type !== 'edit') return
+    if (!form.name.trim()) { setError('请输入地点名称'); return }
+    setSaving(true)
+    try {
+      await app.UpdateLocation(novelId, editMode.item.id, buildPayload())
+      setEditMode(null)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '更新失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete(locId: number) {
+    if (!confirm('确定要删除该地点吗？子地点的父级将被清空，关联的空间关系也会被删除。此操作不可撤销。')) return
+    setSaving(true)
+    try {
+      await app.DeleteLocation(novelId, locId)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ── Render helpers ────────────────────────────────────
+
+  function renderForm() {
+    return (
+      <div className="space-y-3">
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">名称</label>
+          <input
+            type="text"
+            value={form.name}
+            onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+            className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            placeholder="地点名称"
+          />
+        </div>
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">类型</label>
+            <input
+              type="text"
+              value={form.location_type}
+              onChange={e => setForm(f => ({ ...f, location_type: e.target.value }))}
+              className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder="如：森林、城市、洞穴"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">父地点</label>
+            <select
+              value={form.parent_location_id ?? ''}
+              onChange={e => {
+                const v = e.target.value
+                setForm(f => ({ ...f, parent_location_id: v ? parseInt(v) : undefined }))
+              }}
+              className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">无（根节点）</option>
+              {locations.filter(l => editMode?.type !== 'edit' || l.id !== editMode.item.id).map(l => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">描述</label>
+          <textarea
+            value={form.description}
+            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+            rows={2}
+            className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-y"
+            placeholder="环境氛围、特色等自然语言描述"
+          />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">标签</label>
+          <TagInput
+            tags={form.tags}
+            onChange={tags => setForm(f => ({ ...f, tags }))}
+            placeholder="输入后回车添加，如：危险、神秘、主角出生地"
+          />
+        </div>
+      </div>
+    )
+  }
+
+  function renderFormButtons(onSubmit: () => Promise<void>, onDelete?: () => void) {
+    return (
+      <div className="flex items-center gap-2 justify-end mt-3">
+        {onDelete && (
+          <button onClick={onDelete} disabled={saving} className="px-3 py-1 rounded text-xs text-destructive hover:bg-destructive/10 transition-colors">
+            <Trash2 className="h-3 w-3 inline mr-1" />删除
+          </button>
+        )}
+        <button onClick={() => setEditMode(null)} className="px-3 py-1 rounded text-xs text-muted-foreground hover:text-foreground transition-colors">取消</button>
+        <button onClick={onSubmit} disabled={saving} className="px-3 py-1 rounded bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50">
+          {saving ? '保存中...' : '保存'}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <main className="flex-1 min-w-0 flex flex-col overflow-hidden bg-background">
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 px-5 pt-4 pb-2 shrink-0">
+        <button
+          onClick={() => setViewTab('list')}
+          className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+            viewTab === 'list'
+              ? 'bg-card border border-border text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground hover:bg-card/60'
+          }`}
+        >
+          列表
+        </button>
+        <button
+          onClick={() => setViewTab('graph')}
+          className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+            viewTab === 'graph'
+              ? 'bg-card border border-border text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground hover:bg-card/60'
+          }`}
+        >
+          关系图
+        </button>
+      </div>
+
+      {viewTab === 'graph' ? (
+        <LocationGraph novelId={novelId} focusId={focusId} />
+      ) : loading ? (
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载中...</div>
+      ) : error ? (
+        <div className="flex h-full items-center justify-center text-sm text-destructive">{error}</div>
+      ) : (
+        <div className="flex-1 overflow-y-auto overscroll-contain">
+          <div className="max-w-3xl mx-auto px-5 py-6 space-y-6">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-tag-green-foreground" />
+                <h2 className="text-sm font-semibold text-foreground">
+                  地点
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">{locations.length} 处</span>
+                </h2>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={load} className="text-xs text-muted-foreground hover:text-foreground transition-colors">刷新</button>
+                <button onClick={() => openCreate()} className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity">
+                  <Plus className="h-3 w-3" />新建地点
+                </button>
+              </div>
+            </div>
+
+            {/* Create form */}
+            {editMode?.type === 'create' && (
+              <div className="rounded-lg border border-border bg-card p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-semibold text-foreground">新建地点</span>
+                  <button onClick={() => setEditMode(null)} className="p-0.5 rounded text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+                </div>
+                {renderForm()}
+                {renderFormButtons(handleCreate)}
+              </div>
+            )}
+
+            {/* Location list */}
+            {locations.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-tag-green">
+                  <MapPin className="h-5 w-5 text-tag-green-foreground" />
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">暂无地点</p>
+                <button onClick={() => openCreate()} className="mt-2 text-xs text-primary hover:underline">创建第一个地点</button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {locations.map(loc => {
+                  const isEditing = editMode?.type === 'edit' && editMode.item.id === loc.id
+                  const tags: string[] = safeJson<string[]>(loc.tags, [])
+                  const desc = loc.description?.trim() || ''
+                  const parentName = loc.parent_location_id ? nameMap.get(loc.parent_location_id) : null
+
+                  if (isEditing) {
+                    return (
+                      <div key={loc.id} className="rounded-lg border border-border bg-card p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-xs font-semibold text-foreground">编辑：{loc.name}</span>
+                          <button onClick={() => setEditMode(null)} className="p-0.5 rounded text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+                        </div>
+                        {renderForm()}
+                        {renderFormButtons(handleUpdate, () => handleDelete(loc.id))}
+                      </div>
+                    )
+                  }
+
+                  return (
+                    <div key={loc.id} className="rounded-lg border border-border bg-card hover:border-border hover:shadow-sm transition-shadow group">
+                      <div className="flex items-start gap-3 px-4 py-3">
+                        <span className="shrink-0 flex h-8 w-8 items-center justify-center rounded bg-tag-green text-tag-green-foreground">
+                          <MapPin className="h-4 w-4" />
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium text-foreground">{loc.name}</span>
+                            {loc.location_type && (
+                              <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${locationTypeTag(loc.location_type)}`}>
+                                {loc.location_type}
+                              </span>
+                            )}
+                            {parentName && (
+                              <span className="text-[11px] text-muted-foreground">
+                                <ChevronRight className="h-3 w-3 inline text-muted-foreground/60" />
+                                {parentName}
+                              </span>
+                            )}
+                          </div>
+                          {desc && <p className="mt-1 text-xs text-muted-foreground leading-relaxed line-clamp-2">{desc}</p>}
+                          <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                            {tags.map((t: string, i: number) => (
+                              <span key={i} className="rounded px-1.5 py-0.5 text-xs font-medium bg-tag-blue text-tag-blue-foreground">{t}</span>
+                            ))}
+                          </div>
+                        </div>
+                        {/* Hover actions */}
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                          <button onClick={() => openEdit(loc)} className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors" title="编辑">
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                          <button onClick={() => handleDelete(loc.id)} className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors" title="删除">
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                          {loc.parent_location_id && (
+                            <button onClick={() => openCreate(loc.id)} className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors" title="添加子地点">
+                              <Plus className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </main>
+  )
+}

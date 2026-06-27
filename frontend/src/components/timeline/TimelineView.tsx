@@ -29,11 +29,6 @@ const STATUSES = [
 ]
 const IMPORTANCES = [1, 2, 3, 4, 5]
 
-function safeJson<T>(json: string, fallback: T): T {
-  try { return JSON.parse(json) }
-  catch { return fallback }
-}
-
 function importStars(v: number) {
   return '★'.repeat(Math.max(0, Math.min(5, v)))
 }
@@ -73,7 +68,6 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [planTab, setPlanTab] = useState<Tab>('next')
   const [filter, setFilter] = useState<Filter>('all')
-  const [expandedId, setExpandedId] = useState<number | null>(null)
   const [windowCenter, setWindowCenter] = useState(0)
   const [editMode, setEditMode] = useState<EditMode>(null)
   const [form, setForm] = useState<EditForm>(EDIT_FORM_EMPTY)
@@ -107,7 +101,6 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
       const entry = entries.find(e => e.id === focusEntryId)
       if (entry) {
         setWindowCenter(entry.target_chapter || entry.source_chapter_id || 1)
-        setExpandedId(focusEntryId)
       }
     }
   }, [focusEntryId, entries])
@@ -263,7 +256,6 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
     setSaving(true)
     try {
       await app.DeleteTimelineEntry(novelId, entryId)
-      setExpandedId(null)
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : '删除失败')
@@ -372,7 +364,7 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
       {loading ? (
         <div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载中...</div>
       ) : error ? (
-        <div className="flex h-full items-center justify-center text-sm text-rose-500">{error}</div>
+        <div className="flex h-full items-center justify-center text-sm text-destructive">{error}</div>
       ) : (
         <div className="max-w-3xl mx-auto px-5 py-6 space-y-6">
           {/* Chapter Plans */}
@@ -534,14 +526,13 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                   <div key={ch}>
                     <div className="flex items-center gap-1.5 mb-2">
                       <span className="text-xs font-medium text-muted-foreground">第 {ch} 章</span>
-                      <span className="text-[10px] text-muted-foreground">{items.length} 条</span>
+                      <span className="text-[11px] text-muted-foreground">{items.length} 条</span>
                     </div>
                     <div className="space-y-2">
                       {items.map(entry => {
                         const s = statusStyle(entry.status)
                         const c = catStyle(entry.category)
                         const CatIcon = c.icon
-                        const isExpanded = expandedId === entry.id
                         const isEditing = editMode?.type === 'edit' && editMode.entry.id === entry.id
 
                         return isEditing ? (
@@ -566,24 +557,21 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                         ) : (
                           <div
                             key={entry.id}
-                            className={`rounded-lg border bg-card transition-shadow group ${isExpanded ? 'border-border shadow-sm' : 'border-border hover:border-border hover:shadow-sm'}`}
+                            className="rounded-lg border border-border bg-card hover:border-border hover:shadow-sm transition-shadow group"
                           >
                             <div className="flex items-center gap-3 px-4 py-3">
                               <span className={`shrink-0 flex h-7 w-7 items-center justify-center rounded ${c.bg}`}>
                                 <CatIcon className={`h-3.5 w-3.5 ${c.color}`} />
                               </span>
-                              <div
-                                className="flex-1 min-w-0 cursor-pointer"
-                                onClick={() => setExpandedId(isExpanded ? null : entry.id)}
-                              >
+                              <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2">
                                   <span className="text-sm font-medium text-foreground truncate">{entry.title}</span>
-                                  <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${s.bg} ${s.text}`}>
+                                  <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${s.bg} ${s.text}`}>
                                     {s.label}
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground">
-                                  <span className="text-tag-amber-foreground text-[10px]">{importStars(entry.importance)}</span>
+                                  <span className="text-tag-amber-foreground text-[11px]">{importStars(entry.importance)}</span>
                                   <span>目标第 {entry.target_chapter} 章</span>
                                   {entry.source_chapter_id > 0 && <span>· 埋于第 {entry.source_chapter_id} 章</span>}
                                   {entry.resolved_chapter_id > 0 && <span className="text-tag-green-foreground">· 回收于第 {entry.resolved_chapter_id} 章</span>}
@@ -598,7 +586,7 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                                     className="p-1 rounded text-muted-foreground hover:text-tag-green-foreground hover:bg-tag-green/20 transition-colors"
                                     title="标记已回收"
                                   >
-                                    <span className="text-[10px]">✓</span>
+                                    <span className="text-[11px]">✓</span>
                                   </button>
                                 )}
                                 <button
@@ -616,44 +604,12 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                                   <Trash2 className="h-3 w-3" />
                                 </button>
                               </div>
-                              <span
-                                className={`text-[10px] transition-transform cursor-pointer ${isExpanded ? 'rotate-180' : ''}`}
-                                onClick={() => setExpandedId(isExpanded ? null : entry.id)}
-                              >▼</span>
                             </div>
-
-                            {isExpanded && (() => {
-                              const detail = safeJson<Record<string, any>>(entry.detail_json, {})
-                              const detailKeys = Object.keys(detail).filter(k => k.trim())
-                              const hasContent = entry.content || detailKeys.length > 0
-                              return hasContent ? (
-                                <div className="border-t border-border px-4 py-3 space-y-3">
-                                  {entry.content && (
-                                    <div>
-                                      <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{entry.content}</p>
-                                    </div>
-                                  )}
-                                  {detailKeys.length > 0 && (
-                                    <div className="space-y-1">
-                                      {detailKeys.map(k => {
-                                        const v = detail[k]
-                                        const display = typeof v === 'string' ? v : Array.isArray(v) ? v.join('、') : String(v)
-                                        return (
-                                          <div key={k} className="flex gap-2 text-xs">
-                                            <span className="text-muted-foreground shrink-0">{k}</span>
-                                            <span className="text-muted-foreground">{display}</span>
-                                          </div>
-                                        )
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <div className="border-t border-border px-4 py-3">
-                                  <p className="text-xs text-muted-foreground">暂无详细内容</p>
-                                </div>
-                              )
-                            })()}
+                            {entry.content && (
+                              <div className="border-t border-border px-4 py-3">
+                                <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap line-clamp-3">{entry.content}</p>
+                              </div>
+                            )}
                           </div>
                         )
                       })}

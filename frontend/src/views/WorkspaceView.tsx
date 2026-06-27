@@ -6,8 +6,8 @@ import ActivityBar from '@/components/shell/ActivityBar'
 import StatusBar from '@/components/shell/StatusBar'
 import SidePanel from '@/components/sidebar/SidePanel'
 import ContentPanel, { type ContentPanelHandle } from '@/components/content/ContentPanel'
-import CharacterGraph from '@/components/character/CharacterGraph'
-import LocationGraph from '@/components/location/LocationGraph'
+import CharacterListView from '@/components/character/CharacterListView'
+import LocationListView from '@/components/location/LocationListView'
 import ArcListView from '@/components/storyarc/ArcListView'
 import TimelineView from '@/components/timeline/TimelineView'
 import ReaderView from '@/components/reader/ReaderView'
@@ -357,9 +357,9 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
         )}
 
         {activePanel === 'characters' ? (
-          <CharacterGraph novelId={activeNovelId} focusId={characterFocusId} />
+          <CharacterListView novelId={activeNovelId} focusId={characterFocusId} />
         ) : activePanel === 'locations' ? (
-          <LocationGraph novelId={activeNovelId} focusId={locationFocusId} />
+          <LocationListView novelId={activeNovelId} focusId={locationFocusId} />
         ) : activePanel === 'storyarcs' ? (
           <ArcListView novelId={activeNovelId} focusArcId={arcFocusId} />
         ) : activePanel === 'timeline' ? (

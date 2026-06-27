@@ -107,16 +107,14 @@ type UpdateTimelineEntryInput struct {
 }
 
 // UpdateTimelineEntry 更新伏笔或用户指令。只更新非零值字段。
-func (a *App) UpdateTimelineEntry(novelID int64, entryID int64, input UpdateTimelineEntryInput) (*timeline.TimelineEntry, error) {
+func (a *App) UpdateTimelineEntry(novelID int64, entryID int64, input UpdateTimelineEntryInput) error {
 	if err := a.timeline.DB.WithContext(a.ctx).
 		Model(&timeline.TimelineEntry{}).
 		Where("id = ? AND novel_id = ?", entryID, novelID).
 		Updates(&input).Error; err != nil {
-		return nil, fmt.Errorf("update timeline entry: %w", err)
+		return fmt.Errorf("update timeline entry: %w", err)
 	}
-	var entry timeline.TimelineEntry
-	a.timeline.DB.WithContext(a.ctx).First(&entry, entryID)
-	return &entry, nil
+	return nil
 }
 
 // DeleteTimelineEntry 删除一条伏笔或用户指令。

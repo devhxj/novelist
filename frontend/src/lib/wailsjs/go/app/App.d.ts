@@ -3,11 +3,11 @@
 import {app} from '../models';
 import {storyarc} from '../models';
 import {chapter} from '../models';
+import {character} from '../models';
+import {location} from '../models';
 import {novel} from '../models';
 import {timeline} from '../models';
 import {llm} from '../models';
-import {character} from '../models';
-import {location} from '../models';
 import {reader} from '../models';
 import {session} from '../models';
 import {storage} from '../models';
@@ -28,6 +28,10 @@ export function CreateArcNode(arg1:number,arg2:app.CreateArcNodeInput):Promise<s
 
 export function CreateChapter(arg1:app.CreateChapterInput):Promise<chapter.Chapter>;
 
+export function CreateCharacter(arg1:number,arg2:app.CreateCharacterInput):Promise<character.Character>;
+
+export function CreateLocation(arg1:number,arg2:app.CreateLocationInput):Promise<location.Location>;
+
 export function CreateNovel(arg1:app.CreateNovelInput):Promise<novel.Novel>;
 
 export function CreatePreference(arg1:number,arg2:app.CreatePreferenceInput):Promise<novel.PreferenceItem>;
@@ -38,7 +42,11 @@ export function CreateTimelineEntry(arg1:number,arg2:app.CreateTimelineEntryInpu
 
 export function DeleteArcNode(arg1:number,arg2:number):Promise<void>;
 
+export function DeleteCharacter(arg1:number,arg2:number):Promise<void>;
+
 export function DeleteCover(arg1:number):Promise<void>;
+
+export function DeleteLocation(arg1:number,arg2:number):Promise<void>;
 
 export function DeleteNovel(arg1:number):Promise<void>;
 
@@ -140,18 +148,22 @@ export function SetSelectedModel(arg1:string,arg2:string):Promise<void>;
 
 export function TestConnection(arg1:app.TestConnectionInput):Promise<void>;
 
-export function UpdateArcNode(arg1:number,arg2:number,arg3:app.UpdateArcNodeInput):Promise<storyarc.ArcNode>;
+export function UpdateArcNode(arg1:number,arg2:number,arg3:app.UpdateArcNodeInput):Promise<void>;
 
 export function UpdateChapterPlan(arg1:number,arg2:app.UpdateChapterPlanInput):Promise<void>;
 
 export function UpdateChapterTitle(arg1:number,arg2:number,arg3:string):Promise<void>;
 
+export function UpdateCharacter(arg1:number,arg2:number,arg3:app.UpdateCharacterInput):Promise<void>;
+
 export function UpdateDataDir(arg1:string):Promise<void>;
+
+export function UpdateLocation(arg1:number,arg2:number,arg3:app.UpdateLocationInput):Promise<void>;
 
 export function UpdateNovel(arg1:number,arg2:app.UpdateNovelInput):Promise<novel.Novel>;
 
 export function UpdatePreference(arg1:number,arg2:app.UpdatePreferenceInput):Promise<novel.PreferenceItem>;
 
-export function UpdateStoryArc(arg1:number,arg2:number,arg3:app.UpdateStoryArcInput):Promise<storyarc.StoryArc>;
+export function UpdateStoryArc(arg1:number,arg2:number,arg3:app.UpdateStoryArcInput):Promise<void>;
 
-export function UpdateTimelineEntry(arg1:number,arg2:number,arg3:app.UpdateTimelineEntryInput):Promise<timeline.TimelineEntry>;
+export function UpdateTimelineEntry(arg1:number,arg2:number,arg3:app.UpdateTimelineEntryInput):Promise<void>;

@@ -79,16 +79,14 @@ type UpdateStoryArcInput struct {
 }
 
 // UpdateStoryArc 更新叙事弧线。只更新非零值字段。
-func (a *App) UpdateStoryArc(novelID int64, arcID int64, input UpdateStoryArcInput) (*storyarc.StoryArc, error) {
+func (a *App) UpdateStoryArc(novelID int64, arcID int64, input UpdateStoryArcInput) error {
 	if err := a.storyarc.DB.WithContext(a.ctx).
 		Model(&storyarc.StoryArc{}).
 		Where("id = ? AND novel_id = ?", arcID, novelID).
 		Updates(&input).Error; err != nil {
-		return nil, fmt.Errorf("update story arc: %w", err)
+		return fmt.Errorf("update story arc: %w", err)
 	}
-	var arc storyarc.StoryArc
-	a.storyarc.DB.WithContext(a.ctx).First(&arc, arcID)
-	return &arc, nil
+	return nil
 }
 
 // DeleteStoryArc 删除一条叙事弧线（级联删除关联节点）。
@@ -146,16 +144,14 @@ type UpdateArcNodeInput struct {
 }
 
 // UpdateArcNode 更新弧线节点。只更新非零值字段。
-func (a *App) UpdateArcNode(novelID int64, nodeID int64, input UpdateArcNodeInput) (*storyarc.ArcNode, error) {
+func (a *App) UpdateArcNode(novelID int64, nodeID int64, input UpdateArcNodeInput) error {
 	if err := a.storyarc.DB.WithContext(a.ctx).
 		Model(&storyarc.ArcNode{}).
 		Where("id = ? AND novel_id = ?", nodeID, novelID).
 		Updates(&input).Error; err != nil {
-		return nil, fmt.Errorf("update arc node: %w", err)
+		return fmt.Errorf("update arc node: %w", err)
 	}
-	var node storyarc.ArcNode
-	a.storyarc.DB.WithContext(a.ctx).First(&node, nodeID)
-	return &node, nil
+	return nil
 }
 
 // DeleteArcNode 删除弧线节点。

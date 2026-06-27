@@ -26,6 +26,14 @@ export function CreateChapter(arg1) {
   return window['go']['app']['App']['CreateChapter'](arg1);
 }
 
+export function CreateCharacter(arg1, arg2) {
+  return window['go']['app']['App']['CreateCharacter'](arg1, arg2);
+}
+
+export function CreateLocation(arg1, arg2) {
+  return window['go']['app']['App']['CreateLocation'](arg1, arg2);
+}
+
 export function CreateNovel(arg1) {
   return window['go']['app']['App']['CreateNovel'](arg1);
 }
@@ -46,8 +54,16 @@ export function DeleteArcNode(arg1, arg2) {
   return window['go']['app']['App']['DeleteArcNode'](arg1, arg2);
 }
 
+export function DeleteCharacter(arg1, arg2) {
+  return window['go']['app']['App']['DeleteCharacter'](arg1, arg2);
+}
+
 export function DeleteCover(arg1) {
   return window['go']['app']['App']['DeleteCover'](arg1);
+}
+
+export function DeleteLocation(arg1, arg2) {
+  return window['go']['app']['App']['DeleteLocation'](arg1, arg2);
 }
 
 export function DeleteNovel(arg1) {
@@ -262,8 +278,16 @@ export function UpdateChapterTitle(arg1, arg2, arg3) {
   return window['go']['app']['App']['UpdateChapterTitle'](arg1, arg2, arg3);
 }
 
+export function UpdateCharacter(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateCharacter'](arg1, arg2, arg3);
+}
+
 export function UpdateDataDir(arg1) {
   return window['go']['app']['App']['UpdateDataDir'](arg1);
+}
+
+export function UpdateLocation(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateLocation'](arg1, arg2, arg3);
 }
 
 export function UpdateNovel(arg1, arg2) {
