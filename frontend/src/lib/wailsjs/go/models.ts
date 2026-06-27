@@ -505,6 +505,7 @@ export namespace app {
 	    detail_json?: string;
 	    parent_location_id?: number;
 	    tags?: string;
+	    clear_parent?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new UpdateLocationInput(source);
@@ -518,6 +519,7 @@ export namespace app {
 	        this.detail_json = source["detail_json"];
 	        this.parent_location_id = source["parent_location_id"];
 	        this.tags = source["tags"];
+	        this.clear_parent = source["clear_parent"];
 	    }
 	}
 	export class UpdateNovelInput {

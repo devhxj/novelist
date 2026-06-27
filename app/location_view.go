@@ -59,10 +59,19 @@ type UpdateLocationInput struct {
 	DetailJSON       string `json:"detail_json,omitempty"`
 	ParentLocationID *int64 `json:"parent_location_id,omitempty"`
 	Tags             string `json:"tags,omitempty"`
+	ClearParent      bool   `json:"clear_parent,omitempty" gorm:"-"`
 }
 
 // UpdateLocation 更新地点。只更新非零值字段。
 func (a *App) UpdateLocation(novelID int64, locID int64, input UpdateLocationInput) error {
+	if input.ClearParent {
+		if err := a.location.DB.WithContext(a.ctx).
+			Model(&location.Location{}).
+			Where("id = ? AND novel_id = ?", locID, novelID).
+			Update("parent_location_id", nil).Error; err != nil {
+			return fmt.Errorf("clear parent: %w", err)
+		}
+	}
 	if err := a.location.DB.WithContext(a.ctx).
 		Model(&location.Location{}).
 		Where("id = ? AND novel_id = ?", locID, novelID).

@@ -92,12 +92,13 @@ export default function LocationListView({ novelId, focusId }: Props) {
     setEditMode({ type: 'edit', item: loc })
   }
 
-  function buildPayload(): { name: string; location_type: string; description: string; parent_location_id?: number; tags: string } {
+  function buildPayload(): { name: string; location_type: string; description: string; parent_location_id?: number; clear_parent?: boolean; tags: string } {
     return {
       name: form.name,
       location_type: form.location_type,
       description: form.description,
       parent_location_id: form.parent_location_id && form.parent_location_id !== 0 ? form.parent_location_id : undefined,
+      clear_parent: !form.parent_location_id ? true : undefined,
       tags: JSON.stringify(form.tags),
     }
   }
