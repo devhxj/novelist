@@ -166,7 +166,125 @@ func TestLocListByNovel_Pagination(t *testing.T) {
 	result, _ := s.ListByNovel(ctx, 1, ListByNovelOptions{
 		PageParams: storage.PageParams{Page: 1, Size: 2},
 	})
-	if len(result.Items) != 2 {
+	if result.Items == nil || len(result.Items) != 2 {
 		t.Errorf("expected 2, got %d", len(result.Items))
+	}
+}
+
+// ── CRUD ────────────────────────────────────────────────────
+
+func TestLocCreate(t *testing.T) {
+	db := openLocDB(t)
+	ctx := context.Background()
+
+	loc := Location{NovelID: 1, Name: "森林", LocationType: "自然", Tags: `["秘境","古老"]`}
+	if err := db.WithContext(ctx).Create(&loc).Error; err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if loc.ID == 0 {
+		t.Error("ID should be set after create")
+	}
+
+	var found Location
+	db.First(&found, loc.ID)
+	if found.Name != "森林" {
+		t.Errorf("expected 森林, got %s", found.Name)
+	}
+}
+
+func TestLocUpdate(t *testing.T) {
+	db := openLocDB(t)
+	ctx := context.Background()
+
+	loc := Location{NovelID: 1, Name: "旧名", LocationType: "旧类型", Description: "旧描述"}
+	db.WithContext(ctx).Create(&loc)
+
+	type UpdateInput struct {
+		Name        string `json:"name,omitempty"`
+		Description string `json:"description,omitempty"`
+	}
+	input := UpdateInput{Name: "新名", Description: ""}
+	if err := db.WithContext(ctx).Model(&Location{}).Where("id = ?", loc.ID).Updates(&input).Error; err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	var updated Location
+	db.WithContext(ctx).First(&updated, loc.ID)
+	if updated.Name != "新名" {
+		t.Errorf("expected 新名, got %s", updated.Name)
+	}
+	if updated.Description != "旧描述" {
+		t.Errorf("description should be unchanged (zero value skipped), got %s", updated.Description)
+	}
+}
+
+func TestLocUpdateClearParent(t *testing.T) {
+	db := openLocDB(t)
+	ctx := context.Background()
+
+	parent := Location{NovelID: 1, Name: "王宫"}
+	db.WithContext(ctx).Create(&parent)
+	child := Location{NovelID: 1, Name: "大殿", ParentLocationID: &parent.ID}
+	db.WithContext(ctx).Create(&child)
+
+	// clear_parent → UPDATE parent_location_id = nil, then Updates other fields
+	if err := db.WithContext(ctx).Model(&Location{}).Where("id = ?", child.ID).Update("parent_location_id", nil).Error; err != nil {
+		t.Fatalf("clear parent: %v", err)
+	}
+	if err := db.WithContext(ctx).Model(&Location{}).Where("id = ?", child.ID).Updates(&Location{Name: "大殿(独立)"}).Error; err != nil {
+		t.Fatalf("update after clear: %v", err)
+	}
+
+	var updated Location
+	db.WithContext(ctx).First(&updated, child.ID)
+	if updated.ParentLocationID != nil {
+		t.Error("parent should be cleared")
+	}
+	if updated.Name != "大殿(独立)" {
+		t.Errorf("expected 大殿(独立), got %s", updated.Name)
+	}
+}
+
+func TestLocDelete(t *testing.T) {
+	db := openLocDB(t)
+	ctx := context.Background()
+
+	parent := Location{NovelID: 1, Name: "城堡"}
+	db.WithContext(ctx).Create(&parent)
+	child := Location{NovelID: 1, Name: "大厅", ParentLocationID: &parent.ID}
+	db.WithContext(ctx).Create(&child)
+	other := Location{NovelID: 1, Name: "森林"}
+	db.WithContext(ctx).Create(&other)
+	db.WithContext(ctx).Create(&LocationRelation{NovelID: 1, LocationA: parent.ID, LocationB: other.ID, RelationType: "相邻"})
+
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&Location{}).Where("parent_location_id = ?", parent.ID).Update("parent_location_id", nil).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("location_a = ? OR location_b = ?", parent.ID, parent.ID).Delete(&LocationRelation{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", parent.ID).Delete(&Location{}).Error
+	})
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	var found Location
+	if db.First(&found, parent.ID).Error == nil {
+		t.Error("parent should be deleted")
+	}
+	db.First(&found, child.ID)
+	if found.ParentLocationID != nil {
+		t.Error("child parent should be nil after reparenting")
+	}
+	var relCount int64
+	db.Model(&LocationRelation{}).Where("location_a = ? OR location_b = ?", parent.ID, parent.ID).Count(&relCount)
+	if relCount != 0 {
+		t.Errorf("relations should be cascade-deleted, got %d", relCount)
+	}
+	var otherLoc Location
+	if db.First(&otherLoc, other.ID).Error != nil {
+		t.Error("other should remain")
 	}
 }

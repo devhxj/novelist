@@ -175,3 +175,151 @@ func TestArcGetBreakpoint(t *testing.T) {
 		t.Errorf("expected 2 pending (breakpoint + next), got %d", len(pending))
 	}
 }
+
+// ── CRUD ────────────────────────────────────────────────────
+
+func TestArcCreate(t *testing.T) {
+	db := openArcDB(t)
+	ctx := context.Background()
+
+	arc := StoryArc{NovelID: 1, Name: "主线", ArcType: "main", Description: "描述", Importance: 5, Status: "active"}
+	if err := db.WithContext(ctx).Create(&arc).Error; err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if arc.ID == 0 {
+		t.Error("ID should be set after create")
+	}
+
+	var found StoryArc
+	db.First(&found, arc.ID)
+	if found.Name != "主线" {
+		t.Errorf("expected 主线, got %s", found.Name)
+	}
+	if found.Status != "active" {
+		t.Errorf("expected active, got %s", found.Status)
+	}
+}
+
+func TestArcUpdate(t *testing.T) {
+	db := openArcDB(t)
+	ctx := context.Background()
+
+	arc := StoryArc{NovelID: 1, Name: "旧弧线", ArcType: "sub", Status: "active", Importance: 3}
+	db.WithContext(ctx).Create(&arc)
+
+	type UpdateInput struct {
+		Name    string `json:"name,omitempty"`
+		Status  string `json:"status,omitempty"`
+	}
+	input := UpdateInput{Status: "paused", Name: ""}
+	if err := db.WithContext(ctx).Model(&StoryArc{}).Where("id = ?", arc.ID).Updates(&input).Error; err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	var updated StoryArc
+	db.WithContext(ctx).First(&updated, arc.ID)
+	if updated.Status != "paused" {
+		t.Errorf("status: expected paused, got %s", updated.Status)
+	}
+	if updated.Name != "旧弧线" {
+		t.Errorf("name should be unchanged (empty string skipped), got %s", updated.Name)
+	}
+}
+
+func TestArcDelete(t *testing.T) {
+	db := openArcDB(t)
+	ctx := context.Background()
+
+	arc := StoryArc{NovelID: 1, Name: "待删弧线", ArcType: "sub", Status: "active", Importance: 2}
+	db.WithContext(ctx).Create(&arc)
+	db.WithContext(ctx).Create(&ArcNode{NovelID: 1, StoryArcID: arc.ID, Title: "节点1", TargetChapter: 3, Status: "pending"})
+	db.WithContext(ctx).Create(&ArcNode{NovelID: 1, StoryArcID: arc.ID, Title: "节点2", TargetChapter: 7, Status: "pending"})
+
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("story_arc_id = ?", arc.ID).Delete(&ArcNode{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", arc.ID).Delete(&StoryArc{}).Error
+	})
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	var found StoryArc
+	if db.First(&found, arc.ID).Error == nil {
+		t.Error("arc should be deleted")
+	}
+	var nodeCount int64
+	db.Model(&ArcNode{}).Where("story_arc_id = ?", arc.ID).Count(&nodeCount)
+	if nodeCount != 0 {
+		t.Errorf("nodes should be cascade-deleted, got %d", nodeCount)
+	}
+}
+
+// ── ArcNode CRUD ────────────────────────────────────────────
+
+func TestArcNodeCreate(t *testing.T) {
+	db := openArcDB(t)
+	ctx := context.Background()
+
+	node := ArcNode{NovelID: 1, StoryArcID: 1, Title: "关键节点", TargetChapter: 5, Status: "pending"}
+	if err := db.WithContext(ctx).Create(&node).Error; err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if node.ID == 0 {
+		t.Error("ID should be set after create")
+	}
+
+	var found ArcNode
+	db.First(&found, node.ID)
+	if found.Title != "关键节点" {
+		t.Errorf("expected 关键节点, got %s", found.Title)
+	}
+	if found.Status != "pending" {
+		t.Errorf("expected pending, got %s", found.Status)
+	}
+}
+
+func TestArcNodeUpdate(t *testing.T) {
+	db := openArcDB(t)
+	ctx := context.Background()
+
+	node := ArcNode{NovelID: 1, StoryArcID: 1, Title: "旧节点", TargetChapter: 3, Status: "pending"}
+	db.WithContext(ctx).Create(&node)
+
+	type UpdateInput struct {
+		Title         string `json:"title,omitempty"`
+		Status        string `json:"status,omitempty"`
+		ActualChapter int    `json:"actual_chapter,omitempty"`
+	}
+	input := UpdateInput{Status: "completed", ActualChapter: 3}
+	if err := db.WithContext(ctx).Model(&ArcNode{}).Where("id = ?", node.ID).Updates(&input).Error; err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	var updated ArcNode
+	db.WithContext(ctx).First(&updated, node.ID)
+	if updated.Status != "completed" {
+		t.Errorf("status: expected completed, got %s", updated.Status)
+	}
+	if updated.ActualChapter != 3 {
+		t.Errorf("actual_chapter: expected 3, got %d", updated.ActualChapter)
+	}
+}
+
+func TestArcNodeDelete(t *testing.T) {
+	db := openArcDB(t)
+	ctx := context.Background()
+
+	node := ArcNode{NovelID: 1, StoryArcID: 1, Title: "待删节点", TargetChapter: 5, Status: "pending"}
+	db.WithContext(ctx).Create(&node)
+
+	if err := db.WithContext(ctx).Where("id = ?", node.ID).Delete(&ArcNode{}).Error; err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	var found ArcNode
+	if db.First(&found, node.ID).Error == nil {
+		t.Error("node should be deleted")
+	}
+}

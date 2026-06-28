@@ -2,11 +2,12 @@ package app
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"novel/internal/config"
 	"novel/internal/skill"
-	"os"
 )
 
 // ListSkillsInput 是 ListSkills 的入参。
@@ -93,9 +94,9 @@ func (a *App) DeleteSkill(input DeleteSkillInput) error {
 		if input.NovelID <= 0 {
 			return fmt.Errorf("小说 ID 无效")
 		}
-		filePath = config.NovelSkillsDir(input.NovelID) + "/" + input.Name + ".md"
+		filePath = filepath.Join(config.NovelSkillsDir(input.NovelID), input.Name+".md")
 	case "user":
-		filePath = config.UserSkillsDir() + "/" + input.Name + ".md"
+		filePath = filepath.Join(config.UserSkillsDir(), input.Name+".md")
 	}
 
 	if err := os.Remove(filePath); err != nil {

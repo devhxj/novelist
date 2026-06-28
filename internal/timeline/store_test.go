@@ -148,3 +148,75 @@ func TestTlListByNovel_Pagination(t *testing.T) {
 		t.Errorf("total should be 5, got %d", result.Total)
 	}
 }
+
+// ── CRUD ────────────────────────────────────────────────────
+
+func TestTlCreateEntry(t *testing.T) {
+	db := openTlDB(t)
+	ctx := context.Background()
+
+	entry := TimelineEntry{
+		NovelID: 1, Title: "伏笔A", Category: "foreshadowing",
+		TargetChapter: 10, Importance: 5, Status: "pending",
+		DetailJSON: `{"key":"val"}`,
+	}
+	if err := db.WithContext(ctx).Create(&entry).Error; err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if entry.ID == 0 {
+		t.Error("ID should be set after create")
+	}
+
+	var found TimelineEntry
+	db.First(&found, entry.ID)
+	if found.Title != "伏笔A" {
+		t.Errorf("expected 伏笔A, got %s", found.Title)
+	}
+	if found.Status != "pending" {
+		t.Errorf("expected pending, got %s", found.Status)
+	}
+}
+
+func TestTlUpdateEntry(t *testing.T) {
+	db := openTlDB(t)
+	ctx := context.Background()
+
+	entry := TimelineEntry{NovelID: 1, Title: "旧伏笔", Content: "旧内容", Status: "pending", TargetChapter: 5}
+	db.WithContext(ctx).Create(&entry)
+
+	type UpdateInput struct {
+		Title    string `json:"title,omitempty"`
+		Content  string `json:"content,omitempty"`
+		Status   string `json:"status,omitempty"`
+	}
+	input := UpdateInput{Status: "resolved", Content: ""}
+	if err := db.WithContext(ctx).Model(&TimelineEntry{}).Where("id = ?", entry.ID).Updates(&input).Error; err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	var updated TimelineEntry
+	db.WithContext(ctx).First(&updated, entry.ID)
+	if updated.Status != "resolved" {
+		t.Errorf("status: expected resolved, got %s", updated.Status)
+	}
+	if updated.Content != "旧内容" {
+		t.Errorf("content should be unchanged (empty string skipped), got %s", updated.Content)
+	}
+}
+
+func TestTlDeleteEntry(t *testing.T) {
+	db := openTlDB(t)
+	ctx := context.Background()
+
+	entry := TimelineEntry{NovelID: 1, Title: "待删伏笔", Category: "foreshadowing", TargetChapter: 3, Status: "pending"}
+	db.WithContext(ctx).Create(&entry)
+
+	if err := db.WithContext(ctx).Where("id = ?", entry.ID).Delete(&TimelineEntry{}).Error; err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	var found TimelineEntry
+	if db.First(&found, entry.ID).Error == nil {
+		t.Error("entry should be deleted")
+	}
+}
