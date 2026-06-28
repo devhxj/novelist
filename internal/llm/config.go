@@ -96,6 +96,8 @@ type ProviderView struct {
 	Name          string      `json:"name"`           // 显示名称
 	ChatURL       string      `json:"chat_url"`       // API 端点
 	APIKey        string      `json:"api_key"`        // 用户配置的 key，空表示未配置
+	PlatformURL   string      `json:"platform_url"`   // 注册平台链接
+	HelpText      string      `json:"help_text"`      // 注册引导文字
 	Temperature   float64     `json:"temperature"`    // 默认创意度 0~2
 	Source        string      `json:"source"`         // "builtin" | "custom"
 	BuiltinModels []ModelInfo `json:"builtin_models"` // 内置模型，自定义 provider 为 nil
@@ -128,6 +130,8 @@ func BuildConfigView(user *UserLLMConfig) *LLMConfigView {
 			Name:          bp.Name,
 			ChatURL:       chatURL,
 			APIKey:        apiKey,
+			PlatformURL:   bp.PlatformURL,
+			HelpText:      bp.HelpText,
 			Temperature:   derefOrZero(bp.Temperature),
 			Source:        "builtin",
 			BuiltinModels: append([]ModelInfo{}, bp.Models...),

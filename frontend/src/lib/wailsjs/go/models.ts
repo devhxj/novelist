@@ -898,6 +898,8 @@ export namespace llm {
 	    name: string;
 	    chat_url: string;
 	    api_key: string;
+	    platform_url: string;
+	    help_text: string;
 	    temperature: number;
 	    source: string;
 	    builtin_models: ModelInfo[];
@@ -913,6 +915,8 @@ export namespace llm {
 	        this.name = source["name"];
 	        this.chat_url = source["chat_url"];
 	        this.api_key = source["api_key"];
+	        this.platform_url = source["platform_url"];
+	        this.help_text = source["help_text"];
 	        this.temperature = source["temperature"];
 	        this.source = source["source"];
 	        this.builtin_models = this.convertValues(source["builtin_models"], ModelInfo);
