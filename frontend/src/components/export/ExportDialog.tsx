@@ -33,6 +33,7 @@ export default function ExportDialog({ open, novelTitle, onClose, onExport }: Pr
   const [format, setFormat] = useState<'epub' | 'markdown' | 'txt'>('epub')
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
 
   if (!open) return null
 
@@ -40,9 +41,10 @@ export default function ExportDialog({ open, novelTitle, onClose, onExport }: Pr
     if (exporting) return
     setExporting(true)
     setError('')
+    setSuccess(false)
     try {
       await onExport(format)
-      onClose()
+      setSuccess(true)
     } catch (e: any) {
       setError(e?.message ?? '导出失败，请重试')
     } finally {
@@ -75,6 +77,12 @@ export default function ExportDialog({ open, novelTitle, onClose, onExport }: Pr
           <p className="text-sm text-red-600 bg-danger-bg border border-danger-border rounded-md px-3 py-2 mb-4">{error}</p>
         )}
 
+        {success && (
+          <p className="text-sm text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2 mb-4">
+            ✓ 导出成功
+          </p>
+        )}
+
         <div className="space-y-2">
           {FORMATS.map(f => (
             <button
@@ -97,19 +105,30 @@ export default function ExportDialog({ open, novelTitle, onClose, onExport }: Pr
         </div>
 
         <div className="flex justify-end gap-2 mt-6">
-          <button
-            onClick={onClose}
-            className="h-9 px-4 rounded-md text-sm border hover:bg-muted transition-colors"
-          >
-            取消
-          </button>
-          <button
-            onClick={handleExport}
-            disabled={exporting}
-            className="h-9 px-4 rounded-md text-sm bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
-          >
-            {exporting ? '导出中...' : '导出'}
-          </button>
+          {success ? (
+            <button
+              onClick={onClose}
+              className="h-9 px-4 rounded-md text-sm bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+            >
+              完成
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={onClose}
+                className="h-9 px-4 rounded-md text-sm border hover:bg-muted transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleExport}
+                disabled={exporting}
+                className="h-9 px-4 rounded-md text-sm bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {exporting ? '导出中...' : '导出'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
