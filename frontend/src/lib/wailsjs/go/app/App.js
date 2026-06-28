@@ -18,8 +18,20 @@ export function CompressContext(arg1) {
   return window['go']['app']['App']['CompressContext'](arg1);
 }
 
+export function CreateArcNode(arg1, arg2) {
+  return window['go']['app']['App']['CreateArcNode'](arg1, arg2);
+}
+
 export function CreateChapter(arg1) {
   return window['go']['app']['App']['CreateChapter'](arg1);
+}
+
+export function CreateCharacter(arg1, arg2) {
+  return window['go']['app']['App']['CreateCharacter'](arg1, arg2);
+}
+
+export function CreateLocation(arg1, arg2) {
+  return window['go']['app']['App']['CreateLocation'](arg1, arg2);
 }
 
 export function CreateNovel(arg1) {
@@ -30,8 +42,32 @@ export function CreatePreference(arg1, arg2) {
   return window['go']['app']['App']['CreatePreference'](arg1, arg2);
 }
 
+export function CreateReaderPerspective(arg1, arg2) {
+  return window['go']['app']['App']['CreateReaderPerspective'](arg1, arg2);
+}
+
+export function CreateStoryArc(arg1, arg2) {
+  return window['go']['app']['App']['CreateStoryArc'](arg1, arg2);
+}
+
+export function CreateTimelineEntry(arg1, arg2) {
+  return window['go']['app']['App']['CreateTimelineEntry'](arg1, arg2);
+}
+
+export function DeleteArcNode(arg1, arg2) {
+  return window['go']['app']['App']['DeleteArcNode'](arg1, arg2);
+}
+
+export function DeleteCharacter(arg1, arg2) {
+  return window['go']['app']['App']['DeleteCharacter'](arg1, arg2);
+}
+
 export function DeleteCover(arg1) {
   return window['go']['app']['App']['DeleteCover'](arg1);
+}
+
+export function DeleteLocation(arg1, arg2) {
+  return window['go']['app']['App']['DeleteLocation'](arg1, arg2);
 }
 
 export function DeleteNovel(arg1) {
@@ -42,8 +78,32 @@ export function DeletePreference(arg1) {
   return window['go']['app']['App']['DeletePreference'](arg1);
 }
 
+export function DeleteReaderPerspective(arg1, arg2) {
+  return window['go']['app']['App']['DeleteReaderPerspective'](arg1, arg2);
+}
+
+export function DeleteSkill(arg1) {
+  return window['go']['app']['App']['DeleteSkill'](arg1);
+}
+
+export function DeleteStoryArc(arg1, arg2) {
+  return window['go']['app']['App']['DeleteStoryArc'](arg1, arg2);
+}
+
+export function DeleteTimelineEntry(arg1, arg2) {
+  return window['go']['app']['App']['DeleteTimelineEntry'](arg1, arg2);
+}
+
 export function DiscoverModels(arg1, arg2) {
   return window['go']['app']['App']['DiscoverModels'](arg1, arg2);
+}
+
+export function ExportNovel(arg1, arg2) {
+  return window['go']['app']['App']['ExportNovel'](arg1, arg2);
+}
+
+export function ExtractStyle(arg1) {
+  return window['go']['app']['App']['ExtractStyle'](arg1);
 }
 
 export function GetAppConfig() {
@@ -218,8 +278,28 @@ export function TestConnection(arg1) {
   return window['go']['app']['App']['TestConnection'](arg1);
 }
 
+export function UpdateArcNode(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateArcNode'](arg1, arg2, arg3);
+}
+
+export function UpdateChapterPlan(arg1, arg2) {
+  return window['go']['app']['App']['UpdateChapterPlan'](arg1, arg2);
+}
+
+export function UpdateChapterTitle(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateChapterTitle'](arg1, arg2, arg3);
+}
+
+export function UpdateCharacter(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateCharacter'](arg1, arg2, arg3);
+}
+
 export function UpdateDataDir(arg1) {
   return window['go']['app']['App']['UpdateDataDir'](arg1);
+}
+
+export function UpdateLocation(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateLocation'](arg1, arg2, arg3);
 }
 
 export function UpdateNovel(arg1, arg2) {
@@ -228,4 +308,16 @@ export function UpdateNovel(arg1, arg2) {
 
 export function UpdatePreference(arg1, arg2) {
   return window['go']['app']['App']['UpdatePreference'](arg1, arg2);
+}
+
+export function UpdateReaderPerspective(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateReaderPerspective'](arg1, arg2, arg3);
+}
+
+export function UpdateStoryArc(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateStoryArc'](arg1, arg2, arg3);
+}
+
+export function UpdateTimelineEntry(arg1, arg2, arg3) {
+  return window['go']['app']['App']['UpdateTimelineEntry'](arg1, arg2, arg3);
 }

@@ -5,6 +5,8 @@ var Builtin = map[string]Provider{
 	"deepseek": {
 		Name:        "DeepSeek",
 		ChatURL:     "https://api.deepseek.com/v1/chat/completions",
+		PlatformURL: "https://platform.deepseek.com",
+		HelpText:    "使用邮箱或手机号注册。完成实名认证后，进入「API Keys」创建密钥。预付费模式，最低充值 ¥1。",
 		Temperature: floatPtr(0.7),
 		Models: []ModelInfo{
 			{
@@ -29,55 +31,59 @@ var Builtin = map[string]Provider{
 		BuildRequest: nil,
 	},
 	"doubao": {
-			Name:        "Doubao",
-			ChatURL:     "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-			Temperature: floatPtr(0.1),
-			Models: []ModelInfo{
-				{
-					ID:               "doubao-seed-2-1-pro-260628",
-					Name:             "Seed 2.1 Pro",
-					ContextWindow:    256_000,
-					MaxOutputTokens:  256_000,
-					SupportsThinking: true,
-					SupportsVision:   true,
-				},
-				{
-					ID:               "doubao-seed-2-1-turbo-260628",
-					Name:             "Seed 2.1 Turbo",
-					ContextWindow:    256_000,
-					MaxOutputTokens:  256_000,
-					SupportsThinking: true,
-					SupportsVision:   true,
-				},
-				{
-					ID:               "doubao-seed-2-0-lite-260428",
-					Name:             "Seed 2.0 Lite",
-					ContextWindow:    256_000,
-					MaxOutputTokens:  128_000,
-					SupportsThinking: true,
-					SupportsVision:   true,
-				},
-				{
-					ID:               "doubao-seed-2-0-code-preview-260215",
-					Name:             "Seed 2.0 Code Preview",
-					ContextWindow:    256_000,
-					MaxOutputTokens:  128_000,
-					SupportsThinking: true,
-					SupportsVision:   true,
-				},
-				{
-					ID:               "doubao-seed-character-260628",
-					Name:             "Seed Character",
-					ContextWindow:    128_000,
-					MaxOutputTokens:  32_000,
-					SupportsThinking: true,
-					SupportsVision:   true,
-				},
+		Name:        "Doubao",
+		ChatURL:     "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+		PlatformURL: "https://console.volcengine.com/ark/",
+		HelpText:    "注册火山引擎并实名认证，进入火山方舟控制台。① 在「API 密钥管理」创建 API Key；② 在「开通管理」开通所需模型，每个模型有试用额度。",
+		Temperature: floatPtr(0.1),
+		Models: []ModelInfo{
+			{
+				ID:               "doubao-seed-2-1-pro-260628",
+				Name:             "Seed 2.1 Pro",
+				ContextWindow:    256_000,
+				MaxOutputTokens:  256_000,
+				SupportsThinking: true,
+				SupportsVision:   true,
+			},
+			{
+				ID:               "doubao-seed-2-1-turbo-260628",
+				Name:             "Seed 2.1 Turbo",
+				ContextWindow:    256_000,
+				MaxOutputTokens:  256_000,
+				SupportsThinking: true,
+				SupportsVision:   true,
+			},
+			{
+				ID:               "doubao-seed-2-0-lite-260428",
+				Name:             "Seed 2.0 Lite",
+				ContextWindow:    256_000,
+				MaxOutputTokens:  128_000,
+				SupportsThinking: true,
+				SupportsVision:   true,
+			},
+			{
+				ID:               "doubao-seed-2-0-code-preview-260215",
+				Name:             "Seed 2.0 Code Preview",
+				ContextWindow:    256_000,
+				MaxOutputTokens:  128_000,
+				SupportsThinking: true,
+				SupportsVision:   true,
+			},
+			{
+				ID:               "doubao-seed-character-260628",
+				Name:             "Seed Character",
+				ContextWindow:    128_000,
+				MaxOutputTokens:  32_000,
+				SupportsThinking: true,
+				SupportsVision:   true,
 			},
 		},
-		"qwen": {
+	},
+	"qwen": {
 		Name:         "Qwen",
 		ChatURL:      "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+		PlatformURL:  "https://platform.qianwenai.com",
+		HelpText:     "注册后在「工作台 → API Key 管理」创建密钥。新用户有免费额度，API 地址统一使用 dashscope.aliyuncs.com，无需区分地域。如使用阿里云百炼平台，需自行将上方 Chat URL 替换为百炼地址。",
 		Temperature:  floatPtr(0.7),
 		BuildRequest: qwenBuildRequest,
 		Models: []ModelInfo{
@@ -118,6 +124,8 @@ var Builtin = map[string]Provider{
 	"zhipu": {
 		Name:        "GLM",
 		ChatURL:     "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+		PlatformURL: "https://open.bigmodel.cn",
+		HelpText:    "手机号或微信注册。注册后点击「控制台」→「API Keys」→「新建」创建密钥。注册赠送体验额度。",
 		Temperature: floatPtr(1.0),
 		Models: []ModelInfo{
 			{
@@ -174,6 +182,8 @@ var Builtin = map[string]Provider{
 	"minimax": {
 		Name:         "MiniMax",
 		ChatURL:      "https://api.minimaxi.com/v1/chat/completions",
+		PlatformURL:  "https://platform.minimaxi.com",
+		HelpText:     "手机号注册。赠送 ¥15 体验金。点击控制台 →「接口管理」→「创建 API Key」获取密钥。按量付费需在「余额」页面充值。",
 		Temperature:  floatPtr(1.0),
 		BuildRequest: minimaxBuildRequest,
 		Models: []ModelInfo{
@@ -206,6 +216,8 @@ var Builtin = map[string]Provider{
 	"mimo": {
 		Name:         "MiMo",
 		ChatURL:      "https://api.xiaomimimo.com/v1/chat/completions",
+		PlatformURL:  "https://platform.xiaomimimo.com",
+		HelpText:     "手机号注册。在控制台左侧「邀请有礼」输入邀请码领取 ¥10 体验金（有效期 40 天），然后在「API Keys」创建密钥。",
 		Temperature:  floatPtr(1.0),
 		BuildHeaders: mimoBuildHeaders,
 		Models: []ModelInfo{
@@ -231,6 +243,8 @@ var Builtin = map[string]Provider{
 	"moonshot": {
 		Name:         "Kimi",
 		ChatURL:      "https://api.moonshot.cn/v1/chat/completions",
+		PlatformURL:  "https://platform.kimi.com",
+		HelpText:     "手机号或微信登录。在控制台「API Key 管理」创建密钥。新用户赠送 ¥15 体验金，初始 RPM=3。累计充值 ¥50 升 Tier 1（RPM=200）。",
 		BuildRequest: moonshotBuildRequest,
 		Models: []ModelInfo{
 			{

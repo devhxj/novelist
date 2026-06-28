@@ -27,8 +27,15 @@ Categories=Office;WordProcessor;
 Terminal=false
 EOF
 
-# 图标占位
-[ -f build/package/linux/goink.png ] && cp build/package/linux/goink.png "$APPDIR/" || touch "$APPDIR/goink.png"
+# 图标（优先专用图标，回退到项目 appicon.png）
+if [ -f build/package/linux/goink.png ]; then
+  cp build/package/linux/goink.png "$APPDIR/"
+elif [ -f appicon.png ]; then
+  cp appicon.png "$APPDIR/goink.png"
+else
+  echo "Warning: no icon found, AppImage will have no icon" >&2
+  touch "$APPDIR/goink.png"
+fi
 
 # AppRun
 cat > "$APPDIR/AppRun" <<'APPRUN'

@@ -77,30 +77,71 @@ Two-tier management: global preferences and per-novel preferences. By chapter th
 
 ## Frontend Visualized State
 <p align="center">
-  <img src="assets/arc-demo.png" width="32%" alt="Story Arcs" />
-  <img src="assets/location-demo.png" width="32%" alt="Location Graph" />
-  <img src="assets/preferences-demo.png" width="32%" alt="Writing Preferences" />
+  <img src="assets/arc-demo.png" alt="Story Arcs" />
+</p>
+<p align="center">
+  <img src="assets/location-demo.png" alt="Location Graph" />
+</p>
+<p align="center">
+  <img src="assets/preferences-demo.png" alt="Writing Preferences" />
 </p>
 
-## Skill Matrix: Any Writing Style, Drop a File and It Works
+## Skill System: 3 Layers × 3 Modes
 
-8 built-in creative methodologies—Scene Beats, Dialogue Subtext, Pacing Control, Suspense Hooks, Character Design, Revision Polish, De-AI-ify, Co-Creation Brainstorm—covering the full writing workflow. Load with `/skillname` and the LLM executes the methodology workflow.
+Skills are Goink's creative methodology modules. Each Skill is defined by a single `.md` file with YAML frontmatter metadata and markdown body. **3 layers × 3 modes = 9 strategic dimensions** — precise control over what content, at what scope, with what activation model.
 
-Need more? Create a `.md` file and it becomes a new Skill:
+### Three Layers
+
+Same-name Skills override by priority: **Novel > User > Built-in**. Changes hot-reload instantly — no restart needed.
+
+| Layer | Storage | Scope | Editable |
+|---|---|---|---|
+| Built-in | Read-only bundled | All novels | No |
+| User | `~/.goink/skills/` | All novels | Yes |
+| Novel | `{novel}/skills/` | Current novel | Yes |
+
+### Three Modes
+
+| Mode | AI auto-invoke | User `/` trigger | Injected at session start | Listed in catalog |
+|---|---|---|---|---|
+| Smart `auto` | Yes | Yes | — | Yes |
+| Command `manual` | — | Yes | — | — |
+| Always-on `always` | Yes | Yes | Yes (full body) | — |
+
+### 3×3 Capability Matrix
+
+|  | Smart auto | Command manual | Always-on always |
+|---|---|---|---|
+| **Built-in** | Scene Beats, Dialogue Subtext, Pacing Control, Suspense Hooks, Character Design, Revision Polish, De-AI-ify, Co-Creation Brainstorm | review / memory / collect / next | — |
+| **User** | Reusable cross-novel workflows | Personal quick commands | Global style rules |
+| **Novel** | Novel-specific workflows | Novel quick commands | Novel always-on rules |
+
+Create a `.md` file and it becomes a new Skill:
 
 ```markdown
 ---
 name: My Writing Process
 description: Custom personal creative workflow
 category: Custom
+mode: auto
 ---
 # Content...
 ```
 
-Three-layer override (Built-in → User → Novel), **same-name Skills override by level**, hot-reload, zero-code extensibility.
+Zero-code extensibility. Changes take effect instantly. Deletion works the same way.
 
 <p align="center">
   <img src="assets/skill-demo.png" width="80%" alt="Skill System" />
+</p>
+
+## Style Distillation: One Sample → One Imitation Skill
+
+Want to write like a certain author? Paste a sample text. The AI analyzes it across six dimensions — **sentence structure, word choice, rhetorical devices, pacing, narrative distance, tone & atmosphere** — and generates a complete imitation Skill. This is pattern extraction, not keyword substitution.
+
+The generated Skill appears in your list instantly. Load it with `/stylename` and all subsequent output follows that style. Open the editor to fine-tune if needed.
+
+<p align="center">
+  <img src="assets/extract-demo.png" width="80%" alt="Style Distillation" />
 </p>
 
 ## Triple Assurance: Maintenance Never Gets Missed
@@ -117,8 +158,10 @@ The AI doesn't modify the manuscript directly. Every edit generates a Diff first
 
 Every change has Git history. Roll back to any state at any time.
 <p align="center">
-  <img src="assets/write-demo.png" width="48%" alt="Writing & Diff Approval" />
-  <img src="assets/outline-demo.png" width="48%" alt="Outline & Chapter Plan" />
+  <img src="assets/write-demo.png" alt="Writing & Diff Approval" />
+</p>
+<p align="center">
+  <img src="assets/outline-demo.png" alt="Outline & Chapter Plan" />
 </p>
 ## The AI Can't Touch Files It Shouldn't
 

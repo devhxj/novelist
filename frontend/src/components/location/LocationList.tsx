@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { ChevronRight, MapPin } from 'lucide-react'
+import { ChevronRight, MapPin, Trash2 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { location } from '@/hooks/useApp'
 
@@ -45,6 +45,14 @@ export default function LocationList({ novelId }: Props) {
 
   useEffect(() => { load() }, [load])
 
+  async function handleDelete(locId: number) {
+    if (!confirm('确定要删除该地点吗？子地点将变为根节点，关联的空间关系也会被删除。')) return
+    try {
+      await app.DeleteLocation(novelId, locId)
+      await load()
+    } catch { /* 静默失败 */ }
+  }
+
   useEffect(() => {
     // 默认展开根节点
     const roots = locations.filter(l => !l.parent_location_id)
@@ -67,7 +75,7 @@ export default function LocationList({ novelId }: Props) {
     const isExpanded = expandedIds.has(loc.id)
     const hasChildren = node.children.length > 0
     return (
-      <div key={loc.id}>
+      <div key={loc.id} className="group">
         <button
           onClick={() => { if (hasChildren) toggle(loc.id) }}
           className="w-full flex items-center gap-1.5 px-3 py-1.5 text-left hover:bg-muted/50 transition-colors"
@@ -85,6 +93,13 @@ export default function LocationList({ novelId }: Props) {
           {loc.location_type && (
             <span className="text-[10px] text-muted-foreground/60 shrink-0">{loc.location_type}</span>
           )}
+          <button
+            onClick={(e) => { e.stopPropagation(); handleDelete(loc.id) }}
+            className="shrink-0 p-0.5 rounded text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+            title="删除"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
         </button>
         {isExpanded && hasChildren && (
           <div>

@@ -2,6 +2,7 @@ import { useMemo, useState, useRef } from 'react'
 
 interface Props {
   content: string
+  isDirty?: boolean
 }
 
 interface DetailedStats {
@@ -54,7 +55,7 @@ function computeStats(text: string): DetailedStats {
   }
 }
 
-export default function StatusBar({ content }: Props) {
+export default function StatusBar({ content, isDirty }: Props) {
   const stats = useMemo(() => computeStats(content), [content])
   const [showDetail, setShowDetail] = useState(false)
   const hoverTimer = useRef<ReturnType<typeof setTimeout>>(0)
@@ -122,8 +123,8 @@ export default function StatusBar({ content }: Props) {
       )}
 
       <span className="flex items-center gap-1">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-        已保存
+        <span className={`w-1.5 h-1.5 rounded-full ${isDirty ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+        {isDirty ? '未保存' : '已保存'}
       </span>
     </div>
   )

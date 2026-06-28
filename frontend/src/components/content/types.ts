@@ -7,7 +7,7 @@ export type EditorTab = {
   content?: string
   outlineContent?: string
   isDirty?: boolean
-  viewMode?: 'content' | 'outline' | 'preview'
+  viewMode?: 'content' | 'outline' | 'preview' | 'edit'
   readOnly?: boolean
   // diff tab
   diff?: string

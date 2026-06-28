@@ -12,6 +12,8 @@ type Provider struct {
 	Name         string                                         `json:"name"`                  // 供应商名称，如 "DeepSeek"
 	ChatURL      string                                         `json:"chat_url"`              // 聊天补全端点
 	APIKey       string                                         `json:"api_key,omitempty"`     // API 密钥
+	PlatformURL  string                                         `json:"-"`                     // 注册平台 URL，仅内置模板使用
+	HelpText     string                                         `json:"-"`                     // 注册引导文字，仅内置模板使用
 	Models       []ModelInfo                                    `json:"models"`                // 可用模型列表
 	Temperature  *float64                                       `json:"temperature,omitempty"` // 默认创意度 0~2，nil 表示未设置，运行时取内置默认
 	BuildRequest func(payload map[string]any) map[string]any    `json:"-"`                     // 发送前改造请求体，nil 则原样发送

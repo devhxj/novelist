@@ -94,6 +94,19 @@ func (s *Store) ListMeta(novelID int64) []SkillMeta {
 	return result
 }
 
+// ListMetaForCatalog 返回只有 auto 模式的 skill 元数据，用于注入 LLM skill catalog。
+// manual 和 always 不出现在 catalog 中。
+// ListMetaForCatalog 从已有列表中过滤出 auto 模式的 skill，用于构建 skill catalog。
+func (s *Store) ListMetaForCatalog(all []SkillMeta) []SkillMeta {
+	var result []SkillMeta
+	for _, m := range all {
+		if m.Mode == ModeAuto {
+			result = append(result, m)
+		}
+	}
+	return result
+}
+
 // ReloadUser 重新扫描用户级 skill 目录。
 func (s *Store) ReloadUser(userSkillsDir string) error {
 	s.mu.Lock()

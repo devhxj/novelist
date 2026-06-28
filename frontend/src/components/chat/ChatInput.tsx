@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { ArrowUp, Square, Zap, Play } from 'lucide-react'
+import { ArrowUp, Square, Zap, Play, Star } from 'lucide-react'
 import type { app } from '@/hooks/useApp'
 import SlashMenu from './SlashMenu'
 
@@ -158,11 +158,13 @@ export default function ChatInput({ disabled, isLoading, placeholder, slashItems
       {activeCommand && (
         <div className="flex items-center mb-1 px-1">
           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${
-            activeCommand.type === 'command'
-              ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
-              : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+            activeCommand.type === 'manual' ? 'bg-tag-blue text-tag-blue-foreground' :
+            activeCommand.type === 'always' ? 'bg-tag-green text-tag-green-foreground' :
+            'bg-tag-amber text-tag-amber-foreground'
           }`}>
-            {activeCommand.type === 'command' ? <Play className="w-3 h-3" /> : <Zap className="w-3 h-3" />}
+            {activeCommand.type === 'manual' ? <Play className="w-3 h-3" /> :
+             activeCommand.type === 'always' ? <Star className="w-3 h-3" /> :
+             <Zap className="w-3 h-3" />}
             {activeCommand.name}
           </span>
         </div>
@@ -180,7 +182,7 @@ export default function ChatInput({ disabled, isLoading, placeholder, slashItems
         {isLoading && !hasContent ? (
           <button
             onClick={handleStopClick}
-            className="w-[52px] h-[36px] min-w-[52px] flex items-center justify-center rounded-xl bg-red-500 text-white shadow-md shadow-red-500/20 transition-all hover:bg-red-600 hover:shadow-lg hover:shadow-red-500/30 shrink-0"
+            className="w-[52px] h-[36px] min-w-[52px] flex items-center justify-center rounded-xl bg-destructive text-destructive-foreground shadow-md transition-all hover:bg-destructive/85 shrink-0"
           >
             <Square className="w-4 h-4" fill="currentColor" />
           </button>

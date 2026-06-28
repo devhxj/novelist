@@ -101,14 +101,14 @@ func (a *Agent) Cancel(sessionID string) {
 // RunSubAgent 启动子 Agent 并返回最终报告文本。
 func (a *Agent) RunSubAgent(ctx context.Context, parentOpts RunOptions, req mcp_tools.SubAgentRequest) (string, error) {
 	at := agentTypeFromString(req.AgentType)
-	sysPrompt := agentcfg.System1(at)
+	sysPrompt := agentcfg.AgentIdentity(at)
 	allowed := agentcfg.Allowlist(at)
 
 	msgs := []map[string]any{
 		{"role": "system", "content": sysPrompt},
 	}
-	if sys3, err := agentcfg.System3(a.db, req.NovelID); err == nil && sys3 != "" {
-		msgs = append(msgs, map[string]any{"role": "system", "content": sys3})
+	if novelState, err := agentcfg.NovelState(a.db, req.NovelID); err == nil && novelState != "" {
+		msgs = append(msgs, map[string]any{"role": "system", "content": novelState})
 	}
 	msgs = append(msgs, map[string]any{"role": "user", "content": req.Instruction})
 

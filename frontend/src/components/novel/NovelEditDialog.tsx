@@ -67,7 +67,7 @@ export default function NovelEditDialog({ open, novel, onClose, onSave }: Props)
         <h2 className="text-base font-semibold mb-5">{isEdit ? '编辑作品' : '新建作品'}</h2>
 
         {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2 mb-4">{error}</p>
+          <p className="text-sm text-red-600 bg-danger-bg border border-danger-border rounded-md px-3 py-2 mb-4">{error}</p>
         )}
 
         <div className="space-y-4">

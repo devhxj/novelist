@@ -2,7 +2,7 @@
 name: revision-pass
 description: 提供三遍修改法，按结构层→场景层→句子层逐级打磨文稿。当用户要求修改章节、审稿、或说"帮我看看""润色一下""感觉不对"时，使用此技能。
 category: 修订
-mode: on_demand
+mode: auto
 author: builtin
 version: 1
 ---

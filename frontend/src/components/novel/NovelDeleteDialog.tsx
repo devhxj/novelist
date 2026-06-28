@@ -53,10 +53,10 @@ export default function NovelDeleteDialog({ open, novelTitle, onClose, onConfirm
           ✕
         </button>
 
-        <h2 className="text-base font-semibold text-red-600 mb-3">删除作品</h2>
+        <h2 className="text-base font-semibold text-destructive mb-3">删除作品</h2>
 
         {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2 mb-3">{error}</p>
+          <p className="text-sm text-red-600 bg-danger-bg border border-danger-border rounded-md px-3 py-2 mb-3">{error}</p>
         )}
 
         <p className="text-sm text-muted-foreground mb-1">
@@ -83,7 +83,7 @@ export default function NovelDeleteDialog({ open, novelTitle, onClose, onConfirm
           <button
             onClick={handleDelete}
             disabled={!canDelete || deleting}
-            className="h-9 px-4 rounded-md text-sm bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+            className="h-9 px-4 rounded-md text-sm bg-destructive text-destructive-foreground hover:bg-destructive/85 transition-colors disabled:opacity-50"
           >
             {deleting ? '删除中...' : '确认删除'}
           </button>

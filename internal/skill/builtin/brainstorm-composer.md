@@ -2,7 +2,7 @@
 name: brainstorm-composer
 description: 提供共创构思工作流，LLM作为brainstorm搭档帮用户挖掘和验证情节方案。当用户卡情节、说"没想法""接下来怎么写""帮我构思"时，使用此技能。
 category: 创作
-mode: on_demand
+mode: auto
 author: builtin
 version: 1
 ---

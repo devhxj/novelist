@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Search } from 'lucide-react'
+import { Search, Trash2 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { character } from '@/hooks/useApp'
 
@@ -26,6 +26,14 @@ export default function CharacterList({ novelId }: Props) {
     const q = search.toLowerCase()
     return characters.filter(c => c.name.toLowerCase().includes(q))
   }, [characters, search])
+
+  async function handleDelete(charId: number) {
+    if (!confirm('确定要删除该角色吗？关联的关系记录也会被删除。')) return
+    try {
+      await app.DeleteCharacter(novelId, charId)
+      await load()
+    } catch { /* 静默失败，主视图会处理 */ }
+  }
 
   return (
     <>
@@ -59,12 +67,19 @@ export default function CharacterList({ novelId }: Props) {
           filtered.map(c => (
             <div
               key={c.id}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left hover:bg-muted/50 transition-colors"
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left hover:bg-muted/50 transition-colors group"
             >
-              <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-medium flex items-center justify-center shrink-0">
+              <span className="w-5 h-5 rounded-full bg-tag-blue text-tag-blue-foreground text-[10px] font-medium flex items-center justify-center shrink-0">
                 {c.name.charAt(0)}
               </span>
               <span className="flex-1 text-sm truncate">{c.name}</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleDelete(c.id) }}
+                className="shrink-0 p-0.5 rounded text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                title="删除"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
             </div>
           ))
         )}

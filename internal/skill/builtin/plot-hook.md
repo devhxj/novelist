@@ -2,7 +2,7 @@
 name: plot-hook
 description: 提供悬念设计与伏笔管理方法论，涵盖悬念类型、章尾钩子和埋设-强化-回收流程。当用户要求设计悬念、章尾钩子、埋伏笔或回收伏笔时，使用此技能。
 category: 情节
-mode: on_demand
+mode: auto
 author: builtin
 version: 1
 ---

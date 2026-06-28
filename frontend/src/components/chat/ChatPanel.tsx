@@ -893,11 +893,11 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
       </div>
 
       {initLoadError && (
-        <div className="px-4 py-2 bg-red-50 border-b border-red-200 text-xs text-red-600 flex items-center justify-between shrink-0">
+        <div className="px-4 py-2 bg-danger-bg border-b border-danger-border text-xs text-red-600 flex items-center justify-between shrink-0">
           <span>加载设置失败，模型列表和偏好可能不准确</span>
           <button
             onClick={() => setInitLoadRetry(n => n + 1)}
-            className="underline hover:text-red-800 cursor-pointer"
+            className="underline hover:text-destructive cursor-pointer"
           >
             重试
           </button>
@@ -1037,14 +1037,14 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
 
                     {turn.status === 'failed' && turn.errorMessage && (
                       <div className="flex justify-start">
-                        <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-600 max-w-[80%]">
+                        <div className="bg-danger-bg border border-danger-border rounded-lg px-3 py-2 text-xs text-red-600 max-w-[80%]">
                           {turn.errorMessage}
                         </div>
                       </div>
                     )}
                     {turn.status === 'interrupted' && (
                       <div className="flex justify-center">
-                        <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-500 max-w-[80%]">
+                        <div className="bg-danger-bg border border-danger-border rounded-lg px-3 py-2 text-xs text-red-500 max-w-[80%]">
                           对话被中断
                         </div>
                       </div>

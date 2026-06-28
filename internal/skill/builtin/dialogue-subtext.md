@@ -2,7 +2,7 @@
 name: dialogue-subtext
 description: 提供对白设计方法论，让每句台词都承载潜台词和角色博弈。当用户要求写对白、检查对白质量、或说"太生硬""说话都一样""没味道"时，使用此技能。
 category: 角色
-mode: on_demand
+mode: auto
 author: builtin
 version: 1
 ---

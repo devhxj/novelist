@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Plus, Pencil, Trash2, BookOpen, Camera } from 'lucide-react'
+import { Plus, Pencil, Trash2, BookOpen, Camera, Download } from 'lucide-react'
 import BookCover from '@/components/sidebar/BookCover'
 import type { novel } from '@/hooks/useApp'
 
@@ -11,12 +11,13 @@ interface Props {
   onDeleteNovel: (n: novel.Novel) => void
   onCreateNovel: () => void
   onSaveCover: (novelID: number, file: File) => Promise<void>
+  onExportNovel: (n: novel.Novel) => void
 }
 
 export default function BookshelfView({
   novels, activeNovelId,
   onSelectNovel, onEditNovel, onDeleteNovel, onCreateNovel,
-  onSaveCover,
+  onSaveCover, onExportNovel,
 }: Props) {
   const [coverKeys, setCoverKeys] = useState<Record<number, number>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -115,6 +116,13 @@ export default function BookshelfView({
                 {/* 悬浮操作按钮 */}
                 <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
+                    onClick={(e) => { e.stopPropagation(); onExportNovel(n) }}
+                    className="w-7 h-7 flex items-center justify-center rounded-md bg-background/90 border shadow-sm hover:bg-muted transition-colors"
+                    title="导出"
+                  >
+                    <Download className="w-3.5 h-3.5 text-muted-foreground" />
+                  </button>
+                  <button
                     onClick={(e) => { e.stopPropagation(); onEditNovel(n) }}
                     className="w-7 h-7 flex items-center justify-center rounded-md bg-background/90 border shadow-sm hover:bg-muted transition-colors"
                     title="编辑"
@@ -123,10 +131,10 @@ export default function BookshelfView({
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); onDeleteNovel(n) }}
-                    className="w-7 h-7 flex items-center justify-center rounded-md bg-background/90 border shadow-sm hover:bg-red-50 hover:border-red-200 transition-colors"
+                    className="w-7 h-7 flex items-center justify-center rounded-md bg-background/90 border shadow-sm hover:bg-danger-bg hover:border-danger-border transition-colors"
                     title="删除"
                   >
-                    <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-red-600" />
+                    <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive" />
                   </button>
                 </div>
               </div>

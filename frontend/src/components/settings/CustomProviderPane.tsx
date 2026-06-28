@@ -212,7 +212,7 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
                     </div>
                     <button
                       onClick={() => onRemoveCustomModel(selectedKey, m.id)}
-                      className="text-muted-foreground hover:text-red-500 transition-colors"
+                      className="text-muted-foreground hover:text-destructive transition-colors"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -239,7 +239,7 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
                 onRemove(selectedKey)
                 setSelectedKey(providers.filter(p => p.key !== selectedKey)[0]?.key || '')
               }}
-              className="h-8 px-3 rounded-md border border-red-200 text-red-500 text-xs hover:bg-red-50 transition-colors"
+              className="h-8 px-3 rounded-md border border-danger-border text-destructive text-xs hover:bg-danger-bg transition-colors"
             >
               删除服务商
             </button>

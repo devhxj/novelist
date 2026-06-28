@@ -36,6 +36,7 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -70,8 +71,14 @@
   --tool-green-border: oklch(0.5 0.15 155);
   --tool-red: oklch(0.97 0.01 27);
   --tool-red-border: oklch(0.58 0.22 27);
+  --danger-bg: oklch(0.97 0.015 15);
+  --danger-border: oklch(0.88 0.06 18);
   --bubble-user: oklch(0.546 0.245 262.881);
   --bubble-user-foreground: oklch(0.985 0 0);
+  --action-extract: oklch(0.62 0.18 80);
+  --action-extract-foreground: oklch(0.985 0 0);
+  --action-save: oklch(0.48 0.14 155);
+  --action-save-foreground: oklch(0.985 0 0);
 }
 
 /* ── 深色主题 ────────────────────────────────────────────── */
@@ -92,6 +99,7 @@
   --accent: oklch(0.23 0.012 258);
   --accent-foreground: oklch(0.94 0.003 255);
   --destructive: oklch(0.55 0.18 22);
+  --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.32 0.012 255);
   --input: oklch(0.28 0.012 258);
   --ring: oklch(0.65 0.15 255);
@@ -126,8 +134,14 @@
   --tool-green-border: oklch(0.55 0.15 145);
   --tool-red: oklch(0.5 0.18 15 / 0.1);
   --tool-red-border: oklch(0.55 0.18 22);
+  --danger-bg: oklch(0.48 0.18 15 / 0.12);
+  --danger-border: oklch(0.5 0.18 15 / 0.25);
   --bubble-user: oklch(0.546 0.245 262.881 / 0.2);
   --bubble-user-foreground: var(--foreground);
+  --action-extract: oklch(0.42 0.12 80);
+  --action-extract-foreground: oklch(0.95 0.02 90);
+  --action-save: oklch(0.34 0.09 155);
+  --action-save-foreground: oklch(0.95 0.02 150);
 }
 
 * {
@@ -177,9 +191,16 @@ body {
   --color-ring: var(--ring);
   --color-bubble-user: var(--bubble-user);
   --color-bubble-user-foreground: var(--bubble-user-foreground);
+  --color-action-extract: var(--action-extract);
+  --color-action-extract-foreground: var(--action-extract-foreground);
+  --color-action-save: var(--action-save);
+  --color-action-save-foreground: var(--action-save-foreground);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-border: var(--danger-border);
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -227,17 +248,17 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--border));
+  background: var(--border);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground));
+  background: var(--muted-foreground);
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: hsl(var(--border)) transparent;
+  scrollbar-color: var(--border) transparent;
 }
 
 /* 防止滚动链式传递的通用工具类 */

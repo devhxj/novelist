@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, BookOpen, Flag, Lightbulb, Target } from 'lucide-react'
+import { AlertTriangle, BookOpen, Flag, Lightbulb, Pencil, Plus, Target, Trash2, X } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { timeline } from '@/hooks/useApp'
 
@@ -17,13 +17,46 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'abandoned', label: '已废弃' },
 ]
 
-function safeJson<T>(json: string, fallback: T): T {
-  try { return JSON.parse(json) }
-  catch { return fallback }
-}
+const PLAN_LABELS: Record<Tab, string> = { next: '下一章', near: '近期', far: '远期' }
+const CATEGORIES = [
+  { value: 'foreshadowing', label: '伏笔' },
+  { value: 'user_directive', label: '用户指令' },
+]
+const STATUSES = [
+  { value: 'pending', label: '进行中' },
+  { value: 'resolved', label: '已回收' },
+  { value: 'abandoned', label: '已废弃' },
+]
+const IMPORTANCES = [1, 2, 3, 4, 5]
 
 function importStars(v: number) {
   return '★'.repeat(Math.max(0, Math.min(5, v)))
+}
+
+type EditMode = { type: 'create' } | { type: 'edit'; entry: timeline.TimelineEntry } | { type: 'plan'; scope: string; content: string } | null
+
+type EditForm = {
+  title: string
+  content: string
+  target_chapter: number
+  importance: number
+  detail_json: string
+  status: string
+  resolved_chapter_id: number
+  // create-only
+  category?: string
+  source_chapter_id?: number
+  source?: string
+}
+
+const EDIT_FORM_EMPTY: EditForm = {
+  title: '',
+  content: '',
+  target_chapter: 1,
+  importance: 3,
+  detail_json: '',
+  status: 'pending',
+  resolved_chapter_id: 0,
 }
 
 export default function TimelineView({ novelId, focusEntryId }: Props) {
@@ -35,8 +68,11 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [planTab, setPlanTab] = useState<Tab>('next')
   const [filter, setFilter] = useState<Filter>('all')
-  const [expandedId, setExpandedId] = useState<number | null>(null)
   const [windowCenter, setWindowCenter] = useState(0)
+  const [editMode, setEditMode] = useState<EditMode>(null)
+  const [form, setForm] = useState<EditForm>(EDIT_FORM_EMPTY)
+  const [createCat, setCreateCat] = useState('foreshadowing')
+  const [saving, setSaving] = useState(false)
 
   const load = useCallback(async () => {
     if (!novelId) { setPlans([]); setEntries([]); return }
@@ -50,7 +86,6 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
       ])
       setPlans(planList ?? [])
       setEntries(entryList ?? [])
-
       setWindowCenter(Math.max(1, maxCh))
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败')
@@ -66,7 +101,6 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
       const entry = entries.find(e => e.id === focusEntryId)
       if (entry) {
         setWindowCenter(entry.target_chapter || entry.source_chapter_id || 1)
-        setExpandedId(focusEntryId)
       }
     }
   }, [focusEntryId, entries])
@@ -81,12 +115,6 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
     }
     return map
   }, [plans])
-
-  const planLabels: Record<Tab, string> = {
-    next: '下一章',
-    near: '近期',
-    far: '远期',
-  }
 
   const filteredEntries = useMemo(() => {
     if (filter === 'all') return entries
@@ -106,10 +134,8 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
   const visibleChapters = grouped.filter(([ch]) => ch >= windowFrom && ch <= windowTo)
   const beforeChapters = grouped.filter(([ch]) => ch < windowFrom)
   const afterChapters = grouped.filter(([ch]) => ch > windowTo)
-
   const beforeCount = beforeChapters.reduce((s, [, items]) => s + items.length, 0)
   const afterCount = afterChapters.reduce((s, [, items]) => s + items.length, 0)
-
   const minChapter = grouped.length > 0 ? grouped[0][0] : 0
   const maxChapter = grouped.length > 0 ? grouped[grouped.length - 1][0] : 0
 
@@ -119,26 +145,218 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
 
   const statusStyle = (status: string) => {
     switch (status) {
-      case 'pending':
-        return { bg: 'bg-tag-blue', text: 'text-tag-blue-foreground', label: '进行中' }
-      case 'resolved':
-        return { bg: 'bg-tag-green', text: 'text-tag-green-foreground', label: '已回收' }
-      case 'abandoned':
-        return { bg: 'bg-secondary', text: 'text-muted-foreground', label: '已废弃' }
-      default:
-        return { bg: 'bg-muted', text: 'text-muted-foreground', label: status }
+      case 'pending': return { bg: 'bg-tag-blue', text: 'text-tag-blue-foreground', label: '进行中' }
+      case 'resolved': return { bg: 'bg-tag-green', text: 'text-tag-green-foreground', label: '已回收' }
+      case 'abandoned': return { bg: 'bg-secondary', text: 'text-muted-foreground', label: '已废弃' }
+      default: return { bg: 'bg-muted', text: 'text-muted-foreground', label: status }
     }
   }
 
   const catStyle = (category: string) => {
     switch (category) {
-      case 'foreshadowing':
-        return { icon: Target, color: 'text-tag-amber-foreground', bg: 'bg-tag-amber', label: '伏笔' }
-      case 'user_directive':
-        return { icon: Lightbulb, color: 'text-violet-500', bg: 'bg-violet-50', label: '用户指令' }
-      default:
-        return { icon: Flag, color: 'text-muted-foreground', bg: 'bg-muted', label: category }
+      case 'foreshadowing': return { icon: Target, color: 'text-tag-amber-foreground', bg: 'bg-tag-amber', label: '伏笔' }
+      case 'user_directive': return { icon: Lightbulb, color: 'text-tag-purple-foreground', bg: 'bg-tag-purple', label: '用户指令' }
+      default: return { icon: Flag, color: 'text-muted-foreground', bg: 'bg-muted', label: category }
     }
+  }
+
+  // ── CRUD handlers ────────────────────────────────────
+
+  function openCreate() {
+    setError(null)
+    setForm({ ...EDIT_FORM_EMPTY, target_chapter: Math.max(1, windowCenter) })
+    setCreateCat('foreshadowing')
+    setEditMode({ type: 'create' })
+  }
+
+  function openEdit(entry: timeline.TimelineEntry) {
+    setError(null)
+    setForm({
+      title: entry.title,
+      content: entry.content || '',
+      target_chapter: entry.target_chapter,
+      importance: entry.importance,
+      detail_json: entry.detail_json || '',
+      status: entry.status,
+      resolved_chapter_id: entry.resolved_chapter_id,
+    })
+    setEditMode({ type: 'edit', entry })
+  }
+
+  function openPlanEdit(scope: string, content: string) {
+    setError(null)
+    setForm({ ...EDIT_FORM_EMPTY, content })
+    setEditMode({ type: 'plan', scope, content })
+  }
+
+  async function handleSavePlan() {
+    if (!editMode || editMode.type !== 'plan') return
+    setSaving(true)
+    try {
+      await app.UpdateChapterPlan(novelId, { scope: editMode.scope, content: form.content })
+      setEditMode(null)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存计划失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleCreate() {
+    if (!form.title.trim()) { setError('请输入标题'); return }
+    if (!form.target_chapter) { setError('请输入目标章节'); return }
+    setSaving(true)
+    try {
+      await app.CreateTimelineEntry(novelId, {
+        category: createCat,
+        title: form.title,
+        content: form.content,
+        target_chapter: form.target_chapter,
+        importance: form.importance,
+        source_chapter_id: 0,
+        detail_json: form.detail_json,
+        source: 'user',
+      })
+      setEditMode(null)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '创建失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleUpdate() {
+    if (!editMode || editMode.type !== 'edit') return
+    if (!form.title.trim()) { setError('请输入标题'); return }
+    setSaving(true)
+    try {
+      const payload = {
+        title: form.title,
+        content: form.content,
+        detail_json: form.detail_json,
+        target_chapter: form.target_chapter,
+        importance: form.importance,
+        status: form.status,
+        resolved_chapter_id: form.status === 'resolved' ? form.resolved_chapter_id || form.target_chapter : 0,
+      }
+      await app.UpdateTimelineEntry(novelId, editMode.entry.id, payload)
+      setEditMode(null)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '更新失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete(entryId: number) {
+    if (!confirm('确定要删除这条记录吗？此操作不可撤销。')) return
+    setSaving(true)
+    try {
+      await app.DeleteTimelineEntry(novelId, entryId)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleQuickStatus(entry: timeline.TimelineEntry, newStatus: string) {
+    setSaving(true)
+    try {
+      await app.UpdateTimelineEntry(novelId, entry.id, {
+        title: entry.title,
+        content: entry.content || '',
+        detail_json: entry.detail_json || '',
+        target_chapter: entry.target_chapter,
+        importance: entry.importance,
+        status: newStatus,
+        resolved_chapter_id: newStatus === 'resolved' ? entry.target_chapter : 0,
+      })
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '更新状态失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ── Form fields ──────────────────────────────────────
+
+  function renderFormFields(showCategory: boolean, showStatus: boolean) {
+    return (
+      <div className="space-y-3">
+        {showCategory && (
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">类型</label>
+            <select
+              value={createCat}
+              onChange={e => setCreateCat(e.target.value)}
+              className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+          </div>
+        )}
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">标题</label>
+          <input
+            type="text"
+            value={form.title}
+            onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+            className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            placeholder="简短标题"
+          />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">内容</label>
+          <textarea
+            value={form.content}
+            onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
+            rows={3}
+            className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-y"
+            placeholder="详细描述"
+          />
+        </div>
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">目标章节</label>
+            <input
+              type="number"
+              value={form.target_chapter}
+              onChange={e => setForm(f => ({ ...f, target_chapter: parseInt(e.target.value) || 1 }))}
+              min={1}
+              className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">重要度</label>
+            <select
+              value={form.importance}
+              onChange={e => setForm(f => ({ ...f, importance: parseInt(e.target.value) }))}
+              className="rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {IMPORTANCES.map(i => <option key={i} value={i}>{importStars(i)}</option>)}
+            </select>
+          </div>
+        </div>
+        {showStatus && (
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">状态</label>
+            <select
+              value={form.status}
+              onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
+              className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -146,7 +364,7 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
       {loading ? (
         <div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载中...</div>
       ) : error ? (
-        <div className="flex h-full items-center justify-center text-sm text-rose-500">{error}</div>
+        <div className="flex h-full items-center justify-center text-sm text-destructive">{error}</div>
       ) : (
         <div className="max-w-3xl mx-auto px-5 py-6 space-y-6">
           {/* Chapter Plans */}
@@ -168,15 +386,51 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                     }
                   `}
                 >
-                  {planLabels[tab]}
+                  {PLAN_LABELS[tab]}
                 </button>
               ))}
             </div>
-            <div className="rounded-lg border border-border bg-card p-4 min-h-[80px]">
-              {planMap[planTab] ? (
-                <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">{planMap[planTab]}</p>
+            <div className="rounded-lg border border-border bg-card p-4 min-h-[80px] relative group">
+              {editMode?.type === 'plan' && editMode.scope === planTab ? (
+                <div className="space-y-3">
+                  <textarea
+                    value={form.content}
+                    onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
+                    rows={4}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-y"
+                    placeholder={`${PLAN_LABELS[planTab]}计划内容...`}
+                  />
+                  <div className="flex items-center gap-2 justify-end">
+                    <button
+                      onClick={() => { setEditMode(null); setForm(EDIT_FORM_EMPTY) }}
+                      className="px-3 py-1 rounded text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={handleSavePlan}
+                      disabled={saving}
+                      className="px-3 py-1 rounded bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                      {saving ? '保存中...' : '保存'}
+                    </button>
+                  </div>
+                </div>
               ) : (
-                <p className="text-sm text-muted-foreground">暂无{planLabels[planTab]}计划</p>
+                <>
+                  {planMap[planTab] ? (
+                    <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">{planMap[planTab]}</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">暂无{PLAN_LABELS[planTab]}计划</p>
+                  )}
+                  <button
+                    onClick={() => openPlanEdit(planTab, planMap[planTab])}
+                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary"
+                    title="编辑"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                </>
               )}
             </div>
           </section>
@@ -195,11 +449,13 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                 <span className="text-[11px] text-muted-foreground">
                   第 {windowFrom}-{windowTo} 章 · 共 {minChapter}-{maxChapter} 章
                 </span>
+                <button onClick={load} className="text-xs text-muted-foreground hover:text-muted-foreground transition-colors">刷新</button>
                 <button
-                  onClick={load}
-                  className="text-xs text-muted-foreground hover:text-muted-foreground transition-colors"
+                  onClick={openCreate}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
                 >
-                  刷新
+                  <Plus className="h-3 w-3" />
+                  新建
                 </button>
               </div>
             </div>
@@ -220,13 +476,34 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                 >
                   {f.label}
                   {f.key !== 'all' && (
-                    <span className="ml-1 text-muted-foreground">
-                      ({entries.filter(e => e.status === f.key).length})
-                    </span>
+                    <span className="ml-1 text-muted-foreground">({entries.filter(e => e.status === f.key).length})</span>
                   )}
                 </button>
               ))}
             </div>
+
+            {/* Create form */}
+            {editMode?.type === 'create' && (
+              <div className="rounded-lg border border-border bg-card p-4 mb-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-semibold text-foreground">新建条目</span>
+                  <button onClick={() => { setEditMode(null); setForm(EDIT_FORM_EMPTY) }} className="p-0.5 rounded text-muted-foreground hover:text-foreground">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                {renderFormFields(true, false)}
+                <div className="flex items-center gap-2 justify-end mt-3">
+                  <button onClick={() => { setEditMode(null); setForm(EDIT_FORM_EMPTY) }} className="px-3 py-1 rounded text-xs text-muted-foreground hover:text-foreground transition-colors">取消</button>
+                  <button
+                    onClick={handleCreate}
+                    disabled={saving || !form.title.trim()}
+                    className="px-3 py-1 rounded bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                  >
+                    {saving ? '创建中...' : '创建'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {grouped.length === 0 ? (
               <div className="text-center py-12">
@@ -239,41 +516,48 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
               </div>
             ) : (
               <div className="space-y-6">
-                {/* Collapsed before */}
                 {beforeCount > 0 && (
-                  <button
-                    onClick={() => shiftWindow(-ENTRY_WINDOW)}
-                    className="w-full rounded-lg border border-dashed border-border bg-card/60 px-4 py-2.5 text-xs text-muted-foreground hover:bg-card hover:border-border hover:text-foreground transition-colors"
-                  >
+                  <button onClick={() => shiftWindow(-ENTRY_WINDOW)} className="w-full rounded-lg border border-dashed border-border bg-card/60 px-4 py-2.5 text-xs text-muted-foreground hover:bg-card hover:border-border hover:text-foreground transition-colors">
                     ← 第 {beforeChapters[0]?.[0]}-{beforeChapters[beforeChapters.length - 1]?.[0]} 章 · {beforeCount} 条
                   </button>
                 )}
 
-                {/* Visible entries */}
                 {visibleChapters.map(([ch, items]) => (
                   <div key={ch}>
                     <div className="flex items-center gap-1.5 mb-2">
                       <span className="text-xs font-medium text-muted-foreground">第 {ch} 章</span>
-                      <span className="text-[10px] text-muted-foreground">{items.length} 条</span>
+                      <span className="text-[11px] text-muted-foreground">{items.length} 条</span>
                     </div>
                     <div className="space-y-2">
                       {items.map(entry => {
                         const s = statusStyle(entry.status)
                         const c = catStyle(entry.category)
                         const CatIcon = c.icon
-                        const isExpanded = expandedId === entry.id
-                        const detail = safeJson<Record<string, any>>(entry.detail_json, {})
-                        const detailKeys = Object.keys(detail).filter(k => k.trim())
-                        const hasContent = entry.content || detailKeys.length > 0
+                        const isEditing = editMode?.type === 'edit' && editMode.entry.id === entry.id
 
-                        return (
+                        return isEditing ? (
+                          <div key={entry.id} className="rounded-lg border border-border bg-card p-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <span className="text-xs font-semibold text-foreground">编辑：{entry.title}</span>
+                              <button onClick={() => { setEditMode(null); setForm(EDIT_FORM_EMPTY) }} className="p-0.5 rounded text-muted-foreground hover:text-foreground">
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                            {renderFormFields(false, true)}
+                            <div className="flex items-center gap-2 justify-end mt-3">
+                              <button onClick={() => handleDelete(entry.id)} className="px-3 py-1 rounded text-xs text-destructive hover:bg-destructive/10 transition-colors" disabled={saving}>
+                                <Trash2 className="h-3 w-3 inline mr-1" />删除
+                              </button>
+                              <button onClick={() => { setEditMode(null); setForm(EDIT_FORM_EMPTY) }} className="px-3 py-1 rounded text-xs text-muted-foreground hover:text-foreground transition-colors">取消</button>
+                              <button onClick={handleUpdate} disabled={saving || !form.title.trim()} className="px-3 py-1 rounded bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50">
+                                {saving ? '保存中...' : '保存'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
                           <div
                             key={entry.id}
-                            onClick={() => setExpandedId(isExpanded ? null : entry.id)}
-                            className={`
-                              rounded-lg border bg-card transition-shadow cursor-pointer
-                              ${isExpanded ? 'border-border shadow-sm' : 'border-border hover:border-border hover:shadow-sm'}
-                            `}
+                            className="rounded-lg border border-border bg-card hover:border-border hover:shadow-sm transition-shadow group"
                           >
                             <div className="flex items-center gap-3 px-4 py-3">
                               <span className={`shrink-0 flex h-7 w-7 items-center justify-center rounded ${c.bg}`}>
@@ -282,52 +566,48 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2">
                                   <span className="text-sm font-medium text-foreground truncate">{entry.title}</span>
-                                  <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${s.bg} ${s.text}`}>
+                                  <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium ${s.bg} ${s.text}`}>
                                     {s.label}
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-2 mt-0.5 text-[11px] text-muted-foreground">
-                                  <span className="text-tag-amber-foreground text-[10px]">{importStars(entry.importance)}</span>
+                                  <span className="text-tag-amber-foreground text-[11px]">{importStars(entry.importance)}</span>
                                   <span>目标第 {entry.target_chapter} 章</span>
-                                  {entry.source_chapter_id > 0 && (
-                                    <span>· 埋于第 {entry.source_chapter_id} 章</span>
-                                  )}
-                                  {entry.resolved_chapter_id > 0 && (
-                                    <span className="text-tag-green-foreground">· 回收于第 {entry.resolved_chapter_id} 章</span>
-                                  )}
+                                  {entry.source_chapter_id > 0 && <span>· 埋于第 {entry.source_chapter_id} 章</span>}
+                                  {entry.resolved_chapter_id > 0 && <span className="text-tag-green-foreground">· 回收于第 {entry.resolved_chapter_id} 章</span>}
                                   <span className="text-muted-foreground">· {entry.source === 'ai' ? 'AI' : '用户'}</span>
                                 </div>
                               </div>
-                              <span className={`text-[10px] transition-transform ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
-                            </div>
-
-                            {isExpanded && hasContent && (
-                              <div className="border-t border-border px-4 py-3 space-y-3">
-                                {entry.content && (
-                                  <div>
-                                    <p className="text-xs text-muted-foreground mb-1">详情</p>
-                                    <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">{entry.content}</p>
-                                  </div>
+                              {/* Quick actions */}
+                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                {entry.status === 'pending' && (
+                                  <button
+                                    onClick={() => handleQuickStatus(entry, 'resolved')}
+                                    className="p-1 rounded text-muted-foreground hover:text-tag-green-foreground hover:bg-tag-green/20 transition-colors"
+                                    title="标记已回收"
+                                  >
+                                    <span className="text-[11px]">✓</span>
+                                  </button>
                                 )}
-                                {detailKeys.length > 0 && (
-                                  <div className="space-y-1">
-                                    {detailKeys.map(k => {
-                                      const v = detail[k]
-                                      const display = typeof v === 'string' ? v : Array.isArray(v) ? v.join('、') : String(v)
-                                      return (
-                                        <div key={k} className="flex gap-2 text-xs">
-                                          <span className="text-muted-foreground shrink-0">{k}</span>
-                                          <span className="text-muted-foreground">{display}</span>
-                                        </div>
-                                      )
-                                    })}
-                                  </div>
-                                )}
+                                <button
+                                  onClick={() => openEdit(entry)}
+                                  className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                                  title="编辑"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(entry.id)}
+                                  className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                  title="删除"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
                               </div>
-                            )}
-                            {isExpanded && !hasContent && (
+                            </div>
+                            {entry.content && (
                               <div className="border-t border-border px-4 py-3">
-                                <p className="text-xs text-muted-foreground">暂无详细内容</p>
+                                <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap line-clamp-3">{entry.content}</p>
                               </div>
                             )}
                           </div>
@@ -337,12 +617,8 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
                   </div>
                 ))}
 
-                {/* Collapsed after */}
                 {afterCount > 0 && (
-                  <button
-                    onClick={() => shiftWindow(ENTRY_WINDOW)}
-                    className="w-full rounded-lg border border-dashed border-border bg-card/60 px-4 py-2.5 text-xs text-muted-foreground hover:bg-card hover:border-border hover:text-foreground transition-colors"
-                  >
+                  <button onClick={() => shiftWindow(ENTRY_WINDOW)} className="w-full rounded-lg border border-dashed border-border bg-card/60 px-4 py-2.5 text-xs text-muted-foreground hover:bg-card hover:border-border hover:text-foreground transition-colors">
                     → 第 {afterChapters[0]?.[0]}-{afterChapters[afterChapters.length - 1]?.[0]} 章 · {afterCount} 条
                   </button>
                 )}

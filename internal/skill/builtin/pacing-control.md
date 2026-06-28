@@ -2,7 +2,7 @@
 name: pacing-control
 description: 提供叙事节奏控制方法论，覆盖快节奏、慢节奏和过渡的技法选择。当用户要求调整节奏、或说"太慢了""太快了""这里拖了"时，使用此技能。
 category: 结构
-mode: on_demand
+mode: auto
 author: builtin
 version: 1
 ---

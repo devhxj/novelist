@@ -2,7 +2,7 @@
 name: deai-flavor
 description: 提供去AI味写作方法论，识别并破坏AI写作的十大常见模式。当用户说"太AI了""有AI味""不自然""像机器写的"时，使用此技能。
 category: 技法
-mode: on_demand
+mode: auto
 author: builtin
 version: 1
 ---

@@ -135,7 +135,7 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		a.logger.Info("slash injected", "name", injectName, "session", sess.SessionID)
 	}
 
-	// 8. 构建消息列表：全部来自 DB（含 System1/System2/历史/用户消息）
+	// 8. 构建消息列表：全部来自 DB（含系统消息/历史/用户消息）
 	messages, err := a.loadAPIMessages(ctx, sess.SessionID, sess.ActiveVersion)
 	if err != nil {
 		return nil, fmt.Errorf("加载 API 消息失败: %w", err)
@@ -219,7 +219,7 @@ func (a *App) loadOrCreateSession(ctx context.Context, input ChatInput) (*sessio
 	return sess, true, nil
 }
 
-// writeSystemMessages 在新 session 的事务内写入 System1、System2、System3 和技能目录到 messages 表。
+// writeSystemMessages 在新 session 的事务内写入 AgentIdentity、AlwaysSkills、SkillCatalog、NovelState 到 messages 表。
 func (a *App) writeSystemMessages(tx *gorm.DB, sessionID string, novelID int64, turnID int) error {
 	sysMsg := func(content string) *session.Message {
 		return &session.Message{
@@ -228,20 +228,23 @@ func (a *App) writeSystemMessages(tx *gorm.DB, sessionID string, novelID int64, 
 		}
 	}
 
-	sys1 := agentcfg.System1(agentcfg.MainAgent)
+	identity := agentcfg.AgentIdentity(agentcfg.MainAgent)
 
-	var sys2 string
+	var always string
+	var catalog string
 	if a.skill != nil {
-		sys2 = agentcfg.BuildSkillCatalog(a.skill.ListMeta(novelID))
+		all := a.skill.ListMeta(novelID)
+		catalog = agentcfg.BuildSkillCatalog(a.skill.ListMetaForCatalog(all))
+		always = agentcfg.BuildAlwaysSkillsContent(all, a.skill, novelID)
 	}
 
-	sys3, err := agentcfg.System3(tx, novelID)
+	novelState, err := agentcfg.NovelState(tx, novelID)
 	if err != nil {
-		a.logger.Warn("System3 构建失败，写入空消息", "novel_id", novelID, "err", err)
-		sys3 = ""
+		a.logger.Warn("NovelState 构建失败，写入空消息", "novel_id", novelID, "err", err)
+		novelState = ""
 	}
 
-	for _, c := range []string{sys1, sys2, sys3} {
+	for _, c := range []string{identity, always, catalog, novelState} {
 		if c != "" {
 			if err := tx.Create(sysMsg(c)).Error; err != nil {
 				return err

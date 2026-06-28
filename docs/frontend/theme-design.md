@@ -101,10 +101,8 @@ const PALETTE_DARK  = [{ fill: 'oklch(0.58 0.15 255 / 0.15)', stroke: 'oklch(0.7
 
 ### 7. 不动的东西
 
-- `text-rose-500` / `text-red-500` 错误消息 — 功能色，深浅可读
-- `bg-red-500` 发送按钮 / 删除按钮 — 功能色
+- `text-red-500` / `text-red-600` / `text-rose-500` 错误消息 — 功能色，深浅可读
 - ContextRing 状态环 `#e74c3c` / `#f39c12` / `#52c41a` — 独立色系
-- ChatInput `bg-amber-400` 停止按钮 — 功能色
 - Highlight.js 语法着色 — 独立色系
 
 ## 新增一个主题

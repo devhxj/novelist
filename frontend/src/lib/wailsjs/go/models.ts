@@ -66,6 +66,24 @@ export namespace app {
 	        this.turn_id = source["turn_id"];
 	    }
 	}
+	export class CreateArcNodeInput {
+	    story_arc_id: number;
+	    title: string;
+	    description?: string;
+	    target_chapter: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateArcNodeInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.story_arc_id = source["story_arc_id"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.target_chapter = source["target_chapter"];
+	    }
+	}
 	export class CreateChapterInput {
 	    novel_id: number;
 	    title: string;
@@ -78,6 +96,46 @@ export namespace app {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.novel_id = source["novel_id"];
 	        this.title = source["title"];
+	    }
+	}
+	export class CreateCharacterInput {
+	    name: string;
+	    description?: string;
+	    personality?: string;
+	    abilities?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateCharacterInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.personality = source["personality"];
+	        this.abilities = source["abilities"];
+	    }
+	}
+	export class CreateLocationInput {
+	    name: string;
+	    location_type?: string;
+	    description?: string;
+	    detail_json?: string;
+	    parent_location_id?: number;
+	    tags?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateLocationInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.location_type = source["location_type"];
+	        this.description = source["description"];
+	        this.detail_json = source["detail_json"];
+	        this.parent_location_id = source["parent_location_id"];
+	        this.tags = source["tags"];
 	    }
 	}
 	export class CreateNovelInput {
@@ -110,6 +168,124 @@ export namespace app {
 	        this.is_global = source["is_global"];
 	        this.category = source["category"];
 	        this.content = source["content"];
+	    }
+	}
+	export class CreateReaderPerspectiveInput {
+	    type: string;
+	    content: string;
+	    planted_chapter: number;
+	    related_truth?: string;
+	    revealed_chapter?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateReaderPerspectiveInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.content = source["content"];
+	        this.planted_chapter = source["planted_chapter"];
+	        this.related_truth = source["related_truth"];
+	        this.revealed_chapter = source["revealed_chapter"];
+	    }
+	}
+	export class CreateStoryArcInput {
+	    name: string;
+	    arc_type: string;
+	    description?: string;
+	    importance?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateStoryArcInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.arc_type = source["arc_type"];
+	        this.description = source["description"];
+	        this.importance = source["importance"];
+	    }
+	}
+	export class CreateTimelineEntryInput {
+	    category: string;
+	    title: string;
+	    content?: string;
+	    detail_json?: string;
+	    target_chapter: number;
+	    importance?: number;
+	    source_chapter_id?: number;
+	    source?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateTimelineEntryInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.category = source["category"];
+	        this.title = source["title"];
+	        this.content = source["content"];
+	        this.detail_json = source["detail_json"];
+	        this.target_chapter = source["target_chapter"];
+	        this.importance = source["importance"];
+	        this.source_chapter_id = source["source_chapter_id"];
+	        this.source = source["source"];
+	    }
+	}
+	export class DeleteSkillInput {
+	    novel_id: number;
+	    name: string;
+	    source: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeleteSkillInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	        this.name = source["name"];
+	        this.source = source["source"];
+	    }
+	}
+	export class ExtractStyleInput {
+	    novel_id: number;
+	    sample: string;
+	    provider_name: string;
+	    model_id: string;
+	    reasoning_effort: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExtractStyleInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	        this.sample = source["sample"];
+	        this.provider_name = source["provider_name"];
+	        this.model_id = source["model_id"];
+	        this.reasoning_effort = source["reasoning_effort"];
+	    }
+	}
+	export class ExtractStyleResult {
+	    name: string;
+	    description: string;
+	    raw_content: string;
+	    file_path: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExtractStyleResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.raw_content = source["raw_content"];
+	        this.file_path = source["file_path"];
 	    }
 	}
 	export class GetSessionsInput {
@@ -306,6 +482,82 @@ export namespace app {
 	        this.model_id = source["model_id"];
 	    }
 	}
+	export class UpdateArcNodeInput {
+	    title?: string;
+	    description?: string;
+	    target_chapter?: number;
+	    actual_chapter?: number;
+	    status?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateArcNodeInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.target_chapter = source["target_chapter"];
+	        this.actual_chapter = source["actual_chapter"];
+	        this.status = source["status"];
+	    }
+	}
+	export class UpdateChapterPlanInput {
+	    scope?: string;
+	    content?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateChapterPlanInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.scope = source["scope"];
+	        this.content = source["content"];
+	    }
+	}
+	export class UpdateCharacterInput {
+	    name?: string;
+	    description?: string;
+	    personality?: string;
+	    abilities?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateCharacterInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.personality = source["personality"];
+	        this.abilities = source["abilities"];
+	    }
+	}
+	export class UpdateLocationInput {
+	    name?: string;
+	    location_type?: string;
+	    description?: string;
+	    detail_json?: string;
+	    parent_location_id?: number;
+	    tags?: string;
+	    clear_parent?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateLocationInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.location_type = source["location_type"];
+	        this.description = source["description"];
+	        this.detail_json = source["detail_json"];
+	        this.parent_location_id = source["parent_location_id"];
+	        this.tags = source["tags"];
+	        this.clear_parent = source["clear_parent"];
+	    }
+	}
 	export class UpdateNovelInput {
 	    title?: string;
 	    description?: string;
@@ -336,6 +588,72 @@ export namespace app {
 	        this.category = source["category"];
 	        this.content = source["content"];
 	        this.is_global = source["is_global"];
+	    }
+	}
+	export class UpdateReaderPerspectiveInput {
+	    type?: string;
+	    content?: string;
+	    planted_chapter?: number;
+	    related_truth?: string;
+	    revealed_chapter?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateReaderPerspectiveInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.content = source["content"];
+	        this.planted_chapter = source["planted_chapter"];
+	        this.related_truth = source["related_truth"];
+	        this.revealed_chapter = source["revealed_chapter"];
+	    }
+	}
+	export class UpdateStoryArcInput {
+	    name?: string;
+	    description?: string;
+	    arc_type?: string;
+	    importance?: number;
+	    status?: string;
+	    reactivate_at?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateStoryArcInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.arc_type = source["arc_type"];
+	        this.importance = source["importance"];
+	        this.status = source["status"];
+	        this.reactivate_at = source["reactivate_at"];
+	    }
+	}
+	export class UpdateTimelineEntryInput {
+	    title?: string;
+	    content?: string;
+	    detail_json?: string;
+	    target_chapter?: number;
+	    importance?: number;
+	    status?: string;
+	    resolved_chapter_id?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateTimelineEntryInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.content = source["content"];
+	        this.detail_json = source["detail_json"];
+	        this.target_chapter = source["target_chapter"];
+	        this.importance = source["importance"];
+	        this.status = source["status"];
+	        this.resolved_chapter_id = source["resolved_chapter_id"];
 	    }
 	}
 
@@ -580,6 +898,8 @@ export namespace llm {
 	    name: string;
 	    chat_url: string;
 	    api_key: string;
+	    platform_url: string;
+	    help_text: string;
 	    temperature: number;
 	    source: string;
 	    builtin_models: ModelInfo[];
@@ -595,6 +915,8 @@ export namespace llm {
 	        this.name = source["name"];
 	        this.chat_url = source["chat_url"];
 	        this.api_key = source["api_key"];
+	        this.platform_url = source["platform_url"];
+	        this.help_text = source["help_text"];
 	        this.temperature = source["temperature"];
 	        this.source = source["source"];
 	        this.builtin_models = this.convertValues(source["builtin_models"], ModelInfo);

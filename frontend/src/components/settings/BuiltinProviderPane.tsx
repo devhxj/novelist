@@ -1,8 +1,10 @@
-import { useState } from 'react'
-import { X, CheckCircle2, Loader2 } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { X, CheckCircle2, Loader2, Globe, ExternalLink, ChevronDown } from 'lucide-react'
+import { BrowserOpenURL } from '@/lib/wailsjs/runtime/runtime'
 import type { llm } from '@/hooks/useApp'
 import TemperatureInfo from './TemperatureInfo'
 import ModelDiscoveryPanel from './ModelDiscoveryPanel'
+import ProviderIcon from './ProviderIcon'
 
 interface Props {
   providers: llm.ProviderView[]
@@ -16,6 +18,9 @@ interface Props {
 
 export default function BuiltinProviderPane({ providers, onUpdate, onAddCustomModel, onRemoveCustomModel, onTest, testResults, testing }: Props) {
   const [selectedKey, setSelectedKey] = useState(providers[0]?.key || '')
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
 
   const provider = providers.find(p => p.key === selectedKey)
   if (!provider) {
@@ -31,20 +36,53 @@ export default function BuiltinProviderPane({ providers, onUpdate, onAddCustomMo
     ...(provider?.custom_models || []).map(m => m.id),
   ])
 
+  // 切换服务商时重置折叠和下拉状态
+  useEffect(() => {
+    setHelpOpen(false)
+    setDropdownOpen(false)
+  }, [selectedKey])
+
+  // 点击外部关闭下拉
+  useEffect(() => {
+    if (!dropdownOpen) return
+    const handle = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handle)
+    return () => document.removeEventListener('mousedown', handle)
+  }, [dropdownOpen])
+
   return (
     <div className="flex flex-col gap-4">
       {/* 服务商选择 + 状态 */}
       <div className="flex items-center gap-3">
         <label className="text-xs text-muted-foreground w-14 shrink-0">服务商</label>
-        <select
-          value={selectedKey}
-          onChange={e => setSelectedKey(e.target.value)}
-          className="flex-1 h-8 rounded-md border bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        >
-          {providers.map(p => (
-            <option key={p.key} value={p.key}>{p.name}</option>
-          ))}
-        </select>
+        <div className="relative flex-1" ref={dropdownRef}>
+          <button
+            onClick={() => setDropdownOpen(!dropdownOpen)}
+            className="flex items-center gap-2 w-full h-8 rounded-md border bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            <ProviderIcon provider={selectedKey} className="w-4 h-4 shrink-0 text-muted-foreground" />
+            <span className="flex-1 text-left">{provider.name}</span>
+            <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${dropdownOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {dropdownOpen && (
+            <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-md border bg-popover text-popover-foreground shadow-md py-1 max-h-56 overflow-auto">
+              {providers.map(p => (
+                <button
+                  key={p.key}
+                  onClick={() => { setSelectedKey(p.key); setDropdownOpen(false) }}
+                  className={`flex items-center gap-2 w-full px-2.5 py-1.5 text-sm hover:bg-muted/50 transition-colors ${p.key === selectedKey ? 'bg-muted/30' : ''}`}
+                >
+                  <ProviderIcon provider={p.key} className="w-4 h-4 shrink-0 text-muted-foreground" />
+                  <span>{p.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <span className={`flex items-center gap-1 text-xs shrink-0 ${hasKey ? 'text-emerald-600' : 'text-muted-foreground'}`}>
           {hasKey ? <><CheckCircle2 className="w-3.5 h-3.5" /> 已配置</> : '未配置'}
         </span>
@@ -83,6 +121,45 @@ export default function BuiltinProviderPane({ providers, onUpdate, onAddCustomMo
       {testResult && (
         <div className={`text-xs pl-[4.5rem] ${testResult.ok ? 'text-emerald-600' : 'text-red-500'}`}>
           {testResult.ok ? '✓ 连通成功' : `✗ ${testResult.msg || '连接失败'}`}
+        </div>
+      )}
+
+      {/* 注册链接 */}
+      {provider.platform_url && (
+        <div className="flex items-center gap-3">
+          <label className="text-xs text-muted-foreground w-14 shrink-0">注册</label>
+          <button
+            onClick={() => BrowserOpenURL(provider.platform_url!)}
+            className="flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-xs hover:bg-muted/50 transition-colors max-w-full"
+          >
+            <Globe className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{provider.platform_url}</span>
+            <ExternalLink className="w-3 h-3 shrink-0 text-muted-foreground" />
+          </button>
+        </div>
+      )}
+
+      {/* 注册指引 */}
+      {provider.help_text && (
+        <div className="border rounded-md overflow-hidden">
+          <button
+            onClick={() => setHelpOpen(!helpOpen)}
+            className="flex items-center gap-1.5 w-full px-3 py-2 text-xs text-muted-foreground hover:bg-muted/30 transition-colors"
+          >
+            <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${helpOpen ? 'rotate-180' : ''}`} />
+            注册指引
+          </button>
+          <div
+            className={`grid transition-all duration-300 ease-out ${
+              helpOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+            }`}
+          >
+            <div className="overflow-hidden">
+              <div className="px-3 pb-2 text-xs text-muted-foreground leading-relaxed">
+                {provider.help_text}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -140,7 +217,7 @@ export default function BuiltinProviderPane({ providers, onUpdate, onAddCustomMo
                 </div>
                 <button
                   onClick={() => onRemoveCustomModel(selectedKey, m.id)}
-                  className="text-muted-foreground hover:text-red-500 transition-colors"
+                  className="text-muted-foreground hover:text-destructive transition-colors"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>

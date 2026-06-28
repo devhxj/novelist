@@ -6,8 +6,8 @@ import ActivityBar from '@/components/shell/ActivityBar'
 import StatusBar from '@/components/shell/StatusBar'
 import SidePanel from '@/components/sidebar/SidePanel'
 import ContentPanel, { type ContentPanelHandle } from '@/components/content/ContentPanel'
-import CharacterGraph from '@/components/character/CharacterGraph'
-import LocationGraph from '@/components/location/LocationGraph'
+import CharacterListView from '@/components/character/CharacterListView'
+import LocationListView from '@/components/location/LocationListView'
 import ArcListView from '@/components/storyarc/ArcListView'
 import TimelineView from '@/components/timeline/TimelineView'
 import ReaderView from '@/components/reader/ReaderView'
@@ -15,6 +15,7 @@ import PreferenceView from '@/components/preference/PreferenceView'
 import BookshelfView from '@/components/novel/BookshelfView'
 import NovelEditDialog from '@/components/novel/NovelEditDialog'
 import NovelDeleteDialog from '@/components/novel/NovelDeleteDialog'
+import ExportDialog from '@/components/export/ExportDialog'
 import ChatPanel from '@/components/chat/ChatPanel'
 import GitHubLink from '@/components/shell/GitHubLink'
 import SettingsDialog from '@/components/settings/SettingsDialog'
@@ -48,6 +49,8 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
   const [locationFocusId, setLocationFocusId] = useState<number>(0)
   const [timelineFocusId, setTimelineFocusId] = useState<number>(0)
   const [arcFocusId, setArcFocusId] = useState<number>(0)
+  const [readerFocusId, setReaderFocusId] = useState<number>(0)
+  const [preferenceFocusId, setPreferenceFocusId] = useState<number>(0)
   const [showCreate, setShowCreate] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -55,6 +58,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
   const [showHelp, setShowHelp] = useState(false)
   const [tabTarget, setTabTarget] = useState<{ path: string; title: string } | null>(null)
   const [activeContent, setActiveContent] = useState('')
+  const [isDirty, setIsDirty] = useState(false)
   const [activeSkillName, setActiveSkillName] = useState<string | null>(null)
   const [isMaximised, setIsMaximised] = useState(false)
   const [platformOS, setPlatformOS] = useState('')
@@ -65,6 +69,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
   const [editingNovel, setEditingNovel] = useState<novel.Novel | null>(null)
   const [deletingNovel, setDeletingNovel] = useState<novel.Novel | null>(null)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [exportNovelId, setExportNovelId] = useState<number | null>(null)
 
   // ── 窗口状态 ────────────────────────────────────────────
 
@@ -152,11 +157,15 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
     setLocationFocusId(0)
     setTimelineFocusId(0)
     setArcFocusId(0)
+    setReaderFocusId(0)
+    setPreferenceFocusId(0)
     switch (panelId) {
       case 'characters': setCharacterFocusId(entityId); break
       case 'locations': setLocationFocusId(entityId); break
       case 'timeline': setTimelineFocusId(entityId); break
       case 'storyarcs': setArcFocusId(entityId); break
+      case 'reader': setReaderFocusId(entityId); break
+      case 'preferences': setPreferenceFocusId(entityId); break
     }
     setActivePanel(panelId)
   }
@@ -218,6 +227,11 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
     await loadNovels()
   }
 
+  async function handleExportNovel(format: 'epub' | 'markdown' | 'txt') {
+    if (exportNovelId == null) return
+    await app.ExportNovel(exportNovelId, format)
+  }
+
   async function handleSaveCover(novelID: number, file: File) {
     const buf = await file.arrayBuffer()
     await app.SaveCover(novelID, Array.from(new Uint8Array(buf)))
@@ -228,7 +242,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
   // ── 窗口按钮样式 ────────────────────────────────────────
 
   const winBtn = 'w-12 h-full flex items-center justify-center cursor-pointer text-foreground/80 hover:text-foreground hover:bg-black/25 hover:shadow-md transition-all'
-  const closeBtn = 'w-12 h-full flex items-center justify-center cursor-pointer text-foreground/80 hover:text-white hover:bg-red-500 transition-colors'
+  const closeBtn = 'w-12 h-full flex items-center justify-center cursor-pointer text-foreground/80 hover:text-destructive-foreground hover:bg-destructive transition-colors'
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
@@ -308,6 +322,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
           onSelectNovel={handleSelectNovel}
           onSelectChapter={handleSelectChapter}
           onSelectGoink={handleSelectGoink}
+          onExportNovel={(id) => setExportNovelId(id)}
           target={tabTarget}
           showCreate={showCreate}
           setShowCreate={setShowCreate}
@@ -321,9 +336,13 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
             setActiveSkillName(title)
             contentRef.current?.openFile(path, title, readOnly)
           }}
+          onEditSkill={(path, title, readOnly) => {
+            setActiveSkillName(title)
+            contentRef.current?.openFile(path, title, readOnly, 'edit')
+          }}
           onNewSkill={(name) => {
             setActiveSkillName(`技能: ${name}`)
-            contentRef.current?.openFile(`skills/${name}.md`, `技能: ${name}`)
+            contentRef.current?.openFile(`skills/${name}.md`, `技能: ${name}`, false, 'edit')
           }}
           onSearchNavigateEntity={handleSearchNavigateEntity}
           onSearchNavigateChapter={handleSearchNavigateChapter}
@@ -341,23 +360,24 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
             onDeleteNovel={setDeletingNovel}
             onCreateNovel={() => setShowCreateDialog(true)}
             onSaveCover={handleSaveCover}
+            onExportNovel={(n) => setExportNovelId(n.id)}
           />
         ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && activePanel !== 'profile' && (
-          <ContentPanel ref={contentRef} novelId={activeNovelId} onContentChange={setActiveContent} />
+          <ContentPanel ref={contentRef} novelId={activeNovelId} onContentChange={setActiveContent} onDirtyChange={setIsDirty} />
         )}
 
         {activePanel === 'characters' ? (
-          <CharacterGraph novelId={activeNovelId} focusId={characterFocusId} />
+          <CharacterListView novelId={activeNovelId} focusId={characterFocusId} />
         ) : activePanel === 'locations' ? (
-          <LocationGraph novelId={activeNovelId} focusId={locationFocusId} />
+          <LocationListView novelId={activeNovelId} focusId={locationFocusId} />
         ) : activePanel === 'storyarcs' ? (
           <ArcListView novelId={activeNovelId} focusArcId={arcFocusId} />
         ) : activePanel === 'timeline' ? (
           <TimelineView novelId={activeNovelId} focusEntryId={timelineFocusId} />
         ) : activePanel === 'reader' ? (
-          <ReaderView novelId={activeNovelId} />
+          <ReaderView novelId={activeNovelId} focusId={readerFocusId} />
         ) : activePanel === 'preferences' ? (
-          <PreferenceView novelId={activeNovelId} />
+          <PreferenceView novelId={activeNovelId} focusId={preferenceFocusId} />
         ) : activePanel === 'profile' ? (
           <ProfileView />
         ) : null}
@@ -367,7 +387,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
         )}
       </div>
 
-      <StatusBar content={activeContent} />
+      <StatusBar content={activeContent} isDirty={isDirty} />
 
       <SettingsDialog
         open={showSettings}
@@ -396,6 +416,13 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
         novelTitle={deletingNovel?.title ?? ''}
         onClose={() => setDeletingNovel(null)}
         onConfirm={handleDeleteNovel}
+      />
+
+      <ExportDialog
+        open={exportNovelId !== null}
+        novelTitle={novels.find(n => n.id === exportNovelId)?.title ?? ''}
+        onClose={() => setExportNovelId(null)}
+        onExport={handleExportNovel}
       />
     </div>
   )

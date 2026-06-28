@@ -2,7 +2,7 @@
 name: scene-beats
 description: 提供场景节拍设计方法论，确保每场戏都有戏剧功能和情感推力。当用户要求写具体场景、判断场景质量、或说"这段太平了""场景没力"时，使用此技能。
 category: 结构
-mode: on_demand
+mode: auto
 author: builtin
 version: 1
 ---

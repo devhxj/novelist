@@ -77,30 +77,71 @@
 
 ## 前端可视化状态
 <p align="center">
-  <img src="assets/arc-demo.png" width="32%" alt="故事弧线" />
-  <img src="assets/location-demo.png" width="32%" alt="地点图谱" />
-  <img src="assets/preferences-demo.png" width="32%" alt="创作偏好" />
+  <img src="assets/arc-demo.png" alt="故事弧线" />
+</p>
+<p align="center">
+  <img src="assets/location-demo.png" alt="地点图谱" />
+</p>
+<p align="center">
+  <img src="assets/preferences-demo.png" alt="创作偏好" />
 </p>
 
-## Skill 矩阵：任意创作风格，丢个文件就生效
+## Skill 系统：3 层覆盖 × 3 种模式
 
-8 个内置创作方法论——场景节拍、对白潜台词、节奏控制、悬念钩子、角色设计、修改打磨、去 AI 味、共创构思——覆盖写作全流程。需要时通过 `/技能名` 一键加载，LLM 按方法论工作流执行。
+Skill 是 Goink 的创作方法论模块。每个 Skill 由一个 `.md` 文件定义，包含 YAML frontmatter 元数据和 markdown 正文。**三层覆盖 + 三种模式 = 9 种策略维度**，精确控制"什么内容、在什么范围、以什么方式生效"。
 
-还不够？新建一个 `.md` 文件就是新 Skill：
+### 三层覆盖
+
+同名 Skill 按 **小说 > 用户 > 内置** 优先级覆盖。修改即时热重载，无需重启。
+
+| 层级 | 存储路径 | 可见范围 | 可编辑 |
+|---|---|---|---|
+| 内置 Builtin | 打包只读 | 所有小说 | 否 |
+| 用户 User | `~/.goink/skills/` | 所有小说 | 是 |
+| 小说 Novel | `{novel}/skills/` | 当前小说 | 是 |
+
+### 三种触发模式
+
+| 模式 | AI 自主调用 | 用户 `/` 触发 | 会话开头注入 | 出现在目录 |
+|---|---|---|---|---|
+| 智能 `auto` | 是 | 是 | — | 是 |
+| 指令 `manual` | — | 是 | — | — |
+| 常驻 `always` | 是 | 是 | 是（注入全文） | — |
+
+### 3×3 能力矩阵
+
+|  | 智能 auto | 指令 manual | 常驻 always |
+|---|---|---|---|
+| **内置** | 场景节拍、对白潜台词、节奏控制、悬念钩子、角色设计、修改打磨、去AI味、共创构思 | review / memory / collect / next | — |
+| **用户** | 跨小说可复用的创作工作流 | 个人快捷命令 | 全局生效的风格规则 |
+| **小说** | 单书专属工作流 | 单书快捷命令 | 单书常驻规则 |
+
+新建一个 `.md` 文件就是新 Skill：
 
 ```markdown
 ---
 name: 我的写作流程
 description: 个人定制创作流程
 category: 自定义
+mode: auto
 ---
-# 正文...
+# 正文 markdown 内容
 ```
 
-三层覆盖（内置 → 用户 → 小说），**同名 Skill 逐级覆盖**，热重载，零代码扩展。
+零代码扩展。修改即时生效。删除同理。
 
 <p align="center">
   <img src="assets/skill-demo.png" width="80%" alt="Skill 技能系统" />
+</p>
+
+## 风格蒸馏：一段文字 → 一个仿写 Skill
+
+想写出某个作家的笔法？贴一段样文，AI 从六个维度拆解——**句式结构、用词习惯、修辞手法、节奏控制、叙事距离、氛围语调**——自动生成一个完整的仿写 Skill。不是关键词替换，是提炼风格模式。
+
+生成的 Skill 立刻出现在列表中，`/风格名` 一键加载，后续所有对话都按此风格输出。也可以打开编辑继续微调。
+
+<p align="center">
+  <img src="assets/extract-demo.png" width="80%" alt="风格蒸馏" />
 </p>
 
 ## 三重保障，维护不会遗漏
@@ -117,8 +158,10 @@ AI 不会直接改正文。每次编辑系统先生成 Diff，等你批准再写
 
 所有修改都有 Git 历史，任何时候都可以回退到任意状态。
 <p align="center">
-  <img src="assets/write-demo.png" width="48%" alt="写作与 Diff 审批" />
-  <img src="assets/outline-demo.png" width="48%" alt="大纲与章节计划" />
+  <img src="assets/write-demo.png" alt="写作与 Diff 审批" />
+</p>
+<p align="center">
+  <img src="assets/outline-demo.png" alt="大纲与章节计划" />
 </p>
 ## AI 碰不到不该碰的文件
 

@@ -102,7 +102,7 @@ export default function InitView({ onInitialized }: Props) {
                     relative rounded-xl border-2 p-3 text-left transition-all cursor-pointer
                     ${selected
                       ? 'border-primary ring-2 ring-primary/20'
-                      : 'border-border hover:border-muted-foreground/30'}
+                      : 'border-border hover:border-muted-foreground/50 hover:-translate-y-0.5 hover:shadow-md'}
                   `}
                 >
                   <ThemePreview theme={opt.key} />

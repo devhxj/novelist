@@ -2,7 +2,7 @@
 name: character-design
 description: 提供角色设计方法论，涵盖欲望vs需求、创伤缺陷、弧光方向和配角功能化。当用户要求创建角色、调整设定、或说"太扁平""没弧光""不真实"时，使用此技能。
 category: 角色
-mode: on_demand
+mode: auto
 author: builtin
 version: 1
 ---

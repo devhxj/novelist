@@ -76,3 +76,74 @@ func TestRdListByNovel_Pagination(t *testing.T) {
 		t.Errorf("total should be 4, got %d", result.Total)
 	}
 }
+
+// ── CRUD ────────────────────────────────────────────────────
+
+func TestRdCreate(t *testing.T) {
+	db := openRdDB(t)
+	ctx := context.Background()
+
+	item := ReaderPerspective{
+		NovelID: 1, Type: "known", Content: "主角身世未知",
+		PlantedChapter: 1, RelatedTruth: "主角是皇帝私生子",
+	}
+	if err := db.WithContext(ctx).Create(&item).Error; err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if item.ID == 0 {
+		t.Error("ID should be set after create")
+	}
+
+	var found ReaderPerspective
+	db.First(&found, item.ID)
+	if found.Content != "主角身世未知" {
+		t.Errorf("expected 主角身世未知, got %s", found.Content)
+	}
+	if found.Type != "known" {
+		t.Errorf("expected known, got %s", found.Type)
+	}
+}
+
+func TestRdUpdate(t *testing.T) {
+	db := openRdDB(t)
+	ctx := context.Background()
+
+	item := ReaderPerspective{NovelID: 1, Type: "suspense", Content: "旧悬念", PlantedChapter: 2}
+	db.WithContext(ctx).Create(&item)
+
+	type UpdateInput struct {
+		Content         string `json:"content,omitempty"`
+		Type            string `json:"type,omitempty"`
+		RevealedChapter int    `json:"revealed_chapter,omitempty"`
+	}
+	input := UpdateInput{RevealedChapter: 5, Type: ""}
+	if err := db.WithContext(ctx).Model(&ReaderPerspective{}).Where("id = ?", item.ID).Updates(&input).Error; err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	var updated ReaderPerspective
+	db.WithContext(ctx).First(&updated, item.ID)
+	if updated.RevealedChapter != 5 {
+		t.Errorf("revealed_chapter: expected 5, got %d", updated.RevealedChapter)
+	}
+	if updated.Type != "suspense" {
+		t.Errorf("type should be unchanged (empty string skipped), got %s", updated.Type)
+	}
+}
+
+func TestRdDelete(t *testing.T) {
+	db := openRdDB(t)
+	ctx := context.Background()
+
+	item := ReaderPerspective{NovelID: 1, Type: "known", Content: "待删", PlantedChapter: 1}
+	db.WithContext(ctx).Create(&item)
+
+	if err := db.WithContext(ctx).Where("id = ?", item.ID).Delete(&ReaderPerspective{}).Error; err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	var found ReaderPerspective
+	if db.First(&found, item.ID).Error == nil {
+		t.Error("item should be deleted")
+	}
+}

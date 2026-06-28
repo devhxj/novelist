@@ -4,7 +4,7 @@ import type { EditorTab } from '@/components/content/types'
 let idSeq = 0
 function nextId(prefix: string) { return `${prefix}_${++idSeq}` }
 
-type TabMeta = Pick<EditorTab, 'path' | 'title' | 'type' | 'viewMode'>
+type TabMeta = Pick<EditorTab, 'path' | 'title' | 'type' | 'viewMode' | 'readOnly'>
 
 export function useEditorTabs(novelId: number) {
   const [tabs, setTabs] = useState<EditorTab[]>([])
@@ -71,7 +71,7 @@ export function useEditorTabs(novelId: number) {
   useEffect(() => {
     if (!initRef.current) return
     const key = String(prevNovelIdRef.current)
-    const metas: TabMeta[] = tabs.map(t => ({ path: t.path, title: t.title, type: t.type, viewMode: t.viewMode }))
+    const metas: TabMeta[] = tabs.map(t => ({ path: t.path, title: t.title, type: t.type, viewMode: t.viewMode, readOnly: t.readOnly }))
     if (metas.length > 0) {
       allMetasRef.current[key] = metas
     } else {

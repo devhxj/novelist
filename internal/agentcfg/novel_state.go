@@ -9,9 +9,9 @@ import (
 	"novel/internal/novel"
 )
 
-// System3 构建小说上下文快照，每轮对话开头注入。
+// NovelState 构建小说上下文快照（原 System3），每轮对话开头注入。
 // 只包含基本信息 + 故事状态。具体数据（角色、时间线等）由 MCP 工具按需提供。
-func System3(db *gorm.DB, novelID int64) (string, error) {
+func NovelState(db *gorm.DB, novelID int64) (string, error) {
 	var n novel.Novel
 	if err := db.First(&n, novelID).Error; err != nil {
 		return "", fmt.Errorf("agentcfg: load novel %d: %w", novelID, err)

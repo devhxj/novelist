@@ -9,6 +9,7 @@ import TabBar from './TabBar'
 import ContentEditor from './ContentEditor'
 import OutlineViewer from './OutlineViewer'
 import SkillPreview from './SkillPreview'
+import SkillEditForm from '@/components/skill/SkillEditForm'
 import Markdown from '@/components/Markdown'
 import { outlinePath, isContentPath, isOutlinePath, isSkillPath, skillNameFromPath } from './types'
 import type { EditorTab } from './types'
@@ -17,7 +18,7 @@ import './ContentPanel.css'
 const MONACO_THEME: Record<Theme, string> = { light: 'light', dark: 'vs-dark' }
 
 export interface ContentPanelHandle {
-  openFile: (path: string, title: string, readOnly?: boolean) => void
+  openFile: (path: string, title: string, readOnly?: boolean, initialViewMode?: string) => void
   openFileWithHighlight: (path: string, title: string, matchPos: number, matchLen: number) => void
   clearHighlight: () => void
   closeAllTabs: () => void
@@ -32,10 +33,11 @@ export interface ContentPanelHandle {
 interface Props {
   novelId: number
   onContentChange?: (content: string) => void
+  onDirtyChange?: (isDirty: boolean) => void
 }
 
 const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel(
-  { novelId, onContentChange }, ref
+  { novelId, onContentChange, onDirtyChange }, ref
 ) {
   const app = useApp()
   const {
@@ -66,6 +68,10 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       onContentChange?.(activeTab.content ?? '')
     }
   }, [activeTab, onContentChange])
+
+  useEffect(() => {
+    onDirtyChange?.(activeTab?.isDirty ?? false)
+  }, [activeTab?.isDirty, onDirtyChange])
 
   // 从 localStorage 恢复 tab 后，自动加载文件内容
   const loadedRef = useRef<Set<string>>(new Set())
@@ -128,11 +134,25 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
 
   // ── 保存逻辑 ────────────────────────────────────────────
 
-  const doSave = useCallback((tabId: string, path: string, content: string) => {
+  const doSave = useCallback(async (tabId: string, path: string, content: string) => {
     if (!novelIdRef.current) return
-    app.SaveContent({ novel_id: novelIdRef.current, path, content })
+    await app.SaveContent({ novel_id: novelIdRef.current, path, content })
     updateTab(tabId, { isDirty: false })
   }, [app, updateTab])
+
+  // Ctrl+S 立即保存
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 's') {
+        e.preventDefault()
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+        const s = savingRef.current
+        if (s) doSave(s.id, s.path, s.content)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [doSave])
 
   const handleEditorChange = useCallback((tabId: string, value: string | undefined) => {
     const content = value ?? ''
@@ -267,17 +287,21 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     return p
   }
 
-  const doOpenFile = useCallback((path: string, title?: string, readOnly?: boolean) => {
+  const doOpenFile = useCallback((path: string, title?: string, readOnly?: boolean, initialViewMode?: string) => {
     const display = title || titleFromPath(path)
     const existing = tabs.find(t => t.path === path && t.type === 'file')
     if (existing) {
+      if (initialViewMode) {
+        updateTab(existing.id, { viewMode: initialViewMode as EditorTab['viewMode'] })
+      }
       setActiveTabId(existing.id)
       onContentChange?.(existing.content ?? '')
       return
     }
 
     const skReadOnly = readOnly ?? path.startsWith('/builtin/skills/')
-    const initialMode = skReadOnly ? 'preview' : (isSkillPath(path) ? 'content' : 'content') as 'content' | 'outline' | 'preview'
+    const initialMode: EditorTab['viewMode'] = initialViewMode as EditorTab['viewMode'] ||
+      (skReadOnly ? 'preview' : (isSkillPath(path) ? 'preview' : 'content'))
 
     setIsLoading(true)
     app.GetContent(novelId, path).then(content => {
@@ -487,16 +511,30 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       <div className="flex items-center justify-between px-4 py-2 border-b shrink-0 select-none">
         <span className="text-sm font-medium truncate">{activeTab.title}</span>
         <div className="flex items-center gap-0.5 shrink-0">
-          {(isSkillPath(activeTab.path) || activeTab.path === 'goink.md') ? (
+          {activeTab.path === 'goink.md' ? (
             <button
-              onClick={() => {
-                const newMode = activeTab.viewMode === 'preview' ? 'content' : 'preview'
-                updateTab(activeTab.id, { viewMode: newMode })
-              }}
+              onClick={() => updateTab(activeTab.id, { viewMode: viewMode === 'preview' ? 'content' : 'preview' })}
               className={tabBtnClass(viewMode === 'preview')}
             >
               预览
             </button>
+          ) : isSkillPath(activeTab.path) ? (
+            <>
+              <button
+                onClick={() => updateTab(activeTab.id, { viewMode: 'preview' })}
+                className={tabBtnClass(viewMode === 'preview')}
+              >
+                预览
+              </button>
+              {!activeTab.readOnly && (
+                <button
+                  onClick={() => updateTab(activeTab.id, { viewMode: 'edit' })}
+                  className={tabBtnClass(viewMode === 'edit')}
+                >
+                  编辑
+                </button>
+              )}
+            </>
           ) : (
             <>
               <button onClick={() => handleSetViewMode(activeTab.id, 'content')} className={tabBtnClass(viewMode === 'content')}>
@@ -517,17 +555,23 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
           </div>
         ) : viewMode === 'preview' ? (
           <SkillPreview content={activeTab.content ?? ''} />
+        ) : viewMode === 'edit' ? (
+          <SkillEditForm
+            content={activeTab.content ?? ''}
+            readOnly={activeTab.readOnly}
+            onSave={async (newContent) => {
+              await doSave(activeTab.id, activeTab.path, newContent as string)
+              updateTab(activeTab.id, { viewMode: 'preview' })
+            }}
+            onCancel={() => updateTab(activeTab.id, { viewMode: 'preview' })}
+          />
         ) : viewMode === 'content' ? (
-          activeTab.readOnly ? (
-            <SkillPreview content={activeTab.content ?? ''} />
-          ) : (
-            <ContentEditor
-              value={activeTab.content ?? ''}
-              onChange={v => handleEditorChange(activeTab.id, v)}
-              onMount={handleEditorMount}
-              editorTheme={MONACO_THEME[theme]}
-            />
-          )
+          <ContentEditor
+            value={activeTab.content ?? ''}
+            onChange={v => handleEditorChange(activeTab.id, v)}
+            onMount={handleEditorMount}
+            editorTheme={MONACO_THEME[theme]}
+          />
         ) : (
           <OutlineViewer content={activeTab.outlineContent ?? ''} />
         )}

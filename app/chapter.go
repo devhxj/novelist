@@ -29,6 +29,11 @@ func (a *App) GetMaxChapterNumber(novelID int64) (int, error) {
 	return a.chapter.GetLatestNumber(a.ctx, novelID)
 }
 
+// UpdateChapterTitle 更新章节标题。
+func (a *App) UpdateChapterTitle(novelID int64, chapterNumber int, title string) error {
+	return a.chapter.UpdateTitle(a.ctx, novelID, chapterNumber, title)
+}
+
 // CreateChapter 创建新章节，章节号自动递增。同时创建空正文文件。
 func (a *App) CreateChapter(input CreateChapterInput) (*chapter.Chapter, error) {
 	latest, err := a.chapter.GetLatestNumber(a.ctx, input.NovelID)

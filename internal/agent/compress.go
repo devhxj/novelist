@@ -63,7 +63,7 @@ func (a *Agent) generateSummary(ctx context.Context, opts *RunOptions) (string, 
 	return summary, retained, nil
 }
 
-// Compress 执行主 Agent 上下文压缩：调 LLM 生成摘要，重建 System2/3，保留近期关键消息。
+// Compress 执行主 Agent 上下文压缩：调 LLM 生成摘要，重建 SkillCatalog/NovelState，保留近期关键消息。
 // opts 不会被修改，成功后才赋值新的 Messages / ActiveVersion / runningTokens。
 func (a *Agent) Compress(ctx context.Context, opts *RunOptions, runningTokens map[string]int) error {
 	a.logger.Info("开始上下文压缩",
@@ -80,20 +80,23 @@ func (a *Agent) Compress(ctx context.Context, opts *RunOptions, runningTokens ma
 		return err
 	}
 
-	// 重建 System1/2/3
-	sys1 := agentcfg.System1(agentcfg.MainAgent)
-	var sys2 string
+	// 重建系统消息（顺序与 writeSystemMessages 一致）
+	identity := agentcfg.AgentIdentity(agentcfg.MainAgent)
+	var always string
+	var catalog string
 	if a.skillStore != nil {
-		sys2 = agentcfg.BuildSkillCatalog(a.skillStore.ListMeta(opts.NovelID))
+		all := a.skillStore.ListMeta(opts.NovelID)
+		catalog = agentcfg.BuildSkillCatalog(a.skillStore.ListMetaForCatalog(all))
+		always = agentcfg.BuildAlwaysSkillsContent(all, a.skillStore, opts.NovelID)
 	}
-	sys3, err := agentcfg.System3(a.db, opts.NovelID)
+	novelState, err := agentcfg.NovelState(a.db, opts.NovelID)
 	if err != nil {
-		a.logger.Warn("压缩时 System3 构建失败", "novel_id", opts.NovelID, "err", err)
-		sys3 = ""
+		a.logger.Warn("压缩时 NovelState 构建失败", "novel_id", opts.NovelID, "err", err)
+		novelState = ""
 	}
 
 	// 在事务中完成版本递增 + 全部 DB 写入
-	newVersion, err := a.persistCompression(ctx, opts, sys1, sys2, sys3, summary, retained)
+	newVersion, err := a.persistCompression(ctx, opts, identity, always, catalog, novelState, summary, retained)
 	if err != nil {
 		return fmt.Errorf("compress: persist failed: %w", err)
 	}
@@ -124,7 +127,7 @@ func (a *Agent) Compress(ctx context.Context, opts *RunOptions, runningTokens ma
 	return nil
 }
 
-// compressInMemory 执行子 Agent 上下文压缩：纯内存操作，System1/System3 不动，仅写边界标记到 DB。
+// compressInMemory 执行子 Agent 上下文压缩：纯内存操作，AgentIdentity/NovelState 不动，仅写边界标记到 DB。
 func (a *Agent) compressInMemory(ctx context.Context, opts *RunOptions, runningTokens map[string]int) error {
 	a.logger.Info("子Agent上下文压缩",
 		"session_id", opts.SessionID,
@@ -142,7 +145,7 @@ func (a *Agent) compressInMemory(ctx context.Context, opts *RunOptions, runningT
 		return err
 	}
 
-	// 提取头部 system 消息（System1 + System3），不动
+	// 提取头部 system 消息，不动
 	sysEnd := 0
 	for i, m := range opts.Messages {
 		role, _ := m["role"].(string)
@@ -199,7 +202,7 @@ func (a *Agent) compressInMemory(ctx context.Context, opts *RunOptions, runningT
 }
 
 // persistCompression 在事务中递增 active_version 并写入所有压缩消息。
-func (a *Agent) persistCompression(ctx context.Context, opts *RunOptions, sys1, sys2, sys3, summary string, retained []map[string]any) (int, error) {
+func (a *Agent) persistCompression(ctx context.Context, opts *RunOptions, identity, always, catalog, novelState, summary string, retained []map[string]any) (int, error) {
 	var newVersion int
 
 	err := a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -227,29 +230,35 @@ func (a *Agent) persistCompression(ctx context.Context, opts *RunOptions, sys1, 
 			}).Error
 		}
 
-		// System1
-		if err := msg("system", sys1, true, false, ""); err != nil {
-			return fmt.Errorf("写入 System1 失败: %w", err)
+		// AgentIdentity
+		if err := msg("system", identity, true, false, ""); err != nil {
+			return fmt.Errorf("write AgentIdentity: %w", err)
 		}
-		// System2: Skill Catalog
-		if sys2 != "" {
-			if err := msg("system", sys2, true, false, ""); err != nil {
-				return fmt.Errorf("写入 System2 失败: %w", err)
+		// AlwaysSkills
+		if always != "" {
+			if err := msg("system", always, true, false, ""); err != nil {
+				return fmt.Errorf("write AlwaysSkills: %w", err)
 			}
 		}
-		// System3: 小说上下文
-		if sys3 != "" {
-			if err := msg("system", sys3, true, false, ""); err != nil {
-				return fmt.Errorf("写入 System3 失败: %w", err)
+		// SkillCatalog
+		if catalog != "" {
+			if err := msg("system", catalog, true, false, ""); err != nil {
+				return fmt.Errorf("write SkillCatalog: %w", err)
+			}
+		}
+		// NovelState
+		if novelState != "" {
+			if err := msg("system", novelState, true, false, ""); err != nil {
+				return fmt.Errorf("write NovelState: %w", err)
 			}
 		}
 		// 提醒语
 		if err := msg("user", compressionReminder, true, false, ""); err != nil {
-			return fmt.Errorf("写入提醒语失败: %w", err)
+			return fmt.Errorf("write compression reminder: %w", err)
 		}
 		// 摘要
 		if err := msg("user", "<system-reminder>\n"+summary+"\n</system-reminder>", true, false, ""); err != nil {
-			return fmt.Errorf("写入摘要失败: %w", err)
+			return fmt.Errorf("write summary: %w", err)
 		}
 		// 保留消息副本
 		for _, m := range retained {
@@ -260,7 +269,7 @@ func (a *Agent) persistCompression(ctx context.Context, opts *RunOptions, sys1, 
 		}
 		// 边界标记
 		if err := msg("system", "", false, true, "compression"); err != nil {
-			return fmt.Errorf("写入边界标记失败: %w", err)
+			return fmt.Errorf("write compression marker: %w", err)
 		}
 
 		return nil
@@ -324,21 +333,18 @@ func (a *Agent) emitCompression(ctx context.Context, turnID int, phase, summary,
 }
 
 // retainMessages 筛选应保留的历史消息。
-// 跳过前 3 条 system 消息（System1/System2/System3），后续应用保留规则。
+// 跳过前 N 条 system 消息，后续应用保留规则。
 func retainMessages(messages []map[string]any) []map[string]any {
 	if len(messages) == 0 {
 		return nil
 	}
 
-	// 跳过前 3 条 system 消息（System1/System2/System3）
+	// 跳过前部 system 消息
 	sysEnd := 0
-	for i, m := range messages {
-		if i >= 3 {
-			break
-		}
+	for _, m := range messages {
 		role, _ := m["role"].(string)
 		if role == "system" {
-			sysEnd = i + 1
+			sysEnd++
 		} else {
 			break
 		}

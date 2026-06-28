@@ -32,7 +32,7 @@ export default function ModelEditForm({ model, onChange, onSave, onCancel, title
       {title && (
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium">{title}</span>
-          <button onClick={onCancel} className="text-muted-foreground hover:text-red-500">
+          <button onClick={onCancel} className="text-muted-foreground hover:text-destructive">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>

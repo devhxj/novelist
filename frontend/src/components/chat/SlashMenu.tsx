@@ -1,7 +1,25 @@
 import { useEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { Zap, Play } from 'lucide-react'
+import { Zap, Play, Star } from 'lucide-react'
 import type { app } from '@/hooks/useApp'
+
+const MODE_ICON: Record<string, React.ReactNode> = {
+  auto: <Zap className="w-3.5 h-3.5 text-tag-amber-foreground shrink-0" />,
+  manual: <Play className="w-3.5 h-3.5 text-tag-blue-foreground shrink-0" />,
+  always: <Star className="w-3.5 h-3.5 text-tag-green-foreground shrink-0" />,
+}
+
+const MODE_LABEL: Record<string, string> = {
+  auto: '智能',
+  manual: '指令',
+  always: '常驻',
+}
+
+const MODE_SELECTED_BG: Record<string, string> = {
+  auto: 'bg-tag-amber',
+  manual: 'bg-tag-blue',
+  always: 'bg-tag-green',
+}
 
 interface Props {
   slashItems: app.SlashCommand[]
@@ -90,31 +108,25 @@ export default function SlashMenu({
     >
       <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: style.maxHeight }}>
         {filtered.map((c, i) => {
-          const isCommand = c.type === 'command'
+          const mode = c.type || 'auto'
+          const selBg = MODE_SELECTED_BG[mode] || MODE_SELECTED_BG.auto
           return (
           <button
-            key={`${c.type}:${c.name}`}
+            key={`${mode}:${c.name}`}
             onMouseDown={e => {
               e.preventDefault()
               onSelect(c)
             }}
             onMouseEnter={() => onHover(i)}
             className={`w-full text-left px-3 py-2 transition-colors ${
-              i === selectedIndex
-                ? (isCommand ? 'bg-tag-blue dark:bg-blue-950/30' : 'bg-accent')
-                : (isCommand ? 'hover:bg-tag-blue/60 dark:hover:bg-blue-950/20' : 'hover:bg-muted/60')
+              i === selectedIndex ? selBg : 'hover:bg-muted/60'
             }`}
           >
             <div className="flex items-center gap-2 min-w-0">
-              {isCommand
-                ? <Play className="w-3.5 h-3.5 text-tag-blue-foreground shrink-0" />
-                : <Zap className="w-3.5 h-3.5 text-tag-amber-foreground shrink-0" />
-              }
+              {MODE_ICON[mode] || MODE_ICON.auto}
               <span className="text-sm font-medium text-foreground truncate">{c.name}</span>
-              <span className={`text-[10px] shrink-0 ml-auto ${
-                isCommand ? 'text-tag-blue-foreground' : 'text-muted-foreground/40'
-              }`}>
-                {isCommand ? '指令' : '技能'}
+              <span className="text-[10px] text-muted-foreground shrink-0 ml-auto">
+                {MODE_LABEL[mode] || MODE_LABEL.auto}
               </span>
             </div>
             {c.description && (

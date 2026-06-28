@@ -39,8 +39,8 @@ content`
 	if err != nil {
 		t.Fatalf("ParseBytes: %v", err)
 	}
-	if sk.Mode != "on_demand" {
-		t.Errorf("default Mode should be on_demand, got %s", sk.Mode)
+	if sk.Mode != "auto" {
+		t.Errorf("default Mode should be auto, got %s", sk.Mode)
 	}
 }
 
@@ -135,7 +135,7 @@ func TestParseFrontmatter_Empty(t *testing.T) {
 }
 
 func TestParseFrontmatter_WithFields(t *testing.T) {
-	raw := "name: 高潮场景\nmode: on_demand\nauthor: 系统"
+	raw := "name: 高潮场景\nmode: auto\nauthor: 系统"
 	sk, err := parseFrontmatter(raw)
 	if err != nil {
 		t.Fatalf("parseFrontmatter: %v", err)
@@ -143,7 +143,7 @@ func TestParseFrontmatter_WithFields(t *testing.T) {
 	if sk.Name != "高潮场景" {
 		t.Errorf("Name: got %s", sk.Name)
 	}
-	if sk.Mode != "on_demand" {
+	if sk.Mode != "auto" {
 		t.Errorf("Mode: got %s", sk.Mode)
 	}
 	if sk.Author != "系统" {

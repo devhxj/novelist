@@ -5,6 +5,10 @@ import CharacterList from '@/components/character/CharacterList'
 import LocationList from '@/components/location/LocationList'
 import SkillList from '@/components/skill/SkillList'
 import SearchPanel from '@/components/search/SearchPanel'
+import TimelineList from '@/components/timeline/TimelineList'
+import ArcList from '@/components/storyarc/ArcList'
+import ReaderList from '@/components/reader/ReaderList'
+import PreferenceList from '@/components/preference/PreferenceList'
 import type { SearchResult } from '@/components/search/SearchPanel'
 
 interface Props {
@@ -14,6 +18,7 @@ interface Props {
   onSelectNovel: (n: novel.Novel) => void
   onSelectChapter: (ch: chapter.Chapter) => void
   onSelectGoink: () => void
+  onExportNovel: (novelId: number) => void
   target: { path: string; title: string } | null
   showCreate: boolean
   setShowCreate: (v: boolean) => void
@@ -24,6 +29,7 @@ interface Props {
   onCreateNovel: () => void
   activeSkillName: string | null
   onSelectSkill: (path: string, title: string, readOnly: boolean) => void
+  onEditSkill: (path: string, title: string, readOnly: boolean) => void
   onNewSkill: (name: string) => void
   onSearchNavigateEntity: (panelId: string, entityId: number) => void
   onSearchNavigateChapter: (filePath: string, title: string, chapterNum: number, matchPos: number, matchLen: number) => void
@@ -35,10 +41,10 @@ interface Props {
 export default function SidePanel({
   activePanel,
   novels, novelId, onSelectNovel,
-  onSelectChapter, onSelectGoink, target,
+  onSelectChapter, onSelectGoink, onExportNovel, target,
   showCreate, setShowCreate, title, setTitle, description, setDescription,
   onCreateNovel,
-  activeSkillName, onSelectSkill, onNewSkill,
+  activeSkillName, onSelectSkill, onEditSkill, onNewSkill,
   onSearchNavigateEntity, onSearchNavigateChapter,
   searchQuery, searchResults, onSearchChange,
 }: Props) {
@@ -58,6 +64,7 @@ export default function SidePanel({
           novelId={novelId}
           activeSkillName={activeSkillName}
           onSelectSkill={onSelectSkill}
+          onEditSkill={onEditSkill}
           onNewSkill={onNewSkill}
         />
       ) : activePanel === 'novels' ? (
@@ -79,27 +86,20 @@ export default function SidePanel({
           target={target}
           onSelectChapter={onSelectChapter}
           onSelectGoink={onSelectGoink}
+          onExportNovel={() => onExportNovel(novelId)}
         />
       ) : activePanel === 'characters' ? (
         <CharacterList novelId={novelId} />
       ) : activePanel === 'locations' ? (
         <LocationList novelId={novelId} />
       ) : activePanel === 'storyarcs' ? (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-xs text-muted-foreground">故事弧线</p>
-        </div>
+        <ArcList novelId={novelId} />
       ) : activePanel === 'timeline' ? (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-xs text-muted-foreground">时间线</p>
-        </div>
+        <TimelineList novelId={novelId} />
       ) : activePanel === 'reader' ? (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-xs text-muted-foreground">读者视角</p>
-        </div>
+        <ReaderList novelId={novelId} />
       ) : activePanel === 'preferences' ? (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-xs text-muted-foreground">创作偏好</p>
-        </div>
+        <PreferenceList novelId={novelId} />
       ) : (
         <div className="flex-1 flex items-center justify-center">
           <p className="text-xs text-muted-foreground">即将推出</p>

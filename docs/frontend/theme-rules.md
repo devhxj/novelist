@@ -26,6 +26,8 @@
 | `bg-blue-50 text-blue-600`         | `bg-tag-blue text-tag-blue-foreground`   |
 | `bg-rose-50`                       | `bg-tag-rose text-tag-rose-foreground`   |
 | `bg-purple-50 text-purple-600`     | `bg-tag-purple text-tag-purple-foreground` |
+| `bg-red-600 text-white` (删除按钮)  | `bg-destructive text-destructive-foreground` |
+| `hover:text-red-*` (删除/关闭图标)  | `hover:text-destructive`                |
 | User 消息气泡                       | `bg-bubble-user text-bubble-user-foreground` |
 
 ### 主题相关逻辑 → `Record<Theme, T>` 字典

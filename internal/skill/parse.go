@@ -53,12 +53,10 @@ func ParseBytes(data []byte, defaultAuthor string) (*Skill, error) {
 	if sk.Name == "" {
 		return nil, fmt.Errorf("缺少 name 字段")
 	}
-	if sk.Mode == "" {
-		sk.Mode = "on_demand"
-	}
 	if sk.Author == "" {
 		sk.Author = defaultAuthor
 	}
+	sk.Mode = normalizeMode(sk.Mode)
 	sk.Content = body
 	sk.RawContent = string(data)
 	return sk, nil

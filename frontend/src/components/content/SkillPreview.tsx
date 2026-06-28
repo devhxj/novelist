@@ -40,6 +40,20 @@ export default function SkillPreview({ content }: Props) {
                   <td className="px-4 py-2.5 text-foreground">{meta.category}</td>
                 </tr>
               )}
+              {meta.mode && (
+                <tr>
+                  <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap w-20">模式</td>
+                  <td className="px-4 py-2.5">
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${
+                      meta.mode === 'manual' ? 'bg-tag-blue text-tag-blue-foreground' :
+                      meta.mode === 'always' ? 'bg-tag-green text-tag-green-foreground' :
+                      'bg-tag-amber text-tag-amber-foreground'
+                    }`}>
+                      {meta.mode === 'manual' ? '指令' : meta.mode === 'always' ? '常驻' : '智能'}
+                    </span>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
