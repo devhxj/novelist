@@ -17,8 +17,8 @@
 ## Current State
 
 - Phase: `Phase 5 - Microsoft Agent Framework Migration`
-- Current task: `P5.1 Port approval wait/resume contract for tool calls`
-- Next task: `P5.2 Wire MAF-backed chat tool execution loop`
+- Current task: `P5.3 Port write/edit tools behind approval coordinator`
+- Next task: `P5.4 Port subagent orchestration`
 - Overall status: `In progress`
 - Last updated: `2026-07-03`
 
@@ -59,7 +59,9 @@
 | P4.2 | Add embedding configuration UI and packaged sqlite-vec binary loading | Completed | Added encrypted Embeddings API settings, bridge handlers, frontend settings UI, draft connection testing, sqlite-vec packaged/native resolver with runtime status, and RAG DI wiring; `dotnet test Novelist.slnx --no-restore -v minimal` passed 105/105; `npm --prefix frontend run build` passed |
 | P4.3 | Port search_story_memory behavior over the new RAG service | Completed | Added `SearchStoryMemory` contract, stable `RAG_UNAVAILABLE` errors, RAG-backed tool service, Photino bridge wiring, and tests for filtering, empty results, stale index errors, and bridge dispatch; `dotnet test Novelist.slnx --no-restore -v minimal` passed 109/109; `npm --prefix frontend run build` passed |
 | P5.0 | Start Microsoft Agent Framework tool adapter baseline | Completed | Added `Microsoft.Agents.AI` package baseline and a `NovelistMafToolRegistry` that exposes `search_story_memory` as a Microsoft.Extensions.AI `AIFunction` with the old flat tool schema, session-scoped novel context, unchanged Novelist DTO results, and unit coverage for schema/invocation; `dotnet test Novelist.slnx --no-restore -v minimal` passed 111/111; `npm --prefix frontend run build` passed |
-| P5.1 | Port approval wait/resume contract for tool calls | Pending | Pending |
+| P5.1 | Port approval wait/resume contract for tool calls | Completed | Added approval DTOs, `ToolApprovalCoordinator`, legacy `ApproveTool(toolId, approved, feedback)` bridge handler, Photino wiring, event payload tool metadata support, and chat-cancel cleanup; `dotnet test Novelist.slnx --no-restore -v minimal` passed 114/114; `npm --prefix frontend run build` passed |
+| P5.2 | Wire MAF-backed chat tool execution loop | Completed | Added neutral chat tool contracts, OpenAI-compatible `tools` request/streaming `tool_calls` parsing, `NovelistMafChatToolExecutor`, MAF-backed chat loop execution, legacy tool events, assistant `tool_calls`/`tool_displays` persistence, and tool result message replay; `dotnet test Novelist.slnx --no-restore -v minimal` passed 116/116; `npm --prefix frontend run build` passed |
+| P5.3 | Port write/edit tools behind approval coordinator | Pending | Pending |
 
 ## Completed Work Log
 
@@ -101,25 +103,28 @@
 - Completed P4.2 embedding configuration/sqlite-vec loading: added `EmbeddingConfigPayload` and sqlite-vec status DTOs, `IEmbeddingSettingsService`, encrypted filesystem Embeddings API config persistence under `embedding/config.enc`, active embedding options for RAG rebuild/search, draft `TestEmbeddingConnection`, Photino bridge handlers, and a reused settings-tab Embeddings UI. Added `PackagedSqliteVecExtensionResolver` with `NOVELIST_SQLITE_VEC_PATH` override and runtime/native candidate discovery, wired `SqliteVecTableProvisioner` through the resolver, and exposed stable sqlite-vec status without leaking local absolute paths in the bridge payload. Verified `dotnet test Novelist.slnx --no-restore -v minimal` passed 105/105 and `npm --prefix frontend run build` passed with existing chunk-size warnings only.
 - Completed P4.3 story-memory search migration: inventoried the old Go `search_story_memory` tool, added .NET DTOs for request/result/hits, introduced `IStoryMemorySearchService`, implemented `RagStoryMemorySearchService` over the new API-backed RAG semantic search, preserved old defaults for `top_k` and `min_relevance`, retained chapter/chunk-type filtering, formatted the same Markdown-style result content, added stable `RAG_UNAVAILABLE` bridge errors for missing/stale/failed direct tool states, and registered `SearchStoryMemory` through the Photino bridge for future MAF tool adapters. Verified `dotnet test Novelist.slnx --no-restore -v minimal` passed 109/109 and `npm --prefix frontend run build` passed with existing chunk-size warnings only.
 - Completed P5.0 Microsoft Agent Framework tool adapter baseline: added `Microsoft.Agents.AI` `1.12.0`, introduced `NovelistMafToolContext` and `NovelistMafToolRegistry`, exposed `search_story_memory` as a MAF-compatible `AIFunction`, preserved the old LLM-facing flat parameter schema (`query`, `top_k`, `min_relevance`, `chapter_numbers`, `chunk_types`) while injecting `novel_id` from session context, kept direct `IStoryMemorySearchService` usable for rollback, and validated both generated schema and invocation result serialization. Verified `dotnet test Novelist.slnx --no-restore -v minimal` passed 111/111 and `npm --prefix frontend run build` passed with existing chunk-size warnings only.
+- Completed P5.1 approval wait/resume contract: inventoried the old Go blocking approval service and current React `awaiting_approval` UI contract, added .NET approval DTOs, `IApprovalCoordinator` / `ToolApprovalCoordinator`, stable legacy `AgentEventPayload` tool fields with `metadata.approval_type` and `metadata.payload`, `ApproveTool` bridge handling with idempotent duplicate completion, session cancellation cleanup, and Photino desktop wiring. Verified `dotnet test Novelist.slnx --no-restore -v minimal` passed 114/114 and `npm --prefix frontend run build` passed with existing chunk-size warnings only.
+- Completed P5.2 MAF-backed chat tool loop: extended the internal chat stream contract with neutral tool definitions/calls/results, added OpenAI-compatible `tools` request serialization and streaming `tool_calls` accumulation, introduced `NovelistMafChatToolExecutor`, wired Photino desktop chat through the MAF `search_story_memory` tool, emitted legacy `selected` / `executing` / `completed` / `failed` `AgentEventPayload` tool events, persisted assistant `tool_calls` plus `tool_displays`, and replayed tool result messages into the next model round. Verified `dotnet test Novelist.slnx --no-restore -v minimal` passed 116/116 and `npm --prefix frontend run build` passed with existing chunk-size warnings only.
 
 ## Active Task Detail
 
-### P5.1 Port approval wait/resume contract for tool calls
+### P5.3 Port write/edit tools behind approval coordinator
 
 Scope:
 
-- Inventory the existing Go/Python approval event contract and current React approval UI expectations.
-- Define .NET approval DTOs and bridge events that preserve the existing frontend payload shape.
-- Add an approval coordinator that can pause tool execution, emit approval-required events, and resume or reject deterministically.
-- Keep approval state cancellable and correlated by chat/session/turn/tool-call identifiers.
-- Do not wire write tools through MAF until approval resume semantics are covered by tests.
+- Inventory the old Go `read` / `edit` file tool behavior, SafePath checks, diff payloads, and `file:changed` events.
+- Add MAF tool adapters for read-only file access and approval-gated file edits without exposing MAF-native event shapes to React.
+- Use `IApprovalCoordinator` to emit `awaiting_approval` events with the existing `file_edit` payload shape, wait for approve/reject, and resume exactly one tool call.
+- On approval, write through the existing chapter/content services where possible so word counts and RAG stale markers stay consistent.
+- Keep delete/bulk-write tools out of scope unless needed for parity with the current React diff approval flow.
 
 Acceptance criteria:
 
-- Approval-required tool calls produce stable Photino bridge events compatible with the current React UI.
-- Approve/reject responses resume exactly one pending tool call and are idempotent after completion.
-- Cancellation clears pending approvals without leaking waiters.
-- No MAF-native event shape is exposed to React.
+- `read` can return safe workspace file content to the model.
+- `edit` emits the legacy `awaiting_approval` event and opens the existing frontend diff flow.
+- Approved edits persist content, emit `file:changed`, update chapter word counts when editing chapter files, and mark the novel RAG index stale.
+- Rejected edits return deterministic user-feedback content to the model without writing files.
+- Cancellation clears pending file-edit approvals.
 - Existing frontend build and .NET tests pass.
 
 Verification plan:

@@ -20,6 +20,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
     private const int MaxSearchLength = 512;
     private const int MaxTitleLength = 30;
     private const int MaxEventChunkChars = 8 * 1024;
+    private const int MaxToolLoopCount = 8;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -32,6 +33,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService
     private readonly ILlmConfigurationService _llm;
     private readonly IChatCompletionClient _completion;
     private readonly IBridgeEventSink _events;
+    private readonly IApprovalCoordinator? _approvals;
+    private readonly IChatToolExecutor? _toolExecutor;
     private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _mutex = new(1, 1);
     private readonly ConcurrentDictionary<string, ActiveChatOperation> _activeChats = new(StringComparer.Ordinal);
@@ -43,6 +46,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         ILlmConfigurationService llm,
         IChatCompletionClient completion,
         IBridgeEventSink? events = null,
+        IApprovalCoordinator? approvals = null,
+        IChatToolExecutor? toolExecutor = null,
         TimeProvider? timeProvider = null)
     {
         _options = options ?? new AppInitializationOptions();
@@ -51,6 +56,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         _llm = llm;
         _completion = completion;
         _events = events ?? new NullBridgeEventSink();
+        _approvals = approvals;
+        _toolExecutor = toolExecutor;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -219,10 +226,11 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         var active = new ActiveChatOperation(linkedCancellation);
         RegisterActiveChat(session.SessionId, active);
 
-        var finalText = new StringBuilder();
-        var thinkingText = new StringBuilder();
+        var finalText = string.Empty;
         JsonElement? usage = null;
         var seq = 0;
+        var loopMessages = apiMessages.ToList();
+        var toolDefinitions = _toolExecutor?.GetToolDefinitions(normalized.NovelId) ?? [];
 
         try
         {
@@ -231,65 +239,125 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                 new { session_id = session.SessionId, turn_id = turnId },
                 linkedCancellation.Token);
 
-            await foreach (var streamEvent in _completion.StreamChatAsync(
-                new ChatCompletionRequest(
-                    normalized.ProviderName,
-                    normalized.ModelId,
-                    normalized.ReasoningEffort,
-                    apiMessages),
-                linkedCancellation.Token).WithCancellation(linkedCancellation.Token))
+            for (var loop = 0; loop < MaxToolLoopCount; loop++)
             {
-                switch (streamEvent.Kind)
+                var roundText = new StringBuilder();
+                var roundThinkingText = new StringBuilder();
+                var toolOutputs = new List<ExecutedChatToolCall>();
+
+                await foreach (var streamEvent in _completion.StreamChatAsync(
+                    new ChatCompletionRequest(
+                        normalized.ProviderName,
+                        normalized.ModelId,
+                        normalized.ReasoningEffort,
+                        loopMessages,
+                        toolDefinitions),
+                    linkedCancellation.Token).WithCancellation(linkedCancellation.Token))
                 {
-                    case ChatCompletionStreamEventKind.Thinking:
-                        thinkingText.Append(streamEvent.Data);
-                        seq = await EmitAgentEventAsync(
-                            turnId,
-                            seq,
-                            type: 0,
-                            data: streamEvent.Data,
-                            usage: null,
-                            error: null,
-                            linkedCancellation.Token);
-                        break;
-                    case ChatCompletionStreamEventKind.Content:
-                        finalText.Append(streamEvent.Data);
-                        seq = await EmitAgentEventAsync(
-                            turnId,
-                            seq,
-                            type: 2,
-                            data: streamEvent.Data,
-                            usage: null,
-                            error: null,
-                            linkedCancellation.Token);
-                        break;
-                    case ChatCompletionStreamEventKind.Usage:
-                        if (streamEvent.Usage is not null)
-                        {
-                            usage = streamEvent.Usage.Value.Clone();
+                    switch (streamEvent.Kind)
+                    {
+                        case ChatCompletionStreamEventKind.Thinking:
+                            roundThinkingText.Append(streamEvent.Data);
                             seq = await EmitAgentEventAsync(
                                 turnId,
                                 seq,
-                                type: 4,
-                                data: null,
-                                usage: usage,
+                                type: 0,
+                                data: streamEvent.Data,
+                                usage: null,
                                 error: null,
                                 linkedCancellation.Token);
-                        }
+                            break;
+                        case ChatCompletionStreamEventKind.Content:
+                            roundText.Append(streamEvent.Data);
+                            seq = await EmitAgentEventAsync(
+                                turnId,
+                                seq,
+                                type: 2,
+                                data: streamEvent.Data,
+                                usage: null,
+                                error: null,
+                                linkedCancellation.Token);
+                            break;
+                        case ChatCompletionStreamEventKind.Usage:
+                            if (streamEvent.Usage is not null)
+                            {
+                                usage = streamEvent.Usage.Value.Clone();
+                                seq = await EmitAgentEventAsync(
+                                    turnId,
+                                    seq,
+                                    type: 4,
+                                    data: null,
+                                    usage: usage,
+                                    error: null,
+                                    linkedCancellation.Token);
+                            }
 
-                        break;
-                    default:
-                        throw new InvalidOperationException($"Unsupported chat stream event kind '{streamEvent.Kind}'.");
+                            break;
+                        case ChatCompletionStreamEventKind.ToolCall:
+                            if (streamEvent.ToolCall is null)
+                            {
+                                break;
+                            }
+
+                            var output = await ExecuteToolCallAsync(
+                                normalized.NovelId,
+                                session.SessionId,
+                                turnId,
+                                seq,
+                                streamEvent.ToolCall,
+                                linkedCancellation.Token);
+                            seq = output.Seq;
+                            toolOutputs.Add(output);
+                            break;
+                        default:
+                            throw new InvalidOperationException($"Unsupported chat stream event kind '{streamEvent.Kind}'.");
+                    }
+                }
+
+                if (toolOutputs.Count == 0)
+                {
+                    finalText = roundText.ToString();
+                    await PersistAssistantMessageAsync(
+                        session.SessionId,
+                        turnId,
+                        finalText,
+                        roundThinkingText.ToString(),
+                        usage,
+                        cancellationToken);
+                    break;
+                }
+
+                await PersistToolRoundAsync(
+                    session.SessionId,
+                    turnId,
+                    roundText.ToString(),
+                    roundThinkingText.ToString(),
+                    usage,
+                    toolOutputs,
+                    cancellationToken);
+
+                loopMessages.Add(new ChatCompletionMessage(
+                    "assistant",
+                    roundText.ToString(),
+                    NullIfEmpty(roundThinkingText.ToString()),
+                    toolOutputs.Select(output => output.Call).ToArray()));
+                foreach (var output in toolOutputs)
+                {
+                    loopMessages.Add(new ChatCompletionMessage(
+                        "tool",
+                        FormatToolResultJson(output.Result),
+                        ToolCallId: output.Call.Id,
+                        ToolName: output.Call.Name));
+                }
+
+                if (loop == MaxToolLoopCount - 1)
+                {
+                    throw new BridgeRequestException(
+                        BridgeErrorCodes.LlmProviderError,
+                        "工具调用轮次过多，已中止。",
+                        retryable: false);
                 }
             }
-
-            await PersistAssistantMessageAsync(
-                session.SessionId,
-                turnId,
-                finalText.ToString(),
-                thinkingText.ToString(),
-                usage,
-                cancellationToken);
 
             if (isNew)
             {
@@ -299,7 +367,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                     cancellationToken);
             }
 
-            return new ChatResultPayload(session.SessionId, turnId, finalText.ToString());
+            return new ChatResultPayload(session.SessionId, turnId, finalText);
         }
         catch (OperationCanceledException) when (linkedCancellation.IsCancellationRequested)
         {
@@ -333,7 +401,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         }
     }
 
-    public ValueTask CancelChatAsync(
+    public async ValueTask CancelChatAsync(
         string sessionId,
         CancellationToken cancellationToken)
     {
@@ -341,7 +409,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         var normalizedSessionId = NormalizeSessionId(sessionId, allowEmpty: true);
         if (normalizedSessionId.Length == 0)
         {
-            return ValueTask.CompletedTask;
+            return;
         }
 
         if (_activeChats.TryGetValue(normalizedSessionId, out var active))
@@ -350,7 +418,10 @@ public sealed class FileSystemChatSessionService : IChatSessionService
             active.Cancellation.Cancel();
         }
 
-        return ValueTask.CompletedTask;
+        if (_approvals is not null)
+        {
+            await _approvals.CancelSessionAsync(normalizedSessionId, cancellationToken);
+        }
     }
 
     private void RegisterActiveChat(string sessionId, ActiveChatOperation active)
@@ -437,6 +508,245 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         }
 
         return seq;
+    }
+
+    private async ValueTask<ExecutedChatToolCall> ExecuteToolCallAsync(
+        long novelId,
+        string sessionId,
+        int turnId,
+        int currentSeq,
+        ChatToolCall call,
+        CancellationToken cancellationToken)
+    {
+        var args = ParseToolArguments(call.ArgumentsJson);
+        var activeDisplay = ToolDisplay.For(call.Name, active: true);
+        var seq = await EmitToolEventAsync(
+            turnId,
+            currentSeq,
+            call,
+            phase: "selected",
+            args: null,
+            success: null,
+            error: null,
+            display: activeDisplay,
+            cancellationToken);
+        seq = await EmitToolEventAsync(
+            turnId,
+            seq,
+            call,
+            phase: "executing",
+            args,
+            success: null,
+            error: null,
+            display: activeDisplay,
+            cancellationToken);
+
+        ChatToolExecutionResult result;
+        if (_toolExecutor is null)
+        {
+            result = ChatToolExecutionResult.Failure("Tool execution is not configured.");
+        }
+        else
+        {
+            try
+            {
+                result = await _toolExecutor.ExecuteAsync(
+                    new ChatToolExecutionContext(novelId, sessionId, turnId),
+                    call,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                result = ChatToolExecutionResult.Failure(ex.Message);
+            }
+        }
+
+        var completedDisplay = ToolDisplay.For(call.Name, active: false);
+        seq = await EmitToolEventAsync(
+            turnId,
+            seq,
+            call,
+            result.Success ? "completed" : "failed",
+            args,
+            result.Success,
+            result.Error,
+            completedDisplay,
+            cancellationToken);
+
+        return new ExecutedChatToolCall(
+            call,
+            result,
+            completedDisplay.DisplayText,
+            completedDisplay.ActivityKind,
+            seq);
+    }
+
+    private async ValueTask<int> EmitToolEventAsync(
+        int turnId,
+        int currentSeq,
+        ChatToolCall call,
+        string phase,
+        JsonElement? args,
+        bool? success,
+        string? error,
+        ToolDisplay display,
+        CancellationToken cancellationToken)
+    {
+        var seq = currentSeq + 1;
+        await _events.EmitAsync(
+            $"agent:{turnId.ToString(CultureInfo.InvariantCulture)}",
+            new AgentEventPayload
+            {
+                TurnId = turnId,
+                Seq = seq,
+                Type = 3,
+                ToolName = call.Name,
+                ToolId = call.Id,
+                Phase = phase,
+                ToolArgs = args,
+                Success = success,
+                Error = string.IsNullOrWhiteSpace(error) ? null : error,
+                DisplayText = display.DisplayText,
+                ActivityKind = display.ActivityKind,
+                Timestamp = UtcNow()
+            },
+            cancellationToken);
+        return seq;
+    }
+
+    private async ValueTask PersistToolRoundAsync(
+        string sessionId,
+        int turnId,
+        string assistantText,
+        string thinkingText,
+        JsonElement? usage,
+        IReadOnlyList<ExecutedChatToolCall> toolOutputs,
+        CancellationToken cancellationToken)
+    {
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            var session = FindSession(store, sessionId)
+                ?? throw new InvalidOperationException($"Session '{sessionId}' disappeared during chat.");
+            store.Messages.Add(CreateMessage(
+                store,
+                sessionId,
+                turnId,
+                role: "assistant",
+                content: assistantText,
+                thinkingContent: string.IsNullOrEmpty(thinkingText) ? null : thinkingText,
+                version: session.ActiveVersion,
+                toApi: true,
+                toFrontend: true,
+                eventType: null,
+                agentType: "main",
+                extraMetadata: BuildToolRoundMetadata(toolOutputs)));
+
+            foreach (var output in toolOutputs)
+            {
+                store.Messages.Add(CreateMessage(
+                    store,
+                    sessionId,
+                    turnId,
+                    role: "tool",
+                    content: FormatToolResultJson(output.Result),
+                    thinkingContent: null,
+                    version: session.ActiveVersion,
+                    toApi: true,
+                    toFrontend: true,
+                    eventType: null,
+                    agentType: "main",
+                    extraMetadata: JsonSerializer.Serialize(
+                        new Dictionary<string, object?>
+                        {
+                            ["tool_call_id"] = output.Call.Id,
+                            ["tool_name"] = output.Call.Name
+                        },
+                        BridgeJson.SerializerOptions)));
+            }
+
+            if (usage is not null)
+            {
+                session.UsageJson = usage.Value.GetRawText();
+            }
+
+            session.UpdatedAt = UtcNow();
+            await SaveAsync(store, cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private static string BuildToolRoundMetadata(IReadOnlyList<ExecutedChatToolCall> outputs)
+    {
+        var toolCalls = outputs.Select(output => new Dictionary<string, object?>
+        {
+            ["id"] = output.Call.Id,
+            ["type"] = "function",
+            ["function"] = new Dictionary<string, object?>
+            {
+                ["name"] = output.Call.Name,
+                ["arguments"] = string.IsNullOrWhiteSpace(output.Call.ArgumentsJson) ? "{}" : output.Call.ArgumentsJson
+            }
+        }).ToArray();
+
+        var toolDisplays = outputs.Select(output => new Dictionary<string, object?>
+        {
+            ["tool_id"] = output.Call.Id,
+            ["tool_name"] = output.Call.Name,
+            ["display_text"] = output.DisplayText,
+            ["activity_kind"] = output.ActivityKind,
+            ["phase"] = output.Result.Success ? "completed" : "failed"
+        }).ToArray();
+
+        return JsonSerializer.Serialize(
+            new Dictionary<string, object?>
+            {
+                ["tool_calls"] = toolCalls,
+                ["tool_displays"] = toolDisplays
+            },
+            BridgeJson.SerializerOptions);
+    }
+
+    private static string FormatToolResultJson(ChatToolExecutionResult result)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["success"] = result.Success
+        };
+        if (!string.IsNullOrWhiteSpace(result.Error))
+        {
+            payload["error"] = result.Error;
+        }
+
+        if (result.Data is not null)
+        {
+            payload["data"] = result.Data.Value;
+        }
+
+        return JsonSerializer.Serialize(payload, BridgeJson.SerializerOptions);
+    }
+
+    private static JsonElement ParseToolArguments(string argumentsJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                ? document.RootElement.Clone()
+                : JsonSerializer.SerializeToElement(new { }, BridgeJson.SerializerOptions);
+        }
+        catch (JsonException)
+        {
+            return JsonSerializer.SerializeToElement(new { }, BridgeJson.SerializerOptions);
+        }
     }
 
     private async ValueTask PersistAssistantMessageAsync(
@@ -675,7 +985,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         bool toApi,
         bool toFrontend,
         string? eventType,
-        string agentType)
+        string agentType,
+        string? extraMetadata = null)
     {
         var id = AllocateMessageId(store);
         return new ChatMessageDocument
@@ -691,6 +1002,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
             ToFrontend = toFrontend,
             EventType = eventType,
             AgentType = agentType,
+            ExtraMetadata = extraMetadata,
             CreatedAt = UtcNow()
         };
     }
@@ -908,10 +1220,82 @@ public sealed class FileSystemChatSessionService : IChatSessionService
 
     private static ChatCompletionMessage ToCompletionMessage(ChatMessageDocument message)
     {
+        var metadata = ParseExtraMetadata(message.ExtraMetadata);
         return new ChatCompletionMessage(
             message.Role,
             message.Content,
-            NullIfEmpty(message.ThinkingContent));
+            NullIfEmpty(message.ThinkingContent),
+            ParseToolCalls(metadata),
+            ReadString(metadata, "tool_call_id"),
+            ReadString(metadata, "tool_name"));
+    }
+
+    private static JsonElement? ParseExtraMetadata(string? extraMetadata)
+    {
+        if (string.IsNullOrWhiteSpace(extraMetadata))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(extraMetadata);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                ? document.RootElement.Clone()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static IReadOnlyList<ChatToolCall>? ParseToolCalls(JsonElement? metadata)
+    {
+        if (metadata is null ||
+            !metadata.Value.TryGetProperty("tool_calls", out var calls) ||
+            calls.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var results = new List<ChatToolCall>();
+        foreach (var call in calls.EnumerateArray())
+        {
+            if (!call.TryGetProperty("id", out var id) ||
+                id.ValueKind != JsonValueKind.String ||
+                !call.TryGetProperty("function", out var function) ||
+                function.ValueKind != JsonValueKind.Object ||
+                !function.TryGetProperty("name", out var name) ||
+                name.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var arguments = "{}";
+            if (function.TryGetProperty("arguments", out var args))
+            {
+                arguments = args.ValueKind == JsonValueKind.String
+                    ? args.GetString() ?? "{}"
+                    : args.GetRawText();
+            }
+
+            results.Add(new ChatToolCall(
+                id.GetString() ?? string.Empty,
+                name.GetString() ?? string.Empty,
+                string.IsNullOrWhiteSpace(arguments) ? "{}" : arguments));
+        }
+
+        return results.Count == 0 ? null : results;
+    }
+
+    private static string? ReadString(JsonElement? metadata, string propertyName)
+    {
+        return metadata is not null &&
+            metadata.Value.TryGetProperty(propertyName, out var value) &&
+            value.ValueKind == JsonValueKind.String
+                ? NullIfEmpty(value.GetString())
+                : null;
     }
 
     private static string? NullIfEmpty(string? value)
@@ -962,6 +1346,26 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         if (store.Messages.Select(message => message.Id).Distinct().Count() != store.Messages.Count)
         {
             throw new InvalidOperationException("Chat session store contains duplicate message ids.");
+        }
+    }
+
+    private sealed record ExecutedChatToolCall(
+        ChatToolCall Call,
+        ChatToolExecutionResult Result,
+        string DisplayText,
+        string ActivityKind,
+        int Seq);
+
+    private sealed record ToolDisplay(string DisplayText, string ActivityKind)
+    {
+        public static ToolDisplay For(string toolName, bool active)
+        {
+            var (text, kind) = toolName switch
+            {
+                "search_story_memory" => ("搜索故事记忆", "memory"),
+                _ => (toolName, "general")
+            };
+            return new ToolDisplay(active ? $"正在{text}" : text, kind);
         }
     }
 

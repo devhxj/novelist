@@ -42,6 +42,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
             throw ProviderError(FormatProviderError(response.StatusCode, body, provider.ApiKey), Retryable(response.StatusCode));
         }
 
+        var toolCalls = new Dictionary<int, StreamingToolCall>();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 8192);
         while (true)
@@ -65,13 +66,27 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
             var data = line["data:".Length..].TrimStart();
             if (string.Equals(data, "[DONE]", StringComparison.Ordinal))
             {
+                foreach (var call in FlushToolCalls(toolCalls))
+                {
+                    yield return new ChatCompletionStreamEvent(
+                        ChatCompletionStreamEventKind.ToolCall,
+                        ToolCall: call);
+                }
+
                 break;
             }
 
-            foreach (var item in ParseSseData(data))
+            foreach (var item in ParseSseData(data, toolCalls))
             {
                 yield return item;
             }
+        }
+
+        foreach (var call in FlushToolCalls(toolCalls))
+        {
+            yield return new ChatCompletionStreamEvent(
+                ChatCompletionStreamEventKind.ToolCall,
+                ToolCall: call);
         }
     }
 
@@ -150,13 +165,25 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         {
             var item = new Dictionary<string, object?>
             {
-                ["role"] = NormalizeRequiredText(message.Role, nameof(message.Role), 32),
-                ["content"] = message.Content ?? string.Empty
+                ["role"] = NormalizeRequiredText(message.Role, nameof(message.Role), 32)
             };
 
+            if (message.Role == "tool")
+            {
+                item["content"] = message.Content ?? string.Empty;
+                item["tool_call_id"] = NormalizeRequiredText(message.ToolCallId, nameof(message.ToolCallId), 512);
+                return item;
+            }
+
+            item["content"] = message.Content ?? string.Empty;
             if (!string.IsNullOrWhiteSpace(message.ThinkingContent))
             {
                 item["reasoning_content"] = message.ThinkingContent;
+            }
+
+            if (message.ToolCalls is { Count: > 0 })
+            {
+                item["tool_calls"] = message.ToolCalls.Select(ToOpenAiToolCall).ToArray();
             }
 
             return item;
@@ -178,6 +205,12 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         if (stream)
         {
             payload["stream_options"] = new Dictionary<string, object?> { ["include_usage"] = true };
+        }
+
+        if (request.Tools is { Count: > 0 })
+        {
+            payload["tools"] = request.Tools.Select(ToOpenAiToolDefinition).ToArray();
+            payload["tool_choice"] = "auto";
         }
 
         if (provider.Model.SupportsThinking)
@@ -241,7 +274,9 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         }
     }
 
-    private static IEnumerable<ChatCompletionStreamEvent> ParseSseData(string data)
+    private static IEnumerable<ChatCompletionStreamEvent> ParseSseData(
+        string data,
+        Dictionary<int, StreamingToolCall> toolCalls)
     {
         JsonDocument document;
         try
@@ -296,7 +331,111 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
                     ChatCompletionStreamEventKind.Content,
                     content.GetString()!);
             }
+
+            if (delta.TryGetProperty("tool_calls", out var toolCallsElement) &&
+                toolCallsElement.ValueKind == JsonValueKind.Array)
+            {
+                AccumulateToolCalls(toolCallsElement, toolCalls);
+            }
         }
+    }
+
+    private static void AccumulateToolCalls(
+        JsonElement toolCallsElement,
+        Dictionary<int, StreamingToolCall> toolCalls)
+    {
+        foreach (var item in toolCallsElement.EnumerateArray())
+        {
+            if (!item.TryGetProperty("index", out var indexElement) ||
+                indexElement.ValueKind != JsonValueKind.Number ||
+                !indexElement.TryGetInt32(out var index))
+            {
+                index = toolCalls.Count;
+            }
+
+            if (!toolCalls.TryGetValue(index, out var call))
+            {
+                call = new StreamingToolCall();
+                toolCalls[index] = call;
+            }
+
+            if (item.TryGetProperty("id", out var id) &&
+                id.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrEmpty(id.GetString()))
+            {
+                call.Id = id.GetString()!;
+            }
+
+            if (!item.TryGetProperty("function", out var function) ||
+                function.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            if (function.TryGetProperty("name", out var name) &&
+                name.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrEmpty(name.GetString()))
+            {
+                call.Name = name.GetString()!;
+            }
+
+            if (function.TryGetProperty("arguments", out var arguments) &&
+                arguments.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrEmpty(arguments.GetString()))
+            {
+                call.Arguments.Append(arguments.GetString());
+            }
+        }
+    }
+
+    private static IReadOnlyList<ChatToolCall> FlushToolCalls(Dictionary<int, StreamingToolCall> toolCalls)
+    {
+        if (toolCalls.Count == 0)
+        {
+            return [];
+        }
+
+        var calls = toolCalls
+            .OrderBy(item => item.Key)
+            .Select(item => item.Value)
+            .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+            .Select((item, index) => new ChatToolCall(
+                string.IsNullOrWhiteSpace(item.Id) ? $"call_{index + 1}" : item.Id,
+                item.Name,
+                item.Arguments.Length == 0 ? "{}" : item.Arguments.ToString()))
+            .ToArray();
+        toolCalls.Clear();
+        return calls;
+    }
+
+    private static Dictionary<string, object?> ToOpenAiToolDefinition(ChatToolDefinition tool)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "function",
+            ["function"] = new Dictionary<string, object?>
+            {
+                ["name"] = NormalizeRequiredText(tool.Name, nameof(tool.Name), 128),
+                ["description"] = NormalizeOptionalText(tool.Description, nameof(tool.Description), 4096),
+                ["parameters"] = tool.ParametersSchema.ValueKind == JsonValueKind.Undefined
+                    ? JsonSerializer.SerializeToElement(new { type = "object", properties = new { } }, JsonOptions)
+                    : tool.ParametersSchema
+            }
+        };
+    }
+
+    private static Dictionary<string, object?> ToOpenAiToolCall(ChatToolCall call)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["id"] = NormalizeRequiredText(call.Id, nameof(call.Id), 512),
+            ["type"] = "function",
+            ["function"] = new Dictionary<string, object?>
+            {
+                ["name"] = NormalizeRequiredText(call.Name, nameof(call.Name), 128),
+                ["arguments"] = string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson
+            }
+        };
     }
 
     private static async ValueTask<byte[]> ReadContentLimitedAsync(
@@ -469,4 +608,13 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         string ApiKey,
         double Temperature,
         ModelInfoPayload Model);
+
+    private sealed class StreamingToolCall
+    {
+        public string Id { get; set; } = string.Empty;
+
+        public string Name { get; set; } = string.Empty;
+
+        public StringBuilder Arguments { get; } = new();
+    }
 }

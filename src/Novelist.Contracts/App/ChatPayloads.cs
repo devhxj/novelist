@@ -105,6 +105,26 @@ public sealed class AgentEventPayload
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Phase { get; init; }
 
+    [JsonPropertyName("tool_args")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? ToolArgs { get; init; }
+
+    [JsonPropertyName("success")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Success { get; init; }
+
+    [JsonPropertyName("display_text")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DisplayText { get; init; }
+
+    [JsonPropertyName("activity_kind")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ActivityKind { get; init; }
+
+    [JsonPropertyName("metadata")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, object?>? Metadata { get; init; }
+
     [JsonPropertyName("usage")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Usage { get; init; }

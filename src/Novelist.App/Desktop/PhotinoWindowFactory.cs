@@ -1,4 +1,5 @@
 using System.Drawing;
+using Novelist.Agent;
 using Novelist.Core.App;
 using Novelist.Core.Bridge;
 using Novelist.Infrastructure.App;
@@ -44,13 +45,7 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             sqliteVecProvider);
         ragRefreshNotifier.SetTarget(ragIndexService);
         var eventSink = new PhotinoBridgeEventSink(adapter);
-        var chatService = new FileSystemChatSessionService(
-            appOptions,
-            novelService,
-            settingsService,
-            llmService,
-            new StandardChatCompletionClient(llmService),
-            eventSink);
+        var approvalCoordinator = new ToolApprovalCoordinator(eventSink);
         var skillService = new FileSystemSkillCatalogService(appOptions, novelService, llmService);
         var searchService = new FileSystemWorkspaceSearchService(
             appOptions,
@@ -66,6 +61,20 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             chapterContentService,
             ragIndexService,
             ragIndexService);
+        var chatToolExecutor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            storyMemoryService,
+            chapterContentService,
+            approvalCoordinator,
+            eventSink));
+        var chatService = new FileSystemChatSessionService(
+            appOptions,
+            novelService,
+            settingsService,
+            llmService,
+            new StandardChatCompletionClient(llmService),
+            eventSink,
+            approvalCoordinator,
+            chatToolExecutor);
         var exportService = new FileSystemNovelExportService(
             novelService,
             chapterContentService,
@@ -83,6 +92,7 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             .RegisterLlmConfigurationHandlers(llmService)
             .RegisterEmbeddingConfigurationHandlers(embeddingService)
             .RegisterWorkspaceUtilityHandlers(skillService, searchService, exportService, writingService, storyMemoryService)
+            .RegisterApprovalHandlers(approvalCoordinator)
             .RegisterChatSessionHandlers(chatService);
         var bridge = new PhotinoWebMessageBridge(dispatcher, adapter);
 

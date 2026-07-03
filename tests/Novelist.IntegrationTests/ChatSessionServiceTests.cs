@@ -2,6 +2,7 @@ using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Novelist.Agent;
 using Novelist.Contracts.App;
 using Novelist.Contracts.Bridge;
 using Novelist.Core.App;
@@ -155,13 +156,321 @@ public sealed class ChatSessionServiceTests : IDisposable
         var sessionId = started.Payload.GetProperty("session_id").GetString()!;
         await service.CancelChatAsync(sessionId, CancellationToken.None);
 
-        await Assert.ThrowsAsync<OperationCanceledException>(async () => await chatTask);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await chatTask);
 
         var messages = await service.GetSessionMessagesAsync(sessionId, CancellationToken.None);
         Assert.Contains(messages, message =>
             message.Role == "system" &&
             message.EventType == "user_stopped" &&
             message.ToFrontend);
+    }
+
+    [Fact]
+    public async Task ChatExecutesToolCallsThroughMafExecutorAndPersistsLegacyToolMetadata()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
+        var events = new RecordingBridgeEventSink();
+        var tools = new RecordingChatToolExecutor();
+        var completion = new ToolLoopChatCompletionClient(
+            [
+                [
+                    new ChatCompletionStreamEvent(
+                        ChatCompletionStreamEventKind.ToolCall,
+                        ToolCall: new ChatToolCall(
+                            "call_memory_1",
+                            "search_story_memory",
+                            """{"query":"旧城门暗号","top_k":1}"""))
+                ],
+                [new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "根据记忆继续。")]
+            ],
+            title: "暗号");
+        var service = CreateService(options, novelService, settings, completion, events, tools);
+
+        var result = await service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "查一下旧城门暗号", "test", "model-a", ""),
+            CancellationToken.None);
+
+        Assert.Equal("根据记忆继续。", result.FinalText);
+        Assert.Equal(2, completion.Requests.Count);
+        var toolDefinition = Assert.Single(completion.Requests[0].Tools!);
+        Assert.Equal("search_story_memory", toolDefinition.Name);
+        Assert.Contains("语义检索", toolDefinition.Description, StringComparison.Ordinal);
+
+        Assert.NotNull(tools.LastCall);
+        Assert.Equal(novel.Id, tools.LastNovelId);
+        Assert.Equal("call_memory_1", tools.LastCall.Id);
+        Assert.Equal("search_story_memory", tools.LastCall.Name);
+
+        var toolMessage = Assert.Single(completion.Requests[1].Messages, message => message.Role == "tool");
+        Assert.Equal("call_memory_1", toolMessage.ToolCallId);
+        using (var toolContent = JsonDocument.Parse(toolMessage.Content))
+        {
+            Assert.Equal(
+                "林岚发现暗号",
+                toolContent.RootElement.GetProperty("data").GetProperty("content").GetString());
+        }
+
+        var toolEvents = events.Events
+            .Where(item => item.Name == "agent:1" &&
+                item.Payload.GetProperty("type").GetInt32() == 3)
+            .Select(item => item.Payload)
+            .ToArray();
+        Assert.Collection(
+            toolEvents,
+            selected =>
+            {
+                Assert.Equal("selected", selected.GetProperty("phase").GetString());
+                Assert.Equal("search_story_memory", selected.GetProperty("tool_name").GetString());
+            },
+            executing =>
+            {
+                Assert.Equal("executing", executing.GetProperty("phase").GetString());
+                Assert.Equal("旧城门暗号", executing.GetProperty("tool_args").GetProperty("query").GetString());
+            },
+            completed =>
+            {
+                Assert.Equal("completed", completed.GetProperty("phase").GetString());
+                Assert.True(completed.GetProperty("success").GetBoolean());
+                Assert.Equal("搜索故事记忆", completed.GetProperty("display_text").GetString());
+            });
+
+        var messages = await service.GetSessionMessagesAsync(result.SessionId, CancellationToken.None);
+        Assert.Collection(
+            messages,
+            user => Assert.Equal("user", user.Role),
+            assistantToolCall =>
+            {
+                Assert.Equal("assistant", assistantToolCall.Role);
+                using var metadata = JsonDocument.Parse(assistantToolCall.ExtraMetadata!);
+                var call = metadata.RootElement.GetProperty("tool_calls")[0];
+                Assert.Equal("call_memory_1", call.GetProperty("id").GetString());
+                Assert.Equal("search_story_memory", call.GetProperty("function").GetProperty("name").GetString());
+                Assert.Equal(
+                    """{"query":"旧城门暗号","top_k":1}""",
+                    call.GetProperty("function").GetProperty("arguments").GetString());
+                var display = metadata.RootElement.GetProperty("tool_displays")[0];
+                Assert.Equal("completed", display.GetProperty("phase").GetString());
+                Assert.Equal("memory", display.GetProperty("activity_kind").GetString());
+            },
+            persistedTool =>
+            {
+                Assert.Equal("tool", persistedTool.Role);
+                using var content = JsonDocument.Parse(persistedTool.Content);
+                Assert.Equal("林岚发现暗号", content.RootElement.GetProperty("data").GetProperty("content").GetString());
+                using var metadata = JsonDocument.Parse(persistedTool.ExtraMetadata!);
+                Assert.Equal("call_memory_1", metadata.RootElement.GetProperty("tool_call_id").GetString());
+                Assert.Equal("search_story_memory", metadata.RootElement.GetProperty("tool_name").GetString());
+            },
+            finalAssistant =>
+            {
+                Assert.Equal("assistant", finalAssistant.Role);
+                Assert.Equal("根据记忆继续。", finalAssistant.Content);
+            });
+    }
+
+    [Fact]
+    public async Task ChatEditToolApprovedPersistsContentAndEmitsLegacyApprovalAndFileChangedEvents()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
+        var events = new RecordingBridgeEventSink();
+        var approvals = new ToolApprovalCoordinator(events);
+        var ragRefresh = new RecordingRagIndexRefreshNotifier();
+        var content = new FileSystemChapterContentService(options, novelService, ragRefreshNotifier: ragRefresh);
+        var chapter = await content.CreateChapterAsync(new CreateChapterPayload(novel.Id, "雾中来信"), CancellationToken.None);
+        await content.SaveContentAsync(
+            new SaveContentPayload(novel.Id, chapter.FilePath, "林岚记下旧暗号"),
+            CancellationToken.None);
+        ragRefresh.Notifications.Clear();
+
+        var completion = new ToolLoopChatCompletionClient(
+            [
+                [
+                    new ChatCompletionStreamEvent(
+                        ChatCompletionStreamEventKind.ToolCall,
+                        ToolCall: new ChatToolCall(
+                            "call_edit_1",
+                            "edit",
+                            """
+                            {"path":"chapters/001.md","change_type":"search_replace","search_text":"旧暗号","new_content":"新暗号","reason":"补强伏笔"}
+                            """))
+                ],
+                [new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "已改好。")]
+            ],
+            title: "改暗号");
+        var tools = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new EmptyStoryMemorySearchService(),
+            content,
+            approvals,
+            events));
+        var service = CreateService(options, novelService, settings, completion, events, tools, approvals);
+
+        var chatTask = service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "把旧暗号改成新暗号", "test", "model-a", ""),
+            CancellationToken.None).AsTask();
+
+        var approvalEvent = await events.WaitForEventAsync(
+            "agent:1",
+            item => item.Payload.TryGetProperty("phase", out var phase) &&
+                phase.GetString() == "awaiting_approval",
+            TimeSpan.FromSeconds(3));
+        Assert.Equal("edit", approvalEvent.Payload.GetProperty("tool_name").GetString());
+        Assert.Equal("call_edit_1", approvalEvent.Payload.GetProperty("tool_id").GetString());
+        Assert.Equal("file_edit", approvalEvent.Payload.GetProperty("activity_kind").GetString());
+        var metadata = approvalEvent.Payload.GetProperty("metadata");
+        Assert.Equal("file_edit", metadata.GetProperty("approval_type").GetString());
+        var payload = metadata.GetProperty("payload");
+        Assert.Equal("chapters/001.md", payload.GetProperty("path").GetString());
+        Assert.Equal("search_replace", payload.GetProperty("change_type").GetString());
+        Assert.Equal("补强伏笔", payload.GetProperty("reason").GetString());
+        Assert.Equal("林岚记下旧暗号", payload.GetProperty("original").GetString());
+        Assert.Equal("林岚记下新暗号", payload.GetProperty("modified").GetString());
+
+        await approvals.CompleteAsync(
+            new ToolApprovalDecisionPayload("call_edit_1", true, "可以"),
+            CancellationToken.None);
+        var result = await chatTask;
+
+        Assert.Equal("已改好。", result.FinalText);
+        Assert.Equal(
+            "林岚记下新暗号",
+            await content.GetContentAsync(novel.Id, "chapters/001.md", CancellationToken.None));
+        Assert.Contains(events.Events, item =>
+            item.Name == "file:changed" &&
+            item.Payload.GetProperty("novel_id").GetInt64() == novel.Id &&
+            item.Payload.GetProperty("path").GetString() == "chapters/001.md");
+        var updatedChapter = Assert.Single(await content.GetChaptersAsync(novel.Id, CancellationToken.None));
+        Assert.True(updatedChapter.WordCount > 0);
+        var stale = Assert.Single(ragRefresh.Notifications);
+        Assert.Equal(novel.Id, stale.NovelId);
+        Assert.Contains("chapters/001.md", stale.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ChatEditToolRejectedReturnsFeedbackToModelWithoutWriting()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
+        var events = new RecordingBridgeEventSink();
+        var approvals = new ToolApprovalCoordinator(events);
+        var content = new FileSystemChapterContentService(options, novelService);
+        var chapter = await content.CreateChapterAsync(new CreateChapterPayload(novel.Id, "雾中来信"), CancellationToken.None);
+        await content.SaveContentAsync(
+            new SaveContentPayload(novel.Id, chapter.FilePath, "林岚记下旧暗号"),
+            CancellationToken.None);
+        var completion = new ToolLoopChatCompletionClient(
+            [
+                [
+                    new ChatCompletionStreamEvent(
+                        ChatCompletionStreamEventKind.ToolCall,
+                        ToolCall: new ChatToolCall(
+                            "call_edit_reject",
+                            "edit",
+                            """
+                            {"path":"chapters/001.md","change_type":"search_replace","search_text":"旧暗号","new_content":"新暗号","reason":"补强伏笔"}
+                            """))
+                ],
+                [new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "我会按反馈重试。")]
+            ],
+            title: "拒绝修改");
+        var tools = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new EmptyStoryMemorySearchService(),
+            content,
+            approvals,
+            events));
+        var service = CreateService(options, novelService, settings, completion, events, tools, approvals);
+
+        var chatTask = service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "修改暗号", "test", "model-a", ""),
+            CancellationToken.None).AsTask();
+        await events.WaitForEventAsync(
+            "agent:1",
+            item => item.Payload.TryGetProperty("phase", out var phase) &&
+                phase.GetString() == "awaiting_approval",
+            TimeSpan.FromSeconds(3));
+
+        await approvals.CompleteAsync(
+            new ToolApprovalDecisionPayload("call_edit_reject", false, "不要改暗号"),
+            CancellationToken.None);
+        var result = await chatTask;
+
+        Assert.Equal("我会按反馈重试。", result.FinalText);
+        Assert.Equal(
+            "林岚记下旧暗号",
+            await content.GetContentAsync(novel.Id, "chapters/001.md", CancellationToken.None));
+        Assert.DoesNotContain(events.Events, item => item.Name == "file:changed");
+        var toolMessage = Assert.Single(completion.Requests[1].Messages, message => message.Role == "tool");
+        using var toolContent = JsonDocument.Parse(toolMessage.Content);
+        Assert.False(toolContent.RootElement.GetProperty("success").GetBoolean());
+        Assert.Contains("审批未通过", toolContent.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.Contains("不要改暗号", toolContent.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CancelChatClearsPendingFileEditApproval()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
+        var events = new RecordingBridgeEventSink();
+        var approvals = new ToolApprovalCoordinator(events);
+        var content = new FileSystemChapterContentService(options, novelService);
+        var chapter = await content.CreateChapterAsync(new CreateChapterPayload(novel.Id, "雾中来信"), CancellationToken.None);
+        await content.SaveContentAsync(
+            new SaveContentPayload(novel.Id, chapter.FilePath, "林岚记下旧暗号"),
+            CancellationToken.None);
+        var completion = new ToolLoopChatCompletionClient(
+            [
+                [
+                    new ChatCompletionStreamEvent(
+                        ChatCompletionStreamEventKind.ToolCall,
+                        ToolCall: new ChatToolCall(
+                            "call_edit_cancel",
+                            "edit",
+                            """
+                            {"path":"chapters/001.md","change_type":"search_replace","search_text":"旧暗号","new_content":"新暗号","reason":"补强伏笔"}
+                            """))
+                ],
+                [new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "不应执行")]
+            ],
+            title: "取消修改");
+        var tools = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new EmptyStoryMemorySearchService(),
+            content,
+            approvals,
+            events));
+        var service = CreateService(options, novelService, settings, completion, events, tools, approvals);
+
+        var chatTask = service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "修改暗号", "test", "model-a", ""),
+            CancellationToken.None).AsTask();
+        var started = await events.WaitForEventAsync("chat:started", TimeSpan.FromSeconds(3));
+        var sessionId = started.Payload.GetProperty("session_id").GetString()!;
+        await events.WaitForEventAsync(
+            "agent:1",
+            item => item.Payload.TryGetProperty("phase", out var phase) &&
+                phase.GetString() == "awaiting_approval",
+            TimeSpan.FromSeconds(3));
+
+        await service.CancelChatAsync(sessionId, CancellationToken.None);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await chatTask);
+        Assert.Equal(0, approvals.PendingCount);
+        Assert.Equal(
+            "林岚记下旧暗号",
+            await content.GetContentAsync(novel.Id, "chapters/001.md", CancellationToken.None));
     }
 
     [Fact]
@@ -330,7 +639,9 @@ public sealed class ChatSessionServiceTests : IDisposable
         INovelService novelService,
         IAppSettingsService settings,
         IChatCompletionClient completion,
-        IBridgeEventSink events)
+        IBridgeEventSink events,
+        IChatToolExecutor? tools = null,
+        IApprovalCoordinator? approvals = null)
     {
         return new FileSystemChatSessionService(
             options,
@@ -338,7 +649,9 @@ public sealed class ChatSessionServiceTests : IDisposable
             settings,
             new StaticLlmConfigurationService(),
             completion,
-            events);
+            events,
+            approvals,
+            toolExecutor: tools);
     }
 
     private AppInitializationOptions CreateOptions()
@@ -421,6 +734,29 @@ public sealed class ChatSessionServiceTests : IDisposable
             }
 
             return await WaitAsync(task, timeout);
+        }
+
+        public async ValueTask<RecordedBridgeEvent> WaitForEventAsync(
+            string name,
+            Func<RecordedBridgeEvent, bool> predicate,
+            TimeSpan timeout)
+        {
+            var deadline = DateTimeOffset.UtcNow + timeout;
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                lock (_sync)
+                {
+                    var existing = Events.FirstOrDefault(item => item.Name == name && predicate(item));
+                    if (existing is not null)
+                    {
+                        return existing;
+                    }
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(20));
+            }
+
+            throw new TimeoutException("Timed out waiting for matching bridge event.");
         }
 
         private static async ValueTask<RecordedBridgeEvent> WaitAsync(Task<RecordedBridgeEvent> task, TimeSpan timeout)
@@ -521,6 +857,120 @@ public sealed class ChatSessionServiceTests : IDisposable
             return ValueTask.FromResult("不会执行");
         }
     }
+
+    private sealed class ToolLoopChatCompletionClient : IChatCompletionClient
+    {
+        private readonly Queue<IReadOnlyList<ChatCompletionStreamEvent>> _turns;
+        private readonly string _title;
+
+        public ToolLoopChatCompletionClient(
+            IEnumerable<IReadOnlyList<ChatCompletionStreamEvent>> turns,
+            string title)
+        {
+            _turns = new Queue<IReadOnlyList<ChatCompletionStreamEvent>>(turns);
+            _title = title;
+        }
+
+        public List<ChatCompletionRequest> Requests { get; } = [];
+
+        public async IAsyncEnumerable<ChatCompletionStreamEvent> StreamChatAsync(
+            ChatCompletionRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            var events = _turns.Dequeue();
+            foreach (var item in events)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await Task.Yield();
+                yield return item;
+            }
+        }
+
+        public ValueTask<string> GenerateTextAsync(
+            ChatCompletionRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(_title);
+        }
+    }
+
+    private sealed class RecordingChatToolExecutor : IChatToolExecutor
+    {
+        public long LastNovelId { get; private set; }
+
+        public ChatToolCall? LastCall { get; private set; }
+
+        public IReadOnlyList<ChatToolDefinition> GetToolDefinitions(long novelId)
+        {
+            return
+            [
+                new ChatToolDefinition(
+                    "search_story_memory",
+                    "语义检索小说记忆",
+                    JsonSerializer.SerializeToElement(new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            query = new { type = "string" }
+                        },
+                        required = new[] { "query" }
+                    }))
+            ];
+        }
+
+        public ValueTask<ChatToolExecutionResult> ExecuteAsync(
+            ChatToolExecutionContext context,
+            ChatToolCall call,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            LastNovelId = context.NovelId;
+            LastCall = call;
+            var data = JsonSerializer.SerializeToElement(new
+            {
+                query = "旧城门暗号",
+                total = 1,
+                content = "林岚发现暗号"
+            });
+            return ValueTask.FromResult(ChatToolExecutionResult.Succeeded(data));
+        }
+    }
+
+    private sealed class EmptyStoryMemorySearchService : IStoryMemorySearchService
+    {
+        public ValueTask<SearchStoryMemoryResultPayload> SearchAsync(
+            SearchStoryMemoryPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new SearchStoryMemoryResultPayload(
+                input.Query,
+                Total: 0,
+                Message: "未找到相关记忆",
+                MaxRelevance: "0.00",
+                Content: string.Empty,
+                Results: []));
+        }
+    }
+
+    private sealed class RecordingRagIndexRefreshNotifier : IRagIndexRefreshNotifier
+    {
+        public List<StaleNotification> Notifications { get; } = [];
+
+        public ValueTask MarkNovelIndexStaleAsync(
+            long novelId,
+            string reason,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Notifications.Add(new StaleNotification(novelId, reason));
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed record StaleNotification(long NovelId, string Reason);
 
     private sealed class RecordingHttpMessageHandler : HttpMessageHandler
     {
