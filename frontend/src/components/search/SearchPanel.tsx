@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Search, X, User, MapPin, History, GitBranch, FileText, Sparkles, Loader2 } from 'lucide-react'
-import { SearchAll } from '@/lib/wailsjs/go/app/App'
-import { search } from '@/lib/wailsjs/go/models'
+import { useApp, type search } from '@/hooks/useApp'
 
 export type SearchResult = search.Result
 
@@ -27,6 +26,7 @@ const TYPE_CONFIG: Record<string, { icon: typeof Search; label: string }> = {
 const GROUP_ORDER = ['content', 'character', 'location', 'chapter', 'timeline', 'storyarc', 'rag']
 
 export default function SearchPanel({ novelId, query, results, onResultsChange, onNavigateEntity, onNavigateChapter }: Props) {
+  const app = useApp()
   const [loading, setLoading] = useState(false)
   const [selectedIdx, setSelectedIdx] = useState(-1)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -34,7 +34,10 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
   const timerRef = useRef<number>(0)
   const reqIdRef = useRef(0)
   const onResultsChangeRef = useRef(onResultsChange)
-  onResultsChangeRef.current = onResultsChange
+
+  useEffect(() => {
+    onResultsChangeRef.current = onResultsChange
+  }, [onResultsChange])
 
   const doSearch = useCallback(async (q: string, reqId: number) => {
     if (!q.trim() || !novelId) {
@@ -44,7 +47,7 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
     }
     setLoading(true)
     try {
-      const data = await SearchAll(novelId, q.trim()) as unknown as SearchResult[]
+      const data = await app.SearchAll(novelId, q.trim()) as unknown as SearchResult[]
       if (reqIdRef.current !== reqId) return
       setSelectedIdx(-1)
       onResultsChangeRef.current(q, data ?? [])
@@ -54,7 +57,7 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
     } finally {
       if (reqIdRef.current === reqId) setLoading(false)
     }
-  }, [novelId])
+  }, [app, novelId])
 
   useEffect(() => {
     clearTimeout(timerRef.current)

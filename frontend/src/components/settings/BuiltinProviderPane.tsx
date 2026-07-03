@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { X, CheckCircle2, Loader2, Globe, ExternalLink, ChevronDown } from 'lucide-react'
-import { BrowserOpenURL } from '@/lib/wailsjs/runtime/runtime'
+import { BrowserOpenURL } from '@/lib/novelist/runtime'
 import type { llm } from '@/hooks/useApp'
 import TemperatureInfo from './TemperatureInfo'
 import ModelDiscoveryPanel from './ModelDiscoveryPanel'

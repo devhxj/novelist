@@ -3,7 +3,7 @@ import { ChevronRight, FileText, Pencil, Plus, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useApp } from '@/hooks/useApp'
 import type { chapter } from '@/hooks/useApp'
-import { EventsOn } from '@/lib/wailsjs/runtime/runtime'
+import { EventsOn } from '@/lib/novelist/events'
 
 interface Props {
   novelId: number

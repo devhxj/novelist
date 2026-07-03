@@ -1,4 +1,4 @@
-import { BrowserOpenURL } from '@/lib/wailsjs/runtime/runtime'
+import { BrowserOpenURL } from '@/lib/novelist/runtime'
 
 export default function GitHubLink() {
   const url = 'https://github.com/sigpanic/goink'

@@ -1,0 +1,13 @@
+{
+  "type": "https://novelist.local/problems/invalid-path",
+  "title": "Invalid path",
+  "status": 400,
+  "detail": "The path must stay inside the novel workspace.",
+  "instance": "/api/novels/42/content",
+  "errors": {
+    "path": [
+      "Absolute paths and parent directory segments are not allowed."
+    ]
+  },
+  "trace_id": "00000000000000000000000000000000"
+}

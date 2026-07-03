@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Plus, X, Search, Loader2 } from 'lucide-react'
-import type { llm } from '@/hooks/useApp'
-import { DiscoverModels } from '@/lib/wailsjs/go/app/App'
+import { useApp, type llm } from '@/hooks/useApp'
 import ModelEditForm from './ModelEditForm'
 
 interface Props {
@@ -20,6 +19,8 @@ const emptyModel = (): llm.ModelInfo => ({
 } as unknown as llm.ModelInfo)
 
 export default function ModelDiscoveryPanel({ chatUrl, apiKey, existingIds, onAddModel }: Props) {
+  const app = useApp()
+
   // 手动添加
   const [showAddForm, setShowAddForm] = useState(false)
   const [draftModel, setDraftModel] = useState<llm.ModelInfo>(emptyModel())
@@ -47,7 +48,7 @@ export default function ModelDiscoveryPanel({ chatUrl, apiKey, existingIds, onAd
     setDiscoveredModels([])
     setSelectedForImport(new Set())
     try {
-      const models = await DiscoverModels(chatUrl, apiKey)
+      const models = await app.DiscoverModels(chatUrl, apiKey)
       if (!models || models.length === 0) {
         setDiscoverError('未发现任何模型')
       } else {

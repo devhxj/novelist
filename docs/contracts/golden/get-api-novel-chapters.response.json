@@ -1,0 +1,24 @@
+[
+  {
+    "id": 1001,
+    "novel_id": 42,
+    "chapter_number": 1,
+    "title": "雾中来信",
+    "summary": "主角收到一封无法解释来源的密信。",
+    "word_count": 3260,
+    "created_at": "2026-07-01T08:00:00Z",
+    "updated_at": "2026-07-01T10:15:00Z",
+    "file_path": "chapters/001.md"
+  },
+  {
+    "id": 1002,
+    "novel_id": 42,
+    "chapter_number": 2,
+    "title": "旧城暗号",
+    "summary": "线索指向旧城门下的暗号。",
+    "word_count": 3518,
+    "created_at": "2026-07-02T08:00:00Z",
+    "updated_at": "2026-07-02T11:20:00Z",
+    "file_path": "chapters/002.md"
+  }
+]

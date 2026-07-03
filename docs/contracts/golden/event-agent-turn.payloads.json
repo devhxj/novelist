@@ -1,0 +1,100 @@
+[
+  {
+    "turn_id": 7,
+    "seq": 1,
+    "type": 0,
+    "data": "先检查最近章节和人物状态。",
+    "timestamp": "2026-07-03T09:30:02Z"
+  },
+  {
+    "turn_id": 7,
+    "seq": 2,
+    "type": 1,
+    "timestamp": "2026-07-03T09:30:03Z"
+  },
+  {
+    "turn_id": 7,
+    "seq": 3,
+    "type": 2,
+    "data": "夜色压下来时，林澈终于看见了城墙上的火光。",
+    "timestamp": "2026-07-03T09:30:04Z"
+  },
+  {
+    "turn_id": 7,
+    "seq": 4,
+    "type": 3,
+    "tool_name": "read",
+    "tool_id": "tool_read_001",
+    "phase": "executing",
+    "tool_args": {
+      "path": "chapters/003.md"
+    },
+    "display_text": "读取第 3 章",
+    "activity_kind": "file_read",
+    "timestamp": "2026-07-03T09:30:05Z"
+  },
+  {
+    "turn_id": 7,
+    "seq": 5,
+    "type": 3,
+    "tool_name": "edit",
+    "tool_id": "tool_edit_001",
+    "phase": "awaiting_approval",
+    "tool_args": {
+      "path": "chapters/003.md",
+      "change_type": "full_replace",
+      "title": "夜入皇城"
+    },
+    "display_text": "等待确认写入第 3 章",
+    "activity_kind": "file_edit",
+    "metadata": {
+      "approval_type": "file_edit",
+      "path": "chapters/003.md"
+    },
+    "timestamp": "2026-07-03T09:30:06Z"
+  },
+  {
+    "turn_id": 7,
+    "seq": 6,
+    "type": 3,
+    "tool_name": "edit",
+    "tool_id": "tool_edit_001",
+    "phase": "completed",
+    "success": true,
+    "display_text": "已写入第 3 章",
+    "activity_kind": "file_edit",
+    "timestamp": "2026-07-03T09:30:09Z"
+  },
+  {
+    "turn_id": 7,
+    "seq": 7,
+    "type": 4,
+    "usage": {
+      "prompt_tokens": 1240,
+      "completion_tokens": 320,
+      "total_tokens": 1560,
+      "usage_ratio": 0.18,
+      "detail": {
+        "system": 680,
+        "user": 120,
+        "assistant": 440
+      }
+    },
+    "timestamp": "2026-07-03T09:30:10Z"
+  },
+  {
+    "turn_id": 7,
+    "seq": 8,
+    "type": 6,
+    "compression_phase": "done",
+    "summary": "保留主角潜入皇城、发现火光异常、下一章追查内应的上下文。",
+    "timestamp": "2026-07-03T09:30:11Z"
+  },
+  {
+    "turn_id": 7,
+    "seq": 9,
+    "type": 5,
+    "error": "tool execution failed: stale file version",
+    "timestamp": "2026-07-03T09:30:12Z"
+  }
+]

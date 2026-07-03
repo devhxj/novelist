@@ -1,0 +1,224 @@
+using System.Text.Json;
+using Novelist.Contracts.App;
+using Novelist.Contracts.Bridge;
+using Novelist.Core.Bridge;
+using Novelist.Infrastructure.App;
+
+namespace Novelist.IntegrationTests;
+
+public sealed class NovelServiceTests : IDisposable
+{
+    private readonly string _root = Path.Combine(Path.GetTempPath(), "novelist-tests", Guid.NewGuid().ToString("N"));
+
+    [Fact]
+    public async Task NovelCrudPersistsAcrossServiceRecreation()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var service = new FileSystemNovelService(options, settings);
+
+        var created = await service.CreateNovelAsync(
+            new CreateNovelPayload("  长夜档案  ", "围绕一座旧城失踪案展开。", "悬疑"),
+            CancellationToken.None);
+
+        Assert.Equal(1, created.Id);
+        Assert.Equal("长夜档案", created.Title);
+        Assert.Equal("悬疑", created.Genre);
+        Assert.True(File.Exists(Path.Combine(options.DefaultDataDirectory, "novels", "1", "goink.md")));
+
+        var updated = await service.UpdateNovelAsync(
+            created.Id,
+            new UpdateNovelPayload(Title: "", Description: "", Genre: "推理"),
+            CancellationToken.None);
+
+        Assert.Equal("长夜档案", updated.Title);
+        Assert.Equal("围绕一座旧城失踪案展开。", updated.Description);
+        Assert.Equal("推理", updated.Genre);
+        Assert.True(updated.UpdatedAt >= created.UpdatedAt);
+
+        var reloaded = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novels = await reloaded.GetNovelsAsync(CancellationToken.None);
+
+        var novel = Assert.Single(novels);
+        Assert.Equal(created.Id, novel.Id);
+        Assert.Equal("长夜档案", novel.Title);
+        Assert.Equal("推理", novel.Genre);
+
+        await reloaded.DeleteNovelAsync(created.Id, CancellationToken.None);
+
+        Assert.Empty(await reloaded.GetNovelsAsync(CancellationToken.None));
+        Assert.False(Directory.Exists(Path.Combine(options.DefaultDataDirectory, "novels", "1")));
+    }
+
+    [Fact]
+    public async Task NovelIdAllocationDoesNotReuseDeletedIds()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var service = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+
+        var first = await service.CreateNovelAsync(
+            new CreateNovelPayload("第一本", "", ""),
+            CancellationToken.None);
+        await service.DeleteNovelAsync(first.Id, CancellationToken.None);
+        var second = await service.CreateNovelAsync(
+            new CreateNovelPayload("第二本", "", ""),
+            CancellationToken.None);
+
+        Assert.Equal(first.Id + 1, second.Id);
+    }
+
+    [Fact]
+    public async Task DeleteActiveNovelClearsLastNovelWithoutErasingOtherSettings()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var service = new FileSystemNovelService(options, settings);
+        var novel = await service.CreateNovelAsync(
+            new CreateNovelPayload("群星边境", "远航舰队遭遇未知信号。", "科幻"),
+            CancellationToken.None);
+
+        await settings.SetSelectedModelAsync("qwen/qwen-plus", "high", CancellationToken.None);
+        await settings.SetApprovalModeAsync("auto", CancellationToken.None);
+        await service.SetActiveNovelAsync(novel.Id, CancellationToken.None);
+        await service.DeleteNovelAsync(novel.Id, CancellationToken.None);
+
+        var reloadedSettings = await new FileSystemAppSettingsService(options).GetSettingsAsync(CancellationToken.None);
+        Assert.Equal(0, reloadedSettings.LastNovelId);
+        Assert.Equal("qwen/qwen-plus", reloadedSettings.SelectedModelKey);
+        Assert.Equal("high", reloadedSettings.ReasoningEffort);
+        Assert.Equal("auto", reloadedSettings.ApprovalMode);
+    }
+
+    [Fact]
+    public async Task BridgeNovelHandlersReturnValidationErrorForInvalidPayload()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var service = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var dispatcher = new BridgeDispatcher()
+            .RegisterCompatibilityAppMethodHandlers()
+            .RegisterNovelHandlers(service);
+
+        var result = await dispatcher.DispatchAsync("""
+            {
+              "kind": "request",
+              "id": "req_bad_title",
+              "method": "CreateNovel",
+              "payload": { "args": [{ "title": "   " }] }
+            }
+            """);
+
+        using var json = ParseOutbound(result);
+        AssertBridgeError(json.RootElement, "req_bad_title", BridgeErrorCodes.ValidationError);
+    }
+
+    [Fact]
+    public async Task BridgeNovelHandlersReturnStableErrorWhenAppIsNotInitialized()
+    {
+        var options = CreateOptions();
+        var dispatcher = new BridgeDispatcher()
+            .RegisterCompatibilityAppMethodHandlers()
+            .RegisterNovelHandlers(new FileSystemNovelService(options, new FileSystemAppSettingsService(options)));
+
+        var result = await dispatcher.DispatchAsync("""
+            {
+              "kind": "request",
+              "id": "req_novels",
+              "method": "GetNovels",
+              "payload": { "args": [] }
+            }
+            """);
+
+        using var json = ParseOutbound(result);
+        AssertBridgeError(json.RootElement, "req_novels", BridgeErrorCodes.AppNotInitialized);
+    }
+
+    [Fact]
+    public async Task BridgeNovelHandlersCreateListAndSetActiveNovel()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var service = new FileSystemNovelService(options, settings);
+        var dispatcher = new BridgeDispatcher()
+            .RegisterCompatibilityAppMethodHandlers()
+            .RegisterNovelHandlers(service);
+
+        using var createJson = ParseOutbound(await dispatcher.DispatchAsync("""
+            {
+              "kind": "request",
+              "id": "req_create",
+              "method": "CreateNovel",
+              "payload": { "args": [{ "title": "长夜档案", "description": "旧城失踪案", "genre": "悬疑" }] }
+            }
+            """));
+        var createdId = createJson.RootElement.GetProperty("result").GetProperty("id").GetInt64();
+
+        using var listJson = ParseOutbound(await dispatcher.DispatchAsync("""
+            {
+              "kind": "request",
+              "id": "req_list",
+              "method": "GetNovels",
+              "payload": { "args": [] }
+            }
+            """));
+        var list = listJson.RootElement.GetProperty("result");
+        Assert.Equal(JsonValueKind.Array, list.ValueKind);
+        Assert.Equal(createdId, list[0].GetProperty("id").GetInt64());
+        Assert.Equal("长夜档案", list[0].GetProperty("title").GetString());
+
+        using var setActiveJson = ParseOutbound(await dispatcher.DispatchAsync($$"""
+            {
+              "kind": "request",
+              "id": "req_set_active",
+              "method": "SetActiveNovel",
+              "payload": { "args": [{ "novel_id": {{createdId}} }] }
+            }
+            """));
+        Assert.True(setActiveJson.RootElement.GetProperty("ok").GetBoolean());
+
+        var savedSettings = await settings.GetSettingsAsync(CancellationToken.None);
+        Assert.Equal(createdId, savedSettings.LastNovelId);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_root))
+        {
+            Directory.Delete(_root, recursive: true);
+        }
+    }
+
+    private AppInitializationOptions CreateOptions()
+    {
+        return new AppInitializationOptions
+        {
+            ConfigDirectory = Path.Combine(_root, "config"),
+            DefaultDataDirectory = Path.Combine(_root, "data")
+        };
+    }
+
+    private static async ValueTask InitializeAsync(AppInitializationOptions options)
+    {
+        var initialization = new FileSystemAppInitializationService(options);
+        await initialization.InitializeAsync(options.DefaultDataDirectory, CancellationToken.None);
+    }
+
+    private static JsonDocument ParseOutbound(BridgeDispatchResult result)
+    {
+        Assert.Null(result.CancelRequestId);
+        Assert.False(string.IsNullOrWhiteSpace(result.OutboundJson));
+        return JsonDocument.Parse(result.OutboundJson);
+    }
+
+    private static void AssertBridgeError(JsonElement root, string expectedId, string expectedCode)
+    {
+        Assert.Equal("response", root.GetProperty("kind").GetString());
+        Assert.Equal(expectedId, root.GetProperty("id").GetString());
+        Assert.False(root.GetProperty("ok").GetBoolean());
+        Assert.Equal(expectedCode, root.GetProperty("error").GetProperty("code").GetString());
+    }
+}

@@ -23,7 +23,7 @@ import HelpDialog from '@/components/help/HelpDialog'
 import ProfileView from '@/components/profile/ProfileView'
 import { search } from '@/lib/wailsjs/go/models'
 import { Settings, User, HelpCircle, Moon, Sun } from 'lucide-react'
-import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised, Quit } from '@/lib/wailsjs/runtime/runtime'
+import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised, Quit } from '@/lib/novelist/runtime'
 import Logo from '@/components/Logo'
 import { useTheme, type Theme } from '@/hooks/useTheme'
 

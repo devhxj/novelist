@@ -2,18 +2,31 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { llm } from '@/hooks/useApp'
+import type { EmbeddingConfigView, SqliteVecStatusView } from '@/lib/novelist/api'
 import BuiltinProviderPane from './BuiltinProviderPane'
 import CustomProviderPane from './CustomProviderPane'
+import EmbeddingConfigPane from './EmbeddingConfigPane'
 
-type SubNav = 'builtin' | 'custom'
+type SubNav = 'builtin' | 'custom' | 'embedding'
 
 interface Props {
   onSaved?: () => void
 }
 
+const emptyEmbeddingConfig = (): EmbeddingConfigView => ({
+  provider_key: '',
+  endpoint_url: '',
+  api_key: '',
+  model_id: '',
+  dimensions: null,
+  user: '',
+})
+
 export default function ModelConfigTab({ onSaved }: Props) {
   const app = useApp()
   const [providers, setProviders] = useState<llm.ProviderView[]>([])
+  const [embeddingConfig, setEmbeddingConfig] = useState<EmbeddingConfigView>(emptyEmbeddingConfig())
+  const [sqliteVecStatus, setSqliteVecStatus] = useState<SqliteVecStatusView | null>(null)
   const [subNav, setSubNav] = useState<SubNav>('builtin')
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -22,11 +35,19 @@ export default function ModelConfigTab({ onSaved }: Props) {
   // 测试状态：{ providerKey: { ok, msg, apiKey } }
   const [testResults, setTestResults] = useState<Record<string, { ok: boolean; msg?: string; keySnapshot: string } | undefined>>({})
   const [testing, setTesting] = useState<Record<string, boolean>>({})
+  const [embeddingTestResult, setEmbeddingTestResult] = useState<{ ok: boolean; msg?: string } | undefined>()
+  const [embeddingTesting, setEmbeddingTesting] = useState(false)
   // 保存过后的配置哈希，用于判断 key 是否被修改
   const savedKeysRef = useRef<Record<string, string>>({})
 
   useEffect(() => {
-    app.GetLLMConfig().then(config => {
+    let cancelled = false
+    Promise.all([
+      app.GetLLMConfig(),
+      app.GetEmbeddingConfig(),
+      app.GetSqliteVecStatus(),
+    ]).then(([config, embedding, sqliteVec]) => {
+      if (cancelled) return
       if (config?.providers) {
         setProviders(config.providers)
         const keys: Record<string, string> = {}
@@ -35,7 +56,12 @@ export default function ModelConfigTab({ onSaved }: Props) {
         }
         savedKeysRef.current = keys
       }
-    }).catch(() => {}).finally(() => setIsLoading(false))
+      setEmbeddingConfig(embedding ?? emptyEmbeddingConfig())
+      setSqliteVecStatus(sqliteVec ?? null)
+    }).catch(() => {}).finally(() => {
+      if (!cancelled) setIsLoading(false)
+    })
+    return () => { cancelled = true }
   }, [])
 
   const builtinProviders = providers.filter(p => p.source === 'builtin')
@@ -52,6 +78,11 @@ export default function ModelConfigTab({ onSaved }: Props) {
         return next
       })
     }
+  }, [])
+
+  const handleUpdateEmbeddingConfig = useCallback((patch: Partial<EmbeddingConfigView>) => {
+    setEmbeddingConfig(prev => ({ ...prev, ...patch }))
+    setEmbeddingTestResult(undefined)
   }, [])
 
   const handleAddCustomProvider = useCallback((provider: llm.ProviderView) => {
@@ -126,7 +157,46 @@ export default function ModelConfigTab({ onSaved }: Props) {
     }
   }, [providers, app])
 
+  const handleTestEmbedding = useCallback(async () => {
+    setEmbeddingTesting(true)
+    setEmbeddingTestResult(undefined)
+    try {
+      await app.TestEmbeddingConnection(embeddingConfig)
+      setEmbeddingTestResult({ ok: true })
+    } catch (err) {
+      setEmbeddingTestResult({ ok: false, msg: String(err) })
+    } finally {
+      setEmbeddingTesting(false)
+    }
+  }, [app, embeddingConfig])
+
+  const handleSaveEmbedding = useCallback(async () => {
+    setIsSaving(true)
+    setSaveMsg('')
+    try {
+      await app.SaveEmbeddingConfig(embeddingConfig)
+      const [saved, sqliteVec] = await Promise.all([
+        app.GetEmbeddingConfig(),
+        app.GetSqliteVecStatus(),
+      ])
+      setEmbeddingConfig(saved ?? emptyEmbeddingConfig())
+      setSqliteVecStatus(sqliteVec ?? null)
+      setSaveMsg('配置已保存')
+      onSaved?.()
+      setTimeout(() => setSaveMsg(''), 2000)
+    } catch (err) {
+      setSaveMsg(`保存失败: ${String(err)}`)
+    } finally {
+      setIsSaving(false)
+    }
+  }, [app, embeddingConfig, onSaved])
+
   const handleSave = useCallback(async () => {
+    if (subNav === 'embedding') {
+      await handleSaveEmbedding()
+      return
+    }
+
     // 收集有 key 的 provider
     const withKey = providers.filter(p => p.api_key)
     if (withKey.length === 0) {
@@ -172,7 +242,7 @@ export default function ModelConfigTab({ onSaved }: Props) {
     } finally {
       setIsSaving(false)
     }
-  }, [providers, app, testResults, handleTest])
+  }, [providers, app, testResults, handleTest, subNav, handleSaveEmbedding])
 
   if (isLoading) {
     return (
@@ -206,6 +276,16 @@ export default function ModelConfigTab({ onSaved }: Props) {
         >
           自定义服务商
         </button>
+        <button
+          onClick={() => setSubNav('embedding')}
+          className={`text-sm pb-1 transition-colors ${
+            subNav === 'embedding'
+              ? 'text-foreground border-b-2 border-primary font-medium'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          Embeddings
+        </button>
       </div>
 
       {/* 内容区 */}
@@ -220,7 +300,7 @@ export default function ModelConfigTab({ onSaved }: Props) {
             testResults={testResults}
             testing={testing}
           />
-        ) : (
+        ) : subNav === 'custom' ? (
           <CustomProviderPane
             providers={customProviders}
             onAdd={handleAddCustomProvider}
@@ -231,6 +311,15 @@ export default function ModelConfigTab({ onSaved }: Props) {
             onTest={handleTest}
             testResults={testResults}
             testing={testing}
+          />
+        ) : (
+          <EmbeddingConfigPane
+            config={embeddingConfig}
+            sqliteVecStatus={sqliteVecStatus}
+            onUpdate={handleUpdateEmbeddingConfig}
+            onTest={handleTestEmbedding}
+            testing={embeddingTesting}
+            testResult={embeddingTestResult}
           />
         )}
       </div>

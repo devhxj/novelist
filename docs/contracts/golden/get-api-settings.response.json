@@ -1,0 +1,10 @@
+{
+  "ID": 1,
+  "last_novel_id": 42,
+  "selected_model_key": "deepseek/deepseek-v4-pro",
+  "reasoning_effort": "high",
+  "approval_mode": "manual",
+  "chat_panel_width": 420,
+  "last_session_id": "sess_42_demo",
+  "user_name": "Demo Writer"
+}

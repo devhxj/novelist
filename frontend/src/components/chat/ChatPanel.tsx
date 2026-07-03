@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { MessageSquare, Loader2, History, Plus } from 'lucide-react'
-import { EventsOn } from '@/lib/wailsjs/runtime/runtime'
+import { EventsOn } from '@/lib/novelist/events'
 import { useApp } from '@/hooks/useApp'
 import type { llm, app } from '@/hooks/useApp'
 import type { AgentEvent, Turn } from './types'

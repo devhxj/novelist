@@ -16,8 +16,16 @@ models/
 !/build/runtime/models/vocab.txt
 /build/dist/
 /build/*.AppDir/
+/frontend/dist/
 goink
 goink.exe
+
+# .NET
+/.dotnet/
+src/**/bin/
+src/**/obj/
+tests/**/bin/
+tests/**/obj/
 
 # Go
 *.mod.cache
