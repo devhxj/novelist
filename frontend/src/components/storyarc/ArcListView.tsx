@@ -114,15 +114,53 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
     }
   }, [app, novelId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!novelId) {
+        if (!cancelled) {
+          setArcs([])
+          setAllNodes([])
+        }
+        return
+      }
+      if (!cancelled) {
+        setLoading(true)
+        setError(null)
+      }
+      try {
+        const [arcList, nodeList, maxCh] = await Promise.all([
+          app.GetStoryArcs(novelId),
+          app.GetArcNodes(novelId, 0, 0),
+          app.GetMaxChapterNumber(novelId),
+        ])
+        if (!cancelled) {
+          setArcs(arcList ?? [])
+          setAllNodes(nodeList ?? [])
+          setWindowCenter(Math.max(1, maxCh))
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : '加载失败')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId])
 
   useEffect(() => {
     if (focusArcId && focusArcId > 0 && allNodes.length > 0) {
       const arcNodes = allNodes.filter(n => n.story_arc_id === focusArcId)
       if (arcNodes.length > 0) {
         const firstNode = arcNodes[0]
-        setWindowCenter(firstNode.target_chapter || firstNode.actual_chapter || 1)
-        setExpandedId(firstNode.id)
+        const targetChapter = firstNode.target_chapter || firstNode.actual_chapter || 1
+        const targetId = firstNode.id
+        const timer = window.setTimeout(() => {
+          setWindowCenter(targetChapter)
+          setExpandedId(targetId)
+        }, 0)
+        return () => window.clearTimeout(timer)
       }
     }
   }, [focusArcId, allNodes])

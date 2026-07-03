@@ -46,6 +46,73 @@ public sealed class WorldEntityServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CharacterRelationsCanBeEvolvedEditedAndDeleted()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novelService = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
+        var service = new FileSystemWorldEntityService(options, novelService);
+
+        var source = await service.CreateCharacterAsync(
+            novel.Id,
+            new CreateCharacterPayload("林岚", "记者", "", "[]"),
+            CancellationToken.None);
+        var target = await service.CreateCharacterAsync(
+            novel.Id,
+            new CreateCharacterPayload("阿七", "线人", "", "[]"),
+            CancellationToken.None);
+
+        var first = await service.UpdateCharacterRelationshipAsync(
+            novel.Id,
+            new UpdateCharacterRelationshipPayload(
+                SourceCharacterId: source.Id,
+                TargetCharacterId: target.Id,
+                RelationDescribe: "互相试探",
+                Description: "交换情报但互不信任",
+                ChapterId: 3),
+            CancellationToken.None);
+        var second = await service.UpdateCharacterRelationshipAsync(
+            novel.Id,
+            new UpdateCharacterRelationshipPayload(
+                SourceCharacterId: source.Id,
+                TargetCharacterId: target.Id,
+                RelationDescribe: "临时盟友",
+                Description: "共同追查旧城门线索",
+                ChapterId: 7),
+            CancellationToken.None);
+
+        var current = Assert.Single(await service.GetCharacterRelationsAsync(novel.Id, CancellationToken.None));
+        Assert.Equal(second.Id, current.Id);
+        Assert.True(current.IsCurrent);
+        Assert.Equal("临时盟友", current.RelationDescribe);
+
+        var edited = await service.UpdateCharacterRelationshipAsync(
+            novel.Id,
+            new UpdateCharacterRelationshipPayload(
+                RelationId: second.Id,
+                RelationDescribe: "临时同盟",
+                Description: "共享线索但保留底牌"),
+            CancellationToken.None);
+        Assert.Equal(second.Id, edited.Id);
+        Assert.Equal("临时同盟", edited.RelationDescribe);
+        Assert.Equal("共享线索但保留底牌", edited.Description);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.UpdateCharacterRelationshipAsync(
+                novel.Id,
+                new UpdateCharacterRelationshipPayload(
+                    SourceCharacterId: source.Id,
+                    TargetCharacterId: source.Id,
+                    RelationDescribe: "自我关系"),
+                CancellationToken.None));
+
+        await service.DeleteCharacterRelationAsync(novel.Id, first.Id, CancellationToken.None);
+        await service.DeleteCharacterRelationAsync(novel.Id, second.Id, CancellationToken.None);
+        Assert.Empty(await service.GetCharacterRelationsAsync(novel.Id, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task LocationCrudPersistsParentChangesAndRelationsAreStable()
     {
         var options = CreateOptions();
@@ -84,6 +151,57 @@ public sealed class WorldEntityServiceTests : IDisposable
         var afterDelete = await reloaded.GetLocationsAsync(novel.Id, CancellationToken.None);
         Assert.Null(afterDelete.Single(item => item.Id == child.Id).ParentLocationId);
         Assert.DoesNotContain(afterDelete, item => item.Id == station.Id);
+    }
+
+    [Fact]
+    public async Task LocationRelationsAreUndirectedUniquePatchableAndDeletable()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novelService = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("群星边境", "", ""), CancellationToken.None);
+        var service = new FileSystemWorldEntityService(options, novelService);
+
+        var station = await service.CreateLocationAsync(
+            novel.Id,
+            new CreateLocationPayload("边境站", "空间站", "", "{}", null, "[]"),
+            CancellationToken.None);
+        var gate = await service.CreateLocationAsync(
+            novel.Id,
+            new CreateLocationPayload("星门", "设施", "", "{}", null, "[]"),
+            CancellationToken.None);
+
+        var relation = await service.CreateLocationRelationAsync(
+            novel.Id,
+            new CreateLocationRelationPayload(
+                LocationAId: gate.Id,
+                LocationBId: station.Id,
+                RelationType: "跃迁航线",
+                Description: "需要军方许可"),
+            CancellationToken.None);
+        Assert.Equal(Math.Min(station.Id, gate.Id), relation.LocationAId);
+        Assert.Equal(Math.Max(station.Id, gate.Id), relation.LocationBId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await service.CreateLocationRelationAsync(
+                novel.Id,
+                new CreateLocationRelationPayload(
+                    LocationAId: station.Id,
+                    LocationBId: gate.Id,
+                    RelationType: "重复航线",
+                    Description: ""),
+                CancellationToken.None));
+
+        var updated = await service.UpdateLocationRelationAsync(
+            novel.Id,
+            relation.Id,
+            new UpdateLocationRelationPayload(RelationType: "封锁航线", Description: "临时封闭"),
+            CancellationToken.None);
+        Assert.Equal("封锁航线", updated.RelationType);
+        Assert.Equal("临时封闭", updated.Description);
+
+        await service.DeleteLocationRelationAsync(novel.Id, relation.Id, CancellationToken.None);
+        Assert.Empty(await service.GetLocationRelationsAsync(novel.Id, CancellationToken.None));
     }
 
     [Fact]

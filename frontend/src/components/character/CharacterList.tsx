@@ -19,7 +19,19 @@ export default function CharacterList({ novelId }: Props) {
     setCharacters(list ?? [])
   }, [novelId, app])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!novelId) {
+        if (!cancelled) setCharacters([])
+        return
+      }
+      const list = await app.GetCharacters(novelId)
+      if (!cancelled) setCharacters(list ?? [])
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return characters

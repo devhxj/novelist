@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Graph } from '@antv/g6'
+import { Graph, type EdgeData, type GraphData, type NodeData } from '@antv/g6'
 import { ArrowLeft, ArrowRight, GitBranch, LocateFixed, RefreshCw, X } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import { useGraphColors } from '@/components/graphColors'
@@ -39,6 +39,11 @@ function nid(id: number) { return `an-${id}` }
 function aid(id: number) { return `arc-${id}` }
 function eid(a: number, b: number) { return `e-${a}-${b}` }
 
+function graphEventTargetId(event: unknown): string {
+  const target = (event as { target?: { id?: unknown } }).target
+  return typeof target?.id === 'string' ? target.id : ''
+}
+
 function centerOnChapter(graph: Graph, containerW: number, containerH: number, ch: number, wf: number, laneCount: number) {
   const cx = LEFT_MARGIN + (ch - wf + 0.5) * CH_W
   const cy = (laneCount * LANE_H) / 2 + 30
@@ -69,8 +74,10 @@ export default function StoryArcGraph({ novelId }: Props) {
   const windowTo = useMemo(() => windowCenter + WINDOW, [windowCenter])
   const windowFromRef = useRef(windowFrom)
   const windowToRef = useRef(windowTo)
-  windowFromRef.current = windowFrom
-  windowToRef.current = windowTo
+  useEffect(() => {
+    windowFromRef.current = windowFrom
+    windowToRef.current = windowTo
+  }, [windowFrom, windowTo])
   const autoExpandRef = useRef(false)
 
   const load = useCallback(async () => {
@@ -95,7 +102,56 @@ export default function StoryArcGraph({ novelId }: Props) {
     }
   }, [app, novelId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!novelId) {
+        if (!cancelled) {
+          setArcs([])
+          setAllNodes([])
+        }
+        return
+      }
+      if (!cancelled) {
+        setLoading(true)
+        setError(null)
+      }
+      try {
+        const [arcList, nodeList, maxCh] = await Promise.all([
+          app.GetStoryArcs(novelId),
+          app.GetArcNodes(novelId, 0, 0),
+          app.GetMaxChapterNumber(novelId),
+        ])
+        if (!cancelled) {
+          setArcs(arcList ?? [])
+          setAllNodes(nodeList ?? [])
+          setWindowCenter(Math.max(1, maxCh))
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : '加载失败')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId])
+
+  const totalChapters = useMemo(() => (
+    allNodes.length > 0
+      ? Math.max(...allNodes.map(n => n.target_chapter))
+      : 1
+  ), [allNodes])
+  const totalChaptersRef = useRef(totalChapters)
+  const allNodesRef = useRef(allNodes)
+
+  useEffect(() => {
+    totalChaptersRef.current = totalChapters
+  }, [totalChapters])
+
+  useEffect(() => {
+    allNodesRef.current = allNodes
+  }, [allNodes])
 
   const nodesByArc = useMemo(() => {
     const map = new Map<number, storyarc.ArcNode[]>()
@@ -109,15 +165,15 @@ export default function StoryArcGraph({ novelId }: Props) {
     return map
   }, [allNodes])
 
-  const graphData = useMemo(() => {
+  const graphData = useMemo<GraphData>(() => {
     if (arcs.length === 0) return { nodes: [], edges: [] }
 
     const visibleNodes = allNodes.filter(
       n => n.target_chapter >= windowFrom && n.target_chapter <= windowTo
     )
 
-    const gNodes: any[] = []
-    const gEdges: any[] = []
+    const gNodes: NodeData[] = []
+    const gEdges: EdgeData[] = []
 
     // Arc lane labels
     arcs.forEach((arc, i) => {
@@ -313,14 +369,31 @@ export default function StoryArcGraph({ novelId }: Props) {
     return { nodes: gNodes, edges: gEdges }
   }, [arcs, allNodes, windowFrom, windowTo, nodesByArc, C, PALETTE])
 
+  const graphDataRef = useRef(graphData)
+  const arcsRef = useRef(arcs)
+  const windowCenterRef = useRef(windowCenter)
+
+  useEffect(() => {
+    graphDataRef.current = graphData
+  }, [graphData])
+
+  useEffect(() => {
+    arcsRef.current = arcs
+  }, [arcs])
+
+  useEffect(() => {
+    windowCenterRef.current = windowCenter
+  }, [windowCenter])
+
   // Create G6 graph once on mount
   useEffect(() => {
     const container = containerRef.current
-    if (!container || loading || arcs.length === 0) return
+    const currentArcs = arcsRef.current
+    if (!container || loading || currentArcs.length === 0) return
 
     const graph = new Graph({
       container,
-      data: graphData,
+      data: graphDataRef.current,
       background: C.bg,
       animation: false,
       node: {
@@ -344,19 +417,26 @@ export default function StoryArcGraph({ novelId }: Props) {
 
     graphRef.current = graph
     graph.render().then(() => {
-      centerOnChapter(graph, container.clientWidth, container.clientHeight, windowCenter, windowFrom, arcs.length)
+      centerOnChapter(
+        graph,
+        container.clientWidth,
+        container.clientHeight,
+        windowCenterRef.current,
+        windowFromRef.current,
+        currentArcs.length,
+      )
     })
 
-    graph.on('node:click', (event: any) => {
-      const rawId = event.target?.id || ''
-      const arcMatch = arcs.find(a => rawId === aid(a.id))
+    graph.on('node:click', (event: unknown) => {
+      const rawId = graphEventTargetId(event)
+      const arcMatch = arcsRef.current.find(a => rawId === aid(a.id))
       if (arcMatch) {
         setSelectedArc(prev => prev?.id === arcMatch.id ? null : arcMatch)
         setSelectedNode(null)
         return
       }
       if (rawId.startsWith('ch-')) return
-      const nodeMatch = allNodes.find(n => rawId.startsWith(nid(n.id)))
+      const nodeMatch = allNodesRef.current.find(n => rawId.startsWith(nid(n.id)))
       if (nodeMatch) {
         setSelectedNode(prev => prev?.id === nodeMatch.id ? null : nodeMatch)
         setSelectedArc(null)
@@ -400,17 +480,18 @@ export default function StoryArcGraph({ novelId }: Props) {
     }
     graph.on('canvas:zoom', updateEdgeCounts)
     graph.on('canvas:dragend', updateEdgeCounts)
-    setTimeout(updateEdgeCounts, 200)
+    const edgeCountTimer = window.setTimeout(updateEdgeCounts, 200)
 
     const ro = new ResizeObserver(() => graph.resize())
     ro.observe(container)
 
     return () => {
       ro.disconnect()
+      window.clearTimeout(edgeCountTimer)
       graph.destroy()
       graphRef.current = null
     }
-  }, [arcs.length, loading]) // only on mount / novel switch
+  }, [C.bg, arcs.length, loading])
 
   // Update graph data when window shifts
   useEffect(() => {
@@ -426,15 +507,7 @@ export default function StoryArcGraph({ novelId }: Props) {
       const ch = containerRef.current?.clientHeight ?? 600
       centerOnChapter(graph, cw, ch, windowCenter, windowFrom, arcs.length)
     })
-  }, [graphData])
-
-  const totalChapters = allNodes.length > 0
-    ? Math.max(...allNodes.map(n => n.target_chapter))
-    : 1
-  const totalChaptersRef = useRef(totalChapters)
-  totalChaptersRef.current = totalChapters
-  const allNodesRef = useRef(allNodes)
-  allNodesRef.current = allNodes
+  }, [arcs.length, graphData, windowCenter, windowFrom])
 
   const canShiftLeft = windowCenter > WINDOW + 1
   const canShiftRight = windowTo < totalChapters

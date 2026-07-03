@@ -20,6 +20,10 @@ public interface IChatSessionService
         ChatInputPayload input,
         CancellationToken cancellationToken);
 
+    ValueTask<CompressResultPayload> CompressContextAsync(
+        CompressInputPayload input,
+        CancellationToken cancellationToken);
+
     ValueTask CancelChatAsync(
         string sessionId,
         CancellationToken cancellationToken);

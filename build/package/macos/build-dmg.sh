@@ -2,24 +2,28 @@
 set -euo pipefail
 
 VERSION="${1:-dev}"
-APP_NAME="goink"
-# Wails on macOS outputs a .app bundle at build/bin/goink.app
+APP_NAME="Novelist"
+APP_EXECUTABLE="novelist"
+PUBLISH_DIR="${PUBLISH_DIR:-build/bin/novelist}"
 APP_BUNDLE="build/bin/${APP_NAME}.app"
-RUNTIME_DIR="build/runtime"
 
-echo "使用 Wails 生成的 .app: $APP_BUNDLE"
-
-# 将运行时注入已有 .app bundle
-mkdir -p "$APP_BUNDLE/Contents/Resources/runtime/git"
-cp "$RUNTIME_DIR/git/git" "$APP_BUNDLE/Contents/Resources/runtime/git/"
-find "$RUNTIME_DIR" -maxdepth 1 \( -name "libonnxruntime*" -o -name "*.pc" \) -exec cp -R {} "$APP_BUNDLE/Contents/Resources/runtime/" \;
-# 模型文件
-if [ -d "$RUNTIME_DIR/models" ]; then
-	cp -r "$RUNTIME_DIR/models" "$APP_BUNDLE/Contents/Resources/runtime/"
+if [ ! -d "$PUBLISH_DIR" ]; then
+    echo "Publish directory is missing: $PUBLISH_DIR" >&2
+    echo "Run bash scripts/novelist-publish.sh osx-arm64 first." >&2
+    exit 1
 fi
-# 确保可执行
-chmod +x "$APP_BUNDLE/Contents/Resources/runtime/git"
-chmod +x "$APP_BUNDLE/Contents/Resources/runtime/libonnxruntime"* 2>/dev/null || true
+
+if [ ! -x "$PUBLISH_DIR/$APP_EXECUTABLE" ]; then
+    echo "macOS executable is missing or not executable: $PUBLISH_DIR/$APP_EXECUTABLE" >&2
+    exit 1
+fi
+
+echo "创建 Photino/.NET .app: $APP_BUNDLE"
+
+rm -rf "$APP_BUNDLE"
+mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
+cp -a "$PUBLISH_DIR"/. "$APP_BUNDLE/Contents/MacOS/"
+chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_EXECUTABLE"
 
 # Info.plist
 cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
@@ -29,17 +33,17 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Goink</string>
+    <string>Novelist</string>
     <key>CFBundleDisplayName</key>
-    <string>Goink</string>
+    <string>Novelist</string>
     <key>CFBundleIdentifier</key>
-    <string>com.goink.app</string>
+    <string>app.novelist.desktop</string>
     <key>CFBundleVersion</key>
     <string>${VERSION}</string>
     <key>CFBundleShortVersionString</key>
     <string>${VERSION}</string>
     <key>CFBundleExecutable</key>
-    <string>goink</string>
+    <string>${APP_EXECUTABLE}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
@@ -51,11 +55,11 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
 EOF
 
 # 图标占位
-[ -f build/package/macos/goink.icns ] && cp build/package/macos/goink.icns "$APP_BUNDLE/Contents/Resources/"
+[ -f build/package/macos/novelist.icns ] && cp build/package/macos/novelist.icns "$APP_BUNDLE/Contents/Resources/"
 
 # 生成 DMG
 mkdir -p build/dist
-hdiutil create -volname "Goink" -srcfolder "$APP_BUNDLE" -ov -format UDZO \
-    "build/dist/goink-v${VERSION}-macos-arm64.dmg"
+hdiutil create -volname "Novelist" -srcfolder "$APP_BUNDLE" -ov -format UDZO \
+    "build/dist/novelist-v${VERSION}-macos-arm64.dmg"
 
-echo "DMG → build/dist/goink-v${VERSION}-macos-arm64.dmg"
+echo "DMG → build/dist/novelist-v${VERSION}-macos-arm64.dmg"

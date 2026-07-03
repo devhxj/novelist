@@ -10,9 +10,12 @@ export default function CompressionBlock({ phase }: Props) {
 
   useEffect(() => {
     if (phase !== 'compressing') return
-    setSeconds(0)
+    const resetTimer = window.setTimeout(() => setSeconds(0), 0)
     const timer = setInterval(() => setSeconds(s => s + 1), 1000)
-    return () => clearInterval(timer)
+    return () => {
+      window.clearTimeout(resetTimer)
+      clearInterval(timer)
+    }
   }, [phase])
 
   const elapsed = seconds < 60

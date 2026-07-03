@@ -209,7 +209,7 @@ public sealed class FileSystemNovelExportService : INovelExportService
               <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
                 <dc:identifier id="book-id">{{WebUtility.HtmlEncode(uuid)}}</dc:identifier>
                 <dc:title>{{WebUtility.HtmlEncode(novel.Title)}}</dc:title>
-                <dc:creator>{{WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(author) ? "Goink" : author)}}</dc:creator>
+                <dc:creator>{{WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(author) ? "Novelist" : author)}}</dc:creator>
                 <dc:language>zh-CN</dc:language>
                 <dc:description>{{WebUtility.HtmlEncode(novel.Description)}}</dc:description>
               </metadata>

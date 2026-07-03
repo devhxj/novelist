@@ -15,6 +15,10 @@ interface Props {
 
 type Phase = 'input' | 'extracting' | 'preview' | 'saving'
 
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
 export default function ExtractStyleDialog({ open, novelId, onClose, onSaved }: Props) {
   const app = useApp()
 
@@ -28,27 +32,34 @@ export default function ExtractStyleDialog({ open, novelId, onClose, onSaved }: 
   // 加载模型列表并同步当前聊天模型
   useEffect(() => {
     if (!open) return
-    setSample('')
-    setPhase('input')
-    setResult(null)
-    setError('')
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (cancelled) return
+      setSample('')
+      setPhase('input')
+      setResult(null)
+      setError('')
 
-    Promise.all([
-      app.GetModels(),
-      app.GetSettings(),
-    ]).then(([modelList, settings]) => {
-      if (modelList && modelList.length > 0) {
-        setModels(modelList)
-        let key = settings?.selected_model_key || ''
-        if (!modelList.find(m => m.Key === key)) {
-          key = modelList[0].Key
+      try {
+        const [modelList, settings] = await Promise.all([
+          app.GetModels(),
+          app.GetSettings(),
+        ])
+        if (!cancelled && modelList && modelList.length > 0) {
+          setModels(modelList)
+          let key = settings?.selected_model_key || ''
+          if (!modelList.find(m => m.Key === key)) {
+            key = modelList[0].Key
+          }
+          setSelectedKey(key)
         }
-        setSelectedKey(key)
+      } catch (err) {
+        console.error('Load models for extract style failed', err)
       }
-    }).catch((err) => {
-      console.error('Load models for extract style failed', err)
-    })
-  }, [open])
+    })()
+    return () => { cancelled = true }
+  }, [app, open])
 
   const selected = models.find(m => m.Key === selectedKey)
 
@@ -76,8 +87,8 @@ export default function ExtractStyleDialog({ open, novelId, onClose, onSaved }: 
         rawContent: res.raw_content,
       })
       setPhase('preview')
-    } catch (e: any) {
-      setError(e?.message ?? '提取失败，请重试')
+    } catch (e: unknown) {
+      setError(errorMessage(e, '提取失败，请重试'))
       setPhase('input')
     }
   }, [sample, selectedKey, selected, novelId, app])
@@ -94,8 +105,8 @@ export default function ExtractStyleDialog({ open, novelId, onClose, onSaved }: 
       })
       onSaved()
       onClose()
-    } catch (e: any) {
-      setError(e?.message ?? '保存失败，请重试')
+    } catch (e: unknown) {
+      setError(errorMessage(e, '保存失败，请重试'))
       setPhase('preview')
     }
   }, [result, novelId, app, onSaved, onClose])

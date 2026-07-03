@@ -17,6 +17,15 @@ import './ContentPanel.css'
 
 const MONACO_THEME: Record<Theme, string> = { light: 'light', dark: 'vs-dark' }
 
+type MonacoEditor = Parameters<OnMount>[0]
+type MonacoApi = Parameters<OnMount>[1]
+type SearchDecorations = ReturnType<MonacoEditor['createDecorationsCollection']>
+
+interface FileChangedEvent {
+  novel_id?: number
+  path?: string
+}
+
 export interface ContentPanelHandle {
   openFile: (path: string, title: string, readOnly?: boolean, initialViewMode?: string) => void
   openFileWithHighlight: (path: string, title: string, matchPos: number, matchLen: number) => void
@@ -50,6 +59,8 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   const [isLoading, setIsLoading] = useState(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
+  const monacoRef = useRef<MonacoApi | null>(null)
+  const searchDecorationsRef = useRef<SearchDecorations | null>(null)
   const savingRef = useRef<{ id: string; path: string; content: string } | null>(null)
   const pendingHighlightRef = useRef<{ matchPos: number; matchLen: number } | null>(null)
   const didApplyHighlightRef = useRef(false) // handleEditorMount 已应用高亮时跳过清除
@@ -91,7 +102,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
         updateTab(t.id, { content: '加载失败，请关闭标签页后重试' })
       })
     }
-  }, [tabs, novelId, initRef.current])
+  }, [app, tabs, novelId, updateTab, initRef])
 
   // Ctrl+Shift+V 切换技能预览
   useEffect(() => {
@@ -170,8 +181,6 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     }, 500)
   }, [tabs, updateTab, doSave, onContentChange])
 
-  const monacoRef = useRef<any>(null)
-
   // 将 rune 偏移转为 Monaco 行列号（1-based）
   function runeOffsetToMonaco(text: string, runeOffset: number): { line: number; col: number } {
     let runeCount = 0
@@ -196,7 +205,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     const { line: endLine, col: endCol } = runeOffsetToMonaco(content, clampedEnd)
     const ctxEnd = Math.min(endLine + 1, totalLines)
 
-    const decorations: any[] = [
+    const decorations = [
       {
         range: new monaco.Range(Math.max(1, line - 1), 1, ctxEnd, 1),
         options: { isWholeLine: true, className: 'search-context-highlight' },
@@ -207,9 +216,8 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       },
     ]
 
-    const collection = (editor as any)._searchDecorations
-    if (collection) collection.clear()
-    ;(editor as any)._searchDecorations = editor.createDecorationsCollection(decorations)
+    searchDecorationsRef.current?.clear()
+    searchDecorationsRef.current = editor.createDecorationsCollection(decorations)
 
     editor.revealPositionInCenter({ lineNumber: line, column: col })
     editor.setPosition({ lineNumber: line, column: col })
@@ -240,8 +248,10 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   // 用 ref 读取最新 tabs，避免因 tabs 变化频繁重建订阅丢失事件
 
   useEffect(() => {
-    const unsub = EventsOn('file:changed', async (data: any) => {
-      if (data.novel_id !== novelIdRef.current) return
+    const unsub = EventsOn('file:changed', async (data: FileChangedEvent) => {
+      const eventNovelId = data.novel_id
+      const eventPath = data.path
+      if (eventNovelId !== novelIdRef.current || !eventPath) return
 
       for (const tab of tabsRef.current) {
         if (tab.type !== 'file') continue
@@ -249,14 +259,14 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
         let needRefresh = false
         let refreshKey: 'content' | 'outlineContent' = 'content'
 
-        if (tab.path === data.path) {
+        if (tab.path === eventPath) {
           needRefresh = true
           refreshKey = 'content'
         } else {
-          const derivedOutline = isContentPath(tab.path) && tab.path !== 'goink.md'
+          const derivedOutline: string | null = isContentPath(tab.path) && tab.path !== 'goink.md'
             ? outlinePath(parseInt(tab.path.replace(/.*\//, '').replace('.md', '')))
             : null
-          if (derivedOutline && derivedOutline === data.path) {
+          if (derivedOutline && derivedOutline === eventPath) {
             needRefresh = true
             refreshKey = 'outlineContent'
           }
@@ -264,7 +274,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
 
         if (needRefresh) {
           try {
-            const fresh = await app.GetContent(data.novel_id, data.path)
+            const fresh = await app.GetContent(eventNovelId, eventPath)
             const patch: Partial<EditorTab> = { [refreshKey]: fresh }
             if (refreshKey === 'content') patch.isDirty = false
             updateTab(tab.id, patch)
@@ -312,15 +322,12 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       openTab({ type: 'file', path, title: display, content: '', isDirty: false, viewMode: initialMode, readOnly: skReadOnly })
       onContentChange?.('')
     }).finally(() => setIsLoading(false))
-  }, [novelId, tabs, app, openTab, setActiveTabId, onContentChange])
+  }, [novelId, tabs, app, openTab, setActiveTabId, onContentChange, updateTab])
 
 
   const clearHighlight = useCallback(() => {
-    const editor = editorRef.current as any
-    if (editor?._searchDecorations) {
-      editor._searchDecorations.clear()
-      editor._searchDecorations = null
-    }
+    searchDecorationsRef.current?.clear()
+    searchDecorationsRef.current = null
   }, [])
 
   const doOpenFileWithHighlight = useCallback((path: string, title: string, matchPos: number, matchLen: number) => {
@@ -350,7 +357,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       didApplyHighlightRef.current = false
       return
     }
-    const editor = editorRef.current as any
+    const editor = editorRef.current
     const pending = pendingHighlightRef.current
     // 必须检查 editor.getModel()：key 变化导致 ContentEditor 重建时，
     // unmount/remount 之间 editorRef 可能指向已销毁的旧 editor（model 为 null），
@@ -360,10 +367,8 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       pendingHighlightRef.current = null
       return
     }
-    if (editor?._searchDecorations) {
-      editor._searchDecorations.clear()
-      editor._searchDecorations = null
-    }
+    searchDecorationsRef.current?.clear()
+    searchDecorationsRef.current = null
   }, [activeTab?.id, activeTab?.content, doHighlight])
 
   function filePathFromDiff(diffPath: string): { filePath: string; viewMode: 'content' | 'outline' } {
@@ -393,7 +398,9 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
           patch.isDirty = false
         }
         updateTab(ft.id, patch)
-      } catch { }
+      } catch {
+        updateTab(ft.id, { viewMode })
+      }
     }
 
     closeTab(dt.id)

@@ -12,9 +12,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-dotnet@v4
         with:
-          go-version: "1.25"
+          global-json-file: global.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Restore .NET dependencies
+        run: dotnet restore Novelist.slnx
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Build frontend
+        run: npm --prefix frontend run build
 
       - name: Run tests
-        run: go test $(go list ./internal/... ./app/...) -count=1
+        run: dotnet test Novelist.slnx --no-restore -v minimal

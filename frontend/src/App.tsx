@@ -24,7 +24,7 @@ export default function App() {
       console.error('App initialization failed', err)
       setView('init')
     })
-  }, [])
+  }, [app])
 
   if (view === 'loading') {
     return (

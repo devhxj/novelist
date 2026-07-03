@@ -1,4 +1,4 @@
-import { isValidElement, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -101,22 +101,21 @@ function MermaidBlock({ code }: { code: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const isPanning = useRef(false)
   const panStart = useRef({ x: 0, y: 0, scrollX: 0, scrollY: 0 })
-  const idRef = useRef(`m-${Math.random().toString(36).slice(2, 9)}`)
+  const renderId = `m-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
 
   // 防抖渲染：流式输出时 code 频繁变化，延迟等稳定后再渲染。不清空旧 SVG，避免源码/图表来回切换导致页面抖动。
   useEffect(() => {
-    setError(false)
-
     let cancelled = false
     const timer = setTimeout(() => {
       if (cancelled) return
+      setError(false)
       loadMermaid().then(async (mermaid) => {
         if (cancelled) return
         const dark = document.documentElement.classList.contains('dark')
         mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', suppressErrorRendering: true })
         try {
           const cleanCode = code.replace(/^---\n[\s\S]*?---\n/, '')
-          const { svg: s } = await mermaid.render(idRef.current, cleanCode)
+          const { svg: s } = await mermaid.render(renderId, cleanCode)
           if (!cancelled) { setSvg(s); setScale(1) }
         } catch {
           if (!cancelled) { setError(true); setSvg('') }
@@ -128,7 +127,7 @@ function MermaidBlock({ code }: { code: string }) {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [code])
+  }, [code, renderId])
 
   // 非 passive 滚轮监听，阻止页面滚动
   useEffect(() => {
@@ -207,11 +206,11 @@ function MermaidBlock({ code }: { code: string }) {
 }
 
 function PreBlock({ children }: { children?: ReactNode }) {
-  if (!isValidElement(children)) {
+  if (!isValidElement<CodeBlockProps>(children)) {
     return <pre className="markdown-code-pre">{children}</pre>
   }
 
-  const className: string = (children.props as any)?.className || ''
+  const { className = '', children: codeChildren } = children.props
 
   if (!className) {
     return <pre className="markdown-code-pre">{children}</pre>
@@ -220,13 +219,13 @@ function PreBlock({ children }: { children?: ReactNode }) {
   const lang = className.replace(/^language-/, '')
 
   if (lang === 'mermaid') {
-    const code = getNodeText((children.props as any).children).replace(/\n$/, '')
+    const code = getNodeText(codeChildren).replace(/\n$/, '')
     return <MermaidBlock code={code} />
   }
 
   return (
     <CodeBlock className={className}>
-      {(children.props as any).children}
+      {codeChildren}
     </CodeBlock>
   )
 }

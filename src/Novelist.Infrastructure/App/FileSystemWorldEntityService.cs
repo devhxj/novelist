@@ -70,6 +70,49 @@ public sealed class FileSystemWorldEntityService : IWorldEntityService
         }
     }
 
+    public async ValueTask<IReadOnlyList<CharacterRelationPayload>> GetAllCharacterRelationsAsync(
+        long novelId,
+        CancellationToken cancellationToken)
+    {
+        await EnsureNovelExistsAsync(novelId, cancellationToken);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            return store.CharacterRelations
+                .Where(relation => relation.NovelId == novelId)
+                .OrderBy(relation => relation.SourceCharacterId)
+                .ThenBy(relation => relation.TargetCharacterId)
+                .ThenBy(relation => relation.Id)
+                .ToArray();
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<CharacterRelationPayload> UpdateCharacterRelationshipAsync(
+        long novelId,
+        UpdateCharacterRelationshipPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        await EnsureNovelExistsAsync(novelId, cancellationToken);
+
+        return input switch
+        {
+            { RelationId: > 0, SourceCharacterId: 0, TargetCharacterId: 0 } =>
+                await EditCharacterRelationAsync(novelId, input, cancellationToken),
+            { RelationId: 0, SourceCharacterId: > 0, TargetCharacterId: > 0 } =>
+                await EvolveCharacterRelationAsync(novelId, input, cancellationToken),
+            _ => throw new ArgumentException(
+                "Provide either relation_id for editing or source_character_id + target_character_id for evolution.",
+                nameof(input))
+        };
+    }
+
     public async ValueTask<CharacterPayload> CreateCharacterAsync(
         long novelId,
         CreateCharacterPayload input,
@@ -163,6 +206,28 @@ public sealed class FileSystemWorldEntityService : IWorldEntityService
         }
     }
 
+    public async ValueTask DeleteCharacterRelationAsync(
+        long novelId,
+        long relationId,
+        CancellationToken cancellationToken)
+    {
+        ValidateEntityId(relationId, nameof(relationId));
+        await EnsureNovelExistsAsync(novelId, cancellationToken);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            _ = FindCharacterRelationIndex(store, novelId, relationId);
+            store.CharacterRelations.RemoveAll(relation => relation.NovelId == novelId && relation.Id == relationId);
+            await SaveAsync(store, cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
     public async ValueTask<IReadOnlyList<LocationPayload>> GetLocationsAsync(
         long novelId,
         CancellationToken cancellationToken)
@@ -199,6 +264,99 @@ public sealed class FileSystemWorldEntityService : IWorldEntityService
                 .OrderBy(relation => relation.RelationType, StringComparer.Ordinal)
                 .ThenBy(relation => relation.Id)
                 .ToArray();
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<LocationRelationPayload> CreateLocationRelationAsync(
+        long novelId,
+        CreateLocationRelationPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        await EnsureNovelExistsAsync(novelId, cancellationToken);
+        var (locationAId, locationBId) = NormalizeLocationPair(input.LocationAId, input.LocationBId);
+        var relationType = NormalizeRequiredText(input.RelationType, nameof(input.RelationType), MaxShortTextLength);
+        var description = NormalizeOptionalText(input.Description, nameof(input.Description), MaxLongTextLength);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            EnsureLocationExists(store, novelId, locationAId, nameof(input.LocationAId));
+            EnsureLocationExists(store, novelId, locationBId, nameof(input.LocationBId));
+            if (store.LocationRelations.Any(relation =>
+                    relation.NovelId == novelId &&
+                    relation.LocationAId == locationAId &&
+                    relation.LocationBId == locationBId))
+            {
+                throw new InvalidOperationException(
+                    $"Location relation between '{locationAId}' and '{locationBId}' already exists.");
+            }
+
+            var id = AllocateId(
+                store.NextLocationRelationId,
+                store.LocationRelations.Select(relation => relation.Id),
+                "Location relation");
+            var now = DateTimeOffset.UtcNow;
+            var relation = new LocationRelationPayload(
+                id,
+                novelId,
+                locationAId,
+                locationBId,
+                relationType,
+                description,
+                now,
+                now);
+
+            store.LocationRelations.Add(relation);
+            store.NextLocationRelationId = checked(id + 1);
+            await SaveAsync(store, cancellationToken);
+            return relation;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<LocationRelationPayload> UpdateLocationRelationAsync(
+        long novelId,
+        long relationId,
+        UpdateLocationRelationPayload input,
+        CancellationToken cancellationToken)
+    {
+        ValidateEntityId(relationId, nameof(relationId));
+        ArgumentNullException.ThrowIfNull(input);
+        if (input.RelationType is null && input.Description is null)
+        {
+            throw new ArgumentException("At least one location relation field must be provided.", nameof(input));
+        }
+
+        await EnsureNovelExistsAsync(novelId, cancellationToken);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            var index = FindLocationRelationIndex(store, novelId, relationId);
+            var current = store.LocationRelations[index];
+            var updated = current with
+            {
+                RelationType = input.RelationType is not null
+                    ? NormalizeRequiredText(input.RelationType, nameof(input.RelationType), MaxShortTextLength)
+                    : current.RelationType,
+                Description = input.Description is not null
+                    ? NormalizeOptionalText(input.Description, nameof(input.Description), MaxLongTextLength)
+                    : current.Description,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            store.LocationRelations[index] = updated;
+            await SaveAsync(store, cancellationToken);
+            return updated;
         }
         finally
         {
@@ -348,6 +506,131 @@ public sealed class FileSystemWorldEntityService : IWorldEntityService
         }
     }
 
+    public async ValueTask DeleteLocationRelationAsync(
+        long novelId,
+        long relationId,
+        CancellationToken cancellationToken)
+    {
+        ValidateEntityId(relationId, nameof(relationId));
+        await EnsureNovelExistsAsync(novelId, cancellationToken);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            _ = FindLocationRelationIndex(store, novelId, relationId);
+            store.LocationRelations.RemoveAll(relation => relation.NovelId == novelId && relation.Id == relationId);
+            await SaveAsync(store, cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private async ValueTask<CharacterRelationPayload> EditCharacterRelationAsync(
+        long novelId,
+        UpdateCharacterRelationshipPayload input,
+        CancellationToken cancellationToken)
+    {
+        if (input.RelationDescribe is null && input.Description is null && input.ChapterId is null)
+        {
+            throw new ArgumentException("At least one character relation field must be provided.", nameof(input));
+        }
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            var index = FindCharacterRelationIndex(store, novelId, input.RelationId);
+            var current = store.CharacterRelations[index];
+            var updated = current with
+            {
+                RelationDescribe = input.RelationDescribe is not null
+                    ? NormalizeRequiredText(input.RelationDescribe, nameof(input.RelationDescribe), MaxShortTextLength)
+                    : current.RelationDescribe,
+                Description = input.Description is not null
+                    ? NormalizeOptionalText(input.Description, nameof(input.Description), MaxLongTextLength)
+                    : current.Description,
+                ChapterId = input.ChapterId is not null
+                    ? ValidateNonNegativeId(input.ChapterId.Value, nameof(input.ChapterId))
+                    : current.ChapterId
+            };
+            store.CharacterRelations[index] = updated;
+            await SaveAsync(store, cancellationToken);
+            return updated;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private async ValueTask<CharacterRelationPayload> EvolveCharacterRelationAsync(
+        long novelId,
+        UpdateCharacterRelationshipPayload input,
+        CancellationToken cancellationToken)
+    {
+        ValidateEntityId(input.SourceCharacterId, nameof(input.SourceCharacterId));
+        ValidateEntityId(input.TargetCharacterId, nameof(input.TargetCharacterId));
+        var sourceCharacterId = input.SourceCharacterId;
+        var targetCharacterId = input.TargetCharacterId;
+        if (sourceCharacterId == targetCharacterId)
+        {
+            throw new ArgumentException("Source and target character must be different.", nameof(input));
+        }
+
+        var relationDescribe = NormalizeRequiredText(
+            input.RelationDescribe,
+            nameof(input.RelationDescribe),
+            MaxShortTextLength);
+        var description = NormalizeOptionalText(input.Description, nameof(input.Description), MaxLongTextLength);
+        var chapterId = ValidateNonNegativeId(input.ChapterId ?? 0, nameof(input.ChapterId));
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            EnsureCharacterExists(store, novelId, sourceCharacterId, nameof(input.SourceCharacterId));
+            EnsureCharacterExists(store, novelId, targetCharacterId, nameof(input.TargetCharacterId));
+            for (var i = 0; i < store.CharacterRelations.Count; i++)
+            {
+                var relation = store.CharacterRelations[i];
+                if (relation.NovelId == novelId &&
+                    relation.SourceCharacterId == sourceCharacterId &&
+                    relation.TargetCharacterId == targetCharacterId &&
+                    relation.IsCurrent)
+                {
+                    store.CharacterRelations[i] = relation with { IsCurrent = false };
+                }
+            }
+
+            var id = AllocateId(
+                store.NextCharacterRelationId,
+                store.CharacterRelations.Select(relation => relation.Id),
+                "Character relation");
+            var created = new CharacterRelationPayload(
+                id,
+                novelId,
+                sourceCharacterId,
+                targetCharacterId,
+                relationDescribe,
+                description,
+                chapterId,
+                IsCurrent: true,
+                DateTimeOffset.UtcNow);
+
+            store.CharacterRelations.Add(created);
+            store.NextCharacterRelationId = checked(id + 1);
+            await SaveAsync(store, cancellationToken);
+            return created;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
     private async ValueTask<WorldEntityStoreDocument> LoadOrCreateAsync(CancellationToken cancellationToken)
     {
         var path = await StorePathAsync(cancellationToken);
@@ -431,6 +714,17 @@ public sealed class FileSystemWorldEntityService : IWorldEntityService
         return index;
     }
 
+    private static int FindCharacterRelationIndex(WorldEntityStoreDocument store, long novelId, long relationId)
+    {
+        var index = store.CharacterRelations.FindIndex(relation => relation.NovelId == novelId && relation.Id == relationId);
+        if (index < 0)
+        {
+            throw new ArgumentException($"Character relation '{relationId}' does not exist.", nameof(relationId));
+        }
+
+        return index;
+    }
+
     private static int FindLocationIndex(WorldEntityStoreDocument store, long novelId, long locationId)
     {
         var index = store.Locations.FindIndex(location => location.NovelId == novelId && location.Id == locationId);
@@ -440,6 +734,30 @@ public sealed class FileSystemWorldEntityService : IWorldEntityService
         }
 
         return index;
+    }
+
+    private static int FindLocationRelationIndex(WorldEntityStoreDocument store, long novelId, long relationId)
+    {
+        var index = store.LocationRelations.FindIndex(relation => relation.NovelId == novelId && relation.Id == relationId);
+        if (index < 0)
+        {
+            throw new ArgumentException($"Location relation '{relationId}' does not exist.", nameof(relationId));
+        }
+
+        return index;
+    }
+
+    private static void EnsureCharacterExists(
+        WorldEntityStoreDocument store,
+        long novelId,
+        long characterId,
+        string argumentName)
+    {
+        ValidateEntityId(characterId, argumentName);
+        if (!store.Characters.Any(character => character.NovelId == novelId && character.Id == characterId))
+        {
+            throw new ArgumentException($"Character '{characterId}' does not exist.", argumentName);
+        }
     }
 
     private static void EnsureLocationExists(
@@ -453,6 +771,20 @@ public sealed class FileSystemWorldEntityService : IWorldEntityService
         {
             throw new ArgumentException($"Location '{locationId}' does not exist.", argumentName);
         }
+    }
+
+    private static (long LocationAId, long LocationBId) NormalizeLocationPair(long locationAId, long locationBId)
+    {
+        ValidateEntityId(locationAId, nameof(locationAId));
+        ValidateEntityId(locationBId, nameof(locationBId));
+        if (locationAId == locationBId)
+        {
+            throw new ArgumentException("A location relation cannot point to the same location.", nameof(locationBId));
+        }
+
+        return locationAId < locationBId
+            ? (locationAId, locationBId)
+            : (locationBId, locationAId);
     }
 
     private static bool ShouldApply(string? value)
@@ -544,6 +876,16 @@ public sealed class FileSystemWorldEntityService : IWorldEntityService
         {
             throw new ArgumentOutOfRangeException(argumentName, entityId, "Entity id must be positive.");
         }
+    }
+
+    private static long ValidateNonNegativeId(long entityId, string argumentName)
+    {
+        if (entityId < 0)
+        {
+            throw new ArgumentOutOfRangeException(argumentName, entityId, "Entity id must not be negative.");
+        }
+
+        return entityId;
     }
 
     private sealed class WorldEntityStoreDocument

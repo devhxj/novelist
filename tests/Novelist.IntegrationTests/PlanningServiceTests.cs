@@ -168,7 +168,7 @@ public sealed class PlanningServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task BridgePlanningHandlersUseWailsCompatibleArgumentShapes()
+    public async Task BridgePlanningHandlersUseLegacyCompatibleArgumentShapes()
     {
         var options = CreateOptions();
         await InitializeAsync(options);

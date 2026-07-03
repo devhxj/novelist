@@ -92,12 +92,44 @@ export default function ReaderView({ novelId, focusId }: Props) {
     }
   }, [app, novelId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!novelId) {
+        if (!cancelled) setEntries([])
+        return
+      }
+      if (!cancelled) {
+        setLoading(true)
+        setError(null)
+      }
+      try {
+        const items = await app.GetReaderPerspectives(novelId)
+        if (!cancelled) {
+          const nextEntries = items ?? []
+          setEntries(nextEntries)
+          if (nextEntries.length > 0) {
+            const maxCh = Math.max(...nextEntries.map(e => e.planted_chapter))
+            setWindowCenter(prev => prev || maxCh)
+          }
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : '加载失败')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId])
 
   useEffect(() => {
     if (focusId && focusId > 0 && entries.length > 0) {
       const entry = entries.find(e => e.id === focusId)
-      if (entry) setWindowCenter(entry.planted_chapter)
+      if (entry) {
+        const timer = window.setTimeout(() => setWindowCenter(entry.planted_chapter), 0)
+        return () => window.clearTimeout(timer)
+      }
     }
   }, [focusId, entries])
 

@@ -155,9 +155,9 @@ function QuickStartTab() {
   return (
     <div className="space-y-6 max-w-none">
       <section>
-        <h2 className="text-lg font-semibold mb-2">欢迎使用 Goink</h2>
+        <h2 className="text-lg font-semibold mb-2">欢迎使用 Novelist</h2>
         <p className="text-muted-foreground leading-relaxed">
-          Goink 是一款桌面端 AI 小说写作助手。它不只是聊天机器人——它理解你的小说世界，
+          Novelist 是一款桌面端 AI 小说写作助手。它不只是聊天机器人——它理解你的小说世界，
           能管理角色、地点、时间线、故事弧线等创作要素，并通过 AI 对话辅助你写作、审稿和构思。
         </p>
       </section>
@@ -340,8 +340,8 @@ function LLMConfigTab() {
       <section>
         <h2 className="text-lg font-semibold mb-2">为什么需要配置模型</h2>
         <p className="text-muted-foreground leading-relaxed">
-          Goink 本身不提供 AI 模型，你需要接入第三方大模型服务才能使用 AI 功能。
-          配置过程就是告诉 Goink：用哪个服务商的哪个模型、API Key 是什么。
+          Novelist 本身不提供 AI 模型，你需要接入第三方大模型服务才能使用 AI 功能。
+          配置过程就是告诉 Novelist：用哪个服务商的哪个模型、API Key 是什么。
           配置入口在 <span className="text-foreground font-medium">设置 → 模型配置</span>。
         </p>
       </section>
@@ -371,7 +371,7 @@ function LLMConfigTab() {
         <div className="space-y-3 text-sm text-muted-foreground leading-relaxed">
           <p>每个服务商可以配置多个模型，有两种方式添加：</p>
           <div className="space-y-2">
-            <p><span className="text-foreground font-medium">自动发现</span> —— 点击「自动发现」按钮，Goink 会调用服务商的 /models 接口，列出所有可用模型。勾选需要的模型导入即可。并非所有服务商都支持此功能。</p>
+            <p><span className="text-foreground font-medium">自动发现</span> —— 点击「自动发现」按钮，Novelist 会调用服务商的 /models 接口，列出所有可用模型。勾选需要的模型导入即可。并非所有服务商都支持此功能。</p>
             <p><span className="text-foreground font-medium">手动添加</span> —— 点击「+ 添加」按钮，手动填写模型 ID、名称、上下文窗口大小、最大输出长度等信息。</p>
           </div>
           <p className="mt-3">模型参数说明：</p>
@@ -411,7 +411,7 @@ function LLMConfigTab() {
           </div>
           <div>
             <p className="text-foreground font-medium">API Key 安全吗？</p>
-            <p>API Key 以 AES-256 加密存储在本地磁盘（<code className="text-xs bg-muted px-1 rounded">~/Goink/llm_config.enc</code>）。注意这只防磁盘文件扫描，不防设备被物理破解。</p>
+            <p>API Key 以 AES-256 加密存储在本地数据目录（<code className="text-xs bg-muted px-1 rounded">llm/config.enc</code>）。注意这只防磁盘文件扫描，不防设备被物理破解。</p>
           </div>
           <div>
             <p className="text-foreground font-medium">可以配置多个服务商吗？</p>
@@ -431,7 +431,7 @@ function ContextCacheTab() {
       <section>
         <h2 className="text-lg font-semibold mb-2">什么是上下文和缓存</h2>
         <p className="text-muted-foreground leading-relaxed">
-          每次与 AI 对话时，Goink 会把对话历史、系统提示词（System1/2/3）打包成「上下文」发送给模型。
+          每次与 AI 对话时，Novelist 会把对话历史、系统提示词（System1/2/3）打包成「上下文」发送给模型。
           主流大模型服务商会缓存对话前缀——如果连续多轮对话的前缀不变，模型可以直接复用之前的计算结果（KV 缓存），
           跳过重复处理，从而降低费用和延迟。这就是「缓存命中」。
         </p>
@@ -529,7 +529,7 @@ function ApprovalTab() {
       <section>
         <h2 className="text-lg font-semibold mb-2">两种创作姿态，自由切换</h2>
         <p className="text-muted-foreground leading-relaxed">
-          Goink 同时支持「AI 自主创作」和「精细化协同审批」两种模式。你不需要二选一，
+          Novelist 同时支持「AI 自主创作」和「精细化协同审批」两种模式。你不需要二选一，
           随时在聊天面板底部切换，适应不同阶段的创作需求。
         </p>
       </section>

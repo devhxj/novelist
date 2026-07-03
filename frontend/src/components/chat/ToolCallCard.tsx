@@ -16,16 +16,16 @@ interface Props {
   onReject?: (feedback: string) => void
 }
 
-function activityIcon(kind?: string) {
+function ActivityIcon({ kind, size }: { kind?: string; size: number }) {
   switch (kind) {
-    case 'view': case 'browse': return Eye
-    case 'create': return Plus
-    case 'write': case 'edit': return Pencil
-    case 'memory': return Brain
-    case 'review': return CheckCircle2
-    case 'delete': return Trash2
-    case 'plan': return FileText
-    default: return Wrench
+    case 'view': case 'browse': return <Eye size={size} />
+    case 'create': return <Plus size={size} />
+    case 'write': case 'edit': return <Pencil size={size} />
+    case 'memory': return <Brain size={size} />
+    case 'review': return <CheckCircle2 size={size} />
+    case 'delete': return <Trash2 size={size} />
+    case 'plan': return <FileText size={size} />
+    default: return <Wrench size={size} />
   }
 }
 
@@ -101,7 +101,6 @@ function ApprovalBody({ type, payload }: { type?: string; payload?: Record<strin
 
 export default memo(function ToolCallCard({ displayText, status, activityKind, error, compact, approvalType, approvalPayload, onApprove, onReject }: Props) {
   const [feedback, setFeedback] = useState('')
-  const Icon = activityIcon(activityKind)
 
   // 审批中状态
   if (status === 'awaiting_approval' && onApprove && onReject) {
@@ -159,7 +158,7 @@ export default memo(function ToolCallCard({ displayText, status, activityKind, e
           ) : isFailed ? (
             <XCircle size={compact ? 12 : 14} />
           ) : (
-            <Icon size={compact ? 12 : 14} />
+            <ActivityIcon kind={activityKind} size={compact ? 12 : 14} />
           )}
         </span>
 

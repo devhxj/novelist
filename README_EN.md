@@ -1,33 +1,33 @@
 <p align="center">
-  <img src="assets/logo-dark.svg#gh-dark-mode-only" alt="Goink" />
-  <img src="assets/logo-light.svg#gh-light-mode-only" alt="Goink" />
+  <img src="assets/logo-dark.svg#gh-dark-mode-only" alt="Novelist" />
+  <img src="assets/logo-light.svg#gh-light-mode-only" alt="Novelist" />
 </p>
 
 <h1 align="center">Desktop AI Novel-Writing System<br><sub>Agent Real-Time Decisions × Structured Memory × Post-Writing Self-Check</sub></h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Go-1.25-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go 1.25" />
-  <img src="https://img.shields.io/badge/Wails-v2.12-DF0000?style=for-the-badge&logo=wails&logoColor=white" alt="Wails v2" />
+  <img src="https://img.shields.io/badge/.NET-10.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" alt=".NET 10" />
+  <img src="https://img.shields.io/badge/Photino.NET-Desktop-2E7D32?style=for-the-badge" alt="Photino.NET" />
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/SQLite-3-003B57?style=for-the-badge&logo=sqlite&logoColor=white" alt="SQLite" />
   <br />
   <img src="https://img.shields.io/badge/TypeScript-6.0-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript 6" />
   <img src="https://img.shields.io/badge/Tailwind-4.3-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white" alt="Tailwind 4" />
-  <img src="https://img.shields.io/badge/ONNX_Runtime-1.26-005BED?style=for-the-badge&logo=onnx&logoColor=white" alt="ONNX Runtime" />
+  <img src="https://img.shields.io/badge/Agent_Framework-Microsoft-5E5CE6?style=for-the-badge" alt="Microsoft Agent Framework" />
   <img src="https://img.shields.io/badge/license-MIT-716B94?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT" />
 </p>
 
 ---
 
-<p align="center"><strong>Anyone who has tried to write a novel with a general-purpose AI knows the pain—by chapter five it forgets the protagonist's name. By chapter thirty you're manually flipping through earlier chapters hunting for that one foreshadowing line. After finishing a chapter you have to remind it yourself to "update character status" and "check arc progress." Goink doesn't have these problems. It's a desktop AI writing system with structured memory—character profiles, foreshadowing states, arc progress, location relationships, reader knowledge—the system remembers, and the Agent looks it up, edits it, and maintains it on its own.</strong></p>
+<p align="center"><strong>Anyone who has tried to write a novel with a general-purpose AI knows the pain—by chapter five it forgets the protagonist's name. By chapter thirty you're manually flipping through earlier chapters hunting for that one foreshadowing line. After finishing a chapter you have to remind it yourself to "update character status" and "check arc progress." Novelist doesn't have these problems. It's a desktop AI writing system with structured memory—character profiles, foreshadowing states, arc progress, location relationships, reader knowledge—the system remembers, and the Agent looks it up, edits it, and maintains it on its own.</strong></p>
 
 ## What Makes It Different From General AI Chat
 
-| | General AI Chat | Goink |
+| | General AI Chat | Novelist |
 |---|---|---|
 | Creative context | Re-explain everything in every conversation | Full structured tracking: characters, relationships, foreshadowing, arcs, locations, reader knowledge |
 | Editing | Outputs text directly; no idea what changed | Diff preview + line-by-line comparison + approve before writing |
-| Finding past content | Manual searching, flipping through chapters | Local semantic search—"that pendant" finds every relevant passage |
+| Finding past content | Manual searching, flipping through chapters | Semantic search + local index—"that pendant" finds every relevant passage |
 | Post-writing maintenance | Doesn't care unless you remind it | Auto-triggers character updates, foreshadowing resolution, arc progression, reader knowledge refresh after writing |
 | Writing style | Prompt-based brute force | 8 built-in methodologies + custom Skill hot-reload, three-layer override |
 | Version history | None | Built-in Git, auto-commit every conversation, rollback anytime |
@@ -47,7 +47,7 @@ On chapter fifty, wondering "where exactly did the protagonist first see that pe
 
 Not keyword matching—meaning-based search. Ask "clues about the pendant" and it finds paragraphs that never mention the word "pendant" but clearly allude to it. The Agent can also proactively search earlier content when writing new chapters to maintain consistency.
 
-The entire engine runs locally—BGE Chinese semantic model via ONNX local inference, sqlite-vec vector index, MMR de-duplication re-ranking. Background incremental indexing after each chapter. No network, no extra configuration.
+The index and retrieval state live locally in sqlite-vec. Embeddings are generated through a configurable standard Embeddings API, so providers and vector dimensions can vary safely. Chapter edits mark the index stale, and after rebuild the Agent can proactively search earlier content to maintain consistency.
 
 ## Not Just Memory—Structured Creative State
 
@@ -88,7 +88,7 @@ Two-tier management: global preferences and per-novel preferences. By chapter th
 
 ## Skill System: 3 Layers × 3 Modes
 
-Skills are Goink's creative methodology modules. Each Skill is defined by a single `.md` file with YAML frontmatter metadata and markdown body. **3 layers × 3 modes = 9 strategic dimensions** — precise control over what content, at what scope, with what activation model.
+Skills are Novelist's creative methodology modules. Each Skill is defined by a single `.md` file with YAML frontmatter metadata and markdown body. **3 layers × 3 modes = 9 strategic dimensions** — precise control over what content, at what scope, with what activation model.
 
 ### Three Layers
 
@@ -97,7 +97,7 @@ Same-name Skills override by priority: **Novel > User > Built-in**. Changes hot-
 | Layer | Storage | Scope | Editable |
 |---|---|---|---|
 | Built-in | Read-only bundled | All novels | No |
-| User | `~/.goink/skills/` | All novels | Yes |
+| User | data-dir `skills/` (tool path remains compatible with `~/.goink/skills/`) | All novels | Yes |
 | Novel | `{novel}/skills/` | Current novel | Yes |
 
 ### Three Modes
@@ -175,28 +175,30 @@ Download the installer for your platform from [Releases](https://github.com/sigp
 - **macOS** — Open DMG, drag to Applications
 - **Linux** — Run the AppImage
 
-Requires an LLM API Key (built-in DeepSeek, GLM, MiMo templates; compatible with OpenAI format). Installer < 60MB. No Python, Node.js, database, or GPU required. Windows SmartScreen may show a warning (unsigned)—click "More info" → "Run anyway."
+Requires an LLM API Key (built-in DeepSeek, GLM, MiMo templates; compatible with OpenAI format). Installers include the desktop host, frontend assets, and Git runtime. No Python, Node.js, external database, or GPU required. Windows SmartScreen may show a warning (unsigned)—click "More info" → "Run anyway."
 
 ### Build From Source
 
 ```bash
-sudo apt install libsqlite3-dev libgtk-3-dev libwebkit2gtk-4.1-dev gcc
+sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0 curl file unzip
 git clone https://github.com/sigpanic/goink
 cd goink
+dotnet restore Novelist.slnx
+npm --prefix frontend ci
 make deps
 make build   # production build
-make dev     # dev mode (hot reload)
+make dev     # Photino desktop dev mode
 ```
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Agent Engine | Custom ReAct loop (Go, SSE streaming + 31 Function Calling tools + nested sub-agents) |
-| Desktop Framework | Wails v2 (Go + WebView) |
+| Agent Engine | Microsoft Agent Framework + OpenAI-compatible streaming + structured tools + nested sub-agents |
+| Desktop Framework | Photino.NET + .NET 10 |
 | Editor | Monaco Editor |
-| Database | SQLite + GORM (ACID transactions + operation log rollback) |
-| Vector Search | sqlite-vec + ONNX Runtime (bge-small-zh-v1.5 int8 quantized) |
+| Database | Filesystem JSON stores + SQLite/sqlite-vec RAG index |
+| Vector Search | Standard Embeddings API + sqlite-vec |
 | Version Control | Built-in Git (auto commit / Diff / Revert) |
 | Security | Regex whitelist + SafePath dual sandbox + approval flow |
 | Frontend | React 19 + TypeScript + Tailwind CSS 4 + shadcn/ui |

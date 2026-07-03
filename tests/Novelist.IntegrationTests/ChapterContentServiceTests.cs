@@ -80,6 +80,32 @@ public sealed class ChapterContentServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveContentCreatesGitCommitForRepositoryFiles()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var versionControl = new GitVersionControlService(options);
+        var novelService = new FileSystemNovelService(
+            options,
+            new FileSystemAppSettingsService(options),
+            versionControl);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("版本章节", "", ""), CancellationToken.None);
+        var service = new FileSystemChapterContentService(
+            options,
+            novelService,
+            versionControl: versionControl);
+        var chapter = await service.CreateChapterAsync(new CreateChapterPayload(novel.Id, "第一章"), CancellationToken.None);
+
+        await service.SaveContentAsync(
+            new SaveContentPayload(novel.Id, chapter.FilePath, "可追溯正文"),
+            CancellationToken.None);
+
+        var log = await versionControl.GetLogAsync(novel.Id, null, 10, CancellationToken.None);
+        Assert.Contains(log, commit => commit.Message == "create chapter 001");
+        Assert.Contains(log, commit => commit.Message == "update chapters/001.md");
+    }
+
+    [Fact]
     public async Task SaveContentDoesNotFailWhenRagStaleNotificationFails()
     {
         var options = CreateOptions();

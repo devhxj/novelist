@@ -43,7 +43,26 @@ export default function SkillList({ novelId, activeSkillName, onSelectSkill, onE
     }
   }, [app, novelId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!novelId) {
+        if (!cancelled) setSkills([])
+        return
+      }
+      if (!cancelled) setLoading(true)
+      try {
+        const list = await app.ListSkills({ novel_id: novelId })
+        if (!cancelled) setSkills(list ?? [])
+      } catch (err) {
+        console.error('Failed to load skills:', err)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return skills

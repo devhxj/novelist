@@ -7,6 +7,14 @@ const MODE_OPTIONS = [
   { value: 'always', label: '常驻 — 会话开头自动注入，始终生效' },
 ]
 
+const KNOWN_FIELDS = ['name', 'description', 'category', 'mode', 'author', 'version']
+
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  return fallback
+}
+
 interface Props {
   content: string
   readOnly?: boolean
@@ -15,8 +23,6 @@ interface Props {
 }
 
 export default function SkillEditForm({ content, readOnly, onSave, onCancel }: Props) {
-  const KNOWN_FIELDS = ['name', 'description', 'category', 'mode', 'author', 'version']
-
   const { meta, body } = splitFrontmatter(content)
 
   const [name, setName] = useState(meta.name || '')
@@ -31,22 +37,25 @@ export default function SkillEditForm({ content, readOnly, onSave, onCancel }: P
   const [extraFields, setExtraFields] = useState<[string, string][]>([])
 
   useEffect(() => {
-    const { meta: m, body: b } = splitFrontmatter(content)
-    setName(m.name || '')
-    setDescription(m.description || '')
-    setCategory(m.category || '')
-    setMode(m.mode || 'auto')
-    setAuthor(m.author || '')
-    setVersion(m.version || '1')
-    setBodyText(b || '')
-    setError('')
-    const extras: [string, string][] = []
-    for (const [k, v] of Object.entries(m)) {
-      if (!KNOWN_FIELDS.includes(k)) {
-        extras.push([k, v])
+    const timer = window.setTimeout(() => {
+      const { meta: m, body: b } = splitFrontmatter(content)
+      setName(m.name || '')
+      setDescription(m.description || '')
+      setCategory(m.category || '')
+      setMode(m.mode || 'auto')
+      setAuthor(m.author || '')
+      setVersion(m.version || '1')
+      setBodyText(b || '')
+      setError('')
+      const extras: [string, string][] = []
+      for (const [k, v] of Object.entries(m)) {
+        if (!KNOWN_FIELDS.includes(k)) {
+          extras.push([k, v])
+        }
       }
-    }
-    setExtraFields(extras)
+      setExtraFields(extras)
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [content])
 
   if (readOnly) {
@@ -80,8 +89,8 @@ export default function SkillEditForm({ content, readOnly, onSave, onCancel }: P
       }
       lines.push('---', '', bodyText.trim())
       await onSave(lines.join('\n'))
-    } catch (e: any) {
-      setError(typeof e === 'string' ? e : (e?.message || e?.toString() || '保存失败，请重试'))
+    } catch (e: unknown) {
+      setError(errorMessage(e, '保存失败，请重试'))
     } finally {
       setSaving(false)
     }

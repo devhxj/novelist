@@ -1,4 +1,6 @@
 using Novelist.App.Realtime;
+using Novelist.Core.App;
+using Novelist.Infrastructure.App;
 
 namespace Novelist.App.Hosting;
 
@@ -33,6 +35,34 @@ public static class NovelistAppBuilder
 
         app.MapGet("/health", () => Results.Ok(new HealthResponse("ok", "novelist")));
         app.MapHub<EventsHub>("/hubs/events");
+        app.MapGet("/covers/{novelId:long}", async (long novelId, HttpContext context) =>
+        {
+            var options = CreateAppInitializationOptions(app.Configuration);
+            var service = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+            try
+            {
+                var cover = await service.GetCoverAsync(novelId, context.RequestAborted);
+                if (cover is null)
+                {
+                    return Results.NotFound();
+                }
+
+                context.Response.Headers.CacheControl = "no-cache";
+                return Results.File(
+                    cover.LocalPath,
+                    cover.ContentType,
+                    lastModified: cover.LastModified,
+                    enableRangeProcessing: false);
+            }
+            catch (AppNotInitializedException)
+            {
+                return Results.NotFound();
+            }
+            catch (ArgumentException)
+            {
+                return Results.NotFound();
+            }
+        });
 
         if (frontendAssets is not null)
         {
@@ -44,6 +74,25 @@ public static class NovelistAppBuilder
         }
 
         return app;
+    }
+
+    private static AppInitializationOptions CreateAppInitializationOptions(IConfiguration configuration)
+    {
+        var defaults = new AppInitializationOptions();
+        return defaults with
+        {
+            ConfigDirectory = ReadPath(configuration, "Novelist:ConfigDirectory") ?? defaults.ConfigDirectory,
+            DefaultDataDirectory = ReadPath(configuration, "Novelist:DefaultDataDirectory") ?? defaults.DefaultDataDirectory,
+            EnableLegacyGoinkMigration = bool.TryParse(configuration["Novelist:EnableLegacyGoinkMigration"], out var enabled) && enabled,
+            LegacyGoinkConfigDirectory = ReadPath(configuration, "Novelist:LegacyGoinkConfigDirectory"),
+            LegacyGoinkDataDirectory = ReadPath(configuration, "Novelist:LegacyGoinkDataDirectory")
+        };
+    }
+
+    private static string? ReadPath(IConfiguration configuration, string key)
+    {
+        var value = configuration[key];
+        return string.IsNullOrWhiteSpace(value) ? null : Path.GetFullPath(value);
     }
 }
 

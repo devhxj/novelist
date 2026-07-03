@@ -15,6 +15,11 @@ interface Props {
 
 const BLOCK_SIZE = 100
 
+interface FileChangedEvent {
+  novel_id?: number
+  path?: string
+}
+
 export default function ChapterList({ novelId, target, onSelectChapter, onSelectGoink, onExportNovel }: Props) {
   const app = useApp()
 
@@ -31,11 +36,23 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
     setChapters(list ?? [])
   }, [novelId, app])
 
-  useEffect(() => { loadChapters() }, [loadChapters])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!novelId) {
+        if (!cancelled) setChapters([])
+        return
+      }
+      const list = await app.GetChapters(novelId)
+      if (!cancelled) setChapters(list ?? [])
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId])
 
   // file:changed 时刷新章节列表（字数统计、新章等）
   useEffect(() => {
-    const unsub = EventsOn('file:changed', (data: any) => {
+    const unsub = EventsOn('file:changed', (data: FileChangedEvent) => {
       if (data.novel_id !== novelId) return
       if (data.path && (data.path.startsWith('chapters/') || data.path.startsWith('outlines/') || data.path === 'goink.md')) {
         loadChapters()

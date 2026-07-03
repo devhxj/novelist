@@ -62,7 +62,7 @@ export default function ModelConfigTab({ onSaved }: Props) {
       if (!cancelled) setIsLoading(false)
     })
     return () => { cancelled = true }
-  }, [])
+  }, [app])
 
   const builtinProviders = providers.filter(p => p.source === 'builtin')
   const customProviders = providers.filter(p => p.source === 'custom')
@@ -148,7 +148,7 @@ export default function ModelConfigTab({ onSaved }: Props) {
       })
       setTestResults(prev => ({ ...prev, [providerKey]: { ok: true, keySnapshot: provider.api_key } }))
       return null
-    } catch (err: any) {
+    } catch (err: unknown) {
       const msg = String(err).replace(/^app: test connection: /, '')
       setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, keySnapshot: provider.api_key } }))
       return msg
@@ -242,7 +242,7 @@ export default function ModelConfigTab({ onSaved }: Props) {
     } finally {
       setIsSaving(false)
     }
-  }, [providers, app, testResults, handleTest, subNav, handleSaveEmbedding])
+  }, [providers, app, testResults, handleTest, subNav, handleSaveEmbedding, onSaved])
 
   if (isLoading) {
     return (

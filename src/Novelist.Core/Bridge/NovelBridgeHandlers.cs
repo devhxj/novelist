@@ -39,6 +39,21 @@ public static class NovelBridgeHandlers
             return null;
         });
 
+        dispatcher.Register("SaveCover", async (context, cancellationToken) =>
+        {
+            await service.SaveCoverAsync(
+                ReadLongArg(context.Payload, 0, "novelId"),
+                ReadByteArrayArg(context.Payload, 1, "data"),
+                cancellationToken);
+            return null;
+        });
+
+        dispatcher.Register("DeleteCover", async (context, cancellationToken) =>
+        {
+            await service.DeleteCoverAsync(ReadLongArg(context.Payload, 0, "novelId"), cancellationToken);
+            return null;
+        });
+
         return dispatcher;
     }
 
@@ -70,6 +85,34 @@ public static class NovelBridgeHandlers
         }
 
         return number;
+    }
+
+    private static byte[] ReadByteArrayArg(JsonElement? payload, int index, string argumentName)
+    {
+        var value = ReadArg(payload, index, argumentName);
+        if (value.ValueKind != JsonValueKind.Array)
+        {
+            throw Invalid(argumentName, "Value must be an array of bytes.");
+        }
+
+        if (value.GetArrayLength() > NovelCoverConstraints.MaxBytes)
+        {
+            throw Invalid(argumentName, $"Value must contain at most {NovelCoverConstraints.MaxBytes} bytes.");
+        }
+
+        var bytes = new byte[value.GetArrayLength()];
+        var offset = 0;
+        foreach (var item in value.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Number || !item.TryGetInt32(out var number) || number is < 0 or > 255)
+            {
+                throw Invalid(argumentName, "Every item must be an integer between 0 and 255.");
+            }
+
+            bytes[offset++] = (byte)number;
+        }
+
+        return bytes;
     }
 
     private static JsonElement ReadArg(JsonElement? payload, int index, string argumentName)

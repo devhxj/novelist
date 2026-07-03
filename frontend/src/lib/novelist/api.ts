@@ -15,7 +15,7 @@ import type {
   storyarc,
   timeline,
   writing,
-} from '@/lib/wailsjs/go/models'
+} from './types'
 
 export type AppMethodArgs = readonly unknown[]
 type BridgeBackedMethod = (...args: never[]) => Promise<unknown>

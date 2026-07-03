@@ -34,6 +34,11 @@ public static class ChatSessionBridgeHandlers
                 ReadObjectArg<ChatInputPayload>(context.Payload, 0, "input"),
                 cancellationToken));
 
+        dispatcher.Register("CompressContext", async (context, cancellationToken) =>
+            await service.CompressContextAsync(
+                ReadObjectArg<CompressInputPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
         dispatcher.Register("CancelChat", async (context, cancellationToken) =>
         {
             await service.CancelChatAsync(

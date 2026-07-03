@@ -29,6 +29,10 @@ const FORMATS = [
   },
 ] as const
 
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
 export default function ExportDialog({ open, novelTitle, onClose, onExport }: Props) {
   const [format, setFormat] = useState<'epub' | 'markdown' | 'txt'>('epub')
   const [exporting, setExporting] = useState(false)
@@ -45,8 +49,8 @@ export default function ExportDialog({ open, novelTitle, onClose, onExport }: Pr
     try {
       await onExport(format)
       setSuccess(true)
-    } catch (e: any) {
-      setError(e?.message ?? '导出失败，请重试')
+    } catch (e: unknown) {
+      setError(errorMessage(e, '导出失败，请重试'))
     } finally {
       setExporting(false)
     }

@@ -105,6 +105,226 @@ public sealed class ChatSessionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ChatCommitsPendingUserAndAiWorkspaceChanges()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var versionControl = new GitVersionControlService(options);
+        var novelService = new FileSystemNovelService(options, settings, versionControl);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("版本对话", "", ""), CancellationToken.None);
+        var workspace = Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        await File.WriteAllTextAsync(Path.Combine(workspace, "goink.md"), "user changed before chat");
+        var completion = new WorkspaceMutatingCompletionClient(
+            Path.Combine(workspace, "goink.md"),
+            "ai changed during chat");
+        var service = CreateService(
+            options,
+            novelService,
+            settings,
+            completion,
+            new RecordingBridgeEventSink(),
+            versionControl: versionControl);
+
+        var result = await service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "继续", "test", "model-a", ""),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.TurnId);
+        var log = await versionControl.GetLogAsync(novel.Id, null, 10, CancellationToken.None);
+        Assert.Contains(log, commit => commit.Message == "turn 1: user manual changes");
+        Assert.Contains(log, commit => commit.Message == "turn 1: AI changes");
+    }
+
+    [Fact]
+    public async Task ChatInjectsInitialSystemSkillContextAndSlashSkillPrompt()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "旧城疑案", "悬疑"), CancellationToken.None);
+        var content = new FileSystemChapterContentService(options, novelService);
+        await content.SaveContentAsync(
+            new SaveContentPayload(novel.Id, "goink.md", "## 当前进展\n林岚正在调查旧城门。"),
+            CancellationToken.None);
+        Directory.CreateDirectory(Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(), "skills"));
+        await File.WriteAllTextAsync(
+            Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(), "skills", "always-style.md"),
+            """
+            ---
+            name: always-style
+            description: 常驻风格
+            mode: always
+            ---
+
+            保持冷峻克制的叙述风格。
+            """);
+        await File.WriteAllTextAsync(
+            Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(), "skills", "scene-tool.md"),
+            """
+            ---
+            name: scene-tool
+            description: 场景推进方法
+            mode: auto
+            ---
+
+            用场景目标推进剧情。
+            """);
+        Directory.CreateDirectory(Path.Combine(options.DefaultDataDirectory, "skills"));
+        await File.WriteAllTextAsync(
+            Path.Combine(options.DefaultDataDirectory, "skills", "manual-review.md"),
+            """
+            ---
+            name: manual-review
+            description: 手动审稿指令
+            mode: manual
+            ---
+
+            逐条检查动机、线索和章末钩子。
+            """);
+
+        var completion = new ScriptedChatCompletionClient(
+            [new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "收到。")],
+            title: "技能上下文");
+        var service = CreateService(
+            options,
+            novelService,
+            settings,
+            completion,
+            new RecordingBridgeEventSink(),
+            chapterContent: content);
+
+        var result = await service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "/manual-review 请审一下第一章", "test", "model-a", ""),
+            CancellationToken.None);
+
+        var request = Assert.Single(completion.Requests);
+        Assert.Contains(request.Messages, message =>
+            message.Role == "system" &&
+            message.Content.Contains("【常驻技能】", StringComparison.Ordinal) &&
+            message.Content.Contains("保持冷峻克制", StringComparison.Ordinal));
+        var catalog = Assert.Single(request.Messages, message =>
+            message.Role == "system" &&
+            message.Content.Contains("<available_skills>", StringComparison.Ordinal));
+        Assert.Contains("scene-tool: 场景推进方法", catalog.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("manual-review", catalog.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("always-style", catalog.Content, StringComparison.Ordinal);
+        Assert.Contains(request.Messages, message =>
+            message.Role == "system" &&
+            message.Content.Contains("书名：长夜档案", StringComparison.Ordinal) &&
+            message.Content.Contains("林岚正在调查旧城门", StringComparison.Ordinal));
+
+        var userMessages = request.Messages.Where(message => message.Role == "user").ToArray();
+        Assert.Equal(2, userMessages.Length);
+        Assert.Contains("用户启用了快捷指令「manual-review」", userMessages[0].Content, StringComparison.Ordinal);
+        Assert.Contains("逐条检查动机", userMessages[0].Content, StringComparison.Ordinal);
+        Assert.Equal("/manual-review 请审一下第一章", userMessages[1].Content);
+
+        var frontendMessages = await service.GetSessionMessagesAsync(result.SessionId, CancellationToken.None);
+        Assert.DoesNotContain(frontendMessages, message =>
+            message.Content.Contains("逐条检查动机", StringComparison.Ordinal));
+        Assert.Contains(frontendMessages, message =>
+            message.Role == "user" &&
+            message.Content == "/manual-review 请审一下第一章" &&
+            message.ToFrontend);
+    }
+
+    [Fact]
+    public async Task CompressContextRebuildsActiveVersionAndNextChatUsesSummary()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
+        var completion = new ScriptedChatCompletionClient(
+            [new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "继续写。")],
+            title: "压缩摘要");
+        var service = CreateService(
+            options,
+            novelService,
+            settings,
+            completion,
+            new RecordingBridgeEventSink());
+
+        var first = await service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "第一轮设定", "test", "model-a", ""),
+            CancellationToken.None);
+        var compressed = await service.CompressContextAsync(
+            new CompressInputPayload(first.SessionId, "test", "model-a"),
+            CancellationToken.None);
+
+        Assert.Equal(2, compressed.TurnId);
+        var detail = await service.GetSessionAsync(first.SessionId, CancellationToken.None);
+        Assert.Equal(2, detail.ActiveVersion);
+        Assert.Equal(2, detail.LastTurnId);
+        var messages = await service.GetSessionMessagesAsync(first.SessionId, CancellationToken.None);
+        Assert.Contains(messages, message =>
+            message.TurnId == 2 &&
+            message.Role == "system" &&
+            message.EventType == "compression" &&
+            message.ToFrontend);
+
+        await service.ChatAsync(
+            new ChatInputPayload(first.SessionId, novel.Id, "继续", "test", "model-a", ""),
+            CancellationToken.None);
+        var nextRequest = completion.Requests.Last();
+        Assert.Contains(nextRequest.Messages, message =>
+            message.Role == "user" &&
+            message.Content.Contains("上下文已压缩", StringComparison.Ordinal));
+        Assert.Contains(nextRequest.Messages, message =>
+            message.Role == "user" &&
+            message.Content.Contains("压缩摘要", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ChatAutoCompressesWhenPreviousUsageExceedsBudget()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
+        var events = new RecordingBridgeEventSink();
+        var completion = new ScriptedChatCompletionClient(
+            [
+                new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "收到。"),
+                new ChatCompletionStreamEvent(
+                    ChatCompletionStreamEventKind.Usage,
+                    string.Empty,
+                    JsonSerializer.SerializeToElement(new { total_tokens = 30_000 }))
+            ],
+            title: "自动摘要");
+        var service = CreateService(options, novelService, settings, completion, events);
+
+        var first = await service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "第一轮", "test", "model-a", ""),
+            CancellationToken.None);
+        var detail = await service.GetSessionAsync(first.SessionId, CancellationToken.None);
+        Assert.NotNull(detail.Usage);
+        Assert.Equal(32_000, detail.Usage.Value.GetProperty("context_window").GetInt32());
+        Assert.True(detail.Usage.Value.GetProperty("usage_ratio").GetDouble() > 80);
+
+        await service.ChatAsync(
+            new ChatInputPayload(first.SessionId, novel.Id, "第二轮", "test", "model-a", ""),
+            CancellationToken.None);
+
+        Assert.Contains(events.Events, item =>
+            item.Name == "agent:2" &&
+            item.Payload.GetProperty("type").GetInt32() == 6 &&
+            item.Payload.GetProperty("compression_phase").GetString() == "compressing");
+        Assert.Contains(events.Events, item =>
+            item.Name == "agent:2" &&
+            item.Payload.GetProperty("type").GetInt32() == 6 &&
+            item.Payload.GetProperty("compression_phase").GetString() == "done" &&
+            item.Payload.GetProperty("summary").GetString() == "自动摘要");
+        Assert.Contains(completion.Requests.Last().Messages, message =>
+            message.Role == "user" &&
+            message.Content.Contains("自动摘要", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task GetSessionsPaginatesAndSearchesMessageContent()
     {
         var options = CreateOptions();
@@ -474,6 +694,273 @@ public sealed class ChatSessionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ChatRunSubagentStreamsNestedEventsPersistsMessagesAndReturnsReportToParentModel()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "旧城疑案", "悬疑"), CancellationToken.None);
+        var events = new RecordingBridgeEventSink();
+        var content = new FileSystemChapterContentService(options, novelService);
+        var chapter = await content.CreateChapterAsync(new CreateChapterPayload(novel.Id, "雾中来信"), CancellationToken.None);
+        await content.SaveContentAsync(
+            new SaveContentPayload(novel.Id, chapter.FilePath, "林岚在旧城门听见暗号。"),
+            CancellationToken.None);
+        await content.SaveContentAsync(
+            new SaveContentPayload(novel.Id, "goink.md", "## 当前进展\n林岚正在调查旧城门。"),
+            CancellationToken.None);
+
+        var completion = new ToolLoopChatCompletionClient(
+            [
+                [
+                    new ChatCompletionStreamEvent(
+                        ChatCompletionStreamEventKind.ToolCall,
+                        ToolCall: new ChatToolCall(
+                            "call_sub_1",
+                            "run_subagent",
+                            """{"agent_type":"review","instruction":"审读第 1 章并指出风险"}"""))
+                ],
+                [
+                    new ChatCompletionStreamEvent(
+                        ChatCompletionStreamEventKind.ToolCall,
+                        ToolCall: new ChatToolCall(
+                            "call_read_sub_1",
+                            "read",
+                            """{"path":"chapters/001.md","include_lines":false}"""))
+                ],
+                [new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "审稿报告：暗号动机需要补强。")],
+                [new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "已根据审稿报告整理。")]
+            ],
+            title: "审稿");
+        var subagents = new DeferredSubagentRunner();
+        var tools = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new EmptyStoryMemorySearchService(),
+            content,
+            approvals: null,
+            events,
+            subagents));
+        var service = CreateService(
+            options,
+            novelService,
+            settings,
+            completion,
+            events,
+            tools,
+            approvals: null,
+            chapterContent: content);
+        subagents.SetTarget(service);
+
+        var result = await service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "请启动审稿子 Agent", "test", "model-a", ""),
+            CancellationToken.None);
+
+        Assert.Equal("已根据审稿报告整理。", result.FinalText);
+        Assert.Equal(4, completion.Requests.Count);
+        Assert.Contains(completion.Requests[0].Tools!, tool => tool.Name == "run_subagent");
+        Assert.DoesNotContain(completion.Requests[1].Tools!, tool => tool.Name == "run_subagent");
+        Assert.DoesNotContain(completion.Requests[1].Tools!, tool => tool.Name == "edit");
+        Assert.Contains(completion.Requests[1].Tools!, tool => tool.Name == "read");
+        Assert.Contains(completion.Requests[1].Messages, message =>
+            message.Role == "system" &&
+            message.Content.Contains("审稿 Agent", StringComparison.Ordinal));
+        Assert.Contains(completion.Requests[1].Messages, message =>
+            message.Role == "system" &&
+            message.Content.Contains("林岚正在调查旧城门", StringComparison.Ordinal));
+        Assert.Contains(completion.Requests[1].Messages, message =>
+            message.Role == "user" &&
+            message.Content == "审读第 1 章并指出风险");
+
+        var subagentToolMessage = Assert.Single(completion.Requests[2].Messages, message => message.Role == "tool");
+        Assert.Equal("call_read_sub_1", subagentToolMessage.ToolCallId);
+        using (var readResult = JsonDocument.Parse(subagentToolMessage.Content))
+        {
+            Assert.Equal(
+                "林岚在旧城门听见暗号。",
+                readResult.RootElement.GetProperty("data").GetProperty("content").GetString());
+        }
+
+        var parentToolMessage = Assert.Single(completion.Requests[3].Messages, message => message.Role == "tool");
+        Assert.Equal("call_sub_1", parentToolMessage.ToolCallId);
+        using (var subagentResult = JsonDocument.Parse(parentToolMessage.Content))
+        {
+            Assert.True(subagentResult.RootElement.GetProperty("success").GetBoolean());
+            Assert.Equal(
+                "review",
+                subagentResult.RootElement.GetProperty("data").GetProperty("agent_type").GetString());
+            Assert.Equal(
+                "审稿报告：暗号动机需要补强。",
+                subagentResult.RootElement.GetProperty("data").GetProperty("report").GetString());
+        }
+
+        var runSubagentExecuting = events.Events.Single(item =>
+            item.Name == "agent:1" &&
+            item.Payload.TryGetProperty("tool_name", out var toolName) &&
+            toolName.GetString() == "run_subagent" &&
+            item.Payload.GetProperty("phase").GetString() == "executing");
+        Assert.Equal(
+            "review",
+            runSubagentExecuting.Payload.GetProperty("metadata").GetProperty("agent_type").GetString());
+
+        Assert.Contains(events.Events, item =>
+            item.Name == "agent:1" &&
+            item.Payload.TryGetProperty("sub_task_id", out var subTaskId) &&
+            subTaskId.GetString() == "call_sub_1" &&
+            item.Payload.GetProperty("type").GetInt32() == 3 &&
+            item.Payload.GetProperty("tool_name").GetString() == "read");
+        Assert.Contains(events.Events, item =>
+            item.Name == "agent:1" &&
+            item.Payload.TryGetProperty("sub_task_id", out var subTaskId) &&
+            subTaskId.GetString() == "call_sub_1" &&
+            item.Payload.GetProperty("type").GetInt32() == 2 &&
+            item.Payload.GetProperty("data").GetString() == "审稿报告：暗号动机需要补强。");
+
+        var messages = await service.GetSessionMessagesAsync(result.SessionId, CancellationToken.None);
+        Assert.Contains(messages, message =>
+            message.Role == "assistant" &&
+            message.AgentType == "review" &&
+            message.SubTaskId == "call_sub_1" &&
+            message.Content == "审稿报告：暗号动机需要补强。");
+        Assert.Contains(messages, message =>
+            message.Role == "assistant" &&
+            message.AgentType == "review" &&
+            message.SubTaskId == "call_sub_1" &&
+            message.ExtraMetadata?.Contains("call_read_sub_1", StringComparison.Ordinal) == true);
+        Assert.Contains(messages, message =>
+            message.Role == "assistant" &&
+            message.AgentType == "main" &&
+            message.ExtraMetadata?.Contains("run_subagent", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public async Task SubagentToolDefinitionsAllowReadOnlyStructuredToolsOnly()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "旧城疑案", "悬疑"), CancellationToken.None);
+        var events = new RecordingBridgeEventSink();
+        var content = new FileSystemChapterContentService(options, novelService);
+        var preferences = new FileSystemPreferenceService(options, novelService);
+        var world = new FileSystemWorldEntityService(options, novelService);
+        var planning = new FileSystemPlanningService(options, novelService);
+        var completion = new ToolLoopChatCompletionClient(
+            [
+                [
+                    new ChatCompletionStreamEvent(
+                        ChatCompletionStreamEventKind.ToolCall,
+                        ToolCall: new ChatToolCall(
+                            "call_memory_1",
+                            "run_subagent",
+                            """{"agent_type":"memory","instruction":"整理人物和地点"}"""))
+                ],
+                [new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "记忆报告")],
+                [new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "完成")]
+            ],
+            title: "子任务");
+        var subagents = new DeferredSubagentRunner();
+        var tools = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new EmptyStoryMemorySearchService(),
+            content,
+            approvals: null,
+            events,
+            subagents,
+            preferences,
+            world,
+            planning,
+            webFetch: new StaticWebFetchService(),
+            webSearch: new StaticWebSearchService()));
+        var service = CreateService(
+            options,
+            novelService,
+            settings,
+            completion,
+            events,
+            tools,
+            approvals: null,
+            chapterContent: content);
+        subagents.SetTarget(service);
+
+        await service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "启动记忆子任务", "test", "model-a", ""),
+            CancellationToken.None);
+
+        Assert.Contains(completion.Requests[0].Tools!, tool => tool.Name == "create_character");
+        Assert.Contains(completion.Requests[0].Tools!, tool => tool.Name == "delete_record");
+        Assert.Contains(completion.Requests[0].Tools!, tool => tool.Name == "web_fetch");
+        Assert.Contains(completion.Requests[0].Tools!, tool => tool.Name == "web_search");
+
+        var subagentTools = completion.Requests[1].Tools!.Select(tool => tool.Name).ToArray();
+        Assert.Contains("get_chapter_list", subagentTools);
+        Assert.Contains("get_preferences", subagentTools);
+        Assert.Contains("get_characters", subagentTools);
+        Assert.Contains("get_locations", subagentTools);
+        Assert.Contains("get_timeline", subagentTools);
+        Assert.Contains("get_story_arcs", subagentTools);
+        Assert.Contains("get_reader_perspective", subagentTools);
+        Assert.DoesNotContain("edit", subagentTools);
+        Assert.DoesNotContain("web_fetch", subagentTools);
+        Assert.DoesNotContain("web_search", subagentTools);
+        Assert.DoesNotContain("run_subagent", subagentTools);
+        Assert.DoesNotContain("create_character", subagentTools);
+        Assert.DoesNotContain("update_character", subagentTools);
+        Assert.DoesNotContain("create_timeline_entry", subagentTools);
+        Assert.DoesNotContain("delete_record", subagentTools);
+    }
+
+    [Fact]
+    public async Task CancelChatStopsActiveSubagentRunAndPersistsUserStoppedMarker()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
+        var events = new RecordingBridgeEventSink();
+        var content = new FileSystemChapterContentService(options, novelService);
+        var subagents = new DeferredSubagentRunner();
+        var tools = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new EmptyStoryMemorySearchService(),
+            content,
+            approvals: null,
+            events,
+            subagents));
+        var completion = new SubagentBlockingChatCompletionClient();
+        var service = CreateService(
+            options,
+            novelService,
+            settings,
+            completion,
+            events,
+            tools,
+            approvals: null,
+            chapterContent: content);
+        subagents.SetTarget(service);
+
+        var chatTask = service.ChatAsync(
+            new ChatInputPayload("", novel.Id, "启动长任务子 Agent", "test", "model-a", ""),
+            CancellationToken.None).AsTask();
+        var started = await events.WaitForEventAsync("chat:started", TimeSpan.FromSeconds(3));
+        var sessionId = started.Payload.GetProperty("session_id").GetString()!;
+        await events.WaitForEventAsync(
+            "agent:1",
+            item => item.Payload.TryGetProperty("sub_task_id", out var subTaskId) &&
+                subTaskId.GetString() == "call_sub_blocking" &&
+                item.Payload.GetProperty("type").GetInt32() == 2,
+            TimeSpan.FromSeconds(3));
+
+        await service.CancelChatAsync(sessionId, CancellationToken.None);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await chatTask);
+        var messages = await service.GetSessionMessagesAsync(sessionId, CancellationToken.None);
+        Assert.Contains(messages, message =>
+            message.Role == "system" &&
+            message.EventType == "user_stopped" &&
+            message.ToFrontend);
+    }
+
+    [Fact]
     public async Task BridgeChatHandlersDispatchRepresentativeMethodsAndValidationErrors()
     {
         var options = CreateOptions();
@@ -641,7 +1128,9 @@ public sealed class ChatSessionServiceTests : IDisposable
         IChatCompletionClient completion,
         IBridgeEventSink events,
         IChatToolExecutor? tools = null,
-        IApprovalCoordinator? approvals = null)
+        IApprovalCoordinator? approvals = null,
+        IChapterContentService? chapterContent = null,
+        IVersionControlService? versionControl = null)
     {
         return new FileSystemChatSessionService(
             options,
@@ -651,7 +1140,9 @@ public sealed class ChatSessionServiceTests : IDisposable
             completion,
             events,
             approvals,
-            toolExecutor: tools);
+            toolExecutor: tools,
+            chapterContent: chapterContent,
+            versionControl: versionControl);
     }
 
     private AppInitializationOptions CreateOptions()
@@ -840,6 +1331,34 @@ public sealed class ChatSessionServiceTests : IDisposable
         }
     }
 
+    private sealed class WorkspaceMutatingCompletionClient : IChatCompletionClient
+    {
+        private readonly string _path;
+        private readonly string _content;
+
+        public WorkspaceMutatingCompletionClient(string path, string content)
+        {
+            _path = path;
+            _content = content;
+        }
+
+        public async IAsyncEnumerable<ChatCompletionStreamEvent> StreamChatAsync(
+            ChatCompletionRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await File.WriteAllTextAsync(_path, _content, cancellationToken);
+            yield return new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "完成");
+        }
+
+        public ValueTask<string> GenerateTextAsync(
+            ChatCompletionRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult("版本提交");
+        }
+    }
+
     private sealed class BlockingChatCompletionClient : IChatCompletionClient
     {
         public async IAsyncEnumerable<ChatCompletionStreamEvent> StreamChatAsync(
@@ -896,6 +1415,42 @@ public sealed class ChatSessionServiceTests : IDisposable
         }
     }
 
+    private sealed class SubagentBlockingChatCompletionClient : IChatCompletionClient
+    {
+        private int _streamCount;
+
+        public List<ChatCompletionRequest> Requests { get; } = [];
+
+        public async IAsyncEnumerable<ChatCompletionStreamEvent> StreamChatAsync(
+            ChatCompletionRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            var count = Interlocked.Increment(ref _streamCount);
+            if (count == 1)
+            {
+                yield return new ChatCompletionStreamEvent(
+                    ChatCompletionStreamEventKind.ToolCall,
+                    ToolCall: new ChatToolCall(
+                        "call_sub_blocking",
+                        "run_subagent",
+                        """{"agent_type":"memory","instruction":"持续检索"}"""));
+                yield break;
+            }
+
+            yield return new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "开始检索");
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+
+        public ValueTask<string> GenerateTextAsync(
+            ChatCompletionRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult("不会执行");
+        }
+    }
+
     private sealed class RecordingChatToolExecutor : IChatToolExecutor
     {
         public long LastNovelId { get; private set; }
@@ -939,6 +1494,24 @@ public sealed class ChatSessionServiceTests : IDisposable
         }
     }
 
+    private sealed class StaticWebFetchService : IWebFetchService
+    {
+        public ValueTask<WebFetchResultPayload> FetchAsync(string url, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(new WebFetchResultPayload(url, "网页", "正文"));
+        }
+    }
+
+    private sealed class StaticWebSearchService : IWebSearchService
+    {
+        public ValueTask<WebSearchResultPayload> SearchAsync(string prompt, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(new WebSearchResultPayload([prompt], "摘要", []));
+        }
+    }
+
     private sealed class EmptyStoryMemorySearchService : IStoryMemorySearchService
     {
         public ValueTask<SearchStoryMemoryResultPayload> SearchAsync(
@@ -952,6 +1525,24 @@ public sealed class ChatSessionServiceTests : IDisposable
                 MaxRelevance: "0.00",
                 Content: string.Empty,
                 Results: []));
+        }
+    }
+
+    private sealed class DeferredSubagentRunner : ISubagentRunner
+    {
+        private ISubagentRunner? _target;
+
+        public void SetTarget(ISubagentRunner target)
+        {
+            _target = target;
+        }
+
+        public ValueTask<SubagentRunResult> RunAsync(
+            SubagentRunRequest request,
+            CancellationToken cancellationToken)
+        {
+            var target = _target ?? throw new InvalidOperationException("Subagent runner is not configured.");
+            return target.RunAsync(request, cancellationToken);
         }
     }
 

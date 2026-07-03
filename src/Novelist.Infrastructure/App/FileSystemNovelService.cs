@@ -10,6 +10,7 @@ public sealed class FileSystemNovelService : INovelService
     private const int MaxTitleLength = 200;
     private const int MaxGenreLength = 128;
     private const int MaxDescriptionLength = 10_000;
+    private const string CoverFileName = "cover.jpg";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -18,14 +19,17 @@ public sealed class FileSystemNovelService : INovelService
 
     private readonly AppInitializationOptions _options;
     private readonly IAppSettingsService _settings;
+    private readonly IVersionControlService _versionControl;
     private readonly SemaphoreSlim _mutex = new(1, 1);
 
     public FileSystemNovelService(
         AppInitializationOptions? options = null,
-        IAppSettingsService? settings = null)
+        IAppSettingsService? settings = null,
+        IVersionControlService? versionControl = null)
     {
         _options = options ?? new AppInitializationOptions();
         _settings = settings ?? new FileSystemAppSettingsService(_options);
+        _versionControl = versionControl ?? new GitVersionControlService(_options);
     }
 
     public async ValueTask<IReadOnlyList<NovelPayload>> GetNovelsAsync(CancellationToken cancellationToken)
@@ -64,11 +68,11 @@ public sealed class FileSystemNovelService : INovelService
             var novel = new NovelPayload(id, title, genre, description, now, now);
             var workspace = await EnsureNovelWorkspaceAsync(id, cancellationToken);
 
-            store.Items.Add(novel);
-            store.NextId = checked(id + 1);
-
             try
             {
+                await _versionControl.EnsureRepositoryAsync(id, cancellationToken);
+                store.Items.Add(novel);
+                store.NextId = checked(id + 1);
                 await SaveAsync(store, cancellationToken);
             }
             catch
@@ -140,6 +144,7 @@ public sealed class FileSystemNovelService : INovelService
             var workspace = await NovelWorkspacePathAsync(novelId, cancellationToken);
             if (Directory.Exists(workspace))
             {
+                ClearReadOnlyAttributes(workspace);
                 Directory.Delete(workspace, recursive: true);
             }
 
@@ -171,6 +176,119 @@ public sealed class FileSystemNovelService : INovelService
         }
 
         await _settings.SetLastNovelAsync(novelId, cancellationToken);
+    }
+
+    public async ValueTask SaveCoverAsync(
+        long novelId,
+        IReadOnlyList<byte> data,
+        CancellationToken cancellationToken)
+    {
+        ValidateNovelId(novelId);
+        var coverBytes = ValidateCoverBytes(data);
+        var shouldCommit = false;
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            _ = FindNovelIndex(store, novelId);
+            var coverPath = await CoverPathAsync(novelId, cancellationToken);
+            Directory.CreateDirectory(Path.GetDirectoryName(coverPath)!);
+
+            var tempPath = $"{coverPath}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                await File.WriteAllBytesAsync(tempPath, coverBytes, cancellationToken);
+                File.Move(tempPath, coverPath, overwrite: true);
+                shouldCommit = true;
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+            }
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+
+        if (shouldCommit)
+        {
+            await _versionControl.CommitIfChangedAsync(novelId, "update cover", cancellationToken);
+        }
+    }
+
+    public async ValueTask DeleteCoverAsync(long novelId, CancellationToken cancellationToken)
+    {
+        ValidateNovelId(novelId);
+        var shouldCommit = false;
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            _ = FindNovelIndex(store, novelId);
+            var coverPath = await CoverPathAsync(novelId, cancellationToken);
+            if (File.Exists(coverPath))
+            {
+                File.Delete(coverPath);
+                shouldCommit = true;
+            }
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+
+        if (shouldCommit)
+        {
+            await _versionControl.CommitIfChangedAsync(novelId, "remove cover", cancellationToken);
+        }
+    }
+
+    public async ValueTask<NovelCoverFile?> GetCoverAsync(
+        long novelId,
+        CancellationToken cancellationToken)
+    {
+        ValidateNovelId(novelId);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            _ = FindNovelIndex(store, novelId);
+            var coverPath = await CoverPathAsync(novelId, cancellationToken);
+            if (!File.Exists(coverPath))
+            {
+                return null;
+            }
+
+            var info = new FileInfo(coverPath);
+            if (info.Length <= 0 || info.Length > NovelCoverConstraints.MaxBytes)
+            {
+                return null;
+            }
+
+            var probe = new byte[(int)Math.Min(16L, info.Length)];
+            await using (var stream = File.OpenRead(coverPath))
+            {
+                _ = await stream.ReadAsync(probe, cancellationToken);
+            }
+
+            var contentType = DetectCoverContentType(probe);
+            return new NovelCoverFile(
+                coverPath,
+                contentType,
+                info.Length,
+                new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero));
+        }
+        finally
+        {
+            _mutex.Release();
+        }
     }
 
     private async ValueTask<NovelStoreDocument> LoadOrCreateAsync(CancellationToken cancellationToken)
@@ -240,6 +358,11 @@ public sealed class FileSystemNovelService : INovelService
     {
         ValidateNovelId(novelId);
         return SafeChildPath(await NovelsDirectoryAsync(cancellationToken), novelId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    private async ValueTask<string> CoverPathAsync(long novelId, CancellationToken cancellationToken)
+    {
+        return SafeChildPath(await NovelWorkspacePathAsync(novelId, cancellationToken), CoverFileName);
     }
 
     private async ValueTask<string> NovelsDirectoryAsync(CancellationToken cancellationToken)
@@ -333,6 +456,81 @@ public sealed class FileSystemNovelService : INovelService
         return normalized;
     }
 
+    private static byte[] ValidateCoverBytes(IReadOnlyList<byte>? data)
+    {
+        if (data is null)
+        {
+            throw new ArgumentNullException(nameof(data));
+        }
+
+        if (data.Count == 0)
+        {
+            throw new ArgumentException("Cover image data is required.", nameof(data));
+        }
+
+        if (data.Count > NovelCoverConstraints.MaxBytes)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(data),
+                data.Count,
+                $"Cover image must be at most {NovelCoverConstraints.MaxBytes} bytes.");
+        }
+
+        var bytes = data as byte[] ?? data.ToArray();
+        _ = DetectCoverContentType(bytes);
+        return bytes;
+    }
+
+    private static string DetectCoverContentType(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length >= 3 &&
+            bytes[0] == 0xFF &&
+            bytes[1] == 0xD8 &&
+            bytes[2] == 0xFF)
+        {
+            return "image/jpeg";
+        }
+
+        if (bytes.Length >= 8 &&
+            bytes[0] == 0x89 &&
+            bytes[1] == 0x50 &&
+            bytes[2] == 0x4E &&
+            bytes[3] == 0x47 &&
+            bytes[4] == 0x0D &&
+            bytes[5] == 0x0A &&
+            bytes[6] == 0x1A &&
+            bytes[7] == 0x0A)
+        {
+            return "image/png";
+        }
+
+        if (bytes.Length >= 12 &&
+            bytes[0] == (byte)'R' &&
+            bytes[1] == (byte)'I' &&
+            bytes[2] == (byte)'F' &&
+            bytes[3] == (byte)'F' &&
+            bytes[8] == (byte)'W' &&
+            bytes[9] == (byte)'E' &&
+            bytes[10] == (byte)'B' &&
+            bytes[11] == (byte)'P')
+        {
+            return "image/webp";
+        }
+
+        if (bytes.Length >= 6 &&
+            bytes[0] == (byte)'G' &&
+            bytes[1] == (byte)'I' &&
+            bytes[2] == (byte)'F' &&
+            bytes[3] == (byte)'8' &&
+            (bytes[4] == (byte)'7' || bytes[4] == (byte)'9') &&
+            bytes[5] == (byte)'a')
+        {
+            return "image/gif";
+        }
+
+        throw new ArgumentException("Cover image must be JPEG, PNG, WebP, or GIF.");
+    }
+
     private static string SafeChildPath(string parentDirectory, string childName)
     {
         var parent = Path.GetFullPath(parentDirectory);
@@ -357,12 +555,37 @@ public sealed class FileSystemNovelService : INovelService
         {
             if (Directory.Exists(directory))
             {
+                ClearReadOnlyAttributes(directory);
                 Directory.Delete(directory, recursive: true);
             }
         }
         catch
         {
             // Preserve the original persistence failure; orphan cleanup can be retried manually.
+        }
+    }
+
+    private static void ClearReadOnlyAttributes(string directory)
+    {
+        if (!OperatingSystem.IsWindows() || !Directory.Exists(directory))
+        {
+            return;
+        }
+
+        foreach (var path in Directory.EnumerateFileSystemEntries(directory, "*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                var attributes = File.GetAttributes(path);
+                if ((attributes & FileAttributes.ReadOnly) != 0)
+                {
+                    File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup; callers still get the actual delete error if removal fails.
+            }
         }
     }
 

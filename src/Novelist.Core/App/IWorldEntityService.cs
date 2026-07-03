@@ -8,6 +8,15 @@ public interface IWorldEntityService
 
     ValueTask<IReadOnlyList<CharacterRelationPayload>> GetCharacterRelationsAsync(long novelId, CancellationToken cancellationToken);
 
+    ValueTask<IReadOnlyList<CharacterRelationPayload>> GetAllCharacterRelationsAsync(
+        long novelId,
+        CancellationToken cancellationToken);
+
+    ValueTask<CharacterRelationPayload> UpdateCharacterRelationshipAsync(
+        long novelId,
+        UpdateCharacterRelationshipPayload input,
+        CancellationToken cancellationToken);
+
     ValueTask<CharacterPayload> CreateCharacterAsync(
         long novelId,
         CreateCharacterPayload input,
@@ -21,9 +30,22 @@ public interface IWorldEntityService
 
     ValueTask DeleteCharacterAsync(long novelId, long characterId, CancellationToken cancellationToken);
 
+    ValueTask DeleteCharacterRelationAsync(long novelId, long relationId, CancellationToken cancellationToken);
+
     ValueTask<IReadOnlyList<LocationPayload>> GetLocationsAsync(long novelId, CancellationToken cancellationToken);
 
     ValueTask<IReadOnlyList<LocationRelationPayload>> GetLocationRelationsAsync(long novelId, CancellationToken cancellationToken);
+
+    ValueTask<LocationRelationPayload> CreateLocationRelationAsync(
+        long novelId,
+        CreateLocationRelationPayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<LocationRelationPayload> UpdateLocationRelationAsync(
+        long novelId,
+        long relationId,
+        UpdateLocationRelationPayload input,
+        CancellationToken cancellationToken);
 
     ValueTask<LocationPayload> CreateLocationAsync(
         long novelId,
@@ -37,4 +59,6 @@ public interface IWorldEntityService
         CancellationToken cancellationToken);
 
     ValueTask DeleteLocationAsync(long novelId, long locationId, CancellationToken cancellationToken);
+
+    ValueTask DeleteLocationRelationAsync(long novelId, long relationId, CancellationToken cancellationToken);
 }

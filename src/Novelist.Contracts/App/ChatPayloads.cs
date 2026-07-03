@@ -16,6 +16,14 @@ public sealed record ChatResultPayload(
     [property: JsonPropertyName("turn_id")] int TurnId,
     [property: JsonPropertyName("final_text")] string FinalText);
 
+public sealed record CompressInputPayload(
+    [property: JsonPropertyName("session_id")] string SessionId,
+    [property: JsonPropertyName("provider_name")] string ProviderName,
+    [property: JsonPropertyName("model_id")] string ModelId);
+
+public sealed record CompressResultPayload(
+    [property: JsonPropertyName("turn_id")] int TurnId);
+
 public sealed record GetSessionsPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("page")] int Page,
@@ -128,6 +136,14 @@ public sealed class AgentEventPayload
     [JsonPropertyName("usage")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? Usage { get; init; }
+
+    [JsonPropertyName("compression_phase")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CompressionPhase { get; init; }
+
+    [JsonPropertyName("summary")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Summary { get; init; }
 
     [JsonPropertyName("error")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

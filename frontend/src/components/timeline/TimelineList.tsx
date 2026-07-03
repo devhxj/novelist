@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Search, Target, Lightbulb } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { timeline } from '@/hooks/useApp'
@@ -11,13 +11,19 @@ export default function SidebarTimelineList({ novelId }: Props) {
   const [entries, setEntries] = useState<timeline.TimelineEntry[]>([])
   const [search, setSearch] = useState('')
 
-  const load = useCallback(async () => {
-    if (!novelId) { setEntries([]); return }
-    const list = await app.GetTimelineEntries(novelId, 0, 0)
-    setEntries(list ?? [])
-  }, [novelId, app])
-
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!novelId) {
+        if (!cancelled) setEntries([])
+        return
+      }
+      const list = await app.GetTimelineEntries(novelId, 0, 0)
+      if (!cancelled) setEntries(list ?? [])
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return entries

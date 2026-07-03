@@ -83,7 +83,7 @@ public sealed class ApprovalCoordinatorTests
     }
 
     [Fact]
-    public async Task ApproveToolBridgeHandlerKeepsLegacyWailsSignature()
+    public async Task ApproveToolBridgeHandlerKeepsLegacyApprovalSignature()
     {
         var coordinator = new ToolApprovalCoordinator(new RecordingBridgeEventSink());
         var pending = coordinator.RequestApprovalAsync(CreateRequest("sess_1", "tool_1"), CancellationToken.None).AsTask();

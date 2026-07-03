@@ -131,7 +131,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
       console.error('Load models/settings failed', err)
       setInitLoadError(true)
     })
-  }, [initLoadRetry])
+  }, [app, initLoadRetry])
 
   // 加载会话列表
   useEffect(() => {
@@ -160,7 +160,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
         app.SetLastSession('').catch(() => {})
       })
     }
-  }, [novelId])
+  }, [app, novelId])
 
   // 加载历史消息
   useEffect(() => {
@@ -176,7 +176,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
       console.error('Load messages failed', err)
       setHistoryLoadError(true)
     }).finally(() => setIsLoadingHistory(false))
-  }, [activeSessionId, novelId, historyLoadRetry])
+  }, [app, activeSessionId, novelId, historyLoadRetry])
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -748,7 +748,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
         }
         return t
       }))
-    } catch (err: any) {
+    } catch {
       // 压缩失败，移除 compressing turn
       setTurns(prev => prev.filter(t => t.id !== compTurnId))
     } finally {

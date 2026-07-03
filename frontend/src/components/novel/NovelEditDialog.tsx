@@ -3,6 +3,10 @@ import type { novel } from '@/hooks/useApp'
 
 const GENRE_PRESETS = ['玄幻', '科幻', '都市', '历史', '悬疑', '武侠', '言情', '其他']
 
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
 interface Props {
   open: boolean
   novel?: novel.Novel | null  // 传了=编辑，不传=创建
@@ -18,13 +22,15 @@ export default function NovelEditDialog({ open, novel, onClose, onSave }: Props)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    if (open) {
+    if (!open) return
+    const timer = window.setTimeout(() => {
       setTitle(novel?.title ?? '')
       setDescription(novel?.description ?? '')
       setGenre(novel?.genre ?? '')
       setSaving(false)
       setError('')
-    }
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [open, novel])
 
   if (!open) return null
@@ -38,8 +44,8 @@ export default function NovelEditDialog({ open, novel, onClose, onSave }: Props)
     setError('')
     try {
       await onSave({ title: title.trim(), description: description.trim(), genre: genre.trim() })
-    } catch (e: any) {
-      setError(e?.message ?? '保存失败，请重试')
+    } catch (e: unknown) {
+      setError(errorMessage(e, '保存失败，请重试'))
     } finally {
       setSaving(false)
     }

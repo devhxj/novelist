@@ -17,10 +17,13 @@ export function useEditorTabs(novelId: number) {
 
   // 启动加载：从 localStorage 恢复
   useEffect(() => {
+    if (initRef.current) return
     try {
       const raw = localStorage.getItem('goink_tabs_all')
       if (raw) allMetasRef.current = JSON.parse(raw)
-    } catch {}
+    } catch {
+      allMetasRef.current = {}
+    }
     const key = String(novelId)
     const saved = allMetasRef.current[key]
     if (saved?.length) {
@@ -32,14 +35,16 @@ export function useEditorTabs(novelId: number) {
       setActiveTabId(restored[0].id)
     }
     initRef.current = true
-  }, [])
+  }, [novelId])
 
   // beforeunload 时保存到 localStorage
   useEffect(() => {
     function save() {
       try {
         localStorage.setItem('goink_tabs_all', JSON.stringify(allMetasRef.current))
-      } catch {}
+      } catch {
+        return
+      }
     }
     window.addEventListener('beforeunload', save)
     return () => window.removeEventListener('beforeunload', save)

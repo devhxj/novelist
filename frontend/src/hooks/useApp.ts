@@ -13,7 +13,7 @@ import type {
   skill,
   storyarc,
   timeline,
-} from '@/lib/wailsjs/go/models'
+} from '@/lib/novelist/types'
 
 export function useApp(): NovelistAppApi {
   return appApi

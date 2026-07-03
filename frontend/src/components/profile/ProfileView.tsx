@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useApp } from '@/hooks/useApp'
+import type { config } from '@/hooks/useApp'
 import ContributionGrid from './ContributionGrid'
+import type { LucideIcon } from 'lucide-react'
 import { PenLine, CalendarDays, Flame, User, Camera } from 'lucide-react'
-import type { config } from '@/lib/wailsjs/go/models'
 
 interface WritingStats {
   total_words: number
@@ -26,32 +27,39 @@ export default function ProfileView() {
   const [avatarErrored, setAvatarErrored] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [act, st, cfg] = await Promise.all([
-        app.GetWritingActivity(12),
-        app.GetWritingStats(),
-        app.GetSettings(),
-      ])
-      const dict: Record<string, number> = {}
-      if (act) {
-        for (const d of act as Array<{ date: string; words: number }>) {
-          dict[d.date] = d.words
-        }
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!cancelled) {
+        setLoading(true)
+        setError(null)
       }
-      setActivity(dict)
-      setStats(st as WritingStats)
-      setSettings(cfg as config.AppSettings)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
-    } finally {
-      setLoading(false)
-    }
+      try {
+        const [act, st, cfg] = await Promise.all([
+          app.GetWritingActivity(12),
+          app.GetWritingStats(),
+          app.GetSettings(),
+        ])
+        const dict: Record<string, number> = {}
+        if (act) {
+          for (const d of act as Array<{ date: string; words: number }>) {
+            dict[d.date] = d.words
+          }
+        }
+        if (!cancelled) {
+          setActivity(dict)
+          setStats(st as WritingStats)
+          setSettings(cfg as config.AppSettings)
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : '加载失败')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
   }, [app])
-
-  useEffect(() => { load() }, [load])
 
   function handleAvatarClick() {
     fileInputRef.current?.click()
@@ -202,7 +210,7 @@ export default function ProfileView() {
   )
 }
 
-function StatCard({ icon: Icon, label, value }: { icon: any; label: string; value: string }) {
+function StatCard({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
     <div className="rounded-lg border bg-card px-4 py-3 space-y-1">
       <div className="flex items-center gap-1.5 text-muted-foreground">

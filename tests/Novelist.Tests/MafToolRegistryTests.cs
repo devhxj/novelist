@@ -104,7 +104,124 @@ public sealed class MafToolRegistryTests
             .Select(tool => tool.Name)
             .ToArray();
 
-        Assert.Equal(["search_story_memory", "read", "edit"], names);
+        Assert.Equal(["search_story_memory", "get_chapter_list", "read", "edit"], names);
+    }
+
+    [Fact]
+    public void CreateToolsIncludesStructuredNovelToolsWithoutSessionScopedSchemaFields()
+    {
+        var events = new RecordingBridgeEventSink();
+        var registry = new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            new RecordingChapterContentService(),
+            new ToolApprovalCoordinator(events),
+            events,
+            subagents: null,
+            preferences: new RecordingPreferenceService(),
+            world: new RecordingWorldEntityService(),
+            planning: new RecordingPlanningService());
+
+        var tools = registry.CreateTools(new NovelistMafToolContext(17));
+        var names = tools.Select(tool => tool.Name).ToArray();
+
+        Assert.Contains("get_chapter_list", names);
+        Assert.Contains("get_preferences", names);
+        Assert.Contains("create_character", names);
+        Assert.Contains("update_character_relationship", names);
+        Assert.Contains("create_location_relation", names);
+        Assert.Contains("get_timeline", names);
+        Assert.Contains("create_story_arc", names);
+        Assert.Contains("get_reader_perspective", names);
+        Assert.Contains("delete_record", names);
+
+        foreach (var tool in tools.Where(tool => tool.Name is not "search_story_memory"))
+        {
+            Assert.True(tool.JsonSchema.TryGetProperty("properties", out var properties), tool.Name);
+            Assert.False(properties.TryGetProperty("novel_id", out _), tool.Name);
+            Assert.False(properties.TryGetProperty("session_id", out _), tool.Name);
+            Assert.False(properties.TryGetProperty("turn_id", out _), tool.Name);
+            Assert.False(properties.TryGetProperty("tool_id", out _), tool.Name);
+        }
+
+        var createCharacter = tools.Single(tool => tool.Name == "create_character");
+        Assert.True(createCharacter.JsonSchema.GetProperty("properties").TryGetProperty("characters", out var characters));
+        Assert.Equal("array", characters.GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public async Task StructuredToolSupportsComplexArrayArgumentsAndInjectsNovelContext()
+    {
+        var world = new RecordingWorldEntityService();
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world,
+            planning: null));
+
+        var result = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_1", 2),
+            new ChatToolCall(
+                "call_create_character",
+                "create_character",
+                """
+                {"characters":[{"name":"林岚","description":"记者","personality":"{\"role\":\"主角\"}","abilities":"[\"追踪\"]"}]}
+                """),
+            CancellationToken.None);
+
+        Assert.True(result.Success, result.Error);
+        Assert.NotNull(result.Data);
+        Assert.Equal(23, world.LastCreateCharacterNovelId);
+        Assert.Equal("林岚", world.LastCreateCharacterInput!.Name);
+        Assert.Equal([101], result.Data.Value.GetProperty("ids").EnumerateArray().Select(item => item.GetInt64()).ToArray());
+        Assert.Equal(1, result.Data.Value.GetProperty("count").GetInt32());
+    }
+
+    [Fact]
+    public async Task RunSubagentToolInvokesRunnerWithParentChatContext()
+    {
+        var runner = new RecordingSubagentRunner();
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: runner));
+
+        var names = executor.GetToolDefinitions(11).Select(tool => tool.Name).ToArray();
+        Assert.Equal(["search_story_memory", "run_subagent"], names);
+        var definition = executor.GetToolDefinitions(11).Single(tool => tool.Name == "run_subagent");
+        Assert.True(definition.ParametersSchema.TryGetProperty("properties", out var properties));
+        Assert.True(properties.TryGetProperty("agent_type", out _));
+        Assert.True(properties.TryGetProperty("instruction", out _));
+        Assert.False(properties.TryGetProperty("session_id", out _));
+        Assert.False(properties.TryGetProperty("turn_id", out _));
+
+        var result = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(11, "sess_sub", 3, "test", "model-a", "high", 8),
+            new ChatToolCall(
+                "call_sub_1",
+                "run_subagent",
+                """{"agent_type":"review","instruction":"审第 3 章"}"""),
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.NotNull(runner.LastRequest);
+        Assert.Equal(11, runner.LastRequest.NovelId);
+        Assert.Equal("sess_sub", runner.LastRequest.SessionId);
+        Assert.Equal(3, runner.LastRequest.TurnId);
+        Assert.Equal("call_sub_1", runner.LastRequest.ToolId);
+        Assert.Equal("review", runner.LastRequest.AgentType);
+        Assert.Equal("审第 3 章", runner.LastRequest.Instruction);
+        Assert.Equal("test", runner.LastRequest.ProviderName);
+        Assert.Equal("model-a", runner.LastRequest.ModelId);
+        Assert.Equal("high", runner.LastRequest.ReasoningEffort);
+        Assert.Equal(8, runner.LastRequest.StartSequence);
+        Assert.Equal("review", result.Data!.Value.GetProperty("agent_type").GetString());
+        Assert.Equal("审稿报告", result.Data.Value.GetProperty("report").GetString());
     }
 
     [Fact]
@@ -139,6 +256,54 @@ public sealed class MafToolRegistryTests
         Assert.Equal(3, data.GetProperty("total_lines").GetInt32());
         Assert.Equal(2, data.GetProperty("start_line").GetInt32());
         Assert.Equal(3, data.GetProperty("end_line").GetInt32());
+    }
+
+    [Fact]
+    public async Task WebToolsExposeLegacySchemaAndInvokeConfiguredServices()
+    {
+        var fetch = new RecordingWebFetchService();
+        var search = new RecordingWebSearchService();
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: fetch,
+            webSearch: search));
+
+        var definitions = executor.GetToolDefinitions(17);
+        var webFetch = definitions.Single(tool => tool.Name == "web_fetch");
+        var webSearch = definitions.Single(tool => tool.Name == "web_search");
+
+        Assert.True(webFetch.ParametersSchema.GetProperty("properties").TryGetProperty("url", out _));
+        Assert.False(webFetch.ParametersSchema.GetProperty("properties").TryGetProperty("novel_id", out _));
+        Assert.True(webSearch.ParametersSchema.GetProperty("properties").TryGetProperty("prompt", out _));
+        Assert.False(webSearch.ParametersSchema.GetProperty("properties").TryGetProperty("session_id", out _));
+
+        var fetchResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(17, "sess_web", 1),
+            new ChatToolCall("call_fetch", "web_fetch", """{"url":"https://example.test/story"}"""),
+            CancellationToken.None);
+
+        Assert.True(fetchResult.Success, fetchResult.Error);
+        Assert.Equal("https://example.test/story", fetch.LastUrl);
+        Assert.Equal("网页标题", fetchResult.Data!.Value.GetProperty("title").GetString());
+        Assert.Equal("正文", fetchResult.Data.Value.GetProperty("text").GetString());
+
+        var searchResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(17, "sess_web", 1),
+            new ChatToolCall("call_search", "web_search", """{"prompt":"检索 DeepSeek web search 文档"}"""),
+            CancellationToken.None);
+
+        Assert.True(searchResult.Success, searchResult.Error);
+        Assert.Equal("检索 DeepSeek web search 文档", search.LastPrompt);
+        Assert.Equal("检索 DeepSeek web search 文档", searchResult.Data!.Value.GetProperty("queries")[0].GetString());
+        Assert.Equal("综合摘要", searchResult.Data.Value.GetProperty("summary").GetString());
+        Assert.Equal("https://example.test/source", searchResult.Data.Value.GetProperty("sources")[0].GetProperty("url").GetString());
     }
 
     private sealed class RecordingStoryMemorySearchService : IStoryMemorySearchService
@@ -220,6 +385,293 @@ public sealed class MafToolRegistryTests
             CancellationToken cancellationToken)
         {
             Files[input.Path] = input.Content;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingSubagentRunner : ISubagentRunner
+    {
+        public SubagentRunRequest? LastRequest { get; private set; }
+
+        public ValueTask<SubagentRunResult> RunAsync(
+            SubagentRunRequest request,
+            CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+            return ValueTask.FromResult(new SubagentRunResult(request.AgentType, "审稿报告"));
+        }
+    }
+
+    private sealed class RecordingWebFetchService : IWebFetchService
+    {
+        public string LastUrl { get; private set; } = string.Empty;
+
+        public ValueTask<WebFetchResultPayload> FetchAsync(string url, CancellationToken cancellationToken)
+        {
+            LastUrl = url;
+            return ValueTask.FromResult(new WebFetchResultPayload(url, "网页标题", "正文"));
+        }
+    }
+
+    private sealed class RecordingWebSearchService : IWebSearchService
+    {
+        public string LastPrompt { get; private set; } = string.Empty;
+
+        public ValueTask<WebSearchResultPayload> SearchAsync(string prompt, CancellationToken cancellationToken)
+        {
+            LastPrompt = prompt;
+            return ValueTask.FromResult(new WebSearchResultPayload(
+                [prompt],
+                "综合摘要",
+                [new WebSearchSourcePayload("来源", "https://example.test/source")]));
+        }
+    }
+
+    private sealed class RecordingPreferenceService : IPreferenceService
+    {
+        public ValueTask<PreferenceResultPayload> GetPreferencesAsync(long novelId, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new PreferenceResultPayload([], []));
+        }
+
+        public ValueTask<PreferenceItemPayload> CreatePreferenceAsync(
+            long novelId,
+            CreatePreferencePayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new PreferenceItemPayload(1, novelId, input.IsGlobal, input.Category ?? string.Empty, input.Content, DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask<PreferenceItemPayload> UpdatePreferenceAsync(
+            long preferenceId,
+            UpdatePreferencePayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new PreferenceItemPayload(preferenceId, 17, input.IsGlobal ?? false, input.Category ?? string.Empty, input.Content ?? "偏好", DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask DeletePreferenceAsync(long preferenceId, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingWorldEntityService : IWorldEntityService
+    {
+        public long LastCreateCharacterNovelId { get; private set; }
+
+        public CreateCharacterPayload? LastCreateCharacterInput { get; private set; }
+
+        public ValueTask<IReadOnlyList<CharacterPayload>> GetCharactersAsync(long novelId, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<CharacterPayload>>([]);
+        }
+
+        public ValueTask<IReadOnlyList<CharacterRelationPayload>> GetCharacterRelationsAsync(long novelId, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<CharacterRelationPayload>>([]);
+        }
+
+        public ValueTask<IReadOnlyList<CharacterRelationPayload>> GetAllCharacterRelationsAsync(long novelId, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<CharacterRelationPayload>>([]);
+        }
+
+        public ValueTask<CharacterRelationPayload> UpdateCharacterRelationshipAsync(
+            long novelId,
+            UpdateCharacterRelationshipPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new CharacterRelationPayload(
+                301,
+                novelId,
+                input.SourceCharacterId,
+                input.TargetCharacterId,
+                input.RelationDescribe ?? "关系",
+                input.Description ?? string.Empty,
+                input.ChapterId ?? 0,
+                IsCurrent: true,
+                DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask<CharacterPayload> CreateCharacterAsync(
+            long novelId,
+            CreateCharacterPayload input,
+            CancellationToken cancellationToken)
+        {
+            LastCreateCharacterNovelId = novelId;
+            LastCreateCharacterInput = input;
+            return ValueTask.FromResult(new CharacterPayload(
+                101,
+                novelId,
+                input.Name,
+                input.Description ?? string.Empty,
+                input.Personality ?? string.Empty,
+                input.Abilities ?? string.Empty,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask UpdateCharacterAsync(long novelId, long characterId, UpdateCharacterPayload input, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask DeleteCharacterAsync(long novelId, long characterId, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask DeleteCharacterRelationAsync(long novelId, long relationId, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<IReadOnlyList<LocationPayload>> GetLocationsAsync(long novelId, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<LocationPayload>>([]);
+        }
+
+        public ValueTask<IReadOnlyList<LocationRelationPayload>> GetLocationRelationsAsync(long novelId, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<LocationRelationPayload>>([]);
+        }
+
+        public ValueTask<LocationRelationPayload> CreateLocationRelationAsync(
+            long novelId,
+            CreateLocationRelationPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new LocationRelationPayload(
+                401,
+                novelId,
+                input.LocationAId,
+                input.LocationBId,
+                input.RelationType,
+                input.Description ?? string.Empty,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask<LocationRelationPayload> UpdateLocationRelationAsync(
+            long novelId,
+            long relationId,
+            UpdateLocationRelationPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new LocationRelationPayload(relationId, novelId, 1, 2, input.RelationType ?? "相邻", input.Description ?? string.Empty, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask<LocationPayload> CreateLocationAsync(long novelId, CreateLocationPayload input, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new LocationPayload(201, novelId, input.Name, input.LocationType ?? string.Empty, input.Description ?? string.Empty, input.DetailJson ?? string.Empty, input.ParentLocationId, input.Tags ?? string.Empty, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask UpdateLocationAsync(long novelId, long locationId, UpdateLocationPayload input, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask DeleteLocationAsync(long novelId, long locationId, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask DeleteLocationRelationAsync(long novelId, long relationId, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingPlanningService : IPlanningService
+    {
+        public ValueTask<IReadOnlyList<ChapterPlanPayload>> GetChapterPlansAsync(long novelId, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<ChapterPlanPayload>>([]);
+        }
+
+        public ValueTask UpdateChapterPlanAsync(long novelId, UpdateChapterPlanPayload input, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<IReadOnlyList<TimelineEntryPayload>> GetTimelineEntriesAsync(long novelId, int fromChapter, int toChapter, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<TimelineEntryPayload>>([]);
+        }
+
+        public ValueTask<TimelineEntryPayload> CreateTimelineEntryAsync(long novelId, CreateTimelineEntryPayload input, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new TimelineEntryPayload(1, novelId, input.Category, "pending", input.Title, input.Content ?? string.Empty, input.DetailJson ?? string.Empty, input.TargetChapter, input.Importance ?? 3, input.SourceChapterId ?? 0, input.Source ?? "ai", 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask UpdateTimelineEntryAsync(long novelId, long entryId, UpdateTimelineEntryPayload input, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask DeleteTimelineEntryAsync(long novelId, long entryId, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<IReadOnlyList<StoryArcPayload>> GetStoryArcsAsync(long novelId, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<StoryArcPayload>>([]);
+        }
+
+        public ValueTask<StoryArcPayload> CreateStoryArcAsync(long novelId, CreateStoryArcPayload input, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new StoryArcPayload(1, novelId, input.Name, input.Description ?? string.Empty, input.ArcType, input.Importance ?? 1, "active", string.Empty, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask UpdateStoryArcAsync(long novelId, long arcId, UpdateStoryArcPayload input, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask DeleteStoryArcAsync(long novelId, long arcId, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<IReadOnlyList<ArcNodePayload>> GetArcNodesAsync(long novelId, int fromChapter, int toChapter, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<ArcNodePayload>>([]);
+        }
+
+        public ValueTask<ArcNodePayload> CreateArcNodeAsync(long novelId, CreateArcNodePayload input, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new ArcNodePayload(1, novelId, input.StoryArcId, input.Title, input.Description ?? string.Empty, input.TargetChapter, 0, "pending", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask UpdateArcNodeAsync(long novelId, long nodeId, UpdateArcNodePayload input, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask DeleteArcNodeAsync(long novelId, long nodeId, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<IReadOnlyList<ReaderPerspectivePayload>> GetReaderPerspectivesAsync(long novelId, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<ReaderPerspectivePayload>>([]);
+        }
+
+        public ValueTask<ReaderPerspectivePayload> CreateReaderPerspectiveAsync(long novelId, CreateReaderPerspectivePayload input, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new ReaderPerspectivePayload(1, novelId, input.Type, input.Content, input.RelatedTruth ?? string.Empty, input.PlantedChapter, input.RevealedChapter ?? 0, DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask UpdateReaderPerspectiveAsync(long novelId, long perspectiveId, UpdateReaderPerspectivePayload input, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask DeleteReaderPerspectiveAsync(long novelId, long perspectiveId, CancellationToken cancellationToken)
+        {
             return ValueTask.CompletedTask;
         }
     }

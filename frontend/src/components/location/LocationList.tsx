@@ -31,6 +31,10 @@ function buildTree(locations: location.Location[]): TreeNode[] {
   return roots
 }
 
+function rootIds(locations: location.Location[]): Set<number> {
+  return new Set(locations.filter(l => !l.parent_location_id).map(l => l.id))
+}
+
 export default function LocationList({ novelId }: Props) {
   const app = useApp()
 
@@ -38,12 +42,37 @@ export default function LocationList({ novelId }: Props) {
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
 
   const load = useCallback(async () => {
-    if (!novelId) { setLocations([]); return }
+    if (!novelId) {
+      setLocations([])
+      setExpandedIds(new Set())
+      return
+    }
     const list = await app.GetLocations(novelId)
-    setLocations(list ?? [])
+    const nextLocations = list ?? []
+    setLocations(nextLocations)
+    setExpandedIds(rootIds(nextLocations))
   }, [novelId, app])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!novelId) {
+        if (!cancelled) {
+          setLocations([])
+          setExpandedIds(new Set())
+        }
+        return
+      }
+      const list = await app.GetLocations(novelId)
+      if (!cancelled) {
+        const nextLocations = list ?? []
+        setLocations(nextLocations)
+        setExpandedIds(rootIds(nextLocations))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId])
 
   async function handleDelete(locId: number) {
     if (!confirm('确定要删除该地点吗？子地点将变为根节点，关联的空间关系也会被删除。')) return
@@ -52,12 +81,6 @@ export default function LocationList({ novelId }: Props) {
       await load()
     } catch { /* 静默失败 */ }
   }
-
-  useEffect(() => {
-    // 默认展开根节点
-    const roots = locations.filter(l => !l.parent_location_id)
-    setExpandedIds(new Set(roots.map(l => l.id)))
-  }, [locations])
 
   const tree = useMemo(() => buildTree(locations), [locations])
 

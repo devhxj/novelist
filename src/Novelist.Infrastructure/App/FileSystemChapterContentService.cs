@@ -42,18 +42,21 @@ public sealed class FileSystemChapterContentService : IChapterContentService
     private readonly INovelService _novels;
     private readonly IWritingDeltaRecorder? _writingDeltaRecorder;
     private readonly IRagIndexRefreshNotifier? _ragRefreshNotifier;
+    private readonly IVersionControlService _versionControl;
     private readonly SemaphoreSlim _mutex = new(1, 1);
 
     public FileSystemChapterContentService(
         AppInitializationOptions? options = null,
         INovelService? novels = null,
         IWritingDeltaRecorder? writingDeltaRecorder = null,
-        IRagIndexRefreshNotifier? ragRefreshNotifier = null)
+        IRagIndexRefreshNotifier? ragRefreshNotifier = null,
+        IVersionControlService? versionControl = null)
     {
         _options = options ?? new AppInitializationOptions();
         _novels = novels ?? new FileSystemNovelService(_options);
         _writingDeltaRecorder = writingDeltaRecorder;
         _ragRefreshNotifier = ragRefreshNotifier;
+        _versionControl = versionControl ?? new GitVersionControlService(_options);
     }
 
     public async ValueTask<IReadOnlyList<ChapterPayload>> GetChaptersAsync(
@@ -140,6 +143,10 @@ public sealed class FileSystemChapterContentService : IChapterContentService
                 throw;
             }
 
+            await _versionControl.CommitIfChangedAsync(
+                input.NovelId,
+                $"create chapter {chapterNumber.ToString("D3", CultureInfo.InvariantCulture)}",
+                cancellationToken);
             return chapter;
         }
         finally
@@ -223,6 +230,7 @@ public sealed class FileSystemChapterContentService : IChapterContentService
 
         var fullPath = await ResolveContentFilePathAsync(input.NovelId, relativePath, cancellationToken);
         var shouldMarkRagStale = false;
+        var shouldCommitRepositoryChanges = !IsUserSkillPath(relativePath);
 
         await _mutex.WaitAsync(cancellationToken);
         try
@@ -263,6 +271,14 @@ public sealed class FileSystemChapterContentService : IChapterContentService
         finally
         {
             _mutex.Release();
+        }
+
+        if (shouldCommitRepositoryChanges)
+        {
+            await _versionControl.CommitIfChangedAsync(
+                input.NovelId,
+                $"update {relativePath}",
+                cancellationToken);
         }
 
         if (shouldMarkRagStale)

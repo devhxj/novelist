@@ -13,10 +13,15 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
     };
 
     private readonly AppInitializationOptions _options;
+    private readonly ILegacyGoinkDataMigrationService? _legacyMigration;
 
-    public FileSystemAppInitializationService(AppInitializationOptions? options = null)
+    public FileSystemAppInitializationService(
+        AppInitializationOptions? options = null,
+        ILegacyGoinkDataMigrationService? legacyMigration = null)
     {
         _options = options ?? new AppInitializationOptions();
+        _legacyMigration = legacyMigration ??
+            (_options.EnableLegacyGoinkMigration ? new LegacyGoinkDataMigrationService(_options) : null);
     }
 
     public async ValueTask<bool> IsInitializedAsync(CancellationToken cancellationToken)
@@ -26,7 +31,24 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
 
     public async ValueTask InitializeAsync(string dataDirectory, CancellationToken cancellationToken)
     {
+        var hadConfig = File.Exists(ConfigPath);
         await SaveConfigAsync(dataDirectory, cancellationToken);
+        try
+        {
+            if (_legacyMigration is not null)
+            {
+                await _legacyMigration.MigrateAsync(NormalizePath(dataDirectory), cancellationToken);
+            }
+        }
+        catch
+        {
+            if (!hadConfig)
+            {
+                TryDeleteConfig();
+            }
+
+            throw;
+        }
     }
 
     public async ValueTask<AppConfigPayload> GetAppConfigAsync(CancellationToken cancellationToken)
@@ -89,6 +111,21 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
     }
 
     private string ConfigPath => Path.Combine(_options.ConfigDirectory, "config.json");
+
+    private void TryDeleteConfig()
+    {
+        try
+        {
+            if (File.Exists(ConfigPath))
+            {
+                File.Delete(ConfigPath);
+            }
+        }
+        catch
+        {
+            // Preserve the migration failure; the pointer can be repaired by reinitializing.
+        }
+    }
 
     private static string NormalizePath(string path)
     {

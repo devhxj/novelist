@@ -93,6 +93,90 @@ public sealed class NovelServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CoverSaveReadAndDeleteUseValidatedWorkspaceFile()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var service = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await service.CreateNovelAsync(
+            new CreateNovelPayload("封面测试", "", ""),
+            CancellationToken.None);
+        var data = JpegCoverBytes();
+
+        await service.SaveCoverAsync(novel.Id, data, CancellationToken.None);
+
+        var cover = await service.GetCoverAsync(novel.Id, CancellationToken.None);
+        Assert.NotNull(cover);
+        Assert.Equal("image/jpeg", cover.ContentType);
+        Assert.Equal(data.Length, cover.Length);
+        Assert.Equal(Path.Combine(options.DefaultDataDirectory, "novels", "1", "cover.jpg"), cover.LocalPath);
+        Assert.Equal(data, await File.ReadAllBytesAsync(cover.LocalPath));
+
+        await service.DeleteCoverAsync(novel.Id, CancellationToken.None);
+        Assert.Null(await service.GetCoverAsync(novel.Id, CancellationToken.None));
+
+        await service.DeleteCoverAsync(novel.Id, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task CreateNovelInitializesGitRepositoryWithInitialCommit()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var versionControl = new GitVersionControlService(options);
+        var service = new FileSystemNovelService(
+            options,
+            new FileSystemAppSettingsService(options),
+            versionControl);
+
+        var novel = await service.CreateNovelAsync(
+            new CreateNovelPayload("版本库", "", ""),
+            CancellationToken.None);
+
+        var workspace = Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Assert.True(Directory.Exists(Path.Combine(workspace, ".git")) || File.Exists(Path.Combine(workspace, ".git")));
+        Assert.True(File.Exists(Path.Combine(workspace, "goink.md")));
+        var log = await versionControl.GetLogAsync(novel.Id, null, 10, CancellationToken.None);
+        Assert.Contains(log, commit => commit.Message == "initial commit");
+    }
+
+    [Fact]
+    public async Task SaveAndDeleteCoverCreateGitCommits()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var versionControl = new GitVersionControlService(options);
+        var service = new FileSystemNovelService(
+            options,
+            new FileSystemAppSettingsService(options),
+            versionControl);
+        var novel = await service.CreateNovelAsync(
+            new CreateNovelPayload("封面提交", "", ""),
+            CancellationToken.None);
+
+        await service.SaveCoverAsync(novel.Id, JpegCoverBytes(), CancellationToken.None);
+        await service.DeleteCoverAsync(novel.Id, CancellationToken.None);
+
+        var log = await versionControl.GetLogAsync(novel.Id, null, 10, CancellationToken.None);
+        Assert.Contains(log, commit => commit.Message == "update cover");
+        Assert.Contains(log, commit => commit.Message == "remove cover");
+    }
+
+    [Fact]
+    public async Task SaveCoverRejectsUnsupportedImagePayloads()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var service = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await service.CreateNovelAsync(
+            new CreateNovelPayload("坏封面", "", ""),
+            CancellationToken.None);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.SaveCoverAsync(novel.Id, [0x00, 0x01, 0x02], CancellationToken.None));
+    }
+
+    [Fact]
     public async Task BridgeNovelHandlersReturnValidationErrorForInvalidPayload()
     {
         var options = CreateOptions();
@@ -184,6 +268,67 @@ public sealed class NovelServiceTests : IDisposable
         Assert.Equal(createdId, savedSettings.LastNovelId);
     }
 
+    [Fact]
+    public async Task BridgeNovelHandlersSaveAndDeleteCover()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var service = new FileSystemNovelService(options, settings);
+        var novel = await service.CreateNovelAsync(
+            new CreateNovelPayload("桥接封面", "", ""),
+            CancellationToken.None);
+        var dispatcher = new BridgeDispatcher()
+            .RegisterCompatibilityAppMethodHandlers()
+            .RegisterNovelHandlers(service);
+        var byteArrayJson = string.Join(",", JpegCoverBytes().Select(item => item.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
+        using var saveJson = ParseOutbound(await dispatcher.DispatchAsync($$"""
+            {
+              "kind": "request",
+              "id": "req_save_cover",
+              "method": "SaveCover",
+              "payload": { "args": [{{novel.Id}}, [{{byteArrayJson}}]] }
+            }
+            """));
+        Assert.True(saveJson.RootElement.GetProperty("ok").GetBoolean());
+        Assert.NotNull(await service.GetCoverAsync(novel.Id, CancellationToken.None));
+
+        using var deleteJson = ParseOutbound(await dispatcher.DispatchAsync($$"""
+            {
+              "kind": "request",
+              "id": "req_delete_cover",
+              "method": "DeleteCover",
+              "payload": { "args": [{{novel.Id}}] }
+            }
+            """));
+        Assert.True(deleteJson.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Null(await service.GetCoverAsync(novel.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task BridgeNovelHandlersRejectInvalidCoverBytesBeforeServiceCall()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var service = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var dispatcher = new BridgeDispatcher()
+            .RegisterCompatibilityAppMethodHandlers()
+            .RegisterNovelHandlers(service);
+
+        var result = await dispatcher.DispatchAsync("""
+            {
+              "kind": "request",
+              "id": "req_bad_cover",
+              "method": "SaveCover",
+              "payload": { "args": [1, [256]] }
+            }
+            """);
+
+        using var json = ParseOutbound(result);
+        AssertBridgeError(json.RootElement, "req_bad_cover", BridgeErrorCodes.ValidationError);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -205,6 +350,11 @@ public sealed class NovelServiceTests : IDisposable
     {
         var initialization = new FileSystemAppInitializationService(options);
         await initialization.InitializeAsync(options.DefaultDataDirectory, CancellationToken.None);
+    }
+
+    private static byte[] JpegCoverBytes()
+    {
+        return [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0xFF, 0xD9];
     }
 
     private static JsonDocument ParseOutbound(BridgeDispatchResult result)

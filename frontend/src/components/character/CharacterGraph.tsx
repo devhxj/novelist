@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Graph, treeToGraphData } from '@antv/g6'
+import { Graph, treeToGraphData, type EdgeData, type GraphData, type NodeData } from '@antv/g6'
 import { LocateFixed, RefreshCw, UsersRound, X } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import { useGraphColors } from '@/components/graphColors'
@@ -13,6 +13,17 @@ interface Props {
 const NODE_COLOR = { fill: '#e0f2fe', stroke: '#38a8df', text: '#0c4a6e' }
 
 function nodeId(id: number) { return `character-${id}` }
+
+interface CharacterTreeNode {
+  id: string
+  data: { name: string }
+  children: CharacterTreeNode[]
+}
+
+function graphEventTargetId(event: unknown): string {
+  const target = (event as { target?: { id?: unknown } }).target
+  return typeof target?.id === 'string' ? target.id : ''
+}
 
 function safeJson<T>(json: string, fallback: T): T {
   try { return JSON.parse(json) }
@@ -39,7 +50,7 @@ function buildCharacterTree(characters: character.Character[], relations: charac
 
   const visited = new Set<number>([rootId])
   const treeEdgeSet = new Set<string>()
-  const childrenMap = new Map<number, any[]>()
+  const childrenMap = new Map<number, CharacterTreeNode[]>()
   for (const c of characters) childrenMap.set(c.id, [])
 
   const queue = [rootId]
@@ -60,7 +71,7 @@ function buildCharacterTree(characters: character.Character[], relations: charac
     }
   }
 
-  const roots: any[] = [{
+  const roots: CharacterTreeNode[] = [{
     id: nodeId(rootId),
     data: { name: charMap.get(rootId)!.name },
     children: childrenMap.get(rootId) || [],
@@ -69,7 +80,7 @@ function buildCharacterTree(characters: character.Character[], relations: charac
     if (!visited.has(c.id)) roots.push({ id: nodeId(c.id), data: { name: c.name }, children: [] })
   }
 
-  const treeData: any = roots.length === 1
+  const treeData: CharacterTreeNode = roots.length === 1
     ? roots[0]
     : { id: '__root__', data: { name: '' }, children: roots }
 
@@ -111,23 +122,57 @@ export default function CharacterGraph({ novelId, focusId }: Props) {
     }
   }, [app, novelId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!novelId) {
+        if (!cancelled) {
+          setCharacters([])
+          setRelations([])
+        }
+        return
+      }
+      if (!cancelled) {
+        setLoading(true)
+        setError(null)
+      }
+      try {
+        const [charList, relList] = await Promise.all([
+          app.GetCharacters(novelId),
+          app.GetCharacterRelations(novelId),
+        ])
+        if (!cancelled) {
+          setCharacters(charList ?? [])
+          setRelations(relList ?? [])
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : '加载失败')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId])
 
   useEffect(() => {
     if (focusId && focusId > 0 && characters.length > 0) {
       const char = characters.find(c => c.id === focusId)
-      if (char) setSelectedCharacter(char)
+      if (char) {
+        const timer = window.setTimeout(() => setSelectedCharacter(char), 0)
+        return () => window.clearTimeout(timer)
+      }
     }
   }, [focusId, characters])
 
-  const graphData = useMemo(() => {
+  const graphData = useMemo<GraphData>(() => {
     const charIds = new Set(characters.map(c => c.id))
     const { treeData, nonTreeEdges } = buildCharacterTree(characters, relations)
     if (!treeData) return { nodes: [], edges: [] }
 
     const baseGraph = treeToGraphData(treeData)
 
-    const nodes = (baseGraph.nodes ?? []).map((n: any) => {
+    const nodes: NodeData[] = ((baseGraph.nodes ?? []) as NodeData[]).map((n) => {
       const char = characters.find(c => nodeId(c.id) === n.id)
       if (!char) return { ...n, style: { size: [1, 1], opacity: 0 } }
       return {
@@ -144,9 +189,9 @@ export default function CharacterGraph({ novelId, focusId }: Props) {
       }
     })
 
-    const treeEdges = (baseGraph.edges ?? [])
-      .filter((e: any) => e.source !== '__root__' && e.target !== '__root__')
-      .map((e: any) => ({
+    const treeEdges: EdgeData[] = ((baseGraph.edges ?? []) as EdgeData[])
+      .filter((e) => e.source !== '__root__' && e.target !== '__root__')
+      .map((e) => ({
         ...e,
         type: 'polyline' as const,
         style: {
@@ -157,7 +202,7 @@ export default function CharacterGraph({ novelId, focusId }: Props) {
         },
       }))
 
-    const extraEdges = nonTreeEdges
+    const extraEdges: EdgeData[] = nonTreeEdges
       .filter(r => charIds.has(r.source_character_id) && charIds.has(r.target_character_id))
       .map((r, i) => ({
         id: `extra-${r.id || i}`,
@@ -173,8 +218,8 @@ export default function CharacterGraph({ novelId, focusId }: Props) {
         },
       }))
 
-    const nodeIds = new Set(nodes.map(n => n.id))
-    const allEdges = [...treeEdges, ...extraEdges].filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
+    const nodeIds = new Set(nodes.map(n => String(n.id)))
+    const allEdges = [...treeEdges, ...extraEdges].filter(e => nodeIds.has(String(e.source)) && nodeIds.has(String(e.target)))
 
     return { nodes, edges: allEdges }
   }, [characters, relations, C])
@@ -226,8 +271,8 @@ export default function CharacterGraph({ novelId, focusId }: Props) {
     graphRef.current = graph
     graph.render()
 
-    graph.on('node:click', (event: any) => {
-      const rawId = event.target?.id || ''
+    graph.on('node:click', (event: unknown) => {
+      const rawId = graphEventTargetId(event)
       const char = characters.find(c => rawId.startsWith(nodeId(c.id)))
       if (char) {
         setSelectedCharacter(prev => prev?.id === char.id ? null : char)
@@ -243,7 +288,7 @@ export default function CharacterGraph({ novelId, focusId }: Props) {
       graph.destroy()
       if (graphRef.current === graph) graphRef.current = null
     }
-  }, [characters.length, graphData, loading])
+  }, [C.bg, C.edge, characters, graphData, loading])
 
   const treeEdgeCount = (graphData.edges ?? []).filter(e => e.type === 'polyline').length
   const extraEdgeCount = (graphData.edges ?? []).filter(e => e.type === 'line').length
@@ -281,11 +326,17 @@ export default function CharacterGraph({ novelId, focusId }: Props) {
       </div>
 
       {selectedCharacter && (() => {
-        const personality = safeJson<Record<string, any>>(selectedCharacter.personality, {})
+        const personality = safeJson<Record<string, unknown>>(selectedCharacter.personality, {})
         const abilities = safeJson<string[]>(selectedCharacter.abilities, [])
         const desc = selectedCharacter.description?.trim() || ''
-        const brief: string = personality?.brief || personality?.brief_description || ''
-        const traits: string[] = Array.isArray(personality?.traits) ? personality.traits : []
+        const brief = typeof personality.brief === 'string'
+          ? personality.brief
+          : typeof personality.brief_description === 'string'
+            ? personality.brief_description
+            : ''
+        const traits = Array.isArray(personality.traits)
+          ? personality.traits.filter((value): value is string => typeof value === 'string')
+          : []
         const hasContent = desc || brief || traits.length > 0 || abilities.length > 0
         const longDesc = desc.length > 100
 

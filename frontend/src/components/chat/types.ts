@@ -1,6 +1,6 @@
 import type { session } from '@/hooks/useApp'
 
-// 与 Go 端 internal/agent/events.go 的 AgentEventType 枚举一一对应
+// 与 Novelist.Contracts.App.AgentEventPayload 的 type 值一一对应
 export enum AgentEventType {
   Thinking = 0,
   ThinkingDone = 1,
@@ -11,7 +11,7 @@ export enum AgentEventType {
   Compression = 6,
 }
 
-// AgentEvent 与 Go 端 AgentEvent 的 JSON 序列化一一对应
+// AgentEvent 与 Photino bridge 推送的 agent:{turnId} JSON 负载一一对应
 export interface AgentEvent {
   turn_id: number
   sub_task_id?: string

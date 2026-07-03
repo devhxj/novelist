@@ -94,13 +94,48 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
     }
   }, [app, novelId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!novelId) {
+        if (!cancelled) {
+          setPlans([])
+          setEntries([])
+        }
+        return
+      }
+      if (!cancelled) {
+        setLoading(true)
+        setError(null)
+      }
+      try {
+        const [planList, entryList, maxCh] = await Promise.all([
+          app.GetChapterPlans(novelId),
+          app.GetTimelineEntries(novelId, 0, 0),
+          app.GetMaxChapterNumber(novelId),
+        ])
+        if (!cancelled) {
+          setPlans(planList ?? [])
+          setEntries(entryList ?? [])
+          setWindowCenter(Math.max(1, maxCh))
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : '加载失败')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId])
 
   useEffect(() => {
     if (focusEntryId && focusEntryId > 0 && entries.length > 0) {
       const entry = entries.find(e => e.id === focusEntryId)
       if (entry) {
-        setWindowCenter(entry.target_chapter || entry.source_chapter_id || 1)
+        const targetChapter = entry.target_chapter || entry.source_chapter_id || 1
+        const timer = window.setTimeout(() => setWindowCenter(targetChapter), 0)
+        return () => window.clearTimeout(timer)
       }
     }
   }, [focusEntryId, entries])

@@ -15,16 +15,19 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
 
         var window = new PhotinoWindow();
         var adapter = new PhotinoWindowAdapter(window);
-        var appOptions = new AppInitializationOptions();
+        var appOptions = new AppInitializationOptions { EnableLegacyGoinkMigration = true };
         var settingsService = new FileSystemAppSettingsService(appOptions);
-        var novelService = new FileSystemNovelService(appOptions, settingsService);
+        var versionControl = new GitVersionControlService(appOptions);
+        var novelService = new FileSystemNovelService(appOptions, settingsService, versionControl);
         var writingService = new FileSystemWritingStatisticsService(appOptions, novelService);
         var ragRefreshNotifier = new DeferredRagIndexRefreshNotifier();
         var chapterContentService = new FileSystemChapterContentService(
             appOptions,
             novelService,
             writingService,
-            ragRefreshNotifier);
+            ragRefreshNotifier,
+            versionControl);
+        var preferenceService = new FileSystemPreferenceService(appOptions, novelService);
         var worldService = new FileSystemWorldEntityService(appOptions, novelService);
         var planningService = new FileSystemPlanningService(appOptions, novelService);
         var llmService = new FileSystemLlmConfigurationService(appOptions);
@@ -61,11 +64,20 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             chapterContentService,
             ragIndexService,
             ragIndexService);
+        var webFetchService = new HttpWebFetchService();
+        var webSearchService = new DeepSeekWebSearchService(llmService);
+        var subagentRunner = new DeferredSubagentRunner();
         var chatToolExecutor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
             storyMemoryService,
             chapterContentService,
             approvalCoordinator,
-            eventSink));
+            eventSink,
+            subagentRunner,
+            preferenceService,
+            worldService,
+            planningService,
+            webFetchService,
+            webSearchService));
         var chatService = new FileSystemChatSessionService(
             appOptions,
             novelService,
@@ -74,7 +86,10 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             new StandardChatCompletionClient(llmService),
             eventSink,
             approvalCoordinator,
-            chatToolExecutor);
+            chatToolExecutor,
+            chapterContentService,
+            versionControl);
+        subagentRunner.SetTarget(chatService);
         var exportService = new FileSystemNovelExportService(
             novelService,
             chapterContentService,
@@ -86,7 +101,7 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             .RegisterAppSettingsHandlers(settingsService)
             .RegisterNovelHandlers(novelService)
             .RegisterChapterContentHandlers(chapterContentService)
-            .RegisterPreferenceHandlers(new FileSystemPreferenceService(appOptions, novelService))
+            .RegisterPreferenceHandlers(preferenceService)
             .RegisterWorldEntityHandlers(worldService)
             .RegisterPlanningHandlers(planningService)
             .RegisterLlmConfigurationHandlers(llmService)
@@ -126,6 +141,24 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             return target is null
                 ? ValueTask.CompletedTask
                 : target.MarkNovelIndexStaleAsync(novelId, reason, cancellationToken);
+        }
+    }
+
+    private sealed class DeferredSubagentRunner : ISubagentRunner
+    {
+        private ISubagentRunner? _target;
+
+        public void SetTarget(ISubagentRunner target)
+        {
+            _target = target ?? throw new ArgumentNullException(nameof(target));
+        }
+
+        public ValueTask<SubagentRunResult> RunAsync(
+            SubagentRunRequest request,
+            CancellationToken cancellationToken)
+        {
+            var target = _target ?? throw new InvalidOperationException("Subagent runner is not configured.");
+            return target.RunAsync(request, cancellationToken);
         }
     }
 

@@ -2,11 +2,11 @@
 
 ## Purpose
 
-This document records how the existing React/Vite UI is handed to the new Photino.NET app host during the migration. It does not change the current Wails runtime.
+This document records how the React/Vite UI is handed to the Photino.NET app host. The migration is complete: the active desktop runtime is Photino + .NET, and the retired desktop runtime is no longer part of the mainline product path.
 
 ## Current Frontend Build
 
-The existing frontend remains in `frontend/`.
+The frontend remains in `frontend/`.
 
 ```powershell
 npm --prefix frontend ci
@@ -17,16 +17,17 @@ Vite writes production assets to `frontend/dist/`. That directory is build outpu
 
 ## Photino Consumption Path
 
-The first Photino slices use an explicit desktop launch flag:
+The desktop app uses an explicit launch flag:
 
 ```powershell
 dotnet run --project src/Novelist.App/Novelist.App.csproj -- --desktop
 ```
 
-At P1.2 this loaded `about:blank` by design. P1.4/P1.5 added optional local static asset serving so Photino can load the built UI. That host is for UI delivery and diagnostics; packaged business communication must go through the Photino bridge.
+Photino loads the built Vite UI from the local app host in packaged/dev desktop mode. That host is for UI delivery and diagnostics; packaged business communication goes through the Photino WebMessage bridge.
 
 ## Guardrails
 
-- Keep `frontend/src/lib/wailsjs` intact until the frontend adapter slice replaces imports.
+- Do not restore retired generated desktop bindings or direct retired-runtime imports.
 - Do not add Electron, Electron.NET, or Node runtime dependencies to the desktop host.
 - Keep bridge contracts aligned with `docs/novelist-photino-bridge-contract.md`.
+- Add frontend-owned DTOs and bridge wrappers under `frontend/src/lib/novelist/`; backend contracts belong under `src/Novelist.Contracts/`.

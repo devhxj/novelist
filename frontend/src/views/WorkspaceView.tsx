@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { flushSync } from 'react-dom'
 import { useApp } from '@/hooks/useApp'
-import type { novel, chapter } from '@/hooks/useApp'
+import type { novel, chapter, search } from '@/hooks/useApp'
 import ActivityBar from '@/components/shell/ActivityBar'
 import StatusBar from '@/components/shell/StatusBar'
 import SidePanel from '@/components/sidebar/SidePanel'
@@ -21,7 +21,6 @@ import GitHubLink from '@/components/shell/GitHubLink'
 import SettingsDialog from '@/components/settings/SettingsDialog'
 import HelpDialog from '@/components/help/HelpDialog'
 import ProfileView from '@/components/profile/ProfileView'
-import { search } from '@/lib/wailsjs/go/models'
 import { Settings, User, HelpCircle, Moon, Sun } from 'lucide-react'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised, Quit } from '@/lib/novelist/runtime'
 import Logo from '@/components/Logo'
@@ -78,12 +77,14 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
       if (info.os) setPlatformOS(info.os as string)
     })
     WindowIsMaximised().then(setIsMaximised)
-  }, [])
+  }, [app])
 
   // ── 首次进入自动弹帮助 ──────────────────────────────────
 
   useEffect(() => {
-    if (initialShowHelp) setShowHelp(true)
+    if (!initialShowHelp) return
+    const timer = window.setTimeout(() => setShowHelp(true), 0)
+    return () => window.clearTimeout(timer)
   }, [initialShowHelp])
 
   // ── 作品列表 ────────────────────────────────────────────
@@ -92,9 +93,20 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
     const list = await app.GetNovels()
     setNovels(list ?? [])
     loadedRef.current = true
-  }, [])
+  }, [app])
 
-  useEffect(() => { loadNovels() }, [loadNovels])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      const list = await app.GetNovels()
+      if (!cancelled) {
+        setNovels(list ?? [])
+        loadedRef.current = true
+      }
+    })()
+    return () => { cancelled = true }
+  }, [app])
 
   // ── SidePanel → ContentPanel 桥接 ─────────────────────────
 
@@ -132,15 +144,18 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
   useEffect(() => {
     if (!loadedRef.current) return
     const exists = novels.find(n => n.id === activeNovelId)
-    if (!exists && novels.length > 0) {
-      const first = novels[0]
-      setActiveNovelId(first.id)
-      setActivePanel('chapters')
-      app.SetActiveNovel({ novel_id: first.id })
-    } else if (novels.length === 0) {
-      setActivePanel('novels')
-    }
-  }, [novels, activeNovelId])
+    const timer = window.setTimeout(() => {
+      if (!exists && novels.length > 0) {
+        const first = novels[0]
+        setActiveNovelId(first.id)
+        setActivePanel('chapters')
+        void app.SetActiveNovel({ novel_id: first.id })
+      } else if (novels.length === 0) {
+        setActivePanel('novels')
+      }
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [app, novels, activeNovelId])
 
   function handleActivitySelect(id: string) {
     if (id === 'search') {
@@ -248,14 +263,13 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
     <div className="h-screen flex flex-col overflow-hidden">
       <header
         className="h-11 flex items-center border-b bg-sidebar shrink-0 select-none cursor-default"
-        style={{ '--wails-draggable': 'drag' } as React.CSSProperties}
         onDoubleClick={() => { WindowToggleMaximise(); setIsMaximised(!isMaximised) }}
       >
         <Logo className="h-7 w-7 ml-3" />
         <span className="text-sm font-medium pl-2 flex-1">
-          {activeNovel?.title ?? 'Goink'}
+          {activeNovel?.title ?? 'Novelist'}
         </span>
-        <div className="flex items-center h-full" style={{ '--wails-draggable': 'no-drag' } as React.CSSProperties}>
+        <div className="flex items-center h-full">
           <GitHubLink />
           <button
             onClick={() => setActivePanel('profile')}

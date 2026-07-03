@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Search, Eye } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { reader } from '@/hooks/useApp'
@@ -11,13 +11,19 @@ export default function SidebarReaderList({ novelId }: Props) {
   const [items, setItems] = useState<reader.ReaderPerspective[]>([])
   const [search, setSearch] = useState('')
 
-  const load = useCallback(async () => {
-    if (!novelId) { setItems([]); return }
-    const list = await app.GetReaderPerspectives(novelId)
-    setItems(list ?? [])
-  }, [novelId, app])
-
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!novelId) {
+        if (!cancelled) setItems([])
+        return
+      }
+      const list = await app.GetReaderPerspectives(novelId)
+      if (!cancelled) setItems(list ?? [])
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return items

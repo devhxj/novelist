@@ -35,6 +35,14 @@ public sealed record UpdateCharacterPayload(
     [property: JsonPropertyName("personality")] string? Personality,
     [property: JsonPropertyName("abilities")] string? Abilities);
 
+public sealed record UpdateCharacterRelationshipPayload(
+    [property: JsonPropertyName("relation_id")] long RelationId = 0,
+    [property: JsonPropertyName("source_character_id")] long SourceCharacterId = 0,
+    [property: JsonPropertyName("target_character_id")] long TargetCharacterId = 0,
+    [property: JsonPropertyName("relation_describe")] string? RelationDescribe = null,
+    [property: JsonPropertyName("description")] string? Description = null,
+    [property: JsonPropertyName("chapter_id")] long? ChapterId = null);
+
 public sealed record LocationPayload(
     [property: JsonPropertyName("id")] long Id,
     [property: JsonPropertyName("novel_id")] long NovelId,
@@ -73,3 +81,13 @@ public sealed record UpdateLocationPayload(
     [property: JsonPropertyName("parent_location_id")] long? ParentLocationId,
     [property: JsonPropertyName("tags")] string? Tags,
     [property: JsonPropertyName("clear_parent")] bool ClearParent);
+
+public sealed record CreateLocationRelationPayload(
+    [property: JsonPropertyName("location_a_id")] long LocationAId,
+    [property: JsonPropertyName("location_b_id")] long LocationBId,
+    [property: JsonPropertyName("relation_type")] string RelationType,
+    [property: JsonPropertyName("description")] string? Description);
+
+public sealed record UpdateLocationRelationPayload(
+    [property: JsonPropertyName("relation_type")] string? RelationType,
+    [property: JsonPropertyName("description")] string? Description);

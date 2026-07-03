@@ -43,7 +43,35 @@ export default function PreferenceView({ novelId }: Props) {
     }
   }, [app, novelId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!novelId) {
+        if (!cancelled) {
+          setGlobal([])
+          setNovelPrefs([])
+        }
+        return
+      }
+      if (!cancelled) {
+        setLoading(true)
+        setError(null)
+      }
+      try {
+        const result = await app.GetPreferences(novelId)
+        if (!cancelled) {
+          setGlobal(result.global ?? [])
+          setNovelPrefs(result.novel ?? [])
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : '加载失败')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId])
 
   // ── CRUD handlers ────────────────────────────────────
 

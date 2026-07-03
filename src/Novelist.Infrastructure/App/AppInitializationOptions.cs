@@ -6,6 +6,12 @@ public sealed record AppInitializationOptions
 
     public string DefaultDataDirectory { get; init; } = DefaultDataDirectoryPath();
 
+    public bool EnableLegacyGoinkMigration { get; init; }
+
+    public string? LegacyGoinkConfigDirectory { get; init; }
+
+    public string? LegacyGoinkDataDirectory { get; init; }
+
     private static string DefaultConfigDirectory()
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);

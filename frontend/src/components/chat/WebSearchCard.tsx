@@ -1,6 +1,7 @@
 import { memo, useState } from 'react'
 import { Search, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react'
 import Markdown from '@/components/Markdown'
+import { BrowserOpenURL } from '@/lib/novelist/runtime'
 import './WebSearchCard.css'
 
 interface SourceItem {
@@ -14,7 +15,7 @@ interface Props {
 
 function openExternal(url: string) {
   if (window.confirm(`是否在浏览器中打开\n${url}`)) {
-    window.open(url, '_blank', 'noopener,noreferrer')
+    void BrowserOpenURL(url)
   }
 }
 

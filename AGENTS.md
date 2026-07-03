@@ -2,25 +2,27 @@
 
 ## Project Structure & Module Organization
 
-Goink is a Wails desktop app with a Go backend and React frontend. Root Go entrypoints are `main.go` and `app/`, where Wails-exported methods form the frontend API. Domain code lives under `internal/` (`agent`, `mcp_tools`, `storage`, `chapter`, `rag`, etc.) with tests beside packages as `*_test.go`. React/TypeScript source is in `frontend/src/`; generated Wails bindings are in `frontend/src/lib/wailsjs/`. Assets and packaging files live in `assets/` and `build/`; design notes live in `docs/`. `python-master/` is historical/reference code, not the main app path.
+Novelist is a .NET 10 + Photino.NET desktop app with a React/Vite frontend. The primary backend lives under `src/`: `Novelist.App` hosts the desktop/window and optional local asset server, `Novelist.Contracts` owns bridge DTOs, `Novelist.Core` owns app interfaces and bridge dispatch, `Novelist.Infrastructure` owns filesystem/storage/RAG implementations, and `Novelist.Agent` owns Microsoft Agent Framework tool adapters. Tests live under `tests/Novelist.Tests` and `tests/Novelist.IntegrationTests`. React/TypeScript source is in `frontend/src/`; `frontend/src/lib/novelist/` is the owned bridge adapter. The retired Go desktop implementation has been removed from mainline; historical behavior is captured in `docs/` contracts and migration notes.
 
 ## Build, Test, and Development Commands
 
-- `make deps`: download Git and ONNX Runtime into `build/runtime/`.
-- `make dev`: run Wails dev mode with Go backend and Vite hot reload.
-- `make build`: build frontend assets, download deps if needed, then run the production Wails build.
-- `make frontend-dev`: run only the Vite frontend; backend APIs are unavailable.
-- `go test $(go list ./internal/... ./app/...) -count=1`: run the same Go test scope used by CI.
+- `make deps`: download or reuse the bundled Git runtime under `build/runtime/`.
+- `make dev`: run the .NET Photino desktop app.
+- `make build`: build frontend assets, prepare runtime deps, then publish `Novelist.App` to `build/bin/novelist/`.
+- `make publish RID=win-x64`: publish a self-contained RID-specific app output.
+- `make package-windows`, `make package-linux`, `make package-macos`: build platform packages into `build/dist/`.
+- `make frontend-dev`: run only the Vite frontend; backend bridge APIs are unavailable.
+- `dotnet test Novelist.slnx --no-restore -v minimal`: run the .NET test suite used by CI.
 - `cd frontend && npm ci && npm run build`: install frontend dependencies, then run TypeScript and Vite build.
 - `cd frontend && npm run lint`: run ESLint for TypeScript/React files.
 
 ## Coding Style & Naming Conventions
 
-Use `gofmt` on Go files and keep package names short, lowercase, and domain-oriented. Run Go commands from the repository root. Frontend work uses TypeScript, React 19, Tailwind CSS 4, shadcn/ui patterns, and ESLint flat config. Run npm commands from `frontend/`. Do not hand-edit `frontend/src/lib/wailsjs/`; regenerate bindings with Wails tooling when Go APIs change.
+Use idiomatic C# with nullable annotations and keep contracts in `Novelist.Contracts`, interfaces in `Novelist.Core`, and filesystem/runtime implementations in `Novelist.Infrastructure`. Run .NET commands from the repository root. Frontend work uses TypeScript, React 19, Tailwind CSS 4, shadcn/ui patterns, and ESLint flat config. Run npm commands from `frontend/`. Add owned frontend DTOs or bridge methods under `frontend/src/lib/novelist/` and `src/Novelist.Contracts/`.
 
 ## Testing Guidelines
 
-Prefer package-level Go tests beside implementation files (`store_test.go`, `service_test.go`, `*_bench_test.go`). Add tests for storage, safety, parsing, and domain behavior changes. CI validates `internal/...` and `app/...`; run frontend build and lint before UI changes because no frontend test suite is configured.
+Prefer focused unit tests in `tests/Novelist.Tests` for pure bridge/tool behavior and integration tests in `tests/Novelist.IntegrationTests` for filesystem, SQLite, Git, migration, and app-host behavior. Add tests for storage, path safety, migrations, version history, bridge contracts, and user-facing workflow changes. Run the frontend build before UI changes because no frontend test suite is configured.
 
 ## Commit & Pull Request Guidelines
 
@@ -28,4 +30,4 @@ Recent history uses concise English subjects with typed prefixes: `feat: ...`, `
 
 ## Security & Configuration Tips
 
-Keep API keys, local model paths, and user data out of git. Preserve SafePath, approval-flow, and sandbox checks when touching file editing or MCP tool code. Runtime models and ONNX libraries belong in `build/runtime/` or the app data directory, not source folders.
+Keep API keys, local model paths, and user data out of git. Preserve SafePath, approval-flow, SSRF checks, migration copy-first behavior, and sandbox checks when touching file editing, web tools, or agent tool code. Runtime Git and optional sqlite-vec native libraries belong in `build/runtime/` or app data/config paths, not source folders. Existing user data migration must leave the source untouched and write a manifest.

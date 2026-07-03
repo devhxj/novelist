@@ -1,5 +1,9 @@
 import { useState, useEffect } from 'react'
 
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
 interface Props {
   open: boolean
   novelTitle: string
@@ -13,11 +17,13 @@ export default function NovelDeleteDialog({ open, novelTitle, onClose, onConfirm
   const [error, setError] = useState('')
 
   useEffect(() => {
-    if (open) {
+    if (!open) return
+    const timer = window.setTimeout(() => {
       setConfirmText('')
       setDeleting(false)
       setError('')
-    }
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [open])
 
   if (!open) return null
@@ -30,8 +36,8 @@ export default function NovelDeleteDialog({ open, novelTitle, onClose, onConfirm
     setError('')
     try {
       await onConfirm()
-    } catch (e: any) {
-      setError(e?.message ?? '删除失败，请重试')
+    } catch (e: unknown) {
+      setError(errorMessage(e, '删除失败，请重试'))
     } finally {
       setDeleting(false)
     }

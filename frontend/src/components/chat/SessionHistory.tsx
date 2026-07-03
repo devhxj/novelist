@@ -36,34 +36,7 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
   const loadingRef = useRef(false)
   const searchRef = useRef('')
 
-  const loadPageRef = useRef<(p: number) => void>(null as any)
-
-  useEffect(() => {
-    if (open) {
-      setMounted(true)
-      requestAnimationFrame(() => setVisible(true))
-    } else {
-      setVisible(false)
-      const timer = setTimeout(() => setMounted(false), 200)
-      return () => clearTimeout(timer)
-    }
-  }, [open])
-
-  // 搜索防抖 300ms
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (searchRef.current !== search) {
-        searchRef.current = search
-        setSessions([])
-        setPage(1)
-        setHasMore(true)
-        loadPageRef.current?.(1)
-      }
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [search])
-
-  loadPageRef.current = async (p: number) => {
+  const loadPage = useCallback(async (p: number) => {
     if (loadingRef.current) return
     loadingRef.current = true
     setIsLoading(true)
@@ -75,22 +48,62 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
         setHasMore(result.page < result.total_pages)
       }
     } catch {
-      // ignore
+      // Session history is non-critical; keep the panel usable on transient failures.
     } finally {
       setIsLoading(false)
       loadingRef.current = false
     }
-  }
+  }, [app, novelId])
+
+  useEffect(() => {
+    let frame = 0
+    let secondFrame = 0
+    let timer: ReturnType<typeof setTimeout> | null = null
+    if (open) {
+      frame = requestAnimationFrame(() => {
+        setMounted(true)
+        secondFrame = requestAnimationFrame(() => setVisible(true))
+      })
+    } else {
+      frame = requestAnimationFrame(() => setVisible(false))
+      timer = setTimeout(() => setMounted(false), 200)
+    }
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      if (secondFrame) cancelAnimationFrame(secondFrame)
+      if (timer) clearTimeout(timer)
+    }
+  }, [open])
+
+  // 搜索防抖 300ms
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchRef.current !== search) {
+        searchRef.current = search
+        setSessions([])
+        setPage(1)
+        setHasMore(true)
+        loadPage(1)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [loadPage, search])
 
   useEffect(() => {
     if (!open) return
-    setSearch('')
-    searchRef.current = ''
-    setSessions([])
-    setPage(1)
-    setHasMore(true)
-    loadPageRef.current?.(1)
-  }, [open, novelId])
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (cancelled) return
+      setSearch('')
+      searchRef.current = ''
+      setSessions([])
+      setPage(1)
+      setHasMore(true)
+      await loadPage(1)
+    })()
+    return () => { cancelled = true }
+  }, [loadPage, open, novelId])
 
   const handleScroll = useCallback(() => {
     if (!listRef.current || !hasMore || isLoading) return
@@ -98,9 +111,9 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
     if (scrollHeight - scrollTop - clientHeight < 80) {
       const next = page + 1
       setPage(next)
-      loadPageRef.current?.(next)
+      loadPage(next)
     }
-  }, [hasMore, isLoading, page])
+  }, [hasMore, isLoading, loadPage, page])
 
   if (!mounted) return null
 
@@ -140,7 +153,7 @@ export default function SessionHistory({ open, novelId, onClose, onSelectSession
           <div className="flex items-center justify-center h-full">
             <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
           </div>
-        ) : sessions.length === 0 && searchRef.current ? (
+        ) : sessions.length === 0 && search.trim() ? (
           <div className="flex items-center justify-center h-full">
             <span className="text-xs text-muted-foreground">无匹配会话</span>
           </div>

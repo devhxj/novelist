@@ -1,82 +1,145 @@
-# 构建环境搭建
+# Novelist 构建环境搭建
 
-## 系统依赖
+本文档记录当前 Novelist 桌面应用的构建、测试和发布路径。桌面宿主为 .NET 10 + Photino.NET，前端为 React/Vite，语义检索使用标准 Embeddings API + sqlite-vec。
 
-### Linux (Ubuntu/Debian)
+## 本地依赖
 
-```bash
-sudo apt install libsqlite3-dev
-```
+| 依赖 | 推荐版本 | 用途 |
+| --- | --- | --- |
+| .NET SDK | `global.json` 固定的 `10.0.301` | 编译和发布 `Novelist.App` |
+| Node.js | 24.x | 安装前端依赖并运行 Vite 构建 |
+| npm | 随 Node.js | 前端依赖锁定安装 |
+| Bash | Git Bash、WSL、Linux shell 或 macOS shell | 运行 `scripts/*.sh` 和 Makefile 目标 |
+| Git | 任意近期版本 | 本地开发、测试和运行时版本历史 |
 
-| 依赖 | 原因 |
-|------|------|
-| `libsqlite3-dev` | `mattn/go-sqlite3` 编译时需要 `sqlite3.h` 头文件 |
-| gcc | CGO 编译必需 |
-
-### macOS
-
-```bash
-brew install sqlite
-```
-
-### Windows
-
-使用 MSYS2 或 WSL，`libsqlite3-dev` 等效包。
-
-## ONNX Runtime 共享库
-
-`libonnxruntime.so`（Linux）/ `onnxruntime.dll`（Windows）/ `libonnxruntime.dylib`（macOS）由以下方式获取：
-
-1. 从 Python venv 中提取（如已有 `onnxruntime` 包）
-2. 从 [GitHub Releases](https://github.com/microsoft/onnxruntime/releases) 下载预编译包
-3. 应用打包时随二进制分发
-
-路径需通过 `CGO_LDFLAGS` 指定。
-
-## ONNX 模型文件
-
-首次运行时从 [HuggingFace 镜像](https://hf-mirror.com/shibing624/text2vec-base-chinese) 自动下载至 `models/` 目录：
-
-```
-models/
-├── model.onnx        (~400MB)
-├── vocab.txt         (~100KB)
-└── tokenizer.json    (~1MB)
-```
-
-## Go 依赖
+Linux 桌面运行还需要系统 WebView/GTK 运行库。Ubuntu/Debian 可安装：
 
 ```bash
-go mod download
+sudo apt-get update
+sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.1-0
 ```
 
-全部依赖由 `go.mod` + `go.sum` 锁定版本，无需额外操作。
-
-## CGO 编译标志
+如果需要在 Linux 上从源码编译/打包 AppImage，建议同时安装：
 
 ```bash
-CGO_ENABLED=1 \
-CGO_CFLAGS="-I$(go env GOMODCACHE)/github.com/mattn/go-sqlite3@v1.14.44" \
-CGO_LDFLAGS="-L/path/to/onnxruntime -lonnxruntime -Wl,-rpath,/path/to/onnxruntime" \
-go build ./...
+sudo apt-get install -y curl file unzip
 ```
 
-`CGO_CFLAGS` 指向 `mattn/go-sqlite3` 模块目录（含 `sqlite3-binding.h`），系统 `sqlite3.h` 已安装则可不设。
+## 依赖安装
 
-## Monaco Editor
-
-`@monaco-editor/react` 默认从 jsDelivr CDN 加载 Monaco 核心代码。桌面应用离线时编辑器不可用。
-
-后续方案：配置 loader 指向本地打包的 Monaco，或切换到 `monaco-editor` 直接 import 由 Vite 打包（bundle +~5MB）。
-
-参考：https://github.com/suren-atoyan/monaco-react#use-monaco-editor-as-an-npm-package
-
-## 验证
+从仓库根目录运行：
 
 ```bash
-# 测试 ONNX 加载 + embedding（需 libonnxruntime.so）
-go run -tags cgo ./dev_test/rag_test/cmd/
-
-# RAG 全流程对比测试（需 libonnxruntime.so + ref_data.json）
-go run -tags cgo,compare ./dev_test/rag_test/
+dotnet restore Novelist.slnx
+npm --prefix frontend ci
+make deps
 ```
+
+`make deps` 只准备打包所需的 Git 运行时，输出到 `build/runtime/git/`。如果要随包提供 sqlite-vec 原生扩展，请将平台目录放到 `build/runtime/sqlite-vec/{rid}/`，例如：
+
+```text
+build/runtime/sqlite-vec/
+├── win-x64/
+│   └── sqlite_vec.dll
+├── linux-x64/
+│   └── sqlite_vec.so
+└── osx-arm64/
+    └── sqlite_vec.dylib
+```
+
+也可以在运行时用 `NOVELIST_SQLITE_VEC_PATH` 指向明确的扩展文件。
+
+## 开发模式
+
+启动桌面应用：
+
+```bash
+make dev
+```
+
+只启动前端开发服务器：
+
+```bash
+make frontend-dev
+```
+
+只启动前端时，桌面桥接 API 不可用；它适合做纯界面调试。
+
+## 构建与测试
+
+常用验证命令：
+
+```bash
+npm --prefix frontend run build
+dotnet test Novelist.slnx --no-restore -v minimal
+```
+
+Makefile 等价入口：
+
+```bash
+make frontend-build
+make test
+make build
+```
+
+`make build` 会准备运行时依赖、构建前端，并发布到 `build/bin/novelist/`。默认发布为当前平台 framework-dependent 输出；发布安装包时应使用对应 RID 的自包含输出。
+
+## 发布产物
+
+通用发布脚本：
+
+```bash
+bash scripts/novelist-publish.sh win-x64
+bash scripts/novelist-publish.sh linux-x64
+bash scripts/novelist-publish.sh osx-arm64
+```
+
+发布脚本会：
+
+- 调用 `dotnet publish src/Novelist.App/Novelist.App.csproj`；
+- 要求 `frontend/dist/index.html` 已存在；
+- 复制前端静态资源到 `build/bin/novelist/frontend/dist/`；
+- 复制 `build/runtime/git/` 到发布目录；
+- 复制可选的 `build/runtime/sqlite-vec/` 到发布目录；
+- 生成 `novelist` 或 `novelist.exe` 入口别名。
+
+平台打包入口：
+
+```bash
+make package-windows
+make package-linux
+make package-macos
+```
+
+输出目录为 `build/dist/`：
+
+- Windows: `novelist-v{VERSION}-windows-amd64.exe`
+- Linux: `novelist-v{VERSION}-linux-{ARCH}.AppImage`
+- macOS: `novelist-v{VERSION}-macos-arm64.dmg`
+
+`VERSION` 默认取 `git describe --tags --always --dirty`，也可以显式指定：
+
+```bash
+VERSION=1.0.0 make package-linux
+```
+
+## CI 路径
+
+`.github/workflows/test.yml` 执行：
+
+1. 安装 .NET SDK；
+2. 安装 Node.js；
+3. `dotnet restore Novelist.slnx`；
+4. `npm --prefix frontend ci`；
+5. `npm --prefix frontend run build`；
+6. `dotnet test Novelist.slnx --no-restore -v minimal`。
+
+`.github/workflows/release.yml` 在三平台分别构建前端、发布自包含 `Novelist.App`，再打包 Windows 安装器、Linux AppImage 和 macOS DMG。
+
+## 清理
+
+```bash
+make clean
+```
+
+该命令会删除前端构建输出、前端依赖目录、发布目录和运行时缓存。用户数据目录不在仓库内，不会被清理。

@@ -56,7 +56,7 @@ export default function InitView({ onInitialized }: Props) {
     app.GetPlatform().then((info) => {
       if (info.defaultPath) setDataDir(info.defaultPath as string)
     })
-  }, [])
+  }, [app])
 
   function handleThemeSelect(t: Theme) {
     setSelectedTheme(t)
@@ -81,7 +81,7 @@ export default function InitView({ onInitialized }: Props) {
         <Logo className="h-16 w-16 mx-auto mb-8" />
 
         <h1 className="text-3xl font-semibold tracking-tight mb-3">
-          欢迎使用 Goink
+          欢迎使用 Novelist
         </h1>
 
         <p className="text-base text-muted-foreground mb-8">

@@ -10,7 +10,7 @@ using Novelist.Core.Bridge;
 
 namespace Novelist.Infrastructure.App;
 
-public sealed class FileSystemChatSessionService : IChatSessionService
+public sealed class FileSystemChatSessionService : IChatSessionService, ISubagentRunner
 {
     private const int MaxSessionIdLength = 512;
     private const int MaxMessageLength = 200_000;
@@ -21,11 +21,172 @@ public sealed class FileSystemChatSessionService : IChatSessionService
     private const int MaxTitleLength = 30;
     private const int MaxEventChunkChars = 8 * 1024;
     private const int MaxToolLoopCount = 8;
+    private const int MaxSubagentLoopCount = 50;
+    private const double AutoCompressionUsageRatio = 80.0;
+    private const int MaxRetainedUserMessagesAfterCompression = 15;
+    private const int MinRetainedConversationTurnsAfterCompression = 4;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
     };
+
+    private static readonly Lazy<IReadOnlyList<ParsedSkillDocument>> BuiltinSkills = new(SkillDocuments.LoadBuiltin);
+
+    private static readonly IReadOnlySet<string> MemorySubagentTools =
+        new HashSet<string>([
+            "search_story_memory",
+            "read",
+            "get_chapter_list",
+            "get_preferences",
+            "get_characters",
+            "get_character_relations",
+            "get_locations",
+            "get_timeline",
+            "get_story_arcs",
+            "get_reader_perspective"], StringComparer.Ordinal);
+
+    private static readonly IReadOnlySet<string> ReviewSubagentTools =
+        new HashSet<string>([
+            "search_story_memory",
+            "read",
+            "get_chapter_list",
+            "get_preferences",
+            "get_characters",
+            "get_character_relations",
+            "get_locations",
+            "get_timeline",
+            "get_story_arcs",
+            "get_reader_perspective"], StringComparer.Ordinal);
+
+    private const string MainAgentPrompt = """
+        你是 Novelist 小说创作系统的主创作助手，协助用户持续管理一部长篇小说的章节、故事状态、技能方法论和创作上下文。
+
+        【核心理念】
+
+        本系统不是一次性问答工具，而是持续积累的创作环境。每一轮对话都可能影响后续章节，所以你必须优先保持一致性、可追溯性和数据真实。不要凭记忆猜测；需要原文、章节大纲、故事状态或技能内容时，使用当前可用工具读取。
+
+        【当前已迁移工具面】
+
+        当前对话可见的 tools 才是你实际能够调用的工具。不要调用未出现在 tools 列表中的旧工具名。
+
+        已迁移的核心工具语义：
+        - read：读取 chapters/NNN.md、outlines/NNN.md、goink.md、小说级/user/builtin skills。
+        - edit：经用户审批后写入章节、大纲、goink.md 或可编辑 skill。
+        - search_story_memory：在已构建的 RAG 记忆中检索章节片段。
+        - run_subagent：启动 memory/review 子 Agent，获取专项检索报告或审稿报告。
+
+        【创作流程】
+
+        1. 判断意图：用户是在讨论、检索、审稿、规划，还是要求直接创作。
+        2. 搜集上下文：优先读取 goink.md、相关章节/大纲，必要时用 search_story_memory 检索相关片段。
+        3. 大纲先行：用户要求创作新章节时，先写大纲到 outlines/NNN.md 并等待审批。大纲应覆盖章节标题、基调与字数、场景设计、关键事件、重点角色、伏笔操作、章末钩子。
+        4. 执行创作：审批通过后再写 chapters/NNN.md。正文 edit 的 new_content 只包含正文，不写章节号、章节标题或“本章完”。
+        5. 状态维护：重要创作后必须同步维护 goink.md，记录当前进展、角色动态、未回收悬念和后续需要注意的信息。
+        6. 审稿校验：较大改动或新章节完成后，可启动 review 子 Agent 审读一致性、逻辑、伏笔和节奏风险。
+        7. 整合汇报：向用户简洁汇报已完成事项、重要决策和下一步。
+
+        【文件路径约定】
+
+        - chapters/001.md：章节正文。
+        - outlines/001.md：章节大纲。
+        - goink.md：故事状态文档，类似 CLAUDE.md，用于快速恢复创作状态。
+        - skills/<name>.md：小说级技能。
+        - ~/.goink/skills/<name>.md：用户级技能。
+        - /builtin/skills/<name>.md：内置技能，只读。
+
+        【技能系统】
+
+        技能是 markdown 格式的创作方法论模块，包含 YAML frontmatter 和正文。
+        - auto：出现在技能目录中。你可按需 read 完整技能内容后执行。
+        - manual：只由用户通过 /skill 手动触发，不出现在 auto 技能目录中。
+        - always：会话开头自动注入为系统消息，始终生效。
+
+        如果用户通过 /skill 触发技能，你会收到额外的 system-reminder 注入。你必须结合该技能和用户原始消息执行，不要只处理斜杠命令本身。
+
+        【输出规范】
+
+        - 使用与用户一致的语言。
+        - thinking 用于内部推理，content 用于给用户看的正式回复。
+        - 工具调用遵循聚合原则，不要逐个报幕。
+        - 工具结果异常或信息不足时明确说明缺口，并给出下一步可执行方案。
+        - 遇到有风险的写入、设定冲突或模糊需求时，先确认或通过审批流程保护用户数据。
+        """;
+
+    private const string CompressionPrompt = """
+        <system-reminder>
+        你是上下文压缩助手。请基于完整对话历史生成结构化摘要，用于后续对话的上下文恢复。
+
+        ## 已完成的事项
+        （每个一句话，最多 15 条，从最近的开始保留。不再重复执行的事项）
+
+        ## 进行中（断点）
+        （最详细的部分：当前正在做什么、做到哪一步、下一步计划做什么。这是最重要的部分，请务必详尽）
+
+        ## 用户偏好和要求
+        （从用户消息中提炼的核心写作风格、约束条件、反复强调的事项）
+
+        ## 关键决策和设定变更
+        （已确认的情节走向、角色设定、世界观规则、命名等决定）
+
+        ## 待办事项
+        （已计划但尚未开始的任务清单）
+        </system-reminder>
+        """;
+
+    private const string CompressionReminder = """
+        <system-reminder>
+        上下文已压缩，请根据下面的摘要继续工作。
+        </system-reminder>
+        """;
+
+    private const string MemorySubagentPrompt = """
+        你是小说创作系统的记忆检索分析员，负责按需查询和整理小说数据。
+
+        ## 系统架构
+
+        你与主 Agent 共享同一小说数据。你只有只读工具，不能修改任何数据。你的职责是按用户需求检索信息并整理成结构化报告。
+
+        ## 工作流程
+
+        1. 理解需求：明确用户想了解什么，例如角色背景、伏笔关系、弧线进展或章节细节。
+        2. 多维度检索：优先使用 search_story_memory 检索语义记忆；需要精确原文、章节大纲、故事状态或技能时使用 read。
+        3. 整理输出：将分散的信息整合为连贯报告，标注信息来源。
+
+        ## 输出规范
+
+        - 用中文回复。
+        - 报告结构清晰，按主题分段。
+        - 引用具体数据时注明来源，例如章节号、文件路径或检索片段。
+        - 不输出无依据的推测；信息不足时明确说明还缺什么。
+        """;
+
+    private const string ReviewSubagentPrompt = """
+        你是小说创作系统的审稿 Agent，负责对已完成章节进行专业审读。
+
+        ## 系统架构
+
+        你与主 Agent 共享同一小说数据。你可以调用只读工具获取章节正文、章节大纲、故事状态和语义记忆来辅助审读。你不能修改任何文件或结构化数据。
+
+        ## 审读流程
+
+        1. 阅读章节：使用 read 读取目标章节或大纲；若指令未给出章节号，先根据章节目录和故事状态判断需要审读的范围。
+        2. 收集上下文：使用 search_story_memory 查询相关角色、伏笔、场景和前后文。
+        3. 逐项检查：
+           - 角色一致性：性格、能力、关系是否前后一致。
+           - 情节逻辑：事件因果是否合理，有无逻辑漏洞。
+           - 伏笔管理：已埋伏笔是否推进或回收，新伏笔是否需要记录。
+           - 读者认知：悬念是否恰当维护，误知是否按时回收。
+           - 弧线推进：故事线进度是否合理，节点是否需要校准。
+        4. 输出审稿意见：格式自由，但应包含发现的问题、严重程度和可执行建议。
+
+        ## 输出规范
+
+        - 用中文回复。
+        - 审稿意见按维度分段，每段标注问题严重程度。
+        - thinking 用于分析推理，content 用于最终审稿意见。
+        - 不能直接改稿；如需修改，给主 Agent 提供明确建议。
+        """;
 
     private readonly AppInitializationOptions _options;
     private readonly INovelService _novels;
@@ -35,6 +196,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService
     private readonly IBridgeEventSink _events;
     private readonly IApprovalCoordinator? _approvals;
     private readonly IChatToolExecutor? _toolExecutor;
+    private readonly IChapterContentService? _chapterContent;
+    private readonly IVersionControlService _versionControl;
     private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _mutex = new(1, 1);
     private readonly ConcurrentDictionary<string, ActiveChatOperation> _activeChats = new(StringComparer.Ordinal);
@@ -48,6 +211,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         IBridgeEventSink? events = null,
         IApprovalCoordinator? approvals = null,
         IChatToolExecutor? toolExecutor = null,
+        IChapterContentService? chapterContent = null,
+        IVersionControlService? versionControl = null,
         TimeProvider? timeProvider = null)
     {
         _options = options ?? new AppInitializationOptions();
@@ -58,6 +223,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         _events = events ?? new NullBridgeEventSink();
         _approvals = approvals;
         _toolExecutor = toolExecutor;
+        _chapterContent = chapterContent;
+        _versionControl = versionControl ?? new GitVersionControlService(_options);
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -163,12 +330,15 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         var normalized = NormalizeChatInput(input);
 
         await EnsureNovelExistsAsync(normalized.NovelId, cancellationToken);
-        await EnsureModelConfiguredAsync(normalized.ProviderName, normalized.ModelId, cancellationToken);
+        var model = await GetConfiguredModelAsync(normalized.ProviderName, normalized.ModelId, cancellationToken);
+        var initialSystemMessages = await BuildMainInitialSystemMessagesAsync(normalized.NovelId, cancellationToken);
+        var slashInjection = await ResolveSlashInjectionAsync(normalized.NovelId, normalized.Message, cancellationToken);
 
         ChatSessionDocument session;
         bool isNew;
         int turnId;
         IReadOnlyList<ChatCompletionMessage> apiMessages;
+        JsonElement? previousUsage;
 
         await _mutex.WaitAsync(cancellationToken);
         try
@@ -185,6 +355,41 @@ public sealed class FileSystemChatSessionService : IChatSessionService
             turnId = checked(session.LastTurnId + 1);
             session.LastTurnId = turnId;
             session.UpdatedAt = UtcNow();
+
+            if (isNew)
+            {
+                foreach (var systemMessage in initialSystemMessages)
+                {
+                    store.Messages.Add(CreateMessage(
+                        store,
+                        session.SessionId,
+                        turnId,
+                        role: "system",
+                        content: systemMessage,
+                        thinkingContent: null,
+                        version: session.ActiveVersion,
+                        toApi: true,
+                        toFrontend: false,
+                        eventType: null,
+                        agentType: "main"));
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(slashInjection.InjectContent))
+            {
+                store.Messages.Add(CreateMessage(
+                    store,
+                    session.SessionId,
+                    turnId,
+                    role: "user",
+                    content: slashInjection.InjectContent,
+                    thinkingContent: null,
+                    version: session.ActiveVersion,
+                    toApi: true,
+                    toFrontend: false,
+                    eventType: null,
+                    agentType: "main"));
+            }
 
             store.Messages.Add(CreateMessage(
                 store,
@@ -208,6 +413,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                 .Select(ToCompletionMessage)
                 .ToArray();
 
+            previousUsage = ParseUsage(session.UsageJson);
             await SaveAsync(store, cancellationToken);
         }
         finally
@@ -221,6 +427,11 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         }
 
         await _settings.SetLastSessionAsync(session.SessionId, cancellationToken);
+        await CommitUserChangesAtTurnStartAsync(
+            normalized.NovelId,
+            turnId,
+            session.SessionId,
+            cancellationToken);
 
         using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var active = new ActiveChatOperation(linkedCancellation);
@@ -231,6 +442,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         var seq = 0;
         var loopMessages = apiMessages.ToList();
         var toolDefinitions = _toolExecutor?.GetToolDefinitions(normalized.NovelId) ?? [];
+        var autoCompressedThisTurn = false;
 
         try
         {
@@ -238,6 +450,23 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                 "chat:started",
                 new { session_id = session.SessionId, turn_id = turnId },
                 linkedCancellation.Token);
+
+            if (ShouldAutoCompress(previousUsage))
+            {
+                var compression = await CompressSessionContextAsync(
+                    session.SessionId,
+                    normalized.NovelId,
+                    turnId,
+                    normalized.ProviderName,
+                    normalized.ModelId,
+                    normalized.ReasoningEffort,
+                    seq,
+                    subTaskId: null,
+                    linkedCancellation.Token);
+                seq = compression.Seq;
+                loopMessages = compression.Messages.ToList();
+                autoCompressedThisTurn = true;
+            }
 
             for (var loop = 0; loop < MaxToolLoopCount; loop++)
             {
@@ -265,6 +494,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                                 data: streamEvent.Data,
                                 usage: null,
                                 error: null,
+                                subTaskId: null,
                                 linkedCancellation.Token);
                             break;
                         case ChatCompletionStreamEventKind.Content:
@@ -276,12 +506,13 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                                 data: streamEvent.Data,
                                 usage: null,
                                 error: null,
+                                subTaskId: null,
                                 linkedCancellation.Token);
                             break;
                         case ChatCompletionStreamEventKind.Usage:
                             if (streamEvent.Usage is not null)
                             {
-                                usage = streamEvent.Usage.Value.Clone();
+                                usage = BuildUsagePayload(streamEvent.Usage.Value, model);
                                 seq = await EmitAgentEventAsync(
                                     turnId,
                                     seq,
@@ -289,6 +520,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                                     data: null,
                                     usage: usage,
                                     error: null,
+                                    subTaskId: null,
                                     linkedCancellation.Token);
                             }
 
@@ -303,8 +535,14 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                                 normalized.NovelId,
                                 session.SessionId,
                                 turnId,
+                                normalized.ProviderName,
+                                normalized.ModelId,
+                                normalized.ReasoningEffort,
                                 seq,
                                 streamEvent.ToolCall,
+                                allowedToolNames: null,
+                                subTaskId: null,
+                                agentType: "main",
                                 linkedCancellation.Token);
                             seq = output.Seq;
                             toolOutputs.Add(output);
@@ -350,6 +588,23 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                         ToolName: output.Call.Name));
                 }
 
+                if (!autoCompressedThisTurn && ShouldAutoCompress(usage))
+                {
+                    var compression = await CompressSessionContextAsync(
+                        session.SessionId,
+                        normalized.NovelId,
+                        turnId,
+                        normalized.ProviderName,
+                        normalized.ModelId,
+                        normalized.ReasoningEffort,
+                        seq,
+                        subTaskId: null,
+                        linkedCancellation.Token);
+                    seq = compression.Seq;
+                    loopMessages = compression.Messages.ToList();
+                    autoCompressedThisTurn = true;
+                }
+
                 if (loop == MaxToolLoopCount - 1)
                 {
                     throw new BridgeRequestException(
@@ -367,6 +622,13 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                     cancellationToken);
             }
 
+            await CommitAiChangesAtTurnEndAsync(
+                normalized.NovelId,
+                turnId,
+                session.SessionId,
+                model.ModelName,
+                CancellationToken.None);
+
             return new ChatResultPayload(session.SessionId, turnId, finalText);
         }
         catch (OperationCanceledException) when (linkedCancellation.IsCancellationRequested)
@@ -377,20 +639,116 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                 active.UserCancelled ? "user_stopped" : "system_interrupted",
                 active.UserCancelled ? "对话已停止" : "对话被中断",
                 CancellationToken.None);
+            await CommitAiChangesAtTurnEndAsync(
+                normalized.NovelId,
+                turnId,
+                session.SessionId,
+                model.ModelName,
+                CancellationToken.None);
             throw;
         }
         catch (BridgeRequestException ex)
         {
             await PersistAndEmitErrorAsync(session.SessionId, turnId, seq, ex.Message, CancellationToken.None);
+            await CommitAiChangesAtTurnEndAsync(
+                normalized.NovelId,
+                turnId,
+                session.SessionId,
+                model.ModelName,
+                CancellationToken.None);
             throw;
         }
         catch (Exception ex)
         {
             await PersistAndEmitErrorAsync(session.SessionId, turnId, seq, ex.Message, CancellationToken.None);
+            await CommitAiChangesAtTurnEndAsync(
+                normalized.NovelId,
+                turnId,
+                session.SessionId,
+                model.ModelName,
+                CancellationToken.None);
             throw new BridgeRequestException(
                 BridgeErrorCodes.LlmProviderError,
                 $"LLM 调用失败: {ex.Message}",
                 retryable: true);
+        }
+        finally
+        {
+            if (_activeChats.TryGetValue(session.SessionId, out var current) && ReferenceEquals(current, active))
+            {
+                _activeChats.TryRemove(session.SessionId, out _);
+            }
+        }
+    }
+
+    public async ValueTask<CompressResultPayload> CompressContextAsync(
+        CompressInputPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        var normalized = NormalizeCompressInput(input);
+        await GetConfiguredModelAsync(normalized.ProviderName, normalized.ModelId, cancellationToken);
+
+        ChatSessionDocument session;
+        int turnId;
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            session = FindSession(store, normalized.SessionId)
+                ?? throw new ArgumentException($"Session '{normalized.SessionId}' does not exist.", nameof(input));
+
+            if (_activeChats.ContainsKey(session.SessionId))
+            {
+                throw new BridgeRequestException(
+                    BridgeErrorCodes.ValidationError,
+                    "对话进行中，无法手动压缩上下文，请等待当前对话完成。",
+                    retryable: false);
+            }
+
+            turnId = checked(session.LastTurnId + 1);
+            session.LastTurnId = turnId;
+            session.UpdatedAt = UtcNow();
+            await SaveAsync(store, cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var active = new ActiveChatOperation(linkedCancellation);
+        if (!_activeChats.TryAdd(session.SessionId, active))
+        {
+            throw new BridgeRequestException(
+                BridgeErrorCodes.ValidationError,
+                "对话进行中，无法手动压缩上下文，请等待当前对话完成。",
+                retryable: false);
+        }
+
+        try
+        {
+            await CompressSessionContextAsync(
+                session.SessionId,
+                session.NovelId,
+                turnId,
+                normalized.ProviderName,
+                normalized.ModelId,
+                session.ReasoningEffort,
+                currentSeq: 0,
+                subTaskId: null,
+                linkedCancellation.Token);
+            return new CompressResultPayload(turnId);
+        }
+        catch (OperationCanceledException) when (linkedCancellation.IsCancellationRequested)
+        {
+            await PersistSystemEventAsync(
+                session.SessionId,
+                turnId,
+                active.UserCancelled ? "user_stopped" : "system_interrupted",
+                active.UserCancelled ? "上下文压缩已停止" : "上下文压缩被中断",
+                CancellationToken.None);
+            throw;
         }
         finally
         {
@@ -424,6 +782,1061 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         }
     }
 
+    public async ValueTask<SubagentRunResult> RunAsync(
+        SubagentRunRequest request,
+        CancellationToken cancellationToken)
+    {
+        var normalized = NormalizeSubagentRunRequest(request);
+        var model = await GetConfiguredModelAsync(
+            normalized.ProviderName,
+            normalized.ModelId,
+            cancellationToken);
+        var seq = normalized.StartSequence;
+        var messages = await BuildSubagentInitialMessagesAsync(normalized, cancellationToken);
+        var loopMessages = messages.ToList();
+        var toolDefinitions = GetSubagentToolDefinitions(normalized.NovelId, normalized.AgentType);
+        var allowedToolNames = toolDefinitions
+            .Select(tool => tool.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var finalText = string.Empty;
+        var subagentCompressedThisRun = false;
+
+        for (var loop = 0; loop < MaxSubagentLoopCount; loop++)
+        {
+            var roundText = new StringBuilder();
+            var roundThinkingText = new StringBuilder();
+            var toolOutputs = new List<ExecutedChatToolCall>();
+            JsonElement? roundUsage = null;
+
+            await foreach (var streamEvent in _completion.StreamChatAsync(
+                new ChatCompletionRequest(
+                    normalized.ProviderName,
+                    normalized.ModelId,
+                    normalized.ReasoningEffort,
+                    loopMessages,
+                    toolDefinitions),
+                cancellationToken).WithCancellation(cancellationToken))
+            {
+                switch (streamEvent.Kind)
+                {
+                    case ChatCompletionStreamEventKind.Thinking:
+                        roundThinkingText.Append(streamEvent.Data);
+                        seq = await EmitAgentEventAsync(
+                            normalized.TurnId,
+                            seq,
+                            type: 0,
+                            data: streamEvent.Data,
+                            usage: null,
+                            error: null,
+                            subTaskId: normalized.ToolId,
+                            cancellationToken);
+                        break;
+                    case ChatCompletionStreamEventKind.Content:
+                        roundText.Append(streamEvent.Data);
+                        seq = await EmitAgentEventAsync(
+                            normalized.TurnId,
+                            seq,
+                            type: 2,
+                            data: streamEvent.Data,
+                            usage: null,
+                            error: null,
+                            subTaskId: normalized.ToolId,
+                            cancellationToken);
+                        break;
+                    case ChatCompletionStreamEventKind.Usage:
+                        if (streamEvent.Usage is not null)
+                        {
+                            roundUsage = BuildUsagePayload(streamEvent.Usage.Value, model);
+                            seq = await EmitAgentEventAsync(
+                                normalized.TurnId,
+                                seq,
+                                type: 4,
+                                data: null,
+                                usage: roundUsage,
+                                error: null,
+                                subTaskId: normalized.ToolId,
+                                cancellationToken);
+                        }
+
+                        break;
+                    case ChatCompletionStreamEventKind.ToolCall:
+                        if (streamEvent.ToolCall is null)
+                        {
+                            break;
+                        }
+
+                        var output = await ExecuteToolCallAsync(
+                            normalized.NovelId,
+                            normalized.SessionId,
+                            normalized.TurnId,
+                            normalized.ProviderName,
+                            normalized.ModelId,
+                            normalized.ReasoningEffort,
+                            seq,
+                            streamEvent.ToolCall,
+                            allowedToolNames,
+                            normalized.ToolId,
+                            normalized.AgentType,
+                            cancellationToken);
+                        seq = output.Seq;
+                        toolOutputs.Add(output);
+                        break;
+                    default:
+                        throw new InvalidOperationException($"Unsupported chat stream event kind '{streamEvent.Kind}'.");
+                }
+            }
+
+            if (toolOutputs.Count == 0)
+            {
+                finalText = roundText.ToString();
+                if (finalText.Length > 0 || roundThinkingText.Length > 0)
+                {
+                    await PersistSubagentAssistantMessageAsync(
+                        normalized,
+                        finalText,
+                        roundThinkingText.ToString(),
+                        cancellationToken);
+                }
+
+                return new SubagentRunResult(normalized.AgentType, finalText, seq);
+            }
+
+            await PersistSubagentToolRoundAsync(
+                normalized,
+                roundText.ToString(),
+                roundThinkingText.ToString(),
+                toolOutputs,
+                cancellationToken);
+
+            loopMessages.Add(new ChatCompletionMessage(
+                "assistant",
+                roundText.ToString(),
+                NullIfEmpty(roundThinkingText.ToString()),
+                toolOutputs.Select(output => output.Call).ToArray()));
+            foreach (var output in toolOutputs)
+            {
+                loopMessages.Add(new ChatCompletionMessage(
+                    "tool",
+                    FormatToolResultJson(output.Result),
+                    ToolCallId: output.Call.Id,
+                    ToolName: output.Call.Name));
+            }
+
+            if (!subagentCompressedThisRun && ShouldAutoCompress(roundUsage))
+            {
+                var compression = await CompressSubagentContextAsync(
+                    normalized,
+                    loopMessages,
+                    seq,
+                    cancellationToken);
+                loopMessages = compression.Messages.ToList();
+                seq = compression.Seq;
+                subagentCompressedThisRun = true;
+            }
+        }
+
+        throw new BridgeRequestException(
+            BridgeErrorCodes.LlmProviderError,
+            "子 Agent 工具调用轮次过多，已中止。",
+            retryable: false);
+    }
+
+    private async ValueTask<IReadOnlyList<ChatCompletionMessage>> BuildSubagentInitialMessagesAsync(
+        SubagentRunRequest request,
+        CancellationToken cancellationToken)
+    {
+        var messages = new List<ChatCompletionMessage>
+        {
+            new("system", SubagentIdentityPrompt(request.AgentType))
+        };
+
+        var state = await BuildSubagentNovelStateAsync(request.NovelId, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(state))
+        {
+            messages.Add(new ChatCompletionMessage("system", state));
+        }
+
+        messages.Add(new ChatCompletionMessage("user", request.Instruction));
+        return messages;
+    }
+
+    private async ValueTask<string> BuildSubagentNovelStateAsync(
+        long novelId,
+        CancellationToken cancellationToken)
+    {
+        var builder = new StringBuilder();
+        try
+        {
+            var novels = await _novels.GetNovelsAsync(cancellationToken);
+            var novel = novels.FirstOrDefault(item => item.Id == novelId);
+            if (novel is not null)
+            {
+                builder.AppendLine("<novel-state>");
+                builder.AppendLine($"小说：{novel.Title}");
+                if (!string.IsNullOrWhiteSpace(novel.Genre))
+                {
+                    builder.AppendLine($"类型：{novel.Genre}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(novel.Description))
+                {
+                    builder.AppendLine($"简介：{novel.Description}");
+                }
+            }
+
+            if (_chapterContent is not null)
+            {
+                var chapters = await _chapterContent.GetChaptersAsync(novelId, cancellationToken);
+                if (chapters.Count > 0)
+                {
+                    builder.AppendLine();
+                    builder.AppendLine("章节目录：");
+                    foreach (var chapter in chapters.OrderBy(item => item.ChapterNumber).Take(200))
+                    {
+                        builder.AppendLine(
+                            $"- 第{chapter.ChapterNumber.ToString(CultureInfo.InvariantCulture)}章 {chapter.Title}（{chapter.WordCount.ToString(CultureInfo.InvariantCulture)}字）");
+                    }
+                }
+
+                var goink = await _chapterContent.GetContentAsync(novelId, "goink.md", cancellationToken);
+                if (!string.IsNullOrWhiteSpace(goink))
+                {
+                    builder.AppendLine();
+                    builder.AppendLine("故事状态 goink.md：");
+                    builder.AppendLine(TrimLongState(goink));
+                }
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.AppendLine("</novel-state>");
+            }
+        }
+        catch
+        {
+            // Match the old runner: a snapshot failure must not prevent the subagent from using tools.
+        }
+
+        return builder.ToString();
+    }
+
+    private async ValueTask<IReadOnlyList<string>> BuildMainInitialSystemMessagesAsync(
+        long novelId,
+        CancellationToken cancellationToken)
+    {
+        var messages = new List<string> { MainAgentPrompt };
+        var skills = await LoadMergedSkillDocumentsAsync(novelId, cancellationToken);
+        var alwaysSkills = BuildAlwaysSkillsContent(skills);
+        if (!string.IsNullOrWhiteSpace(alwaysSkills))
+        {
+            messages.Add(alwaysSkills);
+        }
+
+        var skillCatalog = BuildSkillCatalog(skills);
+        if (!string.IsNullOrWhiteSpace(skillCatalog))
+        {
+            messages.Add(skillCatalog);
+        }
+
+        var novelState = await BuildMainNovelStateAsync(novelId, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(novelState))
+        {
+            messages.Add(novelState);
+        }
+
+        return messages;
+    }
+
+    private async ValueTask<string> BuildMainNovelStateAsync(
+        long novelId,
+        CancellationToken cancellationToken)
+    {
+        var novels = await _novels.GetNovelsAsync(cancellationToken);
+        var novel = novels.FirstOrDefault(item => item.Id == novelId)
+            ?? throw new ArgumentException($"Novel '{novelId}' does not exist.", nameof(novelId));
+
+        var builder = new StringBuilder();
+        builder.AppendLine("【小说基础信息】");
+        builder.AppendLine($"书名：{novel.Title}");
+        if (!string.IsNullOrWhiteSpace(novel.Genre))
+        {
+            builder.AppendLine($"类型：{novel.Genre}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(novel.Description))
+        {
+            builder.AppendLine($"简介：{novel.Description}");
+        }
+
+        if (_chapterContent is not null)
+        {
+            var state = await _chapterContent.GetContentAsync(novelId, "goink.md", cancellationToken);
+            if (!string.IsNullOrWhiteSpace(state))
+            {
+                builder.AppendLine();
+                builder.AppendLine("【故事状态文档】");
+                builder.AppendLine(state.Trim());
+            }
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private async ValueTask<SlashInjection> ResolveSlashInjectionAsync(
+        long novelId,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        if (!message.StartsWith("/", StringComparison.Ordinal))
+        {
+            return SlashInjection.Empty;
+        }
+
+        var first = message
+            .Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(first) || first.Length <= 1)
+        {
+            return SlashInjection.Empty;
+        }
+
+        var commandName = first[1..];
+        ResolvedSkillDocument? skill;
+        try
+        {
+            var normalizedName = SkillDocuments.NormalizeSkillName(commandName);
+            var skills = await LoadMergedSkillDocumentsAsync(novelId, cancellationToken);
+            skill = skills.FirstOrDefault(item => string.Equals(item.Name, normalizedName, StringComparison.Ordinal));
+        }
+        catch (ArgumentException)
+        {
+            return SlashInjection.Empty;
+        }
+
+        if (skill is null)
+        {
+            return SlashInjection.Empty;
+        }
+
+        var content = skill.Mode switch
+        {
+            "always" =>
+                $"用户通过 /{skill.Name} 提醒你注意常驻技能「{skill.Name}」，其完整内容已在本次对话开头注入，请严格遵循。",
+            "manual" =>
+                $"用户启用了快捷指令「{skill.Name}」。请根据该指令的内容和用户需求进行工作。\n\n---\n{skill.Content}\n---",
+            _ =>
+                $"用户启用了技能「{skill.Name}」。请根据该技能的定义和用户需求进行工作。\n\n---\n{skill.RawContent}\n---"
+        };
+
+        return new SlashInjection(
+            $"<system-reminder>\n{content}\n</system-reminder>",
+            skill.Name);
+    }
+
+    private async ValueTask<IReadOnlyList<ResolvedSkillDocument>> LoadMergedSkillDocumentsAsync(
+        long novelId,
+        CancellationToken cancellationToken)
+    {
+        var dataDirectory = await AppDataDirectoryResolver.ResolveAsync(_options, cancellationToken);
+        var layers = new[]
+        {
+            ("novel", SkillDocuments.ScanDirectory(NovelSkillsDirectory(dataDirectory, novelId), "user")),
+            ("user", SkillDocuments.ScanDirectory(UserSkillsDirectory(dataDirectory), "user")),
+            ("builtin", BuiltinSkills.Value)
+        };
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<ResolvedSkillDocument>();
+        foreach (var (source, skills) in layers)
+        {
+            foreach (var skill in skills.OrderBy(item => item.Name, StringComparer.Ordinal))
+            {
+                if (!seen.Add(skill.Name))
+                {
+                    continue;
+                }
+
+                result.Add(new ResolvedSkillDocument(
+                    skill.Name,
+                    skill.Description,
+                    skill.Mode,
+                    source,
+                    skill.Content,
+                    skill.RawContent));
+            }
+        }
+
+        return result;
+    }
+
+    private static string NovelSkillsDirectory(string dataDirectory, long novelId)
+    {
+        return SafeChildPath(Path.Combine(dataDirectory, "novels"), $"{novelId}/skills");
+    }
+
+    private static string UserSkillsDirectory(string dataDirectory)
+    {
+        return SafeChildPath(dataDirectory, "skills");
+    }
+
+    private static string SafeChildPath(string parentDirectory, string relativePath)
+    {
+        var parent = Path.GetFullPath(parentDirectory);
+        var fullPath = Path.GetFullPath(Path.Combine(parent, relativePath));
+        var parentWithSeparator = parent.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (!fullPath.StartsWith(parentWithSeparator, comparison))
+        {
+            throw new InvalidContentPathException(relativePath, "Resolved path escapes the novelist data directory.");
+        }
+
+        return fullPath;
+    }
+
+    private static string BuildAlwaysSkillsContent(IReadOnlyList<ResolvedSkillDocument> skills)
+    {
+        var always = skills
+            .Where(skill => string.Equals(skill.Mode, "always", StringComparison.Ordinal))
+            .ToArray();
+        if (always.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine("【常驻技能】");
+        builder.AppendLine("以下技能在本次对话中始终生效：");
+        builder.AppendLine();
+        foreach (var skill in always)
+        {
+            builder.Append("--- ").Append(skill.Name).AppendLine(" ---");
+            builder.AppendLine(skill.Content);
+            builder.AppendLine();
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private static string BuildSkillCatalog(IReadOnlyList<ResolvedSkillDocument> skills)
+    {
+        var auto = skills
+            .Where(skill => string.Equals(skill.Mode, "auto", StringComparison.Ordinal))
+            .ToArray();
+        if (auto.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine("<available_skills>");
+        AddGroup("小说专属技能", "novel");
+        AddGroup("用户技能", "user");
+        AddGroup("内置技能（只读）", "builtin");
+        builder.AppendLine("---");
+        builder.AppendLine("使用 read 工具加载技能完整内容：");
+        builder.AppendLine("- skills/<name>.md（小说技能）");
+        builder.AppendLine("- ~/.goink/skills/<name>.md（用户技能）");
+        builder.AppendLine("- /builtin/skills/<name>.md（内置技能，只读）");
+        builder.AppendLine("使用 edit 工具创建或修改技能。内置技能不可编辑。");
+        builder.Append("</available_skills>");
+        return builder.ToString();
+
+        void AddGroup(string title, string source)
+        {
+            var group = auto
+                .Where(skill => string.Equals(skill.Source, source, StringComparison.Ordinal))
+                .ToArray();
+            if (group.Length == 0)
+            {
+                return;
+            }
+
+            builder.Append("## ").AppendLine(title);
+            foreach (var skill in group)
+            {
+                builder.Append("- ").Append(skill.Name);
+                if (!string.IsNullOrWhiteSpace(skill.Description))
+                {
+                    builder.Append(": ").Append(skill.Description);
+                }
+
+                builder.AppendLine();
+            }
+
+            builder.AppendLine();
+        }
+    }
+
+    private async ValueTask<CompressionRunResult> CompressSessionContextAsync(
+        string sessionId,
+        long novelId,
+        int turnId,
+        string providerName,
+        string modelId,
+        string reasoningEffort,
+        int currentSeq,
+        string? subTaskId,
+        CancellationToken cancellationToken)
+    {
+        var seq = await EmitCompressionEventAsync(
+            turnId,
+            currentSeq,
+            phase: "compressing",
+            summary: null,
+            subTaskId,
+            cancellationToken);
+        var messages = await LoadApiMessagesForSessionAsync(sessionId, cancellationToken);
+        var summary = await GenerateCompressionSummaryAsync(
+            providerName,
+            modelId,
+            reasoningEffort,
+            messages,
+            cancellationToken);
+        var retained = RetainMessages(messages);
+        var compressedMessages = await PersistMainCompressionAsync(
+            sessionId,
+            novelId,
+            turnId,
+            summary,
+            retained,
+            cancellationToken);
+        seq = await EmitCompressionEventAsync(
+            turnId,
+            seq,
+            phase: "done",
+            summary,
+            subTaskId,
+            cancellationToken);
+        return new CompressionRunResult(compressedMessages, seq);
+    }
+
+    private async ValueTask<IReadOnlyList<ChatCompletionMessage>> LoadApiMessagesForSessionAsync(
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            var session = FindSession(store, sessionId)
+                ?? throw new ArgumentException($"Session '{sessionId}' does not exist.", nameof(sessionId));
+            return store.Messages
+                .Where(message => string.Equals(message.SessionId, sessionId, StringComparison.Ordinal) &&
+                    message.ToApi &&
+                    message.Version == session.ActiveVersion)
+                .OrderBy(message => message.CreatedAt)
+                .ThenBy(message => message.Id)
+                .Select(ToCompletionMessage)
+                .ToArray();
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private async ValueTask<string> GenerateCompressionSummaryAsync(
+        string providerName,
+        string modelId,
+        string reasoningEffort,
+        IReadOnlyList<ChatCompletionMessage> messages,
+        CancellationToken cancellationToken)
+    {
+        var compressionMessages = messages
+            .Append(new ChatCompletionMessage("user", CompressionPrompt))
+            .ToArray();
+        var summary = await _completion.GenerateTextAsync(
+            new ChatCompletionRequest(providerName, modelId, reasoningEffort, compressionMessages),
+            cancellationToken);
+        summary = summary.Trim();
+        if (summary.Length == 0)
+        {
+            throw new BridgeRequestException(
+                BridgeErrorCodes.LlmProviderError,
+                "上下文压缩失败：模型返回了空摘要。",
+                retryable: true);
+        }
+
+        return summary;
+    }
+
+    private async ValueTask<IReadOnlyList<ChatCompletionMessage>> PersistMainCompressionAsync(
+        string sessionId,
+        long novelId,
+        int turnId,
+        string summary,
+        IReadOnlyList<ChatCompletionMessage> retained,
+        CancellationToken cancellationToken)
+    {
+        var systemMessages = await BuildMainInitialSystemMessagesAsync(novelId, cancellationToken);
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            var session = FindSession(store, sessionId)
+                ?? throw new InvalidOperationException($"Session '{sessionId}' disappeared during compression.");
+            var newVersion = checked(session.ActiveVersion + 1);
+            session.ActiveVersion = newVersion;
+            session.Summary = summary;
+            session.UpdatedAt = UtcNow();
+
+            foreach (var systemMessage in systemMessages)
+            {
+                store.Messages.Add(CreateMessage(
+                    store,
+                    sessionId,
+                    turnId,
+                    role: "system",
+                    content: systemMessage,
+                    thinkingContent: null,
+                    version: newVersion,
+                    toApi: true,
+                    toFrontend: false,
+                    eventType: null,
+                    agentType: "main"));
+            }
+
+            store.Messages.Add(CreateMessage(
+                store,
+                sessionId,
+                turnId,
+                role: "user",
+                content: CompressionReminder,
+                thinkingContent: null,
+                version: newVersion,
+                toApi: true,
+                toFrontend: false,
+                eventType: null,
+                agentType: "main"));
+            store.Messages.Add(CreateMessage(
+                store,
+                sessionId,
+                turnId,
+                role: "user",
+                content: $"<system-reminder>\n{summary}\n</system-reminder>",
+                thinkingContent: null,
+                version: newVersion,
+                toApi: true,
+                toFrontend: false,
+                eventType: null,
+                agentType: "main"));
+
+            foreach (var message in retained)
+            {
+                store.Messages.Add(CreateMessage(
+                    store,
+                    sessionId,
+                    turnId,
+                    message.Role,
+                    message.Content,
+                    message.ThinkingContent,
+                    newVersion,
+                    toApi: true,
+                    toFrontend: false,
+                    eventType: null,
+                    agentType: "main",
+                    extraMetadata: BuildApiMessageMetadata(message)));
+            }
+
+            store.Messages.Add(CreateMessage(
+                store,
+                sessionId,
+                turnId,
+                role: "system",
+                content: string.Empty,
+                thinkingContent: null,
+                version: newVersion,
+                toApi: false,
+                toFrontend: true,
+                eventType: "compression",
+                agentType: "main"));
+
+            var apiMessages = store.Messages
+                .Where(message => string.Equals(message.SessionId, sessionId, StringComparison.Ordinal) &&
+                    message.ToApi &&
+                    message.Version == session.ActiveVersion)
+                .OrderBy(message => message.CreatedAt)
+                .ThenBy(message => message.Id)
+                .Select(ToCompletionMessage)
+                .ToArray();
+            await SaveAsync(store, cancellationToken);
+            return apiMessages;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private async ValueTask<int> EmitCompressionEventAsync(
+        int turnId,
+        int currentSeq,
+        string phase,
+        string? summary,
+        string? subTaskId,
+        CancellationToken cancellationToken)
+    {
+        var seq = currentSeq + 1;
+        await _events.EmitAsync(
+            $"agent:{turnId.ToString(CultureInfo.InvariantCulture)}",
+            new AgentEventPayload
+            {
+                TurnId = turnId,
+                SubTaskId = string.IsNullOrWhiteSpace(subTaskId) ? null : subTaskId,
+                Seq = seq,
+                Type = 6,
+                CompressionPhase = phase,
+                Summary = string.IsNullOrWhiteSpace(summary) ? null : summary,
+                Timestamp = UtcNow()
+            },
+            cancellationToken);
+        return seq;
+    }
+
+    private static IReadOnlyList<ChatCompletionMessage> RetainMessages(
+        IReadOnlyList<ChatCompletionMessage> messages)
+    {
+        if (messages.Count == 0)
+        {
+            return [];
+        }
+
+        var systemEnd = 0;
+        while (systemEnd < messages.Count &&
+            string.Equals(messages[systemEnd].Role, "system", StringComparison.Ordinal))
+        {
+            systemEnd++;
+        }
+
+        var history = messages.Skip(systemEnd).ToArray();
+        if (history.Length == 0)
+        {
+            return [];
+        }
+
+        var userIndexes = history
+            .Select((message, index) => (message, index))
+            .Where(item => string.Equals(item.message.Role, "user", StringComparison.Ordinal))
+            .Select(item => item.index)
+            .ToArray();
+        if (userIndexes.Length == 0)
+        {
+            return [];
+        }
+
+        var keepFrom = 0;
+        if (userIndexes.Length > MaxRetainedUserMessagesAfterCompression)
+        {
+            keepFrom = userIndexes[^MaxRetainedUserMessagesAfterCompression];
+        }
+
+        if (userIndexes.Length >= MinRetainedConversationTurnsAfterCompression)
+        {
+            var minKeep = userIndexes[^MinRetainedConversationTurnsAfterCompression];
+            if (minKeep < keepFrom)
+            {
+                keepFrom = minKeep;
+            }
+        }
+
+        return history.Skip(keepFrom).ToArray();
+    }
+
+    private static string? BuildApiMessageMetadata(ChatCompletionMessage message)
+    {
+        var metadata = new Dictionary<string, object?>();
+        if (string.Equals(message.Role, "assistant", StringComparison.Ordinal) &&
+            message.ToolCalls is { Count: > 0 })
+        {
+            metadata["tool_calls"] = message.ToolCalls.Select(call => new Dictionary<string, object?>
+            {
+                ["id"] = call.Id,
+                ["type"] = "function",
+                ["function"] = new Dictionary<string, object?>
+                {
+                    ["name"] = call.Name,
+                    ["arguments"] = string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson
+                }
+            }).ToArray();
+        }
+
+        if (string.Equals(message.Role, "tool", StringComparison.Ordinal))
+        {
+            if (!string.IsNullOrWhiteSpace(message.ToolCallId))
+            {
+                metadata["tool_call_id"] = message.ToolCallId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(message.ToolName))
+            {
+                metadata["tool_name"] = message.ToolName;
+            }
+        }
+
+        return metadata.Count == 0
+            ? null
+            : JsonSerializer.Serialize(metadata, BridgeJson.SerializerOptions);
+    }
+
+    private static JsonElement BuildUsagePayload(JsonElement rawUsage, AvailableModelPayload model)
+    {
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (rawUsage.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in rawUsage.EnumerateObject())
+            {
+                payload[property.Name] = JsonElementToObject(property.Value);
+            }
+        }
+
+        var totalTokens = ReadNumeric(rawUsage, "total_tokens");
+        var hitTokens = ReadNumeric(rawUsage, "prompt_cache_hit_tokens");
+        var missTokens = ReadNumeric(rawUsage, "prompt_cache_miss_tokens");
+        payload["prompt_cache_hit_tokens"] = hitTokens;
+        payload["prompt_cache_miss_tokens"] = missTokens;
+        payload["context_window"] = model.ContextWindow;
+        if (model.ContextWindow > 0 && totalTokens > 0)
+        {
+            payload["usage_ratio"] = totalTokens / model.ContextWindow * 100.0;
+        }
+
+        if (hitTokens + missTokens > 0)
+        {
+            payload["cache_hit_ratio"] = hitTokens / (hitTokens + missTokens) * 100.0;
+        }
+        else
+        {
+            payload["cache_hit_ratio"] = 0;
+        }
+
+        return JsonSerializer.SerializeToElement(payload, BridgeJson.SerializerOptions);
+    }
+
+    private static object? JsonElementToObject(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number when value.TryGetInt64(out var integer) => integer,
+            JsonValueKind.Number => value.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            _ => value.Clone()
+        };
+    }
+
+    private static bool ShouldAutoCompress(JsonElement? usage)
+    {
+        if (usage is null || usage.Value.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        var ratio = ReadNumeric(usage.Value, "usage_ratio");
+        return ratio >= AutoCompressionUsageRatio;
+    }
+
+    private static double ReadNumeric(JsonElement source, string propertyName)
+    {
+        if (source.ValueKind != JsonValueKind.Object ||
+            !source.TryGetProperty(propertyName, out var property) ||
+            property.ValueKind != JsonValueKind.Number)
+        {
+            return 0;
+        }
+
+        return property.TryGetDouble(out var value) ? value : 0;
+    }
+
+    private async ValueTask<CompressionRunResult> CompressSubagentContextAsync(
+        SubagentRunRequest request,
+        IReadOnlyList<ChatCompletionMessage> messages,
+        int currentSeq,
+        CancellationToken cancellationToken)
+    {
+        var seq = await EmitCompressionEventAsync(
+            request.TurnId,
+            currentSeq,
+            phase: "compressing",
+            summary: null,
+            request.ToolId,
+            cancellationToken);
+        var summary = await GenerateCompressionSummaryAsync(
+            request.ProviderName,
+            request.ModelId,
+            request.ReasoningEffort,
+            messages,
+            cancellationToken);
+        var retained = RetainMessages(messages);
+        var systemEnd = 0;
+        while (systemEnd < messages.Count &&
+            string.Equals(messages[systemEnd].Role, "system", StringComparison.Ordinal))
+        {
+            systemEnd++;
+        }
+
+        var compressed = new List<ChatCompletionMessage>(systemEnd + retained.Count + 2);
+        compressed.AddRange(messages.Take(systemEnd));
+        compressed.Add(new ChatCompletionMessage("user", CompressionReminder));
+        compressed.Add(new ChatCompletionMessage("user", $"<system-reminder>\n{summary}\n</system-reminder>"));
+        compressed.AddRange(retained);
+        await PersistSubagentCompressionMarkerAsync(request, cancellationToken);
+        seq = await EmitCompressionEventAsync(
+            request.TurnId,
+            seq,
+            phase: "done",
+            summary,
+            request.ToolId,
+            cancellationToken);
+        return new CompressionRunResult(compressed, seq);
+    }
+
+    private IReadOnlyList<ChatToolDefinition> GetSubagentToolDefinitions(long novelId, string agentType)
+    {
+        if (_toolExecutor is null)
+        {
+            return [];
+        }
+
+        var allowed = SubagentAllowedTools(agentType);
+        return _toolExecutor
+            .GetToolDefinitions(novelId)
+            .Where(tool => allowed.Contains(tool.Name))
+            .ToArray();
+    }
+
+    private async ValueTask PersistSubagentAssistantMessageAsync(
+        SubagentRunRequest request,
+        string content,
+        string thinkingText,
+        CancellationToken cancellationToken)
+    {
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            var session = FindSession(store, request.SessionId)
+                ?? throw new InvalidOperationException($"Session '{request.SessionId}' disappeared during subagent run.");
+            store.Messages.Add(CreateMessage(
+                store,
+                request.SessionId,
+                request.TurnId,
+                role: "assistant",
+                content: content,
+                thinkingContent: string.IsNullOrEmpty(thinkingText) ? null : thinkingText,
+                version: session.ActiveVersion,
+                toApi: false,
+                toFrontend: true,
+                eventType: null,
+                agentType: request.AgentType,
+                subTaskId: request.ToolId));
+            session.UpdatedAt = UtcNow();
+            await SaveAsync(store, cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private async ValueTask PersistSubagentToolRoundAsync(
+        SubagentRunRequest request,
+        string assistantText,
+        string thinkingText,
+        IReadOnlyList<ExecutedChatToolCall> toolOutputs,
+        CancellationToken cancellationToken)
+    {
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            var session = FindSession(store, request.SessionId)
+                ?? throw new InvalidOperationException($"Session '{request.SessionId}' disappeared during subagent run.");
+            store.Messages.Add(CreateMessage(
+                store,
+                request.SessionId,
+                request.TurnId,
+                role: "assistant",
+                content: assistantText,
+                thinkingContent: string.IsNullOrEmpty(thinkingText) ? null : thinkingText,
+                version: session.ActiveVersion,
+                toApi: false,
+                toFrontend: true,
+                eventType: null,
+                agentType: request.AgentType,
+                extraMetadata: BuildToolRoundMetadata(toolOutputs),
+                subTaskId: request.ToolId));
+
+            foreach (var output in toolOutputs)
+            {
+                store.Messages.Add(CreateMessage(
+                    store,
+                    request.SessionId,
+                    request.TurnId,
+                    role: "tool",
+                    content: FormatToolResultJson(output.Result),
+                    thinkingContent: null,
+                    version: session.ActiveVersion,
+                    toApi: false,
+                    toFrontend: false,
+                    eventType: null,
+                    agentType: request.AgentType,
+                    extraMetadata: JsonSerializer.Serialize(
+                        new Dictionary<string, object?>
+                        {
+                            ["tool_call_id"] = output.Call.Id,
+                            ["tool_name"] = output.Call.Name
+                        },
+                        BridgeJson.SerializerOptions),
+                    subTaskId: request.ToolId));
+            }
+
+            session.UpdatedAt = UtcNow();
+            await SaveAsync(store, cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private async ValueTask PersistSubagentCompressionMarkerAsync(
+        SubagentRunRequest request,
+        CancellationToken cancellationToken)
+    {
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            var session = FindSession(store, request.SessionId)
+                ?? throw new InvalidOperationException($"Session '{request.SessionId}' disappeared during subagent compression.");
+            store.Messages.Add(CreateMessage(
+                store,
+                request.SessionId,
+                request.TurnId,
+                role: "system",
+                content: string.Empty,
+                thinkingContent: null,
+                version: session.ActiveVersion,
+                toApi: false,
+                toFrontend: true,
+                eventType: "compression",
+                agentType: request.AgentType,
+                subTaskId: request.ToolId));
+            session.UpdatedAt = UtcNow();
+            await SaveAsync(store, cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
     private void RegisterActiveChat(string sessionId, ActiveChatOperation active)
     {
         if (_activeChats.TryRemove(sessionId, out var previous))
@@ -445,14 +1858,41 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         }
     }
 
-    private async ValueTask EnsureModelConfiguredAsync(
+    private async ValueTask CommitUserChangesAtTurnStartAsync(
+        long novelId,
+        int turnId,
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        await _versionControl.CommitIfChangedAsync(
+            novelId,
+            $"turn {turnId.ToString(CultureInfo.InvariantCulture)}: user manual changes\n\nSession: {sessionId}",
+            cancellationToken);
+    }
+
+    private async ValueTask CommitAiChangesAtTurnEndAsync(
+        long novelId,
+        int turnId,
+        string sessionId,
+        string modelName,
+        CancellationToken cancellationToken)
+    {
+        var displayModelName = string.IsNullOrWhiteSpace(modelName) ? "unknown model" : modelName.Trim();
+        await _versionControl.CommitIfChangedAsync(
+            novelId,
+            $"turn {turnId.ToString(CultureInfo.InvariantCulture)}: AI changes\n\nSession: {sessionId}\n\nCo-authored-by: {displayModelName}",
+            cancellationToken);
+    }
+
+    private async ValueTask<AvailableModelPayload> GetConfiguredModelAsync(
         string providerName,
         string modelId,
         CancellationToken cancellationToken)
     {
         var key = $"{providerName}/{modelId}";
         var models = await _llm.GetModelsAsync(cancellationToken);
-        if (!models.Any(model => string.Equals(model.Key, key, StringComparison.Ordinal)))
+        var model = models.FirstOrDefault(model => string.Equals(model.Key, key, StringComparison.Ordinal));
+        if (model is null)
         {
             throw new BridgeRequestException(
                 BridgeErrorCodes.LlmProviderError,
@@ -460,6 +1900,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                 retryable: false,
                 details: new { provider_name = providerName, model_id = modelId });
         }
+
+        return model;
     }
 
     private async ValueTask<int> EmitAgentEventAsync(
@@ -469,6 +1911,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         string? data,
         JsonElement? usage,
         string? error,
+        string? subTaskId,
         CancellationToken cancellationToken)
     {
         var seq = currentSeq;
@@ -480,6 +1923,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                 new AgentEventPayload
                 {
                     TurnId = turnId,
+                    SubTaskId = string.IsNullOrWhiteSpace(subTaskId) ? null : subTaskId,
                     Seq = seq,
                     Type = type,
                     Data = chunk,
@@ -498,6 +1942,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                 new AgentEventPayload
                 {
                     TurnId = turnId,
+                    SubTaskId = string.IsNullOrWhiteSpace(subTaskId) ? null : subTaskId,
                     Seq = seq,
                     Type = type,
                     Usage = usage,
@@ -514,12 +1959,18 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         long novelId,
         string sessionId,
         int turnId,
+        string providerName,
+        string modelId,
+        string reasoningEffort,
         int currentSeq,
         ChatToolCall call,
+        IReadOnlySet<string>? allowedToolNames,
+        string? subTaskId,
+        string agentType,
         CancellationToken cancellationToken)
     {
         var args = ParseToolArguments(call.ArgumentsJson);
-        var activeDisplay = ToolDisplay.For(call.Name, active: true);
+        var activeDisplay = ToolDisplay.For(call.Name, args, active: true);
         var seq = await EmitToolEventAsync(
             turnId,
             currentSeq,
@@ -529,6 +1980,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
             success: null,
             error: null,
             display: activeDisplay,
+            subTaskId,
             cancellationToken);
         seq = await EmitToolEventAsync(
             turnId,
@@ -539,10 +1991,15 @@ public sealed class FileSystemChatSessionService : IChatSessionService
             success: null,
             error: null,
             display: activeDisplay,
+            subTaskId,
             cancellationToken);
 
         ChatToolExecutionResult result;
-        if (_toolExecutor is null)
+        if (allowedToolNames is not null && !allowedToolNames.Contains(call.Name))
+        {
+            result = ChatToolExecutionResult.Failure($"Tool '{call.Name}' is not allowed for {agentType} agent.");
+        }
+        else if (_toolExecutor is null)
         {
             result = ChatToolExecutionResult.Failure("Tool execution is not configured.");
         }
@@ -551,7 +2008,14 @@ public sealed class FileSystemChatSessionService : IChatSessionService
             try
             {
                 result = await _toolExecutor.ExecuteAsync(
-                    new ChatToolExecutionContext(novelId, sessionId, turnId),
+                    new ChatToolExecutionContext(
+                        novelId,
+                        sessionId,
+                        turnId,
+                        providerName,
+                        modelId,
+                        reasoningEffort,
+                        seq),
                     call,
                     cancellationToken);
             }
@@ -565,7 +2029,12 @@ public sealed class FileSystemChatSessionService : IChatSessionService
             }
         }
 
-        var completedDisplay = ToolDisplay.For(call.Name, active: false);
+        if (result.LastSequence is { } lastSequence && lastSequence > seq)
+        {
+            seq = lastSequence;
+        }
+
+        var completedDisplay = ToolDisplay.For(call.Name, args, active: false);
         seq = await EmitToolEventAsync(
             turnId,
             seq,
@@ -575,6 +2044,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
             result.Success,
             result.Error,
             completedDisplay,
+            subTaskId,
             cancellationToken);
 
         return new ExecutedChatToolCall(
@@ -582,6 +2052,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
             result,
             completedDisplay.DisplayText,
             completedDisplay.ActivityKind,
+            completedDisplay.Metadata,
             seq);
     }
 
@@ -594,6 +2065,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         bool? success,
         string? error,
         ToolDisplay display,
+        string? subTaskId,
         CancellationToken cancellationToken)
     {
         var seq = currentSeq + 1;
@@ -602,6 +2074,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
             new AgentEventPayload
             {
                 TurnId = turnId,
+                SubTaskId = string.IsNullOrWhiteSpace(subTaskId) ? null : subTaskId,
                 Seq = seq,
                 Type = 3,
                 ToolName = call.Name,
@@ -612,6 +2085,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
                 Error = string.IsNullOrWhiteSpace(error) ? null : error,
                 DisplayText = display.DisplayText,
                 ActivityKind = display.ActivityKind,
+                Metadata = display.Metadata,
                 Timestamp = UtcNow()
             },
             cancellationToken);
@@ -697,13 +2171,22 @@ public sealed class FileSystemChatSessionService : IChatSessionService
             }
         }).ToArray();
 
-        var toolDisplays = outputs.Select(output => new Dictionary<string, object?>
+        var toolDisplays = outputs.Select(output =>
         {
-            ["tool_id"] = output.Call.Id,
-            ["tool_name"] = output.Call.Name,
-            ["display_text"] = output.DisplayText,
-            ["activity_kind"] = output.ActivityKind,
-            ["phase"] = output.Result.Success ? "completed" : "failed"
+            var display = new Dictionary<string, object?>
+            {
+                ["tool_id"] = output.Call.Id,
+                ["tool_name"] = output.Call.Name,
+                ["display_text"] = output.DisplayText,
+                ["activity_kind"] = output.ActivityKind,
+                ["phase"] = output.Result.Success ? "completed" : "failed"
+            };
+            if (output.Metadata is not null)
+            {
+                display["metadata"] = output.Metadata;
+            }
+
+            return display;
         }).ToArray();
 
         return JsonSerializer.Serialize(
@@ -839,6 +2322,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
             data: null,
             usage: null,
             error: message,
+            subTaskId: null,
             cancellationToken);
     }
 
@@ -986,7 +2470,8 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         bool toFrontend,
         string? eventType,
         string agentType,
-        string? extraMetadata = null)
+        string? extraMetadata = null,
+        string? subTaskId = null)
     {
         var id = AllocateMessageId(store);
         return new ChatMessageDocument
@@ -1002,6 +2487,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService
             ToFrontend = toFrontend,
             EventType = eventType,
             AgentType = agentType,
+            SubTaskId = subTaskId,
             ExtraMetadata = extraMetadata,
             CreatedAt = UtcNow()
         };
@@ -1036,11 +2522,74 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         return input with
         {
             SessionId = NormalizeSessionId(input.SessionId, allowEmpty: true),
+            NovelId = NormalizeNovelId(input.NovelId),
             Message = NormalizeRequiredText(input.Message, nameof(input.Message), MaxMessageLength, allowLineBreaks: true),
             ProviderName = NormalizeProviderName(input.ProviderName),
             ModelId = NormalizeRequiredText(input.ModelId, nameof(input.ModelId), MaxModelIdLength, allowLineBreaks: false),
             ReasoningEffort = NormalizeOptionalText(input.ReasoningEffort, nameof(input.ReasoningEffort), MaxReasoningEffortLength)
         };
+    }
+
+    private static CompressInputPayload NormalizeCompressInput(CompressInputPayload input)
+    {
+        return input with
+        {
+            SessionId = NormalizeSessionId(input.SessionId, allowEmpty: false),
+            ProviderName = NormalizeProviderName(input.ProviderName),
+            ModelId = NormalizeRequiredText(input.ModelId, nameof(input.ModelId), MaxModelIdLength, allowLineBreaks: false)
+        };
+    }
+
+    private static SubagentRunRequest NormalizeSubagentRunRequest(SubagentRunRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ValidateNovelId(request.NovelId);
+        var agentType = NormalizeOptionalText(request.AgentType, nameof(request.AgentType), 32);
+        if (agentType is not ("memory" or "review"))
+        {
+            throw new ArgumentException("Subagent agent_type must be memory or review.", nameof(request));
+        }
+
+        return request with
+        {
+            SessionId = NormalizeSessionId(request.SessionId, allowEmpty: false),
+            ToolId = NormalizeRequiredText(request.ToolId, nameof(request.ToolId), MaxSessionIdLength, allowLineBreaks: false),
+            AgentType = agentType,
+            Instruction = NormalizeRequiredText(request.Instruction, nameof(request.Instruction), MaxMessageLength, allowLineBreaks: true),
+            ProviderName = NormalizeProviderName(request.ProviderName),
+            ModelId = NormalizeRequiredText(request.ModelId, nameof(request.ModelId), MaxModelIdLength, allowLineBreaks: false),
+            ReasoningEffort = NormalizeOptionalText(request.ReasoningEffort, nameof(request.ReasoningEffort), MaxReasoningEffortLength),
+            StartSequence = Math.Max(0, request.StartSequence)
+        };
+    }
+
+    private static IReadOnlySet<string> SubagentAllowedTools(string agentType)
+    {
+        return agentType switch
+        {
+            "memory" => MemorySubagentTools,
+            "review" => ReviewSubagentTools,
+            _ => throw new ArgumentException("Subagent agent_type must be memory or review.", nameof(agentType))
+        };
+    }
+
+    private static string SubagentIdentityPrompt(string agentType)
+    {
+        return agentType switch
+        {
+            "memory" => MemorySubagentPrompt,
+            "review" => ReviewSubagentPrompt,
+            _ => throw new ArgumentException("Subagent agent_type must be memory or review.", nameof(agentType))
+        };
+    }
+
+    private static string TrimLongState(string content)
+    {
+        const int maxStateChars = 20_000;
+        var normalized = content.Trim();
+        return normalized.Length <= maxStateChars
+            ? normalized
+            : normalized[..maxStateChars] + "\n\n[goink.md 内容过长，已截断。可用 read 工具读取完整内容。]";
     }
 
     private static string NormalizeSessionId(string? value, bool allowEmpty)
@@ -1122,6 +2671,12 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         {
             throw new ArgumentOutOfRangeException(nameof(novelId), novelId, "Novel id must be positive.");
         }
+    }
+
+    private static long NormalizeNovelId(long novelId)
+    {
+        ValidateNovelId(novelId);
+        return novelId;
     }
 
     private static string NormalizeTitle(string value)
@@ -1354,18 +2909,101 @@ public sealed class FileSystemChatSessionService : IChatSessionService
         ChatToolExecutionResult Result,
         string DisplayText,
         string ActivityKind,
+        IReadOnlyDictionary<string, object?>? Metadata,
         int Seq);
 
-    private sealed record ToolDisplay(string DisplayText, string ActivityKind)
+    private sealed record CompressionRunResult(
+        IReadOnlyList<ChatCompletionMessage> Messages,
+        int Seq);
+
+    private sealed record SlashInjection(string InjectContent, string SkillName)
     {
-        public static ToolDisplay For(string toolName, bool active)
+        public static SlashInjection Empty { get; } = new(string.Empty, string.Empty);
+    }
+
+    private sealed record ResolvedSkillDocument(
+        string Name,
+        string Description,
+        string Mode,
+        string Source,
+        string Content,
+        string RawContent);
+
+    private sealed record ToolDisplay(
+        string DisplayText,
+        string ActivityKind,
+        IReadOnlyDictionary<string, object?>? Metadata)
+    {
+        public static ToolDisplay For(string toolName, JsonElement? args, bool active)
         {
-            var (text, kind) = toolName switch
+            var (text, kind, metadata) = toolName switch
             {
-                "search_story_memory" => ("搜索故事记忆", "memory"),
-                _ => (toolName, "general")
+                "search_story_memory" => ("搜索故事记忆", "memory", null),
+                "read" => (ReadPathDisplay(args), "view", null),
+                "edit" => (EditPathDisplay(args), "write", null),
+                "run_subagent" => SubagentDisplay(args),
+                _ => (toolName, "general", null)
             };
-            return new ToolDisplay(active ? $"正在{text}" : text, kind);
+            return new ToolDisplay(active ? $"正在{text}" : text, kind, metadata);
+        }
+
+        private static (string Text, string Kind, IReadOnlyDictionary<string, object?> Metadata) SubagentDisplay(JsonElement? args)
+        {
+            var agentType = ReadString(args, "agent_type");
+            var text = agentType switch
+            {
+                "review" => "审核章节内容",
+                "memory" => "探索故事记忆",
+                _ => "调度AI子任务"
+            };
+            return (text, "plan", new Dictionary<string, object?> { ["agent_type"] = agentType });
+        }
+
+        private static string ReadPathDisplay(JsonElement? args)
+        {
+            var path = ReadString(args, "path");
+            return path switch
+            {
+                "goink.md" => "查看 故事状态",
+                _ when path.StartsWith("chapters/", StringComparison.Ordinal) =>
+                    $"查看 第{ParsePathNumber(path, "chapters/").ToString(CultureInfo.InvariantCulture)}章",
+                _ when path.StartsWith("outlines/", StringComparison.Ordinal) =>
+                    $"查看 第{ParsePathNumber(path, "outlines/").ToString(CultureInfo.InvariantCulture)}章大纲",
+                _ => "读取文件内容"
+            };
+        }
+
+        private static string EditPathDisplay(JsonElement? args)
+        {
+            var path = ReadString(args, "path");
+            return path switch
+            {
+                "goink.md" => "编辑 故事状态",
+                _ when path.StartsWith("chapters/", StringComparison.Ordinal) =>
+                    $"编辑 第{ParsePathNumber(path, "chapters/").ToString(CultureInfo.InvariantCulture)}章",
+                _ when path.StartsWith("outlines/", StringComparison.Ordinal) =>
+                    $"编辑 第{ParsePathNumber(path, "outlines/").ToString(CultureInfo.InvariantCulture)}章大纲",
+                _ => "编辑文件内容"
+            };
+        }
+
+        private static string ReadString(JsonElement? args, string propertyName)
+        {
+            return args is not null &&
+                args.Value.TryGetProperty(propertyName, out var value) &&
+                value.ValueKind == JsonValueKind.String
+                    ? value.GetString() ?? string.Empty
+                    : string.Empty;
+        }
+
+        private static int ParsePathNumber(string path, string prefix)
+        {
+            var fileName = path[prefix.Length..];
+            var dot = fileName.IndexOf('.', StringComparison.Ordinal);
+            return dot > 0 &&
+                int.TryParse(fileName.AsSpan(0, dot), NumberStyles.None, CultureInfo.InvariantCulture, out var number)
+                    ? number
+                    : 0;
         }
     }
 

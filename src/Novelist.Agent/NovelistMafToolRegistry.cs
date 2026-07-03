@@ -7,12 +7,13 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.AI;
 using Novelist.Contracts.App;
+using Novelist.Contracts.Bridge;
 using Novelist.Core.App;
 using Novelist.Core.Bridge;
 
 namespace Novelist.Agent;
 
-public sealed class NovelistMafToolRegistry
+public sealed partial class NovelistMafToolRegistry
 {
     private static readonly JsonSerializerOptions DefaultSerializerOptions = new(JsonSerializerDefaults.Web)
     {
@@ -24,6 +25,12 @@ public sealed class NovelistMafToolRegistry
     private readonly IChapterContentService? _chapterContent;
     private readonly IApprovalCoordinator? _approvals;
     private readonly IBridgeEventSink _events;
+    private readonly ISubagentRunner? _subagents;
+    private readonly IPreferenceService? _preferences;
+    private readonly IWorldEntityService? _world;
+    private readonly IPlanningService? _planning;
+    private readonly IWebFetchService? _webFetch;
+    private readonly IWebSearchService? _webSearch;
     private readonly JsonSerializerOptions _serializerOptions;
 
     public NovelistMafToolRegistry(
@@ -34,6 +41,12 @@ public sealed class NovelistMafToolRegistry
             chapterContent: null,
             approvals: null,
             events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: null,
+            webSearch: null,
             serializerOptions)
     {
     }
@@ -43,12 +56,24 @@ public sealed class NovelistMafToolRegistry
         IChapterContentService? chapterContent,
         IApprovalCoordinator? approvals,
         IBridgeEventSink? events,
+        ISubagentRunner? subagents = null,
+        IPreferenceService? preferences = null,
+        IWorldEntityService? world = null,
+        IPlanningService? planning = null,
+        IWebFetchService? webFetch = null,
+        IWebSearchService? webSearch = null,
         JsonSerializerOptions? serializerOptions = null)
     {
         _storyMemory = storyMemory ?? throw new ArgumentNullException(nameof(storyMemory));
         _chapterContent = chapterContent;
         _approvals = approvals;
         _events = events ?? new NullBridgeEventSink();
+        _subagents = subagents;
+        _preferences = preferences;
+        _world = world;
+        _planning = planning;
+        _webFetch = webFetch;
+        _webSearch = webSearch;
         _serializerOptions = EnsureTypeInfoResolver(serializerOptions ?? DefaultSerializerOptions);
     }
 
@@ -65,6 +90,9 @@ public sealed class NovelistMafToolRegistry
             new StoryMemoryMafTool(_storyMemory, context.NovelId, _serializerOptions).CreateFunction()
         };
 
+        AddWebTools(tools);
+        AddStructuredTools(tools, context);
+
         if (_chapterContent is not null)
         {
             tools.Add(new ReadMafTool(_chapterContent, context.NovelId, _serializerOptions).CreateFunction());
@@ -79,8 +107,17 @@ public sealed class NovelistMafToolRegistry
             }
         }
 
+        if (_subagents is not null)
+        {
+            tools.Add(new RunSubagentMafTool(_subagents, context, _serializerOptions).CreateFunction());
+        }
+
         return tools;
     }
+
+    private partial void AddStructuredTools(List<AIFunction> tools, NovelistMafToolContext context);
+
+    private partial void AddWebTools(List<AIFunction> tools);
 
     private static JsonSerializerOptions EnsureTypeInfoResolver(JsonSerializerOptions options)
     {
@@ -492,6 +529,93 @@ public sealed class NovelistMafToolRegistry
         }
     }
 
+    private sealed class RunSubagentMafTool
+    {
+        private const string ToolName = "run_subagent";
+        private const string ToolDescription = """
+            启动专项子 Agent 执行任务，子 Agent 独立运行多轮思考后返回报告。
+
+            Agent 类型：
+            - memory：记忆检索分析员。可以搜索故事记忆、读取章节/大纲/状态文档，将分散的信息整合为连贯报告。
+            - review：章节审稿人。可以读取章节内容、检索故事记忆，逐项检查角色一致性、情节逻辑、伏笔管理、读者认知和弧线推进，输出审稿意见。
+
+            instruction 应清晰描述任务目标和期望输出。
+            """;
+
+        private static readonly MethodInfo RunMethod =
+            typeof(RunSubagentMafTool).GetMethod(
+                nameof(RunSubagentAsync),
+                BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(
+                typeof(RunSubagentMafTool).FullName,
+                nameof(RunSubagentAsync));
+
+        private readonly ISubagentRunner _subagents;
+        private readonly NovelistMafToolContext _context;
+        private readonly JsonSerializerOptions _serializerOptions;
+
+        public RunSubagentMafTool(
+            ISubagentRunner subagents,
+            NovelistMafToolContext context,
+            JsonSerializerOptions serializerOptions)
+        {
+            _subagents = subagents;
+            _context = context;
+            _serializerOptions = serializerOptions;
+        }
+
+        public AIFunction CreateFunction()
+        {
+            return AIFunctionFactory.Create(
+                RunMethod,
+                this,
+                new AIFunctionFactoryOptions
+                {
+                    Name = ToolName,
+                    Description = ToolDescription,
+                    SerializerOptions = _serializerOptions
+                });
+        }
+
+        [Description(ToolDescription)]
+        private ValueTask<SubagentRunResult> RunSubagentAsync(
+            [Description("子 Agent 类型：memory / review")]
+            string agent_type,
+            [Description("给子 Agent 的任务指令，描述需要完成的具体工作")]
+            string instruction,
+            CancellationToken cancellationToken = default)
+        {
+            var agentType = NormalizeAgentType(agent_type);
+            var normalizedInstruction = NormalizeRequiredInstruction(instruction);
+            EnsureSubagentContext();
+            return _subagents.RunAsync(
+                new SubagentRunRequest(
+                    _context.NovelId,
+                    _context.SessionId,
+                    _context.TurnId,
+                    _context.ToolId,
+                    agentType,
+                    normalizedInstruction,
+                    _context.ProviderName,
+                    _context.ModelId,
+                    _context.ReasoningEffort,
+                    _context.CurrentSequence),
+                cancellationToken);
+        }
+
+        private void EnsureSubagentContext()
+        {
+            if (string.IsNullOrWhiteSpace(_context.SessionId) ||
+                _context.TurnId <= 0 ||
+                string.IsNullOrWhiteSpace(_context.ToolId) ||
+                string.IsNullOrWhiteSpace(_context.ProviderName) ||
+                string.IsNullOrWhiteSpace(_context.ModelId))
+            {
+                throw new InvalidOperationException("子 Agent 调度缺少父会话上下文。");
+            }
+        }
+    }
+
     private sealed record ReadFileToolResult(
         [property: JsonPropertyName("path")] string Path,
         [property: JsonPropertyName("display")] string Display,
@@ -542,6 +666,37 @@ public sealed class NovelistMafToolRegistry
             "full_replace" or "search_replace" or "line_range_replace" => normalized,
             _ => throw new ArgumentException($"未知的 change_type: {changeType}", nameof(changeType))
         };
+    }
+
+    private static string NormalizeAgentType(string? agentType)
+    {
+        var normalized = (agentType ?? string.Empty).Trim();
+        return normalized switch
+        {
+            "memory" or "review" => normalized,
+            _ => throw new ArgumentException("agent_type 必须是 memory 或 review。", nameof(agentType))
+        };
+    }
+
+    private static string NormalizeRequiredInstruction(string? instruction)
+    {
+        var normalized = (instruction ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new ArgumentException("instruction 不能为空。", nameof(instruction));
+        }
+
+        if (normalized.Length > 100_000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(instruction), normalized.Length, "instruction 过长。");
+        }
+
+        if (normalized.Any(ch => char.IsControl(ch) && ch is not ('\r' or '\n' or '\t')))
+        {
+            throw new ArgumentException("instruction 不能包含不支持的控制字符。", nameof(instruction));
+        }
+
+        return normalized;
     }
 
     private static string ApplyChange(

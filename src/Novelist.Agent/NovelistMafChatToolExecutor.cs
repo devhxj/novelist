@@ -38,7 +38,12 @@ public sealed class NovelistMafChatToolExecutor : IChatToolExecutor
             context.NovelId,
             context.SessionId,
             context.TurnId,
-            call.Id));
+            call.Id,
+            context.ProviderName,
+            context.ModelId,
+            context.ReasoningEffort,
+            context.CurrentSequence,
+            call.ArgumentsJson));
         var function = tools.SingleOrDefault(item => string.Equals(item.Name, call.Name, StringComparison.Ordinal));
         if (function is null)
         {
@@ -52,7 +57,10 @@ public sealed class NovelistMafChatToolExecutor : IChatToolExecutor
             var data = result is JsonElement element
                 ? element.Clone()
                 : JsonSerializer.SerializeToElement(result, JsonOptions);
-            return ChatToolExecutionResult.Succeeded(data);
+            int? lastSequence = result is ISequencedChatToolResult sequenced
+                ? sequenced.LastSequence
+                : null;
+            return ChatToolExecutionResult.Succeeded(data, lastSequence);
         }
         catch (OperationCanceledException)
         {
@@ -107,7 +115,7 @@ public sealed class NovelistMafChatToolExecutor : IChatToolExecutor
         var items = value.EnumerateArray().ToArray();
         if (items.Length == 0)
         {
-            return Array.Empty<object>();
+            return value.Clone();
         }
 
         if (items.All(item => item.ValueKind == JsonValueKind.String))
@@ -125,6 +133,6 @@ public sealed class NovelistMafChatToolExecutor : IChatToolExecutor
             return items.Select(item => item.GetDouble()).ToArray();
         }
 
-        return items.Select(ToArgumentValue).ToArray();
+        return value.Clone();
     }
 }

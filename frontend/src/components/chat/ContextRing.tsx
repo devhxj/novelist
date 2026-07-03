@@ -111,7 +111,7 @@ export default function ContextRing({ usage, onCompress, isTurnRunning, isCompre
           {hasUsage && usage.detail && (
             <div className="flex flex-col gap-1.5 border-t pt-2">
               {Object.entries(DETAIL_LABELS).map(([key, label]) => {
-                const count = (usage.detail as any)[key] || 0
+                const count = usage.detail[key as keyof UsageInfo['detail']] || 0
                 return (
                   <div key={key} className="flex justify-between items-center text-xs">
                     <span className="text-muted-foreground">{label}</span>

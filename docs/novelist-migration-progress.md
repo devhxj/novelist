@@ -12,15 +12,15 @@
 - 每个任务必须有明确验收标准和验证记录。
 - 每完成一个任务，立即更新本文档的状态、当前任务和下一任务。
 - 迁移实现必须保持高质量、健壮、可回滚；不得用临时 mock 或简化逻辑替代真实迁移要求。
-- 保留旧 Go/Wails 实现直到 Photino + .NET 版本达到功能对等并通过迁移验证。
+- 旧 Go/Wails 主线代码只在 Git 历史和历史设计文档中保留；当前产品路径必须走 Photino + .NET。
 
 ## Current State
 
-- Phase: `Phase 5 - Microsoft Agent Framework Migration`
-- Current task: `P5.3 Port write/edit tools behind approval coordinator`
-- Next task: `P5.4 Port subagent orchestration`
-- Overall status: `In progress`
-- Last updated: `2026-07-03`
+- Phase: `Phase 9 - Legacy Retirement`
+- Current task: `Migration complete`
+- Next task: `None for migration; release signing/notarization remains launch work`
+- Overall status: `Completed`
+- Last updated: `2026-07-04`
 
 ## Task Board
 
@@ -38,7 +38,7 @@
 | P1.4 | Serve built frontend assets from Novelist.App | Completed | Added configurable `frontend/dist` static asset serving and SPA fallback tests; optional `/health` and `/hubs/events` still pass; `dotnet test Novelist.slnx --no-restore -v minimal` passed 10/10 tests |
 | P1.5 | Load served frontend from Photino desktop mode | Completed | `--desktop` orchestration test starts loopback host and passes `http://127.0.0.1:{port}/` to fake Photino window; `--start-url=` override tested; `dotnet test Novelist.slnx --no-restore -v minimal` passed 13/13 tests |
 | P1.6 | Define Photino bridge protocol and dispatcher skeleton | Completed | Added bridge envelopes, stable error codes, dispatcher skeleton, event envelope, cancellation parsing, and tests for success/unknown/malformed/validation/cancel/internal-error behavior; `dotnet test Novelist.slnx --no-restore -v minimal` passed 20/20 tests |
-| P2.0 | Create frontend novelist bridge adapter modules | Completed | Added `bridge.ts`, `api.ts`, `events.ts`, and `runtime.ts`; `npm --prefix frontend run build` passed; `npm exec eslint -- 'src/lib/novelist/**/*.ts'` passed from `frontend/`; `dotnet test Novelist.slnx --no-restore -v minimal` passed 20/20 tests; full `npm --prefix frontend run lint` still fails on pre-existing non-P2.0 files |
+| P2.0 | Create frontend novelist bridge adapter modules | Completed | Added `bridge.ts`, `api.ts`, `events.ts`, and `runtime.ts`; `npm --prefix frontend run build` passed; `npm exec eslint -- 'src/lib/novelist/**/*.ts'` passed from `frontend/`; `dotnet test Novelist.slnx --no-restore -v minimal` passed 20/20 tests; full frontend lint is covered by final P9.1 verification |
 | P2.1 | Wire useApp to bridge adapter without component rewrites | Completed | `frontend/src/hooks/useApp.ts` now returns `appApi` from `frontend/src/lib/novelist/api.ts`; generated Wails App function imports removed from `useApp.ts`; `npm --prefix frontend run build` passed; `npm exec eslint -- 'src/lib/novelist/**/*.ts'` passed from `frontend/`; `dotnet test Novelist.slnx --no-restore -v minimal` passed 20/20 tests |
 | P2.2 | Replace direct Wails runtime imports with novelist events/runtime adapters | Completed | Replaced runtime/event imports in `WorkspaceView`, `ChatPanel`, `ContentPanel`, `ChapterList`, `GitHubLink`, and `BuiltinProviderPane`; `rg '@/lib/wailsjs/runtime/runtime' frontend/src` has no matches; `npm --prefix frontend run build` passed; `npm exec eslint -- 'src/lib/novelist/**/*.ts' 'src/hooks/useApp.ts'` passed from `frontend/`; `dotnet test Novelist.slnx --no-restore -v minimal` passed 20/20 tests |
 | P2.3 | Replace remaining direct Wails App imports in React components | Completed | Replaced `SearchAll` and `DiscoverModels` direct imports with `useApp()` bridge calls; `rg '@/lib/wailsjs/go/app/App' frontend/src` has no matches; moved `SearchPanel` result callback ref synchronization out of render; targeted lint passed for touched adapter/component files; `npm --prefix frontend run build` passed; `dotnet test Novelist.slnx --no-restore -v minimal` passed 20/20 tests |
@@ -61,7 +61,16 @@
 | P5.0 | Start Microsoft Agent Framework tool adapter baseline | Completed | Added `Microsoft.Agents.AI` package baseline and a `NovelistMafToolRegistry` that exposes `search_story_memory` as a Microsoft.Extensions.AI `AIFunction` with the old flat tool schema, session-scoped novel context, unchanged Novelist DTO results, and unit coverage for schema/invocation; `dotnet test Novelist.slnx --no-restore -v minimal` passed 111/111; `npm --prefix frontend run build` passed |
 | P5.1 | Port approval wait/resume contract for tool calls | Completed | Added approval DTOs, `ToolApprovalCoordinator`, legacy `ApproveTool(toolId, approved, feedback)` bridge handler, Photino wiring, event payload tool metadata support, and chat-cancel cleanup; `dotnet test Novelist.slnx --no-restore -v minimal` passed 114/114; `npm --prefix frontend run build` passed |
 | P5.2 | Wire MAF-backed chat tool execution loop | Completed | Added neutral chat tool contracts, OpenAI-compatible `tools` request/streaming `tool_calls` parsing, `NovelistMafChatToolExecutor`, MAF-backed chat loop execution, legacy tool events, assistant `tool_calls`/`tool_displays` persistence, and tool result message replay; `dotnet test Novelist.slnx --no-restore -v minimal` passed 116/116; `npm --prefix frontend run build` passed |
-| P5.3 | Port write/edit tools behind approval coordinator | Pending | Pending |
+| P5.3 | Port write/edit tools behind approval coordinator | Completed | Added MAF `read` / `edit` adapters over `IChapterContentService`, approval-gated file edit flow, legacy `file_edit` approval payloads, `file:changed` emission, chapter word-count/RAG stale preservation, rejection/cancellation coverage; `dotnet test Novelist.slnx --no-restore -v minimal` passed 121/121; `npm --prefix frontend run build` passed |
+| P5.4 | Port subagent orchestration | Completed | Added real `run_subagent` MAF orchestration, nested event routing, persistence, and cancellation; `dotnet test Novelist.slnx --no-restore -v minimal` passed 127/127; `npm --prefix frontend run build` passed |
+| P5.5 | Port chat skill context and slash injection | Completed | Added main system prompt, initial novel state, auto/always/manual skill semantics, and hidden slash-command injection; `dotnet test Novelist.slnx --no-restore -v minimal` passed 127/127; `npm --prefix frontend run build` passed |
+| P5.6 | Port compression and token budget handling | Completed | Added real `CompressContext`, active-version rebuild, compression events/markers, usage enrichment, next-turn auto compression, and subagent in-memory compression; `dotnet test Novelist.slnx --no-restore -v minimal` passed 127/127; `npm --prefix frontend run build` passed |
+| P5.7 | Port remaining structured MAF tool surface | Completed | Added real MAF adapters for chapter list, preferences, characters/relations, locations/relations, timeline/chapter plans, story arcs/nodes, reader perspective, and delete_record over migrated services; added relation write/delete service support, delete approval/impact checks, structured tool schemas and subagent read-only allowlist coverage; `dotnet test Novelist.slnx --no-restore -v minimal` passed 134/134; `npm --prefix frontend run build` passed |
+| P5.8 | Port web search/fetch MAF tools | Completed | Added real `web_fetch` and DeepSeek Anthropic `web_search` MAF tools with SSRF-safe fetch validation, response limits, HTML cleanup, deterministic network seams, service tests, main-agent registration, and subagent non-allowlist coverage; `dotnet test Novelist.slnx --no-restore -v minimal` passed 145/145; `npm --prefix frontend run build` passed |
+| P5.9 | Define release-candidate migration gap audit | Completed | `docs/novelist-release-candidate-gap-audit.md` created with RC blockers, acceptance dependencies, and work order |
+| P5.10 | Close release-candidate blocking gaps | Completed | Closed RC-01..RC-05: release path migrated, cover API/route implemented, Git history semantics migrated, legacy Goink copy-first migration implemented, and web cards routed through Photino external URL bridge |
+| P9.0 | Retire legacy Go/Wails mainline code | Completed | Removed `main.go`, `go.mod`, `go.sum`, `wails.json`, `app/**`, `internal/**`, `frontend/src/lib/wailsjs/**`, and `scripts/download-onnx.sh`; builtin skills moved to `src/Novelist.Infrastructure/BuiltinSkills/` |
+| P9.1 | Final migration verification and release-path smoke test | Completed | `npm --prefix frontend run lint` passed; `npm --prefix frontend run build` passed with only Vite chunk-size warning; `dotnet build Novelist.slnx --no-restore -v minimal /m:1 /p:UseSharedCompilation=false` passed with only network-limited NU1900 warnings; `dotnet test Novelist.slnx --no-restore --no-build -v minimal /m:1 /p:UseSharedCompilation=false` passed 156/156; `NO_RESTORE=1 bash scripts/novelist-publish.sh` passed; final legacy-stack scans returned no matches |
 
 ## Completed Work Log
 
@@ -82,7 +91,7 @@
 - Corrected the architecture to Photino Bridge-first for performance and lightweight runtime goals. Loopback HTTP/SignalR work is retained only as optional diagnostics/test infrastructure; the packaged product communication path is Photino WebMessage.
 - Added `docs/novelist-photino-bridge-contract.md` as the primary IPC contract.
 - Completed P1.6 bridge skeleton: added typed bridge envelopes and error codes in `Novelist.Contracts`, dispatcher and validation exception types in `Novelist.Core`, and tests for request routing, unknown methods, malformed JSON, validation failures, cancellation envelopes, event envelopes, and internal error redaction.
-- Completed P2.0 frontend bridge adapter modules: added a Photino WebMessage client with request id correlation, timeout and abort cancellation envelopes, response/error conversion, event dispatch, message size limits, and isolated event handler failures; added app method, event, and runtime wrappers; `openExternal` accepts only absolute `https://` URLs. Verified frontend build, isolated lint for new files, and .NET tests. Full frontend lint remains blocked by existing React/generated-binding errors outside this task.
+- Completed P2.0 frontend bridge adapter modules: added a Photino WebMessage client with request id correlation, timeout and abort cancellation envelopes, response/error conversion, event dispatch, message size limits, and isolated event handler failures; added app method, event, and runtime wrappers; `openExternal` accepts only absolute `https://` URLs. Verified frontend build, isolated lint for new files, and .NET tests. Full frontend lint is covered by the final P9.1 verification.
 - Completed P2.1 `useApp()` bridge wiring: moved the full App method surface into `frontend/src/lib/novelist/api.ts`, kept existing method names and TypeScript return shapes, and changed `frontend/src/hooks/useApp.ts` to return the app-owned bridge API instead of generated Wails App functions. Existing model type exports remain as a compatibility bridge until .NET DTO contracts replace them.
 - Completed P2.2 runtime bridge wiring: replaced all direct `@/lib/wailsjs/runtime/runtime` imports with `@/lib/novelist/events` and `@/lib/novelist/runtime`, preserving component call sites and Wails-compatible function names while routing through Photino bridge methods.
 - Completed P2.3 component App bridge wiring: replaced remaining direct `@/lib/wailsjs/go/app/App` imports in `SearchPanel` and `ModelDiscoveryPanel` with `useApp()` calls. The frontend now routes generated App method usage through `frontend/src/lib/novelist/api.ts`; generated model namespaces remain type-only compatibility dependencies.
@@ -105,29 +114,49 @@
 - Completed P5.0 Microsoft Agent Framework tool adapter baseline: added `Microsoft.Agents.AI` `1.12.0`, introduced `NovelistMafToolContext` and `NovelistMafToolRegistry`, exposed `search_story_memory` as a MAF-compatible `AIFunction`, preserved the old LLM-facing flat parameter schema (`query`, `top_k`, `min_relevance`, `chapter_numbers`, `chunk_types`) while injecting `novel_id` from session context, kept direct `IStoryMemorySearchService` usable for rollback, and validated both generated schema and invocation result serialization. Verified `dotnet test Novelist.slnx --no-restore -v minimal` passed 111/111 and `npm --prefix frontend run build` passed with existing chunk-size warnings only.
 - Completed P5.1 approval wait/resume contract: inventoried the old Go blocking approval service and current React `awaiting_approval` UI contract, added .NET approval DTOs, `IApprovalCoordinator` / `ToolApprovalCoordinator`, stable legacy `AgentEventPayload` tool fields with `metadata.approval_type` and `metadata.payload`, `ApproveTool` bridge handling with idempotent duplicate completion, session cancellation cleanup, and Photino desktop wiring. Verified `dotnet test Novelist.slnx --no-restore -v minimal` passed 114/114 and `npm --prefix frontend run build` passed with existing chunk-size warnings only.
 - Completed P5.2 MAF-backed chat tool loop: extended the internal chat stream contract with neutral tool definitions/calls/results, added OpenAI-compatible `tools` request serialization and streaming `tool_calls` accumulation, introduced `NovelistMafChatToolExecutor`, wired Photino desktop chat through the MAF `search_story_memory` tool, emitted legacy `selected` / `executing` / `completed` / `failed` `AgentEventPayload` tool events, persisted assistant `tool_calls` plus `tool_displays`, and replayed tool result messages into the next model round. Verified `dotnet test Novelist.slnx --no-restore -v minimal` passed 116/116 and `npm --prefix frontend run build` passed with existing chunk-size warnings only.
+- Completed P5.3 write/edit tool migration: extended tool execution context with session/turn data, added MAF `read` and approval-gated `edit` tools while preserving the old line-numbered read result and `file_edit` approval payload, routed approved writes through `IChapterContentService`, emitted `file:changed`, preserved chapter word-count and RAG stale behavior, and covered approval, rejection, and cancellation paths. Verified `dotnet test Novelist.slnx --no-restore -v minimal` passed 121/121 and `npm --prefix frontend run build` passed with existing chunk-size warnings only.
+- Completed P5.4 subagent orchestration: added `ISubagentRunner`, `run_subagent` MAF adapter, real memory/review subagent loops over the shared chat client, read/search allowlists, nested `sub_task_id` event routing, persisted subagent assistant/tool rounds for history rebuild, parent sequence preservation, and cancellation propagation. Verified `dotnet test Novelist.slnx --no-restore -v minimal` passed 127/127 and `npm --prefix frontend run build` passed with existing chunk-size warnings only.
+- Completed P5.5 skill/slash context migration: new chat sessions now persist API-only system messages for main Agent identity, always skills, auto skill catalog, and novel state; `/skill` user messages inject hidden system-reminder context with manual/auto/always mode semantics while preserving the visible user message. Added integration coverage for skill layering, catalog filtering, slash injection, and frontend history visibility. Verified `dotnet test Novelist.slnx --no-restore -v minimal` passed 127/127 and `npm --prefix frontend run build` passed with existing chunk-size warnings only.
+- Completed P5.6 compression/token-budget migration: added real `CompressContext` bridge handling, append-only `active_version` rebuild, compression reminder/summary messages, frontend compression markers/events, usage payload enrichment with `context_window`/`usage_ratio`, next-turn auto compression when prior usage exceeds 80%, and subagent in-memory compression with nested markers. Verified `dotnet test Novelist.slnx --no-restore -v minimal` passed 127/127 and `npm --prefix frontend run build` passed with existing chunk-size warnings only.
+- Completed P5.7 structured MAF tool migration: ported remaining structured novel tools over real .NET services, including batch creation/update adapters, formatted memory reads, relation evolution and location relation writes, approval-gated `delete_record`, and read-only structured tool allowlists for memory/review subagents. Added real domain support for character/location relation writes/deletes and full relation impact checks. Verified `dotnet test Novelist.slnx --no-restore -v minimal` passed 134/134 and `npm --prefix frontend run build` passed with existing chunk-size warnings only.
+- Completed P5.8 web tool migration: added `IWebFetchService` / `IWebSearchService` contracts and JSON payloads, registered `web_fetch` / `web_search` as MAF tools with the legacy LLM-facing schemas, implemented `HttpWebFetchService` with HTTP/HTTPS-only validation, userinfo rejection, metadata/private/reserved IP blocking, DNS validation, redirect validation, response size and content-type limits, anti-crawl and garbled-text detection, markdown cleanup and truncation, and deterministic HTTP/DNS test seams. Implemented `DeepSeekWebSearchService` over the real DeepSeek Anthropic `web_search_20260209` service-side tool, including configured DeepSeek API key lookup, request timeout/response limit, response block parsing, source validation, and API key redaction. Wired both services into the Photino desktop MAF registry for the main Agent only; memory/review subagent allowlists intentionally remain local/read-only. Verified `dotnet test Novelist.slnx --no-restore -v minimal` passed 145/145 and `npm --prefix frontend run build` passed with existing chunk-size warnings only.
+- Completed P5.9 release-candidate gap audit: documented RC-01 through RC-05 in `docs/novelist-release-candidate-gap-audit.md`, separated release blockers from historical/follow-up cleanup, and turned the audit into a concrete closure work order.
+- Completed P5.10 RC blocker closure: migrated release/test workflows and packaging scripts to .NET/Photino, implemented validated cover persistence and `/covers/{novelId}`, added real per-novel Git repository/commit semantics, implemented copy-first legacy Goink data migration with manifest/import coverage, and routed web result cards through the Photino runtime bridge.
+- Completed frontend DTO ownership cleanup: added `frontend/src/lib/novelist/types.ts`, removed runtime/type dependencies on generated Wails bindings, and deleted `frontend/src/lib/wailsjs/**`.
+- Completed legacy Go/Wails retirement: removed `main.go`, `go.mod`, `go.sum`, `wails.json`, `app/**`, `internal/**`, and `scripts/download-onnx.sh`; moved builtin skill resources into `src/Novelist.Infrastructure/BuiltinSkills/`; updated README, AGENTS, build docs, Makefile, CI, and package scripts for Novelist .NET/Photino.
+- Completed product branding cleanup for active UI text: changed visible Goink product labels in initialization, help, title fallback, Agent identity prompt, and EPUB default creator to Novelist while preserving `goink.md`, `~/.goink/skills/<name>.md`, and legacy migration names as compatibility contracts.
+- Completed final lint and active-rule cleanup: full `npm --prefix frontend run lint` passes; `docs/rules/frontend-crud-patterns.md` now describes the owned Novelist bridge, contract, service, validation, and verification workflow instead of the retired desktop binding flow; active frontend code no longer carries the stale draggable CSS variable from the retired runtime.
+- Completed final packaging brand cleanup: Linux and macOS package scripts no longer fall back to old product-named icon files; they use `novelist` icons or the shared `build/appicon.png` fallback.
+- Final verification: `npm --prefix frontend run lint` passed; `npm --prefix frontend run build` passed with only the existing Vite chunk-size warning; `dotnet build Novelist.slnx --no-restore -v minimal /m:1 /p:UseSharedCompilation=false` passed with only NU1900 vulnerability-index warnings caused by restricted network; `dotnet test Novelist.slnx --no-restore --no-build -v minimal /m:1 /p:UseSharedCompilation=false` passed 37 unit tests and 119 integration tests; `NO_RESTORE=1 bash scripts/novelist-publish.sh` passed and produced `build/bin/novelist`.
+- Local RID self-contained publish note: `NO_RESTORE=1 bash scripts/novelist-publish.sh win-x64` requires RID runtime packs to be present in the local restore assets. In this restricted-network sandbox those packs were absent (`NETSDK1047` / missing `net10.0/win-x64` assets). The framework-dependent publish smoke test passes, and the publish script uses a staging directory so failed RID publishes preserve the previous output.
 
 ## Active Task Detail
 
-### P5.3 Port write/edit tools behind approval coordinator
+### Migration completed
 
-Scope:
+Scope completed:
 
-- Inventory the old Go `read` / `edit` file tool behavior, SafePath checks, diff payloads, and `file:changed` events.
-- Add MAF tool adapters for read-only file access and approval-gated file edits without exposing MAF-native event shapes to React.
-- Use `IApprovalCoordinator` to emit `awaiting_approval` events with the existing `file_edit` payload shape, wait for approve/reject, and resume exactly one tool call.
-- On approval, write through the existing chapter/content services where possible so word counts and RAG stale markers stay consistent.
-- Keep delete/bulk-write tools out of scope unless needed for parity with the current React diff approval flow.
+- The active product path is Novelist on .NET 10 + Photino + React + Microsoft Agent Framework.
+- The old Go/Wails runtime, generated Wails bindings, and ONNX download path have been removed from the mainline source tree.
+- Legacy Goink user data is migrated through a copy-first service with manifest records and integration coverage.
+- Release/test/build/package entrypoints now target the Novelist .NET/Photino stack.
+- Compatibility names that remain (`goink.md`, `~/.goink/skills/<name>.md`, legacy migration class names) are intentional data/tool-path compatibility contracts.
 
-Acceptance criteria:
+Completion criteria:
 
-- `read` can return safe workspace file content to the model.
-- `edit` emits the legacy `awaiting_approval` event and opens the existing frontend diff flow.
-- Approved edits persist content, emit `file:changed`, update chapter word counts when editing chapter files, and mark the novel RAG index stale.
-- Rejected edits return deterministic user-feedback content to the model without writing files.
-- Cancellation clears pending file-edit approvals.
-- Existing frontend build and .NET tests pass.
+- RC-01 through RC-05 are closed in `docs/novelist-release-candidate-gap-audit.md`.
+- Current release-path grep has no retired desktop-runtime, local ONNX, generated-binding, or Go build dependency in README, AGENTS, CI, Makefile, packaging scripts, active docs/rules, active src/tests, or frontend source.
+- Frontend lint, frontend production build, and .NET test suite pass.
+- Framework-dependent Release publish smoke test passes locally.
 
-Verification plan:
+Latest verification:
 
-- Run `npm --prefix frontend run build`.
-- Run `dotnet test Novelist.slnx --no-restore -v minimal`.
+- `npm --prefix frontend run lint`.
+- `npm --prefix frontend run build`.
+- `$env:NUGET_PACKAGES=(Resolve-Path .\.dotnet\.nuget\packages).Path; dotnet build Novelist.slnx --no-restore -v minimal /m:1 /p:UseSharedCompilation=false`.
+- `$env:NUGET_PACKAGES=(Resolve-Path .\.dotnet\.nuget\packages).Path; dotnet test Novelist.slnx --no-restore --no-build -v minimal /m:1 /p:UseSharedCompilation=false`.
+- `NO_RESTORE=1 bash scripts/novelist-publish.sh`.
+- `rg -n -i 'wails|onnx|download-onnx|frontend/src/lib/wailsjs|go test|go build|go mod|wails build|wails dev' README.md README_EN.md AGENTS.md docs\build-setup.md docs\build\cross-platform-build.md docs\rules .github Makefile build\package scripts src tests frontend\src --glob '!frontend/dist/**' --glob '!**/bin/**' --glob '!**/obj/**'`.
+- `rg -n '@/lib/wailsjs|lib/wailsjs|from .*wailsjs|window\.open|--wails-draggable|goink\.(png|icns|ico)' frontend\src build\package --glob '!frontend/dist/**'`.
+- `rg --files | rg '(^|/)(main\.go|go\.mod|go\.sum|wails\.json)$|^app/|^internal/|frontend/src/lib/wailsjs|download-onnx'`.
+- `git diff --check` completed with no whitespace errors; Git reported CRLF conversion warnings only.

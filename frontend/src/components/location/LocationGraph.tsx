@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Graph, treeToGraphData } from '@antv/g6'
+import { Graph, treeToGraphData, type EdgeData, type GraphData, type NodeData } from '@antv/g6'
 import { LocateFixed, Map as MapIcon, RefreshCw, X } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import { useGraphColors } from '@/components/graphColors'
@@ -14,19 +14,30 @@ const NODE_COLOR = { fill: '#dbeafe', stroke: '#3b82f6', text: '#1d4ed8' }
 
 function nodeId(id: number) { return `location-${id}` }
 
+interface LocationTreeNode {
+  id: string
+  data: { name: string; type: string }
+  children: LocationTreeNode[]
+}
+
+function graphEventTargetId(event: unknown): string {
+  const target = (event as { target?: { id?: unknown } }).target
+  return typeof target?.id === 'string' ? target.id : ''
+}
+
 function safeJson<T>(json: string, fallback: T): T {
   try { return JSON.parse(json) }
   catch { return fallback }
 }
 
 function buildTreeData(locs: location.Location[]) {
-  const map = new Map<number, any>()
-  const roots: any[] = []
+  const map = new Map<number, LocationTreeNode>()
+  const roots: LocationTreeNode[] = []
   for (const loc of locs) map.set(loc.id, { id: nodeId(loc.id), data: { name: loc.name, type: loc.location_type }, children: [] })
   for (const loc of locs) {
     const node = map.get(loc.id)!
     if (loc.parent_location_id && map.has(loc.parent_location_id)) {
-      map.get(loc.parent_location_id).children.push(node)
+      map.get(loc.parent_location_id)!.children.push(node)
     } else { roots.push(node) }
   }
   if (roots.length === 1) return roots[0]
@@ -64,21 +75,55 @@ export default function LocationGraph({ novelId, focusId }: Props) {
     }
   }, [app, novelId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!novelId) {
+        if (!cancelled) {
+          setLocations([])
+          setRelations([])
+        }
+        return
+      }
+      if (!cancelled) {
+        setLoading(true)
+        setError(null)
+      }
+      try {
+        const [locList, relList] = await Promise.all([
+          app.GetLocations(novelId),
+          app.GetLocationRelations(novelId),
+        ])
+        if (!cancelled) {
+          setLocations(locList ?? [])
+          setRelations(relList ?? [])
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : '加载失败')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId])
 
   useEffect(() => {
     if (focusId && focusId > 0 && locations.length > 0) {
       const loc = locations.find(l => l.id === focusId)
-      if (loc) setSelectedLocation(loc)
+      if (loc) {
+        const timer = window.setTimeout(() => setSelectedLocation(loc), 0)
+        return () => window.clearTimeout(timer)
+      }
     }
   }, [focusId, locations])
 
-  const graphData = useMemo(() => {
+  const graphData = useMemo<GraphData>(() => {
     const locIds = new Set(locations.map(l => l.id))
     const treeData = buildTreeData(locations)
     const baseGraph = treeToGraphData(treeData)
 
-    const nodes = (baseGraph.nodes ?? []).map((n: any) => {
+    const nodes: NodeData[] = ((baseGraph.nodes ?? []) as NodeData[]).map((n) => {
       const loc = locations.find(l => nodeId(l.id) === n.id)
       if (!loc) return n
       const isRoot = !loc.parent_location_id
@@ -99,7 +144,7 @@ export default function LocationGraph({ novelId, focusId }: Props) {
       }
     })
 
-    const containEdges = (baseGraph.edges ?? []).map((e: any) => ({
+    const containEdges: EdgeData[] = ((baseGraph.edges ?? []) as EdgeData[]).map((e) => ({
       ...e,
       type: 'polyline',
       style: {
@@ -113,7 +158,7 @@ export default function LocationGraph({ novelId, focusId }: Props) {
     const containPairs = new Set(
       locations.filter(l => l.parent_location_id).map(l => `${l.parent_location_id}-${l.id}`)
     )
-    const spaceEdges = relations
+    const spaceEdges: EdgeData[] = relations
       .filter(r => {
         if (!locIds.has(r.location_a_id) || !locIds.has(r.location_b_id)) return false
         if (r.location_a_id === r.location_b_id) return false
@@ -181,8 +226,8 @@ export default function LocationGraph({ novelId, focusId }: Props) {
     graphRef.current = graph
     graph.render()
 
-    graph.on('node:click', (event: any) => {
-      const rawId = event.target?.id || ''
+    graph.on('node:click', (event: unknown) => {
+      const rawId = graphEventTargetId(event)
       const loc = locations.find(l => rawId.startsWith(nodeId(l.id)))
       if (loc) {
         setSelectedLocation(prev => prev?.id === loc.id ? null : loc)
@@ -198,7 +243,7 @@ export default function LocationGraph({ novelId, focusId }: Props) {
       graph.destroy()
       if (graphRef.current === graph) graphRef.current = null
     }
-  }, [locations.length, graphData, loading])
+  }, [C.bg, C.edge, graphData, loading, locations])
 
   const containCount = locations.filter(l => l.parent_location_id).length
 
@@ -240,7 +285,7 @@ export default function LocationGraph({ novelId, focusId }: Props) {
       </div>
 
       {selectedLocation && (() => {
-        const detail = safeJson<Record<string, any>>(selectedLocation.detail_json, {})
+        const detail = safeJson<Record<string, unknown>>(selectedLocation.detail_json, {})
         const tags: string[] = safeJson<string[]>(selectedLocation.tags, [])
         const desc = selectedLocation.description?.trim() || ''
         const detailKeys = Object.keys(detail).filter(k => k.trim())

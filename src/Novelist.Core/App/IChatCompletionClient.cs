@@ -41,22 +41,32 @@ public sealed record ChatToolCall(
 public sealed record ChatToolExecutionContext(
     long NovelId,
     string SessionId,
-    int TurnId);
+    int TurnId,
+    string ProviderName = "",
+    string ModelId = "",
+    string ReasoningEffort = "",
+    int CurrentSequence = 0);
 
 public sealed record ChatToolExecutionResult(
     bool Success,
     JsonElement? Data,
-    string Error)
+    string Error,
+    int? LastSequence = null)
 {
-    public static ChatToolExecutionResult Succeeded(JsonElement data)
+    public static ChatToolExecutionResult Succeeded(JsonElement data, int? lastSequence = null)
     {
-        return new ChatToolExecutionResult(true, data.Clone(), string.Empty);
+        return new ChatToolExecutionResult(true, data.Clone(), string.Empty, lastSequence);
     }
 
     public static ChatToolExecutionResult Failure(string error)
     {
         return new ChatToolExecutionResult(false, null, error);
     }
+}
+
+public interface ISequencedChatToolResult
+{
+    int LastSequence { get; }
 }
 
 public interface IChatToolExecutor

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Search, Settings } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { novel } from '@/hooks/useApp'
@@ -11,13 +11,19 @@ export default function SidebarPreferenceList({ novelId }: Props) {
   const [items, setItems] = useState<novel.PreferenceItem[]>([])
   const [search, setSearch] = useState('')
 
-  const load = useCallback(async () => {
-    if (!novelId) { setItems([]); return }
-    const result = await app.GetPreferences(novelId)
-    setItems([...(result.global ?? []), ...(result.novel ?? [])])
-  }, [novelId, app])
-
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      await Promise.resolve()
+      if (!novelId) {
+        if (!cancelled) setItems([])
+        return
+      }
+      const result = await app.GetPreferences(novelId)
+      if (!cancelled) setItems([...(result.global ?? []), ...(result.novel ?? [])])
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return items

@@ -23,24 +23,6 @@ export default function BuiltinProviderPane({ providers, onUpdate, onAddCustomMo
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   const provider = providers.find(p => p.key === selectedKey)
-  if (!provider) {
-    return <div className="text-sm text-muted-foreground p-4">暂无内置服务商</div>
-  }
-
-  const hasKey = !!provider.api_key
-  const isTesting = testing[selectedKey]
-  const testResult = testResults[selectedKey]
-
-  const allExistingIds = new Set([
-    ...(provider?.builtin_models || []).map(m => m.id),
-    ...(provider?.custom_models || []).map(m => m.id),
-  ])
-
-  // 切换服务商时重置折叠和下拉状态
-  useEffect(() => {
-    setHelpOpen(false)
-    setDropdownOpen(false)
-  }, [selectedKey])
 
   // 点击外部关闭下拉
   useEffect(() => {
@@ -53,6 +35,19 @@ export default function BuiltinProviderPane({ providers, onUpdate, onAddCustomMo
     document.addEventListener('mousedown', handle)
     return () => document.removeEventListener('mousedown', handle)
   }, [dropdownOpen])
+
+  if (!provider) {
+    return <div className="text-sm text-muted-foreground p-4">暂无内置服务商</div>
+  }
+
+  const hasKey = !!provider.api_key
+  const isTesting = testing[selectedKey]
+  const testResult = testResults[selectedKey]
+
+  const allExistingIds = new Set([
+    ...(provider?.builtin_models || []).map(m => m.id),
+    ...(provider?.custom_models || []).map(m => m.id),
+  ])
 
   return (
     <div className="flex flex-col gap-4">
@@ -73,7 +68,11 @@ export default function BuiltinProviderPane({ providers, onUpdate, onAddCustomMo
               {providers.map(p => (
                 <button
                   key={p.key}
-                  onClick={() => { setSelectedKey(p.key); setDropdownOpen(false) }}
+                  onClick={() => {
+                    setSelectedKey(p.key)
+                    setHelpOpen(false)
+                    setDropdownOpen(false)
+                  }}
                   className={`flex items-center gap-2 w-full px-2.5 py-1.5 text-sm hover:bg-muted/50 transition-colors ${p.key === selectedKey ? 'bg-muted/30' : ''}`}
                 >
                   <ProviderIcon provider={p.key} className="w-4 h-4 shrink-0 text-muted-foreground" />
