@@ -726,6 +726,101 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task BindBlueprintMaterialsUsesBlueprintTagFiltersAndExternalEvidenceDutyFit()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("职责标签绑定测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        var evidenceMaterial = new ReferenceMaterialPayload(
+            MaterialId: "external-evidence-material",
+            AnchorId: 1,
+            SourceSegmentId: "segment-1",
+            MaterialType: ReferenceMaterialTypes.Sentence,
+            FunctionTag: "environment",
+            EmotionTag: "reflective",
+            SceneTag: "environment",
+            PovTag: "close",
+            TechniqueTag: "sensory_detail",
+            FunctionConfidence: 0.8,
+            EmotionConfidence: 0.7,
+            PovConfidence: 0.7,
+            Text: "雨声压低了街的呼吸，他心里一紧。",
+            SourceHash: "source-hash",
+            ExtractorVersion: "test",
+            UserVerified: false,
+            CreatedAt: DateTimeOffset.UtcNow);
+        var referenceAnchors = new FixedReferenceAnchorService(evidenceMaterial, applySearchFilters: true);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+        var generated = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                42,
+                "职责标签蓝图",
+                "雨声压低",
+                [1],
+                KnownFacts: ["雨声压低了街的呼吸"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var beatPath = "beat:" + generated.Beats[0].BeatId + ":";
+        var revised = await service.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                generated.BlueprintId,
+                [
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.query",
+                        "雨声压低"),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.material_types",
+                        JsonSerializer.Serialize(new[] { ReferenceMaterialTypes.Sentence })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.emotion_tags",
+                        JsonSerializer.Serialize(new[] { "reflective" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.function_tags",
+                        JsonSerializer.Serialize(new[] { "environment" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.pov_tags",
+                        JsonSerializer.Serialize(new[] { "close" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.technique_tags",
+                        JsonSerializer.Serialize(new[] { "sensory_detail" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "required_material_types",
+                        JsonSerializer.Serialize(new[] { ReferenceMaterialTypes.Sentence })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "prose_duties",
+                        JsonSerializer.Serialize(new[] { "external_evidence" }))
+                ],
+                "user",
+                "verify tag-filtered duty binding"),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId),
+            CancellationToken.None);
+        var approved = await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, review.ReviewId),
+            CancellationToken.None);
+
+        var result = await service.BindBlueprintMaterialsAsync(
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, approved.BlueprintId, MaxResultsPerBeat: 3),
+            CancellationToken.None);
+
+        var search = Assert.Single(referenceAnchors.SearchInputs);
+        Assert.Equal(["reflective"], search.EmotionTags);
+        Assert.Equal(["environment"], search.FunctionTags);
+        Assert.Equal(["close"], search.PovTags);
+        Assert.Equal(["sensory_detail"], search.TechniqueTags);
+        var selected = Assert.Single(result.Links, link => link.Selected);
+        Assert.Equal("external-evidence-material", selected.MaterialId);
+        Assert.True(selected.ScoreComponents["emotion"] > 0);
+        Assert.True(selected.ScoreComponents["pov"] > 0);
+        Assert.True(selected.ScoreComponents["prose_duty"] > 0);
+    }
+
+    [Fact]
     public async Task MaterialBoundBlueprintStillRejectsDraftWithoutCurrentPassingReview()
     {
         var options = CreateOptions();
@@ -1974,23 +2069,53 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
 
     private sealed class FixedReferenceAnchorService : IReferenceAnchorService
     {
-        private readonly ReferenceMaterialPayload _material;
+        private readonly IReadOnlyList<ReferenceMaterialPayload> _materials;
+        private readonly bool _applySearchFilters;
+        private readonly List<SearchReferenceMaterialsPayload> _searchInputs = [];
 
-        public FixedReferenceAnchorService(ReferenceMaterialPayload material)
+        public IReadOnlyList<SearchReferenceMaterialsPayload> SearchInputs => _searchInputs;
+
+        public FixedReferenceAnchorService(
+            ReferenceMaterialPayload material,
+            bool applySearchFilters = false)
         {
-            _material = material;
+            _materials = [material];
+            _applySearchFilters = applySearchFilters;
         }
 
         public ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(
             SearchReferenceMaterialsPayload input,
             CancellationToken cancellationToken)
         {
+            _searchInputs.Add(input);
+            var items = _applySearchFilters
+                ? _materials.Where(material => MatchesSearch(input, material)).ToArray()
+                : _materials.ToArray();
             return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialPayload>(
-                [_material],
-                Total: 1,
+                items,
+                Total: items.Length,
                 Page: input.Page,
                 Size: input.Size,
-                TotalPages: 1));
+                TotalPages: items.Length == 0 ? 0 : 1));
+        }
+
+        private static bool MatchesSearch(
+            SearchReferenceMaterialsPayload input,
+            ReferenceMaterialPayload material)
+        {
+            return MatchesAnyFilter(material.MaterialType, input.MaterialTypes) &&
+                MatchesAnyFilter(material.EmotionTag, input.EmotionTags) &&
+                MatchesAnyFilter(material.FunctionTag, input.FunctionTags) &&
+                MatchesAnyFilter(material.PovTag, input.PovTags) &&
+                MatchesAnyFilter(material.TechniqueTag, input.TechniqueTags) &&
+                (string.IsNullOrWhiteSpace(input.Query) ||
+                    material.Text.Contains(input.Query, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool MatchesAnyFilter(string value, IReadOnlyList<string> filters)
+        {
+            return filters.Count == 0 ||
+                filters.Any(filter => string.Equals(filter, value, StringComparison.OrdinalIgnoreCase));
         }
 
         public ValueTask<IReadOnlyList<ReferenceUserFeedbackPayload>> GetUserFeedbackAsync(
