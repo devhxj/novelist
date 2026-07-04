@@ -307,6 +307,11 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, review.ReviewId),
             CancellationToken.None);
         var beatId = blueprint.Beats[0].BeatId;
+        var slotPlan = new[]
+        {
+            new ReferenceSlotValuePayload("object", "门缝血迹"),
+            new ReferenceSlotValuePayload("reaction", "指尖发紧")
+        };
 
         var revised = await service.ReviseChapterBlueprintAsync(
             new ReviseReferenceChapterBlueprintPayload(
@@ -330,7 +335,10 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
                         JsonSerializer.Serialize(new[] { "interiority", "external_evidence", "transition" })),
                     new ReferenceBlueprintRevisionChangePayload(
                         "beat:" + beatId + ":reference_query.function_tags",
-                        JsonSerializer.Serialize(new[] { "identity_reveal" }))
+                        JsonSerializer.Serialize(new[] { "identity_reveal" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        "beat:" + beatId + ":slot_plan",
+                        JsonSerializer.Serialize(slotPlan))
                 ],
                 "user",
                 "edit beat contract fields"),
@@ -347,6 +355,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.Equal(["门缝里的血迹"], revisedBeat.SceneFacts);
         Assert.Equal(["interiority", "external_evidence", "transition"], revisedBeat.ProseDuties);
         Assert.Equal(["identity_reveal"], revisedBeat.ReferenceQuery.FunctionTags);
+        Assert.Equal(slotPlan, revisedBeat.SlotPlan);
         Assert.Null(revised.LatestReview);
 
         var revisionFieldPaths = await ReadRevisionFieldPathsAsync(options, blueprint.BlueprintId);
@@ -358,6 +367,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.Contains("beat:" + beatId + ":scene_facts", revisionFieldPaths);
         Assert.Contains("beat:" + beatId + ":prose_duties", revisionFieldPaths);
         Assert.Contains("beat:" + beatId + ":reference_query.function_tags", revisionFieldPaths);
+        Assert.Contains("beat:" + beatId + ":slot_plan", revisionFieldPaths);
 
         await Assert.ThrowsAsync<ArgumentException>(async () =>
             await service.ApproveChapterBlueprintAsync(

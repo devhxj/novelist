@@ -2438,6 +2438,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             "forbidden_facts" => JsonSerializer.Serialize(beat.ForbiddenFacts, JsonOptions),
             "required_material_types" => JsonSerializer.Serialize(beat.RequiredMaterialTypes, JsonOptions),
             "max_rewrite_level" => beat.MaxRewriteLevel,
+            "slot_plan" => JsonSerializer.Serialize(beat.SlotPlan, JsonOptions),
             "locked_phrase_policy" => beat.LockedPhrasePolicy,
             "no_reuse_reason" => beat.NoReuseReason,
             "prose_duties" => JsonSerializer.Serialize(beat.ProseDuties, JsonOptions),
@@ -2494,6 +2495,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             "forbidden_facts" => beat with { ForbiddenFacts = ParseRevisionStringList(value) },
             "required_material_types" => beat with { RequiredMaterialTypes = ParseRevisionStringList(value) },
             "max_rewrite_level" => beat with { MaxRewriteLevel = normalized },
+            "slot_plan" => beat with { SlotPlan = ParseRevisionSlotPlan(value) },
             "locked_phrase_policy" => beat with { LockedPhrasePolicy = normalized },
             "no_reuse_reason" => beat with { NoReuseReason = normalized },
             "prose_duties" => beat with { ProseDuties = ParseRevisionStringList(value) },
@@ -2506,6 +2508,47 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             "reference_query.max_results" => beat with { ReferenceQuery = beat.ReferenceQuery with { MaxResults = ParseRevisionPositiveInt(value, 1, 50) } },
             _ => throw new ArgumentException("Unsupported revisable beat field.", nameof(fieldName))
         };
+    }
+
+    private static IReadOnlyList<ReferenceSlotValuePayload> ParseRevisionSlotPlan(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        var trimmed = value.Trim();
+        if (!trimmed.StartsWith("[", StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "Revision slot_plan value must be a JSON array of { slot_name, value } objects.",
+                nameof(value));
+        }
+
+        try
+        {
+            var slots = JsonSerializer.Deserialize<IReadOnlyList<ReferenceSlotValuePayload>>(trimmed, JsonOptions);
+            return NormalizeSlotPlan(slots);
+        }
+        catch (JsonException exception)
+        {
+            throw new ArgumentException(
+                "Revision slot_plan value must be a JSON array of { slot_name, value } objects.",
+                nameof(value),
+                exception);
+        }
+    }
+
+    private static IReadOnlyList<ReferenceSlotValuePayload> NormalizeSlotPlan(
+        IReadOnlyList<ReferenceSlotValuePayload>? slotPlan)
+    {
+        return slotPlan?
+            .Where(slot => slot is not null)
+            .Select(slot => new ReferenceSlotValuePayload(
+                NormalizeOptional(slot.SlotName, string.Empty, 200),
+                NormalizeOptional(slot.Value, string.Empty, 500)))
+            .Where(slot => !string.IsNullOrWhiteSpace(slot.SlotName) || !string.IsNullOrWhiteSpace(slot.Value))
+            .ToArray() ?? [];
     }
 
     private static int ParseRevisionPositiveInt(string value, int minValue, int maxValue)

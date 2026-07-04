@@ -339,7 +339,7 @@ Recommended implementation slices:
 - [x] Blueprint view shows execution track separately from analysis tracks.
 - [x] Blueprint detail has a compact field editor for facts, POV, emotion evidence, paragraph intention, prose duties, and reference query, using `ReviseReferenceChapterBlueprint`.
 - [x] Beat editor exposes transition, POV knowledge boundary, character state delta, emotion trigger/evidence, narration strategy, paragraph intention, execution mode, anti-screenplay duty, prose duties, reference query tags, rewrite policy, and no-reuse reason for the current beat.
-- [ ] Beat editor supports structured `slot_plan` edits; this remains a focused object-list schema slice.
+- [x] Beat editor supports structured `slot_plan` edits through typed slot-name/value rows and `beat:{beat_id}:slot_plan` revisions.
 - [x] Review panel shows logic, causality, emotion, narration, execution, character-state, POV, continuity, transition, forbidden-fact, reference-binding, material-fit, screenplay-drift, novelistic-narration, and AI-prose defects.
 - [x] Editing exposed approved blueprint fields clearly invalidates approval and disables draft generation until re-review/re-approval.
 - [x] Draft generation button is disabled until blueprint review passes and approval exists.
@@ -461,12 +461,12 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 
 The initial foundation has already started. Do not restart from Phase 0 unless contracts have regressed.
 
-Latest verified scope: `cd frontend && npm run build`, `cd frontend && npm run lint`, `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge' -v minimal`, and `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal` passed after expanding the current-beat editor to all backend-supported scalar/list revision paths except structured `slot_plan` edits. Earlier full .NET tests passed after extracting `ReferenceMaterialSlotDetector` and `ReferenceRewriteLevelClassifier`, adding deterministic blueprint-review fixtures and gates, and proving strict review defects surface through structured service/bridge payloads.
+Latest verified scope: `cd frontend && npm run build`, `cd frontend && npm run lint`, `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge' -v minimal`, and `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal` passed after adding structured current-beat `slot_plan` editing and backend `beat:{beat_id}:slot_plan` revision support. Earlier full .NET tests passed after extracting `ReferenceMaterialSlotDetector` and `ReferenceRewriteLevelClassifier`, adding deterministic blueprint-review fixtures and gates, and proving strict review defects surface through structured service/bridge payloads.
 
 Recommended next session:
 
-1. Add structured `slot_plan` editing for blueprint beats as a focused object-list schema slice.
-2. Split `ReferenceAnchorView` into focused child components before adding more UI fields, so the reference workflow remains reviewable.
+1. Split `ReferenceAnchorView` into focused child components before adding more UI fields, so the reference workflow remains reviewable.
+2. Add a native file-picker bridge for source import so the first UI does not rely only on raw local paths.
 3. Extend L2 non-slot edit reporting before expanding model-assisted adaptation.
 
 Recommended following session:

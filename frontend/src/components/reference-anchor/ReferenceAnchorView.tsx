@@ -10,6 +10,7 @@ import {
   RefreshCcw,
   Search,
   ShieldCheck,
+  Trash2,
   Wand2,
 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
@@ -72,6 +73,7 @@ type BlueprintRevisionForm = {
   beatForbiddenFacts: string
   requiredMaterialTypes: string
   maxRewriteLevel: string
+  slotPlan: reference.SlotValue[]
   lockedPhrasePolicy: string
   noReuseReason: string
   proseDuties: string
@@ -83,6 +85,10 @@ type BlueprintRevisionForm = {
   referenceTechniqueTags: string
   referenceMaxResults: string
 }
+
+type BlueprintRevisionStringKey = {
+  [Key in keyof BlueprintRevisionForm]: BlueprintRevisionForm[Key] extends string ? Key : never
+}[keyof BlueprintRevisionForm]
 
 type FindingSection = {
   label: string
@@ -142,6 +148,7 @@ const EMPTY_REVISION_FORM: BlueprintRevisionForm = {
   beatForbiddenFacts: '',
   requiredMaterialTypes: '',
   maxRewriteLevel: '',
+  slotPlan: [],
   lockedPhrasePolicy: '',
   noReuseReason: '',
   proseDuties: '',
@@ -172,6 +179,20 @@ function sameList(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index])
 }
 
+function normalizeSlotPlan(slotPlan: reference.SlotValue[] | undefined): reference.SlotValue[] {
+  return (slotPlan ?? [])
+    .map(slot => ({
+      slot_name: slot.slot_name.trim(),
+      value: slot.value.trim(),
+    }))
+    .filter(slot => slot.slot_name.length > 0 || slot.value.length > 0)
+}
+
+function sameSlotPlan(left: reference.SlotValue[], right: reference.SlotValue[]): boolean {
+  return left.length === right.length &&
+    left.every((slot, index) => slot.slot_name === right[index].slot_name && slot.value === right[index].value)
+}
+
 function addStringChange(
   changes: reference.BlueprintRevisionChange[],
   fieldPath: string,
@@ -193,6 +214,19 @@ function addListChange(
   const nextList = lines(nextValue)
   if (!sameList(nextList, currentValue)) {
     changes.push({ field_path: fieldPath, new_value: JSON.stringify(nextList) })
+  }
+}
+
+function addSlotPlanChange(
+  changes: reference.BlueprintRevisionChange[],
+  fieldPath: string,
+  nextValue: reference.SlotValue[],
+  currentValue: reference.SlotValue[],
+) {
+  const nextSlotPlan = normalizeSlotPlan(nextValue)
+  const currentSlotPlan = normalizeSlotPlan(currentValue)
+  if (!sameSlotPlan(nextSlotPlan, currentSlotPlan)) {
+    changes.push({ field_path: fieldPath, new_value: JSON.stringify(nextSlotPlan) })
   }
 }
 
@@ -236,6 +270,7 @@ function formFromBlueprint(blueprint: reference.ChapterBlueprint | null): Bluepr
     beatForbiddenFacts: multiline(beat?.forbidden_facts),
     requiredMaterialTypes: multiline(beat?.required_material_types),
     maxRewriteLevel: beat?.max_rewrite_level ?? '',
+    slotPlan: normalizeSlotPlan(beat?.slot_plan),
     lockedPhrasePolicy: beat?.locked_phrase_policy ?? '',
     noReuseReason: beat?.no_reuse_reason ?? '',
     proseDuties: multiline(beat?.prose_duties),
@@ -520,7 +555,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     addListChange(changes, 'known_facts', revisionForm.knownFacts, activeBlueprint.known_facts)
     addListChange(changes, 'forbidden_facts', revisionForm.forbiddenFacts, activeBlueprint.forbidden_facts)
 
-    const beatStringFields: Array<[keyof BlueprintRevisionForm, string, string]> = [
+    const beatStringFields: Array<[BlueprintRevisionStringKey, string, string]> = [
       ['narrativeFunction', 'narrative_function', beat.narrative_function],
       ['logicPremise', 'logic_premise', beat.logic_premise],
       ['conflictPressure', 'conflict_pressure', beat.conflict_pressure],
@@ -550,7 +585,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       ['referenceQuery', 'reference_query.query', beat.reference_query.query],
     ]
 
-    const beatListFields: Array<[keyof BlueprintRevisionForm, string, string[]]> = [
+    const beatListFields: Array<[BlueprintRevisionStringKey, string, string[]]> = [
       ['viewpointAllowedKnowledge', 'viewpoint_allowed_knowledge', beat.viewpoint_allowed_knowledge],
       ['viewpointForbiddenKnowledge', 'viewpoint_forbidden_knowledge', beat.viewpoint_forbidden_knowledge],
       ['characterStatesBefore', 'character_states_before', beat.character_states_before],
@@ -587,6 +622,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
         changes.push({ field_path: `${prefix}reference_query.max_results`, new_value: String(parsed) })
       }
     }
+    addSlotPlanChange(changes, `${prefix}slot_plan`, revisionForm.slotPlan, beat.slot_plan)
 
     if (changes.length === 0) {
       setMessage('没有需要保存的蓝图修改')
@@ -884,6 +920,26 @@ function BlueprintDetail({
     (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       onRevisionFormChange(form => ({ ...form, [key]: event.target.value }))
     }
+  const updateSlotPlanField = (index: number, key: keyof reference.SlotValue) =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      onRevisionFormChange(form => ({
+        ...form,
+        slotPlan: form.slotPlan.map((slot, slotIndex) =>
+          slotIndex === index ? { ...slot, [key]: event.target.value } : slot),
+      }))
+    }
+  const addSlotPlanRow = () => {
+    onRevisionFormChange(form => ({
+      ...form,
+      slotPlan: [...form.slotPlan, { slot_name: '', value: '' }],
+    }))
+  }
+  const removeSlotPlanRow = (index: number) => {
+    onRevisionFormChange(form => ({
+      ...form,
+      slotPlan: form.slotPlan.filter((_, slotIndex) => slotIndex !== index),
+    }))
+  }
 
   return (
     <div className="min-w-0 rounded-lg border border-border bg-card p-4">
@@ -1061,6 +1117,39 @@ function BlueprintDetail({
             <Field label="最大改写级别">
               <input value={revisionForm.maxRewriteLevel} onChange={updateRevisionField('maxRewriteLevel')} className={inputClass} />
             </Field>
+            <div className="lg:col-span-2">
+              <Field label="槽位计划">
+                <div className="space-y-2">
+                  {revisionForm.slotPlan.map((slot, index) => (
+                    <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] gap-2">
+                      <input
+                        aria-label="槽位名"
+                        value={slot.slot_name}
+                        onChange={updateSlotPlanField(index, 'slot_name')}
+                        className={inputClass}
+                      />
+                      <input
+                        aria-label="槽位值"
+                        value={slot.value}
+                        onChange={updateSlotPlanField(index, 'value')}
+                        className={inputClass}
+                      />
+                      <button
+                        type="button"
+                        aria-label="移除槽位"
+                        onClick={() => removeSlotPlanRow(index)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded border border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={addSlotPlanRow} className={actionButtonClass}>
+                    <Plus className="h-3.5 w-3.5" />新增槽位
+                  </button>
+                </div>
+              </Field>
+            </div>
             <Field label="锁定短语策略">
               <input value={revisionForm.lockedPhrasePolicy} onChange={updateRevisionField('lockedPhrasePolicy')} className={inputClass} />
             </Field>
