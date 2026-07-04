@@ -44,6 +44,16 @@ type BlueprintForm = {
   forbiddenFacts: string
 }
 
+type MaterialSearchFilters = {
+  materialTypes: string
+  emotionTags: string
+  functionTags: string
+  povTags: string
+  techniqueTags: string
+  narrativeDuties: string
+  emotionTransitions: string
+}
+
 const EMPTY_ANCHOR_FORM: AnchorForm = {
   title: '',
   author: '',
@@ -60,11 +70,27 @@ const EMPTY_BLUEPRINT_FORM: BlueprintForm = {
   forbiddenFacts: '',
 }
 
+const EMPTY_MATERIAL_FILTERS: MaterialSearchFilters = {
+  materialTypes: '',
+  emotionTags: '',
+  functionTags: '',
+  povTags: '',
+  techniqueTags: '',
+  narrativeDuties: '',
+  emotionTransitions: '',
+}
+
 function sourceKindFromPath(path: string, fallback: string): string {
   const lowerPath = path.toLowerCase()
   if (lowerPath.endsWith('.txt')) return 'text'
   if (lowerPath.endsWith('.md') || lowerPath.endsWith('.markdown')) return 'markdown'
   return fallback
+}
+
+function materialScoreComponents(material: reference.Material): Array<[string, number]> {
+  return Object.entries(material.score_components ?? {})
+    .filter(([, value]) => Number.isFinite(value) && value > 0)
+    .sort(([, left], [, right]) => right - left)
 }
 
 export default function ReferenceAnchorView({ novelId }: Props) {
@@ -80,6 +106,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   const [anchorForm, setAnchorForm] = useState<AnchorForm>(EMPTY_ANCHOR_FORM)
   const [blueprintForm, setBlueprintForm] = useState<BlueprintForm>(EMPTY_BLUEPRINT_FORM)
   const [revisionForm, setRevisionForm] = useState<BlueprintRevisionForm>(EMPTY_REVISION_FORM)
+  const [materialFilters, setMaterialFilters] = useState<MaterialSearchFilters>(EMPTY_MATERIAL_FILTERS)
   const [materialQuery, setMaterialQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -187,13 +214,15 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       novel_id: novelId,
       anchor_ids: selectedAnchorIds,
       query: materialQuery.trim(),
-      material_types: [],
-      emotion_tags: [],
-      function_tags: [],
-      pov_tags: [],
-      technique_tags: [],
+      material_types: lines(materialFilters.materialTypes),
+      emotion_tags: lines(materialFilters.emotionTags),
+      function_tags: lines(materialFilters.functionTags),
+      pov_tags: lines(materialFilters.povTags),
+      technique_tags: lines(materialFilters.techniqueTags),
       page: 1,
       size: 10,
+      narrative_duties: lines(materialFilters.narrativeDuties),
+      emotion_transitions: lines(materialFilters.emotionTransitions),
     }))
     if (result) setMaterials(result.items ?? [])
   }
@@ -514,15 +543,54 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                   <Search className="h-3.5 w-3.5" />搜索
                 </button>
               </div>
+              <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
+                <Field label="叙事职责">
+                  <input value={materialFilters.narrativeDuties} onChange={event => setMaterialFilters(filters => ({ ...filters, narrativeDuties: event.target.value }))} className={inputClass} placeholder="external_evidence；transition" />
+                </Field>
+                <Field label="情绪转变">
+                  <input value={materialFilters.emotionTransitions} onChange={event => setMaterialFilters(filters => ({ ...filters, emotionTransitions: event.target.value }))} className={inputClass} placeholder="neutral->pressure" />
+                </Field>
+                <Field label="材料类型">
+                  <input value={materialFilters.materialTypes} onChange={event => setMaterialFilters(filters => ({ ...filters, materialTypes: event.target.value }))} className={inputClass} placeholder="sentence；passage" />
+                </Field>
+                <Field label="功能标签">
+                  <input value={materialFilters.functionTags} onChange={event => setMaterialFilters(filters => ({ ...filters, functionTags: event.target.value }))} className={inputClass} placeholder="emotion_evidence" />
+                </Field>
+                <Field label="情绪标签">
+                  <input value={materialFilters.emotionTags} onChange={event => setMaterialFilters(filters => ({ ...filters, emotionTags: event.target.value }))} className={inputClass} placeholder="restrained" />
+                </Field>
+                <Field label="POV 标签">
+                  <input value={materialFilters.povTags} onChange={event => setMaterialFilters(filters => ({ ...filters, povTags: event.target.value }))} className={inputClass} placeholder="limited；close" />
+                </Field>
+                <Field label="技法标签">
+                  <input value={materialFilters.techniqueTags} onChange={event => setMaterialFilters(filters => ({ ...filters, techniqueTags: event.target.value }))} className={inputClass} placeholder="afterbeat" />
+                </Field>
+              </div>
               {materials.length > 0 && (
                 <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-2">
                   {materials.map(material => (
                     <div key={material.material_id} className="rounded-md border border-border bg-background p-3">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] text-muted-foreground">{material.material_type} · {material.function_tag || 'untagged'}</span>
-                        <span className="text-[11px] text-muted-foreground">{material.pov_tag || 'pov?'}</span>
+                        <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                          {material.material_type} · {material.function_tag || 'untagged'} · {material.emotion_tag || 'neutral'}
+                        </span>
+                        {material.user_verified && <span className="shrink-0 text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {[material.pov_tag, material.technique_tag, material.scene_tag].filter(Boolean).map(tag => (
+                          <span key={tag} className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{tag}</span>
+                        ))}
                       </div>
                       <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-foreground">{material.text}</p>
+                      {materialScoreComponents(material).length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {materialScoreComponents(material).map(([name, value]) => (
+                            <span key={name} className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                              {name} {value.toFixed(2)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
