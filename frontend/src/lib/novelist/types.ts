@@ -538,6 +538,45 @@ export namespace reference {
     audit: ReuseAudit
   }
 
+  export interface RecordUserFeedbackInput {
+    novel_id: number
+    target_type: string
+    target_id: string
+    decision: string
+    material_id: string
+    candidate_id: string
+    blueprint_id: number
+    beat_id: string
+    feedback_tags: string[]
+    note: string
+    edited_text: string
+    origin: string
+  }
+
+  export interface GetUserFeedbackInput {
+    novel_id: number
+    target_type: string
+    target_id: string
+    limit: number
+  }
+
+  export interface UserFeedback {
+    feedback_id: string
+    novel_id: number
+    target_type: string
+    target_id: string
+    decision: string
+    material_id: string
+    candidate_id: string
+    blueprint_id: number
+    beat_id: string
+    feedback_tags: string[]
+    note: string
+    edited_text_hash: string
+    origin: string
+    created_at: Timestamp
+  }
+
   export interface GenerateChapterBlueprintInput {
     novel_id: number
     chapter_number: number

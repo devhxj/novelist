@@ -45,6 +45,9 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         "unknown"
     };
 
+    private static readonly HashSet<string> AllowedFeedbackDecisions = new(ReferenceFeedbackDecisions.All, StringComparer.Ordinal);
+    private static readonly HashSet<string> AllowedFeedbackTargetTypes = new(ReferenceFeedbackTargetTypes.All, StringComparer.Ordinal);
+
     private readonly AppInitializationOptions _options;
     private readonly INovelService _novels;
     private readonly SemaphoreSlim _mutex = new(1, 1);
@@ -400,6 +403,123 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 DateTimeOffset.UtcNow);
             await PersistReuseAuditAsync(connection, candidateId: string.Empty, material.MaterialId, audit, cancellationToken);
             return audit;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<ReferenceUserFeedbackPayload> RecordUserFeedbackAsync(
+        RecordReferenceUserFeedbackPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        await EnsureNovelExistsAsync(input.NovelId, cancellationToken);
+
+        var targetType = ValidateAllowedText(input.TargetType, nameof(input.TargetType), AllowedFeedbackTargetTypes);
+        var targetId = NormalizeRequiredText(input.TargetId, nameof(input.TargetId), maxLength: 256);
+        var decision = ValidateAllowedText(input.Decision, nameof(input.Decision), AllowedFeedbackDecisions);
+        var materialId = NormalizeOptionalText(input.MaterialId, nameof(input.MaterialId), maxLength: 256);
+        var candidateId = NormalizeOptionalText(input.CandidateId, nameof(input.CandidateId), maxLength: 256);
+        var beatId = NormalizeOptionalText(input.BeatId, nameof(input.BeatId), maxLength: 256);
+        var feedbackTags = NormalizeFeedbackTags(input.FeedbackTags);
+        var note = NormalizeOptionalText(input.Note, nameof(input.Note), maxLength: 2_000);
+        var editedText = NormalizeFeedbackEditedText(input.EditedText, nameof(input.EditedText), maxLength: 20_000);
+        var origin = NormalizeRequiredText(input.Origin, nameof(input.Origin), maxLength: 128);
+        if (string.Equals(targetType, ReferenceFeedbackTargetTypes.Material, StringComparison.Ordinal) &&
+            materialId.Length == 0)
+        {
+            materialId = targetId;
+        }
+
+        if (string.Equals(targetType, ReferenceFeedbackTargetTypes.ReuseCandidate, StringComparison.Ordinal) &&
+            candidateId.Length == 0)
+        {
+            candidateId = targetId;
+        }
+
+        if (string.Equals(targetType, ReferenceFeedbackTargetTypes.BlueprintBeat, StringComparison.Ordinal) &&
+            beatId.Length == 0)
+        {
+            beatId = targetId;
+        }
+
+        if (string.Equals(decision, ReferenceFeedbackDecisions.Edited, StringComparison.Ordinal) &&
+            string.IsNullOrWhiteSpace(editedText))
+        {
+            throw new ArgumentException("Edited feedback requires edited text.", nameof(input));
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var feedback = new ReferenceUserFeedbackPayload(
+            "feedback-" + Guid.NewGuid().ToString("N"),
+            input.NovelId,
+            targetType,
+            targetId,
+            decision,
+            materialId,
+            candidateId,
+            Math.Max(0, input.BlueprintId),
+            beatId,
+            feedbackTags,
+            note,
+            string.IsNullOrWhiteSpace(editedText) ? string.Empty : HashText(editedText),
+            origin,
+            now);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+
+            if (feedback.MaterialId.Length > 0 &&
+                await ReadMaterialAsync(connection, feedback.NovelId, feedback.MaterialId, cancellationToken) is null)
+            {
+                throw new ArgumentException("Feedback material does not exist for this novel.", nameof(input));
+            }
+
+            if (feedback.CandidateId.Length > 0 &&
+                string.Equals(feedback.TargetType, ReferenceFeedbackTargetTypes.ReuseCandidate, StringComparison.Ordinal) &&
+                !await ReuseCandidateExistsAsync(connection, feedback.NovelId, feedback.CandidateId, cancellationToken))
+            {
+                throw new ArgumentException("Feedback reuse candidate does not exist for this novel.", nameof(input));
+            }
+
+            await InsertUserFeedbackAsync(connection, feedback, cancellationToken);
+            return feedback;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<IReadOnlyList<ReferenceUserFeedbackPayload>> GetUserFeedbackAsync(
+        GetReferenceUserFeedbackPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        var targetType = NormalizeOptionalText(input.TargetType, nameof(input.TargetType), maxLength: 128);
+        if (targetType.Length > 0 && !AllowedFeedbackTargetTypes.Contains(targetType))
+        {
+            throw new ArgumentException("Unsupported feedback target type.", nameof(input));
+        }
+
+        var targetId = NormalizeOptionalText(input.TargetId, nameof(input.TargetId), maxLength: 256);
+        var limit = Math.Clamp(input.Limit <= 0 ? 100 : input.Limit, 1, 500);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            return await ReadUserFeedbackAsync(connection, input.NovelId, targetType, targetId, limit, cancellationToken);
         }
         finally
         {
@@ -859,6 +979,100 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static async ValueTask InsertUserFeedbackAsync(
+        SqliteConnection connection,
+        ReferenceUserFeedbackPayload feedback,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO reference_user_feedback
+              (feedback_id, novel_id, target_type, target_id, decision, material_id, candidate_id,
+               blueprint_id, beat_id, feedback_tags_json, note, edited_text_hash, origin, created_at)
+            VALUES
+              ($feedback_id, $novel_id, $target_type, $target_id, $decision, $material_id, $candidate_id,
+               $blueprint_id, $beat_id, $feedback_tags_json, $note, $edited_text_hash, $origin, $created_at);
+            """;
+        command.Parameters.AddWithValue("$feedback_id", feedback.FeedbackId);
+        command.Parameters.AddWithValue("$novel_id", feedback.NovelId);
+        command.Parameters.AddWithValue("$target_type", feedback.TargetType);
+        command.Parameters.AddWithValue("$target_id", feedback.TargetId);
+        command.Parameters.AddWithValue("$decision", feedback.Decision);
+        command.Parameters.AddWithValue("$material_id", feedback.MaterialId);
+        command.Parameters.AddWithValue("$candidate_id", feedback.CandidateId);
+        command.Parameters.AddWithValue("$blueprint_id", feedback.BlueprintId);
+        command.Parameters.AddWithValue("$beat_id", feedback.BeatId);
+        command.Parameters.AddWithValue("$feedback_tags_json", JsonSerializer.Serialize(feedback.FeedbackTags, JsonOptions));
+        command.Parameters.AddWithValue("$note", feedback.Note);
+        command.Parameters.AddWithValue("$edited_text_hash", feedback.EditedTextHash);
+        command.Parameters.AddWithValue("$origin", feedback.Origin);
+        command.Parameters.AddWithValue("$created_at", FormatTimestamp(feedback.CreatedAt));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceUserFeedbackPayload>> ReadUserFeedbackAsync(
+        SqliteConnection connection,
+        long novelId,
+        string targetType,
+        string targetId,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        var where = new List<string> { "novel_id = $novel_id" };
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$limit", limit);
+        if (targetType.Length > 0)
+        {
+            where.Add("target_type = $target_type");
+            command.Parameters.AddWithValue("$target_type", targetType);
+        }
+
+        if (targetId.Length > 0)
+        {
+            where.Add("target_id = $target_id");
+            command.Parameters.AddWithValue("$target_id", targetId);
+        }
+
+        command.CommandText = $$"""
+            SELECT feedback_id, novel_id, target_type, target_id, decision, material_id, candidate_id,
+                   blueprint_id, beat_id, feedback_tags_json, note, edited_text_hash, origin, created_at
+            FROM reference_user_feedback
+            WHERE {{string.Join(" AND ", where)}}
+            ORDER BY created_at ASC, feedback_id ASC
+            LIMIT $limit;
+            """;
+        var feedback = new List<ReferenceUserFeedbackPayload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            feedback.Add(ReadUserFeedback(reader));
+        }
+
+        return feedback;
+    }
+
+    private static async ValueTask<bool> ReuseCandidateExistsAsync(
+        SqliteConnection connection,
+        long novelId,
+        string candidateId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT 1
+            FROM reference_reuse_candidates c
+            INNER JOIN reference_materials m ON m.material_id = c.material_id
+            INNER JOIN reference_anchors a ON a.anchor_id = m.anchor_id
+            WHERE a.novel_id = $novel_id AND c.candidate_id = $candidate_id
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$candidate_id", candidateId);
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is not null;
+    }
+
     private async ValueTask<ReferenceAnchorPayload> ReadAnchorAsync(
         SqliteConnection connection,
         long novelId,
@@ -991,6 +1205,23 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
               FOREIGN KEY(material_id) REFERENCES reference_materials(material_id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS reference_user_feedback (
+              feedback_id TEXT PRIMARY KEY,
+              novel_id INTEGER NOT NULL,
+              target_type TEXT NOT NULL,
+              target_id TEXT NOT NULL,
+              decision TEXT NOT NULL,
+              material_id TEXT NOT NULL,
+              candidate_id TEXT NOT NULL,
+              blueprint_id INTEGER NOT NULL,
+              beat_id TEXT NOT NULL,
+              feedback_tags_json TEXT NOT NULL,
+              note TEXT NOT NULL,
+              edited_text_hash TEXT NOT NULL,
+              origin TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_reference_anchors_novel
               ON reference_anchors(novel_id);
 
@@ -1008,6 +1239,12 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
 
             CREATE INDEX IF NOT EXISTS idx_reference_candidates_material
               ON reference_reuse_candidates(material_id, created_at);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_feedback_novel_target
+              ON reference_user_feedback(novel_id, target_type, target_id, created_at);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_feedback_material
+              ON reference_user_feedback(material_id, created_at);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -1622,6 +1859,25 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         return normalized;
     }
 
+    private static string NormalizeFeedbackEditedText(string? value, string name, int maxLength)
+    {
+        var normalized = (value ?? string.Empty)
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace("\r", "\n", StringComparison.Ordinal)
+            .Trim();
+        if (normalized.Length > maxLength)
+        {
+            throw new ArgumentOutOfRangeException(name, normalized.Length, $"Value must be at most {maxLength} characters.");
+        }
+
+        if (normalized.Any(value => char.IsControl(value) && value is not '\n' and not '\t'))
+        {
+            throw new ArgumentException("Value must not contain unsupported control characters.", name);
+        }
+
+        return normalized;
+    }
+
     private static string BuildSegmentId(long anchorId, string type, int chapterIndex, int segmentIndex, string hash)
     {
         return string.Create(
@@ -1695,6 +1951,25 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             ParseTimestamp(reader.GetString(16)));
     }
 
+    private static ReferenceUserFeedbackPayload ReadUserFeedback(SqliteDataReader reader)
+    {
+        return new ReferenceUserFeedbackPayload(
+            reader.GetString(0),
+            reader.GetInt64(1),
+            reader.GetString(2),
+            reader.GetString(3),
+            reader.GetString(4),
+            reader.GetString(5),
+            reader.GetString(6),
+            reader.GetInt64(7),
+            reader.GetString(8),
+            ReadStringList(reader.GetString(9)),
+            reader.GetString(10),
+            reader.GetString(11),
+            reader.GetString(12),
+            ParseTimestamp(reader.GetString(13)));
+    }
+
     private static ReferenceAnchorBuildStatusPayload BuildStatus(
         ReferenceAnchorPayload anchor,
         string status,
@@ -1716,6 +1991,26 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             VectorCount: 0,
             lastError,
             updatedAt);
+    }
+
+    private static IReadOnlyList<string> NormalizeFeedbackTags(IReadOnlyList<string>? tags)
+    {
+        if (tags is null || tags.Count == 0)
+        {
+            return [];
+        }
+
+        return tags
+            .Select(tag => NormalizeOptionalText(tag, nameof(tags), maxLength: 128))
+            .Where(tag => tag.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .Take(32)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> ReadStringList(string json)
+    {
+        return JsonSerializer.Deserialize<IReadOnlyList<string>>(json, JsonOptions) ?? [];
     }
 
     private static string HashText(string text)

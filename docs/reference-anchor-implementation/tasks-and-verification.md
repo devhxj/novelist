@@ -366,7 +366,7 @@ Recommended implementation slices:
 
 **Acceptance criteria:**
 
-- [ ] User feedback rows persist accept/reject/edit decisions.
+- [x] User feedback rows persist accept/reject/edit decisions.
 - [ ] User-verified tags can override extractor tags.
 - [ ] User-edited blueprint beats can be re-reviewed and approved.
 - [ ] Regression fixtures include previously bad blueprints and candidates.
@@ -375,7 +375,7 @@ Recommended implementation slices:
 
 **Verification:**
 
-- [ ] integration tests for feedback persistence
+- [x] integration tests for feedback persistence
 - [ ] ranking test for user-verified boost
 - [ ] blueprint regression fixture tests
 
@@ -461,19 +461,18 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 
 The initial foundation has already started. Do not restart from Phase 0 unless contracts have regressed.
 
-Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge|MafToolRegistry' -v minimal`, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal`, `cd frontend && npm run build`, and `cd frontend && npm run lint` passed after adding deterministic L2 non-slot edit reporting to reference reuse audits and candidate payloads. Earlier reference-anchor verification passed after adding the native `PickReferenceSourceFile` Photino bridge and source-path picker button.
+Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge|MafToolRegistry' -v minimal`, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal`, `cd frontend && npm run build`, and `cd frontend && npm run lint` passed after adding persisted reference user feedback rows for accept/reject/edit decisions. Earlier reference-anchor verification passed after adding deterministic L2 non-slot edit reporting, the native `PickReferenceSourceFile` Photino bridge, and source-path picker button.
 
 Recommended next session:
 
 1. Add full frontend runtime verification after the reference-anchor panel is exercised against a real app bridge.
 2. Add approval hash/version unit tests if approval logic is further split from the SQLite service.
-3. Add feedback persistence rows for accept/reject/edit decisions.
+3. Add ranking tests for user-verified material/tag boosts.
 
 Recommended following session:
 
-1. Add ranking tests for user-verified material/tag boosts.
-2. Add fixture coverage for stale blueprint comparison behavior if the UI starts surfacing stale rows.
-3. Expand model-assisted adaptation only after deterministic audit gates stay stable.
+1. Add fixture coverage for stale blueprint comparison behavior if the UI starts surfacing stale rows.
+2. Expand model-assisted adaptation only after deterministic audit gates stay stable.
 
 Do not broaden frontend workflow beyond the review-first path until source corpus, material binding, blueprint review, and draft audit are reliable. The system's quality depends on immutable provenance, hard blueprint gates, and candidate audit before any manual insertion.
 

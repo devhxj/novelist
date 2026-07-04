@@ -287,6 +287,115 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task UserFeedbackPersistsAcceptRejectAndEditDecisions()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("反馈测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("anchor.md", "他握住{{object}}，没有立刻说话。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "反馈参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var materials = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "{{object}}",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        var material = Assert.Single(materials.Items);
+        var adapted = await service.AdaptMaterialAsync(
+            new AdaptReferenceMaterialPayload(
+                novel.Id,
+                material.MaterialId,
+                [new ReferenceSlotValuePayload("object", "门把手")],
+                ReferenceRewriteLevels.L1,
+                SceneFacts: ["门把手"]),
+            CancellationToken.None);
+
+        var accepted = await service.RecordUserFeedbackAsync(
+            new RecordReferenceUserFeedbackPayload(
+                novel.Id,
+                ReferenceFeedbackTargetTypes.Material,
+                material.MaterialId,
+                ReferenceFeedbackDecisions.Accepted,
+                material.MaterialId,
+                CandidateId: "",
+                BlueprintId: 0,
+                BeatId: "",
+                FeedbackTags: ["useful_reference"],
+                Note: "可作为雨夜停顿参考",
+                EditedText: "",
+                Origin: "user"),
+            CancellationToken.None);
+        var rejected = await service.RecordUserFeedbackAsync(
+            new RecordReferenceUserFeedbackPayload(
+                novel.Id,
+                ReferenceFeedbackTargetTypes.ReuseCandidate,
+                adapted.CandidateId,
+                ReferenceFeedbackDecisions.Rejected,
+                material.MaterialId,
+                adapted.CandidateId,
+                BlueprintId: 0,
+                BeatId: "",
+                FeedbackTags: ["too_ai_flavored"],
+                Note: "节奏太像说明句",
+                EditedText: "",
+                Origin: "user"),
+            CancellationToken.None);
+        var edited = await service.RecordUserFeedbackAsync(
+            new RecordReferenceUserFeedbackPayload(
+                novel.Id,
+                ReferenceFeedbackTargetTypes.ReuseCandidate,
+                adapted.CandidateId,
+                ReferenceFeedbackDecisions.Edited,
+                material.MaterialId,
+                adapted.CandidateId,
+                BlueprintId: 0,
+                BeatId: "",
+                FeedbackTags: ["manual_edit"],
+                Note: "保留动作，改短后半句",
+                EditedText: "他握住门把手。\n没有马上说话。",
+                Origin: "user"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceFeedbackDecisions.Accepted, accepted.Decision);
+        Assert.Equal(ReferenceFeedbackDecisions.Rejected, rejected.Decision);
+        Assert.Equal(ReferenceFeedbackDecisions.Edited, edited.Decision);
+        Assert.True(string.IsNullOrEmpty(rejected.EditedTextHash));
+        Assert.False(string.IsNullOrWhiteSpace(edited.EditedTextHash));
+
+        var reloaded = new SqliteReferenceAnchorService(options, novels);
+        var all = await reloaded.GetUserFeedbackAsync(
+            new GetReferenceUserFeedbackPayload(novel.Id, TargetType: "", TargetId: "", Limit: 10),
+            CancellationToken.None);
+
+        Assert.Equal(3, all.Count);
+        Assert.Contains(all, item => item.Decision == ReferenceFeedbackDecisions.Accepted && item.TargetId == material.MaterialId);
+        Assert.Contains(all, item => item.Decision == ReferenceFeedbackDecisions.Rejected && item.TargetId == adapted.CandidateId);
+        Assert.Contains(all, item => item.Decision == ReferenceFeedbackDecisions.Edited && item.EditedTextHash == edited.EditedTextHash);
+
+        var candidateFeedback = await reloaded.GetUserFeedbackAsync(
+            new GetReferenceUserFeedbackPayload(
+                novel.Id,
+                ReferenceFeedbackTargetTypes.ReuseCandidate,
+                adapted.CandidateId,
+                Limit: 10),
+            CancellationToken.None);
+
+        Assert.Equal(2, candidateFeedback.Count);
+        Assert.All(candidateFeedback, item => Assert.Equal(adapted.CandidateId, item.TargetId));
+    }
+
+    [Fact]
     public async Task CreateAnchorRejectsUnsupportedSourceFiles()
     {
         var options = CreateOptions();
@@ -445,6 +554,98 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
 
         Assert.True(audit.RootElement.GetProperty("ok").GetBoolean());
         Assert.Equal("passed", audit.RootElement.GetProperty("result").GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task BridgeReferenceAnchorHandlersRecordAndListUserFeedback()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("桥接反馈测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("anchor.md", "他握住{{object}}，没有立刻说话。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "反馈参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var materials = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "{{object}}",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        var material = Assert.Single(materials.Items);
+        var adapted = await service.AdaptMaterialAsync(
+            new AdaptReferenceMaterialPayload(
+                novel.Id,
+                material.MaterialId,
+                [new ReferenceSlotValuePayload("object", "门把手")],
+                ReferenceRewriteLevels.L1,
+                SceneFacts: ["门把手"]),
+            CancellationToken.None);
+        var dispatcher = new BridgeDispatcher()
+            .RegisterCompatibilityAppMethodHandlers()
+            .RegisterReferenceAnchorHandlers(service);
+
+        using var recorded = ParseOutbound(await dispatcher.DispatchAsync($$"""
+            {
+              "kind": "request",
+              "id": "req_record_feedback",
+              "method": "RecordReferenceUserFeedback",
+              "payload": {
+                "args": [
+                  {
+                    "novel_id": {{novel.Id}},
+                    "target_type": "reuse_candidate",
+                    "target_id": {{JsonSerializer.Serialize(adapted.CandidateId)}},
+                    "decision": "edited",
+                    "material_id": {{JsonSerializer.Serialize(material.MaterialId)}},
+                    "candidate_id": {{JsonSerializer.Serialize(adapted.CandidateId)}},
+                    "blueprint_id": 0,
+                    "beat_id": "",
+                    "feedback_tags": ["manual_edit"],
+                    "note": "桥接记录一次人工修订",
+                    "edited_text": "他握住门把手，没有马上说话。",
+                    "origin": "user"
+                  }
+                ]
+              }
+            }
+            """));
+
+        Assert.True(recorded.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal("edited", recorded.RootElement.GetProperty("result").GetProperty("decision").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(recorded.RootElement.GetProperty("result").GetProperty("edited_text_hash").GetString()));
+
+        using var listed = ParseOutbound(await dispatcher.DispatchAsync($$"""
+            {
+              "kind": "request",
+              "id": "req_get_feedback",
+              "method": "GetReferenceUserFeedback",
+              "payload": {
+                "args": [
+                  {
+                    "novel_id": {{novel.Id}},
+                    "target_type": "reuse_candidate",
+                    "target_id": {{JsonSerializer.Serialize(adapted.CandidateId)}},
+                    "limit": 10
+                  }
+                ]
+              }
+            }
+            """));
+
+        Assert.True(listed.RootElement.GetProperty("ok").GetBoolean());
+        var feedback = Assert.Single(listed.RootElement.GetProperty("result").EnumerateArray());
+        Assert.Equal(recorded.RootElement.GetProperty("result").GetProperty("feedback_id").GetString(), feedback.GetProperty("feedback_id").GetString());
+        Assert.Equal("manual_edit", feedback.GetProperty("feedback_tags")[0].GetString());
     }
 
     public void Dispose()

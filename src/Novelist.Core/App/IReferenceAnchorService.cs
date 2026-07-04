@@ -34,6 +34,14 @@ public interface IReferenceAnchorService
         AuditReferenceReusePayload input,
         CancellationToken cancellationToken);
 
+    ValueTask<ReferenceUserFeedbackPayload> RecordUserFeedbackAsync(
+        RecordReferenceUserFeedbackPayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<IReadOnlyList<ReferenceUserFeedbackPayload>> GetUserFeedbackAsync(
+        GetReferenceUserFeedbackPayload input,
+        CancellationToken cancellationToken);
+
     ValueTask DeleteAnchorAsync(
         long novelId,
         long anchorId,

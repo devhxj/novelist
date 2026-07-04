@@ -663,6 +663,34 @@ public sealed class MafToolRegistryTests
                 DateTimeOffset.UtcNow));
         }
 
+        public ValueTask<ReferenceUserFeedbackPayload> RecordUserFeedbackAsync(
+            RecordReferenceUserFeedbackPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new ReferenceUserFeedbackPayload(
+                "feedback-1",
+                input.NovelId,
+                input.TargetType,
+                input.TargetId,
+                input.Decision,
+                input.MaterialId,
+                input.CandidateId,
+                input.BlueprintId,
+                input.BeatId,
+                input.FeedbackTags,
+                input.Note,
+                string.IsNullOrWhiteSpace(input.EditedText) ? string.Empty : "edited-hash",
+                input.Origin,
+                DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceUserFeedbackPayload>> GetUserFeedbackAsync(
+            GetReferenceUserFeedbackPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<ReferenceUserFeedbackPayload>>([]);
+        }
+
         public ValueTask DeleteAnchorAsync(long novelId, long anchorId, CancellationToken cancellationToken)
         {
             return ValueTask.CompletedTask;

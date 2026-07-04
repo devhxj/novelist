@@ -67,6 +67,35 @@ public static class ReferenceMaterialTypes
     public static IReadOnlyList<string> All { get; } = [Chapter, Paragraph, Sentence, Passage];
 }
 
+public static class ReferenceFeedbackDecisions
+{
+    public const string Accepted = "accepted";
+    public const string Rejected = "rejected";
+    public const string Edited = "edited";
+
+    public static IReadOnlyList<string> All { get; } = [Accepted, Rejected, Edited];
+}
+
+public static class ReferenceFeedbackTargetTypes
+{
+    public const string Material = "material";
+    public const string ReuseCandidate = "reuse_candidate";
+    public const string DraftCandidate = "draft_candidate";
+    public const string Blueprint = "blueprint";
+    public const string BlueprintBeat = "blueprint_beat";
+    public const string MaterialLink = "material_link";
+
+    public static IReadOnlyList<string> All { get; } =
+    [
+        Material,
+        ReuseCandidate,
+        DraftCandidate,
+        Blueprint,
+        BlueprintBeat,
+        MaterialLink
+    ];
+}
+
 public sealed record CreateReferenceAnchorPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("title")] string Title,
@@ -178,3 +207,39 @@ public sealed record ReferenceReuseAuditPayload(
     [property: JsonPropertyName("non_slot_edits")] IReadOnlyList<string> NonSlotEdits,
     [property: JsonPropertyName("required_fixes")] IReadOnlyList<string> RequiredFixes,
     [property: JsonPropertyName("audited_at")] DateTimeOffset AuditedAt);
+
+public sealed record RecordReferenceUserFeedbackPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("target_type")] string TargetType,
+    [property: JsonPropertyName("target_id")] string TargetId,
+    [property: JsonPropertyName("decision")] string Decision,
+    [property: JsonPropertyName("material_id")] string MaterialId,
+    [property: JsonPropertyName("candidate_id")] string CandidateId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("beat_id")] string BeatId,
+    [property: JsonPropertyName("feedback_tags")] IReadOnlyList<string> FeedbackTags,
+    [property: JsonPropertyName("note")] string Note,
+    [property: JsonPropertyName("edited_text")] string EditedText,
+    [property: JsonPropertyName("origin")] string Origin);
+
+public sealed record GetReferenceUserFeedbackPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("target_type")] string TargetType,
+    [property: JsonPropertyName("target_id")] string TargetId,
+    [property: JsonPropertyName("limit")] int Limit);
+
+public sealed record ReferenceUserFeedbackPayload(
+    [property: JsonPropertyName("feedback_id")] string FeedbackId,
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("target_type")] string TargetType,
+    [property: JsonPropertyName("target_id")] string TargetId,
+    [property: JsonPropertyName("decision")] string Decision,
+    [property: JsonPropertyName("material_id")] string MaterialId,
+    [property: JsonPropertyName("candidate_id")] string CandidateId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("beat_id")] string BeatId,
+    [property: JsonPropertyName("feedback_tags")] IReadOnlyList<string> FeedbackTags,
+    [property: JsonPropertyName("note")] string Note,
+    [property: JsonPropertyName("edited_text_hash")] string EditedTextHash,
+    [property: JsonPropertyName("origin")] string Origin,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);

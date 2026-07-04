@@ -238,6 +238,22 @@ reference_draft_audits
 - ai_prose_risks_json TEXT NOT NULL
 - required_fixes_json TEXT NOT NULL
 - audited_at TEXT NOT NULL
+
+reference_user_feedback
+- feedback_id TEXT PRIMARY KEY
+- novel_id INTEGER NOT NULL
+- target_type TEXT NOT NULL
+- target_id TEXT NOT NULL
+- decision TEXT NOT NULL
+- material_id TEXT NOT NULL
+- candidate_id TEXT NOT NULL
+- blueprint_id INTEGER NOT NULL
+- beat_id TEXT NOT NULL
+- feedback_tags_json TEXT NOT NULL
+- note TEXT NOT NULL
+- edited_text_hash TEXT NOT NULL
+- origin TEXT NOT NULL
+- created_at TEXT NOT NULL
 ```
 
 Add indexes:
@@ -254,6 +270,8 @@ idx_reference_blueprint_reviews_blueprint
 idx_reference_blueprint_revisions_blueprint
 idx_reference_blueprint_links_beat
 idx_reference_draft_candidates_blueprint
+idx_reference_feedback_novel_target
+idx_reference_feedback_material
 ```
 
 Enable foreign key enforcement on every SQLite connection:

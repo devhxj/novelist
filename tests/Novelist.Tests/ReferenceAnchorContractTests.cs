@@ -231,6 +231,65 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void ReferenceUserFeedbackPayloadsUseStableSnakeCaseJsonNames()
+    {
+        var input = new RecordReferenceUserFeedbackPayload(
+            NovelId: 42,
+            TargetType: ReferenceFeedbackTargetTypes.ReuseCandidate,
+            TargetId: "candidate-1",
+            Decision: ReferenceFeedbackDecisions.Edited,
+            MaterialId: "material-1",
+            CandidateId: "candidate-1",
+            BlueprintId: 10,
+            BeatId: "beat-1",
+            FeedbackTags: ["too_ai_flavored", "introduced_fact"],
+            Note: "kept only the pressure image",
+            EditedText: "edited candidate text",
+            Origin: "user");
+
+        using var inputJson = JsonDocument.Parse(JsonSerializer.Serialize(input, BridgeJson.SerializerOptions));
+        var inputRoot = inputJson.RootElement;
+
+        Assert.Equal(42, inputRoot.GetProperty("novel_id").GetInt64());
+        Assert.Equal("reuse_candidate", inputRoot.GetProperty("target_type").GetString());
+        Assert.Equal("candidate-1", inputRoot.GetProperty("target_id").GetString());
+        Assert.Equal("edited", inputRoot.GetProperty("decision").GetString());
+        Assert.Equal("material-1", inputRoot.GetProperty("material_id").GetString());
+        Assert.Equal("candidate-1", inputRoot.GetProperty("candidate_id").GetString());
+        Assert.Equal(10, inputRoot.GetProperty("blueprint_id").GetInt64());
+        Assert.Equal("beat-1", inputRoot.GetProperty("beat_id").GetString());
+        Assert.Equal("too_ai_flavored", inputRoot.GetProperty("feedback_tags")[0].GetString());
+        Assert.Equal("kept only the pressure image", inputRoot.GetProperty("note").GetString());
+        Assert.Equal("edited candidate text", inputRoot.GetProperty("edited_text").GetString());
+        Assert.Equal("user", inputRoot.GetProperty("origin").GetString());
+        Assert.False(inputRoot.TryGetProperty("NovelId", out _));
+
+        var result = new ReferenceUserFeedbackPayload(
+            FeedbackId: "feedback-1",
+            NovelId: 42,
+            TargetType: ReferenceFeedbackTargetTypes.ReuseCandidate,
+            TargetId: "candidate-1",
+            Decision: ReferenceFeedbackDecisions.Edited,
+            MaterialId: "material-1",
+            CandidateId: "candidate-1",
+            BlueprintId: 10,
+            BeatId: "beat-1",
+            FeedbackTags: ["too_ai_flavored"],
+            Note: "kept only the pressure image",
+            EditedTextHash: "edited-hash",
+            Origin: "user",
+            CreatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"));
+
+        using var resultJson = JsonDocument.Parse(JsonSerializer.Serialize(result, BridgeJson.SerializerOptions));
+        var resultRoot = resultJson.RootElement;
+
+        Assert.Equal("feedback-1", resultRoot.GetProperty("feedback_id").GetString());
+        Assert.Equal("edited-hash", resultRoot.GetProperty("edited_text_hash").GetString());
+        Assert.Equal("too_ai_flavored", resultRoot.GetProperty("feedback_tags")[0].GetString());
+        Assert.False(resultRoot.TryGetProperty("EditedTextHash", out _));
+    }
+
+    [Fact]
     public void ReferenceConstantsDocumentInitialStateAndRewriteVocabulary()
     {
         Assert.Equal("L0", ReferenceRewriteLevels.L0);
@@ -243,6 +302,10 @@ public sealed class ReferenceAnchorContractTests
         Assert.Contains(ReferenceBlueprintStates.MaterialBound, ReferenceBlueprintStates.All);
         Assert.Contains(ReferenceBlueprintBeatTypes.Interiority, ReferenceBlueprintBeatTypes.All);
         Assert.Contains(ReferenceBlueprintReviewStatuses.Failed, ReferenceBlueprintReviewStatuses.All);
+        Assert.Contains(ReferenceFeedbackDecisions.Accepted, ReferenceFeedbackDecisions.All);
+        Assert.Contains(ReferenceFeedbackDecisions.Rejected, ReferenceFeedbackDecisions.All);
+        Assert.Contains(ReferenceFeedbackDecisions.Edited, ReferenceFeedbackDecisions.All);
+        Assert.Contains(ReferenceFeedbackTargetTypes.ReuseCandidate, ReferenceFeedbackTargetTypes.All);
     }
 
     [Fact]
@@ -258,6 +321,8 @@ public sealed class ReferenceAnchorContractTests
             "SearchReferenceMaterials",
             "AdaptReferenceMaterial",
             "AuditReferenceReuse",
+            "RecordReferenceUserFeedback",
+            "GetReferenceUserFeedback",
             "GenerateReferenceChapterBlueprint",
             "GetReferenceChapterBlueprints",
             "GetReferenceChapterBlueprint",
