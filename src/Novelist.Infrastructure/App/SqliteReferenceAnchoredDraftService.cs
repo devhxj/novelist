@@ -13,6 +13,7 @@ namespace Novelist.Infrastructure.App;
 public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraftService
 {
     private const string BuildVersion = "reference-blueprint-v1";
+    private const string ProseLikePlanNotice = "provided source text appears to be final prose; convert it into structured causality, emotion, POV, and prose duties before drafting";
     private static readonly JsonSerializerOptions JsonOptions = BridgeJson.SerializerOptions;
 
     private readonly AppInitializationOptions _options;
@@ -63,7 +64,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 forbiddenFacts));
         var now = DateTimeOffset.UtcNow;
         var title = NormalizeOptional(input.Title, "Chapter " + input.ChapterNumber.ToString(CultureInfo.InvariantCulture), 200);
-        var chapterFunction = NormalizeOptional(input.ChapterGoal, "establish a reviewable chapter blueprint before prose generation", 2_000);
+        var chapterFunction = NormalizeBlueprintInstruction(input.ChapterGoal, "establish a reviewable chapter blueprint before prose generation", 2_000);
         var primaryAnchorId = anchorIds.FirstOrDefault();
         var blueprint = BuildDeterministicBlueprint(
             0,
@@ -854,9 +855,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         IReadOnlyList<string> forbiddenFacts,
         DateTimeOffset now)
     {
-        var summary = string.IsNullOrWhiteSpace(planText)
-            ? chapterFunction
-            : planText.Trim();
+        var summary = BuildBlueprintPremise(planText, chapterFunction);
         var beat = new ReferenceChapterBlueprintBeatPayload(
             BeatId: BuildBeatId(blueprintId, 1),
             BeatIndex: 1,
@@ -2212,10 +2211,78 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             .ToArray() ?? [];
     }
 
+    private static string BuildBlueprintPremise(string? planText, string chapterFunction)
+    {
+        var normalized = NormalizeOptional(planText, chapterFunction, 2_000);
+        if (!LooksLikeFinalProseParagraph(normalized))
+        {
+            return normalized;
+        }
+
+        var premise = string.Equals(chapterFunction, ProseLikePlanNotice, StringComparison.Ordinal)
+            ? ProseLikePlanNotice
+            : ProseLikePlanNotice + "; chapter function: " + chapterFunction;
+        return premise.Length <= 2_000 ? premise : premise[..2_000];
+    }
+
+    private static string NormalizeBlueprintInstruction(string? value, string fallback, int maxLength)
+    {
+        var normalized = NormalizeOptional(value, fallback, maxLength);
+        return LooksLikeFinalProseParagraph(normalized)
+            ? ProseLikePlanNotice
+            : normalized;
+    }
+
     private static string NormalizeOptional(string? value, string fallback, int maxLength)
     {
         var normalized = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
         return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
+    }
+
+    private static bool LooksLikeFinalProseParagraph(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = value.ReplaceLineEndings("\n").Trim();
+        if (normalized.Length < 100 || ContainsBlueprintPlanningSignal(normalized))
+        {
+            return false;
+        }
+
+        var terminators = normalized.Count(IsSentenceTerminator);
+        return terminators >= 3 ||
+            (normalized.Contains('\n') && terminators >= 2) ||
+            (normalized.Any(IsDialogueMarker) && terminators >= 2);
+    }
+
+    private static bool ContainsBlueprintPlanningSignal(string value)
+    {
+        return ContainsAny(
+            value,
+            [
+                "chapter goal", "chapter plan", "outline", "blueprint", "beat",
+                "must", "should", "needs to", "plan:",
+                "\u672c\u7ae0\u76ee\u6807", "\u672c\u7ae0\u8ba1\u5212",
+                "\u5927\u7eb2", "\u84dd\u56fe", "\u9700\u8981", "\u5e94\u8be5"
+            ]);
+    }
+
+    private static bool ContainsAny(string value, IReadOnlyList<string> needles)
+    {
+        return needles.Any(needle => value.Contains(needle, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsSentenceTerminator(char value)
+    {
+        return value is '.' or '!' or '?' or '\u3002' or '\uff01' or '\uff1f';
+    }
+
+    private static bool IsDialogueMarker(char value)
+    {
+        return value is '"' or '\'' or '\u201c' or '\u201d' or '\u300c' or '\u300d' or '\u300e' or '\u300f';
     }
 
     private static ReferenceChapterBlueprintPayload ApplyRevisionChange(

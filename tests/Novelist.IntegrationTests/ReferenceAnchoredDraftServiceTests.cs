@@ -159,6 +159,42 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GenerateChapterBlueprintDoesNotPersistProseLikePlanAsBeatDuty()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("蓝图正文防护测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        var proseLikePlan = """
+            雨水顺着林岚的发梢滴下来，她站在旧宅门前，手指贴着冰冷的铜环，却迟迟没有敲下去。屋里传来一声很轻的咳嗽，像是有人故意把声音压进墙缝里，又像是她自己把恐惧听成了回音。她终于抬起手，门后的灯影在这一刻熄灭。
+            """;
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", proseLikePlan),
+            CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning);
+
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                ChapterNumber: 24,
+                Title: "第二十四章蓝图",
+                ChapterGoal: "让林岚在门前完成从犹豫到行动的转折",
+                AnchorIds: [],
+                KnownFacts: ["林岚已经到达旧宅门前"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+
+        var beat = Assert.Single(blueprint.Beats);
+        Assert.DoesNotContain("雨水顺着林岚的发梢滴下来", beat.LogicPremise, StringComparison.Ordinal);
+        Assert.Contains("final prose", beat.LogicPremise, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("structured", beat.LogicPremise, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("interiority", beat.ProseDuties);
+        Assert.False(string.IsNullOrWhiteSpace(beat.ParagraphIntention));
+    }
+
+    [Fact]
     public async Task ReviseApprovedBlueprintInvalidatesApprovalAndMaterialLinks()
     {
         var options = CreateOptions();
