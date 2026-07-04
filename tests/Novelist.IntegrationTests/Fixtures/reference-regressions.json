@@ -36,6 +36,11 @@
       "expected_error": "generic paragraph intention"
     },
     {
+      "name": "unsupported_final_hook",
+      "mutation": "unsupported_final_hook",
+      "expected_error": "final hook"
+    },
+    {
       "name": "material_mismatch",
       "mutation": "material_mismatch",
       "expected_error": "material fit"

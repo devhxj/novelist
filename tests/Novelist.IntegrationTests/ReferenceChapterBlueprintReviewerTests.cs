@@ -117,6 +117,37 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsFinalHookWithUnsupportedFact()
+    {
+        var blueprint = Blueprint(
+            beat => beat,
+            finalHook: "周鸣其实是卧底");
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ContinuityErrors, item => item.Contains("final hook", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(review.ContinuityErrors, item => item.Contains("周鸣是卧底", StringComparison.Ordinal));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "continuity" &&
+                defect.FieldPath == "final_hook");
+    }
+
+    [Fact]
+    public void BuildReviewAllowsFinalHookFactWhenSetupEarlier()
+    {
+        var blueprint = Blueprint(
+            beat => beat,
+            knownFacts: ["周鸣是卧底"],
+            finalHook: "周鸣其实是卧底");
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+    }
+
+    [Fact]
     public void BuildReviewFailsActionBeatWithoutNovelisticDuties()
     {
         var blueprint = Blueprint(beat => beat with
@@ -277,6 +308,7 @@ public sealed class ReferenceChapterBlueprintReviewerTests
         Func<ReferenceChapterBlueprintBeatPayload, ReferenceChapterBlueprintBeatPayload> configureBeat,
         ReferenceChapterBlueprintExecutionTrackPayload? execution = null,
         IReadOnlyList<string>? forbiddenFacts = null,
+        IReadOnlyList<string>? knownFacts = null,
         string finalHook = "hook")
     {
         var beat = configureBeat(Beat("1:beat:1"));
@@ -313,7 +345,7 @@ public sealed class ReferenceChapterBlueprintReviewerTests
             finalHook,
             "林岚",
             "close",
-            ["雨声压低了整条街的呼吸"],
+            knownFacts ?? ["雨声压低了整条街的呼吸"],
             forbiddenFacts ?? [],
             [],
             [beat],

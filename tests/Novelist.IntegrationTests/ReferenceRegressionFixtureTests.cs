@@ -16,7 +16,9 @@ public sealed class ReferenceRegressionFixtureTests
             var name = fixture.GetProperty("name").GetString() ?? "<unnamed>";
             var mutation = fixture.GetProperty("mutation").GetString() ?? string.Empty;
             var expected = fixture.GetProperty("expected_error").GetString() ?? string.Empty;
-            var blueprint = Blueprint(beat => ApplyBlueprintMutation(beat, mutation));
+            var blueprint = Blueprint(
+                beat => ApplyBlueprintMutation(beat, mutation),
+                finalHook: FinalHookForMutation(mutation));
 
             var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
             var messages = AllReviewMessages(review).ToArray();
@@ -99,6 +101,7 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 ParagraphIntention = "写得更好，更有代入感"
             },
+            "unsupported_final_hook" => beat,
             "material_mismatch" => beat with
             {
                 ReferenceQuery = beat.ReferenceQuery with
@@ -110,6 +113,15 @@ public sealed class ReferenceRegressionFixtureTests
                 }
             },
             _ => beat
+        };
+    }
+
+    private static string FinalHookForMutation(string mutation)
+    {
+        return mutation switch
+        {
+            "unsupported_final_hook" => "周鸣其实是卧底",
+            _ => "hook"
         };
     }
 
@@ -177,7 +189,8 @@ public sealed class ReferenceRegressionFixtureTests
     }
 
     private static ReferenceChapterBlueprintPayload Blueprint(
-        Func<ReferenceChapterBlueprintBeatPayload, ReferenceChapterBlueprintBeatPayload> configureBeat)
+        Func<ReferenceChapterBlueprintBeatPayload, ReferenceChapterBlueprintBeatPayload> configureBeat,
+        string finalHook = "hook")
     {
         var beat = configureBeat(Beat("1:beat:1"));
         return new ReferenceChapterBlueprintPayload(
@@ -210,7 +223,7 @@ public sealed class ReferenceRegressionFixtureTests
                 ["reject"]),
             "previous",
             "final",
-            "hook",
+            finalHook,
             "林岚",
             "close",
             ["雨声压低了整条街的呼吸"],

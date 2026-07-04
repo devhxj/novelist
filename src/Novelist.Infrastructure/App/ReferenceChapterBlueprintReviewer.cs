@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 4;
+    public const int CurrentReviewVersion = 5;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -337,6 +337,17 @@ internal static class ReferenceChapterBlueprintReviewer
             }
         }
 
+        foreach (var unsupportedFact in FindUnsupportedFinalHookFacts(blueprint))
+        {
+            AddDefect(
+                continuityErrors,
+                "continuity",
+                "final_hook",
+                string.Empty,
+                $"Final hook depends on unsupported fact: {unsupportedFact}",
+                "Set up the final hook fact in known facts, beat scene facts, or approved POV knowledge before review.");
+        }
+
         if (blueprint.RiskFlags.Any(flag => flag.Contains("ai", StringComparison.OrdinalIgnoreCase)))
         {
             AddDefect(
@@ -494,6 +505,30 @@ internal static class ReferenceChapterBlueprintReviewer
                 "写得更好", "写得好看", "更有代入感", "更有感染力", "更感人",
                 "加强情绪", "增强感染力", "润色一下", "优化一下", "情绪拉满", "氛围拉满"
             ]);
+    }
+
+    private static IEnumerable<string> FindUnsupportedFinalHookFacts(ReferenceChapterBlueprintPayload blueprint)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SceneFacts))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.ViewpointAllowedKnowledge))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        foreach (var fact in ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(blueprint.FinalHook))
+        {
+            if (!IsAllowedFact(fact, allowedFacts))
+            {
+                yield return fact;
+            }
+        }
+    }
+
+    private static bool IsAllowedFact(string fact, IReadOnlyList<string> allowedFacts)
+    {
+        return allowedFacts.Any(allowed => allowed.Contains(fact, StringComparison.OrdinalIgnoreCase) ||
+            fact.Contains(allowed, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool HasReferenceQueryBeatFit(ReferenceChapterBlueprintBeatPayload beat)
