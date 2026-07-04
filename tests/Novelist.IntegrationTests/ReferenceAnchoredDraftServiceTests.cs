@@ -150,6 +150,68 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RevisedBlueprintBeatCanBeReviewedAndApprovedAgain()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("蓝图重新评审测试", "", ""), CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(
+            options,
+            novels,
+            new FileSystemPlanningService(options, novels));
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                21,
+                "第二十一章蓝图",
+                "修订后重新评审",
+                AnchorIds: [],
+                KnownFacts: ["主角已经到场"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var firstReview = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId),
+            CancellationToken.None);
+        await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, firstReview.ReviewId),
+            CancellationToken.None);
+        var revised = await service.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                blueprint.BlueprintId,
+                [new ReferenceBlueprintRevisionChangePayload(
+                    "beat:" + blueprint.Beats[0].BeatId + ":paragraph_intention",
+                    "hold the protagonist at the threshold before the next action")],
+                "user",
+                "manual beat edit"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceBlueprintStates.Draft, revised.Status);
+        Assert.Null(revised.LatestReview);
+        Assert.Equal("hold the protagonist at the threshold before the next action", revised.Beats[0].ParagraphIntention);
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.ApproveChapterBlueprintAsync(
+                new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, firstReview.ReviewId),
+                CancellationToken.None));
+
+        var secondReview = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId),
+            CancellationToken.None);
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, secondReview.Status);
+        Assert.NotEqual(firstReview.AnalysisContractHash, secondReview.AnalysisContractHash);
+
+        var approvedAgain = await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, secondReview.ReviewId),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceBlueprintStates.Approved, approvedAgain.Status);
+        Assert.NotNull(approvedAgain.LatestReview);
+        Assert.Equal(secondReview.ReviewId, approvedAgain.LatestReview.ReviewId);
+        Assert.Equal("hold the protagonist at the threshold before the next action", approvedAgain.Beats[0].ParagraphIntention);
+    }
+
+    [Fact]
     public async Task ReviseApprovedBlueprintSupportsKnownFactsAndReferenceQueryEdits()
     {
         var options = CreateOptions();
