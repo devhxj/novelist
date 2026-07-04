@@ -46,6 +46,11 @@
       "expected_error": "generic paragraph intention"
     },
     {
+      "name": "generic_narration_strategy",
+      "mutation": "generic_narration_strategy",
+      "expected_error": "generic narration strategy"
+    },
+    {
       "name": "unsupported_final_hook",
       "mutation": "unsupported_final_hook",
       "expected_error": "final hook"

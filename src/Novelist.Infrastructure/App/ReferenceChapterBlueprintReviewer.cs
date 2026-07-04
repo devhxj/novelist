@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 8;
+    public const int CurrentReviewVersion = 9;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -352,6 +352,16 @@ internal static class ReferenceChapterBlueprintReviewer
                     $"Beat {beat.BeatIndex} is missing narration strategy.",
                     "Add a narration strategy that constrains POV, distance, and prose execution.");
             }
+            else if (UsesGenericNarrationStrategy(beat.NarrationStrategy))
+            {
+                AddBeatDefect(
+                    narrationErrors,
+                    "narration",
+                    beat,
+                    "narration_strategy",
+                    $"Beat {beat.BeatIndex} uses generic narration strategy.",
+                    "Rewrite narration_strategy with concrete POV distance, sensory/interiority limits, and the narration work this beat must perform.");
+            }
         }
 
         foreach (var forbidden in blueprint.ForbiddenFacts.Where(item => !string.IsNullOrWhiteSpace(item)))
@@ -546,6 +556,19 @@ internal static class ReferenceChapterBlueprintReviewer
                 "make it better", "make it emotional", "more emotional", "more moving",
                 "写得更好", "写得好看", "更有代入感", "更有感染力", "更感人",
                 "加强情绪", "增强感染力", "润色一下", "优化一下", "情绪拉满", "氛围拉满"
+            ]);
+    }
+
+    private static bool UsesGenericNarrationStrategy(string value)
+    {
+        return ContainsAny(
+            value,
+            [
+                "normal narration", "standard narration", "regular narration", "write normally",
+                "make it vivid", "cinematic feel", "more immersive", "more visual",
+                "正常叙述", "常规叙述", "普通叙述", "自然叙述", "正常写",
+                "写得有画面感", "更有画面感", "有画面感", "更沉浸", "更流畅",
+                "代入感", "电影感"
             ]);
     }
 

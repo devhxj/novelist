@@ -334,6 +334,24 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsGenericNarrationStrategy()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            NarrationStrategy = "正常叙述，写得有画面感"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.NarrationErrors, item => item.Contains("generic narration strategy", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "narration" &&
+                defect.FieldPath.Contains("narration_strategy", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsHardTransitionWithoutNarrativePressure()
     {
         var blueprint = Blueprint(beat => beat with

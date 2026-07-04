@@ -110,6 +110,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 ParagraphIntention = "写得更好，更有代入感"
             },
+            "generic_narration_strategy" => beat with
+            {
+                NarrationStrategy = "正常叙述，写得有画面感"
+            },
             "unsupported_final_hook" => beat,
             "unsupported_scene_fact" => beat with
             {
