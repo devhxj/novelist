@@ -245,6 +245,78 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchMaterialsRanksLexicalMatchesAndBoundsPaginationWithoutEmbeddings()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("搜索排序分页测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "search-ranking.md",
+            """
+            # 第一章
+
+            雨声压低了门口。
+
+            他在门口停住。
+
+            她说：别动。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "搜索排序参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        var firstPage = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "门口",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                Page: 1,
+                Size: 1),
+            CancellationToken.None);
+        var secondPage = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "门口",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                Page: 2,
+                Size: 1),
+            CancellationToken.None);
+        var bounded = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "门口",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                Page: 1,
+                Size: 500),
+            CancellationToken.None);
+
+        Assert.Equal(2L, firstPage.Total);
+        Assert.Equal(2, firstPage.TotalPages);
+        Assert.Equal("他在门口停住。", Assert.Single(firstPage.Items).Text);
+        Assert.Equal("雨声压低了门口。", Assert.Single(secondPage.Items).Text);
+        Assert.Equal(100, bounded.Size);
+        Assert.Equal(2L, bounded.Total);
+        Assert.Equal(2, bounded.Items.Count);
+    }
+
+    [Fact]
     public async Task CreateAnchorPersistsMaterialProvenanceTagsAndSlots()
     {
         var options = CreateOptions();
