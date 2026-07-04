@@ -731,6 +731,48 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReviewChapterBlueprintReturnsStrictGateDefectsAfterRevision()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("严格评审门禁测试", "", ""), CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(
+            options,
+            novels,
+            new FileSystemPlanningService(options, novels));
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                11,
+                "第十一章蓝图",
+                "制造压力并留下钩子",
+                AnchorIds: [],
+                KnownFacts: ["主角已经到场"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var revised = await service.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                blueprint.BlueprintId,
+                StrictReviewGateRevisionChanges(blueprint.Beats[0].BeatId),
+                "user",
+                "exercise strict review gates"),
+            CancellationToken.None);
+
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.EmotionErrors, item => item.Contains("fake emotion", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(review.TransitionErrors, item => item.Contains("pressure", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(review.PovErrors, item => item.Contains("周鸣是卧底", StringComparison.Ordinal));
+        Assert.Contains(review.ExecutionErrors, item => item.Contains("prose duties", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(review.MaterialFitErrors, item => item.Contains("material fit", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task BridgeReferenceAnchoredDraftHandlersGenerateReviewAndApproveBlueprint()
     {
         var options = CreateOptions();
@@ -807,6 +849,65 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
 
         Assert.True(approved.RootElement.GetProperty("ok").GetBoolean());
         Assert.Equal("approved", approved.RootElement.GetProperty("result").GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task BridgeReferenceAnchoredDraftHandlersSurfaceStrictReviewGateDefects()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("严格评审桥接测试", "", ""), CancellationToken.None);
+        var draftService = new SqliteReferenceAnchoredDraftService(
+            options,
+            novels,
+            new FileSystemPlanningService(options, novels));
+        var blueprint = await draftService.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                12,
+                "第十二章蓝图",
+                "制造压力并留下钩子",
+                AnchorIds: [],
+                KnownFacts: ["主角已经到场"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        await draftService.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                blueprint.BlueprintId,
+                StrictReviewGateRevisionChanges(blueprint.Beats[0].BeatId),
+                "user",
+                "exercise strict review gates"),
+            CancellationToken.None);
+        var dispatcher = new BridgeDispatcher()
+            .RegisterCompatibilityAppMethodHandlers()
+            .RegisterReferenceAnchoredDraftHandlers(draftService);
+
+        using var reviewed = ParseOutbound(await dispatcher.DispatchAsync($$"""
+            {
+              "kind": "request",
+              "id": "req_review_strict_blueprint",
+              "method": "ReviewReferenceChapterBlueprint",
+              "payload": {
+                "args": [
+                  {
+                    "novel_id": {{novel.Id}},
+                    "blueprint_id": {{blueprint.BlueprintId}}
+                  }
+                ]
+              }
+            }
+            """));
+
+        Assert.True(reviewed.RootElement.GetProperty("ok").GetBoolean());
+        var result = reviewed.RootElement.GetProperty("result");
+        Assert.Equal("failed", result.GetProperty("status").GetString());
+        AssertJsonArrayContains(result.GetProperty("emotion_errors"), "fake emotion");
+        AssertJsonArrayContains(result.GetProperty("transition_errors"), "pressure");
+        AssertJsonArrayContains(result.GetProperty("pov_errors"), "周鸣是卧底");
+        AssertJsonArrayContains(result.GetProperty("execution_errors"), "prose duties");
+        AssertJsonArrayContains(result.GetProperty("material_fit_errors"), "material fit");
     }
 
     [Fact]
@@ -1292,6 +1393,41 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         }
 
         return fieldPaths;
+    }
+
+    private static IReadOnlyList<ReferenceBlueprintRevisionChangePayload> StrictReviewGateRevisionChanges(string beatId)
+    {
+        var prefix = "beat:" + beatId + ":";
+        return
+        [
+            new ReferenceBlueprintRevisionChangePayload(prefix + "emotion_trigger", "剧情需要"),
+            new ReferenceBlueprintRevisionChangePayload(prefix + "suppressed_reaction", "有反应"),
+            new ReferenceBlueprintRevisionChangePayload(prefix + "external_evidence", "表现出痛苦"),
+            new ReferenceBlueprintRevisionChangePayload(prefix + "transition_in", "来到旧宅"),
+            new ReferenceBlueprintRevisionChangePayload(prefix + "transition_out", "第二天转到仓库"),
+            new ReferenceBlueprintRevisionChangePayload(
+                prefix + "viewpoint_allowed_knowledge",
+                JsonSerializer.Serialize(new[] { "主角已经到场", "周鸣是卧底" })),
+            new ReferenceBlueprintRevisionChangePayload(
+                prefix + "prose_duties",
+                JsonSerializer.Serialize(Array.Empty<string>())),
+            new ReferenceBlueprintRevisionChangePayload(
+                prefix + "reference_query.function_tags",
+                JsonSerializer.Serialize(new[] { "dialogue" })),
+            new ReferenceBlueprintRevisionChangePayload(
+                prefix + "reference_query.emotion_tags",
+                JsonSerializer.Serialize(new[] { "triumph" })),
+            new ReferenceBlueprintRevisionChangePayload(
+                prefix + "reference_query.pov_tags",
+                JsonSerializer.Serialize(new[] { "omniscient" }))
+        ];
+    }
+
+    private static void AssertJsonArrayContains(JsonElement element, string expected)
+    {
+        Assert.Contains(
+            element.EnumerateArray(),
+            item => item.GetString()?.Contains(expected, StringComparison.OrdinalIgnoreCase) == true);
     }
 
     private static async ValueTask InitializeAsync(AppInitializationOptions options)

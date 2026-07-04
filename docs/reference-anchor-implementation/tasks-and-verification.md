@@ -178,7 +178,7 @@ Recommended implementation slices:
 - [ ] unit tests for context-pack hashing and stale detection
 - [x] component tests for blueprint normalization and analysis-contract hashing
 - [x] component tests for deterministic blueprint review rules, including anti-screenplay and execution-track defects
-- [ ] fixture tests for fake emotion, hard transition, POV leak, missing prose duty, action/dialogue-only beat, and material mismatch
+- [x] fixture tests for fake emotion, hard transition, POV leak, missing prose duty, action/dialogue-only beat, and material mismatch
 - [ ] unit tests for explicit approval hash/version matching
 - [x] integration tests for approval invalidation after beat, analysis, execution, known-fact, and reference-query edits
 - [ ] integration test for generate/review/approve/stale lifecycle
@@ -460,19 +460,19 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 
 The initial foundation has already started. Do not restart from Phase 0 unless contracts have regressed.
 
-Latest verified scope: full `Novelist.IntegrationTests` passed after extracting normalizer, reviewer, draft preflight components, conservative prose-duty evidence auditing, non-POV hidden-state leakage detection, planned Chinese emotion-mechanic auditing, high-risk identity-reveal fact auditing, broader unsupported-fact auditing for relationship reveals and concealed scene evidence, expanded blueprint revision support for analysis/execution/known-fact/reference-query fields, core beat contract field revisions, material binding score-component exposure, frontend field-level blueprint revision UI, full review finding display, and draft audit/candidate provenance display. `frontend` lint/build also passed after adding score-component display, revision controls, review categories, audit categories, changed-slot chips, and non-slot edit display.
+Latest verified scope: `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj -v minimal` passed after adding deterministic blueprint-review fixtures and gates for fake emotion mechanics, hard transition without narrative pressure, unapproved high-risk POV knowledge, missing prose duties, and material-query beat-fit mismatch, plus service/bridge regressions proving those strict review defects surface through structured review payloads. `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj -v minimal` also passed. Earlier `frontend` lint/build passed after adding score-component display, revision controls, review categories, audit categories, changed-slot chips, and non-slot edit display.
 
 Recommended next session:
 
-1. Extend deterministic unsupported-fact extraction to conservative death/disappearance and past-event reveals, with approved-fact allowance tests.
-2. Add unit/component fixtures for every new blueprint-review and draft-audit rule before expanding service/MAF integration tests.
-3. Expand the beat editor to the remaining supported revision paths; leave complex object-list edits such as `slot_plan` for a focused schema slice.
+1. Expand the beat editor to the remaining supported revision paths; leave complex object-list edits such as `slot_plan` for a focused schema slice.
+2. Split `ReferenceAnchorView` into focused child components before adding more UI fields, so the reference workflow remains reviewable.
+3. Add first-class slot extraction and rewrite-level classifier tests before expanding L2+ adaptation.
 
 Recommended following session:
 
-1. Strengthen deterministic blueprint review fixtures for fake emotion, hard transitions, POV leaks, missing execution duties, material mismatch, and screenplay drift.
-2. Split `ReferenceAnchorView` into focused child components and expand the beat editor to all supported revision fields.
-3. Add a native file-picker bridge for source import so the first UI does not rely only on raw local paths.
+1. Add a native file-picker bridge for source import so the first UI does not rely only on raw local paths.
+2. Add explicit approval hash/version unit tests if approval logic is further split from the SQLite service.
+3. Add full frontend runtime verification after the reference-anchor panel is split into child components.
 
 Do not broaden frontend workflow beyond the review-first path until source corpus, material binding, blueprint review, and draft audit are reliable. The system's quality depends on immutable provenance, hard blueprint gates, and candidate audit before any manual insertion.
 
