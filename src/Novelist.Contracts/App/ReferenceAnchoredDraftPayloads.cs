@@ -217,7 +217,8 @@ public sealed record ReferenceChapterBlueprintReviewPayload(
 public sealed record ApproveReferenceChapterBlueprintPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("blueprint_id")] long BlueprintId,
-    [property: JsonPropertyName("review_id")] string ReviewId);
+    [property: JsonPropertyName("review_id")] string ReviewId,
+    [property: JsonPropertyName("approver_origin")] string ApproverOrigin = "user");
 
 public sealed record BindReferenceBlueprintMaterialsPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,

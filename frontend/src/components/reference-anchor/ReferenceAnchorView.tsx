@@ -253,6 +253,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       novel_id: novelId,
       blueprint_id: activeBlueprint.blueprint_id,
       review_id: activeBlueprint.latest_review!.review_id,
+      approver_origin: 'user',
     }), '蓝图已批准')
     if (approved) {
       setActiveBlueprint(approved)

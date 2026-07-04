@@ -648,6 +648,51 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ApproveBlueprintRecordsFrozenApprovalSnapshot()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("审批记录测试", "", ""), CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, new FileSystemPlanningService(options, novels));
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                23,
+                "第二十三章蓝图",
+                "审批记录必须冻结评审合同",
+                [],
+                KnownFacts: ["主角已经到场"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId),
+            CancellationToken.None);
+        var beforeApproval = DateTimeOffset.UtcNow;
+
+        await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, review.ReviewId, "user"),
+            CancellationToken.None);
+
+        var approval = await ReadBlueprintApprovalAsync(options, blueprint.BlueprintId, review.ReviewId);
+        Assert.False(string.IsNullOrWhiteSpace(approval.ApprovalId));
+        Assert.Equal(blueprint.BlueprintId, approval.BlueprintId);
+        Assert.Equal(review.ReviewId, approval.ReviewId);
+        Assert.Equal(review.ContextHash, approval.ContextHash);
+        Assert.Equal(review.SourcePlanHash, approval.SourcePlanHash);
+        Assert.Equal(review.AnalysisContractHash, approval.AnalysisContractHash);
+        Assert.Equal(review.ReviewVersion, approval.ReviewVersion);
+        Assert.Equal("user", approval.ApproverOrigin);
+        Assert.True(approval.ApprovedAt >= beforeApproval.AddSeconds(-1));
+        Assert.True(approval.ApprovedAt <= DateTimeOffset.UtcNow.AddSeconds(1));
+
+        await SetReviewContextHashAsync(options, review.ReviewId, "changed-after-approval");
+
+        var frozenApproval = await ReadBlueprintApprovalAsync(options, blueprint.BlueprintId, review.ReviewId);
+        Assert.Equal(review.ContextHash, frozenApproval.ContextHash);
+    }
+
+    [Fact]
     public async Task ReviewChapterBlueprintReusesExistingReviewForUnchangedContract()
     {
         var options = CreateOptions();
@@ -2394,6 +2439,54 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         File.WriteAllText(path, content);
         return path;
     }
+
+    private static async ValueTask<BlueprintApprovalRow> ReadBlueprintApprovalAsync(
+        AppInitializationOptions options,
+        long blueprintId,
+        string reviewId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT approval_id, blueprint_id, review_id, context_hash, source_plan_hash,
+                   analysis_contract_hash, review_version, approver_origin, approved_at
+            FROM reference_chapter_blueprint_approvals
+            WHERE blueprint_id = $blueprint_id AND review_id = $review_id
+            ORDER BY approved_at DESC, approval_id DESC
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        command.Parameters.AddWithValue("$review_id", reviewId);
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        return new BlueprintApprovalRow(
+            reader.GetString(0),
+            reader.GetInt64(1),
+            reader.GetString(2),
+            reader.GetString(3),
+            reader.GetString(4),
+            reader.GetString(5),
+            reader.GetInt32(6),
+            reader.GetString(7),
+            DateTimeOffset.Parse(reader.GetString(8)));
+    }
+
+    private sealed record BlueprintApprovalRow(
+        string ApprovalId,
+        long BlueprintId,
+        string ReviewId,
+        string ContextHash,
+        string SourcePlanHash,
+        string AnalysisContractHash,
+        int ReviewVersion,
+        string ApproverOrigin,
+        DateTimeOffset ApprovedAt);
 
     private static async ValueTask SetMaterialLinkAnalysisHashAsync(
         AppInitializationOptions options,

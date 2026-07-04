@@ -311,6 +311,28 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void ApproveReferenceChapterBlueprintPayloadUsesStableSnakeCaseJsonNames()
+    {
+        var payload = new ApproveReferenceChapterBlueprintPayload(
+            NovelId: 42,
+            BlueprintId: 10,
+            ReviewId: "review-1",
+            ApproverOrigin: "user");
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(payload, BridgeJson.SerializerOptions));
+        var root = json.RootElement;
+
+        Assert.Equal(42, root.GetProperty("novel_id").GetInt64());
+        Assert.Equal(10, root.GetProperty("blueprint_id").GetInt64());
+        Assert.Equal("review-1", root.GetProperty("review_id").GetString());
+        Assert.Equal("user", root.GetProperty("approver_origin").GetString());
+        Assert.False(root.TryGetProperty("NovelId", out _));
+
+        var legacyPayload = new ApproveReferenceChapterBlueprintPayload(42, 10, "review-1");
+        Assert.Equal("user", legacyPayload.ApproverOrigin);
+    }
+
+    [Fact]
     public void ReferenceReuseAuditPayloadsExposeNonSlotEditsAsSnakeCase()
     {
         var payload = new ReferenceReuseAuditPayload(

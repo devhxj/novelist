@@ -282,7 +282,7 @@ public sealed partial class NovelistMafToolRegistry
             CancellationToken cancellationToken = default)
         {
             return _referenceDrafts.ApproveChapterBlueprintAsync(
-                new ApproveReferenceChapterBlueprintPayload(_context.NovelId, blueprint_id, review_id),
+                new ApproveReferenceChapterBlueprintPayload(_context.NovelId, blueprint_id, review_id, "agent"),
                 cancellationToken);
         }
 

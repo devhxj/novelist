@@ -759,6 +759,7 @@ export namespace reference {
     novel_id: number
     blueprint_id: number
     review_id: string
+    approver_origin?: string
   }
 
   export interface BindBlueprintMaterialsInput {

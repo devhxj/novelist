@@ -322,6 +322,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             throw new ArgumentException("Review id is required.", nameof(input));
         }
 
+        var approverOrigin = NormalizeApproverOrigin(input.ApproverOrigin);
         await _mutex.WaitAsync(cancellationToken);
         try
         {
@@ -348,6 +349,14 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             }
 
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            await InsertBlueprintApprovalAsync(
+                connection,
+                transaction,
+                input.BlueprintId,
+                review,
+                approverOrigin,
+                DateTimeOffset.UtcNow,
+                cancellationToken);
             await UpdateBlueprintStatusAsync(connection, transaction, input.BlueprintId, ReferenceBlueprintStates.Approved, review.ReviewId, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return await ReadBlueprintAsync(connection, input.NovelId, input.BlueprintId, cancellationToken, required: true)
@@ -1699,6 +1708,37 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static async ValueTask InsertBlueprintApprovalAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long blueprintId,
+        ReferenceChapterBlueprintReviewPayload review,
+        string approverOrigin,
+        DateTimeOffset approvedAt,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO reference_chapter_blueprint_approvals
+              (approval_id, blueprint_id, review_id, context_hash, source_plan_hash,
+               analysis_contract_hash, review_version, approver_origin, approved_at)
+            VALUES
+              ($approval_id, $blueprint_id, $review_id, $context_hash, $source_plan_hash,
+               $analysis_contract_hash, $review_version, $approver_origin, $approved_at);
+            """;
+        command.Parameters.AddWithValue("$approval_id", "approval-" + Guid.NewGuid().ToString("N"));
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        command.Parameters.AddWithValue("$review_id", review.ReviewId);
+        command.Parameters.AddWithValue("$context_hash", review.ContextHash);
+        command.Parameters.AddWithValue("$source_plan_hash", review.SourcePlanHash);
+        command.Parameters.AddWithValue("$analysis_contract_hash", review.AnalysisContractHash);
+        command.Parameters.AddWithValue("$review_version", review.ReviewVersion);
+        command.Parameters.AddWithValue("$approver_origin", approverOrigin);
+        command.Parameters.AddWithValue("$approved_at", FormatTimestamp(approvedAt));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static async ValueTask<ReferenceChapterBlueprintReviewPayload?> ReadLatestReviewAsync(
         SqliteConnection connection,
         long blueprintId,
@@ -1955,6 +1995,20 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
               FOREIGN KEY(blueprint_id) REFERENCES reference_chapter_blueprints(blueprint_id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS reference_chapter_blueprint_approvals (
+              approval_id TEXT PRIMARY KEY,
+              blueprint_id INTEGER NOT NULL,
+              review_id TEXT NOT NULL,
+              context_hash TEXT NOT NULL,
+              source_plan_hash TEXT NOT NULL,
+              analysis_contract_hash TEXT NOT NULL,
+              review_version INTEGER NOT NULL,
+              approver_origin TEXT NOT NULL,
+              approved_at TEXT NOT NULL,
+              FOREIGN KEY(blueprint_id) REFERENCES reference_chapter_blueprints(blueprint_id) ON DELETE CASCADE,
+              FOREIGN KEY(review_id) REFERENCES reference_chapter_blueprint_reviews(review_id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS reference_chapter_blueprint_revisions (
               revision_id TEXT PRIMARY KEY,
               blueprint_id INTEGER NOT NULL,
@@ -2007,6 +2061,9 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 
             CREATE INDEX IF NOT EXISTS idx_reference_blueprint_reviews_blueprint
               ON reference_chapter_blueprint_reviews(blueprint_id, reviewed_at);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_blueprint_approvals_blueprint
+              ON reference_chapter_blueprint_approvals(blueprint_id, approved_at);
 
             CREATE INDEX IF NOT EXISTS idx_reference_blueprint_revisions_blueprint
               ON reference_chapter_blueprint_revisions(blueprint_id, created_at);
@@ -2202,6 +2259,11 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             .Select(value => value.Trim())
             .Distinct(StringComparer.Ordinal)
             .ToArray() ?? [];
+    }
+
+    private static string NormalizeApproverOrigin(string? origin)
+    {
+        return string.IsNullOrWhiteSpace(origin) ? "user" : origin.Trim();
     }
 
     private static IReadOnlyList<long> NormalizeAnchorIds(IReadOnlyList<long>? values)

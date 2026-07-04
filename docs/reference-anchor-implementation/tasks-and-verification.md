@@ -163,7 +163,7 @@ Recommended implementation slices:
 - [ ] Review defects include field path or beat id, severity, reason, and required fix in a form the UI can render without parsing prose.
 - [x] Review stores `context_hash`, `source_plan_hash`, `analysis_contract_hash`, and `review_version` so approvals can be invalidated deterministically.
 - [x] Approved status requires a passing review.
-- [ ] Approval records freeze `review_id`, `context_hash`, `source_plan_hash`, `analysis_contract_hash`, `review_version`, approver origin, and approval time.
+- [x] Approval records freeze `review_id`, `context_hash`, `source_plan_hash`, `analysis_contract_hash`, `review_version`, approver origin, and approval time.
 - [x] A blueprint with `review_passed` but no explicit approval cannot bind materials or generate draft candidates.
 - [x] A blueprint with approval but no current material links cannot generate draft candidates unless every requested beat has an approved `no_reuse_reason`.
 - [x] Editing approved analysis tracks, execution contract, known/forbidden facts, and beat reference query invalidates approval and requires re-review.
