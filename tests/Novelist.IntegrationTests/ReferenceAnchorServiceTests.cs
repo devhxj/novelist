@@ -2,6 +2,7 @@ using Novelist.Contracts.App;
 using Novelist.Contracts.Bridge;
 using Novelist.Core.Bridge;
 using Novelist.Infrastructure.App;
+using Microsoft.Data.Sqlite;
 using System.Text.Json;
 
 namespace Novelist.IntegrationTests;
@@ -83,6 +84,39 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.Equal(first?.SourceSegmentCount, rebuilt.SourceSegmentCount);
         Assert.Equal(first?.MaterialCount, rebuilt.MaterialCount);
         Assert.True(string.IsNullOrEmpty(rebuilt.LastError));
+    }
+
+    [Fact]
+    public async Task RebuildAnchorPreservesStableSourceSegmentIdsAndHashes()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("分段稳定测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "segments.md",
+            """
+            # 第一章
+
+            第一句。
+
+            第二句。第三句。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "分段参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        var before = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
+        Assert.Contains(before, segment => segment.SegmentType == "chapter" && segment.Text.Contains("第一句", StringComparison.Ordinal));
+        Assert.Contains(before, segment => segment.SegmentType == "paragraph" && segment.Text.Contains("第二句", StringComparison.Ordinal));
+        Assert.Contains(before, segment => segment.SegmentType == "sentence" && segment.Text == "第三句。");
+        var beforeSignature = before.Select(segment => segment.Signature).ToArray();
+
+        await service.RebuildAnchorAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+
+        var after = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
+        Assert.Equal(beforeSignature, after.Select(segment => segment.Signature).ToArray());
     }
 
     [Fact]
@@ -1128,10 +1162,54 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         await initialization.InitializeAsync(options.DefaultDataDirectory, CancellationToken.None);
     }
 
+    private static async ValueTask<IReadOnlyList<ReferenceSourceSegmentRow>> ReadSourceSegmentsAsync(
+        AppInitializationOptions options,
+        long anchorId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT segment_id, segment_type, segment_index, text_hash, text
+            FROM reference_source_segments
+            WHERE anchor_id = $anchor_id
+            ORDER BY segment_id ASC;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        var rows = new List<ReferenceSourceSegmentRow>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            rows.Add(new ReferenceSourceSegmentRow(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetInt32(2),
+                reader.GetString(3),
+                reader.GetString(4)));
+        }
+
+        return rows;
+    }
+
     private static JsonDocument ParseOutbound(BridgeDispatchResult result)
     {
         Assert.Null(result.CancelRequestId);
         Assert.False(string.IsNullOrWhiteSpace(result.OutboundJson));
         return JsonDocument.Parse(result.OutboundJson);
+    }
+
+    private sealed record ReferenceSourceSegmentRow(
+        string SegmentId,
+        string SegmentType,
+        int SegmentIndex,
+        string TextHash,
+        string Text)
+    {
+        public string Signature => string.Join('|', SegmentId, SegmentType, SegmentIndex, TextHash, Text);
     }
 }
