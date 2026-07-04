@@ -6,6 +6,24 @@ namespace Novelist.IntegrationTests;
 public sealed class ReferenceAnchoredDraftAuditorTests
 {
     [Fact]
+    public void BuildDraftAuditFailsWhenCandidateMissingMaterialProvenance()
+    {
+        var blueprint = Blueprint(beat => beat);
+        var candidate = Candidate(blueprint, "雨声压低了整条街的呼吸。") with
+        {
+            MaterialId = ""
+        };
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.ProvenanceErrors, item => item.Contains("missing material provenance", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildDraftAuditFailsWhenCandidateContainsForbiddenFact()
     {
         var blueprint = Blueprint(

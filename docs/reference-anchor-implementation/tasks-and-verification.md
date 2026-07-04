@@ -228,8 +228,8 @@ Recommended implementation slices:
 - [x] L2 reports non-slot edits.
 - [x] L3 is classified and blocked unless requested.
 - [x] L4 cannot pass.
-- [ ] Missing provenance fails audit.
-- [ ] Unsupported new facts fail audit.
+- [x] Missing provenance fails audit.
+- [x] Unsupported new facts fail audit.
 - [x] Unsupported high-risk identity reveals fail audit unless the reveal is already present in approved known, scene, viewpoint, or slot facts.
 - [ ] Forbidden facts fail audit even when the prose is otherwise fluent.
 - [ ] Draft candidates preserve beat POV, narrative distance, scene facts, forbidden facts, and prose duties.
@@ -250,7 +250,7 @@ Recommended implementation slices:
 - [x] integration tests for reuse audit rewrite-level gates covering L3 max-level blocking/allowance and unconditional L4 failure
 - [x] component tests for draft preflight status, review-hash, target-beat, no-reuse, and material-link validation
 - [x] integration tests for draft preflight material-link hash validation
-- [x] component tests for unsupported fact detection covering key object/evidence terms, identity reveals, relationship reveals, and approved-fact allowance
+- [x] component tests for missing material provenance and unsupported fact detection covering key object/evidence terms, identity reveals, relationship reveals, and approved-fact allowance
 - [ ] unit tests for blueprint-to-draft audit rules
 - [x] component tests for dialogue-only drift, action-only drift, missing prose duty evidence, missing emotion evidence, POV leakage, and missing required prose target
 - [x] integration test for `AdaptMaterialAsync`
