@@ -245,6 +245,52 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateAnchorPersistsMaterialProvenanceTagsAndSlots()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("材料来源测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "material-provenance.md",
+            """
+            # 第一章
+
+            他心里记得{{object}}。
+
+            雨声压低了街面。
+
+            她说：“走吧。”
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "材料来源参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        var rows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+
+        Assert.NotEmpty(rows);
+        Assert.All(rows, row =>
+        {
+            Assert.Equal(row.SourceSegmentId, row.JoinedSegmentId);
+            Assert.False(string.IsNullOrWhiteSpace(row.MaterialId));
+            Assert.False(string.IsNullOrWhiteSpace(row.FunctionTag));
+            Assert.False(string.IsNullOrWhiteSpace(row.EmotionTag));
+            Assert.False(string.IsNullOrWhiteSpace(row.PovTag));
+            Assert.False(string.IsNullOrWhiteSpace(row.TechniqueTag));
+            Assert.InRange(row.FunctionConfidence, 0, 1);
+            Assert.InRange(row.EmotionConfidence, 0, 1);
+            Assert.InRange(row.PovConfidence, 0, 1);
+        });
+        Assert.Contains(rows, row => row.MaterialType == ReferenceMaterialTypes.Sentence);
+        Assert.Contains(rows, row => row.MaterialType == ReferenceMaterialTypes.Passage);
+        Assert.Contains(rows, row => row.FunctionTag == "dialogue" && row.TechniqueTag == "dialogue_exchange");
+        Assert.Contains(rows, row => row.PovTag == "close" && row.EmotionTag == "reflective");
+        Assert.Contains(rows, row => row.TechniqueTag == "sensory_detail");
+        Assert.Contains(rows, row => row.Text.Contains("{{object}}", StringComparison.Ordinal) && row.SlotCount > 0);
+    }
+
+    [Fact]
     public async Task UpdateMaterialTagsMarksMaterialAsUserVerifiedAndSearchesByCorrectedTags()
     {
         var options = CreateOptions();
@@ -1196,6 +1242,55 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         return rows;
     }
 
+    private static async ValueTask<IReadOnlyList<ReferenceMaterialRow>> ReadMaterialRowsAsync(
+        AppInitializationOptions options,
+        long anchorId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT m.material_id, m.source_segment_id, m.material_type, m.function_tag,
+                   m.emotion_tag, m.pov_tag, m.technique_tag, m.function_confidence,
+                   m.emotion_confidence, m.pov_confidence, m.text, s.segment_id, COUNT(sl.slot_id)
+            FROM reference_materials m
+            INNER JOIN reference_source_segments s ON s.segment_id = m.source_segment_id
+            LEFT JOIN reference_material_slots sl ON sl.material_id = m.material_id
+            WHERE m.anchor_id = $anchor_id
+            GROUP BY m.material_id, m.source_segment_id, m.material_type, m.function_tag,
+                     m.emotion_tag, m.pov_tag, m.technique_tag, m.function_confidence,
+                     m.emotion_confidence, m.pov_confidence, m.text, s.segment_id
+            ORDER BY m.material_id ASC;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        var rows = new List<ReferenceMaterialRow>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            rows.Add(new ReferenceMaterialRow(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5),
+                reader.GetString(6),
+                reader.GetDouble(7),
+                reader.GetDouble(8),
+                reader.GetDouble(9),
+                reader.GetString(10),
+                reader.GetString(11),
+                reader.GetInt64(12)));
+        }
+
+        return rows;
+    }
+
     private static JsonDocument ParseOutbound(BridgeDispatchResult result)
     {
         Assert.Null(result.CancelRequestId);
@@ -1212,4 +1307,19 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     {
         public string Signature => string.Join('|', SegmentId, SegmentType, SegmentIndex, TextHash, Text);
     }
+
+    private sealed record ReferenceMaterialRow(
+        string MaterialId,
+        string SourceSegmentId,
+        string MaterialType,
+        string FunctionTag,
+        string EmotionTag,
+        string PovTag,
+        string TechniqueTag,
+        double FunctionConfidence,
+        double EmotionConfidence,
+        double PovConfidence,
+        string Text,
+        string JoinedSegmentId,
+        long SlotCount);
 }

@@ -60,18 +60,18 @@
 
 **Acceptance criteria:**
 
-- [ ] Material rows point to valid source segments.
-- [ ] Function/material tags exist with confidence fields.
+- [x] Material rows point to valid source segments.
+- [x] Function/material tags exist with confidence fields.
 - [ ] Emotion, POV, technique, narrative-duty, and external-evidence tags exist for blueprint matching.
-- [ ] Slots are stored separately and tied to material ids.
-- [ ] Locked phrases survive L1 adaptation.
+- [x] Slots are stored separately and tied to material ids.
+- [x] Locked phrases survive L1 adaptation.
 - [x] User corrections can be represented even if UI arrives later.
 
 **Verification:**
 
 - [ ] extractor unit tests for Chinese punctuation/dialogue/paragraph cases
 - [ ] extractor unit tests for emotion-trigger, narrative-duty, and POV tag cases
-- [ ] integration test verifies material counts and provenance joins
+- [x] integration test verifies material counts and provenance joins
 
 **Files likely touched:**
 
@@ -470,7 +470,7 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 
 The initial foundation has already started. Do not restart from Phase 0 unless contracts have regressed.
 
-Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Bridge -v minimal` passed 29/29, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceAnchorServiceTests -v minimal` passed 22/22, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceAnchor -v minimal` passed 84/84, `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter ReferenceChapterBlueprintPayloadsUseStableSnakeCaseJsonNames -v minimal` passed 1/1, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'FullyQualifiedName~ReviseApprovedBlueprintInvalidatesApprovalAndMaterialLinks|FullyQualifiedName~BridgeReferenceAnchoredDraftHandlersGenerateReviewAndApproveBlueprint' -v minimal` passed 2/2, `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter MafToolRegistryTests -v minimal` passed 11/11, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceDraftTools -v minimal` passed 2/2, and `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal` passed 119/119 after adding full reference bridge service-routing coverage, reference bridge app-not-initialized/invalid-path semantics coverage, MAF tool exposure/schema constraints, stable reference bridge invalid-payload coverage, structured blueprint bridge payload verification, approval/material-link invalidation coverage, and complete Phase 1 create/import/rebuild/failure-status coverage. Earlier frontend build/lint verification passed after the reference-anchor bridge and UI work; rerun `cd frontend && npm run build` and `cd frontend && npm run lint` before the next UI-facing change.
+Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Bridge -v minimal` passed 29/29, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceAnchorServiceTests -v minimal` passed 23/23, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceAnchor -v minimal` passed 84/84, `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter ReferenceChapterBlueprintPayloadsUseStableSnakeCaseJsonNames -v minimal` passed 1/1, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'FullyQualifiedName~ReviseApprovedBlueprintInvalidatesApprovalAndMaterialLinks|FullyQualifiedName~BridgeReferenceAnchoredDraftHandlersGenerateReviewAndApproveBlueprint' -v minimal` passed 2/2, `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter MafToolRegistryTests -v minimal` passed 11/11, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceDraftTools -v minimal` passed 2/2, and `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal` passed 120/120 after adding full reference bridge service-routing coverage, reference bridge app-not-initialized/invalid-path semantics coverage, MAF tool exposure/schema constraints, stable reference bridge invalid-payload coverage, structured blueprint bridge payload verification, approval/material-link invalidation coverage, complete Phase 1 create/import/rebuild/failure-status coverage, and Phase 2 material provenance/tag/slot coverage. Earlier frontend build/lint verification passed after the reference-anchor bridge and UI work; rerun `cd frontend && npm run build` and `cd frontend && npm run lint` before the next UI-facing change.
 
 Recommended next session:
 
