@@ -159,7 +159,7 @@ Recommended implementation slices:
 - [x] Normalizer computes the same `analysis_contract_hash` for semantically identical payloads with equivalent whitespace/array defaults.
 - [ ] Reviewer is deterministic and idempotent for unchanged `blueprint_id`, `context_hash`, `source_plan_hash`, `analysis_contract_hash`, and `review_version`.
 - [x] Review fails blueprints with missing analysis tracks, missing execution track, missing causality, unsupported emotional shifts, missing external evidence, POV knowledge leaks, missing transition reasons, forbidden facts, material mismatch, action/dialogue-only beats, or screenplay drift risks.
-- [ ] Review result separates logic, causality, emotion, narration, execution, character-state, POV, continuity, transition, forbidden-fact, reference-binding, material-fit, screenplay-drift, novelistic-narration, and AI-prose findings.
+- [x] Review result separates logic, causality, emotion, narration, execution, character-state, POV, continuity, transition, forbidden-fact, reference-binding, material-fit, screenplay-drift, novelistic-narration, and AI-prose findings.
 - [ ] Review defects include field path or beat id, severity, reason, and required fix in a form the UI can render without parsing prose.
 - [ ] Review stores `context_hash`, `source_plan_hash`, `analysis_contract_hash`, and `review_version` so approvals can be invalidated deterministically.
 - [x] Approved status requires a passing review.

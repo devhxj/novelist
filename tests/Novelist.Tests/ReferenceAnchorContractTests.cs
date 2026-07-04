@@ -268,9 +268,21 @@ public sealed class ReferenceAnchorContractTests
         Assert.Equal("preserve physical afterbeat cadence", root.GetProperty("beats")[0].GetProperty("locked_phrase_policy").GetString());
         Assert.Equal("close interiority hesitation", root.GetProperty("beats")[0].GetProperty("reference_query").GetProperty("query").GetString());
         Assert.Equal("missing payoff", root.GetProperty("latest_review").GetProperty("logic_errors")[0].GetString());
+        Assert.Equal("beat 2 lacks causality_in", root.GetProperty("latest_review").GetProperty("causality_errors")[0].GetString());
+        Assert.Equal("emotion shift lacks external evidence", root.GetProperty("latest_review").GetProperty("emotion_errors")[0].GetString());
+        Assert.Equal("dialogue beat lacks anti-screenplay duty", root.GetProperty("latest_review").GetProperty("narration_errors")[0].GetString());
         Assert.Equal("paragraph intention missing", root.GetProperty("latest_review").GetProperty("execution_errors")[0].GetString());
+        Assert.Equal("role-state delta missing", root.GetProperty("latest_review").GetProperty("character_state_errors")[0].GetString());
+        Assert.Equal("pov leak", root.GetProperty("latest_review").GetProperty("pov_errors")[0].GetString());
+        Assert.Equal("state mismatch", root.GetProperty("latest_review").GetProperty("continuity_errors")[0].GetString());
+        Assert.Equal("scene jump lacks reason", root.GetProperty("latest_review").GetProperty("transition_errors")[0].GetString());
+        Assert.Equal("forbidden fact appears", root.GetProperty("latest_review").GetProperty("forbidden_fact_errors")[0].GetString());
+        Assert.Equal("reference query missing", root.GetProperty("latest_review").GetProperty("reference_binding_errors")[0].GetString());
         Assert.Equal("semantic match lacks function fit", root.GetProperty("latest_review").GetProperty("material_fit_errors")[0].GetString());
+        Assert.Equal("action dialogue only", root.GetProperty("latest_review").GetProperty("screenplay_drift_risks")[0].GetString());
+        Assert.Equal("generic emotion label", root.GetProperty("latest_review").GetProperty("ai_prose_risks")[0].GetString());
         Assert.Equal("beat reads like blocking", root.GetProperty("latest_review").GetProperty("novelistic_narration_errors")[0].GetString());
+        Assert.Equal("add external evidence", root.GetProperty("latest_review").GetProperty("required_fixes")[0].GetString());
         Assert.False(root.TryGetProperty("BlueprintId", out _));
     }
 
