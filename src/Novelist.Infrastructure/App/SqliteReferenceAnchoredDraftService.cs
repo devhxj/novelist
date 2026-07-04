@@ -1695,14 +1695,14 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                emotion_errors_json, narration_errors_json, execution_errors_json, character_state_errors_json, pov_errors_json,
                continuity_errors_json, transition_errors_json, forbidden_fact_errors_json,
                reference_binding_errors_json, material_fit_errors_json, screenplay_drift_risks_json,
-               ai_prose_risks_json, novelistic_narration_errors_json, required_fixes_json, reviewed_at)
+               ai_prose_risks_json, novelistic_narration_errors_json, required_fixes_json, defects_json, reviewed_at)
             VALUES
               ($review_id, $blueprint_id, $context_hash, $source_plan_hash, $analysis_contract_hash, $review_version,
                $status, $score, $logic_errors_json, $causality_errors_json,
                $emotion_errors_json, $narration_errors_json, $execution_errors_json, $character_state_errors_json, $pov_errors_json,
                $continuity_errors_json, $transition_errors_json, $forbidden_fact_errors_json,
                $reference_binding_errors_json, $material_fit_errors_json, $screenplay_drift_risks_json,
-               $ai_prose_risks_json, $novelistic_narration_errors_json, $required_fixes_json, $reviewed_at);
+               $ai_prose_risks_json, $novelistic_narration_errors_json, $required_fixes_json, $defects_json, $reviewed_at);
             """;
         AddReviewParameters(command, review);
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -1752,7 +1752,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                    emotion_errors_json, narration_errors_json, execution_errors_json, character_state_errors_json, pov_errors_json,
                    continuity_errors_json, transition_errors_json, forbidden_fact_errors_json,
                    reference_binding_errors_json, material_fit_errors_json, screenplay_drift_risks_json,
-                   ai_prose_risks_json, novelistic_narration_errors_json, required_fixes_json, reviewed_at
+                   ai_prose_risks_json, novelistic_narration_errors_json, required_fixes_json, defects_json, reviewed_at
             FROM reference_chapter_blueprint_reviews
             WHERE blueprint_id = $blueprint_id
               AND analysis_contract_hash = $analysis_contract_hash
@@ -1778,7 +1778,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                    emotion_errors_json, narration_errors_json, execution_errors_json, character_state_errors_json, pov_errors_json,
                    continuity_errors_json, transition_errors_json, forbidden_fact_errors_json,
                    reference_binding_errors_json, material_fit_errors_json, screenplay_drift_risks_json,
-                   ai_prose_risks_json, novelistic_narration_errors_json, required_fixes_json, reviewed_at
+                   ai_prose_risks_json, novelistic_narration_errors_json, required_fixes_json, defects_json, reviewed_at
             FROM reference_chapter_blueprint_reviews
             WHERE blueprint_id = $blueprint_id AND review_id = $review_id;
             """;
@@ -1815,7 +1815,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             ReadJson<IReadOnlyList<string>>(reader.GetString(21)),
             ReadJson<IReadOnlyList<string>>(reader.GetString(22)),
             ReadJson<IReadOnlyList<string>>(reader.GetString(23)),
-            ParseTimestamp(reader.GetString(24)));
+            ReadJson<IReadOnlyList<ReferenceChapterBlueprintReviewDefectPayload>>(reader.GetString(24)),
+            ParseTimestamp(reader.GetString(25)));
     }
 
     private static void AddReviewParameters(SqliteCommand command, ReferenceChapterBlueprintReviewPayload review)
@@ -1844,6 +1845,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         command.Parameters.AddWithValue("$ai_prose_risks_json", JsonSerializer.Serialize(review.AiProseRisks, JsonOptions));
         command.Parameters.AddWithValue("$novelistic_narration_errors_json", JsonSerializer.Serialize(review.NovelisticNarrationErrors, JsonOptions));
         command.Parameters.AddWithValue("$required_fixes_json", JsonSerializer.Serialize(review.RequiredFixes, JsonOptions));
+        command.Parameters.AddWithValue("$defects_json", JsonSerializer.Serialize(review.Defects, JsonOptions));
         command.Parameters.AddWithValue("$reviewed_at", FormatTimestamp(review.ReviewedAt));
     }
 
@@ -1991,6 +1993,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
               ai_prose_risks_json TEXT NOT NULL,
               novelistic_narration_errors_json TEXT NOT NULL,
               required_fixes_json TEXT NOT NULL,
+              defects_json TEXT NOT NULL,
               reviewed_at TEXT NOT NULL,
               FOREIGN KEY(blueprint_id) REFERENCES reference_chapter_blueprints(blueprint_id) ON DELETE CASCADE
             );
@@ -2175,6 +2178,12 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             connection,
             "reference_chapter_blueprint_reviews",
             "novelistic_narration_errors_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_reviews",
+            "defects_json",
             "TEXT NOT NULL DEFAULT '[]'",
             cancellationToken);
         await EnsureColumnAsync(

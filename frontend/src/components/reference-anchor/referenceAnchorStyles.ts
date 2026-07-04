@@ -3,6 +3,7 @@ export const actionButtonClass = 'inline-flex items-center gap-1.5 rounded bg-se
 
 export function statusTone(status: string): string {
   if (status === 'approved' || status === 'material_bound' || status === 'passed') return 'text-emerald-600 dark:text-emerald-400'
-  if (status === 'failed' || status === 'review_failed' || status === 'stale') return 'text-destructive'
+  if (status === 'failed' || status === 'review_failed' || status === 'stale' || status === 'error') return 'text-destructive'
+  if (status === 'warning') return 'text-amber-700 dark:text-amber-300'
   return 'text-muted-foreground'
 }

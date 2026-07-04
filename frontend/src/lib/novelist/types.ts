@@ -734,6 +734,7 @@ export namespace reference {
     context_hash: string
     source_plan_hash: string
     analysis_contract_hash: string
+    review_version: number
     status: string
     score: number
     logic_errors: string[]
@@ -752,7 +753,17 @@ export namespace reference {
     ai_prose_risks: string[]
     novelistic_narration_errors: string[]
     required_fixes: string[]
+    defects?: ChapterBlueprintReviewDefect[]
     reviewed_at: Timestamp
+  }
+
+  export interface ChapterBlueprintReviewDefect {
+    category: string
+    field_path: string
+    beat_id: string
+    severity: string
+    reason: string
+    required_fix: string
   }
 
   export interface ApproveChapterBlueprintInput {

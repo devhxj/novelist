@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 1;
+    public const int CurrentReviewVersion = 2;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -26,6 +26,37 @@ internal static class ReferenceChapterBlueprintReviewer
         var screenplayRisks = new List<string>();
         var aiRisks = new List<string>();
         var novelisticNarrationErrors = new List<string>();
+        var defects = new List<ReferenceChapterBlueprintReviewDefectPayload>();
+
+        void AddDefect(
+            List<string> bucket,
+            string category,
+            string fieldPath,
+            string beatId,
+            string reason,
+            string requiredFix,
+            string severity = "error")
+        {
+            bucket.Add(reason);
+            defects.Add(new ReferenceChapterBlueprintReviewDefectPayload(
+                category,
+                fieldPath,
+                beatId,
+                severity,
+                reason,
+                requiredFix));
+        }
+
+        void AddBeatDefect(
+            List<string> bucket,
+            string category,
+            ReferenceChapterBlueprintBeatPayload beat,
+            string fieldName,
+            string reason,
+            string requiredFix)
+        {
+            AddDefect(bucket, category, "beat:" + beat.BeatId + ":" + fieldName, beat.BeatId, reason, requiredFix);
+        }
 
         if (IsEmptyTrack(blueprint.LogicAnalysis) ||
             IsEmptyTrack(blueprint.EmotionAnalysis) ||
@@ -34,38 +65,80 @@ internal static class ReferenceChapterBlueprintReviewer
             IsEmptyTrack(blueprint.ReferenceAnalysis) ||
             IsEmptyTrack(blueprint.TransitionPlan))
         {
-            logicErrors.Add("Blueprint must contain complete logic, emotion, narration, character, reference, and transition tracks.");
+            AddDefect(
+                logicErrors,
+                "logic",
+                "analysis_tracks",
+                string.Empty,
+                "Blueprint must contain complete logic, emotion, narration, character, reference, and transition tracks.",
+                "Complete the logic, emotion, narration, character, reference, and transition analysis tracks.");
         }
 
         if (IsEmptyExecutionTrack(blueprint.ExecutionContract))
         {
-            executionErrors.Add("Blueprint must contain a complete execution track.");
+            AddDefect(
+                executionErrors,
+                "execution",
+                "execution_contract",
+                string.Empty,
+                "Blueprint must contain a complete execution track.",
+                "Complete paragraph intentions, execution modes, anti-screenplay duties, source-backed detail targets, and rejection rules.");
         }
 
         if (blueprint.Beats.Count == 0)
         {
-            causalityErrors.Add("Blueprint must contain at least one beat.");
+            AddDefect(
+                causalityErrors,
+                "causality",
+                "beats",
+                string.Empty,
+                "Blueprint must contain at least one beat.",
+                "Add at least one reviewable beat before running blueprint review.");
         }
 
         foreach (var beat in blueprint.Beats.OrderBy(item => item.BeatIndex))
         {
             if (beat.BeatIndex > 1 && string.IsNullOrWhiteSpace(beat.CausalityIn))
             {
-                causalityErrors.Add($"Beat {beat.BeatIndex} is missing causality_in.");
+                AddBeatDefect(
+                    causalityErrors,
+                    "causality",
+                    beat,
+                    "causality_in",
+                    $"Beat {beat.BeatIndex} is missing causality_in.",
+                    "Add causality_in showing why this beat follows from the previous beat.");
             }
 
             if (string.IsNullOrWhiteSpace(beat.CausalityOut))
             {
-                causalityErrors.Add($"Beat {beat.BeatIndex} is missing causality_out.");
+                AddBeatDefect(
+                    causalityErrors,
+                    "causality",
+                    beat,
+                    "causality_out",
+                    $"Beat {beat.BeatIndex} is missing causality_out.",
+                    "Add causality_out showing the consequence this beat creates for the next beat or hook.");
             }
 
             if (string.IsNullOrWhiteSpace(beat.TransitionIn) || string.IsNullOrWhiteSpace(beat.TransitionOut))
             {
-                transitionErrors.Add($"Beat {beat.BeatIndex} is missing transition reason.");
+                AddBeatDefect(
+                    transitionErrors,
+                    "transition",
+                    beat,
+                    "transition",
+                    $"Beat {beat.BeatIndex} is missing transition reason.",
+                    "Fill transition_in and transition_out with causal, emotional, informational, or viewpoint pressure.");
             }
             else if (!HasTransitionPressure(beat.TransitionIn) || !HasTransitionPressure(beat.TransitionOut))
             {
-                transitionErrors.Add($"Beat {beat.BeatIndex} transition lacks causal, emotional, informational, or viewpoint pressure.");
+                AddBeatDefect(
+                    transitionErrors,
+                    "transition",
+                    beat,
+                    "transition",
+                    $"Beat {beat.BeatIndex} transition lacks causal, emotional, informational, or viewpoint pressure.",
+                    "Rewrite transition_in and transition_out so the movement is forced by story pressure.");
             }
 
             var emotionChanges = !string.Equals(beat.EmotionBefore, beat.EmotionAfter, StringComparison.Ordinal);
@@ -74,7 +147,13 @@ internal static class ReferenceChapterBlueprintReviewer
                     string.IsNullOrWhiteSpace(beat.SuppressedReaction) ||
                     string.IsNullOrWhiteSpace(beat.ExternalEvidence)))
             {
-                emotionErrors.Add($"Beat {beat.BeatIndex} changes emotion without trigger, suppressed reaction, or external evidence.");
+                AddBeatDefect(
+                    emotionErrors,
+                    "emotion",
+                    beat,
+                    "emotion_mechanic",
+                    $"Beat {beat.BeatIndex} changes emotion without trigger, suppressed reaction, or external evidence.",
+                    "Add emotion_trigger, suppressed_reaction, and external_evidence for the declared emotion change.");
             }
 
             if (emotionChanges &&
@@ -82,23 +161,47 @@ internal static class ReferenceChapterBlueprintReviewer
                     UsesFakeEmotionMechanic(beat.SuppressedReaction) ||
                     UsesFakeEmotionMechanic(beat.ExternalEvidence)))
             {
-                emotionErrors.Add($"Beat {beat.BeatIndex} uses fake emotion mechanic; trigger, suppressed reaction, and external evidence must be concrete.");
+                AddBeatDefect(
+                    emotionErrors,
+                    "emotion",
+                    beat,
+                    "emotion_mechanic",
+                    $"Beat {beat.BeatIndex} uses fake emotion mechanic; trigger, suppressed reaction, and external evidence must be concrete.",
+                    "Replace generic emotion mechanics with concrete trigger, suppressed reaction, and observable evidence.");
             }
 
             if (beat.CharacterGoals.Count == 0 || beat.CharacterStatesBefore.Count == 0 || beat.CharacterStatesAfter.Count == 0)
             {
-                characterStateErrors.Add($"Beat {beat.BeatIndex} is missing character state mechanics.");
+                AddBeatDefect(
+                    characterStateErrors,
+                    "character_state",
+                    beat,
+                    "character_state",
+                    $"Beat {beat.BeatIndex} is missing character state mechanics.",
+                    "Fill character goals plus before/after state mechanics for this beat.");
             }
 
             if (beat.ViewpointForbiddenKnowledge.Any(forbidden =>
                     beat.ViewpointAllowedKnowledge.Contains(forbidden, StringComparer.OrdinalIgnoreCase)))
             {
-                povErrors.Add($"Beat {beat.BeatIndex} allows viewpoint knowledge that is also forbidden.");
+                AddBeatDefect(
+                    povErrors,
+                    "pov",
+                    beat,
+                    "viewpoint_allowed_knowledge",
+                    $"Beat {beat.BeatIndex} allows viewpoint knowledge that is also forbidden.",
+                    "Remove forbidden knowledge from the allowed POV boundary.");
             }
 
             foreach (var unsupportedFact in FindUnsupportedViewpointFacts(blueprint, beat))
             {
-                povErrors.Add($"Beat {beat.BeatIndex} allows POV knowledge outside approved facts: {unsupportedFact}");
+                AddBeatDefect(
+                    povErrors,
+                    "pov",
+                    beat,
+                    "viewpoint_allowed_knowledge",
+                    $"Beat {beat.BeatIndex} allows POV knowledge outside approved facts: {unsupportedFact}",
+                    "Remove the unsupported POV knowledge or add it to approved known/scene facts before review.");
             }
 
             var proseDuties = beat.ProseDuties
@@ -106,13 +209,25 @@ internal static class ReferenceChapterBlueprintReviewer
                 .ToArray();
             if (proseDuties.Length == 0)
             {
-                executionErrors.Add($"Beat {beat.BeatIndex} is missing prose duties.");
+                AddBeatDefect(
+                    executionErrors,
+                    "execution",
+                    beat,
+                    "prose_duties",
+                    $"Beat {beat.BeatIndex} is missing prose duties.",
+                    "Add prose duties such as interiority, external_evidence, transition, subtext, or source_detail.");
             }
             else if (proseDuties.All(duty =>
                     string.Equals(duty, "action", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(duty, "dialogue", StringComparison.OrdinalIgnoreCase)))
             {
-                screenplayRisks.Add($"Beat {beat.BeatIndex} has only action/dialogue prose duties.");
+                AddBeatDefect(
+                    screenplayRisks,
+                    "screenplay_drift",
+                    beat,
+                    "prose_duties",
+                    $"Beat {beat.BeatIndex} has only action/dialogue prose duties.",
+                    "Add a novelistic prose duty beyond action/dialogue, such as interiority, subtext, sensory pressure, or transition work.");
             }
 
             if (string.IsNullOrWhiteSpace(beat.ParagraphIntention) ||
@@ -120,7 +235,13 @@ internal static class ReferenceChapterBlueprintReviewer
                 string.IsNullOrWhiteSpace(beat.AntiScreenplayDuty) ||
                 string.IsNullOrWhiteSpace(beat.CandidateRejectionRule))
             {
-                executionErrors.Add($"Beat {beat.BeatIndex} is missing paragraph intention, execution mode, anti-screenplay duty, or rejection rule.");
+                AddBeatDefect(
+                    executionErrors,
+                    "execution",
+                    beat,
+                    "execution_contract",
+                    $"Beat {beat.BeatIndex} is missing paragraph intention, execution mode, anti-screenplay duty, or rejection rule.",
+                    "Fill paragraph_intention, execution_mode, anti_screenplay_duty, and candidate_rejection_rule.");
             }
 
             if ((string.Equals(beat.BeatType, ReferenceBlueprintBeatTypes.Action, StringComparison.Ordinal) ||
@@ -129,36 +250,83 @@ internal static class ReferenceChapterBlueprintReviewer
                 string.IsNullOrWhiteSpace(beat.SensoryAnchorTarget) &&
                 string.IsNullOrWhiteSpace(beat.SourceBackedDetailTarget))
             {
-                novelisticNarrationErrors.Add($"Beat {beat.BeatIndex} reads like screenplay blocking without subtext, sensory anchor, or source-backed detail.");
+                AddBeatDefect(
+                    novelisticNarrationErrors,
+                    "novelistic_narration",
+                    beat,
+                    "novelistic_targets",
+                    $"Beat {beat.BeatIndex} reads like screenplay blocking without subtext, sensory anchor, or source-backed detail.",
+                    "Add subtext_plan, sensory_anchor_target, or source_backed_detail_target so the beat can draft as prose.");
             }
 
             if (string.IsNullOrWhiteSpace(beat.ReferenceQuery.Query) || beat.RequiredMaterialTypes.Count == 0)
             {
-                referenceBindingErrors.Add($"Beat {beat.BeatIndex} is missing reference query or material type.");
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "reference_query",
+                    $"Beat {beat.BeatIndex} is missing reference query or material type.",
+                    "Fill reference_query.query and required material types before material binding.");
             }
             else if (!HasReferenceQueryBeatFit(beat))
             {
-                materialFitErrors.Add($"Beat {beat.BeatIndex} reference query lacks material fit with beat function, emotion, POV, or prose duties.");
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "reference_query",
+                    $"Beat {beat.BeatIndex} reference query lacks material fit with beat function, emotion, POV, or prose duties.",
+                    "Align reference query tags with beat function, emotion, POV, technique, or prose duties.");
             }
 
             if (string.IsNullOrWhiteSpace(beat.NarrationStrategy))
             {
-                narrationErrors.Add($"Beat {beat.BeatIndex} is missing narration strategy.");
+                AddBeatDefect(
+                    narrationErrors,
+                    "narration",
+                    beat,
+                    "narration_strategy",
+                    $"Beat {beat.BeatIndex} is missing narration strategy.",
+                    "Add a narration strategy that constrains POV, distance, and prose execution.");
             }
         }
 
         foreach (var forbidden in blueprint.ForbiddenFacts.Where(item => !string.IsNullOrWhiteSpace(item)))
         {
-            if (ContainsForbidden(blueprint.FinalHook, forbidden) ||
-                blueprint.Beats.Any(beat => beat.SceneFacts.Any(fact => ContainsForbidden(fact, forbidden))))
+            if (ContainsForbidden(blueprint.FinalHook, forbidden))
             {
-                forbiddenFactErrors.Add($"Forbidden fact appears in blueprint: {forbidden}");
+                AddDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    "final_hook",
+                    string.Empty,
+                    $"Forbidden fact appears in blueprint: {forbidden}",
+                    "Remove the forbidden fact from the final hook or move it out of the forbidden fact set.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => beat.SceneFacts.Any(fact => ContainsForbidden(fact, forbidden))))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "scene_facts",
+                    $"Forbidden fact appears in blueprint: {forbidden}",
+                    "Remove the forbidden fact from beat scene facts or move it out of the forbidden fact set.");
             }
         }
 
         if (blueprint.RiskFlags.Any(flag => flag.Contains("ai", StringComparison.OrdinalIgnoreCase)))
         {
-            aiRisks.Add("Blueprint already carries AI prose risk flags.");
+            AddDefect(
+                aiRisks,
+                "ai_prose",
+                "risk_flags",
+                string.Empty,
+                "Blueprint already carries AI prose risk flags.",
+                "Clear or address AI prose risk flags before relying on this review for drafting.",
+                "warning");
         }
 
         var defectCount = logicErrors.Count + causalityErrors.Count + emotionErrors.Count +
@@ -212,6 +380,7 @@ internal static class ReferenceChapterBlueprintReviewer
             aiRisks,
             novelisticNarrationErrors,
             requiredFixes,
+            defects,
             now);
     }
 

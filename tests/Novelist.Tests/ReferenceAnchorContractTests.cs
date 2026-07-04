@@ -200,6 +200,16 @@ public sealed class ReferenceAnchorContractTests
             AiProseRisks: ["generic emotion label"],
             NovelisticNarrationErrors: ["beat reads like blocking"],
             RequiredFixes: ["add external evidence"],
+            Defects:
+            [
+                new ReferenceChapterBlueprintReviewDefectPayload(
+                    Category: "emotion",
+                    FieldPath: "beat:beat-1:external_evidence",
+                    BeatId: "beat-1",
+                    Severity: "error",
+                    Reason: "emotion shift lacks external evidence",
+                    RequiredFix: "Add concrete observable evidence for the emotion shift.")
+            ],
             ReviewedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"));
 
         var payload = new ReferenceChapterBlueprintPayload(
@@ -285,6 +295,13 @@ public sealed class ReferenceAnchorContractTests
         Assert.Equal("generic emotion label", root.GetProperty("latest_review").GetProperty("ai_prose_risks")[0].GetString());
         Assert.Equal("beat reads like blocking", root.GetProperty("latest_review").GetProperty("novelistic_narration_errors")[0].GetString());
         Assert.Equal("add external evidence", root.GetProperty("latest_review").GetProperty("required_fixes")[0].GetString());
+        var defect = root.GetProperty("latest_review").GetProperty("defects")[0];
+        Assert.Equal("emotion", defect.GetProperty("category").GetString());
+        Assert.Equal("beat:beat-1:external_evidence", defect.GetProperty("field_path").GetString());
+        Assert.Equal("beat-1", defect.GetProperty("beat_id").GetString());
+        Assert.Equal("error", defect.GetProperty("severity").GetString());
+        Assert.Equal("emotion shift lacks external evidence", defect.GetProperty("reason").GetString());
+        Assert.Equal("Add concrete observable evidence for the emotion shift.", defect.GetProperty("required_fix").GetString());
         Assert.False(root.TryGetProperty("BlueprintId", out _));
     }
 

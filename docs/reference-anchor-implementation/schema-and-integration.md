@@ -184,6 +184,7 @@ reference_chapter_blueprint_reviews
 - ai_prose_risks_json TEXT NOT NULL
 - novelistic_narration_errors_json TEXT NOT NULL
 - required_fixes_json TEXT NOT NULL
+- defects_json TEXT NOT NULL
 - reviewed_at TEXT NOT NULL
 
 reference_chapter_blueprint_revisions

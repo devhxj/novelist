@@ -253,6 +253,7 @@ public sealed class ReferenceAnchoredDraftPreflightTests
             [],
             [],
             [],
+            [],
             DateTimeOffset.UnixEpoch);
     }
 

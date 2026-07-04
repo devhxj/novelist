@@ -69,6 +69,24 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewEmitsStructuredDefectsForBeatFields()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            CausalityOut = ""
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        var defect = Assert.Single(review.Defects, item => item.FieldPath == "beat:1:beat:1:causality_out");
+        Assert.Equal("1:beat:1", defect.BeatId);
+        Assert.Equal("causality", defect.Category);
+        Assert.Equal("error", defect.Severity);
+        Assert.Contains("causality_out", defect.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("causality_out", defect.RequiredFix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void BuildReviewFailsEmotionChangeWithoutExternalEvidence()
     {
         var blueprint = Blueprint(beat => beat with

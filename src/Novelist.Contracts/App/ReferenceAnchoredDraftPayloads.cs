@@ -187,6 +187,14 @@ public sealed record ReviseReferenceChapterBlueprintPayload(
     [property: JsonPropertyName("origin")] string Origin,
     [property: JsonPropertyName("revision_reason")] string RevisionReason);
 
+public sealed record ReferenceChapterBlueprintReviewDefectPayload(
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("field_path")] string FieldPath,
+    [property: JsonPropertyName("beat_id")] string BeatId,
+    [property: JsonPropertyName("severity")] string Severity,
+    [property: JsonPropertyName("reason")] string Reason,
+    [property: JsonPropertyName("required_fix")] string RequiredFix);
+
 public sealed record ReferenceChapterBlueprintReviewPayload(
     [property: JsonPropertyName("review_id")] string ReviewId,
     [property: JsonPropertyName("blueprint_id")] long BlueprintId,
@@ -212,6 +220,7 @@ public sealed record ReferenceChapterBlueprintReviewPayload(
     [property: JsonPropertyName("ai_prose_risks")] IReadOnlyList<string> AiProseRisks,
     [property: JsonPropertyName("novelistic_narration_errors")] IReadOnlyList<string> NovelisticNarrationErrors,
     [property: JsonPropertyName("required_fixes")] IReadOnlyList<string> RequiredFixes,
+    [property: JsonPropertyName("defects")] IReadOnlyList<ReferenceChapterBlueprintReviewDefectPayload> Defects,
     [property: JsonPropertyName("reviewed_at")] DateTimeOffset ReviewedAt);
 
 public sealed record ApproveReferenceChapterBlueprintPayload(

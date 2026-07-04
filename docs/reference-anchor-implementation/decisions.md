@@ -884,6 +884,7 @@ ReferenceChapterBlueprintReviewPayload
 - ai_prose_risks
 - novelistic_narration_errors
 - required_fixes
+- defects (category, field_path, beat_id, severity, reason, required_fix)
 - reviewed_at
 ```
 

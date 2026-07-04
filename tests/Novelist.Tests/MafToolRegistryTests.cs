@@ -897,6 +897,7 @@ public sealed class MafToolRegistryTests
                 [],
                 [],
                 [],
+                [],
                 DateTimeOffset.UtcNow));
         }
 

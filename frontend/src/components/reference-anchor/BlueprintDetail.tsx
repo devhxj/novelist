@@ -114,6 +114,29 @@ function FindingSections({ sections, emptyText }: { sections: FindingSection[]; 
   )
 }
 
+function ReviewDefects({ defects }: { defects: reference.ChapterBlueprintReviewDefect[] }) {
+  if (defects.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="mt-2 grid grid-cols-1 gap-2">
+      {defects.map((defect, index) => (
+        <div key={`${defect.field_path}:${defect.reason}:${index}`} className="rounded border border-border bg-card px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            <span className={statusTone(defect.severity)}>{defect.severity}</span>
+            <span>{defect.category}</span>
+            {defect.beat_id && <span>beat {defect.beat_id}</span>}
+            {defect.field_path && <span className="break-all">{defect.field_path}</span>}
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-foreground">{defect.reason}</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{defect.required_fix}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function BlueprintDetail({
   blueprint,
   binding,
@@ -143,6 +166,7 @@ export function BlueprintDetail({
   const canApprove = review?.status === 'passed' && blueprint.status !== 'approved' && blueprint.status !== 'material_bound'
   const requiresReview = blueprint.status === 'draft' || blueprint.status === 'review_failed' || blueprint.status === 'stale'
   const reviewSections = review ? reviewFindings(review) : []
+  const reviewDefects = review?.defects?.filter(defect => defect.reason || defect.required_fix) ?? []
   const auditSections = draft?.audit ? auditFindings(draft.audit) : []
   const editableBeat = blueprint.beats[0]
   const updateRevisionField = (key: keyof BlueprintRevisionForm) =>
@@ -420,7 +444,9 @@ export function BlueprintDetail({
         <div className="mt-4 rounded-md border border-border bg-background p-3">
           <h4 className="text-xs font-semibold text-foreground">评审结果</h4>
           <p className={`mt-1 text-xs ${statusTone(review.status)}`}>{review.status} · {review.score.toFixed(2)}</p>
-          <FindingSections sections={reviewSections} emptyText="当前评审没有返回结构化缺陷。" />
+          {reviewDefects.length > 0
+            ? <ReviewDefects defects={reviewDefects} />
+            : <FindingSections sections={reviewSections} emptyText="当前评审没有返回结构化缺陷。" />}
         </div>
       )}
 

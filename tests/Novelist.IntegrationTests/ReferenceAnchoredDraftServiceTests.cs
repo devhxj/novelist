@@ -693,6 +693,54 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReviewChapterBlueprintPersistsStructuredDefects()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("结构化评审缺陷测试", "", ""), CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, new FileSystemPlanningService(options, novels));
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                24,
+                "第二十四章蓝图",
+                "评审缺陷必须带字段路径",
+                [],
+                KnownFacts: ["主角已经到场"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var beatId = blueprint.Beats[0].BeatId;
+        await service.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                blueprint.BlueprintId,
+                [new ReferenceBlueprintRevisionChangePayload("beat:" + beatId + ":causality_out", "")],
+                "user",
+                "force structured review defect"),
+            CancellationToken.None);
+
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId),
+            CancellationToken.None);
+
+        var defect = Assert.Single(review.Defects, item => item.FieldPath == "beat:" + beatId + ":causality_out");
+        Assert.Equal(beatId, defect.BeatId);
+        Assert.Equal("error", defect.Severity);
+        Assert.Contains("causality_out", defect.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.False(string.IsNullOrWhiteSpace(defect.RequiredFix));
+
+        var persisted = await service.GetChapterBlueprintAsync(novel.Id, blueprint.BlueprintId, CancellationToken.None);
+        Assert.NotNull(persisted?.LatestReview);
+        Assert.Contains(
+            persisted.LatestReview.Defects,
+            item => item.FieldPath == "beat:" + beatId + ":causality_out" &&
+                item.BeatId == beatId &&
+                item.Severity == "error" &&
+                !string.IsNullOrWhiteSpace(item.RequiredFix));
+    }
+
+    [Fact]
     public async Task ReviewChapterBlueprintReusesExistingReviewForUnchangedContract()
     {
         var options = CreateOptions();
