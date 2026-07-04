@@ -352,6 +352,42 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsMissingRhythmStrategy()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            RhythmStrategy = ""
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.NarrationErrors, item => item.Contains("rhythm strategy", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "narration" &&
+                defect.FieldPath.Contains("rhythm_strategy", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsGenericRhythmStrategy()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            RhythmStrategy = "节奏自然流畅，快慢结合"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.NarrationErrors, item => item.Contains("generic rhythm strategy", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "narration" &&
+                defect.FieldPath.Contains("rhythm_strategy", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsHardTransitionWithoutNarrativePressure()
     {
         var blueprint = Blueprint(beat => beat with

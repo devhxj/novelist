@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 9;
+    public const int CurrentReviewVersion = 10;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -362,6 +362,27 @@ internal static class ReferenceChapterBlueprintReviewer
                     $"Beat {beat.BeatIndex} uses generic narration strategy.",
                     "Rewrite narration_strategy with concrete POV distance, sensory/interiority limits, and the narration work this beat must perform.");
             }
+
+            if (string.IsNullOrWhiteSpace(beat.RhythmStrategy))
+            {
+                AddBeatDefect(
+                    narrationErrors,
+                    "narration",
+                    beat,
+                    "rhythm_strategy",
+                    $"Beat {beat.BeatIndex} is missing rhythm strategy.",
+                    "Add a rhythm strategy that names pacing pressure, sentence movement, delay, turn, or release for this beat.");
+            }
+            else if (UsesGenericRhythmStrategy(beat.RhythmStrategy))
+            {
+                AddBeatDefect(
+                    narrationErrors,
+                    "narration",
+                    beat,
+                    "rhythm_strategy",
+                    $"Beat {beat.BeatIndex} uses generic rhythm strategy.",
+                    "Rewrite rhythm_strategy with concrete pacing pressure, sentence movement, delay, turn, or release for this beat.");
+            }
         }
 
         foreach (var forbidden in blueprint.ForbiddenFacts.Where(item => !string.IsNullOrWhiteSpace(item)))
@@ -569,6 +590,19 @@ internal static class ReferenceChapterBlueprintReviewer
                 "正常叙述", "常规叙述", "普通叙述", "自然叙述", "正常写",
                 "写得有画面感", "更有画面感", "有画面感", "更沉浸", "更流畅",
                 "代入感", "电影感"
+            ]);
+    }
+
+    private static bool UsesGenericRhythmStrategy(string value)
+    {
+        return ContainsAny(
+            value,
+            [
+                "normal rhythm", "normal pacing", "balanced pacing", "smooth pacing",
+                "keep rhythm", "control pacing", "fast and slow",
+                "正常节奏", "节奏正常", "常规节奏", "自然节奏", "节奏自然",
+                "节奏自然流畅", "自然流畅", "节奏流畅", "保持节奏", "控制节奏",
+                "快慢结合", "有张有弛", "张弛有度"
             ]);
     }
 

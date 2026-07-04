@@ -51,6 +51,11 @@
       "expected_error": "generic narration strategy"
     },
     {
+      "name": "generic_rhythm_strategy",
+      "mutation": "generic_rhythm_strategy",
+      "expected_error": "generic rhythm strategy"
+    },
+    {
       "name": "unsupported_final_hook",
       "mutation": "unsupported_final_hook",
       "expected_error": "final hook"

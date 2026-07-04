@@ -114,6 +114,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 NarrationStrategy = "正常叙述，写得有画面感"
             },
+            "generic_rhythm_strategy" => beat with
+            {
+                RhythmStrategy = "节奏自然流畅，快慢结合"
+            },
             "unsupported_final_hook" => beat,
             "unsupported_scene_fact" => beat with
             {
