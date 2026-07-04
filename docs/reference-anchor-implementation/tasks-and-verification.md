@@ -152,9 +152,9 @@ Recommended implementation slices:
 
 - [x] Blueprint generation targets `novel_id` and `chapter_number`.
 - [ ] Blueprint generation builds and hashes a normalized context pack before persistence.
-- [ ] Blueprint stores chapter function, causality chain, emotion trajectory, POV constraints, scene facts, forbidden facts, prose duties, and beat-level reference queries.
+- [x] Blueprint stores chapter function, causality chain, emotion trajectory, POV constraints, scene facts, forbidden facts, prose duties, and beat-level reference queries.
 - [x] Blueprint stores complete logic, emotion, narration, character, reference-use, transition, and execution tracks.
-- [ ] Each beat stores transition-in/out, character goal/knowledge/misbelief/state delta, suppressed reaction, external evidence, narration strategy, rhythm strategy, paragraph intention, execution mode, anti-screenplay duty, source-backed detail target, slot plan, locked phrase policy, and no-reuse reason.
+- [x] Each beat stores transition-in/out, character goal/knowledge/misbelief/state delta, suppressed reaction, external evidence, narration strategy, rhythm strategy, paragraph intention, execution mode, anti-screenplay duty, source-backed detail target, slot plan, locked phrase policy, and no-reuse reason.
 - [ ] Blueprint generator cannot persist final prose paragraphs as a substitute for beat duties.
 - [x] Normalizer computes the same `analysis_contract_hash` for semantically identical payloads with equivalent whitespace/array defaults.
 - [ ] Reviewer is deterministic and idempotent for unchanged `blueprint_id`, `context_hash`, `source_plan_hash`, `analysis_contract_hash`, and `review_version`.
