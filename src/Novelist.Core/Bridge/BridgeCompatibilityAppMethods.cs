@@ -74,6 +74,7 @@ public static class BridgeCompatibilityAppMethods
         "IsInitialized",
         "ListSkills",
         "ListSlashCommands",
+        "PickReferenceSourceFile",
         "RebuildReferenceAnchor",
         "RebuildNovelIndex",
         "ReviseReferenceChapterBlueprint",

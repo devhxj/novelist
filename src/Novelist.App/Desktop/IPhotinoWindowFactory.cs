@@ -19,6 +19,12 @@ public interface IPhotinoWindow
         IReadOnlyList<NovelExportFileFilter> filters,
         CancellationToken cancellationToken);
 
+    ValueTask<string?> ShowOpenFileAsync(
+        string title,
+        string defaultPath,
+        IReadOnlyList<WorkspaceFileFilter> filters,
+        CancellationToken cancellationToken);
+
     void Minimize();
 
     void ToggleMaximize();

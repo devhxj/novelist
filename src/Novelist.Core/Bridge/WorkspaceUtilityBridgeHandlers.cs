@@ -13,7 +13,8 @@ public static class WorkspaceUtilityBridgeHandlers
         IWorkspaceSearchService search,
         INovelExportService exports,
         IWritingStatisticsService writing,
-        IStoryMemorySearchService? storyMemory = null)
+        IStoryMemorySearchService? storyMemory = null,
+        IReferenceSourceFilePicker? referenceSourceFilePicker = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(skills);
@@ -38,6 +39,12 @@ public static class WorkspaceUtilityBridgeHandlers
             await skills.ListSlashCommandsAsync(
                 ReadObjectArg<ListSlashCommandsPayload>(context.Payload, 0, "input"),
                 cancellationToken));
+
+        if (referenceSourceFilePicker is not null)
+        {
+            dispatcher.Register("PickReferenceSourceFile", async (_, cancellationToken) =>
+                await referenceSourceFilePicker.PickSourceFileAsync(cancellationToken));
+        }
 
         dispatcher.Register("ExtractStyle", async (context, cancellationToken) =>
             await skills.ExtractStyleAsync(

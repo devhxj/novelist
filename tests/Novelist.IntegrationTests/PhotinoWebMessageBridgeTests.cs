@@ -167,9 +167,30 @@ public sealed class PhotinoWebMessageBridgeTests
         Assert.Equal(new Uri("https://example.com/"), opener.LastUrl);
     }
 
+    [Fact]
+    public async Task ReferenceSourceFilePickerReturnsSelectedWindowPath()
+    {
+        var selectedPath = Path.Combine(Path.GetTempPath(), "reference.md");
+        var window = new RecordingWindow { OpenFilePath = selectedPath };
+        var picker = new PhotinoReferenceSourceFilePicker(window);
+
+        var path = await picker.PickSourceFileAsync(CancellationToken.None);
+
+        Assert.Equal(selectedPath, path);
+        Assert.Equal("选择参考源文件", window.LastOpenFileTitle);
+        Assert.Contains(window.LastOpenFileFilters, filter => filter.Patterns.Contains("*.md", StringComparer.Ordinal));
+        Assert.Contains(window.LastOpenFileFilters, filter => filter.Patterns.Contains("*.txt", StringComparer.Ordinal));
+    }
+
     private sealed class RecordingWindow : IPhotinoWindow
     {
         public List<string> SentMessages { get; } = [];
+
+        public string? OpenFilePath { get; init; }
+
+        public string? LastOpenFileTitle { get; private set; }
+
+        public IReadOnlyList<WorkspaceFileFilter> LastOpenFileFilters { get; private set; } = [];
 
         public bool Minimized { get; private set; }
 
@@ -193,6 +214,17 @@ public sealed class PhotinoWebMessageBridgeTests
             CancellationToken cancellationToken)
         {
             return ValueTask.FromResult<string?>(null);
+        }
+
+        public ValueTask<string?> ShowOpenFileAsync(
+            string title,
+            string defaultPath,
+            IReadOnlyList<WorkspaceFileFilter> filters,
+            CancellationToken cancellationToken)
+        {
+            LastOpenFileTitle = title;
+            LastOpenFileFilters = filters;
+            return ValueTask.FromResult(OpenFilePath);
         }
 
         public void Minimize()

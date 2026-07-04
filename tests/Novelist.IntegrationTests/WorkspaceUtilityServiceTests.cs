@@ -401,7 +401,8 @@ public sealed class WorkspaceUtilityServiceTests : IDisposable
                 new FileSystemSkillCatalogService(options, novelService),
                 new FileSystemWorkspaceSearchService(options, novelService, chapterService, world, planning),
                 new FileSystemNovelExportService(novelService, chapterService, settings, new RecordingExportDestinationPicker(Path.Combine(_root, "bridge-exports"))),
-                writing);
+                writing,
+                referenceSourceFilePicker: new RecordingReferenceSourceFilePicker(Path.Combine(_root, "sources", "reference.md")));
 
         using var skills = ParseOutbound(await dispatcher.DispatchAsync($$"""
             {
@@ -432,6 +433,16 @@ public sealed class WorkspaceUtilityServiceTests : IDisposable
             }
             """));
         Assert.Equal(6, stats.RootElement.GetProperty("result").GetProperty("total_words").GetInt32());
+
+        using var sourceFile = ParseOutbound(await dispatcher.DispatchAsync("""
+            {
+              "kind": "request",
+              "id": "req_source_file",
+              "method": "PickReferenceSourceFile",
+              "payload": {}
+            }
+            """));
+        Assert.Equal(Path.Combine(_root, "sources", "reference.md"), sourceFile.RootElement.GetProperty("result").GetString());
 
         using var rebuild = ParseOutbound(await dispatcher.DispatchAsync($$"""
             {
@@ -507,6 +518,22 @@ public sealed class WorkspaceUtilityServiceTests : IDisposable
             Directory.CreateDirectory(_directory);
             LastSavedPath = Path.Combine(_directory, request.DefaultFileName);
             return ValueTask.FromResult<string?>(LastSavedPath);
+        }
+    }
+
+    private sealed class RecordingReferenceSourceFilePicker : IReferenceSourceFilePicker
+    {
+        private readonly string? _path;
+
+        public RecordingReferenceSourceFilePicker(string? path)
+        {
+            _path = path;
+        }
+
+        public ValueTask<string?> PickSourceFileAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(_path);
         }
     }
 

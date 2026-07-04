@@ -146,6 +146,15 @@ public sealed class PhotinoDesktopHostTests
             return ValueTask.FromResult<string?>(null);
         }
 
+        public ValueTask<string?> ShowOpenFileAsync(
+            string title,
+            string defaultPath,
+            IReadOnlyList<WorkspaceFileFilter> filters,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<string?>(null);
+        }
+
         public void Minimize()
         {
             Minimized = true;

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import {
   BookMarked,
   FileSearch,
+  FolderOpen,
   Loader2,
   Plus,
   RefreshCcw,
@@ -57,6 +58,13 @@ const EMPTY_BLUEPRINT_FORM: BlueprintForm = {
   chapterGoal: '',
   knownFacts: '',
   forbiddenFacts: '',
+}
+
+function sourceKindFromPath(path: string, fallback: string): string {
+  const lowerPath = path.toLowerCase()
+  if (lowerPath.endsWith('.txt')) return 'text'
+  if (lowerPath.endsWith('.md') || lowerPath.endsWith('.markdown')) return 'markdown'
+  return fallback
 }
 
 export default function ReferenceAnchorView({ novelId }: Props) {
@@ -154,6 +162,19 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       setAnchorForm(EMPTY_ANCHOR_FORM)
       await loadAnchors()
     }
+  }
+
+  async function pickReferenceSourceFile() {
+    const pickedPath = await run(() => app.PickReferenceSourceFile())
+    if (!pickedPath?.trim()) {
+      return
+    }
+
+    setAnchorForm(form => ({
+      ...form,
+      sourcePath: pickedPath,
+      sourceKind: sourceKindFromPath(pickedPath, form.sourceKind),
+    }))
   }
 
   async function rebuildAnchor(anchorId: number) {
@@ -406,9 +427,22 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                 <Field label="作者">
                   <input value={anchorForm.author} onChange={event => setAnchorForm(form => ({ ...form, author: event.target.value }))} className={inputClass} placeholder="可选" />
                 </Field>
-                <Field label="本地路径">
-                  <input value={anchorForm.sourcePath} onChange={event => setAnchorForm(form => ({ ...form, sourcePath: event.target.value }))} className={inputClass} placeholder="D:\\books\\reference.md" />
-                </Field>
+                <div>
+                  <span className="mb-1 block text-xs font-medium text-muted-foreground">本地路径</span>
+                  <div className="flex items-center gap-2">
+                    <input value={anchorForm.sourcePath} onChange={event => setAnchorForm(form => ({ ...form, sourcePath: event.target.value }))} className={`${inputClass} min-w-0 flex-1`} placeholder="D:\\books\\reference.md" aria-label="本地路径" />
+                    <button
+                      type="button"
+                      onClick={pickReferenceSourceFile}
+                      disabled={loading}
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                      title="选择文件"
+                      aria-label="选择参考源文件"
+                    >
+                      <FolderOpen className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <Field label="格式">
                     <select value={anchorForm.sourceKind} onChange={event => setAnchorForm(form => ({ ...form, sourceKind: event.target.value }))} className={inputClass}>

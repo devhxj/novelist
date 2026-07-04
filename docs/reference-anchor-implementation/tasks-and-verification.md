@@ -333,6 +333,7 @@ Recommended implementation slices:
 - [x] ActivityBar has a reference-anchor entry.
 - [x] WorkspaceView renders ReferenceAnchorView for the active novel.
 - [x] User can create/rebuild anchor and search materials.
+- [x] User can choose a reference source file through the native Photino bridge while raw path entry remains available.
 - [x] Candidate preview shows source, adapted text, rewrite level, changed slots, audit warnings.
 - [x] User can generate and inspect a chapter blueprint for a chapter number.
 - [x] Blueprint view shows logic, emotion, narration, character, and reference tracks separately.
@@ -441,7 +442,6 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 
 ## Open Implementation Questions
 
-- Should the first UI accept a raw source path text input, or should a native open-file bridge method be added first?
 - Should exact source text previews be truncated by default for unknown-license anchors?
 - Should source segments store the full original line text or normalized text only?
 - Should material extraction be purely deterministic in phase 1, or should optional LLM tagging be available behind a feature flag?
@@ -461,19 +461,19 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 
 The initial foundation has already started. Do not restart from Phase 0 unless contracts have regressed.
 
-Latest verified scope: `cd frontend && npm run build` and `cd frontend && npm run lint` passed after splitting `ReferenceAnchorView` into focused blueprint-detail, revision-helper, and shared-style modules. Earlier `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge' -v minimal` and `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal` passed after adding structured current-beat `slot_plan` editing and backend `beat:{beat_id}:slot_plan` revision support.
+Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge' -v minimal`, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'Reference|Photino|BridgeWorkspaceUtility' -v minimal`, `cd frontend && npm run build`, and `cd frontend && npm run lint` passed after adding the native `PickReferenceSourceFile` Photino bridge and source-path picker button. Earlier reference-anchor verification passed after adding structured current-beat `slot_plan` editing and backend `beat:{beat_id}:slot_plan` revision support.
 
 Recommended next session:
 
-1. Add a native file-picker bridge for source import so the first UI does not rely only on raw local paths.
-2. Extend L2 non-slot edit reporting before expanding model-assisted adaptation.
-3. Add full frontend runtime verification after the reference-anchor panel is exercised against a real app bridge.
+1. Extend L2 non-slot edit reporting before expanding model-assisted adaptation.
+2. Add full frontend runtime verification after the reference-anchor panel is exercised against a real app bridge.
+3. Add approval hash/version unit tests if approval logic is further split from the SQLite service.
 
 Recommended following session:
 
-1. Add explicit approval hash/version unit tests if approval logic is further split from the SQLite service.
-2. Add feedback persistence rows for accept/reject/edit decisions.
-3. Add ranking tests for user-verified material/tag boosts.
+1. Add feedback persistence rows for accept/reject/edit decisions.
+2. Add ranking tests for user-verified material/tag boosts.
+3. Add fixture coverage for stale blueprint comparison behavior if the UI starts surfacing stale rows.
 
 Do not broaden frontend workflow beyond the review-first path until source corpus, material binding, blueprint review, and draft audit are reliable. The system's quality depends on immutable provenance, hard blueprint gates, and candidate audit before any manual insertion.
 

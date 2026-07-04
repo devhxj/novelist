@@ -143,6 +143,7 @@ export interface NovelistAppApi {
   IsInitialized: AppMethod<[], boolean>
   ListSkills: AppMethod<[app.ListSkillsInput], skill.SkillMeta[]>
   ListSlashCommands: AppMethod<[app.ListSlashCommandsInput], app.SlashCommand[]>
+  PickReferenceSourceFile: AppMethod<[], string | null>
   RebuildReferenceAnchor: AppMethod<[number, number], reference.BuildStatus>
   RebuildNovelIndex: AppMethod<[number], void>
   ReviseReferenceChapterBlueprint: AppMethod<[reference.ReviseChapterBlueprintInput], reference.ChapterBlueprint>
@@ -275,6 +276,7 @@ export const appApi: NovelistAppApi = {
   IsInitialized: appMethod<NovelistAppApi['IsInitialized']>('IsInitialized'),
   ListSkills: appMethod<NovelistAppApi['ListSkills']>('ListSkills'),
   ListSlashCommands: appMethod<NovelistAppApi['ListSlashCommands']>('ListSlashCommands'),
+  PickReferenceSourceFile: appMethod<NovelistAppApi['PickReferenceSourceFile']>('PickReferenceSourceFile'),
   RebuildReferenceAnchor: appMethod<NovelistAppApi['RebuildReferenceAnchor']>('RebuildReferenceAnchor'),
   RebuildNovelIndex: appMethod<NovelistAppApi['RebuildNovelIndex']>('RebuildNovelIndex'),
   ReviseReferenceChapterBlueprint: appMethod<NovelistAppApi['ReviseReferenceChapterBlueprint']>('ReviseReferenceChapterBlueprint'),

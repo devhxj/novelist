@@ -115,6 +115,7 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             chapterContentService,
             settingsService,
             new PhotinoNovelExportDestinationPicker(adapter));
+        var referenceSourceFilePicker = new PhotinoReferenceSourceFilePicker(adapter);
         var dispatcher = new BridgeDispatcher()
             .RegisterDefaultNovelistHandlers(new PhotinoBridgeRuntimeHost(adapter, new SystemExternalUrlOpener()))
             .RegisterAppInitializationHandlers(new FileSystemAppInitializationService(appOptions))
@@ -126,7 +127,13 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             .RegisterPlanningHandlers(planningService)
             .RegisterLlmConfigurationHandlers(llmService)
             .RegisterEmbeddingConfigurationHandlers(embeddingService)
-            .RegisterWorkspaceUtilityHandlers(skillService, searchService, exportService, writingService, storyMemoryService)
+            .RegisterWorkspaceUtilityHandlers(
+                skillService,
+                searchService,
+                exportService,
+                writingService,
+                storyMemoryService,
+                referenceSourceFilePicker)
             .RegisterReferenceAnchorHandlers(referenceAnchorService)
             .RegisterReferenceAnchoredDraftHandlers(referenceAnchoredDraftService)
             .RegisterApprovalHandlers(approvalCoordinator)
@@ -245,6 +252,21 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             var path = await _window.ShowSaveFileAsync(title, defaultPath, photinoFilters);
             cancellationToken.ThrowIfCancellationRequested();
             return string.IsNullOrWhiteSpace(path) ? null : path;
+        }
+
+        public async ValueTask<string?> ShowOpenFileAsync(
+            string title,
+            string defaultPath,
+            IReadOnlyList<Novelist.Core.App.WorkspaceFileFilter> filters,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var photinoFilters = filters
+                .Select(filter => (filter.DisplayName, filter.Patterns.ToArray()))
+                .ToArray();
+            var paths = await _window.ShowOpenFileAsync(title, defaultPath, false, photinoFilters);
+            cancellationToken.ThrowIfCancellationRequested();
+            return paths.FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
         }
 
         public void Minimize()

@@ -48,6 +48,11 @@ public interface INovelExportDestinationPicker
         CancellationToken cancellationToken);
 }
 
+public interface IReferenceSourceFilePicker
+{
+    ValueTask<string?> PickSourceFileAsync(CancellationToken cancellationToken);
+}
+
 public sealed record NovelExportDestinationRequest(
     string DefaultFileName,
     string Format,
@@ -56,6 +61,10 @@ public sealed record NovelExportDestinationRequest(
 public sealed record NovelExportFileFilter(
     string DisplayName,
     string Pattern);
+
+public sealed record WorkspaceFileFilter(
+    string DisplayName,
+    IReadOnlyList<string> Patterns);
 
 public interface IWritingStatisticsService
 {
