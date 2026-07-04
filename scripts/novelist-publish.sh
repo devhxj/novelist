@@ -54,6 +54,16 @@ if [ -d build/runtime/git ]; then
     cp -a build/runtime/git "$STAGING_DIR/runtime/"
 fi
 
+if [ -d build/runtime/onnx ]; then
+    mkdir -p "$STAGING_DIR/runtime"
+    cp -a build/runtime/onnx "$STAGING_DIR/runtime/"
+fi
+
+if [ -d build/runtime/models ]; then
+    mkdir -p "$STAGING_DIR/runtime"
+    cp -a build/runtime/models "$STAGING_DIR/runtime/"
+fi
+
 if [ -d build/runtime/sqlite-vec ]; then
     cp -a build/runtime/sqlite-vec "$STAGING_DIR/sqlite-vec"
 fi

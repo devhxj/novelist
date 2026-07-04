@@ -25,6 +25,7 @@ public sealed class SqliteRagIndexService : IRagIndexService, IRagSemanticSearch
     private readonly ISqliteVecTableProvisioner _vecProvisioner;
     private readonly ISqliteVecQueryProvider _vecQuery;
     private readonly SemaphoreSlim _mutex = new(1, 1);
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     public SqliteRagIndexService(
         AppInitializationOptions? options = null,
@@ -39,7 +40,7 @@ public sealed class SqliteRagIndexService : IRagIndexService, IRagSemanticSearch
         _novels = novels ?? new FileSystemNovelService(_options);
         _chapters = chapters ?? new FileSystemChapterContentService(_options, _novels);
         _embeddingConfiguration = embeddingConfiguration ?? new NullEmbeddingConfigurationService();
-        _embeddings = embeddings ?? new StandardEmbeddingClient();
+        _embeddings = embeddings ?? new HybridEmbeddingClient();
         var defaultVec = vecProvisioner as SqliteVecTableProvisioner ?? new SqliteVecTableProvisioner();
         _vecProvisioner = vecProvisioner ?? defaultVec;
         _vecQuery = vecQuery ?? (vecProvisioner as ISqliteVecQueryProvider) ?? defaultVec;
@@ -136,19 +137,35 @@ public sealed class SqliteRagIndexService : IRagIndexService, IRagSemanticSearch
 
         if (chunks.Count == 0)
         {
-            var emptyState = new RagIndexStatePayload(
-                novelId,
-                embeddingOptions.ProviderKey,
-                embeddingOptions.ModelId,
-                embeddingOptions.Dimensions ?? 0,
-                ChunkerVersion,
-                Status: "ready",
-                ChunkCount: 0,
-                VectorTable: string.Empty,
-                LastError: string.Empty,
-                UpdatedAt: DateTimeOffset.UtcNow);
-            await ReplaceChunksAndStateAsync(chunks, emptyState, cancellationToken);
-            return emptyState;
+            await _refreshGate.WaitAsync(cancellationToken);
+            try
+            {
+                var currentChunks = await BuildChunksAsync(novelId, cancellationToken);
+                if (!ChunksMatch(chunks, currentChunks))
+                {
+                    var staleState = BuildContentChangedDuringRebuildState(novelId, embeddingOptions, currentChunks);
+                    await ReplaceChunksAndStateAsync(currentChunks, staleState, cancellationToken);
+                    return staleState;
+                }
+
+                var emptyState = new RagIndexStatePayload(
+                    novelId,
+                    embeddingOptions.ProviderKey,
+                    embeddingOptions.ModelId,
+                    embeddingOptions.Dimensions ?? 0,
+                    ChunkerVersion,
+                    Status: "ready",
+                    ChunkCount: 0,
+                    VectorTable: string.Empty,
+                    LastError: string.Empty,
+                    UpdatedAt: DateTimeOffset.UtcNow);
+                await ReplaceChunksAndStateAsync(chunks, emptyState, cancellationToken);
+                return emptyState;
+            }
+            finally
+            {
+                _refreshGate.Release();
+            }
         }
 
         try
@@ -156,37 +173,57 @@ public sealed class SqliteRagIndexService : IRagIndexService, IRagSemanticSearch
             var embeddingItems = await EmbedChunksAsync(chunks, embeddingOptions, cancellationToken);
             var dimensions = embeddingItems[0].Vector.Count;
             var vectorTable = SqliteVecTableProvisioner.BuildVectorTableName(novelId, dimensions);
-            var state = new RagIndexStatePayload(
-                novelId,
-                embeddingOptions.ProviderKey,
-                embeddingOptions.ModelId,
-                dimensions,
-                ChunkerVersion,
-                Status: "building",
-                ChunkCount: chunks.Count,
-                vectorTable,
-                LastError: string.Empty,
-                UpdatedAt: DateTimeOffset.UtcNow);
-
-            var rowIds = await ReplaceChunksAndStateAsync(chunks, state, cancellationToken);
-            var vectors = embeddingItems
-                .Select((item, index) => new SqliteVecVectorRecord(rowIds[chunks[index].ChunkId], chunks[index].ChunkId, item.Vector))
-                .ToArray();
-            var databasePath = await DatabasePathAsync(cancellationToken);
-            var provisionRequest = new SqliteVecProvisionRequest(
-                vectorTable,
-                dimensions,
-                SqliteVecTableProvisioner.BuildCreateTableSql(vectorTable, dimensions),
-                vectors);
-            await _vecProvisioner.ProvisionAsync(databasePath, provisionRequest, cancellationToken);
-
-            var readyState = state with
+            await _refreshGate.WaitAsync(cancellationToken);
+            try
             {
-                Status = "ready",
-                UpdatedAt = DateTimeOffset.UtcNow
-            };
-            await UpsertStateAsync(readyState, cancellationToken);
-            return readyState;
+                var currentChunks = await BuildChunksAsync(novelId, cancellationToken);
+                if (!ChunksMatch(chunks, currentChunks))
+                {
+                    var staleState = BuildContentChangedDuringRebuildState(novelId, embeddingOptions, currentChunks);
+                    await ReplaceChunksAndStateAsync(currentChunks, staleState, cancellationToken);
+                    return staleState;
+                }
+
+                var state = new RagIndexStatePayload(
+                    novelId,
+                    embeddingOptions.ProviderKey,
+                    embeddingOptions.ModelId,
+                    dimensions,
+                    ChunkerVersion,
+                    Status: "building",
+                    ChunkCount: chunks.Count,
+                    vectorTable,
+                    LastError: string.Empty,
+                    UpdatedAt: DateTimeOffset.UtcNow);
+
+                var rowIds = await ReplaceChunksAndStateAsync(chunks, state, cancellationToken);
+                var vectors = embeddingItems
+                    .Select((item, index) => new SqliteVecVectorRecord(rowIds[chunks[index].ChunkId], chunks[index].ChunkId, item.Vector))
+                    .ToArray();
+                var databasePath = await DatabasePathAsync(cancellationToken);
+                var provisionRequest = new SqliteVecProvisionRequest(
+                    vectorTable,
+                    dimensions,
+                    SqliteVecTableProvisioner.BuildCreateTableSql(vectorTable, dimensions),
+                    vectors);
+                await _vecProvisioner.ProvisionAsync(databasePath, provisionRequest, cancellationToken);
+
+                var readyState = state with
+                {
+                    Status = "ready",
+                    UpdatedAt = DateTimeOffset.UtcNow
+                };
+                await UpsertStateAsync(readyState, cancellationToken);
+                return readyState;
+            }
+            finally
+            {
+                _refreshGate.Release();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (BridgeRequestException ex)
         {
@@ -259,7 +296,11 @@ public sealed class SqliteRagIndexService : IRagIndexService, IRagSemanticSearch
 
         var queryEmbedding = await _embeddings.EmbedAsync(
             [normalizedQuery],
-            embeddingOptions with { Dimensions = state.Dimensions },
+            embeddingOptions with
+            {
+                Dimensions = state.Dimensions,
+                InputKind = BuiltinOnnxEmbeddingModel.QueryInputKind
+            },
             cancellationToken);
         if (queryEmbedding.Dimensions != state.Dimensions ||
             queryEmbedding.Items.Count != 1 ||
@@ -317,18 +358,26 @@ public sealed class SqliteRagIndexService : IRagIndexService, IRagSemanticSearch
         CancellationToken cancellationToken)
     {
         ValidateNovelId(novelId);
-        var state = await GetIndexStateAsync(novelId, cancellationToken);
-        if (state is null)
+        await _refreshGate.WaitAsync(cancellationToken);
+        try
         {
-            return;
-        }
+            var state = await GetIndexStateAsync(novelId, cancellationToken);
+            if (state is null)
+            {
+                return;
+            }
 
-        await UpsertStateAsync(state with
+            await UpsertStateAsync(state with
+            {
+                Status = "stale",
+                LastError = string.IsNullOrWhiteSpace(reason) ? "Index content changed." : reason.Trim(),
+                UpdatedAt = DateTimeOffset.UtcNow
+            }, cancellationToken);
+        }
+        finally
         {
-            Status = "stale",
-            LastError = string.IsNullOrWhiteSpace(reason) ? "Index content changed." : reason.Trim(),
-            UpdatedAt = DateTimeOffset.UtcNow
-        }, cancellationToken);
+            _refreshGate.Release();
+        }
     }
 
     private async ValueTask<IReadOnlyList<EmbeddingItemResult>> EmbedChunksAsync(
@@ -414,6 +463,51 @@ public sealed class SqliteRagIndexService : IRagIndexService, IRagSemanticSearch
         {
             _mutex.Release();
         }
+    }
+
+    private static RagIndexStatePayload BuildContentChangedDuringRebuildState(
+        long novelId,
+        EmbeddingRequestOptions embeddingOptions,
+        IReadOnlyList<RagChunkPayload> currentChunks)
+    {
+        return new RagIndexStatePayload(
+            novelId,
+            embeddingOptions.ProviderKey,
+            embeddingOptions.ModelId,
+            embeddingOptions.Dimensions ?? 0,
+            ChunkerVersion,
+            Status: "stale",
+            ChunkCount: currentChunks.Count,
+            VectorTable: string.Empty,
+            LastError: "Index content changed during rebuild; rebuild again.",
+            UpdatedAt: DateTimeOffset.UtcNow);
+    }
+
+    private static bool ChunksMatch(
+        IReadOnlyList<RagChunkPayload> left,
+        IReadOnlyList<RagChunkPayload> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < left.Count; index++)
+        {
+            var leftChunk = left[index];
+            var rightChunk = right[index];
+            if (!string.Equals(leftChunk.ChunkId, rightChunk.ChunkId, StringComparison.Ordinal) ||
+                !string.Equals(leftChunk.ContentHash, rightChunk.ContentHash, StringComparison.Ordinal) ||
+                !string.Equals(leftChunk.FilePath, rightChunk.FilePath, StringComparison.Ordinal) ||
+                leftChunk.ChapterNumber != rightChunk.ChapterNumber ||
+                leftChunk.ChunkIndex != rightChunk.ChunkIndex ||
+                leftChunk.StartPosition != rightChunk.StartPosition)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private async ValueTask<IReadOnlyList<RagChunkPayload>> BuildChunksAsync(

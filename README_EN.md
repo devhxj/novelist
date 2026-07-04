@@ -47,7 +47,7 @@ On chapter fifty, wondering "where exactly did the protagonist first see that pe
 
 Not keyword matching—meaning-based search. Ask "clues about the pendant" and it finds paragraphs that never mention the word "pendant" but clearly allude to it. The Agent can also proactively search earlier content when writing new chapters to maintain consistency.
 
-The index and retrieval state live locally in sqlite-vec. Embeddings are generated through a configurable standard Embeddings API, so providers and vector dimensions can vary safely. Chapter edits mark the index stale, and after rebuild the Agent can proactively search earlier content to maintain consistency.
+The index and retrieval state live locally in sqlite-vec. Embeddings can be generated through a standard Embeddings API or a local ONNX model. Online Embeddings API mode stays provider/model agnostic; local ONNX mode uses the bundled fixed `bge-small-zh-v1.5` int8 model so sufficiently capable devices can generate embeddings on-device without sending manuscript text to an online embedding service. ONNX mode is strictly local and does not silently fall back to an online API. Chapter edits mark the index stale, and after rebuild the Agent can proactively search earlier content to maintain consistency.
 
 ## Not Just Memory—Structured Creative State
 
@@ -175,7 +175,7 @@ Download the installer for your platform from [Releases](https://github.com/sigp
 - **macOS** — Open DMG, drag to Applications
 - **Linux** — Run the AppImage
 
-Requires an LLM API Key (built-in DeepSeek, GLM, MiMo templates; compatible with OpenAI format). Installers include the desktop host, frontend assets, and Git runtime. No Python, Node.js, external database, or GPU required. Windows SmartScreen may show a warning (unsigned)—click "More info" → "Run anyway."
+Requires an LLM API Key (built-in DeepSeek, GLM, MiMo templates; compatible with OpenAI format). Semantic search can use any compatible online Embeddings API or the bundled fixed ONNX model in settings. Installers include the desktop host, frontend assets, and Git runtime. No Python, Node.js, or external database is required. Windows SmartScreen may show a warning (unsigned)—click "More info" → "Run anyway."
 
 ### Build From Source
 
@@ -198,7 +198,7 @@ make dev     # Photino desktop dev mode
 | Desktop Framework | Photino.NET + .NET 10 |
 | Editor | Monaco Editor |
 | Database | Filesystem JSON stores + SQLite/sqlite-vec RAG index |
-| Vector Search | Standard Embeddings API + sqlite-vec |
+| Vector Search | Standard Embeddings API / local ONNX + sqlite-vec |
 | Version Control | Built-in Git (auto commit / Diff / Revert) |
 | Security | Regex whitelist + SafePath dual sandbox + approval flow |
 | Frontend | React 19 + TypeScript + Tailwind CSS 4 + shadcn/ui |

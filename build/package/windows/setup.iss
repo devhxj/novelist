@@ -27,9 +27,9 @@ Source: "..\..\bin\novelist\*"; DestDir: "{app}"; Flags: ignoreversion recursesu
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "快捷方式:"; Flags: checkedonce
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autoprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--desktop"
 Name: "{autoprograms}\{#MyAppName}卸载 Novelist"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--desktop"; Tasks: desktopicon
 
 [Code]
 function GetDefaultDir(Param: string): string;

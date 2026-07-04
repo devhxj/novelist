@@ -64,6 +64,48 @@ public sealed class RagIndexServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task StandardEmbeddingClientNormalizesKnownEndpointSuffixesBeforePosting()
+    {
+        var handler = new RecordingHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent("""
+                {
+                  "model": "embed-v1",
+                  "data": [
+                    { "index": 0, "embedding": [0.1, 0.2, 0.3] }
+                  ],
+                  "usage": { "prompt_tokens": 1, "total_tokens": 1 }
+                }
+                """)
+        });
+        var client = new StandardEmbeddingClient(new HttpClient(handler));
+
+        foreach (var endpoint in new[]
+        {
+            "api.example.com/v1/responses",
+            "https://api.example.com/v1/models",
+            "https://api.example.com/v1/embeddings/",
+            "https://api.example.com/v1/chat/completions"
+        })
+        {
+            await client.EmbedAsync(
+                ["第一段"],
+                new EmbeddingRequestOptions(
+                    ProviderKey: "custom",
+                    EndpointUrl: endpoint,
+                    ApiKey: "sk-secret",
+                    ModelId: "embed-v1",
+                    Dimensions: 3,
+                    User: null),
+                CancellationToken.None);
+        }
+
+        Assert.Equal(
+            Enumerable.Repeat("https://api.example.com/v1/embeddings", 4).ToArray(),
+            handler.Requests.Select(request => request.RequestUri!.ToString()).ToArray());
+    }
+
+    [Fact]
     public async Task StandardEmbeddingClientRejectsEmptyInputsAndRedactsProviderErrors()
     {
         var handler = new RecordingHttpMessageHandler(_ => new HttpResponseMessage((HttpStatusCode)429)
@@ -172,6 +214,87 @@ public sealed class RagIndexServiceTests : IDisposable
         Assert.Equal(0, state.Dimensions);
         Assert.Contains("Embedding provider is not configured", state.LastError, StringComparison.Ordinal);
         Assert.Empty(embedding.Requests);
+    }
+
+    [Fact]
+    public async Task RebuildNovelIndexDoesNotMarkReadyWhenContentChangesDuringEmbedding()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novels = new FileSystemNovelService(options, settings);
+        var chapters = new FileSystemChapterContentService(options, novels);
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("竞态索引", "", ""), CancellationToken.None);
+        var chapter = await chapters.CreateChapterAsync(new CreateChapterPayload(novel.Id, "第一章"), CancellationToken.None);
+        await chapters.SaveContentAsync(
+            new SaveContentPayload(novel.Id, chapter.FilePath, "旧内容。"),
+            CancellationToken.None);
+        var provisioner = new RecordingSqliteVecTableProvisioner();
+        var embedding = new MutatingEmbeddingClient(
+            dimensions: 3,
+            onFirstEmbed: async () =>
+            {
+                await chapters.SaveContentAsync(
+                    new SaveContentPayload(novel.Id, chapter.FilePath, "新内容。"),
+                    CancellationToken.None);
+            });
+        var index = new SqliteRagIndexService(
+            options,
+            novels,
+            chapters,
+            new StaticEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "custom",
+                "https://api.example.com/v1/embeddings",
+                "sk-secret",
+                "embed-v1",
+                3,
+                null)),
+            embedding,
+            provisioner);
+
+        var state = await index.RebuildNovelAsync(novel.Id, CancellationToken.None);
+
+        Assert.Equal("stale", state.Status);
+        Assert.Contains("changed during rebuild", state.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(provisioner.Provisions);
+        var chunks = await index.GetIndexedChunksAsync(novel.Id, CancellationToken.None);
+        var chunk = Assert.Single(chunks);
+        Assert.Equal("新内容。", chunk.Content);
+    }
+
+    [Fact]
+    public async Task RebuildNovelIndexPropagatesCancellationWithoutRecordingFailedState()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novels = new FileSystemNovelService(options, settings);
+        var chapters = new FileSystemChapterContentService(options, novels);
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("取消索引", "", ""), CancellationToken.None);
+        var chapter = await chapters.CreateChapterAsync(new CreateChapterPayload(novel.Id, "第一章"), CancellationToken.None);
+        await chapters.SaveContentAsync(
+            new SaveContentPayload(novel.Id, chapter.FilePath, "需要向量化的内容。"),
+            CancellationToken.None);
+        var provisioner = new RecordingSqliteVecTableProvisioner();
+        var index = new SqliteRagIndexService(
+            options,
+            novels,
+            chapters,
+            new StaticEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "custom",
+                "https://api.example.com/v1/embeddings",
+                "sk-secret",
+                "embed-v1",
+                3,
+                null)),
+            new CancelingEmbeddingClient(),
+            provisioner);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await index.RebuildNovelAsync(novel.Id, CancellationToken.None));
+
+        Assert.Empty(provisioner.Provisions);
+        Assert.Null(await index.GetIndexStateAsync(novel.Id, CancellationToken.None));
     }
 
     [Fact]
@@ -291,6 +414,52 @@ public sealed class RagIndexServiceTests : IDisposable
                 _dimensions,
                 items,
                 new EmbeddingUsage(0, inputs.Sum(input => input.Length))));
+        }
+    }
+
+    private sealed class MutatingEmbeddingClient : IEmbeddingClient
+    {
+        private readonly int _dimensions;
+        private readonly Func<ValueTask> _onFirstEmbed;
+        private int _called;
+
+        public MutatingEmbeddingClient(int dimensions, Func<ValueTask> onFirstEmbed)
+        {
+            _dimensions = dimensions;
+            _onFirstEmbed = onFirstEmbed;
+        }
+
+        public async ValueTask<EmbeddingBatchResult> EmbedAsync(
+            IReadOnlyList<string> inputs,
+            EmbeddingRequestOptions options,
+            CancellationToken cancellationToken)
+        {
+            if (Interlocked.Exchange(ref _called, 1) == 0)
+            {
+                await _onFirstEmbed();
+            }
+
+            var items = inputs
+                .Select((_, index) => new EmbeddingItemResult(
+                    index,
+                    Enumerable.Range(0, _dimensions).Select(offset => (float)(index + offset + 1)).ToArray()))
+                .ToArray();
+            return new EmbeddingBatchResult(
+                options.ModelId,
+                _dimensions,
+                items,
+                new EmbeddingUsage(0, inputs.Count));
+        }
+    }
+
+    private sealed class CancelingEmbeddingClient : IEmbeddingClient
+    {
+        public ValueTask<EmbeddingBatchResult> EmbedAsync(
+            IReadOnlyList<string> inputs,
+            EmbeddingRequestOptions options,
+            CancellationToken cancellationToken)
+        {
+            throw new OperationCanceledException(cancellationToken);
         }
     }
 

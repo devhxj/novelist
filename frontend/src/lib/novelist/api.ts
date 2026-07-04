@@ -28,6 +28,12 @@ export interface EmbeddingConfigView {
   model_id: string
   dimensions: number | null
   user: string
+  provider_type: string
+  onnx_model_path: string
+  onnx_vocab_path: string
+  onnx_runtime_path: string
+  max_sequence_length: number | null
+  normalize_embeddings: boolean
 }
 
 export interface SqliteVecStatusView {

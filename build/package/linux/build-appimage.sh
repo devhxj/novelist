@@ -28,7 +28,7 @@ cat > "$APPDIR/${APP_NAME}.desktop" <<EOF
 [Desktop Entry]
 Name=Novelist
 Comment=智能写作助手
-Exec=novelist
+Exec=novelist --desktop
 Icon=novelist
 Type=Application
 Categories=Office;WordProcessor;
@@ -51,7 +51,7 @@ fi
 cat > "$APPDIR/AppRun" <<'APPRUN'
 #!/bin/bash
 HERE="$(dirname "$(readlink -f "${0}")")"
-exec "${HERE}/novelist" "$@"
+exec "${HERE}/novelist" --desktop "$@"
 APPRUN
 chmod +x "$APPDIR/AppRun" "$APPDIR/novelist"
 

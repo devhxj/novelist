@@ -1,83 +1,41 @@
-# CLAUDE.md
+# Repository Guidelines
 
-Goink — desktop AI novel-writing assistant built with Wails (Go + React).
+## Project Structure & Module Organization
 
-## Build / Dev
+Novelist is a .NET 10 + Photino.NET desktop app with a React/Vite frontend. The active backend lives under `src/`: `Novelist.App` hosts the desktop/window and optional local asset server, `Novelist.Contracts` owns bridge DTOs, `Novelist.Core` owns app interfaces and bridge dispatch, `Novelist.Infrastructure` owns filesystem/storage/RAG implementations, and `Novelist.Agent` owns Microsoft Agent Framework tool adapters. Tests live under `tests/Novelist.Tests` and `tests/Novelist.IntegrationTests`. React/TypeScript source is in `frontend/src/`; `frontend/src/lib/novelist/` is the owned bridge adapter.
 
-```bash
-make deps      # download runtime deps (ONNX lib, git, models)
-make build     # production build (wails build)
-make dev       # dev mode with hot reload (wails dev)
-```
+The old Go/Wails implementation is retired from the active product path. Historical Goink/Wails behavior is reference material only and lives in migration/design docs or Git history.
 
-**Working directory discipline:**
+## Build, Test, and Development Commands
 
-- **Git commands** — always run from project root (`/home/nianhe/projects/todo`). Before any git operation, ensure CWD is the root.
-- **Frontend commands** — always `cd frontend/` first. Build with `npm run build`, never raw `npx vite build` or `npm build`. Install deps with `npm install <pkg> --save` from within `frontend/`. NEVER run `npm install` from project root.
-- **Go commands** — run from project root. Use `go build ./...` or `go test ./...`.
-- **Know where you are** — before running any command, confirm which directory it will execute in and what side effects it has.
+- `make deps`: download or reuse the bundled Git runtime under `build/runtime/`.
+- `make dev`: run the .NET Photino desktop app.
+- `make build`: build frontend assets, prepare runtime deps, then publish `Novelist.App` to `build/bin/novelist/`.
+- `make publish RID=win-x64`: publish a self-contained RID-specific app output.
+- `make package-windows`, `make package-linux`, `make package-macos`: build platform packages into `build/dist/`.
+- `make frontend-dev`: run only the Vite frontend; backend bridge APIs are unavailable.
+- `dotnet test Novelist.slnx --no-restore -v minimal`: run the .NET test suite used by CI.
+- `cd frontend && npm ci && npm run build`: install frontend dependencies, then run TypeScript and Vite build.
+- `cd frontend && npm run lint`: run ESLint for TypeScript/React files.
 
-System deps (Ubuntu/Debian): `libsqlite3-dev libgtk-3-dev libwebkit2gtk-4.1-dev gcc`
+## Coding Style & Naming Conventions
 
-ONNX Runtime and models are bundled at build time via `scripts/download-onnx.sh` into `build/runtime/`. In dev mode, the ONNX lib fallback path is `~/Goink/runtime/` and models fall back to `~/Goink/models/`. Build constraint `//go:build cgo` guards all ONNX and sqlite-vec code.
+Use idiomatic C# with nullable annotations. Keep public JSON contracts in `Novelist.Contracts`, interfaces and bridge dispatch boundaries in `Novelist.Core`, filesystem/runtime implementations in `Novelist.Infrastructure`, and MAF tool adapters in `Novelist.Agent`. Run .NET commands from the repository root.
 
-## Architecture
+Frontend work uses TypeScript, React 19, Tailwind CSS 4, shadcn/ui patterns, and ESLint flat config. Run npm commands from `frontend/`. Add owned frontend DTOs or bridge methods under `frontend/src/lib/novelist/` and `src/Novelist.Contracts/`.
 
-```
-app/              Wails binding layer — exported methods = frontend API
-internal/
-  agent/          LLM conversation loop, compression, sub-agents
-  agentcfg/       System prompts (system1.go) + context snapshots (system2.go)
-  mcp_tools/      30+ MCP tools the AI can call (read, edit, CRUD for all entities)
-  llm/            Multi-provider LLM transport (OpenAI-compatible)
-  session/        Sessions + messages (append-only, versioned for compression)
-  storage/        SQLite init + operation log + rollback
-  character/      Character CRUD + directed relationship graph
-  timeline/       Foreshadowing entries + 3-slot chapter plans (next/near/far)
-  storyarc/       Multi-node story arcs across chapters
-  reader/         Reader perspective tracking (known/suspense/misconception)
-  location/       Locations as graph: containment tree + undirected spatial edges
-  novel/          Novel metadata + global/per-novel preferences
-  chapter/        Chapter metadata (content stored as files in git repos)
-  git/            File I/O + git version control per novel
-  rag/            Vector search (sqlite-vec + ONNX bge-small-zh-v1.5 int8)
-  approval/       Blocking approval workflow (manual / auto modes)
-  config/         App config, settings, model directory resolution
-  platform/       OS-specific paths (AppDir, DataDir, ONNX lib resolution)
-  migrate/        Auto-migration
-  logger/         Structured slog logging
-frontend/         React 19 + TypeScript + Tailwind 4 + shadcn/ui
-```
+Do not revive the retired Go/Wails path: do not add new code under legacy `app/` or `internal/`, do not run Go/Wails build commands, and do not recreate `frontend/src/lib/wailsjs/`. Compatibility behavior belongs in the Photino bridge, .NET contracts, and owned TypeScript adapter.
 
-## Key conventions
+## Testing Guidelines
 
-- **Build tags**: All ONNX and sqlite-vec code uses `//go:build cgo` (see `internal/rag/`, `internal/mcp_tools/memory_tools.go`)
-- **Data dir**: `~/Goink/` on Linux/macOS, exe-adjacent on Windows. Contains `models/`, `runtime/`, `novel-agent.db`, `novels/`
-- **Per-novel git repos**: Each novel at `{DataDir}/novels/{id}/` with `chapters/NNN.md`, `outlines/NNN.md`, `goink.md`
-- **Preferences**: Global + per-novel, free-text category, LLM-classified
-- **Character relationships**: Append-only with `is_current` flag — updates create new rows, old rows become history
-- **Timeline entries**: `target_chapter` used for ORDER BY only, never WHERE (LLM estimates are imprecise)
-- **Messages**: Append-only, versioned for compression. Three query paths: to_api / to_frontend / full audit
-- **Commit style**: English, specific, no Co-Authored-By, no emoji
-- **User communicates in Chinese** — respond in Chinese
-- **Edit tool + Chinese text**: When Edit tool fails on Go files with Chinese characters ("String to replace not found"), stretch `old_string` to include surrounding ASCII lines as anchors. Before editing, `gofmt -w file.go` and verify indentation with `cat -A`. See `docs/experience/edit-tool-unicode-match-failure.md`.
+Prefer focused unit tests in `tests/Novelist.Tests` for pure bridge/tool behavior and integration tests in `tests/Novelist.IntegrationTests` for filesystem, SQLite, Git, migration, app-host behavior, and end-to-end bridge contracts. Add tests for storage, path safety, migrations, version history, approval flow, SSRF/web-tool safety, and user-facing workflow changes. Run frontend lint/build before UI changes because no frontend test suite is configured.
 
-## CGO / ONNX notes
+## Security & Configuration Tips
 
-- ONNX embedder is a global singleton (`InitEmbedder` / `GetEmbedder`)
-- VectorStore is a global singleton (`InitVectorStore` / `GetVectorStore`)
-- RefreshQueue is a global singleton with `sync.Once` (`InitRefreshQueue` / `GetRefreshQueue`)
-- `ResolveOnnxLib()` search chain: `<appdir>/runtime/` → `~/Goink/runtime/` → system paths
-- Models resolution: `<appdir>/runtime/models/` → `~/Goink/models/`
-- Vec0 table per novel: `vec_novel_{id}`, cosine distance metric
-- Chunks: 420 tokens, 50 overlap, BERT WordPiece tokenizer
-- Embedding: 512-dim, CLS pooling + L2 normalization, BGE instruction prefix for queries only
+Keep API keys, local model paths, and user data out of git. Preserve SafePath, approval-flow, SSRF checks, migration copy-first behavior, and sandbox checks when touching file editing, web tools, or agent tool code. Runtime Git, optional ONNX Runtime/model assets, and optional sqlite-vec native libraries belong in `build/runtime/` or app data/config paths, not source folders. Existing user data migration must leave the source untouched and write a manifest.
 
-## No-gos
+## Collaboration Notes
 
-- Never delete or modify logger statements or code comments without explicit request
-- Never modify code without user permission — ask first
-- Use Edit/Write tools only for code changes, never sed or python scripts
-- Don't proactively ask "commit?" or "start writing?" — wait for explicit instruction
-- Never hand-edit `frontend/src/lib/wailsjs/go/models.ts` — it is auto-generated by Wails bindings. Always regenerate via `wails generate module` or `make build` instead
-- Windows: `platform` build tag issues are expected — cgo code doesn't compile for Windows in diagnostics
+Recent history uses concise English subjects with typed prefixes: `feat: ...`, `fix: ...`, `test: ...`, `docs: ...`, and occasional `assets:`. Keep subjects specific; avoid emoji and `Co-Authored-By` trailers.
+
+The user usually communicates in Chinese; respond in Chinese unless they ask otherwise.

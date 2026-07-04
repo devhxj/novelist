@@ -54,6 +54,8 @@ public sealed class LlmConfigurationServiceTests : IDisposable
                 "my-api",
                 "My API",
                 "example.com/v1",
+                "responses",
+                "example.com/v1",
                 "sk-custom",
                 "",
                 "",
@@ -74,7 +76,9 @@ public sealed class LlmConfigurationServiceTests : IDisposable
 
         var custom = saved.Providers.Single(provider => provider.Key == "my-api");
         Assert.Equal("custom", custom.Source);
-        Assert.Equal("https://example.com/v1/chat/completions", custom.ChatUrl);
+        Assert.Equal("https://example.com/v1", custom.BaseUrl);
+        Assert.Equal("responses", custom.EndpointType);
+        Assert.Equal("https://example.com/v1/responses", custom.ChatUrl);
 
         var models = await reloaded.GetModelsAsync(CancellationToken.None);
         Assert.Contains(models, model => model.Key == "deepseek/deepseek-v4-pro");
@@ -134,7 +138,7 @@ public sealed class LlmConfigurationServiceTests : IDisposable
         var service = new FileSystemLlmConfigurationService(options, httpClient: new HttpClient(handler));
 
         await service.TestConnectionAsync(
-            new TestConnectionPayload("mimo", "", "sk-mimo", "mimo-v2.5"),
+            new TestConnectionPayload("mimo", "", "chat", "", "sk-mimo", "mimo-v2.5"),
             CancellationToken.None);
 
         var request = handler.Requests.Single();
@@ -148,6 +152,59 @@ public sealed class LlmConfigurationServiceTests : IDisposable
         Assert.Equal("mimo-v2.5", json.RootElement.GetProperty("model").GetString());
         Assert.Equal(1, json.RootElement.GetProperty("max_tokens").GetInt32());
         Assert.Equal("hi", json.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
+    }
+
+    [Fact]
+    public async Task TestConnectionCanUseResponsesEndpointFromBaseUrl()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var handler = new RecordingHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent("""{"id":"resp_ok"}""")
+        });
+        var service = new FileSystemLlmConfigurationService(options, httpClient: new HttpClient(handler));
+
+        await service.TestConnectionAsync(
+            new TestConnectionPayload("custom", "https://api.example.com/v1", "res", "", "sk-secret", "model-a"),
+            CancellationToken.None);
+
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("https://api.example.com/v1/responses", request.RequestUri!.ToString());
+        Assert.Equal("Bearer sk-secret", request.Headers.Authorization?.ToString());
+
+        using var json = JsonDocument.Parse(handler.RequestBodies.Single());
+        Assert.Equal("model-a", json.RootElement.GetProperty("model").GetString());
+        Assert.Equal("hi", json.RootElement.GetProperty("input").GetString());
+        Assert.Equal(1, json.RootElement.GetProperty("max_output_tokens").GetInt32());
+        Assert.False(json.RootElement.TryGetProperty("max_tokens", out _));
+    }
+
+    [Fact]
+    public async Task TestConnectionStripsKnownEndpointSuffixFromConfiguredBaseUrl()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var handler = new RecordingHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent("""{"id":"ok"}""")
+        });
+        var service = new FileSystemLlmConfigurationService(options, httpClient: new HttpClient(handler));
+
+        await service.TestConnectionAsync(
+            new TestConnectionPayload("custom", "https://api.example.com/v1/chat/completions", "chat", "", "sk-secret", "model-a"),
+            CancellationToken.None);
+        await service.TestConnectionAsync(
+            new TestConnectionPayload("custom", "https://api.example.com/v1/responses", "responses", "", "sk-secret", "model-a"),
+            CancellationToken.None);
+
+        Assert.Equal(
+            [
+                "https://api.example.com/v1/chat/completions",
+                "https://api.example.com/v1/responses"
+            ],
+            handler.Requests.Select(request => request.RequestUri!.ToString()).ToArray());
     }
 
     [Fact]
@@ -188,6 +245,8 @@ public sealed class LlmConfigurationServiceTests : IDisposable
                       {
                         "key": "deepseek",
                         "name": "DeepSeek",
+                        "base_url": "https://api.deepseek.com",
+                        "endpoint_type": "chat",
                         "chat_url": "https://api.deepseek.com/v1/chat/completions",
                         "api_key": "sk-secret",
                         "temperature": 0.9,
@@ -228,7 +287,7 @@ public sealed class LlmConfigurationServiceTests : IDisposable
               "kind": "request",
               "id": "req_test",
               "method": "TestConnection",
-              "payload": { "args": [{ "provider_name": "deepseek", "api_key": "sk-secret", "model_id": "deepseek-v4-pro" }] }
+              "payload": { "args": [{ "provider_name": "deepseek", "base_url": "https://api.deepseek.com", "endpoint_type": "chat", "api_key": "sk-secret", "model_id": "deepseek-v4-pro" }] }
             }
             """));
         Assert.True(tested.RootElement.GetProperty("ok").GetBoolean());

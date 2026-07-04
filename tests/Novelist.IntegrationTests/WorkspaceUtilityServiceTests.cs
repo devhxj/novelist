@@ -1,4 +1,6 @@
+using System.Net;
 using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using Novelist.Contracts.App;
 using Novelist.Contracts.Bridge;
@@ -79,6 +81,67 @@ public sealed class WorkspaceUtilityServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ExtractStyleSupportsResponsesEndpointConfiguration()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
+        var handler = new RecordingHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {
+                  "output_text": "---\nname: extracted-style\ndescription: responses 风格\ncategory: 测试\nmode: auto\nauthor: ai\nversion: 1\n---\n# extracted-style\n\n保持短句。"
+                }
+                """,
+                Encoding.UTF8,
+                "application/json")
+        });
+        var llm = new FileSystemLlmConfigurationService(options, new HttpClient(handler));
+        await llm.SaveConfigAsync(
+            new LlmConfigViewPayload([
+                new ProviderViewPayload(
+                    "custom-responses",
+                    "Custom Responses",
+                    "https://api.example.com/v1/responses",
+                    "responses",
+                    "",
+                    "sk-secret",
+                    "",
+                    "",
+                    0.2,
+                    "custom",
+                    [],
+                    [new ModelInfoPayload("model-a", "Model A", 128_000, 4096, false, [], false)])
+            ]),
+            CancellationToken.None);
+        var service = new FileSystemSkillCatalogService(
+            options,
+            novelService,
+            llm,
+            new HttpClient(handler));
+
+        var result = await service.ExtractStyleAsync(
+            new ExtractStylePayload(novel.Id, "这是用于提取风格的样本文本。", "custom-responses", "model-a", ""),
+            CancellationToken.None);
+
+        Assert.Equal("extracted-style", result.Name);
+        Assert.Equal("responses 风格", result.Description);
+        Assert.Equal("skills/extracted-style.md", result.FilePath);
+        Assert.Contains("保持短句", result.RawContent, StringComparison.Ordinal);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("https://api.example.com/v1/responses", request.RequestUri!.ToString());
+        using var body = JsonDocument.Parse(handler.RequestBodies.Single());
+        Assert.Equal("model-a", body.RootElement.GetProperty("model").GetString());
+        Assert.False(body.RootElement.TryGetProperty("messages", out _));
+        Assert.Equal("system", body.RootElement.GetProperty("input")[0].GetProperty("role").GetString());
+        Assert.Equal(4096, body.RootElement.GetProperty("max_output_tokens").GetInt32());
+    }
+
+    [Fact]
     public async Task SearchAllReturnsEntityChapterAndContentMatchesWithoutVectorIndex()
     {
         var options = CreateOptions();
@@ -153,6 +216,30 @@ public sealed class WorkspaceUtilityServiceTests : IDisposable
         var contentMatch = Assert.Single(results, item => item.Type == "content");
         Assert.Equal("暗号", contentMatch.MatchHit);
         Assert.DoesNotContain(results, item => item.Type == "rag");
+    }
+
+    [Fact]
+    public async Task SearchAllPropagatesSemanticSearchCancellation()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
+        var chapterService = new FileSystemChapterContentService(options, novelService);
+        var world = new FileSystemWorldEntityService(options, novelService);
+        var planning = new FileSystemPlanningService(options, novelService);
+        var search = new FileSystemWorkspaceSearchService(
+            options,
+            novelService,
+            chapterService,
+            world,
+            planning,
+            new RecordingRagIndexService(),
+            new CancelingSemanticSearchService());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await search.SearchAllAsync(novel.Id, "暗号", CancellationToken.None));
     }
 
     [Fact]
@@ -447,6 +534,43 @@ public sealed class WorkspaceUtilityServiceTests : IDisposable
             CancellationToken cancellationToken)
         {
             throw new InvalidOperationException("semantic search is unavailable");
+        }
+    }
+
+    private sealed class CancelingSemanticSearchService : IRagSemanticSearchService
+    {
+        public ValueTask<IReadOnlyList<RagSearchHitPayload>> SearchAsync(
+            long novelId,
+            string query,
+            int topK,
+            CancellationToken cancellationToken)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+    }
+
+    private sealed class RecordingHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, HttpResponseMessage> _handler;
+
+        public RecordingHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> handler)
+        {
+            _handler = handler;
+        }
+
+        public List<HttpRequestMessage> Requests { get; } = [];
+
+        public List<string> RequestBodies { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            RequestBodies.Add(request.Content is null
+                ? string.Empty
+                : request.Content.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult());
+            Requests.Add(request);
+            return Task.FromResult(_handler(request));
         }
     }
 

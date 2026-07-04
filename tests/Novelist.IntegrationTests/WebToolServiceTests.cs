@@ -234,6 +234,8 @@ public sealed class WebToolServiceTests
         return new ProviderViewPayload(
             "deepseek",
             "DeepSeek",
+            "https://api.deepseek.com",
+            "chat",
             "https://api.deepseek.com/v1/chat/completions",
             apiKey,
             "https://platform.deepseek.com",

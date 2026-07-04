@@ -13,13 +13,33 @@ interface Props {
   onSaved?: () => void
 }
 
+type TestResult = { ok: boolean; msg?: string; configSnapshot: string }
+
 const emptyEmbeddingConfig = (): EmbeddingConfigView => ({
+  provider_type: '',
   provider_key: '',
   endpoint_url: '',
   api_key: '',
   model_id: '',
   dimensions: null,
   user: '',
+  onnx_model_path: '',
+  onnx_vocab_path: '',
+  onnx_runtime_path: '',
+  max_sequence_length: null,
+  normalize_embeddings: true,
+})
+
+const firstModelId = (provider: llm.ProviderView): string => {
+  const models = provider.builtin_models?.length ? provider.builtin_models : provider.custom_models
+  return models?.[0]?.id ?? ''
+}
+
+const buildTestSnapshot = (provider: llm.ProviderView): string => JSON.stringify({
+  api_key: provider.api_key,
+  base_url: (provider.base_url || provider.chat_url || '').trim(),
+  endpoint_type: provider.endpoint_type || 'chat',
+  model_id: firstModelId(provider),
 })
 
 export default function ModelConfigTab({ onSaved }: Props) {
@@ -33,7 +53,7 @@ export default function ModelConfigTab({ onSaved }: Props) {
   const [saveMsg, setSaveMsg] = useState('')
 
   // 测试状态：{ providerKey: { ok, msg, apiKey } }
-  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; msg?: string; keySnapshot: string } | undefined>>({})
+  const [testResults, setTestResults] = useState<Record<string, TestResult | undefined>>({})
   const [testing, setTesting] = useState<Record<string, boolean>>({})
   const [embeddingTestResult, setEmbeddingTestResult] = useState<{ ok: boolean; msg?: string } | undefined>()
   const [embeddingTesting, setEmbeddingTesting] = useState(false)
@@ -69,10 +89,9 @@ export default function ModelConfigTab({ onSaved }: Props) {
 
   const handleUpdateProvider = useCallback((key: string, patch: Partial<llm.ProviderView>) => {
     setProviders(prev => prev.map(p => p.key === key ? { ...p, ...patch } as unknown as llm.ProviderView : p))
-    // key 变了就清除旧测试结果
-    if ('api_key' in patch) {
+    // 会影响连通性请求的字段变了，就清除旧测试结果。
+    if ('api_key' in patch || 'base_url' in patch || 'chat_url' in patch || 'endpoint_type' in patch) {
       setTestResults(prev => {
-        if (prev[key]?.keySnapshot === patch.api_key) return prev
         const next = { ...prev }
         delete next[key]
         return next
@@ -99,6 +118,11 @@ export default function ModelConfigTab({ onSaved }: Props) {
       const models = [...(p.custom_models || []), model]
       return { ...p, custom_models: models } as unknown as llm.ProviderView
     }))
+    setTestResults(prev => {
+      const next = { ...prev }
+      delete next[providerKey]
+      return next
+    })
   }, [])
 
   const handleRemoveCustomModel = useCallback((providerKey: string, modelId: string) => {
@@ -107,6 +131,11 @@ export default function ModelConfigTab({ onSaved }: Props) {
       const models = (p.custom_models || []).filter(m => m.id !== modelId)
       return { ...p, custom_models: models } as unknown as llm.ProviderView
     }))
+    setTestResults(prev => {
+      const next = { ...prev }
+      delete next[providerKey]
+      return next
+    })
   }, [])
 
   // 测试连通性，返回错误消息或 null
@@ -114,43 +143,40 @@ export default function ModelConfigTab({ onSaved }: Props) {
     const provider = providers.find(p => p.key === providerKey)
     if (!provider || !provider.api_key) {
       const msg = '未配置 API Key'
-      setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, keySnapshot: '' } }))
+      setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, configSnapshot: '' } }))
       return msg
     }
 
-    let chatURL = provider.chat_url || ''
-    if (/^https?:\/\//.test(chatURL)) {
-      // 已有协议头，直接用
-    } else if (chatURL.includes('.')) {
-      // www.example.com 之类，补 https://
-      chatURL = 'https://' + chatURL
-    } else {
-      const msg = 'URL 格式不正确，需要以 http:// 或 https:// 开头'
-      setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, keySnapshot: provider.api_key } }))
+    const baseURL = (provider.base_url || provider.chat_url || '').trim()
+    if (!baseURL) {
+      const msg = '请先配置 Base URL'
+      setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, configSnapshot: '' } }))
       return msg
     }
 
-    const models = provider.builtin_models?.length ? provider.builtin_models : provider.custom_models
-    const modelId = models?.[0]?.id
+    const modelId = firstModelId(provider)
     if (!modelId) {
       const msg = '请先添加至少一个模型'
-      setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, keySnapshot: provider.api_key } }))
+      setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, configSnapshot: '' } }))
       return msg
     }
 
+    const configSnapshot = buildTestSnapshot(provider)
     setTesting(prev => ({ ...prev, [providerKey]: true }))
     try {
       await app.TestConnection({
         provider_name: providerKey,
-        chat_url: chatURL,
+        base_url: baseURL,
+        endpoint_type: provider.endpoint_type || 'chat',
+        chat_url: '',
         api_key: provider.api_key,
         model_id: modelId,
       })
-      setTestResults(prev => ({ ...prev, [providerKey]: { ok: true, keySnapshot: provider.api_key } }))
+      setTestResults(prev => ({ ...prev, [providerKey]: { ok: true, configSnapshot } }))
       return null
     } catch (err: unknown) {
       const msg = String(err).replace(/^app: test connection: /, '')
-      setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, keySnapshot: provider.api_key } }))
+      setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, configSnapshot } }))
       return msg
     } finally {
       setTesting(prev => ({ ...prev, [providerKey]: false }))
@@ -209,7 +235,7 @@ export default function ModelConfigTab({ onSaved }: Props) {
     const needTest = withKey.filter(p => {
       const tr = testResults[p.key]
       if (!tr || !tr.ok) return true // 从未测试或上次失败
-      if (tr.keySnapshot !== p.api_key) return true // key 变了
+      if (tr.configSnapshot !== buildTestSnapshot(p)) return true // 请求配置变了
       return false
     })
 

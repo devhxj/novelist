@@ -108,6 +108,30 @@ public sealed class BridgeDispatcherTests
     }
 
     [Fact]
+    public async Task DispatchAsyncEnforcesRequestDeadline()
+    {
+        var dispatcher = new BridgeDispatcher();
+        dispatcher.Register("Block", async (_, cancellationToken) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return null;
+        });
+
+        var result = await dispatcher.DispatchAsync("""
+            {
+              "kind": "request",
+              "id": "req_deadline",
+              "method": "Block",
+              "payload": {},
+              "deadline_ms": 25
+            }
+            """);
+
+        using var json = ParseOutbound(result);
+        AssertBridgeError(json.RootElement, "req_deadline", BridgeErrorCodes.Cancelled);
+    }
+
+    [Fact]
     public async Task DispatchAsyncConvertsInternalErrorWithoutLeakingStackTrace()
     {
         var dispatcher = new BridgeDispatcher();

@@ -14,6 +14,7 @@ public sealed class FileSystemSkillCatalogService : ISkillCatalogService
 {
     private const int MaxSampleLength = 200_000;
     private const int ResponseReadLimitBytes = 512 * 1024;
+    private const int ExtractStyleMaxOutputTokens = 4096;
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromMinutes(2);
     private static readonly Lazy<IReadOnlyList<ParsedSkillDocument>> BuiltinSkills = new(SkillDocuments.LoadBuiltin);
 
@@ -127,21 +128,13 @@ public sealed class FileSystemSkillCatalogService : ISkillCatalogService
             throw ProviderError("模型供应商未配置 API Key，无法提取写作风格。", retryable: false);
         }
 
-        if (string.IsNullOrWhiteSpace(provider.ChatUrl))
-        {
-            throw ProviderError("模型供应商未配置 Chat Completions 地址。", retryable: false);
-        }
+        var endpointType = LlmEndpoint.NormalizeEndpointType(provider.EndpointType);
+        var baseUrl = LlmEndpoint.NormalizeBaseUrl(
+            string.IsNullOrWhiteSpace(provider.BaseUrl) ? provider.ChatUrl : provider.BaseUrl,
+            requireValue: true);
+        var payload = BuildExtractStylePayload(provider, endpointType, modelId, sample, reasoningEffort);
 
-        var payload = new Dictionary<string, object?>
-        {
-            ["model"] = modelId,
-            ["messages"] = BuildExtractMessages(sample),
-            ["temperature"] = provider.Temperature,
-            ["stream"] = false
-        };
-        ApplyProviderRequestAdjustments(provider.Key, payload, reasoningEffort);
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, provider.ChatUrl);
+        using var request = new HttpRequestMessage(HttpMethod.Post, LlmEndpoint.BuildEndpointUrl(baseUrl, endpointType));
         request.Content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions), Encoding.UTF8, "application/json");
         ApplyProviderHeaders(provider.Key, request, provider.ApiKey);
 
@@ -149,7 +142,9 @@ public sealed class FileSystemSkillCatalogService : ISkillCatalogService
         var body = await ReadContentLimitedAsync(response.Content, cancellationToken);
         EnsureSuccess(response.StatusCode, body, provider.ApiKey);
 
-        var text = ExtractMessageContent(body, provider.ApiKey);
+        var text = endpointType == LlmEndpoint.Responses
+            ? ExtractResponsesContent(body, provider.ApiKey)
+            : ExtractChatMessageContent(body, provider.ApiKey);
         var skill = SkillDocuments.Parse(text, "ai");
         var fileName = SkillDocuments.NormalizeSkillName(skill.Name);
         return new ExtractStyleResultPayload(skill.Name, skill.Description, skill.RawContent, $"skills/{fileName}.md");
@@ -180,6 +175,44 @@ public sealed class FileSystemSkillCatalogService : ISkillCatalogService
                 ["content"] = $"请分析以下文本的写作风格：\n\n```\n{sample}\n```"
             }
         ];
+    }
+
+    private static Dictionary<string, object?> BuildExtractStylePayload(
+        ProviderViewPayload provider,
+        string endpointType,
+        string modelId,
+        string sample,
+        string reasoningEffort)
+    {
+        if (endpointType == LlmEndpoint.Responses)
+        {
+            var payload = new Dictionary<string, object?>
+            {
+                ["model"] = modelId,
+                ["input"] = BuildExtractMessages(sample),
+                ["temperature"] = provider.Temperature,
+                ["stream"] = false,
+                ["max_output_tokens"] = ExtractStyleMaxOutputTokens
+            };
+
+            if (!string.IsNullOrWhiteSpace(reasoningEffort))
+            {
+                payload["reasoning"] = new Dictionary<string, object?> { ["effort"] = reasoningEffort };
+            }
+
+            return payload;
+        }
+
+        var chatPayload = new Dictionary<string, object?>
+        {
+            ["model"] = modelId,
+            ["messages"] = BuildExtractMessages(sample),
+            ["temperature"] = provider.Temperature,
+            ["stream"] = false,
+            ["max_tokens"] = ExtractStyleMaxOutputTokens
+        };
+        ApplyProviderRequestAdjustments(provider.Key, chatPayload, reasoningEffort);
+        return chatPayload;
     }
 
     private static void ApplyProviderRequestAdjustments(
@@ -273,7 +306,7 @@ public sealed class FileSystemSkillCatalogService : ISkillCatalogService
         throw ProviderError($"[{(int)statusCode}] {SanitizeProviderBody(body, apiKey)}", retryable);
     }
 
-    private static string ExtractMessageContent(byte[] body, string apiKey)
+    private static string ExtractChatMessageContent(byte[] body, string apiKey)
     {
         try
         {
@@ -290,6 +323,68 @@ public sealed class FileSystemSkillCatalogService : ISkillCatalogService
         {
             throw ProviderError($"解析 LLM 响应失败: {SanitizeProviderBody(body, apiKey)} ({ex.Message})", retryable: false);
         }
+    }
+
+    private static string ExtractResponsesContent(byte[] body, string apiKey)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            if (ReadString(root, "output_text") is { Length: > 0 } outputText)
+            {
+                return outputText;
+            }
+
+            if (!TryReadProperty(root, "output", out var output) || output.ValueKind != JsonValueKind.Array)
+            {
+                throw ProviderError("LLM 返回为空，未能生成写作风格。", retryable: true);
+            }
+
+            var builder = new StringBuilder();
+            foreach (var item in output.EnumerateArray())
+            {
+                if (!TryReadProperty(item, "content", out var content) || content.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var contentItem in content.EnumerateArray())
+                {
+                    if (ReadString(contentItem, "text") is { Length: > 0 } text)
+                    {
+                        builder.Append(text);
+                    }
+                }
+            }
+
+            return builder.Length == 0
+                ? throw ProviderError("LLM 返回为空，未能生成写作风格。", retryable: true)
+                : builder.ToString();
+        }
+        catch (JsonException ex)
+        {
+            throw ProviderError($"解析 Responses 响应失败: {SanitizeProviderBody(body, apiKey)} ({ex.Message})", retryable: false);
+        }
+    }
+
+    private static string? ReadString(JsonElement element, string propertyName)
+    {
+        return TryReadProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+    }
+
+    private static bool TryReadProperty(JsonElement element, string propertyName, out JsonElement value)
+    {
+        if (element.ValueKind == JsonValueKind.Object &&
+            element.TryGetProperty(propertyName, out value))
+        {
+            return true;
+        }
+
+        value = default;
+        return false;
     }
 
     private static string NormalizeSource(string? source)

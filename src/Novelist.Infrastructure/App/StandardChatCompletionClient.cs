@@ -42,6 +42,16 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
             throw ProviderError(FormatProviderError(response.StatusCode, body, provider.ApiKey), Retryable(response.StatusCode));
         }
 
+        if (provider.EndpointType == LlmEndpoint.Responses)
+        {
+            await foreach (var item in ParseResponsesStreamAsync(response.Content, cancellationToken))
+            {
+                yield return item;
+            }
+
+            yield break;
+        }
+
         var toolCalls = new Dictionary<int, StreamingToolCall>();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 8192);
@@ -105,6 +115,11 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
             throw ProviderError(FormatProviderError(response.StatusCode, body, provider.ApiKey), Retryable(response.StatusCode));
         }
 
+        if (provider.EndpointType == LlmEndpoint.Responses)
+        {
+            return ParseResponsesText(body);
+        }
+
         try
         {
             using var document = JsonDocument.Parse(body);
@@ -146,10 +161,15 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
             throw ProviderError($"模型未找到: {providerName}/{modelId}", retryable: false);
         }
 
-        var chatUrl = NormalizeUrl(provider.ChatUrl);
+        var endpointType = LlmEndpoint.NormalizeEndpointType(provider.EndpointType);
+        var baseUrl = LlmEndpoint.NormalizeBaseUrl(
+            string.IsNullOrWhiteSpace(provider.BaseUrl) ? provider.ChatUrl : provider.BaseUrl,
+            requireValue: true);
+        var endpointUrl = LlmEndpoint.BuildEndpointUrl(baseUrl, endpointType);
         return new ResolvedProvider(
             providerName,
-            chatUrl,
+            endpointType,
+            endpointUrl,
             provider.ApiKey.Trim(),
             provider.Temperature,
             model);
@@ -161,6 +181,11 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         bool stream,
         bool titleGeneration)
     {
+        if (provider.EndpointType == LlmEndpoint.Responses)
+        {
+            return BuildResponsesPayload(provider, request, stream, titleGeneration);
+        }
+
         var messages = request.Messages.Select(message =>
         {
             var item = new Dictionary<string, object?>
@@ -231,11 +256,100 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         return ApplyProviderRequestAdapter(provider.Key, payload);
     }
 
+    private static Dictionary<string, object?> BuildResponsesPayload(
+        ResolvedProvider provider,
+        ChatCompletionRequest request,
+        bool stream,
+        bool titleGeneration)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["model"] = provider.Model.Id,
+            ["input"] = ToResponsesInput(request.Messages),
+            ["stream"] = stream,
+            ["temperature"] = provider.Temperature,
+            ["max_output_tokens"] = titleGeneration
+                ? 64
+                : provider.Model.MaxOutputTokens > 0
+                    ? provider.Model.MaxOutputTokens
+                    : 4096
+        };
+
+        if (request.Tools is { Count: > 0 })
+        {
+            payload["tools"] = request.Tools.Select(ToResponsesToolDefinition).ToArray();
+            payload["tool_choice"] = "auto";
+        }
+
+        if (provider.Model.SupportsThinking)
+        {
+            var reasoningEffort = NormalizeOptionalText(request.ReasoningEffort, nameof(request.ReasoningEffort), 128);
+            if (reasoningEffort.Length == 0 && provider.Model.ReasoningLevels is { Count: > 0 })
+            {
+                reasoningEffort = provider.Model.ReasoningLevels[0];
+            }
+
+            if (reasoningEffort.Length > 0)
+            {
+                payload["reasoning"] = new Dictionary<string, object?> { ["effort"] = reasoningEffort };
+            }
+        }
+
+        return payload;
+    }
+
+    private static IReadOnlyList<Dictionary<string, object?>> ToResponsesInput(
+        IReadOnlyList<ChatCompletionMessage> messages)
+    {
+        var input = new List<Dictionary<string, object?>>();
+        foreach (var message in messages)
+        {
+            var role = NormalizeRequiredText(message.Role, nameof(message.Role), 32);
+            if (role == "tool")
+            {
+                input.Add(new Dictionary<string, object?>
+                {
+                    ["type"] = "function_call_output",
+                    ["call_id"] = NormalizeRequiredText(message.ToolCallId, nameof(message.ToolCallId), 512),
+                    ["output"] = message.Content ?? string.Empty
+                });
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(message.Content))
+            {
+                input.Add(new Dictionary<string, object?>
+                {
+                    ["role"] = role,
+                    ["content"] = message.Content
+                });
+            }
+
+            if (message.ToolCalls is not { Count: > 0 })
+            {
+                continue;
+            }
+
+            foreach (var call in message.ToolCalls)
+            {
+                input.Add(new Dictionary<string, object?>
+                {
+                    ["type"] = "function_call",
+                    ["call_id"] = NormalizeRequiredText(call.Id, nameof(call.Id), 512),
+                    ["name"] = NormalizeRequiredText(call.Name, nameof(call.Name), 128),
+                    ["arguments"] = string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson
+                });
+            }
+        }
+
+        return input;
+    }
+
     private HttpRequestMessage CreateHttpRequest(
         ResolvedProvider provider,
         Dictionary<string, object?> payload)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, provider.ChatUrl)
+        var request = new HttpRequestMessage(HttpMethod.Post, provider.EndpointUrl)
         {
             Content = new StringContent(
                 JsonSerializer.Serialize(payload, JsonOptions),
@@ -424,6 +538,19 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         };
     }
 
+    private static Dictionary<string, object?> ToResponsesToolDefinition(ChatToolDefinition tool)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "function",
+            ["name"] = NormalizeRequiredText(tool.Name, nameof(tool.Name), 128),
+            ["description"] = NormalizeOptionalText(tool.Description, nameof(tool.Description), 4096),
+            ["parameters"] = tool.ParametersSchema.ValueKind == JsonValueKind.Undefined
+                ? JsonSerializer.SerializeToElement(new { type = "object", properties = new { } }, JsonOptions)
+                : tool.ParametersSchema
+        };
+    }
+
     private static Dictionary<string, object?> ToOpenAiToolCall(ChatToolCall call)
     {
         return new Dictionary<string, object?>
@@ -462,6 +589,191 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         }
 
         return target.ToArray();
+    }
+
+    private static async IAsyncEnumerable<ChatCompletionStreamEvent> ParseResponsesStreamAsync(
+        HttpContent content,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 8192);
+        while (true)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null)
+            {
+                break;
+            }
+
+            if (line.Length > SseLineLimitChars)
+            {
+                throw ProviderError("服务商返回的 SSE 行过大，已拒绝处理。", retryable: false);
+            }
+
+            if (!line.StartsWith("data:", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var data = line["data:".Length..].TrimStart();
+            if (string.Equals(data, "[DONE]", StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            foreach (var item in ParseResponsesSseData(data))
+            {
+                yield return item;
+            }
+        }
+    }
+
+    private static IEnumerable<ChatCompletionStreamEvent> ParseResponsesSseData(string data)
+    {
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(data);
+        }
+        catch (JsonException)
+        {
+            yield break;
+        }
+
+        using (document)
+        {
+            var root = document.RootElement;
+            var type = ReadString(root, "type");
+            switch (type)
+            {
+                case "response.output_text.delta":
+                    if (ReadString(root, "delta") is { Length: > 0 } delta)
+                    {
+                        yield return new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, delta);
+                    }
+
+                    break;
+                case "response.reasoning_text.delta":
+                case "response.reasoning_summary_text.delta":
+                    if (ReadString(root, "delta") is { Length: > 0 } reasoning)
+                    {
+                        yield return new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Thinking, reasoning);
+                    }
+
+                    break;
+                case "response.output_item.done":
+                    if (TryReadFunctionCall(root, out var call))
+                    {
+                        yield return new ChatCompletionStreamEvent(
+                            ChatCompletionStreamEventKind.ToolCall,
+                            ToolCall: call);
+                    }
+
+                    break;
+                case "response.completed":
+                    if (TryReadProperty(root, "response", out var response) &&
+                        TryReadProperty(response, "usage", out var usage) &&
+                        usage.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                    {
+                        yield return new ChatCompletionStreamEvent(
+                            ChatCompletionStreamEventKind.Usage,
+                            string.Empty,
+                            usage.Clone());
+                    }
+
+                    break;
+            }
+        }
+    }
+
+    private static string ParseResponsesText(byte[] body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            if (ReadString(root, "output_text") is { Length: > 0 } outputText)
+            {
+                return outputText;
+            }
+
+            if (!TryReadProperty(root, "output", out var output) || output.ValueKind != JsonValueKind.Array)
+            {
+                throw ProviderError("LLM 返回为空，未能生成文本。", retryable: true);
+            }
+
+            var builder = new StringBuilder();
+            foreach (var item in output.EnumerateArray())
+            {
+                if (!TryReadProperty(item, "content", out var content) || content.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var contentItem in content.EnumerateArray())
+                {
+                    if (ReadString(contentItem, "text") is { Length: > 0 } text)
+                    {
+                        builder.Append(text);
+                    }
+                }
+            }
+
+            return builder.Length == 0
+                ? throw ProviderError("LLM 返回为空，未能生成文本。", retryable: true)
+                : builder.ToString();
+        }
+        catch (JsonException ex)
+        {
+            throw ProviderError($"解析 Responses 响应失败: {ex.Message}", retryable: false);
+        }
+    }
+
+    private static bool TryReadFunctionCall(JsonElement root, out ChatToolCall call)
+    {
+        call = default!;
+        if (!TryReadProperty(root, "item", out var item) || item.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!string.Equals(ReadString(item, "type"), "function_call", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var name = ReadString(item, "name");
+        var arguments = ReadString(item, "arguments");
+        var callId = ReadString(item, "call_id") ?? ReadString(item, "id");
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        call = new ChatToolCall(
+            string.IsNullOrWhiteSpace(callId) ? $"call_{Guid.NewGuid():N}" : callId,
+            name,
+            string.IsNullOrWhiteSpace(arguments) ? "{}" : arguments);
+        return true;
+    }
+
+    private static string? ReadString(JsonElement element, string propertyName)
+    {
+        return TryReadProperty(element, propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+    }
+
+    private static bool TryReadProperty(JsonElement element, string propertyName, out JsonElement value)
+    {
+        if (element.ValueKind == JsonValueKind.Object &&
+            element.TryGetProperty(propertyName, out value))
+        {
+            return true;
+        }
+
+        value = default;
+        return false;
     }
 
     private static Dictionary<string, object?> ApplyProviderRequestAdapter(
@@ -553,17 +865,6 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
             retryable: retryable);
     }
 
-    private static Uri NormalizeUrl(string value)
-    {
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-        {
-            throw new ArgumentException("Chat URL must be an absolute http:// or https:// URL.", nameof(value));
-        }
-
-        return uri;
-    }
-
     private static string NormalizeProviderName(string? value)
     {
         var providerName = NormalizeRequiredText(value, nameof(value), 128).ToLowerInvariant();
@@ -604,7 +905,8 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
 
     private sealed record ResolvedProvider(
         string Key,
-        Uri ChatUrl,
+        string EndpointType,
+        Uri EndpointUrl,
         string ApiKey,
         double Temperature,
         ModelInfoPayload Model);

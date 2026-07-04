@@ -1,6 +1,6 @@
 # Novelist 构建环境搭建
 
-本文档记录当前 Novelist 桌面应用的构建、测试和发布路径。桌面宿主为 .NET 10 + Photino.NET，前端为 React/Vite，语义检索使用标准 Embeddings API + sqlite-vec。
+本文档记录当前 Novelist 桌面应用的构建、测试和发布路径。桌面宿主为 .NET 10 + Photino.NET，前端为 React/Vite，语义检索使用标准 Embeddings API 或本地 ONNX embedding + sqlite-vec。
 
 ## 本地依赖
 
@@ -35,7 +35,21 @@ npm --prefix frontend ci
 make deps
 ```
 
-`make deps` 只准备打包所需的 Git 运行时，输出到 `build/runtime/git/`。如果要随包提供 sqlite-vec 原生扩展，请将平台目录放到 `build/runtime/sqlite-vec/{rid}/`，例如：
+`make deps` 只准备打包所需的 Git 运行时，输出到 `build/runtime/git/`。如果要随包提供本地 ONNX embedding，请将固定 BGE 模型放到 `build/runtime/models/`，将 ONNX Runtime 托管程序集/原生库放到 `build/runtime/onnx/`；发布脚本会分别复制到应用的 `runtime/models/` 与 `runtime/onnx/`。如果要随包提供 sqlite-vec 原生扩展，请将平台目录放到 `build/runtime/sqlite-vec/{rid}/`，例如：
+
+```text
+build/runtime/
+├── models/
+│   ├── model.onnx                   # Xenova/bge-small-zh-v1.5 onnx/model_int8.onnx
+│   └── vocab.txt
+└── onnx/
+    ├── Microsoft.ML.OnnxRuntime.dll
+    └── onnxruntime.dll              # Windows；Linux/macOS 使用对应 .so/.dylib
+```
+
+也可以将 ONNX Runtime 按 NuGet 包解压后的结构放入 `build/runtime/onnx/`，应用会查找 `lib/net*/Microsoft.ML.OnnxRuntime.dll` 和 `runtimes/{rid}/native/onnxruntime.*`。本地 ONNX 模式在设置中选择 `ONNX` 即可，模型固定为 `bge-small-zh-v1.5` int8、512 维、512 token、CLS pooling + L2 归一化；该模式不会回退到在线 Embeddings API。在线 Embeddings API 模式不限制供应商、模型或维度。
+
+sqlite-vec 目录示例：
 
 ```text
 build/runtime/sqlite-vec/
@@ -100,6 +114,8 @@ bash scripts/novelist-publish.sh osx-arm64
 - 要求 `frontend/dist/index.html` 已存在；
 - 复制前端静态资源到 `build/bin/novelist/frontend/dist/`；
 - 复制 `build/runtime/git/` 到发布目录；
+- 复制可选的 `build/runtime/onnx/` 到发布目录；
+- 复制可选的 `build/runtime/models/` 到发布目录；
 - 复制可选的 `build/runtime/sqlite-vec/` 到发布目录；
 - 生成 `novelist` 或 `novelist.exe` 入口别名。
 

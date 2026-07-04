@@ -106,14 +106,33 @@ export default function BuiltinProviderPane({ providers, onUpdate, onAddCustomMo
         </button>
       </div>
 
-      {/* Chat URL */}
+      {/* Base URL */}
       <div className="flex items-center gap-3">
-        <label className="text-xs text-muted-foreground w-14 shrink-0">Chat URL</label>
+        <label className="text-xs text-muted-foreground w-14 shrink-0">Base URL</label>
         <input
-          value={provider.chat_url}
-          onChange={e => onUpdate(selectedKey, { chat_url: e.target.value })}
+          value={provider.base_url || provider.chat_url}
+          onChange={e => onUpdate(selectedKey, { base_url: e.target.value })}
           className="flex-1 h-8 rounded-md border bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <label className="text-xs text-muted-foreground w-14 shrink-0">接口</label>
+        <div className="inline-flex h-8 rounded-md border overflow-hidden">
+          {(['chat', 'responses'] as const).map(type => (
+            <button
+              key={type}
+              onClick={() => onUpdate(selectedKey, { endpoint_type: type })}
+              className={`px-3 text-xs transition-colors ${
+                (provider.endpoint_type || 'chat') === type
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-background hover:bg-muted/50'
+              }`}
+            >
+              {type === 'chat' ? 'Chat' : 'Responses'}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* 测试结果 */}
@@ -228,7 +247,7 @@ export default function BuiltinProviderPane({ providers, onUpdate, onAddCustomMo
 
       <ModelDiscoveryPanel
         key={selectedKey}
-        chatUrl={provider.chat_url}
+        baseUrl={provider.base_url || provider.chat_url}
         apiKey={provider.api_key}
         existingIds={allExistingIds}
         onAddModel={m => onAddCustomModel(selectedKey, m)}

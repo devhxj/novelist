@@ -1,20 +1,20 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Novelist.Contracts.App;
 using Novelist.Infrastructure.App;
 
 namespace Novelist.IntegrationTests;
 
-public sealed class FrontendAssetTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+[Collection(WebApplicationFactoryCollection.Name)]
+public sealed class FrontendAssetTests : IDisposable
 {
-    private readonly WebApplicationFactory<Program> _factory;
     private readonly string _distPath;
     private readonly List<string> _temporaryRoots = [];
 
-    public FrontendAssetTests(WebApplicationFactory<Program> factory)
+    public FrontendAssetTests()
     {
-        _factory = factory;
         _distPath = CreateFrontendDistFixture();
     }
 
@@ -108,8 +108,9 @@ public sealed class FrontendAssetTests : IClassFixture<WebApplicationFactory<Pro
 
     private WebApplicationFactory<Program> CreateFactory()
     {
-        return _factory.WithWebHostBuilder(builder =>
+        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.ConfigureAppConfiguration((_, configuration) =>
             {
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
@@ -122,8 +123,9 @@ public sealed class FrontendAssetTests : IClassFixture<WebApplicationFactory<Pro
 
     private WebApplicationFactory<Program> CreateFactory(AppInitializationOptions options)
     {
-        return _factory.WithWebHostBuilder(builder =>
+        return new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.ConfigureAppConfiguration((_, configuration) =>
             {
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>

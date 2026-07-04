@@ -32,7 +32,14 @@ public sealed record EmbeddingRequestOptions(
     string ApiKey,
     string ModelId,
     int? Dimensions,
-    string? User);
+    string? User,
+    string ProviderType = "",
+    string OnnxModelPath = "",
+    string OnnxVocabPath = "",
+    string OnnxRuntimePath = "",
+    int? MaxSequenceLength = null,
+    bool NormalizeEmbeddings = true,
+    string InputKind = "");
 
 public sealed record EmbeddingBatchResult(
     string Model,

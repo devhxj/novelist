@@ -1,23 +1,20 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Logging;
 using Novelist.App.Hosting;
 
 namespace Novelist.IntegrationTests;
 
-public sealed class AppContractTests : IClassFixture<WebApplicationFactory<Program>>
+[Collection(WebApplicationFactoryCollection.Name)]
+public sealed class AppContractTests
 {
-    private readonly WebApplicationFactory<Program> _factory;
-
-    public AppContractTests(WebApplicationFactory<Program> factory)
-    {
-        _factory = factory;
-    }
-
     [Fact]
     public async Task HealthEndpointReturnsStablePayload()
     {
-        using var client = _factory.CreateClient();
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
 
         var response = await client.GetAsync("/health");
 
@@ -31,10 +28,21 @@ public sealed class AppContractTests : IClassFixture<WebApplicationFactory<Progr
     [Fact]
     public async Task EventsHubNegotiateEndpointIsMapped()
     {
-        using var client = _factory.CreateClient();
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
 
         using var response = await client.PostAsync("/hubs/events/negotiate?negotiateVersion=1", content: null);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    private static WebApplicationFactory<Program> CreateFactory()
+    {
+        return new WebApplicationFactory<Program>().WithWebHostBuilder(DisableHostLogging);
+    }
+
+    private static void DisableHostLogging(IWebHostBuilder builder)
+    {
+        builder.ConfigureLogging(logging => logging.ClearProviders());
     }
 }

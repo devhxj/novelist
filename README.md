@@ -47,7 +47,7 @@
 
 不是关键词匹配，是按意思搜索。你问"关于吊坠的线索"，它能找到那些没写"吊坠"两个字但确实在暗示吊坠存在的段落。Agent 写新章节时也可主动搜索前文，确保持续一致。
 
-索引和检索状态保存在本机 sqlite-vec 中，向量由可配置的标准 Embeddings API 生成，支持不同供应商和维度。写完章节会标记索引过期，重建后 Agent 可主动搜索前文，确保持续一致。
+索引和检索状态保存在本机 sqlite-vec 中，向量可由标准 Embeddings API 或本地 ONNX 模型生成。在线 Embeddings API 不限制供应商和模型；本地 ONNX 使用内置固定的 `bge-small-zh-v1.5` int8 模型，在硬件足够的设备上可完全本机生成 embedding，不需要把正文发到在线向量服务；ONNX 模式严格本地执行，失败时不会悄悄回退到线上 API。写完章节会标记索引过期，重建后 Agent 可主动搜索前文，确保持续一致。
 
 ## 不只是记忆——是结构化创作状态
 
@@ -175,7 +175,7 @@ AI 不会直接改正文。每次编辑系统先生成 Diff，等你批准再写
 - **macOS** — 打开 DMG，拖入 Applications
 - **Linux** — 运行 AppImage
 
-需要 LLM API Key（内置 DeepSeek、GLM、MiMo 模板，兼容 OpenAI 格式）。安装包自带桌面宿主、前端资源和 Git 运行时，不需要 Python、Node.js、外部数据库或 GPU。Windows SmartScreen 可能弹出提示（未签名），点击"更多信息"→"仍要运行"即可。
+需要 LLM API Key（内置 DeepSeek、GLM、MiMo 模板，兼容 OpenAI 格式）。语义检索可使用任意兼容的在线 Embeddings API，也可在设置中切换到内置 ONNX；本地模式固定使用随包 `bge-small-zh-v1.5` int8 模型。安装包自带桌面宿主、前端资源和 Git 运行时，不需要 Python、Node.js 或外部数据库。Windows SmartScreen 可能弹出提示（未签名），点击"更多信息"→"仍要运行"即可。
 
 ### 从源码构建
 
@@ -198,7 +198,7 @@ make dev     # Photino 桌面开发模式
 | 桌面框架 | Photino.NET + .NET 10 |
 | 编辑器 | Monaco Editor |
 | 数据库 | 文件系统 JSON 存储 + SQLite/sqlite-vec RAG 索引 |
-| 向量搜索 | 标准 Embeddings API + sqlite-vec |
+| 向量搜索 | 标准 Embeddings API / 本地 ONNX + sqlite-vec |
 | 版本控制 | 内置 Git（自动 commit / Diff / Revert） |
 | 安全 | 正则白名单 + SafePath 双层沙箱 + 审批流 |
 | 前端 | React 19 + TypeScript + Tailwind CSS 4 + shadcn/ui |

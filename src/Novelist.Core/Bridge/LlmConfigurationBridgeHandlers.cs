@@ -30,7 +30,7 @@ public static class LlmConfigurationBridgeHandlers
 
         dispatcher.Register("DiscoverModels", async (context, cancellationToken) =>
             await service.DiscoverModelsAsync(
-                ReadStringArg(context.Payload, 0, "chatUrl"),
+                ReadStringArg(context.Payload, 0, "baseUrl"),
                 ReadStringArg(context.Payload, 1, "apiKey"),
                 cancellationToken));
 

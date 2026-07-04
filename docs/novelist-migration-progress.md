@@ -2,7 +2,7 @@
 
 ## Migration Goal
 
-将当前 Go/Wails 项目迁移为 **novelist**：复用现有 React/Vite UI，使用 Photino.NET 桌面壳、.NET 10 本地应用主机、Microsoft Agent Framework、SQLite + sqlite-vec，并将本地 ONNX embedding 替换为标准 Embeddings API。
+将当前 Go/Wails 项目迁移为 **novelist**：复用现有 React/Vite UI，使用 Photino.NET 桌面壳、.NET 10 本地应用主机、Microsoft Agent Framework、SQLite + sqlite-vec，并支持标准 Embeddings API 与可选本地 ONNX embedding 双路径。
 
 主计划文档：[novelist-net10-photino-migration-plan.md](./novelist-net10-photino-migration-plan.md)
 
@@ -71,6 +71,8 @@
 | P5.10 | Close release-candidate blocking gaps | Completed | Closed RC-01..RC-05: release path migrated, cover API/route implemented, Git history semantics migrated, legacy Goink copy-first migration implemented, and web cards routed through Photino external URL bridge |
 | P9.0 | Retire legacy Go/Wails mainline code | Completed | Removed `main.go`, `go.mod`, `go.sum`, `wails.json`, `app/**`, `internal/**`, `frontend/src/lib/wailsjs/**`, and `scripts/download-onnx.sh`; builtin skills moved to `src/Novelist.Infrastructure/BuiltinSkills/` |
 | P9.1 | Final migration verification and release-path smoke test | Completed | `npm --prefix frontend run lint` passed; `npm --prefix frontend run build` passed with only Vite chunk-size warning; `dotnet build Novelist.slnx --no-restore -v minimal /m:1 /p:UseSharedCompilation=false` passed with only network-limited NU1900 warnings; `dotnet test Novelist.slnx --no-restore --no-build -v minimal /m:1 /p:UseSharedCompilation=false` passed 156/156; `NO_RESTORE=1 bash scripts/novelist-publish.sh` passed; final legacy-stack scans returned no matches |
+| P9.2 | Harden post-migration LLM endpoint configuration | Completed | Provider configuration now uses `base_url + endpoint_type` (`chat` or `responses`) as the editable contract while preserving legacy `chat_url` compatibility; endpoint suffixes are stripped before composing `/chat/completions`, `/responses`, or `/models`; frontend connection-test cache is invalidated when request-shaping fields change. Verified with `dotnet test tests\Novelist.IntegrationTests\Novelist.IntegrationTests.csproj --no-restore -v minimal /m:1 /p:UseSharedCompilation=false` (122/122), `dotnet test tests\Novelist.Tests\Novelist.Tests.csproj --no-restore -v minimal /m:1 /p:UseSharedCompilation=false` (37/37), `npm --prefix frontend run lint`, and `npm --prefix frontend run build` |
+| P9.3 | Add local ONNX embedding as an offline-capable RAG provider | Completed | Embedding settings now support open `api` mode and fixed built-in `onnx` mode; `HybridEmbeddingClient` strictly routes local ONNX requests without falling back to online API; local ONNX mode is normalized to bundled `bge-small-zh-v1.5` int8, 512 dimensions, 512 tokens, CLS pooling + L2 normalization, and BGE query instruction prefix. Empty model/vocab paths resolve to `runtime/models/`; advanced path overrides remain for packaging/dev diagnostics. `scripts/novelist-publish.sh` copies optional `build/runtime/models/` and `build/runtime/onnx/`. Verified with Embedding/RAG integration tests (14/14), unit tests (37/37), full integration tests (127/127), frontend lint/build, solution build, and alternate-dir publish smoke. |
 
 ## Completed Work Log
 
@@ -129,6 +131,9 @@
 - Completed final packaging brand cleanup: Linux and macOS package scripts no longer fall back to old product-named icon files; they use `novelist` icons or the shared `build/appicon.png` fallback.
 - Final verification: `npm --prefix frontend run lint` passed; `npm --prefix frontend run build` passed with only the existing Vite chunk-size warning; `dotnet build Novelist.slnx --no-restore -v minimal /m:1 /p:UseSharedCompilation=false` passed with only NU1900 vulnerability-index warnings caused by restricted network; `dotnet test Novelist.slnx --no-restore --no-build -v minimal /m:1 /p:UseSharedCompilation=false` passed 37 unit tests and 119 integration tests; `NO_RESTORE=1 bash scripts/novelist-publish.sh` passed and produced `build/bin/novelist`.
 - Local RID self-contained publish note: `NO_RESTORE=1 bash scripts/novelist-publish.sh win-x64` requires RID runtime packs to be present in the local restore assets. In this restricted-network sandbox those packs were absent (`NETSDK1047` / missing `net10.0/win-x64` assets). The framework-dependent publish smoke test passes, and the publish script uses a staging directory so failed RID publishes preserve the previous output.
+- Post-migration LLM endpoint hardening: replaced user-facing provider endpoint editing with `base_url` plus `endpoint_type` (`chat` / `responses`), retained `chat_url` only as legacy input/output compatibility, normalized old full endpoint URLs by stripping `/chat/completions`, `/responses`, and `/models`, added Responses request/stream parsing coverage, and fixed the settings UI so changing Base URL, endpoint type, API key, or first model invalidates the previous connection-test result. Verified with full integration tests (122/122), unit tests (37/37), frontend lint, and frontend production build.
+- Post-migration ONNX embedding support: restored local embedding as a first-class .NET path instead of reviving the retired Go/Wails ONNX stack. Users can choose any compatible online Embeddings API or fixed local ONNX in settings; ONNX mode is normalized to the bundled `bge-small-zh-v1.5` int8 model and never silently falls back to network. The local runner supports BGE-style `input_ids` + `attention_mask` with optional `token_type_ids`, uses CLS pooling + L2 normalization for `last_hidden_state`, adds the old Goink query instruction prefix for query embeddings, expands `~` in override paths, and searches both flat `runtime/onnx` and NuGet-style ONNX Runtime layouts. Packaged optional ONNX assets live under `build/runtime/models/` and `build/runtime/onnx/` and are copied to release output.
+- Latest ONNX verification: `dotnet test tests\Novelist.IntegrationTests\Novelist.IntegrationTests.csproj --no-restore -v minimal /m:1 /p:UseSharedCompilation=false --filter 'FullyQualifiedName~EmbeddingSettingsServiceTests|FullyQualifiedName~RagIndexServiceTests'` passed 14/14; `dotnet test tests\Novelist.Tests\Novelist.Tests.csproj --no-restore -v minimal /m:1 /p:UseSharedCompilation=false` passed 37/37; `dotnet test tests\Novelist.IntegrationTests\Novelist.IntegrationTests.csproj --no-restore -v minimal /m:1 /p:UseSharedCompilation=false` passed 127/127; `npm --prefix frontend run lint` passed; `npm --prefix frontend run build` passed with only the existing Vite chunk-size warning; `dotnet build Novelist.slnx --no-restore -v minimal /m:1 /p:UseSharedCompilation=false` passed with 0 warnings; `PUBLISH_DIR=build/bin/novelist-smoke NO_RESTORE=1 scripts/novelist-publish.sh` passed under Git Bash and produced `frontend/dist/index.html`, `Novelist.App.exe`, and `novelist.exe`. The smoke output copied the existing `runtime/models/vocab.txt`; the large `model.onnx` asset is not present in this workspace and must be supplied before release packaging that enables local ONNX.
 
 ## Active Task Detail
 
@@ -137,7 +142,7 @@
 Scope completed:
 
 - The active product path is Novelist on .NET 10 + Photino + React + Microsoft Agent Framework.
-- The old Go/Wails runtime, generated Wails bindings, and ONNX download path have been removed from the mainline source tree.
+- The old Go/Wails runtime, generated Wails bindings, and old Go ONNX download path have been removed from the mainline source tree.
 - Legacy Goink user data is migrated through a copy-first service with manifest records and integration coverage.
 - Release/test/build/package entrypoints now target the Novelist .NET/Photino stack.
 - Compatibility names that remain (`goink.md`, `~/.goink/skills/<name>.md`, legacy migration class names) are intentional data/tool-path compatibility contracts.
@@ -145,7 +150,7 @@ Scope completed:
 Completion criteria:
 
 - RC-01 through RC-05 are closed in `docs/novelist-release-candidate-gap-audit.md`.
-- Current release-path grep has no retired desktop-runtime, local ONNX, generated-binding, or Go build dependency in README, AGENTS, CI, Makefile, packaging scripts, active docs/rules, active src/tests, or frontend source.
+- Current release-path grep has no retired desktop-runtime, generated-binding, Go build dependency, or old `download-onnx` path in README, AGENTS, CI, Makefile, packaging scripts, active docs/rules, active src/tests, or frontend source. Local ONNX embedding is now a supported .NET provider path.
 - Frontend lint, frontend production build, and .NET test suite pass.
 - Framework-dependent Release publish smoke test passes locally.
 
@@ -156,7 +161,7 @@ Latest verification:
 - `$env:NUGET_PACKAGES=(Resolve-Path .\.dotnet\.nuget\packages).Path; dotnet build Novelist.slnx --no-restore -v minimal /m:1 /p:UseSharedCompilation=false`.
 - `$env:NUGET_PACKAGES=(Resolve-Path .\.dotnet\.nuget\packages).Path; dotnet test Novelist.slnx --no-restore --no-build -v minimal /m:1 /p:UseSharedCompilation=false`.
 - `NO_RESTORE=1 bash scripts/novelist-publish.sh`.
-- `rg -n -i 'wails|onnx|download-onnx|frontend/src/lib/wailsjs|go test|go build|go mod|wails build|wails dev' README.md README_EN.md AGENTS.md docs\build-setup.md docs\build\cross-platform-build.md docs\rules .github Makefile build\package scripts src tests frontend\src --glob '!frontend/dist/**' --glob '!**/bin/**' --glob '!**/obj/**'`.
+- `rg -n -i 'wails|download-onnx|frontend/src/lib/wailsjs|go test|go build|go mod|wails build|wails dev' README.md README_EN.md AGENTS.md docs\build-setup.md docs\build\cross-platform-build.md docs\rules .github Makefile build\package scripts src tests frontend\src --glob '!frontend/dist/**' --glob '!**/bin/**' --glob '!**/obj/**'`.
 - `rg -n '@/lib/wailsjs|lib/wailsjs|from .*wailsjs|window\.open|--wails-draggable|goink\.(png|icns|ico)' frontend\src build\package --glob '!frontend/dist/**'`.
 - `rg --files | rg '(^|/)(main\.go|go\.mod|go\.sum|wails\.json)$|^app/|^internal/|frontend/src/lib/wailsjs|download-onnx'`.
 - `git diff --check` completed with no whitespace errors; Git reported CRLF conversion warnings only.

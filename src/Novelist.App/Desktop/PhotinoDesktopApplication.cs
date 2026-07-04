@@ -15,21 +15,38 @@ public sealed class PhotinoDesktopApplication
         _windowFactory = windowFactory;
     }
 
-    public async Task RunAsync(string[] args, CancellationToken cancellationToken = default)
+    public Task RunAsync(string[] args, CancellationToken cancellationToken = default)
     {
-        await using var app = NovelistAppBuilder.Build(args);
-        app.Urls.Add(LoopbackUrl);
+        Run(args, cancellationToken);
+        return Task.CompletedTask;
+    }
 
-        await app.StartAsync(cancellationToken);
+    public void Run(string[] args, CancellationToken cancellationToken = default)
+    {
+        var app = NovelistAppBuilder.Build(args);
+        app.Urls.Add(LoopbackUrl);
         try
         {
-            var localUrl = ResolveLocalUrl(app);
-            var settings = PhotinoLaunchMode.CreateSettings(args, localUrl);
-            new PhotinoDesktopHost(_windowFactory).Run(settings);
+            DesktopLaunchLog.Write("Starting loopback host");
+            app.StartAsync(cancellationToken).GetAwaiter().GetResult();
+            try
+            {
+                var localUrl = ResolveLocalUrl(app);
+                DesktopLaunchLog.Write("Loopback host started at " + localUrl);
+                var settings = PhotinoLaunchMode.CreateSettings(args, localUrl);
+                DesktopLaunchLog.Write("Creating Photino window");
+                new PhotinoDesktopHost(_windowFactory).Run(settings);
+                DesktopLaunchLog.Write("Photino window closed");
+            }
+            finally
+            {
+                DesktopLaunchLog.Write("Stopping loopback host");
+                app.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+            }
         }
         finally
         {
-            await app.StopAsync(CancellationToken.None);
+            app.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
     }
 

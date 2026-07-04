@@ -13,9 +13,12 @@ public sealed class FileSystemEmbeddingSettingsService : IEmbeddingSettingsServi
     private const int MaxApiKeyLength = 4_096;
     private const int MaxModelIdLength = 256;
     private const int MaxUserLength = 256;
+    private const int MaxPathLength = 2_048;
     private const int MaxDimensions = 1_000_000;
     private const int NonceSize = 12;
     private const int TagSize = 16;
+    private const string ProviderTypeApi = "api";
+    private const string ProviderTypeOnnx = "onnx";
 
     private static readonly byte[] AppKey =
     [
@@ -36,7 +39,13 @@ public sealed class FileSystemEmbeddingSettingsService : IEmbeddingSettingsServi
         ApiKey: string.Empty,
         ModelId: string.Empty,
         Dimensions: null,
-        User: string.Empty);
+        User: string.Empty,
+        ProviderType: string.Empty,
+        OnnxModelPath: string.Empty,
+        OnnxVocabPath: string.Empty,
+        OnnxRuntimePath: string.Empty,
+        MaxSequenceLength: null,
+        NormalizeEmbeddings: true);
 
     private readonly AppInitializationOptions _options;
     private readonly IEmbeddingClient _embeddings;
@@ -49,7 +58,7 @@ public sealed class FileSystemEmbeddingSettingsService : IEmbeddingSettingsServi
         ISqliteVecExtensionResolver? sqliteVecResolver = null)
     {
         _options = options ?? new AppInitializationOptions();
-        _embeddings = embeddings ?? new StandardEmbeddingClient();
+        _embeddings = embeddings ?? new HybridEmbeddingClient();
         _sqliteVecResolver = sqliteVecResolver ?? new PackagedSqliteVecExtensionResolver();
     }
 
@@ -173,9 +182,35 @@ public sealed class FileSystemEmbeddingSettingsService : IEmbeddingSettingsServi
             return EmptyConfig;
         }
 
+        var providerType = NormalizeProviderType(input.ProviderType, input);
+        if (providerType == ProviderTypeOnnx)
+        {
+            var modelPath = string.IsNullOrWhiteSpace(input.OnnxModelPath)
+                ? string.Empty
+                : NormalizeLocalFilePath(input.OnnxModelPath, nameof(input.OnnxModelPath));
+            var vocabPath = string.IsNullOrWhiteSpace(input.OnnxVocabPath)
+                ? string.Empty
+                : NormalizeLocalFilePath(input.OnnxVocabPath, nameof(input.OnnxVocabPath));
+            var runtimePath = string.IsNullOrWhiteSpace(input.OnnxRuntimePath)
+                ? string.Empty
+                : NormalizeLocalPath(input.OnnxRuntimePath, nameof(input.OnnxRuntimePath), mustExist: false);
+
+            return new EmbeddingConfigPayload(
+                BuiltinOnnxEmbeddingModel.ProviderKey,
+                string.Empty,
+                string.Empty,
+                BuiltinOnnxEmbeddingModel.ModelId,
+                BuiltinOnnxEmbeddingModel.Dimensions,
+                string.Empty,
+                BuiltinOnnxEmbeddingModel.ProviderType,
+                modelPath,
+                vocabPath,
+                runtimePath,
+                BuiltinOnnxEmbeddingModel.MaxSequenceLength,
+                BuiltinOnnxEmbeddingModel.NormalizeEmbeddings);
+        }
+
         var providerKey = NormalizeProviderKey(input.ProviderKey);
-        var endpointUrl = NormalizeEndpointUrl(input.EndpointUrl);
-        var apiKey = NormalizeRequiredText(input.ApiKey, nameof(input.ApiKey), MaxApiKeyLength);
         var modelId = NormalizeRequiredText(input.ModelId, nameof(input.ModelId), MaxModelIdLength);
         if (input.Dimensions is <= 0 or > MaxDimensions)
         {
@@ -185,11 +220,25 @@ public sealed class FileSystemEmbeddingSettingsService : IEmbeddingSettingsServi
                 $"Dimensions must be between 1 and {MaxDimensions}.");
         }
 
+        var endpointUrl = EmbeddingEndpoint.NormalizeEndpointUrl(input.EndpointUrl, MaxUrlLength);
+        var apiKey = NormalizeRequiredText(input.ApiKey, nameof(input.ApiKey), MaxApiKeyLength);
         var user = string.IsNullOrWhiteSpace(input.User)
             ? string.Empty
             : NormalizeRequiredText(input.User, nameof(input.User), MaxUserLength);
 
-        return new EmbeddingConfigPayload(providerKey, endpointUrl, apiKey, modelId, input.Dimensions, user);
+        return new EmbeddingConfigPayload(
+            providerKey,
+            endpointUrl,
+            apiKey,
+            modelId,
+            input.Dimensions,
+            user,
+            ProviderTypeApi,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            null,
+            true);
     }
 
     private static EmbeddingRequestOptions ToOptions(EmbeddingConfigPayload config)
@@ -200,7 +249,14 @@ public sealed class FileSystemEmbeddingSettingsService : IEmbeddingSettingsServi
             config.ApiKey,
             config.ModelId,
             config.Dimensions,
-            string.IsNullOrWhiteSpace(config.User) ? null : config.User);
+            string.IsNullOrWhiteSpace(config.User) ? null : config.User,
+            string.IsNullOrWhiteSpace(config.ProviderType) ? ProviderTypeApi : config.ProviderType,
+            config.OnnxModelPath,
+            config.OnnxVocabPath,
+            config.OnnxRuntimePath,
+            config.MaxSequenceLength,
+            config.NormalizeEmbeddings,
+            BuiltinOnnxEmbeddingModel.DocumentInputKind);
     }
 
     private static bool IsDisabled(EmbeddingConfigPayload input)
@@ -210,7 +266,35 @@ public sealed class FileSystemEmbeddingSettingsService : IEmbeddingSettingsServi
             string.IsNullOrWhiteSpace(input.ApiKey) &&
             string.IsNullOrWhiteSpace(input.ModelId) &&
             input.Dimensions is null &&
-            string.IsNullOrWhiteSpace(input.User);
+            string.IsNullOrWhiteSpace(input.User) &&
+            string.IsNullOrWhiteSpace(input.ProviderType) &&
+            string.IsNullOrWhiteSpace(input.OnnxModelPath) &&
+            string.IsNullOrWhiteSpace(input.OnnxVocabPath) &&
+            string.IsNullOrWhiteSpace(input.OnnxRuntimePath) &&
+            input.MaxSequenceLength is null;
+    }
+
+    private static string NormalizeProviderType(string? value, EmbeddingConfigPayload input)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized.Length == 0)
+        {
+            return LooksLikeOnnxConfig(input) ? ProviderTypeOnnx : ProviderTypeApi;
+        }
+
+        return normalized switch
+        {
+            ProviderTypeApi or "online" or "remote" => ProviderTypeApi,
+            ProviderTypeOnnx or "local" or "local_onnx" or "local-onnx" => ProviderTypeOnnx,
+            _ => throw new ArgumentException("Embedding provider type must be api or onnx.", nameof(value))
+        };
+    }
+
+    private static bool LooksLikeOnnxConfig(EmbeddingConfigPayload input)
+    {
+        return string.Equals(input.ProviderKey, ProviderTypeOnnx, StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrWhiteSpace(input.OnnxModelPath) ||
+            !string.IsNullOrWhiteSpace(input.OnnxVocabPath);
     }
 
     private static string NormalizeProviderKey(string? value)
@@ -224,32 +308,51 @@ public sealed class FileSystemEmbeddingSettingsService : IEmbeddingSettingsServi
         return normalized;
     }
 
-    private static string NormalizeEndpointUrl(string? raw)
+    private static string NormalizeLocalFilePath(string? raw, string name)
     {
-        var value = NormalizeRequiredText(raw, nameof(raw), MaxUrlLength);
-        if (!value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-            !value.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        var path = NormalizeLocalPath(raw, name, mustExist: true);
+        if (!File.Exists(path))
         {
-            value = "https://" + value;
+            throw new ArgumentException($"Local ONNX embedding file was not found: {path}", name);
         }
 
-        if (value.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        return path;
+    }
+
+    private static string NormalizeLocalPath(string? raw, string name, bool mustExist)
+    {
+        var value = NormalizeRequiredText(raw, name, MaxPathLength);
+        var fullPath = Path.GetFullPath(ExpandLocalPath(value));
+        if (fullPath.Length > MaxPathLength)
         {
-            value = value[..^"/chat/completions".Length];
+            throw new ArgumentOutOfRangeException(name, fullPath.Length, $"Path must be at most {MaxPathLength} characters.");
         }
 
-        if (!value.EndsWith("/embeddings", StringComparison.OrdinalIgnoreCase))
+        if (mustExist && !File.Exists(fullPath) && !Directory.Exists(fullPath))
         {
-            value = value.TrimEnd('/') + "/embeddings";
+            throw new ArgumentException($"Local ONNX embedding path was not found: {fullPath}", name);
         }
 
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        return fullPath;
+    }
+
+    private static string ExpandLocalPath(string value)
+    {
+        var expanded = Environment.ExpandEnvironmentVariables(value);
+        if (expanded == "~")
         {
-            throw new ArgumentException("Embedding endpoint must be an absolute http:// or https:// URL.", nameof(raw));
+            return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         }
 
-        return uri.ToString();
+        if (expanded.StartsWith("~/", StringComparison.Ordinal) ||
+            expanded.StartsWith(@"~\", StringComparison.Ordinal))
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                expanded[2..]);
+        }
+
+        return expanded;
     }
 
     private static string NormalizeRequiredText(string? value, string name, int maxLength)

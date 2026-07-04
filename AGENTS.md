@@ -20,6 +20,8 @@ Novelist is a .NET 10 + Photino.NET desktop app with a React/Vite frontend. The 
 
 Use idiomatic C# with nullable annotations and keep contracts in `Novelist.Contracts`, interfaces in `Novelist.Core`, and filesystem/runtime implementations in `Novelist.Infrastructure`. Run .NET commands from the repository root. Frontend work uses TypeScript, React 19, Tailwind CSS 4, shadcn/ui patterns, and ESLint flat config. Run npm commands from `frontend/`. Add owned frontend DTOs or bridge methods under `frontend/src/lib/novelist/` and `src/Novelist.Contracts/`.
 
+Do not revive the retired Go/Wails path: do not add new code under legacy `app/` or `internal/`, do not run Go/Wails build commands, and do not recreate `frontend/src/lib/wailsjs/`. Compatibility behavior belongs in the Photino bridge, .NET contracts, and owned TypeScript adapter.
+
 ## Testing Guidelines
 
 Prefer focused unit tests in `tests/Novelist.Tests` for pure bridge/tool behavior and integration tests in `tests/Novelist.IntegrationTests` for filesystem, SQLite, Git, migration, and app-host behavior. Add tests for storage, path safety, migrations, version history, bridge contracts, and user-facing workflow changes. Run the frontend build before UI changes because no frontend test suite is configured.
@@ -30,4 +32,6 @@ Recent history uses concise English subjects with typed prefixes: `feat: ...`, `
 
 ## Security & Configuration Tips
 
-Keep API keys, local model paths, and user data out of git. Preserve SafePath, approval-flow, SSRF checks, migration copy-first behavior, and sandbox checks when touching file editing, web tools, or agent tool code. Runtime Git and optional sqlite-vec native libraries belong in `build/runtime/` or app data/config paths, not source folders. Existing user data migration must leave the source untouched and write a manifest.
+Keep API keys, local model paths, and user data out of git. Preserve SafePath, approval-flow, SSRF checks, migration copy-first behavior, and sandbox checks when touching file editing, web tools, or agent tool code. Runtime Git, optional ONNX Runtime/model assets, and optional sqlite-vec native libraries belong in `build/runtime/` or app data/config paths, not source folders. Existing user data migration must leave the source untouched and write a manifest.
+
+The user usually communicates in Chinese; respond in Chinese unless they ask otherwise.

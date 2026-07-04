@@ -176,6 +176,8 @@ export namespace app {
 
   export interface TestConnectionInput {
     provider_name: string
+    base_url: string
+    endpoint_type: string
     chat_url: string
     api_key: string
     model_id: string
@@ -328,6 +330,8 @@ export namespace llm {
   export interface ProviderView {
     key: string
     name: string
+    base_url: string
+    endpoint_type: string
     chat_url: string
     api_key: string
     platform_url: string

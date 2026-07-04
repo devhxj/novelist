@@ -8,7 +8,13 @@ public sealed record EmbeddingConfigPayload(
     [property: JsonPropertyName("api_key")] string ApiKey,
     [property: JsonPropertyName("model_id")] string ModelId,
     [property: JsonPropertyName("dimensions")] int? Dimensions,
-    [property: JsonPropertyName("user")] string User);
+    [property: JsonPropertyName("user")] string User,
+    [property: JsonPropertyName("provider_type")] string ProviderType = "",
+    [property: JsonPropertyName("onnx_model_path")] string OnnxModelPath = "",
+    [property: JsonPropertyName("onnx_vocab_path")] string OnnxVocabPath = "",
+    [property: JsonPropertyName("onnx_runtime_path")] string OnnxRuntimePath = "",
+    [property: JsonPropertyName("max_sequence_length")] int? MaxSequenceLength = null,
+    [property: JsonPropertyName("normalize_embeddings")] bool NormalizeEmbeddings = true);
 
 public sealed record SqliteVecStatusPayload(
     [property: JsonPropertyName("available")] bool Available,

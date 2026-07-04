@@ -4,7 +4,7 @@ import { useApp, type llm } from '@/hooks/useApp'
 import ModelEditForm from './ModelEditForm'
 
 interface Props {
-  chatUrl: string
+  baseUrl: string
   apiKey: string
   existingIds: Set<string>
   onAddModel: (model: llm.ModelInfo) => void
@@ -18,7 +18,7 @@ const emptyModel = (): llm.ModelInfo => ({
   supports_thinking: true, supports_vision: false,
 } as unknown as llm.ModelInfo)
 
-export default function ModelDiscoveryPanel({ chatUrl, apiKey, existingIds, onAddModel }: Props) {
+export default function ModelDiscoveryPanel({ baseUrl, apiKey, existingIds, onAddModel }: Props) {
   const app = useApp()
 
   // 手动添加
@@ -48,7 +48,7 @@ export default function ModelDiscoveryPanel({ chatUrl, apiKey, existingIds, onAd
     setDiscoveredModels([])
     setSelectedForImport(new Set())
     try {
-      const models = await app.DiscoverModels(chatUrl, apiKey)
+      const models = await app.DiscoverModels(baseUrl, apiKey)
       if (!models || models.length === 0) {
         setDiscoverError('未发现任何模型')
       } else {

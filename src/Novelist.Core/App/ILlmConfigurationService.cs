@@ -11,7 +11,7 @@ public interface ILlmConfigurationService
     ValueTask<IReadOnlyList<AvailableModelPayload>> GetModelsAsync(CancellationToken cancellationToken);
 
     ValueTask<IReadOnlyList<ModelInfoPayload>> DiscoverModelsAsync(
-        string chatUrl,
+        string baseUrl,
         string apiKey,
         CancellationToken cancellationToken);
 

@@ -165,6 +165,10 @@ public sealed class FileSystemWorkspaceSearchService : IWorkspaceSearchService
         {
             hits = await _semanticSearch.SearchAsync(novelId, query, RagTopK, cancellationToken);
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch
         {
             return [];

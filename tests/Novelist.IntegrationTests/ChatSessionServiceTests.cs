@@ -1046,6 +1046,8 @@ public sealed class ChatSessionServiceTests : IDisposable
                 new ProviderViewPayload(
                     "custom",
                     "Custom",
+                    "https://api.example.com/v1",
+                    "chat",
                     "https://api.example.com/v1/chat/completions",
                     "sk-secret",
                     "",
@@ -1111,6 +1113,94 @@ public sealed class ChatSessionServiceTests : IDisposable
         Assert.Equal("model-a", body.RootElement.GetProperty("model").GetString());
         Assert.Equal("hi", body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString());
         Assert.Equal("high", body.RootElement.GetProperty("reasoning_effort").GetString());
+    }
+
+    [Fact]
+    public async Task StandardChatCompletionClientPostsResponsesStreamAndParsesEvents()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var llm = new FileSystemLlmConfigurationService(options);
+        await llm.SaveConfigAsync(
+            new LlmConfigViewPayload([
+                new ProviderViewPayload(
+                    "custom",
+                    "Custom",
+                    "https://api.example.com/v1",
+                    "responses",
+                    "https://api.example.com/v1/responses",
+                    "sk-secret",
+                    "",
+                    "",
+                    0.4,
+                    "custom",
+                    [],
+                    [new ModelInfoPayload("model-a", "Model A", 32_000, 2_048, false, [], false)])
+            ]),
+            CancellationToken.None);
+        var handler = new RecordingHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                data: {"type":"response.output_text.delta","delta":"你"}
+                data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_lookup","name":"lookup","arguments":"{\"q\":\"x\"}"}}
+                data: {"type":"response.completed","response":{"usage":{"total_tokens":5}}}
+                data: [DONE]
+
+                """,
+                Encoding.UTF8,
+                "text/event-stream")
+        });
+        var client = new StandardChatCompletionClient(llm, new HttpClient(handler));
+
+        var events = new List<ChatCompletionStreamEvent>();
+        await foreach (var item in client.StreamChatAsync(
+            new ChatCompletionRequest(
+                "custom",
+                "model-a",
+                "",
+                [new ChatCompletionMessage("user", "hi")],
+                [
+                    new ChatToolDefinition(
+                        "lookup",
+                        "Lookup",
+                        JsonSerializer.SerializeToElement(new { type = "object" }))
+                ]),
+            CancellationToken.None))
+        {
+            events.Add(item);
+        }
+
+        Assert.Collection(
+            events,
+            content =>
+            {
+                Assert.Equal(ChatCompletionStreamEventKind.Content, content.Kind);
+                Assert.Equal("你", content.Data);
+            },
+            tool =>
+            {
+                Assert.Equal(ChatCompletionStreamEventKind.ToolCall, tool.Kind);
+                Assert.Equal("call_lookup", tool.ToolCall!.Id);
+                Assert.Equal("lookup", tool.ToolCall.Name);
+                Assert.Equal("""{"q":"x"}""", tool.ToolCall.ArgumentsJson);
+            },
+            usage =>
+            {
+                Assert.Equal(ChatCompletionStreamEventKind.Usage, usage.Kind);
+                Assert.Equal(5, usage.Usage!.Value.GetProperty("total_tokens").GetInt32());
+            });
+
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("https://api.example.com/v1/responses", request.RequestUri!.ToString());
+
+        using var body = JsonDocument.Parse(handler.RequestBodies.Single());
+        Assert.True(body.RootElement.GetProperty("stream").GetBoolean());
+        Assert.Equal("model-a", body.RootElement.GetProperty("model").GetString());
+        Assert.Equal("hi", body.RootElement.GetProperty("input")[0].GetProperty("content").GetString());
+        Assert.Equal("function", body.RootElement.GetProperty("tools")[0].GetProperty("type").GetString());
+        Assert.False(body.RootElement.TryGetProperty("messages", out _));
     }
 
     public void Dispose()

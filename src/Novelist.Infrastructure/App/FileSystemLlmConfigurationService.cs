@@ -107,13 +107,13 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
     }
 
     public async ValueTask<IReadOnlyList<ModelInfoPayload>> DiscoverModelsAsync(
-        string chatUrl,
+        string baseUrl,
         string apiKey,
         CancellationToken cancellationToken)
     {
-        var normalizedUrl = NormalizeUrl(chatUrl, requireValue: true);
+        var normalizedBaseUrl = LlmEndpoint.NormalizeBaseUrl(baseUrl, requireValue: true, MaxUrlLength);
         var key = NormalizeApiKey(apiKey);
-        var modelsUrl = ModelsUrl(normalizedUrl);
+        var modelsUrl = LlmEndpoint.BuildModelsUrl(normalizedBaseUrl);
 
         using var request = new HttpRequestMessage(HttpMethod.Get, modelsUrl);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
@@ -158,30 +158,36 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
         var modelId = NormalizeRequiredText(input.ModelId, nameof(input.ModelId), MaxModelIdLength, allowLineBreaks: false);
 
         BuiltinProviders.TryGetValue(providerKey, out var definition);
-        var chatUrl = string.IsNullOrWhiteSpace(input.ChatUrl)
-            ? definition?.ChatUrl ?? string.Empty
-            : input.ChatUrl;
-        var normalizedUrl = NormalizeUrl(chatUrl, requireValue: true);
+        var endpointType = LlmEndpoint.NormalizeEndpointType(input.EndpointType, definition?.EndpointType ?? LlmEndpoint.Chat);
+        var baseUrl = ResolveInputBaseUrl(input.BaseUrl, input.ChatUrl, definition);
+        var endpointUrl = LlmEndpoint.BuildEndpointUrl(baseUrl, endpointType);
 
-        var payload = new Dictionary<string, object?>
-        {
-            ["model"] = modelId,
-            ["messages"] = new[]
+        var payload = endpointType == LlmEndpoint.Responses
+            ? new Dictionary<string, object?>
             {
-                new Dictionary<string, object?>
+                ["model"] = modelId,
+                ["input"] = "hi",
+                ["max_output_tokens"] = 1
+            }
+            : new Dictionary<string, object?>
+            {
+                ["model"] = modelId,
+                ["messages"] = new[]
                 {
-                    ["role"] = "user",
-                    ["content"] = "hi"
-                }
-            },
-            ["max_tokens"] = 1
-        };
-        if (definition?.BuildRequest is not null)
+                    new Dictionary<string, object?>
+                    {
+                        ["role"] = "user",
+                        ["content"] = "hi"
+                    }
+                },
+                ["max_tokens"] = 1
+            };
+        if (endpointType == LlmEndpoint.Chat && definition?.BuildRequest is not null)
         {
             payload = definition.BuildRequest(payload);
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, normalizedUrl);
+        using var request = new HttpRequestMessage(HttpMethod.Post, endpointUrl);
         request.Content = new StringContent(
             JsonSerializer.Serialize(payload, JsonOptions),
             Encoding.UTF8,
@@ -257,10 +263,14 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
         {
             var configured = user.Providers.SingleOrDefault(provider =>
                 string.Equals(provider.Key, definition.Key, StringComparison.Ordinal));
+            var endpointType = ResolveEndpointType(configured?.EndpointType, definition);
+            var baseUrl = ResolveConfiguredBaseUrl(configured, definition);
             providers.Add(new ProviderViewPayload(
                 definition.Key,
                 definition.DisplayName,
-                string.IsNullOrWhiteSpace(configured?.ChatUrl) ? definition.ChatUrl : configured.ChatUrl,
+                baseUrl,
+                endpointType,
+                BuildEndpointUrlOrEmpty(baseUrl, endpointType),
                 configured?.ApiKey ?? string.Empty,
                 definition.PlatformUrl,
                 definition.HelpText,
@@ -273,17 +283,24 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
         providers.AddRange(user.Providers
             .Where(provider => !BuiltinProviders.ContainsKey(provider.Key))
             .OrderBy(provider => provider.Key, StringComparer.Ordinal)
-            .Select(provider => new ProviderViewPayload(
-                provider.Key,
-                string.IsNullOrWhiteSpace(provider.DisplayName) ? provider.Key : provider.DisplayName,
-                provider.ChatUrl,
-                provider.ApiKey,
-                string.Empty,
-                string.Empty,
-                provider.Temperature ?? 0.7,
-                "custom",
-                [],
-                provider.Models)));
+            .Select(provider =>
+            {
+                var endpointType = ResolveEndpointType(provider.EndpointType, null);
+                var baseUrl = ResolveConfiguredBaseUrl(provider, null);
+                return new ProviderViewPayload(
+                    provider.Key,
+                    string.IsNullOrWhiteSpace(provider.DisplayName) ? provider.Key : provider.DisplayName,
+                    baseUrl,
+                    endpointType,
+                    BuildEndpointUrlOrEmpty(baseUrl, endpointType),
+                    provider.ApiKey,
+                    string.Empty,
+                    string.Empty,
+                    provider.Temperature ?? 0.7,
+                    "custom",
+                    [],
+                    provider.Models);
+            }));
 
         return new LlmConfigViewPayload(providers);
     }
@@ -310,9 +327,10 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
             var displayName = source == "builtin" && isBuiltin
                 ? definition!.DisplayName
                 : NormalizeRequiredText(provider.Name, nameof(provider.Name), MaxDisplayNameLength, allowLineBreaks: false);
-            var chatUrl = source == "builtin"
-                ? NormalizeBuiltinChatUrl(provider.ChatUrl, definition)
-                : NormalizeUrl(provider.ChatUrl, requireValue: true);
+            var baseUrl = source == "builtin"
+                ? NormalizeBuiltinBaseUrl(provider.BaseUrl, provider.ChatUrl, definition)
+                : LlmEndpoint.NormalizeBaseUrl(FirstNonEmpty(provider.BaseUrl, provider.ChatUrl), requireValue: true, MaxUrlLength);
+            var endpointType = LlmEndpoint.NormalizeEndpointType(provider.EndpointType, definition?.EndpointType ?? LlmEndpoint.Chat);
             var temperature = ValidateTemperature(provider.Temperature, nameof(provider.Temperature));
             var models = NormalizeModels(provider.CustomModels, definition?.Models ?? []);
 
@@ -320,7 +338,13 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
             {
                 Key = key,
                 DisplayName = displayName,
-                ChatUrl = chatUrl,
+                BaseUrl = baseUrl,
+                EndpointType = endpointType == definition?.EndpointType ? string.Empty : endpointType,
+                ChatUrl = string.IsNullOrWhiteSpace(baseUrl)
+                    ? string.Empty
+                    : LlmEndpoint.BuildEndpointUrl(
+                        string.IsNullOrWhiteSpace(baseUrl) ? definition?.BaseUrl ?? string.Empty : baseUrl,
+                        endpointType).ToString(),
                 ApiKey = apiKey,
                 Temperature = temperature,
                 Models = models
@@ -355,7 +379,8 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
                 configured.Key,
                 definition?.DisplayName ??
                     (string.IsNullOrWhiteSpace(configured.DisplayName) ? configured.Key : configured.DisplayName),
-                string.IsNullOrWhiteSpace(configured.ChatUrl) ? definition?.ChatUrl ?? string.Empty : configured.ChatUrl,
+                ResolveConfiguredBaseUrl(configured, definition),
+                ResolveEndpointType(configured.EndpointType, definition),
                 configured.ApiKey,
                 configured.Temperature ?? definition?.Temperature ?? 0.7,
                 models));
@@ -471,61 +496,89 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
         return plain;
     }
 
-    private static Uri ModelsUrl(string normalizedChatUrl)
+    private static string ResolveInputBaseUrl(
+        string? baseUrl,
+        string? legacyChatUrl,
+        ProviderDefinition? definition)
     {
-        var baseUrl = normalizedChatUrl.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase)
-            ? normalizedChatUrl[..^"/chat/completions".Length]
-            : normalizedChatUrl.TrimEnd('/');
-        return new Uri($"{baseUrl}/models", UriKind.Absolute);
+        var input = FirstNonEmpty(baseUrl, legacyChatUrl);
+        if (!string.IsNullOrWhiteSpace(input))
+        {
+            var normalized = LlmEndpoint.NormalizeBaseUrl(input, requireValue: true, MaxUrlLength);
+            return ResolveLegacyBaseUrl(normalized, definition);
+        }
+
+        return definition?.BaseUrl ?? string.Empty;
     }
 
-    private static string NormalizeBuiltinChatUrl(string? value, ProviderDefinition? definition)
+    private static string BuildEndpointUrlOrEmpty(string baseUrl, string endpointType)
     {
-        if (string.IsNullOrWhiteSpace(value) ||
-            (definition is not null && string.Equals(value.Trim(), definition.ChatUrl, StringComparison.Ordinal)))
+        return string.IsNullOrWhiteSpace(baseUrl)
+            ? string.Empty
+            : LlmEndpoint.BuildEndpointUrl(baseUrl, endpointType).ToString();
+    }
+
+    private static string ResolveConfiguredBaseUrl(
+        UserProviderDocument? provider,
+        ProviderDefinition? definition)
+    {
+        if (provider is null)
+        {
+            return definition?.BaseUrl ?? string.Empty;
+        }
+
+        var input = FirstNonEmpty(provider.BaseUrl, provider.ChatUrl);
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return definition?.BaseUrl ?? string.Empty;
+        }
+
+        var normalized = LlmEndpoint.NormalizeBaseUrl(input, requireValue: true, MaxUrlLength);
+        return ResolveLegacyBaseUrl(normalized, definition);
+    }
+
+    private static string NormalizeBuiltinBaseUrl(
+        string? baseUrl,
+        string? legacyChatUrl,
+        ProviderDefinition? definition)
+    {
+        var input = FirstNonEmpty(baseUrl, legacyChatUrl);
+        if (string.IsNullOrWhiteSpace(input))
         {
             return string.Empty;
         }
 
-        return NormalizeUrl(value, requireValue: true);
-    }
-
-    private static string NormalizeUrl(string? raw, bool requireValue)
-    {
-        var value = (raw ?? string.Empty).Trim();
-        if (value.Length == 0)
+        var normalized = LlmEndpoint.NormalizeBaseUrl(input, requireValue: true, MaxUrlLength);
+        if (definition is not null &&
+            string.Equals(ResolveLegacyBaseUrl(normalized, definition), definition.BaseUrl, StringComparison.Ordinal))
         {
-            if (requireValue)
-            {
-                throw new ArgumentException("URL is required.", nameof(raw));
-            }
-
             return string.Empty;
         }
 
-        if (value.Length > MaxUrlLength)
+        return normalized;
+    }
+
+    private static string ResolveLegacyBaseUrl(string normalizedBaseUrl, ProviderDefinition? definition)
+    {
+        if (definition is null)
         {
-            throw new ArgumentOutOfRangeException(nameof(raw), value.Length, $"URL must be at most {MaxUrlLength} characters.");
+            return normalizedBaseUrl;
         }
 
-        if (!value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-            !value.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            value = "https://" + value;
-        }
+        return definition.AllBaseUrls().Any(candidate =>
+            string.Equals(candidate, normalizedBaseUrl, StringComparison.OrdinalIgnoreCase))
+                ? definition.BaseUrl
+                : normalizedBaseUrl;
+    }
 
-        if (!value.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
-        {
-            value = value.TrimEnd('/') + "/chat/completions";
-        }
+    private static string ResolveEndpointType(string? value, ProviderDefinition? definition)
+    {
+        return LlmEndpoint.NormalizeEndpointType(value, definition?.EndpointType ?? LlmEndpoint.Chat);
+    }
 
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-        {
-            throw new ArgumentException("URL must be an absolute http:// or https:// URL.", nameof(raw));
-        }
-
-        return uri.ToString();
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
     }
 
     private static string NormalizeProviderKey(string? value, string name)
@@ -687,11 +740,15 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
                 _ = NormalizeRequiredText(provider.DisplayName, nameof(provider.DisplayName), MaxDisplayNameLength, allowLineBreaks: false);
             }
 
-            if (!string.IsNullOrWhiteSpace(provider.ChatUrl))
+            if (!string.IsNullOrWhiteSpace(FirstNonEmpty(provider.BaseUrl, provider.ChatUrl)))
             {
-                _ = NormalizeUrl(provider.ChatUrl, requireValue: true);
+                _ = LlmEndpoint.NormalizeBaseUrl(
+                    FirstNonEmpty(provider.BaseUrl, provider.ChatUrl),
+                    requireValue: true,
+                    MaxUrlLength);
             }
 
+            _ = ResolveEndpointType(provider.EndpointType, BuiltinProviders.GetValueOrDefault(provider.Key));
             _ = NormalizeApiKey(provider.ApiKey);
             if (provider.Temperature is not null)
             {
@@ -753,18 +810,21 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
             ["deepseek"] = new(
                 "deepseek",
                 "DeepSeek",
-                "https://api.deepseek.com/v1/chat/completions",
+                "https://api.deepseek.com",
+                LlmEndpoint.Chat,
                 "https://platform.deepseek.com",
                 "使用邮箱或手机号注册。完成实名认证后，进入「API Keys」创建密钥。预付费模式，最低充值 ¥1。",
                 0.7,
                 [
                     new("deepseek-v4-flash", "DeepSeek V4 Flash", 1_000_000, 384_000, true, ["high", "max"], false),
                     new("deepseek-v4-pro", "DeepSeek V4 Pro", 1_000_000, 384_000, true, ["high", "max"], false)
-                ]),
+                ],
+                LegacyBaseUrls: ["https://api.deepseek.com/v1"]),
             ["doubao"] = new(
                 "doubao",
                 "Doubao",
-                "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+                "https://ark.cn-beijing.volces.com/api/v3",
+                LlmEndpoint.Chat,
                 "https://console.volcengine.com/ark/",
                 "注册火山引擎并实名认证，进入火山方舟控制台。① 在「API 密钥管理」创建 API Key；② 在「开通管理」开通所需模型，每个模型有试用额度。",
                 0.1,
@@ -778,7 +838,8 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
             ["minimax"] = new(
                 "minimax",
                 "MiniMax",
-                "https://api.minimaxi.com/v1/chat/completions",
+                "https://api.minimaxi.com/v1",
+                LlmEndpoint.Chat,
                 "https://platform.minimaxi.com",
                 "手机号注册。赠送 ¥15 体验金。点击控制台 →「接口管理」→「创建 API Key」获取密钥。按量付费需在「余额」页面充值。",
                 1.0,
@@ -791,7 +852,8 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
             ["mimo"] = new(
                 "mimo",
                 "MiMo",
-                "https://api.xiaomimimo.com/v1/chat/completions",
+                "https://api.xiaomimimo.com/v1",
+                LlmEndpoint.Chat,
                 "https://platform.xiaomimimo.com",
                 "手机号注册。在控制台左侧「邀请有礼」输入邀请码领取 ¥10 体验金（有效期 40 天），然后在「API Keys」创建密钥。",
                 1.0,
@@ -803,8 +865,9 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
             ["moonshot"] = new(
                 "moonshot",
                 "Kimi",
-                "https://api.moonshot.cn/v1/chat/completions",
-                "https://platform.kimi.com",
+                "https://api.moonshot.ai/v1",
+                LlmEndpoint.Chat,
+                "https://platform.moonshot.ai",
                 "手机号或微信登录。在控制台「API Key 管理」创建密钥。新用户赠送 ¥15 体验金，初始 RPM=3。累计充值 ¥50 升 Tier 1（RPM=200）。",
                 0.7,
                 [
@@ -812,13 +875,15 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
                     new("kimi-k2.6", "Kimi K2.6", 262_144, 128_000, true, null, true),
                     new("kimi-k2.5", "Kimi K2.5", 262_144, 128_000, true, null, true)
                 ],
-                BuildRequest: MoonshotBuildRequest),
+                BuildRequest: MoonshotBuildRequest,
+                LegacyBaseUrls: ["https://api.moonshot.cn/v1"]),
             ["qwen"] = new(
                 "qwen",
                 "Qwen",
-                "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                LlmEndpoint.Chat,
                 "https://platform.qianwenai.com",
-                "注册后在「工作台 → API Key 管理」创建密钥。新用户有免费额度，API 地址统一使用 dashscope.aliyuncs.com，无需区分地域。如使用阿里云百炼平台，需自行将上方 Chat URL 替换为百炼地址。",
+                "注册后在「工作台 → API Key 管理」创建密钥。新用户有免费额度，API 地址统一使用 dashscope.aliyuncs.com，无需区分地域。如使用阿里云百炼平台，需自行将上方 Base URL 替换为百炼地址。",
                 0.7,
                 [
                     new("qwen3.7-max", "Qwen3.7 Max", 1_000_000, 64_000, true, null, true),
@@ -830,7 +895,8 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
             ["zhipu"] = new(
                 "zhipu",
                 "GLM",
-                "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                "https://open.bigmodel.cn/api/paas/v4",
+                LlmEndpoint.Chat,
                 "https://open.bigmodel.cn",
                 "手机号或微信注册。注册后点击「控制台」→「API Keys」→「新建」创建密钥。注册赠送体验额度。",
                 1.0,
@@ -847,18 +913,31 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
     private sealed record ProviderDefinition(
         string Key,
         string DisplayName,
-        string ChatUrl,
+        string BaseUrl,
+        string EndpointType,
         string PlatformUrl,
         string HelpText,
         double Temperature,
         IReadOnlyList<ModelInfoPayload> Models,
         Func<Dictionary<string, object?>, Dictionary<string, object?>>? BuildRequest = null,
-        Func<Dictionary<string, string>, Dictionary<string, string>>? BuildHeaders = null);
+        Func<Dictionary<string, string>, Dictionary<string, string>>? BuildHeaders = null,
+        IReadOnlyList<string>? LegacyBaseUrls = null)
+    {
+        public IEnumerable<string> AllBaseUrls()
+        {
+            yield return BaseUrl;
+            foreach (var url in LegacyBaseUrls ?? [])
+            {
+                yield return url;
+            }
+        }
+    }
 
     private sealed record ConfiguredProvider(
         string Key,
         string DisplayName,
-        string ChatUrl,
+        string BaseUrl,
+        string EndpointType,
         string ApiKey,
         double Temperature,
         IReadOnlyList<ModelInfoPayload> Models);
@@ -876,6 +955,12 @@ public sealed class FileSystemLlmConfigurationService : ILlmConfigurationService
 
         [JsonPropertyName("name")]
         public string DisplayName { get; set; } = string.Empty;
+
+        [JsonPropertyName("base_url")]
+        public string BaseUrl { get; set; } = string.Empty;
+
+        [JsonPropertyName("endpoint_type")]
+        public string EndpointType { get; set; } = string.Empty;
 
         [JsonPropertyName("chat_url")]
         public string ChatUrl { get; set; } = string.Empty;

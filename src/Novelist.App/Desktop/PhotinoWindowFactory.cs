@@ -14,6 +14,18 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
         ArgumentNullException.ThrowIfNull(settings);
 
         var window = new PhotinoWindow();
+        window.SetBrowserControlInitParameters("--disable-gpu --disable-gpu-compositing --disable-software-rasterizer=false");
+        DesktopLaunchLog.Write("Photino browser init parameters configured.");
+        var temporaryFilesPath = TryCreateWebViewDataPath();
+        if (!string.IsNullOrWhiteSpace(temporaryFilesPath))
+        {
+            window.SetTemporaryFilesPath(temporaryFilesPath);
+            DesktopLaunchLog.Write("Photino temporary files path: " + temporaryFilesPath);
+        }
+        else
+        {
+            DesktopLaunchLog.Write("Photino temporary files path not configured; using platform default.");
+        }
         var adapter = new PhotinoWindowAdapter(window);
         var appOptions = new AppInitializationOptions { EnableLegacyGoinkMigration = true };
         var settingsService = new FileSystemAppSettingsService(appOptions);
@@ -33,7 +45,7 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
         var llmService = new FileSystemLlmConfigurationService(appOptions);
         var sqliteVecResolver = new PackagedSqliteVecExtensionResolver();
         var sqliteVecProvider = new SqliteVecTableProvisioner(sqliteVecResolver);
-        var embeddingClient = new StandardEmbeddingClient();
+        var embeddingClient = new HybridEmbeddingClient();
         var embeddingService = new FileSystemEmbeddingSettingsService(
             appOptions,
             embeddingClient,
@@ -121,6 +133,35 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             .Load(settings.StartUrl);
 
         return adapter;
+    }
+
+    private static string? TryCreateWebViewDataPath()
+    {
+        foreach (var path in CandidateWebViewDataPaths())
+        {
+            try
+            {
+                Directory.CreateDirectory(path);
+                return path;
+            }
+            catch (Exception exception)
+            {
+                DesktopLaunchLog.Write("Unable to create WebView2 data path: " + path, exception);
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> CandidateWebViewDataPaths()
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrWhiteSpace(localAppData))
+        {
+            yield return Path.Combine(localAppData, "Novelist", "WebView2");
+        }
+
+        yield return Path.Combine(Path.GetTempPath(), "Novelist", "WebView2");
     }
 
     private sealed class DeferredRagIndexRefreshNotifier : IRagIndexRefreshNotifier

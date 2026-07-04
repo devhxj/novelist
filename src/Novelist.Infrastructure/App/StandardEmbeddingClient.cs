@@ -21,6 +21,7 @@ public sealed class StandardEmbeddingClient : IEmbeddingClient
     private const int MaxDimensions = 1_000_000;
     private const int ResponseReadLimitBytes = 32 * 1024 * 1024;
     private const int MaxAttempts = 3;
+    private const string ProviderTypeApi = "api";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _httpClient;
@@ -95,13 +96,19 @@ public sealed class StandardEmbeddingClient : IEmbeddingClient
 
     private static EmbeddingRequestOptions NormalizeOptions(EmbeddingRequestOptions options)
     {
+        var providerType = (options.ProviderType ?? string.Empty).Trim().ToLowerInvariant();
+        if (providerType.Length > 0 && providerType is not (ProviderTypeApi or "online" or "remote"))
+        {
+            throw new ArgumentException("Standard embedding client only supports api provider type.", nameof(options));
+        }
+
         var providerKey = NormalizeRequiredText(options.ProviderKey, nameof(options.ProviderKey), MaxProviderKeyLength).ToLowerInvariant();
         if (providerKey.Any(ch => !(char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.')))
         {
             throw new ArgumentException("Provider key may only contain letters, digits, hyphen, underscore, and dot.", nameof(options.ProviderKey));
         }
 
-        var endpoint = NormalizeEndpointUrl(options.EndpointUrl);
+        var endpoint = EmbeddingEndpoint.NormalizeEndpointUrl(options.EndpointUrl, MaxEndpointLength);
         var apiKey = NormalizeRequiredText(options.ApiKey, nameof(options.ApiKey), MaxApiKeyLength);
         var modelId = NormalizeRequiredText(options.ModelId, nameof(options.ModelId), MaxModelIdLength);
         if (options.Dimensions is <= 0 or > MaxDimensions)
@@ -119,36 +126,9 @@ public sealed class StandardEmbeddingClient : IEmbeddingClient
             EndpointUrl = endpoint,
             ApiKey = apiKey,
             ModelId = modelId,
-            User = user
+            User = user,
+            ProviderType = ProviderTypeApi
         };
-    }
-
-    private static string NormalizeEndpointUrl(string? raw)
-    {
-        var value = NormalizeRequiredText(raw, nameof(raw), MaxEndpointLength);
-        if (!value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-            !value.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            value = "https://" + value;
-        }
-
-        if (value.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
-        {
-            value = value[..^"/chat/completions".Length];
-        }
-
-        if (!value.EndsWith("/embeddings", StringComparison.OrdinalIgnoreCase))
-        {
-            value = value.TrimEnd('/') + "/embeddings";
-        }
-
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-        {
-            throw new ArgumentException("Embedding endpoint must be an absolute http:// or https:// URL.", nameof(raw));
-        }
-
-        return uri.ToString();
     }
 
     private static HttpRequestMessage CreateRequest(

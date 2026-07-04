@@ -14,6 +14,8 @@ public sealed record ModelInfoPayload(
 public sealed record ProviderViewPayload(
     [property: JsonPropertyName("key")] string Key,
     [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("base_url")] string BaseUrl,
+    [property: JsonPropertyName("endpoint_type")] string EndpointType,
     [property: JsonPropertyName("chat_url")] string ChatUrl,
     [property: JsonPropertyName("api_key")] string ApiKey,
     [property: JsonPropertyName("platform_url")] string PlatformUrl,
@@ -38,6 +40,8 @@ public sealed record AvailableModelPayload(
 
 public sealed record TestConnectionPayload(
     [property: JsonPropertyName("provider_name")] string ProviderName,
+    [property: JsonPropertyName("base_url")] string BaseUrl,
+    [property: JsonPropertyName("endpoint_type")] string EndpointType,
     [property: JsonPropertyName("chat_url")] string ChatUrl,
     [property: JsonPropertyName("api_key")] string ApiKey,
     [property: JsonPropertyName("model_id")] string ModelId);

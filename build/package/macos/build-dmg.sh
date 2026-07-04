@@ -25,6 +25,20 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 cp -a "$PUBLISH_DIR"/. "$APP_BUNDLE/Contents/MacOS/"
 chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_EXECUTABLE"
 
+APP_BINARY="$APP_BUNDLE/Contents/MacOS/Novelist.App"
+if [ ! -x "$APP_BINARY" ]; then
+    APP_BINARY="$APP_BUNDLE/Contents/MacOS/${APP_EXECUTABLE}.bin"
+    mv "$APP_BUNDLE/Contents/MacOS/$APP_EXECUTABLE" "$APP_BINARY"
+fi
+APP_BINARY_NAME="$(basename "$APP_BINARY")"
+cat > "$APP_BUNDLE/Contents/MacOS/$APP_EXECUTABLE" <<EOF
+#!/bin/bash
+set -euo pipefail
+HERE="\$(cd "\$(dirname "\$0")" && pwd)"
+exec "\$HERE/$APP_BINARY_NAME" --desktop "\$@"
+EOF
+chmod +x "$APP_BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_EXECUTABLE"
+
 # Info.plist
 cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

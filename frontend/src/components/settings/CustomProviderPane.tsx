@@ -20,18 +20,21 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
   const [selectedKey, setSelectedKey] = useState(providers[0]?.key || '')
   const [showNewForm, setShowNewForm] = useState(false)
   const [newName, setNewName] = useState('')
-  const [newChatURL, setNewChatURL] = useState('')
+  const [newBaseURL, setNewBaseURL] = useState('')
+  const [newEndpointType, setNewEndpointType] = useState<'chat' | 'responses'>('chat')
   const [newApiKey, setNewApiKey] = useState('')
   const provider = providers.find(p => p.key === selectedKey)
   const isTesting = testing[selectedKey]
   const testResult = testResults[selectedKey]
 
   const handleAdd = () => {
-    if (!newName.trim() || !newChatURL.trim()) return
+    if (!newName.trim() || !newBaseURL.trim()) return
     onAdd({
       key: newName.trim().toLowerCase().replace(/\s+/g, '-'),
       name: newName.trim(),
-      chat_url: newChatURL.trim(),
+      base_url: newBaseURL.trim(),
+      endpoint_type: newEndpointType,
+      chat_url: '',
       api_key: newApiKey,
       source: 'custom',
       builtin_models: [],
@@ -39,7 +42,8 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
       temperature: 0.7,
     } as unknown as llm.ProviderView)
     setNewName('')
-    setNewChatURL('')
+    setNewBaseURL('')
+    setNewEndpointType('chat')
     setNewApiKey('')
     setShowNewForm(false)
     // 选中新加的 provider
@@ -99,13 +103,32 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
           </div>
 
           <div className="flex items-center gap-3">
-            <label className="text-xs text-muted-foreground w-16 shrink-0">Chat URL</label>
+            <label className="text-xs text-muted-foreground w-16 shrink-0">Base URL</label>
             <input
-              value={newChatURL}
-              onChange={e => setNewChatURL(e.target.value)}
-              placeholder="https://api.example.com/v1/chat/completions"
+              value={newBaseURL}
+              onChange={e => setNewBaseURL(e.target.value)}
+              placeholder="https://api.example.com/v1"
               className="flex-1 h-8 rounded-md border bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             />
+          </div>
+
+          <div className="flex items-center gap-3">
+            <label className="text-xs text-muted-foreground w-16 shrink-0">接口</label>
+            <div className="inline-flex h-8 rounded-md border overflow-hidden">
+              {(['chat', 'responses'] as const).map(type => (
+                <button
+                  key={type}
+                  onClick={() => setNewEndpointType(type)}
+                  className={`px-3 text-xs transition-colors ${
+                    newEndpointType === type
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-background hover:bg-muted/50'
+                  }`}
+                >
+                  {type === 'chat' ? 'Chat' : 'Responses'}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
@@ -144,12 +167,31 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
           </div>
 
           <div className="flex items-center gap-3">
-            <label className="text-xs text-muted-foreground w-16 shrink-0">Chat URL</label>
+            <label className="text-xs text-muted-foreground w-16 shrink-0">Base URL</label>
             <input
-              value={provider.chat_url}
-              onChange={e => onUpdate(selectedKey, { chat_url: e.target.value })}
+              value={provider.base_url || provider.chat_url}
+              onChange={e => onUpdate(selectedKey, { base_url: e.target.value })}
               className="flex-1 h-8 rounded-md border bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             />
+          </div>
+
+          <div className="flex items-center gap-3">
+            <label className="text-xs text-muted-foreground w-16 shrink-0">接口</label>
+            <div className="inline-flex h-8 rounded-md border overflow-hidden">
+              {(['chat', 'responses'] as const).map(type => (
+                <button
+                  key={type}
+                  onClick={() => onUpdate(selectedKey, { endpoint_type: type })}
+                  className={`px-3 text-xs transition-colors ${
+                    (provider.endpoint_type || 'chat') === type
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-background hover:bg-muted/50'
+                  }`}
+                >
+                  {type === 'chat' ? 'Chat' : 'Responses'}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -224,7 +266,7 @@ export default function CustomProviderPane({ providers, onAdd, onUpdate, onRemov
 
           <ModelDiscoveryPanel
             key={selectedKey}
-            chatUrl={provider.chat_url}
+            baseUrl={provider.base_url || provider.chat_url}
             apiKey={provider.api_key}
             existingIds={new Set((provider?.custom_models || []).map(m => m.id))}
             onAddModel={m => onAddCustomModel(selectedKey, m)}

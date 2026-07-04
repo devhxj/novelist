@@ -2,6 +2,7 @@ using System.Text.Json;
 using Novelist.App.Desktop;
 using Novelist.Core.App;
 using Novelist.Core.Bridge;
+using Novelist.Contracts.Bridge;
 
 namespace Novelist.IntegrationTests;
 
@@ -44,6 +45,107 @@ public sealed class PhotinoWebMessageBridgeTests
             """);
 
         Assert.Empty(window.SentMessages);
+    }
+
+    [Fact]
+    public async Task ReceiveAsyncCancelsRunningRequestWhenCancelEnvelopeArrives()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observedCancellation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dispatcher = new BridgeDispatcher();
+        dispatcher.Register("Block", async (_, cancellationToken) =>
+        {
+            started.SetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                observedCancellation.SetResult();
+                throw;
+            }
+
+            return null;
+        });
+        var window = new RecordingWindow();
+        var bridge = new PhotinoWebMessageBridge(dispatcher, window);
+
+        var requestTask = bridge.ReceiveAsync("""
+            {
+              "kind": "request",
+              "id": "req_block",
+              "method": "Block",
+              "payload": {}
+            }
+            """).AsTask();
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        await bridge.ReceiveAsync("""
+            {
+              "kind": "cancel",
+              "id": "req_block"
+            }
+            """);
+
+        await observedCancellation.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await requestTask.WaitAsync(TimeSpan.FromSeconds(3));
+
+        var sent = Assert.Single(window.SentMessages);
+        using var json = JsonDocument.Parse(sent);
+        Assert.Equal("req_block", json.RootElement.GetProperty("id").GetString());
+        Assert.False(json.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal(
+            BridgeErrorCodes.Cancelled,
+            json.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task ReceiveAsyncRejectsDuplicatePendingRequestIdWithoutInvokingHandlerTwice()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callCount = 0;
+        var dispatcher = new BridgeDispatcher();
+        dispatcher.Register("Block", async (_, _) =>
+        {
+            Interlocked.Increment(ref callCount);
+            started.SetResult();
+            await release.Task;
+            return new { done = true };
+        });
+        var window = new RecordingWindow();
+        var bridge = new PhotinoWebMessageBridge(dispatcher, window);
+        const string request = """
+            {
+              "kind": "request",
+              "id": "req_duplicate",
+              "method": "Block",
+              "payload": {}
+            }
+            """;
+
+        var firstRequest = bridge.ReceiveAsync(request).AsTask();
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await bridge.ReceiveAsync(request);
+        release.SetResult();
+        await firstRequest.WaitAsync(TimeSpan.FromSeconds(3));
+
+        Assert.Equal(1, callCount);
+        Assert.Equal(2, window.SentMessages.Count);
+        Assert.Contains(window.SentMessages, message =>
+        {
+            using var json = JsonDocument.Parse(message);
+            return json.RootElement.GetProperty("id").GetString() == "req_duplicate" &&
+                !json.RootElement.GetProperty("ok").GetBoolean() &&
+                json.RootElement.GetProperty("error").GetProperty("code").GetString() == BridgeErrorCodes.ValidationError;
+        });
+        Assert.Contains(window.SentMessages, message =>
+        {
+            using var json = JsonDocument.Parse(message);
+            return json.RootElement.GetProperty("id").GetString() == "req_duplicate" &&
+                json.RootElement.GetProperty("ok").GetBoolean();
+        });
     }
 
     [Fact]

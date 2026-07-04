@@ -8,8 +8,9 @@ public sealed class PhotinoDesktopHostTests
     [Fact]
     public void LaunchModeIsExplicit()
     {
-        Assert.False(PhotinoLaunchMode.ShouldLaunchDesktop(Array.Empty<string>()));
+        Assert.True(PhotinoLaunchMode.ShouldLaunchDesktop(Array.Empty<string>()));
         Assert.True(PhotinoLaunchMode.ShouldLaunchDesktop([PhotinoLaunchMode.DesktopFlag]));
+        Assert.False(PhotinoLaunchMode.ShouldLaunchDesktop([PhotinoLaunchMode.ServerFlag]));
     }
 
     [Fact]

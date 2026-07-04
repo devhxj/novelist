@@ -74,8 +74,24 @@ public sealed class BridgeDispatcher
                 method,
                 TryReadProperty(root, "payload", out var payload) ? payload : null,
                 ReadDeadline(root));
-            var result = await handler(context, cancellationToken);
-            return Serialize(BridgeResponse.Success(id, result));
+
+            CancellationTokenSource? deadlineCancellation = null;
+            try
+            {
+                if (context.Deadline is TimeSpan deadline)
+                {
+                    deadlineCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    deadlineCancellation.CancelAfter(deadline);
+                }
+
+                var effectiveCancellation = deadlineCancellation?.Token ?? cancellationToken;
+                var result = await handler(context, effectiveCancellation);
+                return Serialize(BridgeResponse.Success(id, result));
+            }
+            finally
+            {
+                deadlineCancellation?.Dispose();
+            }
         }
         catch (BridgeValidationException ex)
         {
