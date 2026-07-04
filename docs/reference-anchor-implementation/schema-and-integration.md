@@ -212,6 +212,8 @@ reference_blueprint_material_links
 - status TEXT NOT NULL
 - created_at TEXT NOT NULL
 
+`score_components_json` currently records material type, function, emotion, POV, prose-duty, lexical, confidence, `user_verified`, and accepted-feedback boosts when applicable.
+
 reference_draft_paragraph_candidates
 - candidate_id TEXT PRIMARY KEY
 - blueprint_id INTEGER NOT NULL

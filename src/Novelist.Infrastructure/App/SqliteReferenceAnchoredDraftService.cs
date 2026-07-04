@@ -368,6 +368,10 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         ReferenceAnchoredDraftPreflight.EnsureCurrentPassingReview(blueprint, "Material binding");
 
         var now = DateTimeOffset.UtcNow;
+        var acceptedFeedbackMaterialIds = await LoadAcceptedFeedbackMaterialIdsAsync(
+            referenceAnchors,
+            input.NovelId,
+            cancellationToken);
         var boundLinks = new List<ScoredMaterialLink>();
         foreach (var beat in blueprint.Beats.OrderBy(item => item.BeatIndex))
         {
@@ -384,7 +388,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 maxResultsPerBeat,
                 cancellationToken);
             var scored = materials
-                .Select(material => ScoreMaterialForBeat(blueprint.BlueprintId, blueprint.AnalysisContractHash, beat, material, now))
+                .Select(material => ScoreMaterialForBeat(blueprint.BlueprintId, blueprint.AnalysisContractHash, beat, material, acceptedFeedbackMaterialIds, now))
                 .Where(item => item.Score > 0 && item.HasFunctionalFit)
                 .OrderByDescending(item => item.Score)
                 .ThenBy(item => item.Link.MaterialId, StringComparer.Ordinal)
@@ -621,11 +625,34 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         return fallback.Items;
     }
 
+    private static async ValueTask<IReadOnlySet<string>> LoadAcceptedFeedbackMaterialIdsAsync(
+        IReferenceAnchorService referenceAnchors,
+        long novelId,
+        CancellationToken cancellationToken)
+    {
+        var feedback = await referenceAnchors.GetUserFeedbackAsync(
+            new GetReferenceUserFeedbackPayload(
+                novelId,
+                TargetType: string.Empty,
+                TargetId: string.Empty,
+                Limit: 500),
+            cancellationToken);
+        return feedback
+            .Where(item => string.Equals(item.Decision, ReferenceFeedbackDecisions.Accepted, StringComparison.Ordinal))
+            .Select(item => string.IsNullOrWhiteSpace(item.MaterialId) &&
+                    string.Equals(item.TargetType, ReferenceFeedbackTargetTypes.Material, StringComparison.Ordinal)
+                        ? item.TargetId
+                        : item.MaterialId)
+            .Where(materialId => !string.IsNullOrWhiteSpace(materialId))
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
     private static ScoredMaterialLink ScoreMaterialForBeat(
         long blueprintId,
         string analysisContractHash,
         ReferenceChapterBlueprintBeatPayload beat,
         ReferenceMaterialPayload material,
+        IReadOnlySet<string> acceptedFeedbackMaterialIds,
         DateTimeOffset now)
     {
         var components = new Dictionary<string, double>(StringComparer.Ordinal);
@@ -644,6 +671,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         AddScore(components, "lexical", LexicalScore(beat.ReferenceQuery.Query, material.Text));
         AddScore(components, "confidence", material.FunctionConfidence + material.EmotionConfidence * 0.25 + material.PovConfidence * 0.25);
         AddScore(components, "user_verified", material.UserVerified ? 1.0 : 0);
+        AddScore(components, "accepted_feedback", acceptedFeedbackMaterialIds.Contains(material.MaterialId) ? 2.0 : 0);
 
         var hasFunctionalFit = functionFit || emotionFit || povFit || proseDutyFit;
         var score = components.Values.Sum();

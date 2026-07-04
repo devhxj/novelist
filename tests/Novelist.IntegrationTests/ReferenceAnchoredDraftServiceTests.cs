@@ -474,6 +474,116 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task BindBlueprintMaterialsBoostsPreviouslyAcceptedReferenceMaterial()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("反馈排序测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        var sourcePath = CreateSourceFile(
+            "feedback-ranking.md",
+            """
+            # 第一章
+
+            雨声压低了街的呼吸。
+
+            雨声压低了街的呼吸，她想起旧门。
+            """);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "反馈排序参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+        var materials = await referenceAnchors.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "雨声压低",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        var acceptedMaterial = Assert.Single(materials.Items, item => item.Text == "雨声压低了街的呼吸。");
+        var defaultPreferredMaterial = Assert.Single(materials.Items, item => item.Text == "雨声压低了街的呼吸，她想起旧门。");
+
+        var baselineBlueprint = await CreateApprovedSentenceBlueprintAsync(31);
+        var baseline = await service.BindBlueprintMaterialsAsync(
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, baselineBlueprint.BlueprintId, MaxResultsPerBeat: 2),
+            CancellationToken.None);
+        var baselineSelected = Assert.Single(baseline.Links, item => item.Selected);
+        Assert.Equal(defaultPreferredMaterial.MaterialId, baselineSelected.MaterialId);
+        Assert.DoesNotContain("accepted_feedback", baselineSelected.ScoreComponents.Keys);
+
+        await referenceAnchors.RecordUserFeedbackAsync(
+            new RecordReferenceUserFeedbackPayload(
+                novel.Id,
+                ReferenceFeedbackTargetTypes.Material,
+                acceptedMaterial.MaterialId,
+                ReferenceFeedbackDecisions.Accepted,
+                acceptedMaterial.MaterialId,
+                CandidateId: "",
+                BlueprintId: baselineBlueprint.BlueprintId,
+                BeatId: baselineBlueprint.Beats[0].BeatId,
+                FeedbackTags: ["useful_reference"],
+                Note: "这个环境压力细节适合相似节拍",
+                EditedText: "",
+                Origin: "user"),
+            CancellationToken.None);
+
+        var boostedBlueprint = await CreateApprovedSentenceBlueprintAsync(32);
+        var boosted = await service.BindBlueprintMaterialsAsync(
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, boostedBlueprint.BlueprintId, MaxResultsPerBeat: 2),
+            CancellationToken.None);
+        var boostedSelected = Assert.Single(boosted.Links, item => item.Selected);
+
+        Assert.Equal(acceptedMaterial.MaterialId, boostedSelected.MaterialId);
+        Assert.True(boostedSelected.ScoreComponents["accepted_feedback"] > 0);
+
+        async Task<ReferenceChapterBlueprintPayload> CreateApprovedSentenceBlueprintAsync(int chapterNumber)
+        {
+            var generated = await service.GenerateChapterBlueprintAsync(
+                new GenerateReferenceChapterBlueprintPayload(
+                    novel.Id,
+                    chapterNumber,
+                    "反馈排序蓝图",
+                    "雨声压低",
+                    [anchor.AnchorId],
+                    KnownFacts: ["雨声压低了街的呼吸"],
+                    ForbiddenFacts: []),
+                CancellationToken.None);
+            var revised = await service.ReviseChapterBlueprintAsync(
+                new ReviseReferenceChapterBlueprintPayload(
+                    novel.Id,
+                    generated.BlueprintId,
+                    [
+                        new ReferenceBlueprintRevisionChangePayload(
+                            "beat:" + generated.Beats[0].BeatId + ":reference_query.query",
+                            "雨声压低"),
+                        new ReferenceBlueprintRevisionChangePayload(
+                            "beat:" + generated.Beats[0].BeatId + ":reference_query.material_types",
+                            "[\"sentence\"]"),
+                        new ReferenceBlueprintRevisionChangePayload(
+                            "beat:" + generated.Beats[0].BeatId + ":required_material_types",
+                            "[\"sentence\"]")
+                    ],
+                    "user",
+                    "limit ranking fixture to sentence materials"),
+                CancellationToken.None);
+            var review = await service.ReviewChapterBlueprintAsync(
+                new ReviewReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId),
+                CancellationToken.None);
+            return await service.ApproveChapterBlueprintAsync(
+                new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, review.ReviewId),
+                CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task MaterialBoundBlueprintStillRejectsDraftWithoutCurrentPassingReview()
     {
         var options = CreateOptions();
