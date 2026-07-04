@@ -470,6 +470,7 @@ export namespace reference {
     extractor_version: string
     user_verified: boolean
     created_at: Timestamp
+    score_components?: Record<string, number> | null
   }
 
   export interface UpdateMaterialTagsInput {

@@ -309,7 +309,12 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
 
         Assert.Equal(2L, firstPage.Total);
         Assert.Equal(2, firstPage.TotalPages);
-        Assert.Equal("他在门口停住。", Assert.Single(firstPage.Items).Text);
+        var firstItem = Assert.Single(firstPage.Items);
+        Assert.Equal("他在门口停住。", firstItem.Text);
+        Assert.NotNull(firstItem.ScoreComponents);
+        Assert.True(firstItem.ScoreComponents["lexical"] > 0);
+        Assert.True(firstItem.ScoreComponents["material_type"] > 0);
+        Assert.True(firstItem.ScoreComponents["confidence"] > 0);
         Assert.Equal("雨声压低了门口。", Assert.Single(secondPage.Items).Text);
         Assert.Equal(100, bounded.Size);
         Assert.Equal(2L, bounded.Total);

@@ -31,6 +31,44 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void ReferenceMaterialPayloadSearchScoresUseStableSnakeCaseJsonNames()
+    {
+        var material = new ReferenceMaterialPayload(
+            MaterialId: "material-1",
+            AnchorId: 7,
+            SourceSegmentId: "segment-1",
+            MaterialType: ReferenceMaterialTypes.Sentence,
+            FunctionTag: "environment",
+            EmotionTag: "reflective",
+            SceneTag: "scene",
+            PovTag: "close",
+            TechniqueTag: "sensory_detail",
+            FunctionConfidence: 0.8,
+            EmotionConfidence: 0.7,
+            PovConfidence: 0.6,
+            Text: "雨声压低了门口。",
+            SourceHash: "hash",
+            ExtractorVersion: "deterministic-v1",
+            UserVerified: false,
+            CreatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
+            ScoreComponents: new Dictionary<string, double>
+            {
+                ["lexical"] = 12.0,
+                ["material_type"] = 1.5,
+                ["confidence"] = 1.0
+            });
+
+        using var scoredJson = JsonDocument.Parse(JsonSerializer.Serialize(material, BridgeJson.SerializerOptions));
+        var root = scoredJson.RootElement;
+        Assert.Equal(12.0, root.GetProperty("score_components").GetProperty("lexical").GetDouble());
+        Assert.Equal(1.5, root.GetProperty("score_components").GetProperty("material_type").GetDouble());
+        Assert.False(root.TryGetProperty("ScoreComponents", out _));
+
+        using var unscoredJson = JsonDocument.Parse(JsonSerializer.Serialize(material with { ScoreComponents = null }, BridgeJson.SerializerOptions));
+        Assert.False(unscoredJson.RootElement.TryGetProperty("score_components", out _));
+    }
+
+    [Fact]
     public void ReferenceChapterBlueprintPayloadsUseStableSnakeCaseJsonNames()
     {
         var beat = new ReferenceChapterBlueprintBeatPayload(

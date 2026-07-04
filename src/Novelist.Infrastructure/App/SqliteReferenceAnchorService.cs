@@ -305,15 +305,17 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             var all = await ReadMaterialsAsync(connection, input.NovelId, anchorIds, cancellationToken);
             var filtered = all
                 .Where(item => MatchesMaterialFilters(item, input))
-                .OrderByDescending(item => ScoreMaterial(item, input.Query))
-                .ThenBy(item => item.AnchorId)
-                .ThenBy(item => item.MaterialId, StringComparer.Ordinal)
+                .Select(item => new ScoredSearchMaterial(item, ScoreMaterialComponents(item, input)))
+                .OrderByDescending(item => item.Score)
+                .ThenBy(item => item.Material.AnchorId)
+                .ThenBy(item => item.Material.MaterialId, StringComparer.Ordinal)
                 .ToArray();
             var total = filtered.LongLength;
             var totalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)size);
             var items = filtered
                 .Skip((page - 1) * size)
                 .Take(size)
+                .Select(item => item.Material with { ScoreComponents = item.ScoreComponents })
                 .ToArray();
             return new PageResultPayload<ReferenceMaterialPayload>(items, total, page, size, totalPages);
         }
@@ -1804,26 +1806,54 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             filters.Any(filter => string.Equals(value, filter, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static double ScoreMaterial(ReferenceMaterialPayload material, string? query)
+    private static IReadOnlyDictionary<string, double> ScoreMaterialComponents(
+        ReferenceMaterialPayload material,
+        SearchReferenceMaterialsPayload input)
     {
-        var score = 0.0;
-        var normalizedQuery = (query ?? string.Empty).Trim();
+        var components = new Dictionary<string, double>(StringComparer.Ordinal);
+        var normalizedQuery = (input.Query ?? string.Empty).Trim();
         if (normalizedQuery.Length > 0)
         {
             var firstIndex = material.Text.IndexOf(normalizedQuery, StringComparison.OrdinalIgnoreCase);
             if (firstIndex >= 0)
             {
-                score += 10.0;
-                score += Math.Max(0, 2.0 - firstIndex / 20.0);
+                AddScore(components, "lexical", 10.0 + Math.Max(0, 2.0 - firstIndex / 20.0));
             }
         }
 
-        score += material.MaterialType == ReferenceMaterialTypes.Sentence ? 1.5 : 0.8;
-        score += material.FunctionConfidence;
-        score += material.EmotionConfidence * 0.2;
-        score += material.PovConfidence * 0.1;
-        score += Math.Max(0, 1.0 - material.Text.Length / 500.0);
+        AddScore(components, "material_type", material.MaterialType == ReferenceMaterialTypes.Sentence ? 1.5 : 0.8);
+        AddScore(components, "tag", SearchTagScore(material, input));
+        AddScore(components, "confidence", material.FunctionConfidence + material.EmotionConfidence * 0.2 + material.PovConfidence * 0.1);
+        AddScore(components, "length", Math.Max(0, 1.0 - material.Text.Length / 500.0));
+        return components;
+    }
+
+    private static double SearchTagScore(
+        ReferenceMaterialPayload material,
+        SearchReferenceMaterialsPayload input)
+    {
+        var score = 0.0;
+        score += MatchesNonEmptyFilter(material.MaterialType, input.MaterialTypes) ? 1.0 : 0;
+        score += MatchesNonEmptyFilter(material.EmotionTag, input.EmotionTags) ? 1.0 : 0;
+        score += MatchesNonEmptyFilter(material.FunctionTag, input.FunctionTags) ? 1.0 : 0;
+        score += MatchesNonEmptyFilter(material.PovTag, input.PovTags) ? 1.0 : 0;
+        score += MatchesNonEmptyFilter(material.TechniqueTag, input.TechniqueTags) ? 1.0 : 0;
         return score;
+    }
+
+    private static bool MatchesNonEmptyFilter(string value, IReadOnlyList<string>? filters)
+    {
+        return filters is not null &&
+            filters.Count > 0 &&
+            filters.Any(filter => string.Equals(value, filter, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void AddScore(IDictionary<string, double> components, string name, double value)
+    {
+        if (value > 0)
+        {
+            components[name] = Math.Round(value, 4);
+        }
     }
 
     private static AdaptedMaterial ApplySlotValues(
@@ -2263,4 +2293,11 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private sealed record AdaptedMaterial(
         string Text,
         IReadOnlyList<ReferenceSlotValuePayload> ChangedSlots);
+
+    private sealed record ScoredSearchMaterial(
+        ReferenceMaterialPayload Material,
+        IReadOnlyDictionary<string, double> ScoreComponents)
+    {
+        public double Score => ScoreComponents.Values.Sum();
+    }
 }

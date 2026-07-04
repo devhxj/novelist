@@ -147,7 +147,10 @@ public sealed record ReferenceMaterialPayload(
     [property: JsonPropertyName("source_hash")] string SourceHash,
     [property: JsonPropertyName("extractor_version")] string ExtractorVersion,
     [property: JsonPropertyName("user_verified")] bool UserVerified,
-    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
+    [property: JsonPropertyName("score_components")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyDictionary<string, double>? ScoreComponents = null);
 
 public sealed record UpdateReferenceMaterialTagsPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
