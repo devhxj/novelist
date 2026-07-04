@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 10;
+    public const int CurrentReviewVersion = 11;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -295,15 +295,29 @@ internal static class ReferenceChapterBlueprintReviewer
                     $"Beat {beat.BeatIndex} is missing paragraph intention, execution mode, anti-screenplay duty, or rejection rule.",
                     "Fill paragraph_intention, execution_mode, anti_screenplay_duty, and candidate_rejection_rule.");
             }
-            else if (UsesGenericParagraphIntention(beat.ParagraphIntention))
+            else
             {
-                AddBeatDefect(
-                    executionErrors,
-                    "execution",
-                    beat,
-                    "paragraph_intention",
-                    $"Beat {beat.BeatIndex} uses generic paragraph intention.",
-                    "Rewrite paragraph_intention as a concrete prose job, such as dwell, withhold, reveal, contrast, linger, or turn tied to this beat.");
+                if (UsesGenericParagraphIntention(beat.ParagraphIntention))
+                {
+                    AddBeatDefect(
+                        executionErrors,
+                        "execution",
+                        beat,
+                        "paragraph_intention",
+                        $"Beat {beat.BeatIndex} uses generic paragraph intention.",
+                        "Rewrite paragraph_intention as a concrete prose job, such as dwell, withhold, reveal, contrast, linger, or turn tied to this beat.");
+                }
+
+                if (UsesGenericAntiScreenplayDuty(beat.AntiScreenplayDuty))
+                {
+                    AddBeatDefect(
+                        screenplayRisks,
+                        "screenplay_drift",
+                        beat,
+                        "anti_screenplay_duty",
+                        $"Beat {beat.BeatIndex} uses generic anti-screenplay duty.",
+                        "Rewrite anti_screenplay_duty as concrete prose work beyond stage directions, dialogue labels, or camera blocking.");
+                }
             }
 
             if ((string.Equals(beat.BeatType, ReferenceBlueprintBeatTypes.Action, StringComparison.Ordinal) ||
@@ -577,6 +591,17 @@ internal static class ReferenceChapterBlueprintReviewer
                 "make it better", "make it emotional", "more emotional", "more moving",
                 "写得更好", "写得好看", "更有代入感", "更有感染力", "更感人",
                 "加强情绪", "增强感染力", "润色一下", "优化一下", "情绪拉满", "氛围拉满"
+            ]);
+    }
+
+    private static bool UsesGenericAntiScreenplayDuty(string value)
+    {
+        return ContainsAny(
+            value,
+            [
+                "avoid screenplay", "avoid script", "anti-screenplay", "not screenplay",
+                "not a script", "no camera", "不要剧本化", "避免剧本化", "防止剧本化",
+                "别写成剧本", "不要写成剧本", "不是剧本", "非剧本化", "不要镜头感"
             ]);
     }
 

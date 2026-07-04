@@ -110,6 +110,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 ParagraphIntention = "写得更好，更有代入感"
             },
+            "generic_anti_screenplay_duty" => beat with
+            {
+                AntiScreenplayDuty = "避免剧本化"
+            },
             "generic_narration_strategy" => beat with
             {
                 NarrationStrategy = "正常叙述，写得有画面感"

@@ -22,6 +22,7 @@
 - 蓝图评审现在会拒绝角色状态 before/after 完全相同的 beat，并把问题归入 character-state 缺陷，防止缺少角色状态变化的蓝图继续进入材料绑定和候选草稿生成。
 - 蓝图评审现在会拒绝缺少 `character_misbeliefs` 或 `relationship_pressure` 的 beat，让角色状态变化必须具备误信/盲点和关系压力支撑。
 - 蓝图评审现在会拒绝“写得更好/更有代入感”这类泛化段落意图，并要求 `paragraph_intention` 写成可检查的具体正文职责。
+- 蓝图评审现在会拒绝“避免剧本化”这类泛化 anti-screenplay duty，并要求 `anti_screenplay_duty` 写清具体要补足的内心、暗示、细节或非镜头化叙事工作。
 - 蓝图评审现在会拒绝“正常叙述/写得有画面感”这类泛化叙事策略，并要求 `narration_strategy` 写清 POV 距离、感官/内心边界和叙事职责。
 - 蓝图评审现在会拒绝缺失或“节奏自然流畅/快慢结合”这类泛化节奏策略，并要求 `rhythm_strategy` 写清停顿、推进、转折或释放方式。
 - 蓝图评审现在会拦截 final hook 中未由已知事实、beat 场景事实或 POV 已知边界铺垫的高风险身份、证据和过去事件揭示。

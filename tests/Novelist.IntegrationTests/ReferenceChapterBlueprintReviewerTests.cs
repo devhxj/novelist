@@ -334,6 +334,24 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsGenericAntiScreenplayDuty()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            AntiScreenplayDuty = "避免剧本化"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ScreenplayDriftRisks, item => item.Contains("generic anti-screenplay duty", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "screenplay_drift" &&
+                defect.FieldPath.Contains("anti_screenplay_duty", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsGenericNarrationStrategy()
     {
         var blueprint = Blueprint(beat => beat with
