@@ -12,6 +12,7 @@ import ArcListView from '@/components/storyarc/ArcListView'
 import TimelineView from '@/components/timeline/TimelineView'
 import ReaderView from '@/components/reader/ReaderView'
 import PreferenceView from '@/components/preference/PreferenceView'
+import ReferenceAnchorView from '@/components/reference-anchor/ReferenceAnchorView'
 import BookshelfView from '@/components/novel/BookshelfView'
 import NovelEditDialog from '@/components/novel/NovelEditDialog'
 import NovelDeleteDialog from '@/components/novel/NovelDeleteDialog'
@@ -376,7 +377,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
             onSaveCover={handleSaveCover}
             onExportNovel={(n) => setExportNovelId(n.id)}
           />
-        ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && activePanel !== 'profile' && (
+        ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && activePanel !== 'reference' && activePanel !== 'profile' && (
           <ContentPanel ref={contentRef} novelId={activeNovelId} onContentChange={setActiveContent} onDirtyChange={setIsDirty} />
         )}
 
@@ -392,6 +393,8 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
           <ReaderView novelId={activeNovelId} focusId={readerFocusId} />
         ) : activePanel === 'preferences' ? (
           <PreferenceView novelId={activeNovelId} focusId={preferenceFocusId} />
+        ) : activePanel === 'reference' ? (
+          <ReferenceAnchorView novelId={activeNovelId} />
         ) : activePanel === 'profile' ? (
           <ProfileView />
         ) : null}

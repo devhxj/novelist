@@ -76,6 +76,12 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             chapterContentService,
             ragIndexService,
             ragIndexService);
+        var referenceAnchorService = new SqliteReferenceAnchorService(appOptions, novelService);
+        var referenceAnchoredDraftService = new SqliteReferenceAnchoredDraftService(
+            appOptions,
+            novelService,
+            planningService,
+            referenceAnchorService);
         var webFetchService = new HttpWebFetchService();
         var webSearchService = new DeepSeekWebSearchService(llmService);
         var subagentRunner = new DeferredSubagentRunner();
@@ -89,7 +95,9 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             worldService,
             planningService,
             webFetchService,
-            webSearchService));
+            webSearchService,
+            referenceAnchorService,
+            referenceAnchoredDraftService));
         var chatService = new FileSystemChatSessionService(
             appOptions,
             novelService,
@@ -119,6 +127,8 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             .RegisterLlmConfigurationHandlers(llmService)
             .RegisterEmbeddingConfigurationHandlers(embeddingService)
             .RegisterWorkspaceUtilityHandlers(skillService, searchService, exportService, writingService, storyMemoryService)
+            .RegisterReferenceAnchorHandlers(referenceAnchorService)
+            .RegisterReferenceAnchoredDraftHandlers(referenceAnchoredDraftService)
             .RegisterApprovalHandlers(approvalCoordinator)
             .RegisterChatSessionHandlers(chatService);
         var bridge = new PhotinoWebMessageBridge(dispatcher, adapter);

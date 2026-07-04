@@ -1,0 +1,179 @@
+using System.Text.Json.Serialization;
+
+namespace Novelist.Contracts.App;
+
+public static class ReferenceRewriteLevels
+{
+    public const string L0 = "L0";
+    public const string L1 = "L1";
+    public const string L2 = "L2";
+    public const string L3 = "L3";
+    public const string L4 = "L4";
+
+    public static IReadOnlyList<string> All { get; } = [L0, L1, L2, L3, L4];
+}
+
+public static class ReferenceAnchorBuildStates
+{
+    public const string Created = "created";
+    public const string Importing = "importing";
+    public const string SourceImported = "source_imported";
+    public const string Segmenting = "segmenting";
+    public const string SegmentsBuilt = "segments_built";
+    public const string ExtractingMaterials = "extracting_materials";
+    public const string MaterialsExtracted = "materials_extracted";
+    public const string DetectingSlots = "detecting_slots";
+    public const string SlotsDetected = "slots_detected";
+    public const string Embedding = "embedding";
+    public const string Ready = "ready";
+    public const string FailedImport = "failed_import";
+    public const string FailedSegmenting = "failed_segmenting";
+    public const string FailedExtraction = "failed_extraction";
+    public const string FailedSlotting = "failed_slotting";
+    public const string FailedEmbedding = "failed_embedding";
+    public const string Cancelled = "cancelled";
+    public const string Stale = "stale";
+
+    public static IReadOnlyList<string> All { get; } =
+    [
+        Created,
+        Importing,
+        SourceImported,
+        Segmenting,
+        SegmentsBuilt,
+        ExtractingMaterials,
+        MaterialsExtracted,
+        DetectingSlots,
+        SlotsDetected,
+        Embedding,
+        Ready,
+        FailedImport,
+        FailedSegmenting,
+        FailedExtraction,
+        FailedSlotting,
+        FailedEmbedding,
+        Cancelled,
+        Stale
+    ];
+}
+
+public static class ReferenceMaterialTypes
+{
+    public const string Chapter = "chapter";
+    public const string Paragraph = "paragraph";
+    public const string Sentence = "sentence";
+    public const string Passage = "passage";
+
+    public static IReadOnlyList<string> All { get; } = [Chapter, Paragraph, Sentence, Passage];
+}
+
+public sealed record CreateReferenceAnchorPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("author")] string? Author,
+    [property: JsonPropertyName("source_path")] string SourcePath,
+    [property: JsonPropertyName("source_kind")] string SourceKind,
+    [property: JsonPropertyName("license_status")] string LicenseStatus);
+
+public sealed record ReferenceAnchorPayload(
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("author")] string Author,
+    [property: JsonPropertyName("source_path")] string SourcePath,
+    [property: JsonPropertyName("source_kind")] string SourceKind,
+    [property: JsonPropertyName("license_status")] string LicenseStatus,
+    [property: JsonPropertyName("source_file_hash")] string SourceFileHash,
+    [property: JsonPropertyName("build_version")] string BuildVersion,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
+    [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt);
+
+public sealed record ReferenceAnchorBuildStatusPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("stage")] string Stage,
+    [property: JsonPropertyName("source_segment_count")] int SourceSegmentCount,
+    [property: JsonPropertyName("material_count")] int MaterialCount,
+    [property: JsonPropertyName("slot_count")] int SlotCount,
+    [property: JsonPropertyName("vector_count")] int VectorCount,
+    [property: JsonPropertyName("last_error")] string LastError,
+    [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt);
+
+public sealed record ReferenceMaterialPayload(
+    [property: JsonPropertyName("material_id")] string MaterialId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("source_segment_id")] string SourceSegmentId,
+    [property: JsonPropertyName("material_type")] string MaterialType,
+    [property: JsonPropertyName("function_tag")] string FunctionTag,
+    [property: JsonPropertyName("emotion_tag")] string EmotionTag,
+    [property: JsonPropertyName("scene_tag")] string SceneTag,
+    [property: JsonPropertyName("pov_tag")] string PovTag,
+    [property: JsonPropertyName("technique_tag")] string TechniqueTag,
+    [property: JsonPropertyName("function_confidence")] double FunctionConfidence,
+    [property: JsonPropertyName("emotion_confidence")] double EmotionConfidence,
+    [property: JsonPropertyName("pov_confidence")] double PovConfidence,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("source_hash")] string SourceHash,
+    [property: JsonPropertyName("extractor_version")] string ExtractorVersion,
+    [property: JsonPropertyName("user_verified")] bool UserVerified,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
+
+public sealed record ReferenceMaterialQueryPayload(
+    [property: JsonPropertyName("query")] string Query,
+    [property: JsonPropertyName("material_types")] IReadOnlyList<string> MaterialTypes,
+    [property: JsonPropertyName("emotion_tags")] IReadOnlyList<string> EmotionTags,
+    [property: JsonPropertyName("function_tags")] IReadOnlyList<string> FunctionTags,
+    [property: JsonPropertyName("pov_tags")] IReadOnlyList<string> PovTags,
+    [property: JsonPropertyName("technique_tags")] IReadOnlyList<string> TechniqueTags,
+    [property: JsonPropertyName("max_results")] int MaxResults);
+
+public sealed record SearchReferenceMaterialsPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_ids")] IReadOnlyList<long> AnchorIds,
+    [property: JsonPropertyName("query")] string Query,
+    [property: JsonPropertyName("material_types")] IReadOnlyList<string> MaterialTypes,
+    [property: JsonPropertyName("emotion_tags")] IReadOnlyList<string> EmotionTags,
+    [property: JsonPropertyName("function_tags")] IReadOnlyList<string> FunctionTags,
+    [property: JsonPropertyName("pov_tags")] IReadOnlyList<string> PovTags,
+    [property: JsonPropertyName("technique_tags")] IReadOnlyList<string> TechniqueTags,
+    [property: JsonPropertyName("page")] int Page,
+    [property: JsonPropertyName("size")] int Size);
+
+public sealed record ReferenceSlotValuePayload(
+    [property: JsonPropertyName("slot_name")] string SlotName,
+    [property: JsonPropertyName("value")] string Value);
+
+public sealed record AdaptReferenceMaterialPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("material_id")] string MaterialId,
+    [property: JsonPropertyName("slot_values")] IReadOnlyList<ReferenceSlotValuePayload> SlotValues,
+    [property: JsonPropertyName("max_rewrite_level")] string MaxRewriteLevel,
+    [property: JsonPropertyName("scene_facts")] IReadOnlyList<string> SceneFacts);
+
+public sealed record AdaptReferenceMaterialResultPayload(
+    [property: JsonPropertyName("candidate_id")] string CandidateId,
+    [property: JsonPropertyName("material_id")] string MaterialId,
+    [property: JsonPropertyName("rewrite_level")] string RewriteLevel,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("changed_slots")] IReadOnlyList<ReferenceSlotValuePayload> ChangedSlots,
+    [property: JsonPropertyName("non_slot_edits")] IReadOnlyList<string> NonSlotEdits,
+    [property: JsonPropertyName("audit")] ReferenceReuseAuditPayload Audit);
+
+public sealed record AuditReferenceReusePayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("material_id")] string MaterialId,
+    [property: JsonPropertyName("candidate_text")] string CandidateText,
+    [property: JsonPropertyName("max_rewrite_level")] string MaxRewriteLevel,
+    [property: JsonPropertyName("scene_facts")] IReadOnlyList<string> SceneFacts);
+
+public sealed record ReferenceReuseAuditPayload(
+    [property: JsonPropertyName("audit_id")] string AuditId,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("rewrite_level")] string RewriteLevel,
+    [property: JsonPropertyName("provenance_errors")] IReadOnlyList<string> ProvenanceErrors,
+    [property: JsonPropertyName("unsupported_fact_errors")] IReadOnlyList<string> UnsupportedFactErrors,
+    [property: JsonPropertyName("ai_prose_risks")] IReadOnlyList<string> AiProseRisks,
+    [property: JsonPropertyName("required_fixes")] IReadOnlyList<string> RequiredFixes,
+    [property: JsonPropertyName("audited_at")] DateTimeOffset AuditedAt);

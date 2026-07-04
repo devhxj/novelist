@@ -1,0 +1,279 @@
+using System.Text.Json.Serialization;
+
+namespace Novelist.Contracts.App;
+
+public static class ReferenceBlueprintStates
+{
+    public const string Draft = "draft";
+    public const string Normalized = "normalized";
+    public const string ReviewFailed = "review_failed";
+    public const string ReviewPassed = "review_passed";
+    public const string Approved = "approved";
+    public const string Stale = "stale";
+    public const string MaterialBound = "material_bound";
+    public const string UsedForCandidate = "used_for_candidate";
+    public const string Superseded = "superseded";
+
+    public static IReadOnlyList<string> All { get; } =
+    [
+        Draft,
+        Normalized,
+        ReviewFailed,
+        ReviewPassed,
+        Approved,
+        Stale,
+        MaterialBound,
+        UsedForCandidate,
+        Superseded
+    ];
+}
+
+public static class ReferenceBlueprintBeatTypes
+{
+    public const string Action = "action";
+    public const string Reaction = "reaction";
+    public const string Interiority = "interiority";
+    public const string Environment = "environment";
+    public const string Transition = "transition";
+    public const string InformationReveal = "information_reveal";
+    public const string Hook = "hook";
+    public const string DialogueExchange = "dialogue_exchange";
+
+    public static IReadOnlyList<string> All { get; } =
+    [
+        Action,
+        Reaction,
+        Interiority,
+        Environment,
+        Transition,
+        InformationReveal,
+        Hook,
+        DialogueExchange
+    ];
+}
+
+public static class ReferenceBlueprintReviewStatuses
+{
+    public const string Passed = "passed";
+    public const string Failed = "failed";
+
+    public static IReadOnlyList<string> All { get; } = [Passed, Failed];
+}
+
+public sealed record GenerateReferenceChapterBlueprintPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("chapter_number")] int ChapterNumber,
+    [property: JsonPropertyName("title")] string? Title,
+    [property: JsonPropertyName("chapter_goal")] string? ChapterGoal,
+    [property: JsonPropertyName("anchor_ids")] IReadOnlyList<long> AnchorIds,
+    [property: JsonPropertyName("known_facts")] IReadOnlyList<string> KnownFacts,
+    [property: JsonPropertyName("forbidden_facts")] IReadOnlyList<string> ForbiddenFacts);
+
+public sealed record ReferenceChapterBlueprintAnalysisTrackPayload(
+    [property: JsonPropertyName("track")] string Track,
+    [property: JsonPropertyName("summary")] string Summary,
+    [property: JsonPropertyName("points")] IReadOnlyList<string> Points);
+
+public sealed record ReferenceChapterBlueprintExecutionTrackPayload(
+    [property: JsonPropertyName("track")] string Track,
+    [property: JsonPropertyName("summary")] string Summary,
+    [property: JsonPropertyName("paragraph_intentions")] IReadOnlyList<string> ParagraphIntentions,
+    [property: JsonPropertyName("execution_modes")] IReadOnlyList<string> ExecutionModes,
+    [property: JsonPropertyName("anti_screenplay_duties")] IReadOnlyList<string> AntiScreenplayDuties,
+    [property: JsonPropertyName("source_backed_detail_targets")] IReadOnlyList<string> SourceBackedDetailTargets,
+    [property: JsonPropertyName("candidate_rejection_rules")] IReadOnlyList<string> CandidateRejectionRules);
+
+public sealed record ReferenceChapterBlueprintSummaryPayload(
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("chapter_number")] int ChapterNumber,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("source_plan_hash")] string SourcePlanHash,
+    [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt);
+
+public sealed record ReferenceChapterBlueprintPayload(
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("chapter_number")] int ChapterNumber,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("source_plan_scope")] string SourcePlanScope,
+    [property: JsonPropertyName("source_plan_hash")] string SourcePlanHash,
+    [property: JsonPropertyName("context_hash")] string ContextHash,
+    [property: JsonPropertyName("analysis_contract_hash")] string AnalysisContractHash,
+    [property: JsonPropertyName("blueprint_version")] int BlueprintVersion,
+    [property: JsonPropertyName("parent_blueprint_id")] long ParentBlueprintId,
+    [property: JsonPropertyName("primary_anchor_id")] long PrimaryAnchorId,
+    [property: JsonPropertyName("chapter_function")] string ChapterFunction,
+    [property: JsonPropertyName("logic_analysis")] ReferenceChapterBlueprintAnalysisTrackPayload LogicAnalysis,
+    [property: JsonPropertyName("emotion_analysis")] ReferenceChapterBlueprintAnalysisTrackPayload EmotionAnalysis,
+    [property: JsonPropertyName("narration_analysis")] ReferenceChapterBlueprintAnalysisTrackPayload NarrationAnalysis,
+    [property: JsonPropertyName("character_analysis")] ReferenceChapterBlueprintAnalysisTrackPayload CharacterAnalysis,
+    [property: JsonPropertyName("reference_analysis")] ReferenceChapterBlueprintAnalysisTrackPayload ReferenceAnalysis,
+    [property: JsonPropertyName("transition_plan")] ReferenceChapterBlueprintAnalysisTrackPayload TransitionPlan,
+    [property: JsonPropertyName("execution_contract")] ReferenceChapterBlueprintExecutionTrackPayload ExecutionContract,
+    [property: JsonPropertyName("previous_state")] string PreviousState,
+    [property: JsonPropertyName("final_state")] string FinalState,
+    [property: JsonPropertyName("final_hook")] string FinalHook,
+    [property: JsonPropertyName("global_pov")] string GlobalPov,
+    [property: JsonPropertyName("global_narrative_distance")] string GlobalNarrativeDistance,
+    [property: JsonPropertyName("known_facts")] IReadOnlyList<string> KnownFacts,
+    [property: JsonPropertyName("forbidden_facts")] IReadOnlyList<string> ForbiddenFacts,
+    [property: JsonPropertyName("risk_flags")] IReadOnlyList<string> RiskFlags,
+    [property: JsonPropertyName("beats")] IReadOnlyList<ReferenceChapterBlueprintBeatPayload> Beats,
+    [property: JsonPropertyName("latest_review")] ReferenceChapterBlueprintReviewPayload? LatestReview,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
+    [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt);
+
+public sealed record ReferenceChapterBlueprintBeatPayload(
+    [property: JsonPropertyName("beat_id")] string BeatId,
+    [property: JsonPropertyName("beat_index")] int BeatIndex,
+    [property: JsonPropertyName("scene_index")] int SceneIndex,
+    [property: JsonPropertyName("beat_type")] string BeatType,
+    [property: JsonPropertyName("narrative_function")] string NarrativeFunction,
+    [property: JsonPropertyName("logic_premise")] string LogicPremise,
+    [property: JsonPropertyName("conflict_pressure")] string ConflictPressure,
+    [property: JsonPropertyName("causality_in")] string CausalityIn,
+    [property: JsonPropertyName("causality_out")] string CausalityOut,
+    [property: JsonPropertyName("transition_in")] string TransitionIn,
+    [property: JsonPropertyName("transition_out")] string TransitionOut,
+    [property: JsonPropertyName("pov_character")] string PovCharacter,
+    [property: JsonPropertyName("narrative_distance")] string NarrativeDistance,
+    [property: JsonPropertyName("viewpoint_allowed_knowledge")] IReadOnlyList<string> ViewpointAllowedKnowledge,
+    [property: JsonPropertyName("viewpoint_forbidden_knowledge")] IReadOnlyList<string> ViewpointForbiddenKnowledge,
+    [property: JsonPropertyName("character_states_before")] IReadOnlyList<string> CharacterStatesBefore,
+    [property: JsonPropertyName("character_states_after")] IReadOnlyList<string> CharacterStatesAfter,
+    [property: JsonPropertyName("character_goals")] IReadOnlyList<string> CharacterGoals,
+    [property: JsonPropertyName("character_misbeliefs")] IReadOnlyList<string> CharacterMisbeliefs,
+    [property: JsonPropertyName("relationship_pressure")] IReadOnlyList<string> RelationshipPressure,
+    [property: JsonPropertyName("emotion_trigger")] string EmotionTrigger,
+    [property: JsonPropertyName("emotion_before")] string EmotionBefore,
+    [property: JsonPropertyName("emotion_after")] string EmotionAfter,
+    [property: JsonPropertyName("suppressed_reaction")] string SuppressedReaction,
+    [property: JsonPropertyName("external_evidence")] string ExternalEvidence,
+    [property: JsonPropertyName("narration_strategy")] string NarrationStrategy,
+    [property: JsonPropertyName("rhythm_strategy")] string RhythmStrategy,
+    [property: JsonPropertyName("paragraph_intention")] string ParagraphIntention,
+    [property: JsonPropertyName("execution_mode")] string ExecutionMode,
+    [property: JsonPropertyName("anti_screenplay_duty")] string AntiScreenplayDuty,
+    [property: JsonPropertyName("sensory_anchor_target")] string SensoryAnchorTarget,
+    [property: JsonPropertyName("subtext_plan")] string SubtextPlan,
+    [property: JsonPropertyName("source_backed_detail_target")] string SourceBackedDetailTarget,
+    [property: JsonPropertyName("candidate_rejection_rule")] string CandidateRejectionRule,
+    [property: JsonPropertyName("scene_facts")] IReadOnlyList<string> SceneFacts,
+    [property: JsonPropertyName("forbidden_facts")] IReadOnlyList<string> ForbiddenFacts,
+    [property: JsonPropertyName("reference_query")] ReferenceMaterialQueryPayload ReferenceQuery,
+    [property: JsonPropertyName("required_material_types")] IReadOnlyList<string> RequiredMaterialTypes,
+    [property: JsonPropertyName("max_rewrite_level")] string MaxRewriteLevel,
+    [property: JsonPropertyName("slot_plan")] IReadOnlyList<ReferenceSlotValuePayload> SlotPlan,
+    [property: JsonPropertyName("locked_phrase_policy")] string LockedPhrasePolicy,
+    [property: JsonPropertyName("no_reuse_reason")] string NoReuseReason,
+    [property: JsonPropertyName("prose_duties")] IReadOnlyList<string> ProseDuties,
+    [property: JsonPropertyName("risk_flags")] IReadOnlyList<string> RiskFlags);
+
+public sealed record ReviewReferenceChapterBlueprintPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId);
+
+public sealed record ReferenceBlueprintRevisionChangePayload(
+    [property: JsonPropertyName("field_path")] string FieldPath,
+    [property: JsonPropertyName("new_value")] string NewValue);
+
+public sealed record ReviseReferenceChapterBlueprintPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("changes")] IReadOnlyList<ReferenceBlueprintRevisionChangePayload> Changes,
+    [property: JsonPropertyName("origin")] string Origin,
+    [property: JsonPropertyName("revision_reason")] string RevisionReason);
+
+public sealed record ReferenceChapterBlueprintReviewPayload(
+    [property: JsonPropertyName("review_id")] string ReviewId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("context_hash")] string ContextHash,
+    [property: JsonPropertyName("source_plan_hash")] string SourcePlanHash,
+    [property: JsonPropertyName("analysis_contract_hash")] string AnalysisContractHash,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("score")] double Score,
+    [property: JsonPropertyName("logic_errors")] IReadOnlyList<string> LogicErrors,
+    [property: JsonPropertyName("causality_errors")] IReadOnlyList<string> CausalityErrors,
+    [property: JsonPropertyName("emotion_errors")] IReadOnlyList<string> EmotionErrors,
+    [property: JsonPropertyName("narration_errors")] IReadOnlyList<string> NarrationErrors,
+    [property: JsonPropertyName("execution_errors")] IReadOnlyList<string> ExecutionErrors,
+    [property: JsonPropertyName("character_state_errors")] IReadOnlyList<string> CharacterStateErrors,
+    [property: JsonPropertyName("pov_errors")] IReadOnlyList<string> PovErrors,
+    [property: JsonPropertyName("continuity_errors")] IReadOnlyList<string> ContinuityErrors,
+    [property: JsonPropertyName("transition_errors")] IReadOnlyList<string> TransitionErrors,
+    [property: JsonPropertyName("forbidden_fact_errors")] IReadOnlyList<string> ForbiddenFactErrors,
+    [property: JsonPropertyName("reference_binding_errors")] IReadOnlyList<string> ReferenceBindingErrors,
+    [property: JsonPropertyName("material_fit_errors")] IReadOnlyList<string> MaterialFitErrors,
+    [property: JsonPropertyName("screenplay_drift_risks")] IReadOnlyList<string> ScreenplayDriftRisks,
+    [property: JsonPropertyName("ai_prose_risks")] IReadOnlyList<string> AiProseRisks,
+    [property: JsonPropertyName("novelistic_narration_errors")] IReadOnlyList<string> NovelisticNarrationErrors,
+    [property: JsonPropertyName("required_fixes")] IReadOnlyList<string> RequiredFixes,
+    [property: JsonPropertyName("reviewed_at")] DateTimeOffset ReviewedAt);
+
+public sealed record ApproveReferenceChapterBlueprintPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("review_id")] string ReviewId);
+
+public sealed record BindReferenceBlueprintMaterialsPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("max_results_per_beat")] int MaxResultsPerBeat);
+
+public sealed record ReferenceBlueprintMaterialLinkPayload(
+    [property: JsonPropertyName("link_id")] string LinkId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("beat_id")] string BeatId,
+    [property: JsonPropertyName("material_id")] string MaterialId,
+    [property: JsonPropertyName("intended_use")] string IntendedUse,
+    [property: JsonPropertyName("max_rewrite_level")] string MaxRewriteLevel,
+    [property: JsonPropertyName("selected")] bool Selected,
+    [property: JsonPropertyName("score")] double Score,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
+
+public sealed record ReferenceBlueprintMaterialBindingResultPayload(
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("links")] IReadOnlyList<ReferenceBlueprintMaterialLinkPayload> Links);
+
+public sealed record GenerateReferenceAnchoredDraftPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("beat_ids")] IReadOnlyList<string> BeatIds);
+
+public sealed record ReferenceAnchoredDraftPayload(
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("candidates")] IReadOnlyList<ReferenceDraftParagraphCandidatePayload> Candidates,
+    [property: JsonPropertyName("audit")] ReferenceAnchoredDraftAuditPayload? Audit);
+
+public sealed record ReferenceDraftParagraphCandidatePayload(
+    [property: JsonPropertyName("candidate_id")] string CandidateId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("beat_id")] string BeatId,
+    [property: JsonPropertyName("material_id")] string MaterialId,
+    [property: JsonPropertyName("rewrite_level")] string RewriteLevel,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("changed_slots")] IReadOnlyList<ReferenceSlotValuePayload> ChangedSlots,
+    [property: JsonPropertyName("non_slot_edits")] IReadOnlyList<string> NonSlotEdits,
+    [property: JsonPropertyName("audit_status")] string AuditStatus,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
+
+public sealed record AuditReferenceAnchoredDraftPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("candidate_ids")] IReadOnlyList<string> CandidateIds);
+
+public sealed record ReferenceAnchoredDraftAuditPayload(
+    [property: JsonPropertyName("audit_id")] string AuditId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("rewrite_level")] string RewriteLevel,
+    [property: JsonPropertyName("provenance_errors")] IReadOnlyList<string> ProvenanceErrors,
+    [property: JsonPropertyName("blueprint_errors")] IReadOnlyList<string> BlueprintErrors,
+    [property: JsonPropertyName("unsupported_fact_errors")] IReadOnlyList<string> UnsupportedFactErrors,
+    [property: JsonPropertyName("pov_errors")] IReadOnlyList<string> PovErrors,
+    [property: JsonPropertyName("ai_prose_risks")] IReadOnlyList<string> AiProseRisks,
+    [property: JsonPropertyName("required_fixes")] IReadOnlyList<string> RequiredFixes,
+    [property: JsonPropertyName("audited_at")] DateTimeOffset AuditedAt);

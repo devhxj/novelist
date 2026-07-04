@@ -414,6 +414,367 @@ export namespace reader {
   }
 }
 
+export namespace reference {
+  export interface Anchor {
+    anchor_id: number
+    novel_id: number
+    title: string
+    author: string
+    source_path: string
+    source_kind: string
+    license_status: string
+    source_file_hash: string
+    build_version: string
+    status: string
+    created_at: Timestamp
+    updated_at: Timestamp
+  }
+
+  export interface CreateAnchorInput {
+    novel_id: number
+    title: string
+    author?: string
+    source_path: string
+    source_kind: string
+    license_status: string
+  }
+
+  export interface BuildStatus {
+    novel_id: number
+    anchor_id: number
+    status: string
+    stage: string
+    source_segment_count: number
+    material_count: number
+    slot_count: number
+    vector_count: number
+    last_error: string
+    updated_at: Timestamp
+  }
+
+  export interface Material {
+    material_id: string
+    anchor_id: number
+    source_segment_id: string
+    material_type: string
+    function_tag: string
+    emotion_tag: string
+    scene_tag: string
+    pov_tag: string
+    technique_tag: string
+    function_confidence: number
+    emotion_confidence: number
+    pov_confidence: number
+    text: string
+    source_hash: string
+    extractor_version: string
+    user_verified: boolean
+    created_at: Timestamp
+  }
+
+  export interface MaterialQuery {
+    query: string
+    material_types: string[]
+    emotion_tags: string[]
+    function_tags: string[]
+    pov_tags: string[]
+    technique_tags: string[]
+    max_results: number
+  }
+
+  export interface SearchMaterialsInput {
+    novel_id: number
+    anchor_ids: number[]
+    query: string
+    material_types: string[]
+    emotion_tags: string[]
+    function_tags: string[]
+    pov_tags: string[]
+    technique_tags: string[]
+    page: number
+    size: number
+  }
+
+  export interface SlotValue {
+    slot_name: string
+    value: string
+  }
+
+  export interface AdaptMaterialInput {
+    novel_id: number
+    material_id: string
+    slot_values: SlotValue[]
+    max_rewrite_level: string
+    scene_facts: string[]
+  }
+
+  export interface AuditReuseInput {
+    novel_id: number
+    material_id: string
+    candidate_text: string
+    max_rewrite_level: string
+    scene_facts: string[]
+  }
+
+  export interface ReuseAudit {
+    audit_id: string
+    status: string
+    rewrite_level: string
+    provenance_errors: string[]
+    unsupported_fact_errors: string[]
+    ai_prose_risks: string[]
+    required_fixes: string[]
+    audited_at: Timestamp
+  }
+
+  export interface AdaptMaterialResult {
+    candidate_id: string
+    material_id: string
+    rewrite_level: string
+    text: string
+    changed_slots: SlotValue[]
+    non_slot_edits: string[]
+    audit: ReuseAudit
+  }
+
+  export interface GenerateChapterBlueprintInput {
+    novel_id: number
+    chapter_number: number
+    title?: string
+    chapter_goal?: string
+    anchor_ids: number[]
+    known_facts: string[]
+    forbidden_facts: string[]
+  }
+
+  export interface ChapterBlueprintSummary {
+    blueprint_id: number
+    novel_id: number
+    chapter_number: number
+    title: string
+    status: string
+    source_plan_hash: string
+    updated_at: Timestamp
+  }
+
+  export interface ChapterBlueprint {
+    blueprint_id: number
+    novel_id: number
+    chapter_number: number
+    title: string
+    status: string
+    source_plan_scope: string
+    source_plan_hash: string
+    context_hash: string
+    analysis_contract_hash: string
+    blueprint_version: number
+    parent_blueprint_id: number
+    primary_anchor_id: number
+    chapter_function: string
+    logic_analysis: ChapterBlueprintAnalysisTrack
+    emotion_analysis: ChapterBlueprintAnalysisTrack
+    narration_analysis: ChapterBlueprintAnalysisTrack
+    character_analysis: ChapterBlueprintAnalysisTrack
+    reference_analysis: ChapterBlueprintAnalysisTrack
+    transition_plan: ChapterBlueprintAnalysisTrack
+    execution_contract: ChapterBlueprintExecutionTrack
+    previous_state: string
+    final_state: string
+    final_hook: string
+    global_pov: string
+    global_narrative_distance: string
+    known_facts: string[]
+    forbidden_facts: string[]
+    risk_flags: string[]
+    beats: ChapterBlueprintBeat[]
+    latest_review?: ChapterBlueprintReview | null
+    created_at: Timestamp
+    updated_at: Timestamp
+  }
+
+  export interface ChapterBlueprintAnalysisTrack {
+    track: string
+    summary: string
+    points: string[]
+  }
+
+  export interface ChapterBlueprintExecutionTrack {
+    track: string
+    summary: string
+    paragraph_intentions: string[]
+    execution_modes: string[]
+    anti_screenplay_duties: string[]
+    source_backed_detail_targets: string[]
+    candidate_rejection_rules: string[]
+  }
+
+  export interface ChapterBlueprintBeat {
+    beat_id: string
+    beat_index: number
+    scene_index: number
+    beat_type: string
+    narrative_function: string
+    logic_premise: string
+    conflict_pressure: string
+    causality_in: string
+    causality_out: string
+    transition_in: string
+    transition_out: string
+    pov_character: string
+    narrative_distance: string
+    viewpoint_allowed_knowledge: string[]
+    viewpoint_forbidden_knowledge: string[]
+    character_states_before: string[]
+    character_states_after: string[]
+    character_goals: string[]
+    character_misbeliefs: string[]
+    relationship_pressure: string[]
+    emotion_trigger: string
+    emotion_before: string
+    emotion_after: string
+    suppressed_reaction: string
+    external_evidence: string
+    narration_strategy: string
+    rhythm_strategy: string
+    paragraph_intention: string
+    execution_mode: string
+    anti_screenplay_duty: string
+    sensory_anchor_target: string
+    subtext_plan: string
+    source_backed_detail_target: string
+    candidate_rejection_rule: string
+    scene_facts: string[]
+    forbidden_facts: string[]
+    reference_query: MaterialQuery
+    required_material_types: string[]
+    max_rewrite_level: string
+    slot_plan: SlotValue[]
+    locked_phrase_policy: string
+    no_reuse_reason: string
+    prose_duties: string[]
+    risk_flags: string[]
+  }
+
+  export interface ReviewChapterBlueprintInput {
+    novel_id: number
+    blueprint_id: number
+  }
+
+  export interface BlueprintRevisionChange {
+    field_path: string
+    new_value: string
+  }
+
+  export interface ReviseChapterBlueprintInput {
+    novel_id: number
+    blueprint_id: number
+    changes: BlueprintRevisionChange[]
+    origin: string
+    revision_reason: string
+  }
+
+  export interface ChapterBlueprintReview {
+    review_id: string
+    blueprint_id: number
+    context_hash: string
+    source_plan_hash: string
+    analysis_contract_hash: string
+    status: string
+    score: number
+    logic_errors: string[]
+    causality_errors: string[]
+    emotion_errors: string[]
+    narration_errors: string[]
+    execution_errors: string[]
+    character_state_errors: string[]
+    pov_errors: string[]
+    continuity_errors: string[]
+    transition_errors: string[]
+    forbidden_fact_errors: string[]
+    reference_binding_errors: string[]
+    material_fit_errors: string[]
+    screenplay_drift_risks: string[]
+    ai_prose_risks: string[]
+    novelistic_narration_errors: string[]
+    required_fixes: string[]
+    reviewed_at: Timestamp
+  }
+
+  export interface ApproveChapterBlueprintInput {
+    novel_id: number
+    blueprint_id: number
+    review_id: string
+  }
+
+  export interface BindBlueprintMaterialsInput {
+    novel_id: number
+    blueprint_id: number
+    max_results_per_beat: number
+  }
+
+  export interface BlueprintMaterialLink {
+    link_id: string
+    blueprint_id: number
+    beat_id: string
+    material_id: string
+    intended_use: string
+    max_rewrite_level: string
+    selected: boolean
+    score: number
+    created_at: Timestamp
+  }
+
+  export interface BlueprintMaterialBindingResult {
+    blueprint_id: number
+    links: BlueprintMaterialLink[]
+  }
+
+  export interface GenerateAnchoredDraftInput {
+    novel_id: number
+    blueprint_id: number
+    beat_ids: string[]
+  }
+
+  export interface DraftParagraphCandidate {
+    candidate_id: string
+    blueprint_id: number
+    beat_id: string
+    material_id: string
+    rewrite_level: string
+    text: string
+    changed_slots: SlotValue[]
+    non_slot_edits: string[]
+    audit_status: string
+    created_at: Timestamp
+  }
+
+  export interface AnchoredDraft {
+    blueprint_id: number
+    candidates: DraftParagraphCandidate[]
+    audit?: AnchoredDraftAudit | null
+  }
+
+  export interface AuditAnchoredDraftInput {
+    novel_id: number
+    blueprint_id: number
+    candidate_ids: string[]
+  }
+
+  export interface AnchoredDraftAudit {
+    audit_id: string
+    blueprint_id: number
+    status: string
+    rewrite_level: string
+    provenance_errors: string[]
+    blueprint_errors: string[]
+    unsupported_fact_errors: string[]
+    pov_errors: string[]
+    ai_prose_risks: string[]
+    required_fixes: string[]
+    audited_at: Timestamp
+  }
+}
+
 export namespace search {
   export interface Result {
     type: string
@@ -467,6 +828,14 @@ export namespace skill {
 export namespace storage {
   export interface PageResult_novel_app_SessionMeta_ {
     items: app.SessionMeta[]
+    total: number
+    page: number
+    size: number
+    total_pages: number
+  }
+
+  export interface PageResult_reference_Material_ {
+    items: reference.Material[]
     total: number
     page: number
     size: number

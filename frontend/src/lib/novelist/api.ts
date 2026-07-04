@@ -8,6 +8,7 @@ import type {
   location,
   novel,
   reader,
+  reference,
   search,
   session,
   skill,
@@ -73,6 +74,11 @@ export interface SearchStoryMemoryResult {
 
 export interface NovelistAppApi {
   ApproveTool: AppMethod<[string, boolean, string], void>
+  AdaptReferenceMaterial: AppMethod<[reference.AdaptMaterialInput], reference.AdaptMaterialResult>
+  ApproveReferenceChapterBlueprint: AppMethod<[reference.ApproveChapterBlueprintInput], reference.ChapterBlueprint>
+  AuditReferenceAnchoredDraft: AppMethod<[reference.AuditAnchoredDraftInput], reference.AnchoredDraftAudit>
+  AuditReferenceReuse: AppMethod<[reference.AuditReuseInput], reference.ReuseAudit>
+  BindReferenceBlueprintMaterials: AppMethod<[reference.BindBlueprintMaterialsInput], reference.BlueprintMaterialBindingResult>
   CancelChat: AppMethod<[string], void>
   Chat: AppMethod<[app.ChatInput], app.ChatResult>
   CompressContext: AppMethod<[app.CompressInput], app.CompressResult>
@@ -83,6 +89,7 @@ export interface NovelistAppApi {
   CreateNovel: AppMethod<[app.CreateNovelInput], novel.Novel>
   CreatePreference: AppMethod<[number, app.CreatePreferenceInput], novel.PreferenceItem>
   CreateReaderPerspective: AppMethod<[number, app.CreateReaderPerspectiveInput], reader.ReaderPerspective>
+  CreateReferenceAnchor: AppMethod<[reference.CreateAnchorInput], reference.Anchor>
   CreateStoryArc: AppMethod<[number, app.CreateStoryArcInput], storyarc.StoryArc>
   CreateTimelineEntry: AppMethod<[number, app.CreateTimelineEntryInput], timeline.TimelineEntry>
   DeleteArcNode: AppMethod<[number, number], void>
@@ -92,12 +99,15 @@ export interface NovelistAppApi {
   DeleteNovel: AppMethod<[number], void>
   DeletePreference: AppMethod<[number], void>
   DeleteReaderPerspective: AppMethod<[number, number], void>
+  DeleteReferenceAnchor: AppMethod<[number, number], void>
   DeleteSkill: AppMethod<[app.DeleteSkillInput], void>
   DeleteStoryArc: AppMethod<[number, number], void>
   DeleteTimelineEntry: AppMethod<[number, number], void>
   DiscoverModels: AppMethod<[string, string], llm.ModelInfo[]>
   ExportNovel: AppMethod<[number, string], void>
   ExtractStyle: AppMethod<[app.ExtractStyleInput], app.ExtractStyleResult>
+  GenerateReferenceAnchoredDraft: AppMethod<[reference.GenerateAnchoredDraftInput], reference.AnchoredDraft>
+  GenerateReferenceChapterBlueprint: AppMethod<[reference.GenerateChapterBlueprintInput], reference.ChapterBlueprint>
   GetAppConfig: AppMethod<[], Record<string, unknown>>
   GetArcNodes: AppMethod<[number, number, number], storyarc.ArcNode[]>
   GetChapterPlans: AppMethod<[number], timeline.ChapterPlan[]>
@@ -116,6 +126,10 @@ export interface NovelistAppApi {
   GetPlatform: AppMethod<[], Record<string, unknown>>
   GetPreferences: AppMethod<[number], app.PreferenceResult>
   GetReaderPerspectives: AppMethod<[number], reader.ReaderPerspective[]>
+  GetReferenceAnchorBuildStatus: AppMethod<[number, number], reference.BuildStatus | null>
+  GetReferenceAnchors: AppMethod<[number], reference.Anchor[]>
+  GetReferenceChapterBlueprint: AppMethod<[number, number], reference.ChapterBlueprint | null>
+  GetReferenceChapterBlueprints: AppMethod<[number, number | null], reference.ChapterBlueprintSummary[]>
   GetSession: AppMethod<[string], app.SessionDetail>
   GetSessionMessages: AppMethod<[string], session.Message[]>
   GetSessions: AppMethod<[app.GetSessionsInput], storage.PageResult_novel_app_SessionMeta_>
@@ -129,7 +143,10 @@ export interface NovelistAppApi {
   IsInitialized: AppMethod<[], boolean>
   ListSkills: AppMethod<[app.ListSkillsInput], skill.SkillMeta[]>
   ListSlashCommands: AppMethod<[app.ListSlashCommandsInput], app.SlashCommand[]>
+  RebuildReferenceAnchor: AppMethod<[number, number], reference.BuildStatus>
   RebuildNovelIndex: AppMethod<[number], void>
+  ReviseReferenceChapterBlueprint: AppMethod<[reference.ReviseChapterBlueprintInput], reference.ChapterBlueprint>
+  ReviewReferenceChapterBlueprint: AppMethod<[reference.ReviewChapterBlueprintInput], reference.ChapterBlueprintReview>
   SaveAvatar: AppMethod<[number[]], void>
   SaveContent: AppMethod<[app.SaveContentInput], void>
   SaveCover: AppMethod<[number, number[]], void>
@@ -138,6 +155,7 @@ export interface NovelistAppApi {
   SaveSettings: AppMethod<[app.SaveSettingsInput], void>
   SaveUserName: AppMethod<[string], void>
   SearchAll: AppMethod<[number, string], search.Result[]>
+  SearchReferenceMaterials: AppMethod<[reference.SearchMaterialsInput], storage.PageResult_reference_Material_>
   SearchStoryMemory: AppMethod<[SearchStoryMemoryInput], SearchStoryMemoryResult>
   SetActiveNovel: AppMethod<[app.SetActiveNovelInput], void>
   SetApprovalMode: AppMethod<[string], void>
@@ -188,6 +206,11 @@ export function toArgsPayload(args: AppMethodArgs): unknown {
 
 export const appApi: NovelistAppApi = {
   ApproveTool: appMethod<NovelistAppApi['ApproveTool']>('ApproveTool'),
+  AdaptReferenceMaterial: appMethod<NovelistAppApi['AdaptReferenceMaterial']>('AdaptReferenceMaterial'),
+  ApproveReferenceChapterBlueprint: appMethod<NovelistAppApi['ApproveReferenceChapterBlueprint']>('ApproveReferenceChapterBlueprint'),
+  AuditReferenceAnchoredDraft: appMethod<NovelistAppApi['AuditReferenceAnchoredDraft']>('AuditReferenceAnchoredDraft'),
+  AuditReferenceReuse: appMethod<NovelistAppApi['AuditReferenceReuse']>('AuditReferenceReuse'),
+  BindReferenceBlueprintMaterials: appMethod<NovelistAppApi['BindReferenceBlueprintMaterials']>('BindReferenceBlueprintMaterials'),
   CancelChat: appMethod<NovelistAppApi['CancelChat']>('CancelChat'),
   Chat: ((...args) => invokeAppArgs('Chat', args, { timeoutMs: null })) as NovelistAppApi['Chat'],
   CompressContext: appMethod<NovelistAppApi['CompressContext']>('CompressContext'),
@@ -198,6 +221,7 @@ export const appApi: NovelistAppApi = {
   CreateNovel: appMethod<NovelistAppApi['CreateNovel']>('CreateNovel'),
   CreatePreference: appMethod<NovelistAppApi['CreatePreference']>('CreatePreference'),
   CreateReaderPerspective: appMethod<NovelistAppApi['CreateReaderPerspective']>('CreateReaderPerspective'),
+  CreateReferenceAnchor: appMethod<NovelistAppApi['CreateReferenceAnchor']>('CreateReferenceAnchor'),
   CreateStoryArc: appMethod<NovelistAppApi['CreateStoryArc']>('CreateStoryArc'),
   CreateTimelineEntry: appMethod<NovelistAppApi['CreateTimelineEntry']>('CreateTimelineEntry'),
   DeleteArcNode: appMethod<NovelistAppApi['DeleteArcNode']>('DeleteArcNode'),
@@ -207,12 +231,15 @@ export const appApi: NovelistAppApi = {
   DeleteNovel: appMethod<NovelistAppApi['DeleteNovel']>('DeleteNovel'),
   DeletePreference: appMethod<NovelistAppApi['DeletePreference']>('DeletePreference'),
   DeleteReaderPerspective: appMethod<NovelistAppApi['DeleteReaderPerspective']>('DeleteReaderPerspective'),
+  DeleteReferenceAnchor: appMethod<NovelistAppApi['DeleteReferenceAnchor']>('DeleteReferenceAnchor'),
   DeleteSkill: appMethod<NovelistAppApi['DeleteSkill']>('DeleteSkill'),
   DeleteStoryArc: appMethod<NovelistAppApi['DeleteStoryArc']>('DeleteStoryArc'),
   DeleteTimelineEntry: appMethod<NovelistAppApi['DeleteTimelineEntry']>('DeleteTimelineEntry'),
   DiscoverModels: appMethod<NovelistAppApi['DiscoverModels']>('DiscoverModels'),
   ExportNovel: appMethod<NovelistAppApi['ExportNovel']>('ExportNovel'),
   ExtractStyle: appMethod<NovelistAppApi['ExtractStyle']>('ExtractStyle'),
+  GenerateReferenceAnchoredDraft: appMethod<NovelistAppApi['GenerateReferenceAnchoredDraft']>('GenerateReferenceAnchoredDraft'),
+  GenerateReferenceChapterBlueprint: appMethod<NovelistAppApi['GenerateReferenceChapterBlueprint']>('GenerateReferenceChapterBlueprint'),
   GetAppConfig: appMethod<NovelistAppApi['GetAppConfig']>('GetAppConfig'),
   GetArcNodes: appMethod<NovelistAppApi['GetArcNodes']>('GetArcNodes'),
   GetChapterPlans: appMethod<NovelistAppApi['GetChapterPlans']>('GetChapterPlans'),
@@ -231,6 +258,10 @@ export const appApi: NovelistAppApi = {
   GetPlatform: appMethod<NovelistAppApi['GetPlatform']>('GetPlatform'),
   GetPreferences: appMethod<NovelistAppApi['GetPreferences']>('GetPreferences'),
   GetReaderPerspectives: appMethod<NovelistAppApi['GetReaderPerspectives']>('GetReaderPerspectives'),
+  GetReferenceAnchorBuildStatus: appMethod<NovelistAppApi['GetReferenceAnchorBuildStatus']>('GetReferenceAnchorBuildStatus'),
+  GetReferenceAnchors: appMethod<NovelistAppApi['GetReferenceAnchors']>('GetReferenceAnchors'),
+  GetReferenceChapterBlueprint: appMethod<NovelistAppApi['GetReferenceChapterBlueprint']>('GetReferenceChapterBlueprint'),
+  GetReferenceChapterBlueprints: appMethod<NovelistAppApi['GetReferenceChapterBlueprints']>('GetReferenceChapterBlueprints'),
   GetSession: appMethod<NovelistAppApi['GetSession']>('GetSession'),
   GetSessionMessages: appMethod<NovelistAppApi['GetSessionMessages']>('GetSessionMessages'),
   GetSessions: appMethod<NovelistAppApi['GetSessions']>('GetSessions'),
@@ -244,7 +275,10 @@ export const appApi: NovelistAppApi = {
   IsInitialized: appMethod<NovelistAppApi['IsInitialized']>('IsInitialized'),
   ListSkills: appMethod<NovelistAppApi['ListSkills']>('ListSkills'),
   ListSlashCommands: appMethod<NovelistAppApi['ListSlashCommands']>('ListSlashCommands'),
+  RebuildReferenceAnchor: appMethod<NovelistAppApi['RebuildReferenceAnchor']>('RebuildReferenceAnchor'),
   RebuildNovelIndex: appMethod<NovelistAppApi['RebuildNovelIndex']>('RebuildNovelIndex'),
+  ReviseReferenceChapterBlueprint: appMethod<NovelistAppApi['ReviseReferenceChapterBlueprint']>('ReviseReferenceChapterBlueprint'),
+  ReviewReferenceChapterBlueprint: appMethod<NovelistAppApi['ReviewReferenceChapterBlueprint']>('ReviewReferenceChapterBlueprint'),
   SaveAvatar: appMethod<NovelistAppApi['SaveAvatar']>('SaveAvatar'),
   SaveContent: appMethod<NovelistAppApi['SaveContent']>('SaveContent'),
   SaveCover: appMethod<NovelistAppApi['SaveCover']>('SaveCover'),
@@ -253,6 +287,7 @@ export const appApi: NovelistAppApi = {
   SaveSettings: appMethod<NovelistAppApi['SaveSettings']>('SaveSettings'),
   SaveUserName: appMethod<NovelistAppApi['SaveUserName']>('SaveUserName'),
   SearchAll: appMethod<NovelistAppApi['SearchAll']>('SearchAll'),
+  SearchReferenceMaterials: appMethod<NovelistAppApi['SearchReferenceMaterials']>('SearchReferenceMaterials'),
   SearchStoryMemory: appMethod<NovelistAppApi['SearchStoryMemory']>('SearchStoryMemory'),
   SetActiveNovel: appMethod<NovelistAppApi['SetActiveNovel']>('SetActiveNovel'),
   SetApprovalMode: appMethod<NovelistAppApi['SetApprovalMode']>('SetApprovalMode'),

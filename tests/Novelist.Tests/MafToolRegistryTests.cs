@@ -149,6 +149,92 @@ public sealed class MafToolRegistryTests
     }
 
     [Fact]
+    public void CreateToolsIncludesReferenceToolsOnlyWhenServicesAreConfigured()
+    {
+        var withoutReferenceServices = new NovelistMafToolRegistry(new RecordingStoryMemorySearchService());
+        Assert.DoesNotContain(
+            withoutReferenceServices.CreateTools(new NovelistMafToolContext(17)),
+            tool => tool.Name.StartsWith("search_reference", StringComparison.Ordinal) ||
+                tool.Name.StartsWith("generate_reference", StringComparison.Ordinal));
+
+        var registry = new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors: new RecordingReferenceAnchorService(),
+            referenceDrafts: new RecordingReferenceAnchoredDraftService());
+
+        var tools = registry.CreateTools(new NovelistMafToolContext(17));
+        var names = tools.Select(tool => tool.Name).ToArray();
+
+        Assert.Contains("get_reference_anchors", names);
+        Assert.Contains("search_reference_materials", names);
+        Assert.Contains("adapt_reference_material", names);
+        Assert.Contains("audit_reference_reuse", names);
+        Assert.Contains("generate_reference_chapter_blueprint", names);
+        Assert.Contains("review_reference_chapter_blueprint", names);
+        Assert.Contains("revise_reference_chapter_blueprint", names);
+        Assert.Contains("approve_reference_chapter_blueprint", names);
+        Assert.Contains("bind_reference_blueprint_materials", names);
+        Assert.Contains("generate_reference_anchored_draft", names);
+        Assert.Contains("audit_reference_anchored_draft", names);
+
+        foreach (var tool in tools.Where(tool => tool.Name.Contains("reference", StringComparison.Ordinal)))
+        {
+            Assert.True(tool.JsonSchema.TryGetProperty("properties", out var properties), tool.Name);
+            Assert.False(properties.TryGetProperty("novel_id", out _), tool.Name);
+            Assert.False(properties.TryGetProperty("session_id", out _), tool.Name);
+            Assert.False(properties.TryGetProperty("turn_id", out _), tool.Name);
+            Assert.False(properties.TryGetProperty("tool_id", out _), tool.Name);
+        }
+
+        var generateDraft = tools.Single(tool => tool.Name == "generate_reference_anchored_draft");
+        Assert.Contains("approved", generateDraft.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SaveContent", generateDraft.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReferenceMaterialToolInjectsNovelContext()
+    {
+        var anchors = new RecordingReferenceAnchorService();
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors: anchors));
+
+        var result = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 1),
+            new ChatToolCall(
+                "call_reference_search",
+                "search_reference_materials",
+                """{"query":"雨夜压迫感","anchor_ids":[7],"material_types":["sentence"],"page":1,"size":5}"""),
+            CancellationToken.None);
+
+        Assert.True(result.Success, result.Error);
+        Assert.NotNull(anchors.LastSearch);
+        Assert.Equal(23, anchors.LastSearch.NovelId);
+        Assert.Equal("雨夜压迫感", anchors.LastSearch.Query);
+        Assert.Equal([7], anchors.LastSearch.AnchorIds);
+        Assert.Equal(["sentence"], anchors.LastSearch.MaterialTypes);
+        Assert.Equal("mat-1", result.Data!.Value.GetProperty("items")[0].GetProperty("material_id").GetString());
+    }
+
+    [Fact]
     public async Task StructuredToolSupportsComplexArrayArgumentsAndInjectsNovelContext()
     {
         var world = new RecordingWorldEntityService();
@@ -424,6 +510,294 @@ public sealed class MafToolRegistryTests
                 [prompt],
                 "综合摘要",
                 [new WebSearchSourcePayload("来源", "https://example.test/source")]));
+        }
+    }
+
+    private sealed class RecordingReferenceAnchorService : IReferenceAnchorService
+    {
+        public SearchReferenceMaterialsPayload? LastSearch { get; private set; }
+
+        public ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(
+            CreateReferenceAnchorPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new ReferenceAnchorPayload(
+                7,
+                input.NovelId,
+                input.Title,
+                input.Author ?? string.Empty,
+                input.SourcePath,
+                input.SourceKind,
+                input.LicenseStatus,
+                "hash",
+                "test",
+                ReferenceAnchorBuildStates.Ready,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(long novelId, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<ReferenceAnchorPayload>>(
+            [
+                new ReferenceAnchorPayload(
+                    7,
+                    novelId,
+                    "参考书",
+                    "作者",
+                    string.Empty,
+                    "markdown",
+                    "user_provided",
+                    "hash",
+                    "test",
+                    ReferenceAnchorBuildStates.Ready,
+                    DateTimeOffset.UtcNow,
+                    DateTimeOffset.UtcNow)
+            ]);
+        }
+
+        public ValueTask<ReferenceAnchorBuildStatusPayload> RebuildAnchorAsync(
+            long novelId,
+            long anchorId,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new ReferenceAnchorBuildStatusPayload(
+                novelId,
+                anchorId,
+                ReferenceAnchorBuildStates.Ready,
+                "ready",
+                1,
+                1,
+                0,
+                0,
+                string.Empty,
+                DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask<ReferenceAnchorBuildStatusPayload?> GetBuildStatusAsync(
+            long novelId,
+            long anchorId,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<ReferenceAnchorBuildStatusPayload?>(new ReferenceAnchorBuildStatusPayload(
+                novelId,
+                anchorId,
+                ReferenceAnchorBuildStates.Ready,
+                "ready",
+                1,
+                1,
+                0,
+                0,
+                string.Empty,
+                DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(
+            SearchReferenceMaterialsPayload input,
+            CancellationToken cancellationToken)
+        {
+            LastSearch = input;
+            return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialPayload>(
+                [
+                    new ReferenceMaterialPayload(
+                        "mat-1",
+                        7,
+                        "seg-1",
+                        ReferenceMaterialTypes.Sentence,
+                        "environment",
+                        "pressure",
+                        "rain",
+                        "close",
+                        "sensory",
+                        1,
+                        1,
+                        1,
+                        "雨声压低了整条街的呼吸。",
+                        "hash",
+                        "test",
+                        false,
+                        DateTimeOffset.UtcNow)
+                ],
+                Total: 1,
+                Page: input.Page,
+                Size: input.Size,
+                TotalPages: 1));
+        }
+
+        public ValueTask<AdaptReferenceMaterialResultPayload> AdaptMaterialAsync(
+            AdaptReferenceMaterialPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new AdaptReferenceMaterialResultPayload(
+                "candidate-1",
+                input.MaterialId,
+                ReferenceRewriteLevels.L1,
+                "雨声压低了整条街的呼吸。",
+                input.SlotValues,
+                [],
+                new ReferenceReuseAuditPayload(
+                    "audit-1",
+                    "passed",
+                    ReferenceRewriteLevels.L1,
+                    [],
+                    [],
+                    [],
+                    [],
+                    DateTimeOffset.UtcNow)));
+        }
+
+        public ValueTask<ReferenceReuseAuditPayload> AuditCandidateAsync(
+            AuditReferenceReusePayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new ReferenceReuseAuditPayload(
+                "audit-1",
+                "passed",
+                ReferenceRewriteLevels.L1,
+                [],
+                [],
+                [],
+                [],
+                DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask DeleteAnchorAsync(long novelId, long anchorId, CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingReferenceAnchoredDraftService : IReferenceAnchoredDraftService
+    {
+        public ValueTask<ReferenceChapterBlueprintPayload> GenerateChapterBlueprintAsync(
+            GenerateReferenceChapterBlueprintPayload input,
+            CancellationToken cancellationToken)
+        {
+            var now = DateTimeOffset.UtcNow;
+            return ValueTask.FromResult(new ReferenceChapterBlueprintPayload(
+                101,
+                input.NovelId,
+                input.ChapterNumber,
+                input.Title ?? "蓝图",
+                ReferenceBlueprintStates.Draft,
+                "next",
+                "plan-hash",
+                "context-hash",
+                "analysis-hash",
+                1,
+                0,
+                input.AnchorIds.FirstOrDefault(),
+                input.ChapterGoal ?? string.Empty,
+                new ReferenceChapterBlueprintAnalysisTrackPayload("logic", "logic", ["premise"]),
+                new ReferenceChapterBlueprintAnalysisTrackPayload("emotion", "emotion", ["trigger"]),
+                new ReferenceChapterBlueprintAnalysisTrackPayload("narration", "narration", ["distance"]),
+                new ReferenceChapterBlueprintAnalysisTrackPayload("character", "character", ["goal"]),
+                new ReferenceChapterBlueprintAnalysisTrackPayload("reference", "reference", ["query"]),
+                new ReferenceChapterBlueprintAnalysisTrackPayload("transition", "transition", ["reason"]),
+                new ReferenceChapterBlueprintExecutionTrackPayload("execution", "execution", ["intend"], ["dwell"], ["not script"], ["detail"], ["reject"]),
+                "previous",
+                "final",
+                "hook",
+                "pov",
+                "close",
+                input.KnownFacts,
+                input.ForbiddenFacts,
+                [],
+                [],
+                null,
+                now,
+                now));
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceChapterBlueprintSummaryPayload>> GetChapterBlueprintsAsync(long novelId, int? chapterNumber, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<ReferenceChapterBlueprintSummaryPayload>>([]);
+        }
+
+        public ValueTask<ReferenceChapterBlueprintPayload?> GetChapterBlueprintAsync(long novelId, long blueprintId, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<ReferenceChapterBlueprintPayload?>(null);
+        }
+
+        public ValueTask<ReferenceChapterBlueprintReviewPayload> ReviewChapterBlueprintAsync(
+            ReviewReferenceChapterBlueprintPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new ReferenceChapterBlueprintReviewPayload(
+                "review-1",
+                input.BlueprintId,
+                "context-hash",
+                "plan-hash",
+                "analysis-hash",
+                ReferenceBlueprintReviewStatuses.Passed,
+                1,
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask<ReferenceChapterBlueprintPayload> ReviseChapterBlueprintAsync(
+            ReviseReferenceChapterBlueprintPayload input,
+            CancellationToken cancellationToken)
+        {
+            return GenerateChapterBlueprintAsync(
+                new GenerateReferenceChapterBlueprintPayload(input.NovelId, 1, "修订蓝图", input.RevisionReason, [], [], []),
+                cancellationToken);
+        }
+
+        public ValueTask<ReferenceChapterBlueprintPayload> ApproveChapterBlueprintAsync(
+            ApproveReferenceChapterBlueprintPayload input,
+            CancellationToken cancellationToken)
+        {
+            return GenerateChapterBlueprintAsync(
+                new GenerateReferenceChapterBlueprintPayload(input.NovelId, 1, "批准蓝图", "approved", [], [], []),
+                cancellationToken);
+        }
+
+        public ValueTask<ReferenceBlueprintMaterialBindingResultPayload> BindBlueprintMaterialsAsync(
+            BindReferenceBlueprintMaterialsPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new ReferenceBlueprintMaterialBindingResultPayload(input.BlueprintId, []));
+        }
+
+        public ValueTask<ReferenceAnchoredDraftPayload> GenerateDraftFromBlueprintAsync(
+            GenerateReferenceAnchoredDraftPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new ReferenceAnchoredDraftPayload(input.BlueprintId, [], null));
+        }
+
+        public ValueTask<ReferenceAnchoredDraftAuditPayload> AuditDraftAgainstBlueprintAsync(
+            AuditReferenceAnchoredDraftPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new ReferenceAnchoredDraftAuditPayload(
+                "draft-audit-1",
+                input.BlueprintId,
+                "passed",
+                ReferenceRewriteLevels.L1,
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                DateTimeOffset.UtcNow));
         }
     }
 

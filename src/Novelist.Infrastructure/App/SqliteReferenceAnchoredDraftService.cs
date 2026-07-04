@@ -1,0 +1,2578 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using Microsoft.Data.Sqlite;
+using Novelist.Contracts.App;
+using Novelist.Contracts.Bridge;
+using Novelist.Core.App;
+using Novelist.Core.Bridge;
+
+namespace Novelist.Infrastructure.App;
+
+public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraftService
+{
+    private const string BuildVersion = "reference-blueprint-v1";
+    private static readonly JsonSerializerOptions JsonOptions = BridgeJson.SerializerOptions;
+
+    private readonly AppInitializationOptions _options;
+    private readonly INovelService _novels;
+    private readonly IPlanningService _planning;
+    private readonly IReferenceAnchorService? _referenceAnchors;
+    private readonly SemaphoreSlim _mutex = new(1, 1);
+
+    public SqliteReferenceAnchoredDraftService(
+        AppInitializationOptions? options = null,
+        INovelService? novels = null,
+        IPlanningService? planning = null,
+        IReferenceAnchorService? referenceAnchors = null)
+    {
+        _options = options ?? new AppInitializationOptions();
+        _novels = novels ?? new FileSystemNovelService(_options);
+        _planning = planning ?? new FileSystemPlanningService(_options, _novels);
+        _referenceAnchors = referenceAnchors;
+    }
+
+    public async ValueTask<ReferenceChapterBlueprintPayload> GenerateChapterBlueprintAsync(
+        GenerateReferenceChapterBlueprintPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        ValidateChapterNumber(input.ChapterNumber);
+        await EnsureNovelExistsAsync(input.NovelId, cancellationToken);
+
+        var plans = await _planning.GetChapterPlansAsync(input.NovelId, cancellationToken);
+        var sourcePlan = plans.FirstOrDefault(plan => string.Equals(plan.Scope, "next", StringComparison.Ordinal))
+            ?? plans.FirstOrDefault()
+            ?? new ChapterPlanPayload(input.NovelId, "next", string.Empty);
+        var planText = string.IsNullOrWhiteSpace(sourcePlan.Content) ? input.ChapterGoal ?? string.Empty : sourcePlan.Content;
+        var sourcePlanHash = HashText(sourcePlan.Scope + "\n" + sourcePlan.Content);
+        var knownFacts = NormalizeList(input.KnownFacts);
+        var forbiddenFacts = NormalizeList(input.ForbiddenFacts);
+        var contextHash = HashText(string.Join("\n", [input.ChapterGoal ?? string.Empty, .. knownFacts, .. forbiddenFacts, .. input.AnchorIds.Select(id => id.ToString(CultureInfo.InvariantCulture))]));
+        var now = DateTimeOffset.UtcNow;
+        var title = NormalizeOptional(input.Title, "Chapter " + input.ChapterNumber.ToString(CultureInfo.InvariantCulture), 200);
+        var chapterFunction = NormalizeOptional(input.ChapterGoal, "establish a reviewable chapter blueprint before prose generation", 2_000);
+        var primaryAnchorId = input.AnchorIds.FirstOrDefault(id => id > 0);
+        var blueprint = BuildDeterministicBlueprint(
+            0,
+            input.NovelId,
+            input.ChapterNumber,
+            title,
+            sourcePlan.Scope,
+            sourcePlanHash,
+            contextHash,
+            primaryAnchorId,
+            chapterFunction,
+            planText,
+            knownFacts,
+            forbiddenFacts,
+            now);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            var blueprintId = await InsertBlueprintAsync(connection, transaction, blueprint, cancellationToken);
+            var persisted = blueprint with
+            {
+                BlueprintId = blueprintId,
+                Beats = blueprint.Beats
+                    .Select(beat => beat with { BeatId = BuildBeatId(blueprintId, beat.BeatIndex) })
+                    .ToArray()
+            };
+            await ReplaceBeatsAsync(connection, transaction, persisted.BlueprintId, persisted.Beats, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return persisted;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<IReadOnlyList<ReferenceChapterBlueprintSummaryPayload>> GetChapterBlueprintsAsync(
+        long novelId,
+        int? chapterNumber,
+        CancellationToken cancellationToken)
+    {
+        ValidateNovelId(novelId);
+        if (chapterNumber is not null)
+        {
+            ValidateChapterNumber(chapterNumber.Value);
+        }
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = chapterNumber is null
+                ? """
+                  SELECT blueprint_id, novel_id, chapter_number, title, status, source_plan_scope, source_plan_hash, updated_at
+                  FROM reference_chapter_blueprints
+                  WHERE novel_id = $novel_id
+                  ORDER BY chapter_number ASC, updated_at DESC, blueprint_id DESC;
+                  """
+                : """
+                  SELECT blueprint_id, novel_id, chapter_number, title, status, source_plan_scope, source_plan_hash, updated_at
+                  FROM reference_chapter_blueprints
+                  WHERE novel_id = $novel_id AND chapter_number = $chapter_number
+                  ORDER BY updated_at DESC, blueprint_id DESC;
+                  """;
+            command.Parameters.AddWithValue("$novel_id", novelId);
+            if (chapterNumber is not null)
+            {
+                command.Parameters.AddWithValue("$chapter_number", chapterNumber.Value);
+            }
+
+            var rows = new List<BlueprintSummaryRow>();
+            await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+            {
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    rows.Add(new BlueprintSummaryRow(
+                        new ReferenceChapterBlueprintSummaryPayload(
+                            reader.GetInt64(0),
+                            reader.GetInt64(1),
+                            reader.GetInt32(2),
+                            reader.GetString(3),
+                            reader.GetString(4),
+                            reader.GetString(6),
+                            ParseTimestamp(reader.GetString(7))),
+                        reader.GetString(5)));
+                }
+            }
+
+            var items = new List<ReferenceChapterBlueprintSummaryPayload>();
+            foreach (var row in rows)
+            {
+                items.Add(await ApplySummaryStalenessAsync(
+                    connection,
+                    row.Summary,
+                    row.SourcePlanScope,
+                    cancellationToken));
+            }
+
+            return items;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<ReferenceChapterBlueprintPayload?> GetChapterBlueprintAsync(
+        long novelId,
+        long blueprintId,
+        CancellationToken cancellationToken)
+    {
+        ValidateNovelId(novelId);
+        ValidateBlueprintId(blueprintId);
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            return await ReadBlueprintAsync(connection, novelId, blueprintId, cancellationToken, required: false);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<ReferenceChapterBlueprintReviewPayload> ReviewChapterBlueprintAsync(
+        ReviewReferenceChapterBlueprintPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        ValidateBlueprintId(input.BlueprintId);
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var blueprint = await ReadBlueprintAsync(connection, input.NovelId, input.BlueprintId, cancellationToken, required: true)
+                ?? throw new InvalidOperationException("Required blueprint was not loaded.");
+            if (string.Equals(blueprint.Status, ReferenceBlueprintStates.Stale, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Stale blueprint must be regenerated before review.", nameof(input));
+            }
+
+            var review = BuildReview(blueprint, DateTimeOffset.UtcNow);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            await InsertReviewAsync(connection, transaction, review, cancellationToken);
+            await UpdateBlueprintStatusAsync(
+                connection,
+                transaction,
+                blueprint.BlueprintId,
+                review.Status == ReferenceBlueprintReviewStatuses.Passed
+                    ? ReferenceBlueprintStates.ReviewPassed
+                    : ReferenceBlueprintStates.ReviewFailed,
+                approvedReviewId: string.Empty,
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return review;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<ReferenceChapterBlueprintPayload> ReviseChapterBlueprintAsync(
+        ReviseReferenceChapterBlueprintPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        ValidateBlueprintId(input.BlueprintId);
+        if (input.Changes.Count == 0)
+        {
+            throw new ArgumentException("At least one blueprint revision change is required.", nameof(input));
+        }
+
+        var origin = NormalizeOptional(input.Origin, "user", 80);
+        var reason = NormalizeOptional(input.RevisionReason, "blueprint revision", 500);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var blueprint = await ReadBlueprintAsync(connection, input.NovelId, input.BlueprintId, cancellationToken, required: true)
+                ?? throw new InvalidOperationException("Required blueprint was not loaded.");
+            if (string.Equals(blueprint.Status, ReferenceBlueprintStates.Stale, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Stale blueprint must be regenerated before revision.", nameof(input));
+            }
+
+            var changedBeats = blueprint.Beats.ToDictionary(beat => beat.BeatId, StringComparer.Ordinal);
+            var revisionRows = new List<BlueprintRevisionRow>();
+            foreach (var change in input.Changes)
+            {
+                ApplyRevisionChange(changedBeats, change, revisionRows, origin, reason, blueprint.LatestReview?.ReviewId);
+            }
+
+            var revised = blueprint with
+            {
+                Status = ReferenceBlueprintStates.Draft,
+                Beats = blueprint.Beats.Select(beat => changedBeats[beat.BeatId]).ToArray(),
+                LatestReview = null,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            revised = revised with { AnalysisContractHash = ComputeAnalysisContractHash(revised) };
+
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            await UpdateBlueprintAfterRevisionAsync(connection, transaction, revised, cancellationToken);
+            await ReplaceBeatsAsync(connection, transaction, revised.BlueprintId, revised.Beats, cancellationToken);
+            await InsertRevisionRowsAsync(connection, transaction, revised.BlueprintId, revisionRows, cancellationToken);
+            await MarkBlueprintMaterialLinksStaleAsync(connection, transaction, revised.BlueprintId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return await ReadBlueprintAsync(connection, input.NovelId, input.BlueprintId, cancellationToken, required: true)
+                ?? throw new InvalidOperationException("Revised blueprint could not be loaded.");
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<ReferenceChapterBlueprintPayload> ApproveChapterBlueprintAsync(
+        ApproveReferenceChapterBlueprintPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        ValidateBlueprintId(input.BlueprintId);
+        if (string.IsNullOrWhiteSpace(input.ReviewId))
+        {
+            throw new ArgumentException("Review id is required.", nameof(input));
+        }
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var blueprint = await ReadBlueprintAsync(connection, input.NovelId, input.BlueprintId, cancellationToken, required: true)
+                ?? throw new InvalidOperationException("Required blueprint was not loaded.");
+            if (string.Equals(blueprint.Status, ReferenceBlueprintStates.Stale, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Stale blueprint must be regenerated before approval.", nameof(input));
+            }
+
+            var review = await ReadReviewAsync(connection, input.BlueprintId, input.ReviewId, cancellationToken)
+                ?? throw new ArgumentException("Review does not exist for this blueprint.", nameof(input));
+            if (!string.Equals(review.Status, ReferenceBlueprintReviewStatuses.Passed, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Blueprint approval requires a passing review.", nameof(input));
+            }
+
+            if (!ReviewMatchesBlueprint(blueprint, review))
+            {
+                throw new ArgumentException("Blueprint approval requires a current passing review for this exact blueprint contract.", nameof(input));
+            }
+
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            await UpdateBlueprintStatusAsync(connection, transaction, input.BlueprintId, ReferenceBlueprintStates.Approved, review.ReviewId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return await ReadBlueprintAsync(connection, input.NovelId, input.BlueprintId, cancellationToken, required: true)
+                ?? throw new InvalidOperationException("Approved blueprint could not be loaded.");
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<ReferenceBlueprintMaterialBindingResultPayload> BindBlueprintMaterialsAsync(
+        BindReferenceBlueprintMaterialsPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateNovelId(input.NovelId);
+        ValidateBlueprintId(input.BlueprintId);
+        var referenceAnchors = _referenceAnchors
+            ?? throw new ArgumentException("Reference material binding requires a configured reference anchor service.", nameof(input));
+        var maxResultsPerBeat = Math.Clamp(input.MaxResultsPerBeat <= 0 ? 3 : input.MaxResultsPerBeat, 1, 20);
+        var blueprint = await GetChapterBlueprintAsync(input.NovelId, input.BlueprintId, cancellationToken)
+            ?? throw new ArgumentException("Blueprint does not exist.", nameof(input));
+        if (string.Equals(blueprint.Status, ReferenceBlueprintStates.Stale, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Stale blueprint must be regenerated before material binding.", nameof(input));
+        }
+
+        if (!string.Equals(blueprint.Status, ReferenceBlueprintStates.Approved, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Material binding requires an approved blueprint.", nameof(input));
+        }
+
+        EnsureBlueprintHasCurrentPassingReview(blueprint, "Material binding");
+
+        var now = DateTimeOffset.UtcNow;
+        var boundLinks = new List<ScoredMaterialLink>();
+        foreach (var beat in blueprint.Beats.OrderBy(item => item.BeatIndex))
+        {
+            if (!string.IsNullOrWhiteSpace(beat.NoReuseReason))
+            {
+                continue;
+            }
+
+            var materials = await SearchMaterialsForBeatAsync(
+                referenceAnchors,
+                input.NovelId,
+                blueprint.PrimaryAnchorId,
+                beat,
+                maxResultsPerBeat,
+                cancellationToken);
+            var scored = materials
+                .Select(material => ScoreMaterialForBeat(blueprint.BlueprintId, beat, material, now))
+                .Where(item => item.Score > 0 && item.HasFunctionalFit)
+                .OrderByDescending(item => item.Score)
+                .ThenBy(item => item.Link.MaterialId, StringComparer.Ordinal)
+                .Take(maxResultsPerBeat)
+                .ToArray();
+
+            for (var index = 0; index < scored.Length; index++)
+            {
+                boundLinks.Add(scored[index] with { Link = scored[index].Link with { Selected = index == 0 } });
+            }
+        }
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            await ReplaceBlueprintMaterialLinksAsync(connection, transaction, blueprint.BlueprintId, boundLinks, cancellationToken);
+            await UpdateBlueprintStatusAsync(connection, transaction, blueprint.BlueprintId, ReferenceBlueprintStates.MaterialBound, blueprint.LatestReview?.ReviewId ?? string.Empty, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+
+        return new ReferenceBlueprintMaterialBindingResultPayload(
+            blueprint.BlueprintId,
+            boundLinks.Select(item => item.Link).ToArray());
+    }
+
+    public async ValueTask<ReferenceAnchoredDraftPayload> GenerateDraftFromBlueprintAsync(
+        GenerateReferenceAnchoredDraftPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateNovelId(input.NovelId);
+        ValidateBlueprintId(input.BlueprintId);
+        var blueprint = await GetChapterBlueprintAsync(input.NovelId, input.BlueprintId, cancellationToken)
+            ?? throw new ArgumentException("Blueprint does not exist.", nameof(input));
+        if (string.Equals(blueprint.Status, ReferenceBlueprintStates.Stale, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Stale blueprint must be regenerated before reference-anchored draft generation.", nameof(input));
+        }
+
+        if (!string.Equals(blueprint.Status, ReferenceBlueprintStates.Approved, StringComparison.Ordinal) &&
+            !string.Equals(blueprint.Status, ReferenceBlueprintStates.MaterialBound, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Reference-anchored draft generation requires an approved blueprint.", nameof(input));
+        }
+
+        EnsureBlueprintHasCurrentPassingReview(blueprint, "Reference-anchored draft generation");
+
+        var targetBeats = SelectTargetBeats(blueprint, input.BeatIds);
+        var selectedLinks = await EnsureSelectedMaterialLinksAsync(input.NovelId, blueprint, targetBeats, cancellationToken);
+        var candidates = await GenerateBeatCandidatesAsync(
+            input.NovelId,
+            blueprint,
+            targetBeats,
+            selectedLinks,
+            cancellationToken);
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(blueprint, candidates, DateTimeOffset.UtcNow);
+        await PersistDraftCandidatesAsync(blueprint.BlueprintId, candidates, cancellationToken);
+
+        return new ReferenceAnchoredDraftPayload(blueprint.BlueprintId, candidates, audit);
+    }
+
+    public async ValueTask<ReferenceAnchoredDraftAuditPayload> AuditDraftAgainstBlueprintAsync(
+        AuditReferenceAnchoredDraftPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateNovelId(input.NovelId);
+        ValidateBlueprintId(input.BlueprintId);
+        var blueprint = await GetChapterBlueprintAsync(input.NovelId, input.BlueprintId, cancellationToken)
+            ?? throw new ArgumentException("Blueprint does not exist.", nameof(input));
+        EnsureBlueprintHasCurrentPassingReview(blueprint, "Reference-anchored draft audit");
+
+        var candidateIds = NormalizeList(input.CandidateIds);
+        if (candidateIds.Count == 0)
+        {
+            throw new ArgumentException("Draft audit requires at least one candidate id.", nameof(input));
+        }
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var candidates = await ReadDraftCandidatesAsync(
+                connection,
+                input.BlueprintId,
+                candidateIds,
+                cancellationToken);
+            var missing = candidateIds
+                .Where(id => candidates.All(candidate => !string.Equals(candidate.CandidateId, id, StringComparison.Ordinal)))
+                .ToArray();
+            if (missing.Length > 0)
+            {
+                var provenanceAudit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(blueprint, candidates, DateTimeOffset.UtcNow);
+                return provenanceAudit with
+                {
+                    Status = "failed",
+                    ProvenanceErrors = provenanceAudit.ProvenanceErrors
+                        .Concat(missing.Select(id => $"Draft candidate does not exist for this blueprint: {id}"))
+                        .ToArray()
+                };
+            }
+
+            return ReferenceAnchoredDraftAuditor.BuildDraftAudit(blueprint, candidates, DateTimeOffset.UtcNow);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private static IReadOnlyList<ReferenceChapterBlueprintBeatPayload> SelectTargetBeats(
+        ReferenceChapterBlueprintPayload blueprint,
+        IReadOnlyList<string>? requestedBeatIds)
+    {
+        var requested = requestedBeatIds?
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .ToHashSet(StringComparer.Ordinal) ?? [];
+        var targetBeats = requested.Count == 0
+            ? blueprint.Beats
+            : blueprint.Beats.Where(beat => requested.Contains(beat.BeatId)).ToArray();
+        if (targetBeats.Count == 0)
+        {
+            throw new ArgumentException("Draft generation requires at least one valid blueprint beat.", nameof(requestedBeatIds));
+        }
+
+        return targetBeats;
+    }
+
+    private async ValueTask<IReadOnlyList<ReferenceDraftParagraphCandidatePayload>> GenerateBeatCandidatesAsync(
+        long novelId,
+        ReferenceChapterBlueprintPayload blueprint,
+        IReadOnlyList<ReferenceChapterBlueprintBeatPayload> targetBeats,
+        IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload> selectedLinks,
+        CancellationToken cancellationToken)
+    {
+        var referenceAnchors = _referenceAnchors
+            ?? throw new ArgumentException("Reference-anchored draft generation requires a configured reference anchor service.", nameof(_referenceAnchors));
+        var candidates = new List<ReferenceDraftParagraphCandidatePayload>();
+        foreach (var beat in targetBeats.OrderBy(item => item.BeatIndex))
+        {
+            if (!selectedLinks.TryGetValue(beat.BeatId, out var link))
+            {
+                continue;
+            }
+
+            var adapted = await referenceAnchors.AdaptMaterialAsync(
+                new AdaptReferenceMaterialPayload(
+                    novelId,
+                    link.MaterialId,
+                    beat.SlotPlan,
+                    beat.MaxRewriteLevel,
+                    beat.SceneFacts.Concat(beat.ViewpointAllowedKnowledge).Distinct(StringComparer.Ordinal).ToArray()),
+                cancellationToken);
+            var candidate = new ReferenceDraftParagraphCandidatePayload(
+                "draft-" + Guid.NewGuid().ToString("N"),
+                blueprint.BlueprintId,
+                beat.BeatId,
+                link.MaterialId,
+                adapted.RewriteLevel,
+                adapted.Text,
+                adapted.ChangedSlots,
+                adapted.NonSlotEdits,
+                adapted.Audit.Status,
+                DateTimeOffset.UtcNow);
+            candidates.Add(candidate);
+        }
+
+        if (candidates.Count == 0)
+        {
+            throw new ArgumentException("Reference-anchored draft generation produced no auditable candidates.", nameof(targetBeats));
+        }
+
+        return candidates;
+    }
+
+    private async ValueTask<IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload>> EnsureSelectedMaterialLinksAsync(
+        long novelId,
+        ReferenceChapterBlueprintPayload blueprint,
+        IReadOnlyList<ReferenceChapterBlueprintBeatPayload> targetBeats,
+        CancellationToken cancellationToken)
+    {
+        var requiredBeatIds = targetBeats
+            .Where(beat => string.IsNullOrWhiteSpace(beat.NoReuseReason))
+            .Select(beat => beat.BeatId)
+            .ToArray();
+        if (requiredBeatIds.Length == 0)
+        {
+            return new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>(StringComparer.Ordinal);
+        }
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var links = await ReadSelectedMaterialLinksAsync(
+                connection,
+                novelId,
+                blueprint.BlueprintId,
+                requiredBeatIds,
+                cancellationToken);
+            var missing = requiredBeatIds
+                .Where(beatId => !links.ContainsKey(beatId))
+                .ToArray();
+            if (missing.Length > 0)
+            {
+                throw new ArgumentException(
+                    "Reference-anchored draft generation requires selected reference material links for every target beat.",
+                    nameof(targetBeats));
+            }
+
+            return links;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceMaterialPayload>> SearchMaterialsForBeatAsync(
+        IReferenceAnchorService referenceAnchors,
+        long novelId,
+        long primaryAnchorId,
+        ReferenceChapterBlueprintBeatPayload beat,
+        int maxResultsPerBeat,
+        CancellationToken cancellationToken)
+    {
+        var anchorIds = primaryAnchorId > 0 ? new[] { primaryAnchorId } : Array.Empty<long>();
+        var query = beat.ReferenceQuery;
+        var size = Math.Clamp(maxResultsPerBeat * 5, maxResultsPerBeat, 100);
+        var result = await referenceAnchors.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novelId,
+                anchorIds,
+                query.Query,
+                query.MaterialTypes.Count > 0 ? query.MaterialTypes : beat.RequiredMaterialTypes,
+                query.EmotionTags,
+                query.FunctionTags,
+                query.PovTags,
+                query.TechniqueTags,
+                Page: 1,
+                Size: size),
+            cancellationToken);
+
+        if (result.Items.Count > 0 || string.IsNullOrWhiteSpace(query.Query))
+        {
+            return result.Items;
+        }
+
+        var fallback = await referenceAnchors.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novelId,
+                anchorIds,
+                string.Empty,
+                query.MaterialTypes.Count > 0 ? query.MaterialTypes : beat.RequiredMaterialTypes,
+                query.EmotionTags,
+                query.FunctionTags,
+                query.PovTags,
+                query.TechniqueTags,
+                Page: 1,
+                Size: size),
+            cancellationToken);
+        return fallback.Items;
+    }
+
+    private static ScoredMaterialLink ScoreMaterialForBeat(
+        long blueprintId,
+        ReferenceChapterBlueprintBeatPayload beat,
+        ReferenceMaterialPayload material,
+        DateTimeOffset now)
+    {
+        var components = new Dictionary<string, double>(StringComparer.Ordinal);
+        var functionFit = ContainsTag(beat.ReferenceQuery.FunctionTags, material.FunctionTag);
+        var emotionFit = ContainsTag(beat.ReferenceQuery.EmotionTags, material.EmotionTag);
+        var povFit = ContainsTag(beat.ReferenceQuery.PovTags, material.PovTag);
+        var proseDutyFit = HasProseDutyFit(beat.ProseDuties, material);
+        var materialTypeFit = ContainsTag(beat.RequiredMaterialTypes, material.MaterialType) ||
+            ContainsTag(beat.ReferenceQuery.MaterialTypes, material.MaterialType);
+
+        AddScore(components, "material_type", materialTypeFit ? 1.5 : 0);
+        AddScore(components, "function", functionFit ? 3.0 : 0);
+        AddScore(components, "emotion", emotionFit ? 2.0 : 0);
+        AddScore(components, "pov", povFit ? 1.5 : 0);
+        AddScore(components, "prose_duty", proseDutyFit ? 2.0 : 0);
+        AddScore(components, "lexical", LexicalScore(beat.ReferenceQuery.Query, material.Text));
+        AddScore(components, "confidence", material.FunctionConfidence + material.EmotionConfidence * 0.25 + material.PovConfidence * 0.25);
+        AddScore(components, "user_verified", material.UserVerified ? 1.0 : 0);
+
+        var hasFunctionalFit = functionFit || emotionFit || povFit || proseDutyFit;
+        var score = components.Values.Sum();
+        if (!hasFunctionalFit)
+        {
+            score = 0;
+        }
+
+        var roundedScore = Math.Round(score, 4);
+        var link = new ReferenceBlueprintMaterialLinkPayload(
+            BuildMaterialLinkId(blueprintId, beat.BeatId, material.MaterialId),
+            blueprintId,
+            beat.BeatId,
+            material.MaterialId,
+            beat.NarrativeFunction,
+            beat.MaxRewriteLevel,
+            Selected: false,
+            roundedScore,
+            now);
+        return new ScoredMaterialLink(link, components, hasFunctionalFit);
+    }
+
+    private static bool ContainsTag(IReadOnlyList<string> tags, string value)
+    {
+        return tags.Any(tag => string.Equals(tag, value, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool HasProseDutyFit(IReadOnlyList<string> proseDuties, ReferenceMaterialPayload material)
+    {
+        foreach (var duty in proseDuties)
+        {
+            if ((string.Equals(duty, "interiority", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(material.FunctionTag, "interiority", StringComparison.OrdinalIgnoreCase)) ||
+                (string.Equals(duty, "external_evidence", StringComparison.OrdinalIgnoreCase) &&
+                    (string.Equals(material.FunctionTag, "action", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(material.FunctionTag, "environment", StringComparison.OrdinalIgnoreCase))) ||
+                (string.Equals(duty, "transition", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(material.FunctionTag, "transition", StringComparison.OrdinalIgnoreCase)) ||
+                (string.Equals(duty, "sensory", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(material.TechniqueTag, "sensory_detail", StringComparison.OrdinalIgnoreCase)) ||
+                (string.Equals(duty, "causality", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(material.FunctionTag, "dialogue", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static double LexicalScore(string query, string text)
+    {
+        var normalized = (query ?? string.Empty).Trim();
+        if (normalized.Length == 0)
+        {
+            return 0;
+        }
+
+        var index = text.IndexOf(normalized, StringComparison.OrdinalIgnoreCase);
+        return index < 0 ? 0 : Math.Max(0.5, 3.0 - index / 50.0);
+    }
+
+    private static void AddScore(IDictionary<string, double> components, string name, double value)
+    {
+        if (value > 0)
+        {
+            components[name] = Math.Round(value, 4);
+        }
+    }
+
+    private static string BuildMaterialLinkId(long blueprintId, string beatId, string materialId)
+    {
+        return "link-" + HashText(string.Create(CultureInfo.InvariantCulture, $"{blueprintId}|{beatId}|{materialId}"))[..24];
+    }
+
+    private static ReferenceChapterBlueprintPayload BuildDeterministicBlueprint(
+        long blueprintId,
+        long novelId,
+        int chapterNumber,
+        string title,
+        string sourcePlanScope,
+        string sourcePlanHash,
+        string contextHash,
+        long primaryAnchorId,
+        string chapterFunction,
+        string planText,
+        IReadOnlyList<string> knownFacts,
+        IReadOnlyList<string> forbiddenFacts,
+        DateTimeOffset now)
+    {
+        var summary = string.IsNullOrWhiteSpace(planText)
+            ? chapterFunction
+            : planText.Trim();
+        var beat = new ReferenceChapterBlueprintBeatPayload(
+            BeatId: BuildBeatId(blueprintId, 1),
+            BeatIndex: 1,
+            SceneIndex: 1,
+            BeatType: ReferenceBlueprintBeatTypes.Interiority,
+            NarrativeFunction: "convert chapter goal into reviewable prose duties before drafting",
+            LogicPremise: summary,
+            ConflictPressure: chapterFunction,
+            CausalityIn: "chapter starts from the provided plan or chapter goal",
+            CausalityOut: "chapter must reach the declared final hook without adding forbidden facts",
+            TransitionIn: "continue from previous known state",
+            TransitionOut: "carry pressure into the final hook",
+            PovCharacter: "unspecified",
+            NarrativeDistance: "close",
+            ViewpointAllowedKnowledge: knownFacts,
+            ViewpointForbiddenKnowledge: forbiddenFacts,
+            CharacterStatesBefore: ["state before chapter must be inferred from known facts"],
+            CharacterStatesAfter: ["state after chapter must follow from the beat consequence"],
+            CharacterGoals: ["pursue chapter goal"],
+            CharacterMisbeliefs: ["unknown until user or plan provides a stronger constraint"],
+            RelationshipPressure: ["relationship pressure must be made explicit before drafting"],
+            EmotionTrigger: "chapter goal creates pressure",
+            EmotionBefore: "controlled",
+            EmotionAfter: "pressured",
+            SuppressedReaction: "emotion should be shown through controlled external evidence",
+            ExternalEvidence: "visible pause or changed action demonstrates the emotional shift",
+            NarrationStrategy: "close narration with interiority, external evidence, and transition",
+            RhythmStrategy: "alternate reflective sentence with physical afterbeat",
+            ParagraphIntention: "dwell on the pressure before the next action",
+            ExecutionMode: "dwell",
+            AntiScreenplayDuty: "show pressure through interiority, external evidence, and transition rather than action/dialogue blocking",
+            SensoryAnchorTarget: "one source-backed physical detail from the scene",
+            SubtextPlan: "let restraint and delayed reaction carry the emotion",
+            SourceBackedDetailTarget: "source-backed concrete pressure detail",
+            CandidateRejectionRule: "reject action-only or dialogue-only prose for this beat",
+            SceneFacts: knownFacts,
+            ForbiddenFacts: forbiddenFacts,
+            ReferenceQuery: new ReferenceMaterialQueryPayload(
+                Query: chapterFunction,
+                MaterialTypes: [ReferenceMaterialTypes.Passage, ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: ["interiority", "environment", "narration"],
+                PovTags: ["close", "unknown"],
+                TechniqueTags: [],
+                MaxResults: 5),
+            RequiredMaterialTypes: [ReferenceMaterialTypes.Passage, ReferenceMaterialTypes.Sentence],
+            MaxRewriteLevel: ReferenceRewriteLevels.L2,
+            SlotPlan: [],
+            LockedPhrasePolicy: "preserve reference cadence only when rewrite level allows it",
+            NoReuseReason: string.Empty,
+            ProseDuties: ["causality", "interiority", "external_evidence", "transition"],
+            RiskFlags: ["needs_user_review"]);
+
+        var payload = new ReferenceChapterBlueprintPayload(
+            blueprintId,
+            novelId,
+            chapterNumber,
+            title,
+            ReferenceBlueprintStates.Draft,
+            sourcePlanScope,
+            sourcePlanHash,
+            contextHash,
+            AnalysisContractHash: string.Empty,
+            BlueprintVersion: 1,
+            ParentBlueprintId: 0,
+            primaryAnchorId,
+            chapterFunction,
+            new ReferenceChapterBlueprintAnalysisTrackPayload("logic", "chapter function must be causally connected to the hook", ["premise", "conflict", "consequence", "hook"]),
+            new ReferenceChapterBlueprintAnalysisTrackPayload("emotion", "emotional movement must have trigger and visible evidence", ["before", "trigger", "suppressed reaction", "after"]),
+            new ReferenceChapterBlueprintAnalysisTrackPayload("narration", "prose must not collapse into action/dialogue beats", ["POV boundary", "distance", "interiority", "rhythm"]),
+            new ReferenceChapterBlueprintAnalysisTrackPayload("character", "character state must change through pressure", ["goal", "misbelief", "leverage", "state delta"]),
+            new ReferenceChapterBlueprintAnalysisTrackPayload("reference", "reference material must fit function, emotion, POV, prose duty, and rewrite budget", ["query intent", "material type", "rewrite budget", "no-reuse policy"]),
+            new ReferenceChapterBlueprintAnalysisTrackPayload("transition", "scene movement must be causally motivated", ["transition in", "transition out"]),
+            new ReferenceChapterBlueprintExecutionTrackPayload(
+                "execution",
+                "paragraph execution must stay novelistic before prose generation",
+                ["dwell on the pressure before the next action"],
+                ["dwell"],
+                ["interiority, external evidence, and transition before action/dialogue"],
+                ["source-backed concrete pressure detail"],
+                ["reject action-only or dialogue-only prose"]),
+            "previous state is bounded by known facts",
+            "final state follows the chapter function",
+            "final hook must be derived from the beat consequence",
+            "unspecified",
+            "close",
+            knownFacts,
+            forbiddenFacts,
+            ["deterministic_blueprint"],
+            [beat],
+            LatestReview: null,
+            now,
+            now);
+        return payload with { AnalysisContractHash = ComputeAnalysisContractHash(payload) };
+    }
+
+    private static ReferenceChapterBlueprintReviewPayload BuildReview(
+        ReferenceChapterBlueprintPayload blueprint,
+        DateTimeOffset now)
+    {
+        var logicErrors = new List<string>();
+        var causalityErrors = new List<string>();
+        var emotionErrors = new List<string>();
+        var narrationErrors = new List<string>();
+        var executionErrors = new List<string>();
+        var characterStateErrors = new List<string>();
+        var povErrors = new List<string>();
+        var continuityErrors = new List<string>();
+        var transitionErrors = new List<string>();
+        var forbiddenFactErrors = new List<string>();
+        var referenceBindingErrors = new List<string>();
+        var materialFitErrors = new List<string>();
+        var screenplayRisks = new List<string>();
+        var aiRisks = new List<string>();
+        var novelisticNarrationErrors = new List<string>();
+
+        if (IsEmptyTrack(blueprint.LogicAnalysis) ||
+            IsEmptyTrack(blueprint.EmotionAnalysis) ||
+            IsEmptyTrack(blueprint.NarrationAnalysis) ||
+            IsEmptyTrack(blueprint.CharacterAnalysis) ||
+            IsEmptyTrack(blueprint.ReferenceAnalysis) ||
+            IsEmptyTrack(blueprint.TransitionPlan))
+        {
+            logicErrors.Add("Blueprint must contain complete logic, emotion, narration, character, reference, and transition tracks.");
+        }
+
+        if (IsEmptyExecutionTrack(blueprint.ExecutionContract))
+        {
+            executionErrors.Add("Blueprint must contain a complete execution track.");
+        }
+
+        if (blueprint.Beats.Count == 0)
+        {
+            causalityErrors.Add("Blueprint must contain at least one beat.");
+        }
+
+        foreach (var beat in blueprint.Beats.OrderBy(item => item.BeatIndex))
+        {
+            if (beat.BeatIndex > 1 && string.IsNullOrWhiteSpace(beat.CausalityIn))
+            {
+                causalityErrors.Add($"Beat {beat.BeatIndex} is missing causality_in.");
+            }
+
+            if (string.IsNullOrWhiteSpace(beat.CausalityOut))
+            {
+                causalityErrors.Add($"Beat {beat.BeatIndex} is missing causality_out.");
+            }
+
+            if (string.IsNullOrWhiteSpace(beat.TransitionIn) || string.IsNullOrWhiteSpace(beat.TransitionOut))
+            {
+                transitionErrors.Add($"Beat {beat.BeatIndex} is missing transition reason.");
+            }
+
+            if (!string.Equals(beat.EmotionBefore, beat.EmotionAfter, StringComparison.Ordinal) &&
+                (string.IsNullOrWhiteSpace(beat.EmotionTrigger) || string.IsNullOrWhiteSpace(beat.ExternalEvidence)))
+            {
+                emotionErrors.Add($"Beat {beat.BeatIndex} changes emotion without trigger or external evidence.");
+            }
+
+            if (beat.CharacterGoals.Count == 0 || beat.CharacterStatesBefore.Count == 0 || beat.CharacterStatesAfter.Count == 0)
+            {
+                characterStateErrors.Add($"Beat {beat.BeatIndex} is missing character state mechanics.");
+            }
+
+            if (beat.ViewpointForbiddenKnowledge.Any(forbidden =>
+                    beat.ViewpointAllowedKnowledge.Contains(forbidden, StringComparer.OrdinalIgnoreCase)))
+            {
+                povErrors.Add($"Beat {beat.BeatIndex} allows viewpoint knowledge that is also forbidden.");
+            }
+
+            if (beat.ProseDuties.All(duty =>
+                    string.Equals(duty, "action", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(duty, "dialogue", StringComparison.OrdinalIgnoreCase)))
+            {
+                screenplayRisks.Add($"Beat {beat.BeatIndex} has only action/dialogue prose duties.");
+            }
+
+            if (string.IsNullOrWhiteSpace(beat.ParagraphIntention) ||
+                string.IsNullOrWhiteSpace(beat.ExecutionMode) ||
+                string.IsNullOrWhiteSpace(beat.AntiScreenplayDuty) ||
+                string.IsNullOrWhiteSpace(beat.CandidateRejectionRule))
+            {
+                executionErrors.Add($"Beat {beat.BeatIndex} is missing paragraph intention, execution mode, anti-screenplay duty, or rejection rule.");
+            }
+
+            if ((string.Equals(beat.BeatType, ReferenceBlueprintBeatTypes.Action, StringComparison.Ordinal) ||
+                    string.Equals(beat.BeatType, ReferenceBlueprintBeatTypes.DialogueExchange, StringComparison.Ordinal)) &&
+                string.IsNullOrWhiteSpace(beat.SubtextPlan) &&
+                string.IsNullOrWhiteSpace(beat.SensoryAnchorTarget) &&
+                string.IsNullOrWhiteSpace(beat.SourceBackedDetailTarget))
+            {
+                novelisticNarrationErrors.Add($"Beat {beat.BeatIndex} reads like screenplay blocking without subtext, sensory anchor, or source-backed detail.");
+            }
+
+            if (string.IsNullOrWhiteSpace(beat.ReferenceQuery.Query) || beat.RequiredMaterialTypes.Count == 0)
+            {
+                referenceBindingErrors.Add($"Beat {beat.BeatIndex} is missing reference query or material type.");
+            }
+
+            if (string.IsNullOrWhiteSpace(beat.NarrationStrategy))
+            {
+                narrationErrors.Add($"Beat {beat.BeatIndex} is missing narration strategy.");
+            }
+        }
+
+        foreach (var forbidden in blueprint.ForbiddenFacts.Where(item => !string.IsNullOrWhiteSpace(item)))
+        {
+            if (ContainsForbidden(blueprint.FinalHook, forbidden) ||
+                blueprint.Beats.Any(beat => beat.SceneFacts.Any(fact => ContainsForbidden(fact, forbidden))))
+            {
+                forbiddenFactErrors.Add($"Forbidden fact appears in blueprint: {forbidden}");
+            }
+        }
+
+        if (blueprint.RiskFlags.Any(flag => flag.Contains("ai", StringComparison.OrdinalIgnoreCase)))
+        {
+            aiRisks.Add("Blueprint already carries AI prose risk flags.");
+        }
+
+        var defectCount = logicErrors.Count + causalityErrors.Count + emotionErrors.Count +
+            narrationErrors.Count + executionErrors.Count + characterStateErrors.Count + povErrors.Count +
+            continuityErrors.Count + transitionErrors.Count + forbiddenFactErrors.Count +
+            referenceBindingErrors.Count + materialFitErrors.Count + screenplayRisks.Count +
+            novelisticNarrationErrors.Count;
+        var status = defectCount == 0
+            ? ReferenceBlueprintReviewStatuses.Passed
+            : ReferenceBlueprintReviewStatuses.Failed;
+        var requiredFixes = new[]
+        {
+            logicErrors,
+            causalityErrors,
+            emotionErrors,
+            narrationErrors,
+            executionErrors,
+            characterStateErrors,
+            povErrors,
+            continuityErrors,
+            transitionErrors,
+            forbiddenFactErrors,
+            referenceBindingErrors,
+            materialFitErrors,
+            screenplayRisks,
+            novelisticNarrationErrors
+        }.SelectMany(items => items).ToArray();
+
+        return new ReferenceChapterBlueprintReviewPayload(
+            "review-" + Guid.NewGuid().ToString("N"),
+            blueprint.BlueprintId,
+            blueprint.ContextHash,
+            blueprint.SourcePlanHash,
+            blueprint.AnalysisContractHash,
+            status,
+            Math.Max(0, 1.0 - defectCount * 0.1),
+            logicErrors,
+            causalityErrors,
+            emotionErrors,
+            narrationErrors,
+            executionErrors,
+            characterStateErrors,
+            povErrors,
+            continuityErrors,
+            transitionErrors,
+            forbiddenFactErrors,
+            referenceBindingErrors,
+            materialFitErrors,
+            screenplayRisks,
+            aiRisks,
+            novelisticNarrationErrors,
+            requiredFixes,
+            now);
+    }
+
+    private async ValueTask<long> InsertBlueprintAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        ReferenceChapterBlueprintPayload blueprint,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO reference_chapter_blueprints
+              (novel_id, chapter_number, primary_anchor_id, title, status, source_plan_scope,
+               source_plan_hash, context_hash, analysis_contract_hash, blueprint_version, parent_blueprint_id,
+               chapter_function, logic_analysis_json, emotion_analysis_json, narration_analysis_json,
+               character_analysis_json, reference_analysis_json, transition_plan_json, execution_contract_json, previous_state, final_state, final_hook,
+               global_pov, global_narrative_distance, known_facts_json, forbidden_facts_json,
+               risk_flags_json, build_version, approved_review_id, created_at, updated_at, approved_at)
+            VALUES
+              ($novel_id, $chapter_number, $primary_anchor_id, $title, $status, $source_plan_scope,
+               $source_plan_hash, $context_hash, $analysis_contract_hash, $blueprint_version, $parent_blueprint_id,
+               $chapter_function, $logic_analysis_json, $emotion_analysis_json, $narration_analysis_json,
+               $character_analysis_json, $reference_analysis_json, $transition_plan_json, $execution_contract_json, $previous_state, $final_state, $final_hook,
+               $global_pov, $global_narrative_distance, $known_facts_json, $forbidden_facts_json,
+               $risk_flags_json, $build_version, '', $created_at, $updated_at, '')
+            RETURNING blueprint_id;
+            """;
+        command.Parameters.AddWithValue("$novel_id", blueprint.NovelId);
+        command.Parameters.AddWithValue("$chapter_number", blueprint.ChapterNumber);
+        command.Parameters.AddWithValue("$primary_anchor_id", blueprint.PrimaryAnchorId);
+        command.Parameters.AddWithValue("$title", blueprint.Title);
+        command.Parameters.AddWithValue("$status", blueprint.Status);
+        command.Parameters.AddWithValue("$source_plan_scope", blueprint.SourcePlanScope);
+        command.Parameters.AddWithValue("$source_plan_hash", blueprint.SourcePlanHash);
+        command.Parameters.AddWithValue("$context_hash", blueprint.ContextHash);
+        command.Parameters.AddWithValue("$analysis_contract_hash", blueprint.AnalysisContractHash);
+        command.Parameters.AddWithValue("$blueprint_version", blueprint.BlueprintVersion);
+        command.Parameters.AddWithValue("$parent_blueprint_id", blueprint.ParentBlueprintId);
+        command.Parameters.AddWithValue("$chapter_function", blueprint.ChapterFunction);
+        command.Parameters.AddWithValue("$logic_analysis_json", JsonSerializer.Serialize(blueprint.LogicAnalysis, JsonOptions));
+        command.Parameters.AddWithValue("$emotion_analysis_json", JsonSerializer.Serialize(blueprint.EmotionAnalysis, JsonOptions));
+        command.Parameters.AddWithValue("$narration_analysis_json", JsonSerializer.Serialize(blueprint.NarrationAnalysis, JsonOptions));
+        command.Parameters.AddWithValue("$character_analysis_json", JsonSerializer.Serialize(blueprint.CharacterAnalysis, JsonOptions));
+        command.Parameters.AddWithValue("$reference_analysis_json", JsonSerializer.Serialize(blueprint.ReferenceAnalysis, JsonOptions));
+        command.Parameters.AddWithValue("$transition_plan_json", JsonSerializer.Serialize(blueprint.TransitionPlan, JsonOptions));
+        command.Parameters.AddWithValue("$execution_contract_json", JsonSerializer.Serialize(blueprint.ExecutionContract, JsonOptions));
+        command.Parameters.AddWithValue("$previous_state", blueprint.PreviousState);
+        command.Parameters.AddWithValue("$final_state", blueprint.FinalState);
+        command.Parameters.AddWithValue("$final_hook", blueprint.FinalHook);
+        command.Parameters.AddWithValue("$global_pov", blueprint.GlobalPov);
+        command.Parameters.AddWithValue("$global_narrative_distance", blueprint.GlobalNarrativeDistance);
+        command.Parameters.AddWithValue("$known_facts_json", JsonSerializer.Serialize(blueprint.KnownFacts, JsonOptions));
+        command.Parameters.AddWithValue("$forbidden_facts_json", JsonSerializer.Serialize(blueprint.ForbiddenFacts, JsonOptions));
+        command.Parameters.AddWithValue("$risk_flags_json", JsonSerializer.Serialize(blueprint.RiskFlags, JsonOptions));
+        command.Parameters.AddWithValue("$build_version", BuildVersion);
+        command.Parameters.AddWithValue("$created_at", FormatTimestamp(blueprint.CreatedAt));
+        command.Parameters.AddWithValue("$updated_at", FormatTimestamp(blueprint.UpdatedAt));
+        return (long)(await command.ExecuteScalarAsync(cancellationToken)
+            ?? throw new InvalidOperationException("SQLite did not return a blueprint id."));
+    }
+
+    private static async ValueTask ReplaceBeatsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long blueprintId,
+        IReadOnlyList<ReferenceChapterBlueprintBeatPayload> beats,
+        CancellationToken cancellationToken)
+    {
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM reference_chapter_blueprint_beats WHERE blueprint_id = $blueprint_id;";
+            delete.Parameters.AddWithValue("$blueprint_id", blueprintId);
+            await delete.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        foreach (var beat in beats)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO reference_chapter_blueprint_beats
+                  (beat_id, blueprint_id, beat_index, scene_index, beat_type, narrative_function,
+                   logic_premise, conflict_pressure, causality_in, causality_out, transition_in,
+                   transition_out, pov_character, narrative_distance, viewpoint_allowed_knowledge_json,
+                   viewpoint_forbidden_knowledge_json, character_states_before_json,
+                   character_states_after_json, character_goals_json, character_misbeliefs_json,
+                   relationship_pressure_json, emotion_trigger, emotion_before, emotion_after,
+                   suppressed_reaction, external_evidence, narration_strategy, rhythm_strategy,
+                   paragraph_intention, execution_mode, anti_screenplay_duty, sensory_anchor_target,
+                   subtext_plan, source_backed_detail_target, candidate_rejection_rule,
+                   scene_facts_json, forbidden_facts_json, reference_query_json,
+                   required_material_types_json, max_rewrite_level, slot_plan_json,
+                   locked_phrase_policy, no_reuse_reason, prose_duties_json, risk_flags_json)
+                VALUES
+                  ($beat_id, $blueprint_id, $beat_index, $scene_index, $beat_type, $narrative_function,
+                   $logic_premise, $conflict_pressure, $causality_in, $causality_out, $transition_in,
+                   $transition_out, $pov_character, $narrative_distance, $viewpoint_allowed_knowledge_json,
+                   $viewpoint_forbidden_knowledge_json, $character_states_before_json,
+                   $character_states_after_json, $character_goals_json, $character_misbeliefs_json,
+                   $relationship_pressure_json, $emotion_trigger, $emotion_before, $emotion_after,
+                   $suppressed_reaction, $external_evidence, $narration_strategy, $rhythm_strategy,
+                   $paragraph_intention, $execution_mode, $anti_screenplay_duty, $sensory_anchor_target,
+                   $subtext_plan, $source_backed_detail_target, $candidate_rejection_rule,
+                   $scene_facts_json, $forbidden_facts_json, $reference_query_json,
+                   $required_material_types_json, $max_rewrite_level, $slot_plan_json,
+                   $locked_phrase_policy, $no_reuse_reason, $prose_duties_json, $risk_flags_json);
+                """;
+            command.Parameters.AddWithValue("$beat_id", beat.BeatId);
+            command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+            command.Parameters.AddWithValue("$beat_index", beat.BeatIndex);
+            command.Parameters.AddWithValue("$scene_index", beat.SceneIndex);
+            command.Parameters.AddWithValue("$beat_type", beat.BeatType);
+            command.Parameters.AddWithValue("$narrative_function", beat.NarrativeFunction);
+            command.Parameters.AddWithValue("$logic_premise", beat.LogicPremise);
+            command.Parameters.AddWithValue("$conflict_pressure", beat.ConflictPressure);
+            command.Parameters.AddWithValue("$causality_in", beat.CausalityIn);
+            command.Parameters.AddWithValue("$causality_out", beat.CausalityOut);
+            command.Parameters.AddWithValue("$transition_in", beat.TransitionIn);
+            command.Parameters.AddWithValue("$transition_out", beat.TransitionOut);
+            command.Parameters.AddWithValue("$pov_character", beat.PovCharacter);
+            command.Parameters.AddWithValue("$narrative_distance", beat.NarrativeDistance);
+            command.Parameters.AddWithValue("$viewpoint_allowed_knowledge_json", JsonSerializer.Serialize(beat.ViewpointAllowedKnowledge, JsonOptions));
+            command.Parameters.AddWithValue("$viewpoint_forbidden_knowledge_json", JsonSerializer.Serialize(beat.ViewpointForbiddenKnowledge, JsonOptions));
+            command.Parameters.AddWithValue("$character_states_before_json", JsonSerializer.Serialize(beat.CharacterStatesBefore, JsonOptions));
+            command.Parameters.AddWithValue("$character_states_after_json", JsonSerializer.Serialize(beat.CharacterStatesAfter, JsonOptions));
+            command.Parameters.AddWithValue("$character_goals_json", JsonSerializer.Serialize(beat.CharacterGoals, JsonOptions));
+            command.Parameters.AddWithValue("$character_misbeliefs_json", JsonSerializer.Serialize(beat.CharacterMisbeliefs, JsonOptions));
+            command.Parameters.AddWithValue("$relationship_pressure_json", JsonSerializer.Serialize(beat.RelationshipPressure, JsonOptions));
+            command.Parameters.AddWithValue("$emotion_trigger", beat.EmotionTrigger);
+            command.Parameters.AddWithValue("$emotion_before", beat.EmotionBefore);
+            command.Parameters.AddWithValue("$emotion_after", beat.EmotionAfter);
+            command.Parameters.AddWithValue("$suppressed_reaction", beat.SuppressedReaction);
+            command.Parameters.AddWithValue("$external_evidence", beat.ExternalEvidence);
+            command.Parameters.AddWithValue("$narration_strategy", beat.NarrationStrategy);
+            command.Parameters.AddWithValue("$rhythm_strategy", beat.RhythmStrategy);
+            command.Parameters.AddWithValue("$paragraph_intention", beat.ParagraphIntention);
+            command.Parameters.AddWithValue("$execution_mode", beat.ExecutionMode);
+            command.Parameters.AddWithValue("$anti_screenplay_duty", beat.AntiScreenplayDuty);
+            command.Parameters.AddWithValue("$sensory_anchor_target", beat.SensoryAnchorTarget);
+            command.Parameters.AddWithValue("$subtext_plan", beat.SubtextPlan);
+            command.Parameters.AddWithValue("$source_backed_detail_target", beat.SourceBackedDetailTarget);
+            command.Parameters.AddWithValue("$candidate_rejection_rule", beat.CandidateRejectionRule);
+            command.Parameters.AddWithValue("$scene_facts_json", JsonSerializer.Serialize(beat.SceneFacts, JsonOptions));
+            command.Parameters.AddWithValue("$forbidden_facts_json", JsonSerializer.Serialize(beat.ForbiddenFacts, JsonOptions));
+            command.Parameters.AddWithValue("$reference_query_json", JsonSerializer.Serialize(beat.ReferenceQuery, JsonOptions));
+            command.Parameters.AddWithValue("$required_material_types_json", JsonSerializer.Serialize(beat.RequiredMaterialTypes, JsonOptions));
+            command.Parameters.AddWithValue("$max_rewrite_level", beat.MaxRewriteLevel);
+            command.Parameters.AddWithValue("$slot_plan_json", JsonSerializer.Serialize(beat.SlotPlan, JsonOptions));
+            command.Parameters.AddWithValue("$locked_phrase_policy", beat.LockedPhrasePolicy);
+            command.Parameters.AddWithValue("$no_reuse_reason", beat.NoReuseReason);
+            command.Parameters.AddWithValue("$prose_duties_json", JsonSerializer.Serialize(beat.ProseDuties, JsonOptions));
+            command.Parameters.AddWithValue("$risk_flags_json", JsonSerializer.Serialize(beat.RiskFlags, JsonOptions));
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private async ValueTask<ReferenceChapterBlueprintPayload?> ReadBlueprintAsync(
+        SqliteConnection connection,
+        long novelId,
+        long blueprintId,
+        CancellationToken cancellationToken,
+        bool required)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT blueprint_id, novel_id, chapter_number, title, status, source_plan_scope,
+                   source_plan_hash, context_hash, analysis_contract_hash, blueprint_version, parent_blueprint_id,
+                   primary_anchor_id, chapter_function, logic_analysis_json, emotion_analysis_json,
+                   narration_analysis_json, character_analysis_json, reference_analysis_json, transition_plan_json, execution_contract_json,
+                   previous_state, final_state, final_hook, global_pov, global_narrative_distance,
+                   known_facts_json, forbidden_facts_json, risk_flags_json, created_at, updated_at
+            FROM reference_chapter_blueprints
+            WHERE novel_id = $novel_id AND blueprint_id = $blueprint_id;
+            """;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            if (required)
+            {
+                throw new ArgumentException("Blueprint does not exist.", nameof(blueprintId));
+            }
+
+            return null;
+        }
+
+        var row = new BlueprintRow(
+            reader.GetInt64(0),
+            reader.GetInt64(1),
+            reader.GetInt32(2),
+            reader.GetString(3),
+            reader.GetString(4),
+            reader.GetString(5),
+            reader.GetString(6),
+            reader.GetString(7),
+            reader.GetString(8),
+            reader.GetInt32(9),
+            reader.GetInt64(10),
+            reader.GetInt64(11),
+            reader.GetString(12),
+            ReadJson<ReferenceChapterBlueprintAnalysisTrackPayload>(reader.GetString(13)),
+            ReadJson<ReferenceChapterBlueprintAnalysisTrackPayload>(reader.GetString(14)),
+            ReadJson<ReferenceChapterBlueprintAnalysisTrackPayload>(reader.GetString(15)),
+            ReadJson<ReferenceChapterBlueprintAnalysisTrackPayload>(reader.GetString(16)),
+            ReadJson<ReferenceChapterBlueprintAnalysisTrackPayload>(reader.GetString(17)),
+            ReadJson<ReferenceChapterBlueprintAnalysisTrackPayload>(reader.GetString(18)),
+            ReadJson<ReferenceChapterBlueprintExecutionTrackPayload>(reader.GetString(19)),
+            reader.GetString(20),
+            reader.GetString(21),
+            reader.GetString(22),
+            reader.GetString(23),
+            reader.GetString(24),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(25)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(26)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(27)),
+            ParseTimestamp(reader.GetString(28)),
+            ParseTimestamp(reader.GetString(29)));
+
+        var beats = await ReadBeatsAsync(connection, blueprintId, cancellationToken);
+        var latestReview = await ReadLatestReviewAsync(connection, blueprintId, row.AnalysisContractHash, cancellationToken);
+        var blueprint = new ReferenceChapterBlueprintPayload(
+            row.BlueprintId,
+            row.NovelId,
+            row.ChapterNumber,
+            row.Title,
+            row.Status,
+            row.SourcePlanScope,
+            row.SourcePlanHash,
+            row.ContextHash,
+            row.AnalysisContractHash,
+            row.BlueprintVersion,
+            row.ParentBlueprintId,
+            row.PrimaryAnchorId,
+            row.ChapterFunction,
+            row.LogicAnalysis,
+            row.EmotionAnalysis,
+            row.NarrationAnalysis,
+            row.CharacterAnalysis,
+            row.ReferenceAnalysis,
+            row.TransitionPlan,
+            row.ExecutionContract,
+            row.PreviousState,
+            row.FinalState,
+            row.FinalHook,
+            row.GlobalPov,
+            row.GlobalNarrativeDistance,
+            row.KnownFacts,
+            row.ForbiddenFacts,
+            row.RiskFlags,
+            beats,
+            latestReview,
+            row.CreatedAt,
+            row.UpdatedAt);
+        return await ApplyBlueprintStalenessAsync(connection, blueprint, cancellationToken);
+    }
+
+    private async ValueTask<ReferenceChapterBlueprintPayload> ApplyBlueprintStalenessAsync(
+        SqliteConnection connection,
+        ReferenceChapterBlueprintPayload blueprint,
+        CancellationToken cancellationToken)
+    {
+        if (IsStalenessExempt(blueprint.Status))
+        {
+            return blueprint;
+        }
+
+        var currentHash = await CurrentSourcePlanHashAsync(blueprint.NovelId, blueprint.SourcePlanScope, cancellationToken);
+        if (string.Equals(currentHash, blueprint.SourcePlanHash, StringComparison.Ordinal))
+        {
+            return blueprint;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        await SetBlueprintStatusAsync(connection, blueprint.BlueprintId, ReferenceBlueprintStates.Stale, now, cancellationToken);
+        return blueprint with
+        {
+            Status = ReferenceBlueprintStates.Stale,
+            UpdatedAt = now
+        };
+    }
+
+    private async ValueTask<ReferenceChapterBlueprintSummaryPayload> ApplySummaryStalenessAsync(
+        SqliteConnection connection,
+        ReferenceChapterBlueprintSummaryPayload summary,
+        string sourcePlanScope,
+        CancellationToken cancellationToken)
+    {
+        if (IsStalenessExempt(summary.Status))
+        {
+            return summary;
+        }
+
+        var currentHash = await CurrentSourcePlanHashAsync(summary.NovelId, sourcePlanScope, cancellationToken);
+        if (string.Equals(currentHash, summary.SourcePlanHash, StringComparison.Ordinal))
+        {
+            return summary;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        await SetBlueprintStatusAsync(connection, summary.BlueprintId, ReferenceBlueprintStates.Stale, now, cancellationToken);
+        return summary with
+        {
+            Status = ReferenceBlueprintStates.Stale,
+            UpdatedAt = now
+        };
+    }
+
+    private async ValueTask<string> CurrentSourcePlanHashAsync(
+        long novelId,
+        string sourcePlanScope,
+        CancellationToken cancellationToken)
+    {
+        var scope = string.IsNullOrWhiteSpace(sourcePlanScope) ? "next" : sourcePlanScope;
+        var plans = await _planning.GetChapterPlansAsync(novelId, cancellationToken);
+        var plan = plans.FirstOrDefault(item => string.Equals(item.Scope, scope, StringComparison.Ordinal));
+        return HashText(scope + "\n" + (plan?.Content ?? string.Empty));
+    }
+
+    private static bool IsStalenessExempt(string status)
+    {
+        return string.Equals(status, ReferenceBlueprintStates.Stale, StringComparison.Ordinal) ||
+            string.Equals(status, ReferenceBlueprintStates.Superseded, StringComparison.Ordinal);
+    }
+
+    private static async ValueTask SetBlueprintStatusAsync(
+        SqliteConnection connection,
+        long blueprintId,
+        string status,
+        DateTimeOffset updatedAt,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_chapter_blueprints
+            SET status = $status,
+                updated_at = $updated_at
+            WHERE blueprint_id = $blueprint_id;
+            """;
+        command.Parameters.AddWithValue("$status", status);
+        command.Parameters.AddWithValue("$updated_at", FormatTimestamp(updatedAt));
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceChapterBlueprintBeatPayload>> ReadBeatsAsync(
+        SqliteConnection connection,
+        long blueprintId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT beat_id, beat_index, scene_index, beat_type, narrative_function, logic_premise,
+                   conflict_pressure, causality_in, causality_out, transition_in, transition_out,
+                   pov_character, narrative_distance, viewpoint_allowed_knowledge_json,
+                   viewpoint_forbidden_knowledge_json, character_states_before_json,
+                   character_states_after_json, character_goals_json, character_misbeliefs_json,
+                   relationship_pressure_json, emotion_trigger, emotion_before, emotion_after,
+                   suppressed_reaction, external_evidence, narration_strategy, rhythm_strategy,
+                   paragraph_intention, execution_mode, anti_screenplay_duty, sensory_anchor_target,
+                   subtext_plan, source_backed_detail_target, candidate_rejection_rule,
+                   scene_facts_json, forbidden_facts_json, reference_query_json,
+                   required_material_types_json, max_rewrite_level, slot_plan_json,
+                   locked_phrase_policy, no_reuse_reason, prose_duties_json, risk_flags_json
+            FROM reference_chapter_blueprint_beats
+            WHERE blueprint_id = $blueprint_id
+            ORDER BY beat_index ASC;
+            """;
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        var beats = new List<ReferenceChapterBlueprintBeatPayload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            beats.Add(new ReferenceChapterBlueprintBeatPayload(
+                reader.GetString(0),
+                reader.GetInt32(1),
+                reader.GetInt32(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5),
+                reader.GetString(6),
+                reader.GetString(7),
+                reader.GetString(8),
+                reader.GetString(9),
+                reader.GetString(10),
+                reader.GetString(11),
+                reader.GetString(12),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(13)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(14)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(15)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(16)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(17)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(18)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(19)),
+                reader.GetString(20),
+                reader.GetString(21),
+                reader.GetString(22),
+                reader.GetString(23),
+                reader.GetString(24),
+                reader.GetString(25),
+                reader.GetString(26),
+                reader.GetString(27),
+                reader.GetString(28),
+                reader.GetString(29),
+                reader.GetString(30),
+                reader.GetString(31),
+                reader.GetString(32),
+                reader.GetString(33),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(34)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(35)),
+                ReadJson<ReferenceMaterialQueryPayload>(reader.GetString(36)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(37)),
+                reader.GetString(38),
+                ReadJson<IReadOnlyList<ReferenceSlotValuePayload>>(reader.GetString(39)),
+                reader.GetString(40),
+                reader.GetString(41),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(42)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(43))));
+        }
+
+        return beats;
+    }
+
+    private static async ValueTask<IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload>> ReadSelectedMaterialLinksAsync(
+        SqliteConnection connection,
+        long novelId,
+        long blueprintId,
+        IReadOnlyList<string> beatIds,
+        CancellationToken cancellationToken)
+    {
+        if (beatIds.Count == 0)
+        {
+            return new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>(StringComparer.Ordinal);
+        }
+
+        await using var command = connection.CreateCommand();
+        var parameterNames = new List<string>(beatIds.Count);
+        for (var index = 0; index < beatIds.Count; index++)
+        {
+            var parameterName = "$beat_id_" + index.ToString(CultureInfo.InvariantCulture);
+            parameterNames.Add(parameterName);
+            command.Parameters.AddWithValue(parameterName, beatIds[index]);
+        }
+
+        command.CommandText = $$"""
+            SELECT l.link_id, l.blueprint_id, l.beat_id, l.material_id, l.intended_use,
+                   l.max_rewrite_level, l.selected, l.score, l.created_at
+            FROM reference_blueprint_material_links l
+            INNER JOIN reference_chapter_blueprints b ON b.blueprint_id = l.blueprint_id
+            WHERE b.novel_id = $novel_id
+              AND l.blueprint_id = $blueprint_id
+              AND l.selected = 1
+              AND l.status = 'active'
+              AND l.beat_id IN ({{string.Join(", ", parameterNames)}});
+            """;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        var linked = new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var link = new ReferenceBlueprintMaterialLinkPayload(
+                reader.GetString(0),
+                reader.GetInt64(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5),
+                reader.GetInt32(6) != 0,
+                reader.GetDouble(7),
+                ParseTimestamp(reader.GetString(8)));
+            linked[link.BeatId] = link;
+        }
+
+        return linked;
+    }
+
+    private static async ValueTask ReplaceBlueprintMaterialLinksAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long blueprintId,
+        IReadOnlyList<ScoredMaterialLink> links,
+        CancellationToken cancellationToken)
+    {
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM reference_blueprint_material_links WHERE blueprint_id = $blueprint_id;";
+            delete.Parameters.AddWithValue("$blueprint_id", blueprintId);
+            await delete.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        foreach (var item in links)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO reference_blueprint_material_links
+                  (link_id, blueprint_id, beat_id, material_id, intended_use, max_rewrite_level,
+                   selected, score, score_components_json, status, created_at)
+                VALUES
+                  ($link_id, $blueprint_id, $beat_id, $material_id, $intended_use, $max_rewrite_level,
+                   $selected, $score, $score_components_json, $status, $created_at);
+                """;
+            command.Parameters.AddWithValue("$link_id", item.Link.LinkId);
+            command.Parameters.AddWithValue("$blueprint_id", item.Link.BlueprintId);
+            command.Parameters.AddWithValue("$beat_id", item.Link.BeatId);
+            command.Parameters.AddWithValue("$material_id", item.Link.MaterialId);
+            command.Parameters.AddWithValue("$intended_use", item.Link.IntendedUse);
+            command.Parameters.AddWithValue("$max_rewrite_level", item.Link.MaxRewriteLevel);
+            command.Parameters.AddWithValue("$selected", item.Link.Selected ? 1 : 0);
+            command.Parameters.AddWithValue("$score", item.Link.Score);
+            command.Parameters.AddWithValue("$score_components_json", JsonSerializer.Serialize(item.ScoreComponents, JsonOptions));
+            command.Parameters.AddWithValue("$status", "active");
+            command.Parameters.AddWithValue("$created_at", FormatTimestamp(item.Link.CreatedAt));
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static async ValueTask MarkBlueprintMaterialLinksStaleAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long blueprintId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE reference_blueprint_material_links
+            SET status = 'stale'
+            WHERE blueprint_id = $blueprint_id AND status = 'active';
+            """;
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async ValueTask PersistDraftCandidatesAsync(
+        long blueprintId,
+        IReadOnlyList<ReferenceDraftParagraphCandidatePayload> candidates,
+        CancellationToken cancellationToken)
+    {
+        if (candidates.Count == 0)
+        {
+            return;
+        }
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            foreach (var candidate in candidates)
+            {
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = """
+                    INSERT OR REPLACE INTO reference_draft_paragraph_candidates
+                      (candidate_id, blueprint_id, beat_id, material_id, rewrite_level, text,
+                       changed_slots_json, non_slot_edits_json, audit_status, created_at)
+                    VALUES
+                      ($candidate_id, $blueprint_id, $beat_id, $material_id, $rewrite_level, $text,
+                       $changed_slots_json, $non_slot_edits_json, $audit_status, $created_at);
+                    """;
+                command.Parameters.AddWithValue("$candidate_id", candidate.CandidateId);
+                command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+                command.Parameters.AddWithValue("$beat_id", candidate.BeatId);
+                command.Parameters.AddWithValue("$material_id", candidate.MaterialId);
+                command.Parameters.AddWithValue("$rewrite_level", candidate.RewriteLevel);
+                command.Parameters.AddWithValue("$text", candidate.Text);
+                command.Parameters.AddWithValue("$changed_slots_json", JsonSerializer.Serialize(candidate.ChangedSlots, JsonOptions));
+                command.Parameters.AddWithValue("$non_slot_edits_json", JsonSerializer.Serialize(candidate.NonSlotEdits, JsonOptions));
+                command.Parameters.AddWithValue("$audit_status", candidate.AuditStatus);
+                command.Parameters.AddWithValue("$created_at", FormatTimestamp(candidate.CreatedAt));
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceDraftParagraphCandidatePayload>> ReadDraftCandidatesAsync(
+        SqliteConnection connection,
+        long blueprintId,
+        IReadOnlyList<string> candidateIds,
+        CancellationToken cancellationToken)
+    {
+        if (candidateIds.Count == 0)
+        {
+            return [];
+        }
+
+        await using var command = connection.CreateCommand();
+        var parameterNames = new List<string>(candidateIds.Count);
+        for (var index = 0; index < candidateIds.Count; index++)
+        {
+            var parameterName = "$candidate_id_" + index.ToString(CultureInfo.InvariantCulture);
+            parameterNames.Add(parameterName);
+            command.Parameters.AddWithValue(parameterName, candidateIds[index]);
+        }
+
+        command.CommandText = $$"""
+            SELECT candidate_id, blueprint_id, beat_id, material_id, rewrite_level, text,
+                   changed_slots_json, non_slot_edits_json, audit_status, created_at
+            FROM reference_draft_paragraph_candidates
+            WHERE blueprint_id = $blueprint_id
+              AND candidate_id IN ({{string.Join(", ", parameterNames)}})
+            ORDER BY created_at ASC, candidate_id ASC;
+            """;
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        var candidates = new List<ReferenceDraftParagraphCandidatePayload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            candidates.Add(new ReferenceDraftParagraphCandidatePayload(
+                reader.GetString(0),
+                reader.GetInt64(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5),
+                ReadJson<IReadOnlyList<ReferenceSlotValuePayload>>(reader.GetString(6)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(7)),
+                reader.GetString(8),
+                ParseTimestamp(reader.GetString(9))));
+        }
+
+        return candidates;
+    }
+
+    private static async ValueTask UpdateBlueprintAfterRevisionAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        ReferenceChapterBlueprintPayload blueprint,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE reference_chapter_blueprints
+            SET status = $status,
+                analysis_contract_hash = $analysis_contract_hash,
+                logic_analysis_json = $logic_analysis_json,
+                emotion_analysis_json = $emotion_analysis_json,
+                narration_analysis_json = $narration_analysis_json,
+                character_analysis_json = $character_analysis_json,
+                reference_analysis_json = $reference_analysis_json,
+                transition_plan_json = $transition_plan_json,
+                execution_contract_json = $execution_contract_json,
+                approved_review_id = '',
+                approved_at = '',
+                updated_at = $updated_at
+            WHERE blueprint_id = $blueprint_id;
+            """;
+        command.Parameters.AddWithValue("$status", blueprint.Status);
+        command.Parameters.AddWithValue("$analysis_contract_hash", blueprint.AnalysisContractHash);
+        command.Parameters.AddWithValue("$logic_analysis_json", JsonSerializer.Serialize(blueprint.LogicAnalysis, JsonOptions));
+        command.Parameters.AddWithValue("$emotion_analysis_json", JsonSerializer.Serialize(blueprint.EmotionAnalysis, JsonOptions));
+        command.Parameters.AddWithValue("$narration_analysis_json", JsonSerializer.Serialize(blueprint.NarrationAnalysis, JsonOptions));
+        command.Parameters.AddWithValue("$character_analysis_json", JsonSerializer.Serialize(blueprint.CharacterAnalysis, JsonOptions));
+        command.Parameters.AddWithValue("$reference_analysis_json", JsonSerializer.Serialize(blueprint.ReferenceAnalysis, JsonOptions));
+        command.Parameters.AddWithValue("$transition_plan_json", JsonSerializer.Serialize(blueprint.TransitionPlan, JsonOptions));
+        command.Parameters.AddWithValue("$execution_contract_json", JsonSerializer.Serialize(blueprint.ExecutionContract, JsonOptions));
+        command.Parameters.AddWithValue("$updated_at", FormatTimestamp(blueprint.UpdatedAt));
+        command.Parameters.AddWithValue("$blueprint_id", blueprint.BlueprintId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask InsertRevisionRowsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long blueprintId,
+        IReadOnlyList<BlueprintRevisionRow> rows,
+        CancellationToken cancellationToken)
+    {
+        foreach (var row in rows)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO reference_chapter_blueprint_revisions
+                  (revision_id, blueprint_id, parent_blueprint_id, changed_field_path,
+                   previous_value_hash, new_value_hash, origin, revision_reason,
+                   invalidated_review_id, created_at)
+                VALUES
+                  ($revision_id, $blueprint_id, 0, $changed_field_path,
+                   $previous_value_hash, $new_value_hash, $origin, $revision_reason,
+                   $invalidated_review_id, $created_at);
+                """;
+            command.Parameters.AddWithValue("$revision_id", row.RevisionId);
+            command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+            command.Parameters.AddWithValue("$changed_field_path", row.ChangedFieldPath);
+            command.Parameters.AddWithValue("$previous_value_hash", row.PreviousValueHash);
+            command.Parameters.AddWithValue("$new_value_hash", row.NewValueHash);
+            command.Parameters.AddWithValue("$origin", row.Origin);
+            command.Parameters.AddWithValue("$revision_reason", row.RevisionReason);
+            command.Parameters.AddWithValue("$invalidated_review_id", row.InvalidatedReviewId);
+            command.Parameters.AddWithValue("$created_at", FormatTimestamp(row.CreatedAt));
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static async ValueTask InsertReviewAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        ReferenceChapterBlueprintReviewPayload review,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO reference_chapter_blueprint_reviews
+              (review_id, blueprint_id, context_hash, source_plan_hash, analysis_contract_hash,
+               status, score, logic_errors_json, causality_errors_json,
+               emotion_errors_json, narration_errors_json, execution_errors_json, character_state_errors_json, pov_errors_json,
+               continuity_errors_json, transition_errors_json, forbidden_fact_errors_json,
+               reference_binding_errors_json, material_fit_errors_json, screenplay_drift_risks_json,
+               ai_prose_risks_json, novelistic_narration_errors_json, required_fixes_json, reviewed_at)
+            VALUES
+              ($review_id, $blueprint_id, $context_hash, $source_plan_hash, $analysis_contract_hash,
+               $status, $score, $logic_errors_json, $causality_errors_json,
+               $emotion_errors_json, $narration_errors_json, $execution_errors_json, $character_state_errors_json, $pov_errors_json,
+               $continuity_errors_json, $transition_errors_json, $forbidden_fact_errors_json,
+               $reference_binding_errors_json, $material_fit_errors_json, $screenplay_drift_risks_json,
+               $ai_prose_risks_json, $novelistic_narration_errors_json, $required_fixes_json, $reviewed_at);
+            """;
+        AddReviewParameters(command, review);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask<ReferenceChapterBlueprintReviewPayload?> ReadLatestReviewAsync(
+        SqliteConnection connection,
+        long blueprintId,
+        string analysisContractHash,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT review_id, blueprint_id, context_hash, source_plan_hash, analysis_contract_hash,
+                   status, score, logic_errors_json, causality_errors_json,
+                   emotion_errors_json, narration_errors_json, execution_errors_json, character_state_errors_json, pov_errors_json,
+                   continuity_errors_json, transition_errors_json, forbidden_fact_errors_json,
+                   reference_binding_errors_json, material_fit_errors_json, screenplay_drift_risks_json,
+                   ai_prose_risks_json, novelistic_narration_errors_json, required_fixes_json, reviewed_at
+            FROM reference_chapter_blueprint_reviews
+            WHERE blueprint_id = $blueprint_id
+              AND analysis_contract_hash = $analysis_contract_hash
+            ORDER BY reviewed_at DESC, review_id DESC
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        command.Parameters.AddWithValue("$analysis_contract_hash", analysisContractHash);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadReview(reader) : null;
+    }
+
+    private static async ValueTask<ReferenceChapterBlueprintReviewPayload?> ReadReviewAsync(
+        SqliteConnection connection,
+        long blueprintId,
+        string reviewId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT review_id, blueprint_id, context_hash, source_plan_hash, analysis_contract_hash,
+                   status, score, logic_errors_json, causality_errors_json,
+                   emotion_errors_json, narration_errors_json, execution_errors_json, character_state_errors_json, pov_errors_json,
+                   continuity_errors_json, transition_errors_json, forbidden_fact_errors_json,
+                   reference_binding_errors_json, material_fit_errors_json, screenplay_drift_risks_json,
+                   ai_prose_risks_json, novelistic_narration_errors_json, required_fixes_json, reviewed_at
+            FROM reference_chapter_blueprint_reviews
+            WHERE blueprint_id = $blueprint_id AND review_id = $review_id;
+            """;
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        command.Parameters.AddWithValue("$review_id", reviewId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadReview(reader) : null;
+    }
+
+    private static ReferenceChapterBlueprintReviewPayload ReadReview(SqliteDataReader reader)
+    {
+        return new ReferenceChapterBlueprintReviewPayload(
+            reader.GetString(0),
+            reader.GetInt64(1),
+            reader.GetString(2),
+            reader.GetString(3),
+            reader.GetString(4),
+            reader.GetString(5),
+            reader.GetDouble(6),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(7)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(8)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(9)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(10)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(11)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(12)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(13)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(14)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(15)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(16)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(17)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(18)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(19)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(20)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(21)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(22)),
+            ParseTimestamp(reader.GetString(23)));
+    }
+
+    private static void AddReviewParameters(SqliteCommand command, ReferenceChapterBlueprintReviewPayload review)
+    {
+        command.Parameters.AddWithValue("$review_id", review.ReviewId);
+        command.Parameters.AddWithValue("$blueprint_id", review.BlueprintId);
+        command.Parameters.AddWithValue("$context_hash", review.ContextHash);
+        command.Parameters.AddWithValue("$source_plan_hash", review.SourcePlanHash);
+        command.Parameters.AddWithValue("$analysis_contract_hash", review.AnalysisContractHash);
+        command.Parameters.AddWithValue("$status", review.Status);
+        command.Parameters.AddWithValue("$score", review.Score);
+        command.Parameters.AddWithValue("$logic_errors_json", JsonSerializer.Serialize(review.LogicErrors, JsonOptions));
+        command.Parameters.AddWithValue("$causality_errors_json", JsonSerializer.Serialize(review.CausalityErrors, JsonOptions));
+        command.Parameters.AddWithValue("$emotion_errors_json", JsonSerializer.Serialize(review.EmotionErrors, JsonOptions));
+        command.Parameters.AddWithValue("$narration_errors_json", JsonSerializer.Serialize(review.NarrationErrors, JsonOptions));
+        command.Parameters.AddWithValue("$execution_errors_json", JsonSerializer.Serialize(review.ExecutionErrors, JsonOptions));
+        command.Parameters.AddWithValue("$character_state_errors_json", JsonSerializer.Serialize(review.CharacterStateErrors, JsonOptions));
+        command.Parameters.AddWithValue("$pov_errors_json", JsonSerializer.Serialize(review.PovErrors, JsonOptions));
+        command.Parameters.AddWithValue("$continuity_errors_json", JsonSerializer.Serialize(review.ContinuityErrors, JsonOptions));
+        command.Parameters.AddWithValue("$transition_errors_json", JsonSerializer.Serialize(review.TransitionErrors, JsonOptions));
+        command.Parameters.AddWithValue("$forbidden_fact_errors_json", JsonSerializer.Serialize(review.ForbiddenFactErrors, JsonOptions));
+        command.Parameters.AddWithValue("$reference_binding_errors_json", JsonSerializer.Serialize(review.ReferenceBindingErrors, JsonOptions));
+        command.Parameters.AddWithValue("$material_fit_errors_json", JsonSerializer.Serialize(review.MaterialFitErrors, JsonOptions));
+        command.Parameters.AddWithValue("$screenplay_drift_risks_json", JsonSerializer.Serialize(review.ScreenplayDriftRisks, JsonOptions));
+        command.Parameters.AddWithValue("$ai_prose_risks_json", JsonSerializer.Serialize(review.AiProseRisks, JsonOptions));
+        command.Parameters.AddWithValue("$novelistic_narration_errors_json", JsonSerializer.Serialize(review.NovelisticNarrationErrors, JsonOptions));
+        command.Parameters.AddWithValue("$required_fixes_json", JsonSerializer.Serialize(review.RequiredFixes, JsonOptions));
+        command.Parameters.AddWithValue("$reviewed_at", FormatTimestamp(review.ReviewedAt));
+    }
+
+    private static async ValueTask UpdateBlueprintStatusAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long blueprintId,
+        string status,
+        string approvedReviewId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE reference_chapter_blueprints
+            SET status = $status,
+                updated_at = $updated_at,
+                approved_at = CASE WHEN $status = 'approved' THEN $updated_at ELSE approved_at END,
+                approved_review_id = CASE
+                    WHEN $status = 'approved' OR $status = 'material_bound' THEN $approved_review_id
+                    ELSE approved_review_id
+                END
+            WHERE blueprint_id = $blueprint_id;
+            """;
+        command.Parameters.AddWithValue("$status", status);
+        command.Parameters.AddWithValue("$approved_review_id", approvedReviewId);
+        command.Parameters.AddWithValue("$updated_at", FormatTimestamp(DateTimeOffset.UtcNow));
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async ValueTask EnsureSchemaAsync(string databasePath, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TABLE IF NOT EXISTS reference_chapter_blueprints (
+              blueprint_id INTEGER PRIMARY KEY,
+              novel_id INTEGER NOT NULL,
+              chapter_number INTEGER NOT NULL,
+              primary_anchor_id INTEGER NOT NULL,
+              title TEXT NOT NULL,
+              status TEXT NOT NULL,
+              source_plan_scope TEXT NOT NULL,
+              source_plan_hash TEXT NOT NULL,
+              context_hash TEXT NOT NULL,
+              analysis_contract_hash TEXT NOT NULL,
+              blueprint_version INTEGER NOT NULL,
+              parent_blueprint_id INTEGER NOT NULL,
+              chapter_function TEXT NOT NULL,
+              logic_analysis_json TEXT NOT NULL,
+              emotion_analysis_json TEXT NOT NULL,
+              narration_analysis_json TEXT NOT NULL,
+              character_analysis_json TEXT NOT NULL,
+              reference_analysis_json TEXT NOT NULL,
+              transition_plan_json TEXT NOT NULL,
+              execution_contract_json TEXT NOT NULL,
+              previous_state TEXT NOT NULL,
+              final_state TEXT NOT NULL,
+              final_hook TEXT NOT NULL,
+              global_pov TEXT NOT NULL,
+              global_narrative_distance TEXT NOT NULL,
+              known_facts_json TEXT NOT NULL,
+              forbidden_facts_json TEXT NOT NULL,
+              risk_flags_json TEXT NOT NULL,
+              build_version TEXT NOT NULL,
+              approved_review_id TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              approved_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS reference_chapter_blueprint_beats (
+              beat_id TEXT PRIMARY KEY,
+              blueprint_id INTEGER NOT NULL,
+              beat_index INTEGER NOT NULL,
+              scene_index INTEGER NOT NULL,
+              beat_type TEXT NOT NULL,
+              narrative_function TEXT NOT NULL,
+              logic_premise TEXT NOT NULL,
+              conflict_pressure TEXT NOT NULL,
+              causality_in TEXT NOT NULL,
+              causality_out TEXT NOT NULL,
+              transition_in TEXT NOT NULL,
+              transition_out TEXT NOT NULL,
+              pov_character TEXT NOT NULL,
+              narrative_distance TEXT NOT NULL,
+              viewpoint_allowed_knowledge_json TEXT NOT NULL,
+              viewpoint_forbidden_knowledge_json TEXT NOT NULL,
+              character_states_before_json TEXT NOT NULL,
+              character_states_after_json TEXT NOT NULL,
+              character_goals_json TEXT NOT NULL,
+              character_misbeliefs_json TEXT NOT NULL,
+              relationship_pressure_json TEXT NOT NULL,
+              emotion_trigger TEXT NOT NULL,
+              emotion_before TEXT NOT NULL,
+              emotion_after TEXT NOT NULL,
+              suppressed_reaction TEXT NOT NULL,
+              external_evidence TEXT NOT NULL,
+              narration_strategy TEXT NOT NULL,
+              rhythm_strategy TEXT NOT NULL,
+              paragraph_intention TEXT NOT NULL,
+              execution_mode TEXT NOT NULL,
+              anti_screenplay_duty TEXT NOT NULL,
+              sensory_anchor_target TEXT NOT NULL,
+              subtext_plan TEXT NOT NULL,
+              source_backed_detail_target TEXT NOT NULL,
+              candidate_rejection_rule TEXT NOT NULL,
+              scene_facts_json TEXT NOT NULL,
+              forbidden_facts_json TEXT NOT NULL,
+              reference_query_json TEXT NOT NULL,
+              required_material_types_json TEXT NOT NULL,
+              max_rewrite_level TEXT NOT NULL,
+              slot_plan_json TEXT NOT NULL,
+              locked_phrase_policy TEXT NOT NULL,
+              no_reuse_reason TEXT NOT NULL,
+              prose_duties_json TEXT NOT NULL,
+              risk_flags_json TEXT NOT NULL,
+              FOREIGN KEY(blueprint_id) REFERENCES reference_chapter_blueprints(blueprint_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS reference_chapter_blueprint_reviews (
+              review_id TEXT PRIMARY KEY,
+              blueprint_id INTEGER NOT NULL,
+              context_hash TEXT NOT NULL,
+              source_plan_hash TEXT NOT NULL,
+              analysis_contract_hash TEXT NOT NULL,
+              status TEXT NOT NULL,
+              score REAL NOT NULL,
+              logic_errors_json TEXT NOT NULL,
+              causality_errors_json TEXT NOT NULL,
+              emotion_errors_json TEXT NOT NULL,
+              narration_errors_json TEXT NOT NULL,
+              execution_errors_json TEXT NOT NULL,
+              character_state_errors_json TEXT NOT NULL,
+              pov_errors_json TEXT NOT NULL,
+              continuity_errors_json TEXT NOT NULL,
+              transition_errors_json TEXT NOT NULL,
+              forbidden_fact_errors_json TEXT NOT NULL,
+              reference_binding_errors_json TEXT NOT NULL,
+              material_fit_errors_json TEXT NOT NULL,
+              screenplay_drift_risks_json TEXT NOT NULL,
+              ai_prose_risks_json TEXT NOT NULL,
+              novelistic_narration_errors_json TEXT NOT NULL,
+              required_fixes_json TEXT NOT NULL,
+              reviewed_at TEXT NOT NULL,
+              FOREIGN KEY(blueprint_id) REFERENCES reference_chapter_blueprints(blueprint_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS reference_chapter_blueprint_revisions (
+              revision_id TEXT PRIMARY KEY,
+              blueprint_id INTEGER NOT NULL,
+              parent_blueprint_id INTEGER NOT NULL,
+              changed_field_path TEXT NOT NULL,
+              previous_value_hash TEXT NOT NULL,
+              new_value_hash TEXT NOT NULL,
+              origin TEXT NOT NULL,
+              revision_reason TEXT NOT NULL,
+              invalidated_review_id TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(blueprint_id) REFERENCES reference_chapter_blueprints(blueprint_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS reference_blueprint_material_links (
+              link_id TEXT PRIMARY KEY,
+              blueprint_id INTEGER NOT NULL,
+              beat_id TEXT NOT NULL,
+              material_id TEXT NOT NULL,
+              intended_use TEXT NOT NULL,
+              max_rewrite_level TEXT NOT NULL,
+              selected INTEGER NOT NULL,
+              score REAL NOT NULL,
+              score_components_json TEXT NOT NULL,
+              status TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(blueprint_id) REFERENCES reference_chapter_blueprints(blueprint_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS reference_draft_paragraph_candidates (
+              candidate_id TEXT PRIMARY KEY,
+              blueprint_id INTEGER NOT NULL,
+              beat_id TEXT NOT NULL,
+              material_id TEXT NOT NULL,
+              rewrite_level TEXT NOT NULL,
+              text TEXT NOT NULL,
+              changed_slots_json TEXT NOT NULL,
+              non_slot_edits_json TEXT NOT NULL,
+              audit_status TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(blueprint_id) REFERENCES reference_chapter_blueprints(blueprint_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_reference_blueprints_novel_chapter
+              ON reference_chapter_blueprints(novel_id, chapter_number);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_blueprint_beats_blueprint
+              ON reference_chapter_blueprint_beats(blueprint_id, beat_index);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_blueprint_reviews_blueprint
+              ON reference_chapter_blueprint_reviews(blueprint_id, reviewed_at);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_blueprint_revisions_blueprint
+              ON reference_chapter_blueprint_revisions(blueprint_id, created_at);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_blueprint_links_beat
+              ON reference_blueprint_material_links(beat_id);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_draft_candidates_blueprint
+              ON reference_draft_paragraph_candidates(blueprint_id, beat_id, created_at);
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprints",
+            "analysis_contract_hash",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprints",
+            "reference_analysis_json",
+            "TEXT NOT NULL DEFAULT '{\"track\":\"reference\",\"summary\":\"legacy reference analysis\",\"points\":[]}'",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprints",
+            "execution_contract_json",
+            "TEXT NOT NULL DEFAULT '{\"track\":\"execution\",\"summary\":\"legacy execution contract\",\"paragraph_intentions\":[],\"execution_modes\":[],\"anti_screenplay_duties\":[],\"source_backed_detail_targets\":[],\"candidate_rejection_rules\":[]}'",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprints",
+            "approved_review_id",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_beats",
+            "paragraph_intention",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_beats",
+            "execution_mode",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_beats",
+            "anti_screenplay_duty",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_beats",
+            "sensory_anchor_target",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_beats",
+            "subtext_plan",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_beats",
+            "source_backed_detail_target",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_beats",
+            "candidate_rejection_rule",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_reviews",
+            "context_hash",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_reviews",
+            "source_plan_hash",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_reviews",
+            "analysis_contract_hash",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_reviews",
+            "execution_errors_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_reviews",
+            "novelistic_narration_errors_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_blueprint_material_links",
+            "score_components_json",
+            "TEXT NOT NULL DEFAULT '{}'",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_blueprint_material_links",
+            "status",
+            "TEXT NOT NULL DEFAULT 'active'",
+            cancellationToken);
+    }
+
+    private static async ValueTask EnsureColumnAsync(
+        SqliteConnection connection,
+        string tableName,
+        string columnName,
+        string columnDefinition,
+        CancellationToken cancellationToken)
+    {
+        await using (var inspect = connection.CreateCommand())
+        {
+            inspect.CommandText = "PRAGMA table_info(" + tableName + ");";
+            await using var reader = await inspect.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+        }
+
+        await using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + columnDefinition + ";";
+        await alter.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async ValueTask EnsureNovelExistsAsync(long novelId, CancellationToken cancellationToken)
+    {
+        var novels = await _novels.GetNovelsAsync(cancellationToken);
+        if (!novels.Any(novel => novel.Id == novelId))
+        {
+            throw new ArgumentException($"Novel '{novelId}' does not exist.", nameof(novelId));
+        }
+    }
+
+    private async ValueTask<string> DatabasePathAsync(CancellationToken cancellationToken)
+    {
+        return Path.Combine(
+            await AppDataDirectoryResolver.ResolveAsync(_options, cancellationToken),
+            "reference-anchor",
+            "index.sqlite");
+    }
+
+    private static async ValueTask<SqliteConnection> OpenConnectionAsync(
+        string databasePath,
+        CancellationToken cancellationToken)
+    {
+        var builder = new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false };
+        var connection = new SqliteConnection(builder.ToString());
+        await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA foreign_keys = ON;";
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        return connection;
+    }
+
+    private static IReadOnlyList<string> NormalizeList(IReadOnlyList<string>? values)
+    {
+        return values?
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray() ?? [];
+    }
+
+    private static string NormalizeOptional(string? value, string fallback, int maxLength)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+        return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
+    }
+
+    private static bool IsEmptyTrack(ReferenceChapterBlueprintAnalysisTrackPayload track)
+    {
+        return string.IsNullOrWhiteSpace(track.Track) ||
+            string.IsNullOrWhiteSpace(track.Summary) ||
+            track.Points.Count == 0;
+    }
+
+    private static bool IsEmptyExecutionTrack(ReferenceChapterBlueprintExecutionTrackPayload track)
+    {
+        return string.IsNullOrWhiteSpace(track.Track) ||
+            string.IsNullOrWhiteSpace(track.Summary) ||
+            track.ParagraphIntentions.Count == 0 ||
+            track.ExecutionModes.Count == 0 ||
+            track.AntiScreenplayDuties.Count == 0 ||
+            track.CandidateRejectionRules.Count == 0;
+    }
+
+    private static string ComputeAnalysisContractHash(ReferenceChapterBlueprintPayload blueprint)
+    {
+        var contract = new
+        {
+            blueprint.LogicAnalysis,
+            blueprint.EmotionAnalysis,
+            blueprint.NarrationAnalysis,
+            blueprint.CharacterAnalysis,
+            blueprint.ReferenceAnalysis,
+            blueprint.TransitionPlan,
+            blueprint.ExecutionContract,
+            blueprint.KnownFacts,
+            blueprint.ForbiddenFacts,
+            beats = blueprint.Beats.Select(beat => new
+            {
+                beat.BeatId,
+                beat.BeatIndex,
+                beat.NarrativeFunction,
+                beat.CausalityIn,
+                beat.CausalityOut,
+                beat.TransitionIn,
+                beat.TransitionOut,
+                beat.PovCharacter,
+                beat.NarrativeDistance,
+                beat.ViewpointAllowedKnowledge,
+                beat.ViewpointForbiddenKnowledge,
+                beat.CharacterStatesBefore,
+                beat.CharacterStatesAfter,
+                beat.EmotionTrigger,
+                beat.EmotionBefore,
+                beat.EmotionAfter,
+                beat.SuppressedReaction,
+                beat.ExternalEvidence,
+                beat.NarrationStrategy,
+                beat.RhythmStrategy,
+                beat.ParagraphIntention,
+                beat.ExecutionMode,
+                beat.AntiScreenplayDuty,
+                beat.SensoryAnchorTarget,
+                beat.SubtextPlan,
+                beat.SourceBackedDetailTarget,
+                beat.CandidateRejectionRule,
+                beat.SceneFacts,
+                beat.ForbiddenFacts,
+                beat.ReferenceQuery,
+                beat.RequiredMaterialTypes,
+                beat.MaxRewriteLevel,
+                beat.SlotPlan,
+                beat.LockedPhrasePolicy,
+                beat.NoReuseReason,
+                beat.ProseDuties
+            }).ToArray()
+        };
+        return HashText(JsonSerializer.Serialize(contract, JsonOptions));
+    }
+
+    private static bool ReviewMatchesBlueprint(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintReviewPayload review)
+    {
+        return string.Equals(review.ContextHash, blueprint.ContextHash, StringComparison.Ordinal) &&
+            string.Equals(review.SourcePlanHash, blueprint.SourcePlanHash, StringComparison.Ordinal) &&
+            string.Equals(review.AnalysisContractHash, blueprint.AnalysisContractHash, StringComparison.Ordinal);
+    }
+
+    private static void EnsureBlueprintHasCurrentPassingReview(
+        ReferenceChapterBlueprintPayload blueprint,
+        string operationName)
+    {
+        var review = blueprint.LatestReview
+            ?? throw new ArgumentException(operationName + " requires a current passing blueprint review.", nameof(blueprint));
+        if (!string.Equals(review.Status, ReferenceBlueprintReviewStatuses.Passed, StringComparison.Ordinal) ||
+            !ReviewMatchesBlueprint(blueprint, review))
+        {
+            throw new ArgumentException(operationName + " requires a current passing blueprint review for this exact blueprint contract.", nameof(blueprint));
+        }
+    }
+
+    private static void ApplyRevisionChange(
+        IDictionary<string, ReferenceChapterBlueprintBeatPayload> beats,
+        ReferenceBlueprintRevisionChangePayload change,
+        ICollection<BlueprintRevisionRow> revisionRows,
+        string origin,
+        string reason,
+        string? invalidatedReviewId)
+    {
+        if (string.IsNullOrWhiteSpace(change.FieldPath))
+        {
+            throw new ArgumentException("Revision field path is required.", nameof(change));
+        }
+
+        var fieldPath = change.FieldPath.Trim();
+        const string beatPrefix = "beat:";
+        if (!fieldPath.StartsWith(beatPrefix, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Revision currently supports field paths like 'beat:{beat_id}:paragraph_intention'.", nameof(change));
+        }
+
+        var beatAndField = fieldPath[beatPrefix.Length..];
+        var fieldSeparator = beatAndField.LastIndexOf(':');
+        if (fieldSeparator <= 0 || fieldSeparator == beatAndField.Length - 1)
+        {
+            throw new ArgumentException("Revision currently supports field paths like 'beat:{beat_id}:paragraph_intention'.", nameof(change));
+        }
+
+        var beatId = beatAndField[..fieldSeparator];
+        var fieldName = beatAndField[(fieldSeparator + 1)..];
+        if (!beats.TryGetValue(beatId, out var beat))
+        {
+            throw new ArgumentException("Revision beat id does not exist.", nameof(change));
+        }
+
+        var newValue = NormalizeOptional(change.NewValue, string.Empty, 2_000);
+        var previousValue = GetRevisableBeatField(beat, fieldName);
+        var updated = SetRevisableBeatField(beat, fieldName, newValue);
+        beats[beatId] = updated;
+        revisionRows.Add(new BlueprintRevisionRow(
+            "revision-" + Guid.NewGuid().ToString("N"),
+            change.FieldPath,
+            HashText(previousValue),
+            HashText(newValue),
+            origin,
+            reason,
+            invalidatedReviewId ?? string.Empty,
+            DateTimeOffset.UtcNow));
+    }
+
+    private static string GetRevisableBeatField(ReferenceChapterBlueprintBeatPayload beat, string fieldName)
+    {
+        return fieldName switch
+        {
+            "paragraph_intention" => beat.ParagraphIntention,
+            "execution_mode" => beat.ExecutionMode,
+            "anti_screenplay_duty" => beat.AntiScreenplayDuty,
+            "sensory_anchor_target" => beat.SensoryAnchorTarget,
+            "subtext_plan" => beat.SubtextPlan,
+            "source_backed_detail_target" => beat.SourceBackedDetailTarget,
+            "candidate_rejection_rule" => beat.CandidateRejectionRule,
+            _ => throw new ArgumentException("Unsupported revisable beat field.", nameof(fieldName))
+        };
+    }
+
+    private static ReferenceChapterBlueprintBeatPayload SetRevisableBeatField(
+        ReferenceChapterBlueprintBeatPayload beat,
+        string fieldName,
+        string value)
+    {
+        return fieldName switch
+        {
+            "paragraph_intention" => beat with { ParagraphIntention = value },
+            "execution_mode" => beat with { ExecutionMode = value },
+            "anti_screenplay_duty" => beat with { AntiScreenplayDuty = value },
+            "sensory_anchor_target" => beat with { SensoryAnchorTarget = value },
+            "subtext_plan" => beat with { SubtextPlan = value },
+            "source_backed_detail_target" => beat with { SourceBackedDetailTarget = value },
+            "candidate_rejection_rule" => beat with { CandidateRejectionRule = value },
+            _ => throw new ArgumentException("Unsupported revisable beat field.", nameof(fieldName))
+        };
+    }
+
+    private static bool ContainsForbidden(string value, string forbidden)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+            value.Contains(forbidden, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildBeatId(long blueprintId, int beatIndex)
+    {
+        return string.Create(CultureInfo.InvariantCulture, $"{blueprintId}:beat:{beatIndex}");
+    }
+
+    private static string HashText(string value)
+    {
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+    }
+
+    private static int RewriteLevelRank(string rewriteLevel)
+    {
+        return rewriteLevel switch
+        {
+            ReferenceRewriteLevels.L0 => 0,
+            ReferenceRewriteLevels.L1 => 1,
+            ReferenceRewriteLevels.L2 => 2,
+            ReferenceRewriteLevels.L3 => 3,
+            ReferenceRewriteLevels.L4 => 4,
+            _ => 99
+        };
+    }
+
+    private static DateTimeOffset ParseTimestamp(string value)
+    {
+        return DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+    }
+
+    private static string FormatTimestamp(DateTimeOffset value)
+    {
+        return value.ToString("O", CultureInfo.InvariantCulture);
+    }
+
+    private static T ReadJson<T>(string json)
+    {
+        return JsonSerializer.Deserialize<T>(json, JsonOptions)
+            ?? throw new InvalidOperationException("Stored JSON payload is empty.");
+    }
+
+    private static void ValidateNovelId(long novelId)
+    {
+        if (novelId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(novelId), novelId, "Novel id must be positive.");
+        }
+    }
+
+    private static void ValidateChapterNumber(int chapterNumber)
+    {
+        if (chapterNumber <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(chapterNumber), chapterNumber, "Chapter number must be positive.");
+        }
+    }
+
+    private static void ValidateBlueprintId(long blueprintId)
+    {
+        if (blueprintId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(blueprintId), blueprintId, "Blueprint id must be positive.");
+        }
+    }
+
+    private sealed record BlueprintRow(
+        long BlueprintId,
+        long NovelId,
+        int ChapterNumber,
+        string Title,
+        string Status,
+        string SourcePlanScope,
+        string SourcePlanHash,
+        string ContextHash,
+        string AnalysisContractHash,
+        int BlueprintVersion,
+        long ParentBlueprintId,
+        long PrimaryAnchorId,
+        string ChapterFunction,
+        ReferenceChapterBlueprintAnalysisTrackPayload LogicAnalysis,
+        ReferenceChapterBlueprintAnalysisTrackPayload EmotionAnalysis,
+        ReferenceChapterBlueprintAnalysisTrackPayload NarrationAnalysis,
+        ReferenceChapterBlueprintAnalysisTrackPayload CharacterAnalysis,
+        ReferenceChapterBlueprintAnalysisTrackPayload ReferenceAnalysis,
+        ReferenceChapterBlueprintAnalysisTrackPayload TransitionPlan,
+        ReferenceChapterBlueprintExecutionTrackPayload ExecutionContract,
+        string PreviousState,
+        string FinalState,
+        string FinalHook,
+        string GlobalPov,
+        string GlobalNarrativeDistance,
+        IReadOnlyList<string> KnownFacts,
+        IReadOnlyList<string> ForbiddenFacts,
+        IReadOnlyList<string> RiskFlags,
+        DateTimeOffset CreatedAt,
+        DateTimeOffset UpdatedAt);
+
+    private sealed record BlueprintSummaryRow(
+        ReferenceChapterBlueprintSummaryPayload Summary,
+        string SourcePlanScope);
+
+    private sealed record ScoredMaterialLink(
+        ReferenceBlueprintMaterialLinkPayload Link,
+        IReadOnlyDictionary<string, double> ScoreComponents,
+        bool HasFunctionalFit)
+    {
+        public double Score => Link.Score;
+    }
+
+    private sealed record BlueprintRevisionRow(
+        string RevisionId,
+        string ChangedFieldPath,
+        string PreviousValueHash,
+        string NewValueHash,
+        string Origin,
+        string RevisionReason,
+        string InvalidatedReviewId,
+        DateTimeOffset CreatedAt);
+}

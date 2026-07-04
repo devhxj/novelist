@@ -169,6 +169,307 @@ public sealed class MafStructuredToolIntegrationTests : IDisposable
         Assert.Equal("确认删除", deleted.Data!.Value.GetProperty("feedback").GetString());
     }
 
+    [Fact]
+    public async Task ReferenceDraftToolsCallRealServicesThroughMafExecutor()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("锚定工具测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novelService);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novelService);
+        var sourcePath = CreateSourceFile(
+            "maf-reference-anchor.md",
+            """
+            # 第一章
+
+            雨声压低了整条街的呼吸。
+
+            他在门口停了很久。
+            """);
+        var anchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(
+                novel.Id,
+                "雨夜锚定参考",
+                null,
+                sourcePath,
+                "markdown",
+                "user_provided"),
+            CancellationToken.None);
+        var referenceDrafts = new SqliteReferenceAnchoredDraftService(options, novelService, planning, referenceAnchors);
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new EmptyStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors,
+            referenceDrafts));
+
+        var names = executor.GetToolDefinitions(novel.Id).Select(tool => tool.Name).ToArray();
+        Assert.Contains("generate_reference_chapter_blueprint", names);
+        Assert.Contains("review_reference_chapter_blueprint", names);
+        Assert.Contains("approve_reference_chapter_blueprint", names);
+        Assert.DoesNotContain(
+            executor.GetToolDefinitions(novel.Id).Single(tool => tool.Name == "generate_reference_chapter_blueprint").ParametersSchema.GetProperty("properties").EnumerateObject(),
+            property => property.Name == "novel_id");
+
+        var blueprint = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "generate_reference_chapter_blueprint",
+            $$"""
+            {"chapter_number":4,"title":"第四章蓝图","chapter_goal":"雨声压低了整条街的呼吸","known_facts":["雨声压低了整条街的呼吸","主角在门口"],"forbidden_facts":["凶手身份"],"anchor_ids":[{{anchor.AnchorId}}]}
+            """);
+        var blueprintId = blueprint.GetProperty("blueprint_id").GetInt64();
+        Assert.Equal("reference", blueprint.GetProperty("reference_analysis").GetProperty("track").GetString());
+        Assert.Equal(novel.Id, blueprint.GetProperty("novel_id").GetInt64());
+
+        var review = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "review_reference_chapter_blueprint",
+            $$"""{"blueprint_id":{{blueprintId}}}""");
+        Assert.Equal("passed", review.GetProperty("status").GetString());
+
+        var approved = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "approve_reference_chapter_blueprint",
+            $$"""{"blueprint_id":{{blueprintId}},"review_id":{{JsonSerializer.Serialize(review.GetProperty("review_id").GetString())}}}""");
+        Assert.Equal("approved", approved.GetProperty("status").GetString());
+
+        var binding = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "bind_reference_blueprint_materials",
+            $$"""{"blueprint_id":{{blueprintId}},"max_results_per_beat":3}""");
+        var selectedLink = Assert.Single(
+            binding.GetProperty("links").EnumerateArray(),
+            link => link.GetProperty("selected").GetBoolean());
+        Assert.Equal(blueprintId, selectedLink.GetProperty("blueprint_id").GetInt64());
+        Assert.False(string.IsNullOrWhiteSpace(selectedLink.GetProperty("material_id").GetString()));
+
+        var draft = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "generate_reference_anchored_draft",
+            $$"""{"blueprint_id":{{blueprintId}},"beat_ids":[]}""");
+        Assert.Equal(blueprintId, draft.GetProperty("blueprint_id").GetInt64());
+        var candidate = Assert.Single(draft.GetProperty("candidates").EnumerateArray());
+        var candidateId = candidate.GetProperty("candidate_id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(candidateId));
+        Assert.Equal(selectedLink.GetProperty("material_id").GetString(), candidate.GetProperty("material_id").GetString());
+        Assert.Equal("passed", draft.GetProperty("audit").GetProperty("status").GetString());
+
+        var audit = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "audit_reference_anchored_draft",
+            $$"""{"blueprint_id":{{blueprintId}},"candidate_ids":[{{JsonSerializer.Serialize(candidateId)}}]}""");
+        Assert.Equal("passed", audit.GetProperty("status").GetString());
+        Assert.Empty(audit.GetProperty("provenance_errors").EnumerateArray());
+        Assert.Empty(audit.GetProperty("blueprint_errors").EnumerateArray());
+
+        var revised = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "revise_reference_chapter_blueprint",
+            $$"""
+            {"blueprint_id":{{blueprintId}},"changes":[{"field_path":"beat:{{blueprint.GetProperty("beats")[0].GetProperty("beat_id").GetString()}}:paragraph_intention","new_value":"linger on rain pressure before action"}],"origin":"agent","revision_reason":"prove approval invalidation through MAF"}
+            """);
+        Assert.Equal("draft", revised.GetProperty("status").GetString());
+
+        var rejectedDraft = await ExecuteFailureAsync(
+            executor,
+            novel.Id,
+            "generate_reference_anchored_draft",
+            $$"""{"blueprint_id":{{blueprintId}},"beat_ids":[]}""");
+        Assert.Contains("approved", rejectedDraft, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReferenceDraftAuditReportsForbiddenFactThroughMafExecutor()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("锚定审计工具测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novelService);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novelService);
+        var sourcePath = CreateSourceFile(
+            "maf-forbidden-reference-anchor.md",
+            """
+            # 第一章
+
+            雨声压低了整条街的呼吸，凶手身份在门后闪了一下。
+            """);
+        var anchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(
+                novel.Id,
+                "禁止事实锚定参考",
+                null,
+                sourcePath,
+                "markdown",
+                "user_provided"),
+            CancellationToken.None);
+        var referenceDrafts = new SqliteReferenceAnchoredDraftService(options, novelService, planning, referenceAnchors);
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new EmptyStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors,
+            referenceDrafts));
+
+        var blueprint = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "generate_reference_chapter_blueprint",
+            $$"""
+            {"chapter_number":5,"title":"第五章蓝图","chapter_goal":"雨声压低了整条街的呼吸","known_facts":["雨声压低了整条街的呼吸"],"forbidden_facts":["凶手身份"],"anchor_ids":[{{anchor.AnchorId}}]}
+            """);
+        var blueprintId = blueprint.GetProperty("blueprint_id").GetInt64();
+
+        var review = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "review_reference_chapter_blueprint",
+            $$"""{"blueprint_id":{{blueprintId}}}""");
+        Assert.Equal("passed", review.GetProperty("status").GetString());
+
+        await ExecuteAsync(
+            executor,
+            novel.Id,
+            "approve_reference_chapter_blueprint",
+            $$"""{"blueprint_id":{{blueprintId}},"review_id":{{JsonSerializer.Serialize(review.GetProperty("review_id").GetString())}}}""");
+        await ExecuteAsync(
+            executor,
+            novel.Id,
+            "bind_reference_blueprint_materials",
+            $$"""{"blueprint_id":{{blueprintId}},"max_results_per_beat":3}""");
+
+        var draft = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "generate_reference_anchored_draft",
+            $$"""{"blueprint_id":{{blueprintId}},"beat_ids":[]}""");
+        var candidate = Assert.Single(draft.GetProperty("candidates").EnumerateArray());
+        var candidateId = candidate.GetProperty("candidate_id").GetString();
+        Assert.Contains("凶手身份", candidate.GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Equal("failed", draft.GetProperty("audit").GetProperty("status").GetString());
+        Assert.Contains(
+            draft.GetProperty("audit").GetProperty("unsupported_fact_errors").EnumerateArray(),
+            item => item.GetString()?.Contains("凶手身份", StringComparison.Ordinal) == true);
+
+        var audit = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "audit_reference_anchored_draft",
+            $$"""{"blueprint_id":{{blueprintId}},"candidate_ids":[{{JsonSerializer.Serialize(candidateId)}}]}""");
+        Assert.Equal("failed", audit.GetProperty("status").GetString());
+        Assert.Contains(
+            audit.GetProperty("unsupported_fact_errors").EnumerateArray(),
+            item => item.GetString()?.Contains("凶手身份", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public async Task ReferenceDraftToolsRejectStaleBlueprintThroughMafExecutor()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("锚定失效工具测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novelService);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "主角先在雨夜门口等待。"),
+            CancellationToken.None);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novelService);
+        var sourcePath = CreateSourceFile(
+            "maf-stale-reference-anchor.md",
+            """
+            # 第一章
+
+            雨声压低了整条街的呼吸。
+            """);
+        var anchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(
+                novel.Id,
+                "失效锚定参考",
+                null,
+                sourcePath,
+                "markdown",
+                "user_provided"),
+            CancellationToken.None);
+        var referenceDrafts = new SqliteReferenceAnchoredDraftService(options, novelService, planning, referenceAnchors);
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new EmptyStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors,
+            referenceDrafts));
+
+        var blueprint = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "generate_reference_chapter_blueprint",
+            $$"""
+            {"chapter_number":6,"title":"第六章蓝图","chapter_goal":"雨夜等待","known_facts":["主角在门口"],"forbidden_facts":[],"anchor_ids":[{{anchor.AnchorId}}]}
+            """);
+        var blueprintId = blueprint.GetProperty("blueprint_id").GetInt64();
+        var review = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "review_reference_chapter_blueprint",
+            $$"""{"blueprint_id":{{blueprintId}}}""");
+        await ExecuteAsync(
+            executor,
+            novel.Id,
+            "approve_reference_chapter_blueprint",
+            $$"""{"blueprint_id":{{blueprintId}},"review_id":{{JsonSerializer.Serialize(review.GetProperty("review_id").GetString())}}}""");
+
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "主角改为直接进入屋内。"),
+            CancellationToken.None);
+
+        var rejectedBinding = await ExecuteFailureAsync(
+            executor,
+            novel.Id,
+            "bind_reference_blueprint_materials",
+            $$"""{"blueprint_id":{{blueprintId}},"max_results_per_beat":3}""");
+        Assert.Contains("stale", rejectedBinding, StringComparison.OrdinalIgnoreCase);
+
+        var rejectedDraft = await ExecuteFailureAsync(
+            executor,
+            novel.Id,
+            "generate_reference_anchored_draft",
+            $$"""{"blueprint_id":{{blueprintId}},"beat_ids":[]}""");
+        Assert.Contains("stale", rejectedDraft, StringComparison.OrdinalIgnoreCase);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -193,6 +494,22 @@ public sealed class MafStructuredToolIntegrationTests : IDisposable
         return result.Data.Value;
     }
 
+    private async ValueTask<string> ExecuteFailureAsync(
+        NovelistMafChatToolExecutor executor,
+        long novelId,
+        string name,
+        string argumentsJson)
+    {
+        var result = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(novelId, "sess_structured", 1),
+            new ChatToolCall($"call_{name}_{Guid.NewGuid():N}", name, argumentsJson),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
+        return result.Error;
+    }
+
     private AppInitializationOptions CreateOptions()
     {
         return new AppInitializationOptions
@@ -200,6 +517,15 @@ public sealed class MafStructuredToolIntegrationTests : IDisposable
             ConfigDirectory = Path.Combine(_root, "config"),
             DefaultDataDirectory = Path.Combine(_root, "data")
         };
+    }
+
+    private string CreateSourceFile(string fileName, string content)
+    {
+        var sourceDirectory = Path.Combine(_root, "sources");
+        Directory.CreateDirectory(sourceDirectory);
+        var path = Path.Combine(sourceDirectory, fileName);
+        File.WriteAllText(path, content);
+        return path;
     }
 
     private static async ValueTask InitializeAsync(AppInitializationOptions options)

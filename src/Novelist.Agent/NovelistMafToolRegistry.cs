@@ -31,6 +31,8 @@ public sealed partial class NovelistMafToolRegistry
     private readonly IPlanningService? _planning;
     private readonly IWebFetchService? _webFetch;
     private readonly IWebSearchService? _webSearch;
+    private readonly IReferenceAnchorService? _referenceAnchors;
+    private readonly IReferenceAnchoredDraftService? _referenceDrafts;
     private readonly JsonSerializerOptions _serializerOptions;
 
     public NovelistMafToolRegistry(
@@ -47,6 +49,8 @@ public sealed partial class NovelistMafToolRegistry
             planning: null,
             webFetch: null,
             webSearch: null,
+            referenceAnchors: null,
+            referenceDrafts: null,
             serializerOptions)
     {
     }
@@ -62,6 +66,8 @@ public sealed partial class NovelistMafToolRegistry
         IPlanningService? planning = null,
         IWebFetchService? webFetch = null,
         IWebSearchService? webSearch = null,
+        IReferenceAnchorService? referenceAnchors = null,
+        IReferenceAnchoredDraftService? referenceDrafts = null,
         JsonSerializerOptions? serializerOptions = null)
     {
         _storyMemory = storyMemory ?? throw new ArgumentNullException(nameof(storyMemory));
@@ -74,6 +80,8 @@ public sealed partial class NovelistMafToolRegistry
         _planning = planning;
         _webFetch = webFetch;
         _webSearch = webSearch;
+        _referenceAnchors = referenceAnchors;
+        _referenceDrafts = referenceDrafts;
         _serializerOptions = EnsureTypeInfoResolver(serializerOptions ?? DefaultSerializerOptions);
     }
 
@@ -92,6 +100,7 @@ public sealed partial class NovelistMafToolRegistry
 
         AddWebTools(tools);
         AddStructuredTools(tools, context);
+        AddReferenceTools(tools, context);
 
         if (_chapterContent is not null)
         {
@@ -118,6 +127,8 @@ public sealed partial class NovelistMafToolRegistry
     private partial void AddStructuredTools(List<AIFunction> tools, NovelistMafToolContext context);
 
     private partial void AddWebTools(List<AIFunction> tools);
+
+    private partial void AddReferenceTools(List<AIFunction> tools, NovelistMafToolContext context);
 
     private static JsonSerializerOptions EnsureTypeInfoResolver(JsonSerializerOptions options)
     {

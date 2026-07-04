@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Library, List, Search, Settings, Users, MapPin, GitBranch, History, Eye, Wrench } from 'lucide-react'
+import { BookMarked, Library, List, Search, Settings, Users, MapPin, GitBranch, History, Eye, Wrench } from 'lucide-react'
 
 interface Activity {
   id: string
@@ -12,6 +12,7 @@ const activities: Activity[] = [
   { id: 'search', icon: Search, label: '搜索' },
   { id: 'novels', icon: Library, label: '书架' },
   { id: 'chapters', icon: List, label: '章节' },
+  { id: 'reference', icon: BookMarked, label: '参考锚定' },
   { id: 'preferences', icon: Settings, label: '偏好' },
   { id: 'characters', icon: Users, label: '角色' },
   { id: 'locations', icon: MapPin, label: '地点' },
