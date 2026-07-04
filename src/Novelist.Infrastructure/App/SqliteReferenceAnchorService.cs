@@ -185,7 +185,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             {
                 var source = await ReadSourceFileAsync(anchor.SourcePath, cancellationToken);
                 var segments = BuildSegments(anchor.AnchorId, source.Text);
-                var materials = BuildMaterials(anchor.AnchorId, segments, now);
+                var userVerifiedMaterials = await ReadUserVerifiedMaterialsAsync(connection, anchor.AnchorId, cancellationToken);
+                var materials = ApplyUserVerifiedTagOverrides(
+                    BuildMaterials(anchor.AnchorId, segments, now),
+                    userVerifiedMaterials);
                 await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
                 var readyAnchor = anchor with
                 {
@@ -924,6 +927,80 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         command.Parameters.AddWithValue("$material_id", materialId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken) ? ReadMaterial(reader) : null;
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceMaterialPayload>> ReadUserVerifiedMaterialsAsync(
+        SqliteConnection connection,
+        long anchorId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT material_id, anchor_id, source_segment_id, material_type,
+                   function_tag, emotion_tag, scene_tag, pov_tag, technique_tag,
+                   function_confidence, emotion_confidence, pov_confidence,
+                   text, source_hash, extractor_version, user_verified, created_at
+            FROM reference_materials
+            WHERE anchor_id = $anchor_id AND user_verified != 0
+            ORDER BY material_id ASC;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        var materials = new List<ReferenceMaterialPayload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            materials.Add(ReadMaterial(reader));
+        }
+
+        return materials;
+    }
+
+    private static IReadOnlyList<ReferenceMaterialPayload> ApplyUserVerifiedTagOverrides(
+        IReadOnlyList<ReferenceMaterialPayload> materials,
+        IReadOnlyList<ReferenceMaterialPayload> userVerifiedMaterials)
+    {
+        if (userVerifiedMaterials.Count == 0)
+        {
+            return materials;
+        }
+
+        var byMaterialId = userVerifiedMaterials
+            .GroupBy(material => material.MaterialId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var uniqueByHash = userVerifiedMaterials
+            .GroupBy(material => new ReferenceMaterialHashKey(material.MaterialType, material.SourceHash))
+            .Where(group => group.Count() == 1)
+            .ToDictionary(group => group.Key, group => group.Single());
+        var uniqueNewHashKeys = materials
+            .GroupBy(material => new ReferenceMaterialHashKey(material.MaterialType, material.SourceHash))
+            .Where(group => group.Count() == 1)
+            .Select(group => group.Key)
+            .ToHashSet();
+
+        return materials
+            .Select(material =>
+            {
+                var hashKey = new ReferenceMaterialHashKey(material.MaterialType, material.SourceHash);
+                if (!byMaterialId.TryGetValue(material.MaterialId, out var corrected) &&
+                    (!uniqueNewHashKeys.Contains(hashKey) || !uniqueByHash.TryGetValue(hashKey, out corrected)))
+                {
+                    return material;
+                }
+
+                return material with
+                {
+                    FunctionTag = corrected.FunctionTag,
+                    EmotionTag = corrected.EmotionTag,
+                    SceneTag = corrected.SceneTag,
+                    PovTag = corrected.PovTag,
+                    TechniqueTag = corrected.TechniqueTag,
+                    FunctionConfidence = corrected.FunctionConfidence,
+                    EmotionConfidence = corrected.EmotionConfidence,
+                    PovConfidence = corrected.PovConfidence,
+                    UserVerified = true
+                };
+            })
+            .ToArray();
     }
 
     private static async ValueTask UpdateMaterialTagsAsync(
@@ -2180,6 +2257,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         double FunctionConfidence,
         double EmotionConfidence,
         double PovConfidence);
+
+    private sealed record ReferenceMaterialHashKey(string MaterialType, string SourceHash);
 
     private sealed record AdaptedMaterial(
         string Text,

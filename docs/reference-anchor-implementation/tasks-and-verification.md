@@ -370,7 +370,7 @@ Recommended implementation slices:
 - [x] User-verified tags can override extractor tags.
 - [ ] User-edited blueprint beats can be re-reviewed and approved.
 - [ ] Regression fixtures include previously bad blueprints and candidates.
-- [ ] Rebuild preserves user corrections where source segment hash is unchanged.
+- [x] Rebuild preserves user corrections where source segment hash is unchanged.
 - [x] Ranking can boost materials previously accepted for similar blueprint beats.
 
 **Verification:**
@@ -378,6 +378,7 @@ Recommended implementation slices:
 - [x] integration tests for feedback persistence
 - [x] ranking test for accepted-feedback boost
 - [x] integration tests for user-verified material tag overrides
+- [x] integration test for preserving user-verified material tag overrides across rebuild when material text hash is unchanged
 - [ ] blueprint regression fixture tests
 
 ## Required Test Matrix
@@ -462,13 +463,13 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 
 The initial foundation has already started. Do not restart from Phase 0 unless contracts have regressed.
 
-Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge|MafToolRegistry' -v minimal`, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal`, `cd frontend && npm run build`, and `cd frontend && npm run lint` passed after adding user-verified reference material tag overrides. Earlier reference-anchor verification passed after adding accepted-feedback material binding boosts, semantic-only material binding rejection coverage, persisted reference user feedback rows for accept/reject/edit decisions, deterministic L2 non-slot edit reporting, the native `PickReferenceSourceFile` Photino bridge, and source-path picker button.
+Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge|MafToolRegistry' -v minimal`, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal`, `cd frontend && npm run build`, and `cd frontend && npm run lint` passed after preserving user-verified reference material tag overrides across rebuilds when the material text hash is unchanged. Earlier reference-anchor verification passed after adding user-verified reference material tag overrides, accepted-feedback material binding boosts, semantic-only material binding rejection coverage, persisted reference user feedback rows for accept/reject/edit decisions, deterministic L2 non-slot edit reporting, the native `PickReferenceSourceFile` Photino bridge, and source-path picker button.
 
 Recommended next session:
 
 1. Add full frontend runtime verification after the reference-anchor panel is exercised against a real app bridge.
 2. Add approval hash/version unit tests if approval logic is further split from the SQLite service.
-3. Add rebuild preservation for user-verified tag corrections when the source segment hash is unchanged.
+3. Add regression fixtures for previously bad blueprints and draft candidates.
 
 Recommended following session:
 

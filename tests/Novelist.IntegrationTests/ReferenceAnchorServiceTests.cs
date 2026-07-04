@@ -217,6 +217,86 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RebuildAnchorPreservesUserVerifiedTagsWhenMaterialHashIsUnchanged()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("重建保留校正测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "anchor.md",
+            """
+            前奏。
+
+            他在门口停了很久。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "标签保留参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var materials = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "门口",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        var material = Assert.Single(materials.Items);
+
+        await service.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(
+                novel.Id,
+                material.MaterialId,
+                FunctionTag: "interiority",
+                EmotionTag: "unease",
+                SceneTag: "threshold",
+                PovTag: "close",
+                TechniqueTag: "afterbeat",
+                Origin: "user",
+                Note: "重建后仍应保留"),
+            CancellationToken.None);
+        File.WriteAllText(
+            sourcePath,
+            """
+            新的开场。
+
+            前奏。
+
+            他在门口停了很久。
+            """);
+
+        await service.RebuildAnchorAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+
+        var corrected = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "门口",
+                [ReferenceMaterialTypes.Sentence],
+                EmotionTags: ["unease"],
+                FunctionTags: ["interiority"],
+                PovTags: ["close"],
+                TechniqueTags: ["afterbeat"],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        var correctedMaterial = Assert.Single(corrected.Items);
+        Assert.NotEqual(material.MaterialId, correctedMaterial.MaterialId);
+        Assert.Equal("他在门口停了很久。", correctedMaterial.Text);
+        Assert.True(correctedMaterial.UserVerified);
+        Assert.Equal(1, correctedMaterial.FunctionConfidence);
+        Assert.Equal(1, correctedMaterial.EmotionConfidence);
+        Assert.Equal(1, correctedMaterial.PovConfidence);
+    }
+
+    [Fact]
     public async Task AdaptMaterialAppliesDeclaredSlotsAndAuditsRewriteLevel()
     {
         var options = CreateOptions();
