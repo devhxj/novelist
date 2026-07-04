@@ -86,6 +86,71 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateAnchorValidatesNovelIdAndSourceFile()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("校验测试", "", ""), CancellationToken.None);
+        var service = new SqliteReferenceAnchorService(options, novels);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            await service.CreateAnchorAsync(
+                new CreateReferenceAnchorPayload(
+                    0,
+                    "参考",
+                    null,
+                    CreateSourceFile("valid.md", "第一句。"),
+                    "markdown",
+                    "user_provided"),
+                CancellationToken.None));
+
+        var missingSourcePath = Path.Combine(_root, "sources", "missing.md");
+        var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.CreateAnchorAsync(
+                new CreateReferenceAnchorPayload(
+                    novel.Id,
+                    "缺失参考",
+                    null,
+                    missingSourcePath,
+                    "markdown",
+                    "user_provided"),
+                CancellationToken.None));
+        Assert.Contains("does not exist", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RebuildAnchorRecordsFailedImportStatusWithRedactedError()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("失败导入测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("anchor.md", "第一句。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        File.Delete(sourcePath);
+
+        var failed = await service.RebuildAnchorAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, failed.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, failed.Stage);
+        Assert.Equal(0, failed.SourceSegmentCount);
+        Assert.Equal(0, failed.MaterialCount);
+        Assert.Equal(0, failed.SlotCount);
+        Assert.False(string.IsNullOrWhiteSpace(failed.LastError));
+        Assert.DoesNotContain(sourcePath, failed.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(_root, failed.LastError, StringComparison.OrdinalIgnoreCase);
+
+        var persisted = await service.GetBuildStatusAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(persisted);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, persisted.Status);
+        Assert.Equal(failed.LastError, persisted.LastError);
+    }
+
+    [Fact]
     public async Task SearchMaterialsReturnsPagedDeterministicSentenceAndPassageMatches()
     {
         var options = CreateOptions();
