@@ -1118,6 +1118,64 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ApprovedNoReuseBeatGeneratesDraftWithoutSelectedMaterialLink()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("无复用草稿门禁测试", "", ""), CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(
+            options,
+            novels,
+            new FileSystemPlanningService(options, novels));
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                19,
+                "第十九章蓝图",
+                "用无复用过渡承接压力",
+                AnchorIds: [],
+                KnownFacts: ["主角已经到场"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var revised = await service.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                blueprint.BlueprintId,
+                [new ReferenceBlueprintRevisionChangePayload(
+                    "beat:" + blueprint.Beats[0].BeatId + ":no_reuse_reason",
+                    "transition beat only carries approved chapter-state pressure without reusable source material")],
+                "user",
+                "approve no-reuse draft generation path"),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId),
+            CancellationToken.None);
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+        await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, review.ReviewId),
+            CancellationToken.None);
+
+        var draft = await service.GenerateDraftFromBlueprintAsync(
+            new GenerateReferenceAnchoredDraftPayload(novel.Id, revised.BlueprintId, [revised.Beats[0].BeatId]),
+            CancellationToken.None);
+
+        var candidate = Assert.Single(draft.Candidates);
+        Assert.Equal(revised.Beats[0].BeatId, candidate.BeatId);
+        Assert.StartsWith("no-reuse:", candidate.MaterialId, StringComparison.Ordinal);
+        Assert.Equal(ReferenceRewriteLevels.L0, candidate.RewriteLevel);
+        Assert.False(string.IsNullOrWhiteSpace(candidate.Text));
+        Assert.Equal("passed", draft.Audit?.Status);
+        Assert.Empty(draft.Audit?.ProvenanceErrors ?? []);
+
+        var persistedAudit = await service.AuditDraftAgainstBlueprintAsync(
+            new AuditReferenceAnchoredDraftPayload(novel.Id, revised.BlueprintId, [candidate.CandidateId]),
+            CancellationToken.None);
+        Assert.Equal("passed", persistedAudit.Status);
+        Assert.Empty(persistedAudit.ProvenanceErrors);
+    }
+
+    [Fact]
     public async Task GenerateDraftFromBlueprintRejectsMissingFailedStaleOrUnapprovedBlueprints()
     {
         var options = CreateOptions();

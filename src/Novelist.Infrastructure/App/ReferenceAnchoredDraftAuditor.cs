@@ -33,6 +33,11 @@ internal static class ReferenceAnchoredDraftAuditor
             {
                 provenanceErrors.Add($"Candidate {candidate.CandidateId} is missing material provenance.");
             }
+            else if (ReferenceDraftProvenanceIds.IsNoReuseMaterialId(candidate.MaterialId) &&
+                string.IsNullOrWhiteSpace(beat.NoReuseReason))
+            {
+                provenanceErrors.Add($"Candidate {candidate.CandidateId} uses no-reuse provenance but the blueprint beat has no approved no-reuse reason.");
+            }
 
             if (string.IsNullOrWhiteSpace(candidate.Text))
             {

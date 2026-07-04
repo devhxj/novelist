@@ -24,6 +24,24 @@ public sealed class ReferenceAnchoredDraftAuditorTests
     }
 
     [Fact]
+    public void BuildDraftAuditFailsWhenNoReuseProvenanceLacksBeatReason()
+    {
+        var blueprint = Blueprint(beat => beat);
+        var candidate = Candidate(blueprint, "雨声压低了整条街的呼吸，林岚心里一紧，指尖停住。") with
+        {
+            MaterialId = ReferenceDraftProvenanceIds.BuildNoReuseMaterialId(blueprint.Beats[0].BeatId)
+        };
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.ProvenanceErrors, item => item.Contains("no-reuse provenance", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildDraftAuditFailsWhenCandidateContainsForbiddenFact()
     {
         var blueprint = Blueprint(

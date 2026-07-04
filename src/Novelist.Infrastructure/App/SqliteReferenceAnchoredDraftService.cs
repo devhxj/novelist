@@ -514,16 +514,21 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload> selectedLinks,
         CancellationToken cancellationToken)
     {
-        var referenceAnchors = _referenceAnchors
-            ?? throw new ArgumentException("Reference-anchored draft generation requires a configured reference anchor service.", nameof(_referenceAnchors));
         var candidates = new List<ReferenceDraftParagraphCandidatePayload>();
         foreach (var beat in targetBeats.OrderBy(item => item.BeatIndex))
         {
             if (!selectedLinks.TryGetValue(beat.BeatId, out var link))
             {
+                if (!string.IsNullOrWhiteSpace(beat.NoReuseReason))
+                {
+                    candidates.Add(BuildNoReuseDraftCandidate(blueprint, beat));
+                }
+
                 continue;
             }
 
+            var referenceAnchors = _referenceAnchors
+                ?? throw new ArgumentException("Reference-anchored draft generation requires a configured reference anchor service.", nameof(_referenceAnchors));
             var adapted = await referenceAnchors.AdaptMaterialAsync(
                 new AdaptReferenceMaterialPayload(
                     novelId,
@@ -552,6 +557,68 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         }
 
         return candidates;
+    }
+
+    private static ReferenceDraftParagraphCandidatePayload BuildNoReuseDraftCandidate(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var text = BuildNoReuseDraftText(blueprint, beat);
+        return new ReferenceDraftParagraphCandidatePayload(
+            "draft-" + Guid.NewGuid().ToString("N"),
+            blueprint.BlueprintId,
+            beat.BeatId,
+            ReferenceDraftProvenanceIds.BuildNoReuseMaterialId(beat.BeatId),
+            ReferenceRewriteLevels.L0,
+            text,
+            Array.Empty<ReferenceSlotValuePayload>(),
+            Array.Empty<string>(),
+            "passed",
+            DateTimeOffset.UtcNow);
+    }
+
+    private static string BuildNoReuseDraftText(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var premise = FirstNonEmpty(beat.LogicPremise, blueprint.ChapterFunction, "这一段压力");
+        var approvedEvidence = ReferenceAnchoredDraftAuditor.ExtractRequiredProsePhrases(beat)
+            .Concat(ReferenceAnchoredDraftAuditor.ExtractRequiredEmotionEvidence(beat))
+            .Concat(ReferenceAnchoredDraftAuditor.ExtractPlannedEmotionMechanics(beat))
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(4)
+            .ToArray();
+        var text = "因为" + TrimForSentence(premise, 48) +
+            "，他在原地停住，心里意识到压力仍然压着呼吸。只是那阵沉默没有散开，指尖发凉，直到下一步被推到眼前。";
+        if (approvedEvidence.Length > 0)
+        {
+            text += "这一段只使用已审批蓝图内容：" + string.Join("，", approvedEvidence) + "。";
+        }
+
+        return text;
+    }
+
+    private static string FirstNonEmpty(params string[] values)
+    {
+        return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
+    }
+
+    private static string TrimForSentence(string value, int maxLength)
+    {
+        var normalized = value.Trim()
+            .Replace("\r", " ", StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal)
+            .Trim(' ', '\t', '。', '.', '！', '!', '？', '?', '；', ';', '：', ':', '，', ',');
+        if (normalized.Length <= maxLength)
+        {
+            return normalized;
+        }
+
+        return normalized[..maxLength].Trim();
     }
 
     private async ValueTask<IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload>> EnsureSelectedMaterialLinksAsync(

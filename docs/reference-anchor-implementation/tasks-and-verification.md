@@ -165,7 +165,7 @@ Recommended implementation slices:
 - [ ] Approved status requires a passing review.
 - [ ] Approval records freeze `review_id`, `context_hash`, `source_plan_hash`, `analysis_contract_hash`, `review_version`, approver origin, and approval time.
 - [x] A blueprint with `review_passed` but no explicit approval cannot bind materials or generate draft candidates.
-- [ ] A blueprint with approval but no current material links cannot generate draft candidates unless every requested beat has an approved `no_reuse_reason`.
+- [x] A blueprint with approval but no current material links cannot generate draft candidates unless every requested beat has an approved `no_reuse_reason`.
 - [x] Editing approved analysis tracks, execution contract, known/forbidden facts, and beat reference query invalidates approval and requires re-review.
 - [x] Editing approved beat POV, character-state, emotion-mechanic, scene-fact, prose-duty, and material-query tag fields invalidates approval and records revision paths.
 - [ ] Editing any approved blueprint beat, analysis track, execution track, known/forbidden fact, or reference query invalidates approval and requires re-review.
@@ -222,7 +222,7 @@ Recommended implementation slices:
 - [x] `AdaptMaterialAsync` still supports standalone preview/audit.
 - [x] Draft generation rejects missing, failed, stale, or unapproved blueprints.
 - [x] Draft generation rejects approved blueprints whose latest review hash/version no longer matches.
-- [ ] Draft generation rejects beats without fresh material links unless the beat has an explicit approved `no_reuse_reason`.
+- [x] Draft generation rejects beats without fresh material links unless the beat has an explicit approved `no_reuse_reason`.
 - [x] Draft generation rejects material links created against a different `analysis_contract_hash`.
 - [ ] Draft generation rejects candidates when the preflight cannot prove `blueprint -> approval -> material_link -> candidate` provenance.
 - [ ] Draft generation consumes only reviewed blueprint beat facts, duties, execution track, material links, slot plans, and allowed rewrite levels.
