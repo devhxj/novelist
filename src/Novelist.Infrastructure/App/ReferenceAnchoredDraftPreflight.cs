@@ -39,7 +39,8 @@ internal static class ReferenceAnchoredDraftPreflight
     {
         ArgumentNullException.ThrowIfNull(blueprint);
         ArgumentNullException.ThrowIfNull(review);
-        return string.Equals(review.ContextHash, blueprint.ContextHash, StringComparison.Ordinal) &&
+        return review.BlueprintId == blueprint.BlueprintId &&
+            string.Equals(review.ContextHash, blueprint.ContextHash, StringComparison.Ordinal) &&
             string.Equals(review.SourcePlanHash, blueprint.SourcePlanHash, StringComparison.Ordinal) &&
             string.Equals(review.AnalysisContractHash, blueprint.AnalysisContractHash, StringComparison.Ordinal);
     }

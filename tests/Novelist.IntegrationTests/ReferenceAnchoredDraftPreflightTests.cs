@@ -28,6 +28,19 @@ public sealed class ReferenceAnchoredDraftPreflightTests
     }
 
     [Fact]
+    public void ReviewMatchesBlueprintRejectsReviewFromDifferentBlueprint()
+    {
+        var blueprint = Blueprint();
+        var otherBlueprintReview = Review(blueprintId: blueprint.BlueprintId + 1);
+
+        Assert.False(ReferenceAnchoredDraftPreflight.ReviewMatchesBlueprint(blueprint, otherBlueprintReview));
+        Assert.Throws<ArgumentException>(() =>
+            ReferenceAnchoredDraftPreflight.EnsureCurrentPassingReview(
+                blueprint with { LatestReview = otherBlueprintReview },
+                "Material binding"));
+    }
+
+    [Fact]
     public void SelectTargetBeatsTrimsRequestedIdsAndRejectsMissingTargets()
     {
         var blueprint = Blueprint();
@@ -122,6 +135,7 @@ public sealed class ReferenceAnchoredDraftPreflightTests
     }
 
     private static ReferenceChapterBlueprintReviewPayload Review(
+        long blueprintId = 1,
         string contextHash = "context-hash",
         string sourceHash = "source-hash",
         string analysisHash = "analysis-hash",
@@ -129,7 +143,7 @@ public sealed class ReferenceAnchoredDraftPreflightTests
     {
         return new ReferenceChapterBlueprintReviewPayload(
             "review-1",
-            1,
+            blueprintId,
             contextHash,
             sourceHash,
             analysisHash,
