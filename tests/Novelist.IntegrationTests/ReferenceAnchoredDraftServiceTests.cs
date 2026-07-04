@@ -1266,8 +1266,17 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         var candidate = Assert.Single(result.GetProperty("candidates").EnumerateArray());
         var candidateId = candidate.GetProperty("candidate_id").GetString();
         Assert.False(string.IsNullOrWhiteSpace(candidateId));
+        Assert.Equal(blueprint.BlueprintId, candidate.GetProperty("blueprint_id").GetInt64());
+        Assert.False(string.IsNullOrWhiteSpace(candidate.GetProperty("beat_id").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(candidate.GetProperty("material_id").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(candidate.GetProperty("text").GetString()));
+        Assert.Equal("L0", candidate.GetProperty("rewrite_level").GetString());
+        Assert.Equal(JsonValueKind.Array, candidate.GetProperty("changed_slots").ValueKind);
+        Assert.Equal(JsonValueKind.Array, candidate.GetProperty("non_slot_edits").ValueKind);
         Assert.Equal("passed", candidate.GetProperty("audit_status").GetString());
+        Assert.True(candidate.TryGetProperty("created_at", out _));
         Assert.Equal("passed", result.GetProperty("audit").GetProperty("status").GetString());
+        Assert.Equal(blueprint.BlueprintId, result.GetProperty("audit").GetProperty("blueprint_id").GetInt64());
 
         using var audited = ParseOutbound(await dispatcher.DispatchAsync($$"""
             {

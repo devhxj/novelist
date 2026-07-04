@@ -240,7 +240,7 @@ Recommended implementation slices:
 - [ ] Draft candidates are audited for novelistic execution: paragraph intention, execution mode, anti-screenplay duty, sensory/subtext targets, and source-backed detail target.
 - [x] Draft candidates fail when a declared Chinese emotion change has no trigger, suppressed reaction, or external-evidence mechanic present in the text.
 - [ ] Draft candidates are audited against the beat's emotion trigger, suppressed reaction, external evidence, and after-state.
-- [ ] Draft candidates expose source material id, beat id, rewrite level, changed slots, non-slot edits, and audit result in the bridge payload.
+- [x] Draft candidates expose source material id, beat id, rewrite level, changed slots, non-slot edits, and audit result in the bridge payload.
 - [ ] Draft service returns candidates only and never mutates chapter content.
 
 **Verification:**
@@ -253,9 +253,9 @@ Recommended implementation slices:
 - [ ] unit tests for blueprint-to-draft audit rules
 - [x] component tests for dialogue-only drift, action-only drift, missing prose duty evidence, missing emotion evidence, POV leakage, and missing required prose target
 - [ ] integration test for `AdaptMaterialAsync`
-- [ ] integration test for `GenerateDraftFromBlueprintAsync`
+- [x] integration test for `GenerateDraftFromBlueprintAsync`
 - [ ] integration test proving unapproved/stale blueprint generation is blocked
-- [ ] bridge test proving `GenerateReferenceAnchoredDraft` returns a stable validation error before approval
+- [x] bridge test proving `GenerateReferenceAnchoredDraft` returns a stable validation error before approval
 
 **Files likely touched:**
 
@@ -463,7 +463,7 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 
 The initial foundation has already started. Do not restart from Phase 0 unless contracts have regressed.
 
-Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge|MafToolRegistry' -v minimal`, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal`, `cd frontend && npm run build`, and `cd frontend && npm run lint` passed after preserving user-verified reference material tag overrides across rebuilds when the material text hash is unchanged. Follow-up preflight verification also passed for rejecting a current-review match when the review belongs to a different blueprint id. Earlier reference-anchor verification passed after adding user-verified reference material tag overrides, accepted-feedback material binding boosts, semantic-only material binding rejection coverage, persisted reference user feedback rows for accept/reject/edit decisions, deterministic L2 non-slot edit reporting, the native `PickReferenceSourceFile` Photino bridge, and source-path picker button.
+Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge|MafToolRegistry' -v minimal`, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal`, `cd frontend && npm run build`, and `cd frontend && npm run lint` passed after preserving user-verified reference material tag overrides across rebuilds when the material text hash is unchanged. Follow-up preflight verification also passed for rejecting a current-review match when the review belongs to a different blueprint id, and bridge verification now asserts `GenerateReferenceAnchoredDraft` returns candidate provenance, rewrite, edit, and audit fields. Earlier reference-anchor verification passed after adding user-verified reference material tag overrides, accepted-feedback material binding boosts, semantic-only material binding rejection coverage, persisted reference user feedback rows for accept/reject/edit decisions, deterministic L2 non-slot edit reporting, the native `PickReferenceSourceFile` Photino bridge, and source-path picker button.
 
 Recommended next session:
 
