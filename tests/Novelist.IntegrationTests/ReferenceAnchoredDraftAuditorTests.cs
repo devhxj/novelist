@@ -337,6 +337,63 @@ public sealed class ReferenceAnchoredDraftAuditorTests
     }
 
     [Fact]
+    public void BuildDraftAuditAllowsExplicitShortDialogueExchange()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            BeatType = ReferenceBlueprintBeatTypes.DialogueExchange,
+            ParagraphIntention = "allow short exchange before narration resumes",
+            ExecutionMode = "short_exchange",
+            AntiScreenplayDuty = "",
+            ProseDuties = ["dialogue"],
+            CandidateRejectionRule = "allow short exchange"
+        });
+        var candidate = Candidate(
+            blueprint,
+            """
+            “你来了？”
+            “我来了。”
+            """);
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("passed", audit.Status);
+        Assert.Empty(audit.AiProseRisks);
+    }
+
+    [Fact]
+    public void BuildDraftAuditRejectsLongDialogueDespiteShortExchangeAllowance()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            BeatType = ReferenceBlueprintBeatTypes.DialogueExchange,
+            ParagraphIntention = "allow short exchange before narration resumes",
+            ExecutionMode = "short_exchange",
+            AntiScreenplayDuty = "",
+            ProseDuties = ["dialogue"],
+            CandidateRejectionRule = "allow short exchange"
+        });
+        var candidate = Candidate(
+            blueprint,
+            """
+            “你来了？”
+            “我来了。”
+            “那就开始吧。”
+            """);
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.BlueprintErrors, item => item.Contains("anti-screenplay", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildDraftAuditFailsWhenCandidateIsActionOnlyDespiteNovelisticDuties()
     {
         var blueprint = Blueprint(beat => beat with

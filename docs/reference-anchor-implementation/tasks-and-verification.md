@@ -240,7 +240,7 @@ Recommended implementation slices:
 - [ ] Draft candidates preserve beat POV, narrative distance, scene facts, forbidden facts, and prose duties.
 - [x] Draft candidates fail when non-POV character hidden emotion or intention is named directly instead of shown through observable evidence.
 - [x] Draft candidates fail when declared novelistic prose duties have no detectable evidence in the text.
-- [ ] Draft candidates are audited for screenplay drift: dialogue/action-only paragraphs fail unless the beat explicitly allows a short exchange.
+- [x] Draft candidates are audited for screenplay drift: dialogue/action-only paragraphs fail unless the beat explicitly allows a short exchange.
 - [x] Action-only candidates fail when the approved beat requires interiority, external evidence, sensory pressure, transition work, subtext, or delayed reaction.
 - [ ] Draft candidates are audited for novelistic execution: paragraph intention, execution mode, anti-screenplay duty, sensory/subtext targets, and source-backed detail target.
 - [x] Draft candidates fail when a declared Chinese emotion change has no trigger, suppressed reaction, or external-evidence mechanic present in the text.

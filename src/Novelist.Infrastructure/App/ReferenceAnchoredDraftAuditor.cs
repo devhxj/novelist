@@ -49,10 +49,12 @@ internal static class ReferenceAnchoredDraftAuditor
                 requiredFixes.Add($"Candidate {candidate.CandidateId} failed reference reuse audit.");
             }
 
+            var allowsShortDialogueExchange = AllowsExplicitShortDialogueExchange(beat, candidate.Text);
             if ((string.Equals(beat.BeatType, ReferenceBlueprintBeatTypes.DialogueExchange, StringComparison.Ordinal) ||
                     beat.ProseDuties.All(duty => string.Equals(duty, "dialogue", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(duty, "action", StringComparison.OrdinalIgnoreCase))) &&
-                string.IsNullOrWhiteSpace(beat.AntiScreenplayDuty))
+                string.IsNullOrWhiteSpace(beat.AntiScreenplayDuty) &&
+                !allowsShortDialogueExchange)
             {
                 blueprintErrors.Add($"Beat {beat.BeatIndex} lacks anti-screenplay execution duty.");
             }
@@ -124,7 +126,9 @@ internal static class ReferenceAnchoredDraftAuditor
                 requiredFixes.Add($"Add observable prose duty evidence to candidate {candidate.CandidateId}: {duties}");
             }
 
-            if (RequiresNovelisticExecution(beat) && IsDialogueOnly(candidate.Text))
+            if (RequiresNovelisticExecution(beat) &&
+                IsDialogueOnly(candidate.Text) &&
+                !allowsShortDialogueExchange)
             {
                 aiRisks.Add($"Candidate {candidate.CandidateId} has screenplay drift: dialogue-only prose despite anti-screenplay duty.");
                 requiredFixes.Add($"Add non-dialogue narration, interiority, sensory pressure, or transition work to candidate {candidate.CandidateId}.");
@@ -608,15 +612,79 @@ internal static class ReferenceAnchoredDraftAuditor
                 string.Equals(duty, "subtext", StringComparison.OrdinalIgnoreCase));
     }
 
+    private static bool AllowsExplicitShortDialogueExchange(
+        ReferenceChapterBlueprintBeatPayload beat,
+        string candidateText)
+    {
+        if (!IsShortDialogueExchange(candidateText) ||
+            !IsDialogueBeat(beat) ||
+            !HasShortExchangeAllowance(beat))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsDialogueBeat(ReferenceChapterBlueprintBeatPayload beat)
+    {
+        return string.Equals(beat.BeatType, ReferenceBlueprintBeatTypes.DialogueExchange, StringComparison.Ordinal) ||
+            beat.ProseDuties.Any(duty => string.Equals(duty, "dialogue", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool HasShortExchangeAllowance(ReferenceChapterBlueprintBeatPayload beat)
+    {
+        return new[]
+            {
+                beat.ParagraphIntention,
+                beat.ExecutionMode,
+                beat.CandidateRejectionRule,
+                beat.NarrationStrategy,
+                beat.RhythmStrategy,
+                beat.AntiScreenplayDuty
+            }
+            .Concat(beat.ProseDuties)
+            .Any(ContainsShortExchangeMarker);
+    }
+
+    private static bool ContainsShortExchangeMarker(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = value.Trim()
+            .Replace("-", "_", StringComparison.Ordinal)
+            .Replace(" ", "_", StringComparison.Ordinal)
+            .ToLowerInvariant();
+        return normalized.Contains("short_exchange", StringComparison.Ordinal) ||
+            normalized.Contains("brief_exchange", StringComparison.Ordinal) ||
+            normalized.Contains("short_dialogue", StringComparison.Ordinal) ||
+            normalized.Contains("brief_dialogue", StringComparison.Ordinal) ||
+            ContainsAny(value, ["短交流", "短对话", "简短对话"]);
+    }
+
+    private static bool IsShortDialogueExchange(string text)
+    {
+        var lines = DialogueCandidateLines(text);
+        return lines.Length is > 0 and <= 2 && lines.All(IsDialogueLine);
+    }
+
     private static bool IsDialogueOnly(string text)
     {
-        var lines = (text ?? string.Empty)
+        var lines = DialogueCandidateLines(text);
+        return lines.Length > 0 && lines.All(IsDialogueLine);
+    }
+
+    private static string[] DialogueCandidateLines(string text)
+    {
+        return (text ?? string.Empty)
             .Replace("\r\n", "\n", StringComparison.Ordinal)
             .Split('\n')
             .Select(line => line.Trim())
             .Where(line => line.Length > 0)
             .ToArray();
-        return lines.Length > 0 && lines.All(IsDialogueLine);
     }
 
     private static bool IsDialogueLine(string line)
