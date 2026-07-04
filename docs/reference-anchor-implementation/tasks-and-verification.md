@@ -226,8 +226,8 @@ Recommended implementation slices:
 - [x] L1 changes only declared slots.
 - [x] L1 slot replacement preserves locked phrases and source order where applicable.
 - [x] L2 reports non-slot edits.
-- [ ] L3 is classified and blocked unless requested.
-- [ ] L4 cannot pass.
+- [x] L3 is classified and blocked unless requested.
+- [x] L4 cannot pass.
 - [ ] Missing provenance fails audit.
 - [ ] Unsupported new facts fail audit.
 - [x] Unsupported high-risk identity reveals fail audit unless the reveal is already present in approved known, scene, viewpoint, or slot facts.
@@ -247,6 +247,7 @@ Recommended implementation slices:
 
 - [x] component/integration tests for slot extraction and slot-only replacement, covering brace styles, repeated slots, malformed placeholders, stable ids, offsets, undeclared-slot rejection, non-slot phrase preservation, and source order
 - [x] component tests for rewrite-level classifier covering L0, slot-only L1, light L2, loose L3, and unrelated L4
+- [x] integration tests for reuse audit rewrite-level gates covering L3 max-level blocking/allowance and unconditional L4 failure
 - [x] component tests for draft preflight status, review-hash, target-beat, no-reuse, and material-link validation
 - [x] integration tests for draft preflight material-link hash validation
 - [x] component tests for unsupported fact detection covering key object/evidence terms, identity reveals, relationship reveals, and approved-fact allowance

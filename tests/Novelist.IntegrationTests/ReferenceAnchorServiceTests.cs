@@ -448,6 +448,100 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AuditCandidateBlocksL3UnlessRequested()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("L3门禁测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("anchor.md", "雨声压低了整条街的呼吸，林岚在门口停住。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var materials = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "林岚",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        var material = Assert.Single(materials.Items);
+        const string l3Candidate = "雨声压着街口，林岚停在门前，迟迟没有开口。";
+
+        var blocked = await service.AuditCandidateAsync(
+            new AuditReferenceReusePayload(
+                novel.Id,
+                material.MaterialId,
+                l3Candidate,
+                ReferenceRewriteLevels.L1,
+                SceneFacts: []),
+            CancellationToken.None);
+        var requested = await service.AuditCandidateAsync(
+            new AuditReferenceReusePayload(
+                novel.Id,
+                material.MaterialId,
+                l3Candidate,
+                ReferenceRewriteLevels.L3,
+                SceneFacts: []),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceRewriteLevels.L3, blocked.RewriteLevel);
+        Assert.Equal("failed", blocked.Status);
+        Assert.Contains(blocked.RequiredFixes, item => item.Contains("exceeds max rewrite level L1", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(ReferenceRewriteLevels.L3, requested.RewriteLevel);
+        Assert.Equal("passed", requested.Status);
+        Assert.Empty(requested.RequiredFixes);
+    }
+
+    [Fact]
+    public async Task AuditCandidateFailsL4EvenWhenMaximumAllowsL4()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("L4门禁测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("anchor.md", "雨声压低了整条街的呼吸，林岚在门口停住。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var materials = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "林岚",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        var material = Assert.Single(materials.Items);
+
+        var audit = await service.AuditCandidateAsync(
+            new AuditReferenceReusePayload(
+                novel.Id,
+                material.MaterialId,
+                "桌上的茶已经凉透。",
+                ReferenceRewriteLevels.L4,
+                SceneFacts: []),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceRewriteLevels.L4, audit.RewriteLevel);
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("L4 rewrite cannot pass", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task AuditCandidateReportsL2NonSlotEdits()
     {
         var options = CreateOptions();
