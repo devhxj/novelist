@@ -26,6 +26,11 @@
       "expected_error": "action/dialogue"
     },
     {
+      "name": "missing_character_state_delta",
+      "mutation": "missing_character_state_delta",
+      "expected_error": "role-state delta"
+    },
+    {
       "name": "material_mismatch",
       "mutation": "material_mismatch",
       "expected_error": "material fit"

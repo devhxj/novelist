@@ -90,6 +90,11 @@ public sealed class ReferenceRegressionFixtureTests
                 BeatType = ReferenceBlueprintBeatTypes.Action,
                 ProseDuties = ["action", "dialogue"]
             },
+            "missing_character_state_delta" => beat with
+            {
+                CharacterStatesBefore = ["controlled"],
+                CharacterStatesAfter = ["controlled"]
+            },
             "material_mismatch" => beat with
             {
                 ReferenceQuery = beat.ReferenceQuery with

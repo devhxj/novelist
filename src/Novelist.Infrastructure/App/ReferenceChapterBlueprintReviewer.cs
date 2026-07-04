@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 2;
+    public const int CurrentReviewVersion = 3;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -179,6 +179,16 @@ internal static class ReferenceChapterBlueprintReviewer
                     "character_state",
                     $"Beat {beat.BeatIndex} is missing character state mechanics.",
                     "Fill character goals plus before/after state mechanics for this beat.");
+            }
+            else if (HasNoCharacterStateDelta(beat.CharacterStatesBefore, beat.CharacterStatesAfter))
+            {
+                AddBeatDefect(
+                    characterStateErrors,
+                    "character_state",
+                    beat,
+                    "character_state_delta",
+                    $"Beat {beat.BeatIndex} has no role-state delta between before and after states.",
+                    "Change character_states_after to show the pressure, leverage, knowledge, relationship, or role-state delta created by this beat.");
             }
 
             if (beat.ViewpointForbiddenKnowledge.Any(forbidden =>
@@ -455,6 +465,16 @@ internal static class ReferenceChapterBlueprintReviewer
         }
     }
 
+    private static bool HasNoCharacterStateDelta(
+        IReadOnlyList<string> statesBefore,
+        IReadOnlyList<string> statesAfter)
+    {
+        var before = NormalizeStateValues(statesBefore).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var after = NormalizeStateValues(statesAfter).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return before.Count > 0 && after.Count > 0 && before.SetEquals(after);
+    }
+
     private static bool HasReferenceQueryBeatFit(ReferenceChapterBlueprintBeatPayload beat)
     {
         if (!string.IsNullOrWhiteSpace(beat.NoReuseReason))
@@ -504,6 +524,14 @@ internal static class ReferenceChapterBlueprintReviewer
         return tags
             .Select(NormalizeToken)
             .Where(tag => tag.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> NormalizeStateValues(IEnumerable<string> values)
+    {
+        return values
+            .Select(value => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToLowerInvariant())
+            .Where(value => value.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase);
     }
 

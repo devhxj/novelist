@@ -174,6 +174,25 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsWhenCharacterStateHasNoDelta()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            CharacterStatesBefore = ["controlled"],
+            CharacterStatesAfter = ["controlled"]
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.CharacterStateErrors, item => item.Contains("role-state delta", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "character_state" &&
+                defect.FieldPath.Contains("character_state_delta", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsHardTransitionWithoutNarrativePressure()
     {
         var blueprint = Blueprint(beat => beat with
