@@ -451,7 +451,7 @@ internal static class ReferenceAnchoredDraftAuditor
             return [];
         }
 
-        return new[] { beat.EmotionTrigger, beat.SuppressedReaction, beat.ExternalEvidence }
+        return new[] { beat.EmotionTrigger, beat.SuppressedReaction, beat.ExternalEvidence, beat.EmotionAfter }
             .SelectMany(ExtractChineseMechanicPhrases)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

@@ -244,7 +244,7 @@ Recommended implementation slices:
 - [x] Action-only candidates fail when the approved beat requires interiority, external evidence, sensory pressure, transition work, subtext, or delayed reaction.
 - [ ] Draft candidates are audited for novelistic execution: paragraph intention, execution mode, anti-screenplay duty, sensory/subtext targets, and source-backed detail target.
 - [x] Draft candidates fail when a declared Chinese emotion change has no trigger, suppressed reaction, or external-evidence mechanic present in the text.
-- [ ] Draft candidates are audited against the beat's emotion trigger, suppressed reaction, external evidence, and after-state.
+- [x] Draft candidates are audited against the beat's emotion trigger, suppressed reaction, external evidence, and after-state.
 - [x] Draft candidates expose source material id, beat id, rewrite level, changed slots, non-slot edits, and audit result in the bridge payload.
 - [x] Draft service returns candidates only and never mutates chapter content.
 
