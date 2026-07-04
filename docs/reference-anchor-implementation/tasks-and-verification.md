@@ -214,7 +214,7 @@ Recommended implementation slices:
 
 **Acceptance criteria:**
 
-- [ ] `AdaptMaterialAsync` still supports standalone preview/audit.
+- [x] `AdaptMaterialAsync` still supports standalone preview/audit.
 - [x] Draft generation rejects missing, failed, stale, or unapproved blueprints.
 - [ ] Draft generation rejects approved blueprints whose latest review hash/version no longer matches.
 - [ ] Draft generation rejects beats without fresh material links unless the beat has an explicit approved `no_reuse_reason`.
@@ -252,7 +252,7 @@ Recommended implementation slices:
 - [x] component tests for unsupported fact detection covering key object/evidence terms, identity reveals, relationship reveals, and approved-fact allowance
 - [ ] unit tests for blueprint-to-draft audit rules
 - [x] component tests for dialogue-only drift, action-only drift, missing prose duty evidence, missing emotion evidence, POV leakage, and missing required prose target
-- [ ] integration test for `AdaptMaterialAsync`
+- [x] integration test for `AdaptMaterialAsync`
 - [x] integration test for `GenerateDraftFromBlueprintAsync`
 - [x] integration test proving `GenerateDraftFromBlueprintAsync` returns candidates without mutating chapter content
 - [x] integration test proving missing, failed, unapproved, and stale blueprint generation is blocked
