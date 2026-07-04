@@ -184,7 +184,7 @@ Recommended implementation slices:
 - [x] component tests for blueprint normalization and analysis-contract hashing
 - [x] component tests for deterministic blueprint review rules, including anti-screenplay and execution-track defects
 - [x] fixture tests for fake emotion, hard transition, POV leak, missing prose duty, action/dialogue-only beat, and material mismatch
-- [ ] unit tests for explicit approval hash/version matching
+- [x] unit tests for explicit approval hash/version matching
 - [x] integration tests for approval invalidation after beat, analysis, execution, known-fact, and reference-query edits
 - [x] integration test for generate/review/approve/stale lifecycle
 - [x] integration test for beat material binding and provenance joins

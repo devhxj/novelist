@@ -40,6 +40,28 @@ public sealed class ReferenceAnchoredDraftPreflightTests
                 "Material binding"));
     }
 
+    [Theory]
+    [InlineData("context")]
+    [InlineData("source")]
+    [InlineData("analysis")]
+    public void ReviewMatchesBlueprintRejectsReviewHashMismatch(string hashName)
+    {
+        var blueprint = Blueprint();
+        var mismatchedReview = hashName switch
+        {
+            "context" => Review(contextHash: "old-context-hash"),
+            "source" => Review(sourceHash: "old-source-hash"),
+            "analysis" => Review(analysisHash: "old-analysis-hash"),
+            _ => throw new ArgumentOutOfRangeException(nameof(hashName), hashName, "Unsupported hash name.")
+        };
+
+        Assert.False(ReferenceAnchoredDraftPreflight.ReviewMatchesBlueprint(blueprint, mismatchedReview));
+        Assert.Throws<ArgumentException>(() =>
+            ReferenceAnchoredDraftPreflight.EnsureCurrentPassingReview(
+                blueprint with { LatestReview = mismatchedReview },
+                "Material binding"));
+    }
+
     [Fact]
     public void ReviewMatchesBlueprintRejectsReviewFromDifferentReviewVersion()
     {
