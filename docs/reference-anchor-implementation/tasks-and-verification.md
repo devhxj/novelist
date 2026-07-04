@@ -93,7 +93,7 @@ Current design note: narrative duty and external evidence are beat-level bluepri
 - [ ] Missing sqlite-vec returns a recoverable status.
 - [x] Results are bounded and paginated.
 - [x] Search can filter by narrative duty, emotion transition, POV, technique, and material type.
-- [ ] Beat-level material matching returns ranked candidates without selecting them automatically unless requested.
+- [x] Beat-level material matching returns ranked candidates without selecting them automatically unless requested.
 
 **Verification:**
 
@@ -102,7 +102,7 @@ Current design note: narrative duty and external evidence are beat-level bluepri
 - [ ] fake embedding client test
 - [ ] fake sqlite-vec provisioner test
 - [x] complete search filter tests for narrative duty and emotion transition coverage
-- [ ] beat-to-material ranking tests
+- [x] beat-to-material ranking tests
 
 **Files likely touched:**
 

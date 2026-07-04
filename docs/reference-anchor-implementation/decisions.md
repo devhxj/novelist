@@ -388,7 +388,7 @@ Important boundary rules:
 - The drafting service returns candidates only; it must not call `SaveContent`.
 - `ReviseChapterBlueprintAsync` must create an auditable revision entry and invalidate approval/material links when any reviewed field changes.
 - `ApproveChapterBlueprintAsync` must verify that the latest passing review matches the current `context_hash`, `source_plan_hash`, `analysis_contract_hash`, and `review_version`.
-- `BindBlueprintMaterialsAsync` must verify approval first, then create beat-material links against the approved analysis contract. It must not bind materials to a draft, failed, stale, or merely review-passed blueprint.
+- `BindBlueprintMaterialsAsync` must verify approval first, then create beat-material candidate links against the approved analysis contract. It defaults to returning ranked candidates without selecting them; callers must explicitly request top-candidate selection before draft generation. It must not bind materials to a draft, failed, stale, or merely review-passed blueprint.
 - `GenerateDraftFromBlueprintAsync` must verify both the approved blueprint contract and active material links immediately before generation. A stale approval or stale link must return a validation error instead of falling back to free drafting.
 - Inputs should use `novel_id` and `chapter_number` as the stable public targeting model. `ChapterPayload.Id` exists, but chapter-number based workflows already exist in planning, RAG, and workspace utilities.
 - Blueprint records may reference the current `ChapterPlanPayload.Scope` and a hash of `ChapterPlanPayload.Content`, but must remain valid even when a chapter file does not exist yet.

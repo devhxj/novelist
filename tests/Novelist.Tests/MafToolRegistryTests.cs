@@ -248,6 +248,13 @@ public sealed class MafToolRegistryTests
         Assert.False(generateDraftProperties.TryGetProperty("path", out _));
         Assert.False(generateDraftProperties.TryGetProperty("chapter_path", out _));
         Assert.DoesNotContain("SaveContent", generateDraftProperties.EnumerateObject().Select(property => property.Name), StringComparer.Ordinal);
+
+        var bindMaterials = tools.Single(tool => tool.Name == "bind_reference_blueprint_materials");
+        Assert.Contains("select_top_candidate", bindMaterials.Description, StringComparison.Ordinal);
+        Assert.True(bindMaterials.JsonSchema.TryGetProperty("properties", out var bindMaterialsProperties));
+        Assert.True(bindMaterialsProperties.TryGetProperty("blueprint_id", out _));
+        Assert.True(bindMaterialsProperties.TryGetProperty("max_results_per_beat", out _));
+        Assert.True(bindMaterialsProperties.TryGetProperty("select_top_candidate", out _));
     }
 
     [Fact]
@@ -284,6 +291,40 @@ public sealed class MafToolRegistryTests
         Assert.Equal(["external_evidence"], anchors.LastSearch.NarrativeDuties);
         Assert.Equal(["neutral->pressure"], anchors.LastSearch.EmotionTransitions);
         Assert.Equal("mat-1", result.Data!.Value.GetProperty("items")[0].GetProperty("material_id").GetString());
+    }
+
+    [Fact]
+    public async Task ReferenceDraftBindToolInjectsSelectionIntent()
+    {
+        var drafts = new RecordingReferenceAnchoredDraftService();
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors: null,
+            referenceDrafts: drafts));
+
+        var result = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 1),
+            new ChatToolCall(
+                "call_reference_bind",
+                "bind_reference_blueprint_materials",
+                """{"blueprint_id":501,"max_results_per_beat":4,"select_top_candidate":true}"""),
+            CancellationToken.None);
+
+        Assert.True(result.Success, result.Error);
+        Assert.NotNull(drafts.LastBind);
+        Assert.Equal(23, drafts.LastBind.NovelId);
+        Assert.Equal(501, drafts.LastBind.BlueprintId);
+        Assert.Equal(4, drafts.LastBind.MaxResultsPerBeat);
+        Assert.True(drafts.LastBind.SelectTopCandidate);
     }
 
     [Fact]
@@ -775,6 +816,8 @@ public sealed class MafToolRegistryTests
 
     private sealed class RecordingReferenceAnchoredDraftService : IReferenceAnchoredDraftService
     {
+        public BindReferenceBlueprintMaterialsPayload? LastBind { get; private set; }
+
         public ValueTask<ReferenceChapterBlueprintPayload> GenerateChapterBlueprintAsync(
             GenerateReferenceChapterBlueprintPayload input,
             CancellationToken cancellationToken)
@@ -878,6 +921,7 @@ public sealed class MafToolRegistryTests
             BindReferenceBlueprintMaterialsPayload input,
             CancellationToken cancellationToken)
         {
+            LastBind = input;
             return ValueTask.FromResult(new ReferenceBlueprintMaterialBindingResultPayload(input.BlueprintId, []));
         }
 

@@ -267,6 +267,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       novel_id: novelId,
       blueprint_id: activeBlueprint.blueprint_id,
       max_results_per_beat: 3,
+      select_top_candidate: true,
     }), '材料已绑定到蓝图')
     if (result) {
       setBinding(result)

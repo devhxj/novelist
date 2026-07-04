@@ -439,7 +439,7 @@ Tool limits:
 - `review_reference_chapter_blueprint`: pure check only; must not revise the blueprint silently
 - `revise_reference_chapter_blueprint`: requires explicit field-level changes, records a revision, and invalidates approval/material links when reviewed fields change
 - `approve_reference_chapter_blueprint`: allowed only after a passing review
-- `bind_reference_blueprint_materials`: allowed only after explicit approval; must bind material to beat duties, not only semantic similarity
+- `bind_reference_blueprint_materials`: allowed only after explicit approval; returns ranked candidates by beat duty fit, not only semantic similarity; `select_top_candidate` defaults to `false` and must be `true` to mark each beat's top candidate selected for draft generation
 - `generate_reference_anchored_draft`: requires an approved and material-bound `blueprint_id`; returns candidates only
 - `audit_reference_anchored_draft`: pure check only
 - no `SaveContent`
@@ -456,7 +456,8 @@ search/reference context
   -> revise_reference_chapter_blueprint when review fails
   -> review_reference_chapter_blueprint again after revision
   -> approve_reference_chapter_blueprint
-  -> bind_reference_blueprint_materials
+  -> bind_reference_blueprint_materials (candidate preview, no auto-selection by default)
+  -> bind_reference_blueprint_materials with select_top_candidate=true before drafting
   -> generate_reference_anchored_draft
   -> audit_reference_anchored_draft
 ```

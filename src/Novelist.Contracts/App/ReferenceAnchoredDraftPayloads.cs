@@ -221,7 +221,8 @@ public sealed record ApproveReferenceChapterBlueprintPayload(
 public sealed record BindReferenceBlueprintMaterialsPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("blueprint_id")] long BlueprintId,
-    [property: JsonPropertyName("max_results_per_beat")] int MaxResultsPerBeat);
+    [property: JsonPropertyName("max_results_per_beat")] int MaxResultsPerBeat,
+    [property: JsonPropertyName("select_top_candidate")] bool SelectTopCandidate = false);
 
 public sealed record ReferenceBlueprintMaterialLinkPayload(
     [property: JsonPropertyName("link_id")] string LinkId,

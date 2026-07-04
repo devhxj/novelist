@@ -397,7 +397,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 
             for (var index = 0; index < scored.Length; index++)
             {
-                boundLinks.Add(scored[index] with { Link = scored[index].Link with { Selected = index == 0 } });
+                boundLinks.Add(scored[index] with { Link = scored[index].Link with { Selected = input.SelectTopCandidate && index == 0 } });
             }
         }
 
@@ -409,7 +409,15 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             await ReplaceBlueprintMaterialLinksAsync(connection, transaction, blueprint.BlueprintId, boundLinks, cancellationToken);
-            await UpdateBlueprintStatusAsync(connection, transaction, blueprint.BlueprintId, ReferenceBlueprintStates.MaterialBound, blueprint.LatestReview?.ReviewId ?? string.Empty, cancellationToken);
+            await UpdateBlueprintStatusAsync(
+                connection,
+                transaction,
+                blueprint.BlueprintId,
+                boundLinks.Any(item => item.Link.Selected)
+                    ? ReferenceBlueprintStates.MaterialBound
+                    : ReferenceBlueprintStates.Approved,
+                blueprint.LatestReview?.ReviewId ?? string.Empty,
+                cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
         finally

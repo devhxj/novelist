@@ -249,7 +249,7 @@ public sealed class MafStructuredToolIntegrationTests : IDisposable
             executor,
             novel.Id,
             "bind_reference_blueprint_materials",
-            $$"""{"blueprint_id":{{blueprintId}},"max_results_per_beat":3}""");
+            $$"""{"blueprint_id":{{blueprintId}},"max_results_per_beat":3,"select_top_candidate":true}""");
         var selectedLink = Assert.Single(
             binding.GetProperty("links").EnumerateArray(),
             link => link.GetProperty("selected").GetBoolean());
@@ -360,7 +360,7 @@ public sealed class MafStructuredToolIntegrationTests : IDisposable
             executor,
             novel.Id,
             "bind_reference_blueprint_materials",
-            $$"""{"blueprint_id":{{blueprintId}},"max_results_per_beat":3}""");
+            $$"""{"blueprint_id":{{blueprintId}},"max_results_per_beat":3,"select_top_candidate":true}""");
 
         var draft = await ExecuteAsync(
             executor,

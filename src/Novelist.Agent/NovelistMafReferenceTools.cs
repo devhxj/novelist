@@ -168,7 +168,7 @@ public sealed partial class NovelistMafToolRegistry
         private const string ReviewBlueprintDescription = "评审 reference-anchored 蓝图。纯检查工具，不静默修订蓝图。";
         private const string ReviseBlueprintDescription = "按字段路径修订蓝图，并使已批准 review/material links 失效。";
         private const string ApproveBlueprintDescription = "批准已通过评审的蓝图。只有批准后的蓝图才能绑定材料和生成候选。";
-        private const string BindMaterialsDescription = "把参考材料绑定到已通过评审并已批准的蓝图 beat。";
+        private const string BindMaterialsDescription = "为已通过评审并已批准的蓝图 beat 返回参考材料候选；默认不自动选中，进入草稿生成前需显式 select_top_candidate=true。";
         private const string GenerateDraftDescription = "从 approved/material_bound 蓝图和已选择材料链接生成候选段落；只返回 candidates，不调用 SaveContent，不直接写章节。";
         private const string AuditDraftDescription = "按 candidate_id 审计已生成的 reference-anchored 草稿候选。纯检查工具，不写章节。";
 
@@ -292,13 +292,16 @@ public sealed partial class NovelistMafToolRegistry
             long blueprint_id,
             [Description("每个 beat 最多候选数，默认 3，范围 1-10")]
             int max_results_per_beat = 0,
+            [Description("是否自动选中每个 beat 的最高分候选。默认 false；需要进入草稿生成前必须显式传 true")]
+            bool select_top_candidate = false,
             CancellationToken cancellationToken = default)
         {
             return _referenceDrafts.BindBlueprintMaterialsAsync(
                 new BindReferenceBlueprintMaterialsPayload(
                     _context.NovelId,
                     blueprint_id,
-                    Math.Clamp(max_results_per_beat <= 0 ? 3 : max_results_per_beat, 1, 10)),
+                    Math.Clamp(max_results_per_beat <= 0 ? 3 : max_results_per_beat, 1, 10),
+                    select_top_candidate),
                 cancellationToken);
         }
 

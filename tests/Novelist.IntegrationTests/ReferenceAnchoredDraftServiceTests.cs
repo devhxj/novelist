@@ -118,7 +118,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, review.ReviewId),
             CancellationToken.None);
         var binding = await service.BindBlueprintMaterialsAsync(
-            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2),
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2, SelectTopCandidate: true),
             CancellationToken.None);
         Assert.Contains(binding.Links, link => link.Selected);
 
@@ -140,7 +140,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
 
         await Assert.ThrowsAsync<ArgumentException>(async () =>
             await service.BindBlueprintMaterialsAsync(
-                new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2),
+                new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2, SelectTopCandidate: true),
                 CancellationToken.None));
         var draftException = await Assert.ThrowsAsync<ArgumentException>(async () =>
             await service.GenerateDraftFromBlueprintAsync(
@@ -248,7 +248,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, review.ReviewId),
             CancellationToken.None);
         var binding = await service.BindBlueprintMaterialsAsync(
-            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2),
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2, SelectTopCandidate: true),
             CancellationToken.None);
         Assert.Contains(binding.Links, link => link.Selected);
 
@@ -279,7 +279,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
 
         await Assert.ThrowsAsync<ArgumentException>(async () =>
             await service.BindBlueprintMaterialsAsync(
-                new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2),
+                new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2, SelectTopCandidate: true),
                 CancellationToken.None));
     }
 
@@ -513,7 +513,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             CancellationToken.None);
 
         var result = await service.BindBlueprintMaterialsAsync(
-            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, MaxResultsPerBeat: 3),
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, MaxResultsPerBeat: 3, SelectTopCandidate: true),
             CancellationToken.None);
 
         Assert.Equal(blueprint.BlueprintId, result.BlueprintId);
@@ -534,6 +534,70 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.Equal(ReferenceBlueprintStates.MaterialBound, afterBinding.Status);
         Assert.NotNull(afterBinding.LatestReview);
         Assert.Equal(review.ReviewId, afterBinding.LatestReview?.ReviewId);
+    }
+
+    [Fact]
+    public async Task BindBlueprintMaterialsCanReturnRankedCandidatesWithoutSelectingThem()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("材料候选预览测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "雨声压低了街道，主角在门口停住。"),
+            CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "anchor-candidate-preview.md",
+            """
+            # 第一章
+
+            雨声压低了整条街的呼吸。
+
+            他在门口停了很久。
+            """);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "候选预览参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                44,
+                "第四十四章蓝图",
+                "雨声压低了整条街的呼吸",
+                [anchor.AnchorId],
+                KnownFacts: ["雨声压低了整条街的呼吸", "主角在门口"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId),
+            CancellationToken.None);
+        await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, review.ReviewId),
+            CancellationToken.None);
+
+        var candidates = await service.BindBlueprintMaterialsAsync(
+            new BindReferenceBlueprintMaterialsPayload(
+                novel.Id,
+                blueprint.BlueprintId,
+                MaxResultsPerBeat: 3,
+                SelectTopCandidate: false),
+            CancellationToken.None);
+
+        Assert.NotEmpty(candidates.Links);
+        Assert.All(candidates.Links, link => Assert.False(link.Selected));
+        var afterPreview = await service.GetChapterBlueprintAsync(novel.Id, blueprint.BlueprintId, CancellationToken.None);
+        Assert.NotNull(afterPreview);
+        Assert.Equal(ReferenceBlueprintStates.Approved, afterPreview.Status);
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.GenerateDraftFromBlueprintAsync(
+                new GenerateReferenceAnchoredDraftPayload(novel.Id, blueprint.BlueprintId, BeatIds: []),
+                CancellationToken.None));
+        Assert.Contains("selected reference material links", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -576,7 +640,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
 
         var baselineBlueprint = await CreateApprovedSentenceBlueprintAsync(31);
         var baseline = await service.BindBlueprintMaterialsAsync(
-            new BindReferenceBlueprintMaterialsPayload(novel.Id, baselineBlueprint.BlueprintId, MaxResultsPerBeat: 2),
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, baselineBlueprint.BlueprintId, MaxResultsPerBeat: 2, SelectTopCandidate: true),
             CancellationToken.None);
         var baselineSelected = Assert.Single(baseline.Links, item => item.Selected);
         Assert.Equal(defaultPreferredMaterial.MaterialId, baselineSelected.MaterialId);
@@ -600,7 +664,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
 
         var boostedBlueprint = await CreateApprovedSentenceBlueprintAsync(32);
         var boosted = await service.BindBlueprintMaterialsAsync(
-            new BindReferenceBlueprintMaterialsPayload(novel.Id, boostedBlueprint.BlueprintId, MaxResultsPerBeat: 2),
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, boostedBlueprint.BlueprintId, MaxResultsPerBeat: 2, SelectTopCandidate: true),
             CancellationToken.None);
         var boostedSelected = Assert.Single(boosted.Links, item => item.Selected);
 
@@ -719,7 +783,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             CancellationToken.None);
 
         var result = await service.BindBlueprintMaterialsAsync(
-            new BindReferenceBlueprintMaterialsPayload(novel.Id, approved.BlueprintId, MaxResultsPerBeat: 3),
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, approved.BlueprintId, MaxResultsPerBeat: 3, SelectTopCandidate: true),
             CancellationToken.None);
 
         Assert.Empty(result.Links);
@@ -805,7 +869,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             CancellationToken.None);
 
         var result = await service.BindBlueprintMaterialsAsync(
-            new BindReferenceBlueprintMaterialsPayload(novel.Id, approved.BlueprintId, MaxResultsPerBeat: 3),
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, approved.BlueprintId, MaxResultsPerBeat: 3, SelectTopCandidate: true),
             CancellationToken.None);
 
         var search = Assert.Single(referenceAnchors.SearchInputs);
@@ -857,7 +921,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, review.ReviewId),
             CancellationToken.None);
         await service.BindBlueprintMaterialsAsync(
-            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2),
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2, SelectTopCandidate: true),
             CancellationToken.None);
 
         var draft = await service.GenerateDraftFromBlueprintAsync(
@@ -947,7 +1011,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, review.ReviewId),
             CancellationToken.None);
         await service.BindBlueprintMaterialsAsync(
-            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2),
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2, SelectTopCandidate: true),
             CancellationToken.None);
 
         var draft = await service.GenerateDraftFromBlueprintAsync(
@@ -1280,7 +1344,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, review.ReviewId),
             CancellationToken.None);
         await service.BindBlueprintMaterialsAsync(
-            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2),
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2, SelectTopCandidate: true),
             CancellationToken.None);
         await SetMaterialLinkAnalysisHashAsync(options, blueprint.BlueprintId, "old-analysis-contract-hash");
 
@@ -1545,7 +1609,8 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
                   {
                     "novel_id": {{novel.Id}},
                     "blueprint_id": {{blueprint.BlueprintId}},
-                    "max_results_per_beat": 2
+                    "max_results_per_beat": 2,
+                    "select_top_candidate": true
                   }
                 ]
               }
@@ -1599,7 +1664,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, review.ReviewId),
             CancellationToken.None);
         await draftService.BindBlueprintMaterialsAsync(
-            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2),
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2, SelectTopCandidate: true),
             CancellationToken.None);
         var dispatcher = new BridgeDispatcher()
             .RegisterCompatibilityAppMethodHandlers()
@@ -1699,7 +1764,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, review.ReviewId),
             CancellationToken.None);
         await service.BindBlueprintMaterialsAsync(
-            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2),
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, blueprint.BlueprintId, 2, SelectTopCandidate: true),
             CancellationToken.None);
 
         var draft = await service.GenerateDraftFromBlueprintAsync(
@@ -1767,7 +1832,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, review.ReviewId),
             CancellationToken.None);
         await service.BindBlueprintMaterialsAsync(
-            new BindReferenceBlueprintMaterialsPayload(novel.Id, revised.BlueprintId, 2),
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, revised.BlueprintId, 2, SelectTopCandidate: true),
             CancellationToken.None);
 
         var draft = await service.GenerateDraftFromBlueprintAsync(

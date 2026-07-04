@@ -118,7 +118,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             "user",
             "tighten execution"));
         await AssertOkAsync(dispatcher, "ApproveReferenceChapterBlueprint", new ApproveReferenceChapterBlueprintPayload(42, 501, "review-1"));
-        await AssertOkAsync(dispatcher, "BindReferenceBlueprintMaterials", new BindReferenceBlueprintMaterialsPayload(42, 501, 3));
+        await AssertOkAsync(dispatcher, "BindReferenceBlueprintMaterials", new BindReferenceBlueprintMaterialsPayload(42, 501, 3, SelectTopCandidate: true));
         await AssertOkAsync(dispatcher, "GenerateReferenceAnchoredDraft", new GenerateReferenceAnchoredDraftPayload(42, 501, ["beat-1", "beat-2"]));
         await AssertOkAsync(dispatcher, "AuditReferenceAnchoredDraft", new AuditReferenceAnchoredDraftPayload(42, 501, ["candidate-1"]));
 
@@ -130,7 +130,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "ReviewChapterBlueprint:42:501",
                 "ReviseChapterBlueprint:42:501:beat:beat-1:paragraph_intention=linger on the threshold:user:tighten execution",
                 "ApproveChapterBlueprint:42:501:review-1",
-                "BindBlueprintMaterials:42:501:3",
+                "BindBlueprintMaterials:42:501:3:True",
                 "GenerateDraftFromBlueprint:42:501:beat-1,beat-2",
                 "AuditDraftAgainstBlueprint:42:501:candidate-1"
             ],
@@ -398,7 +398,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Calls.Add($"BindBlueprintMaterials:{input.NovelId}:{input.BlueprintId}:{input.MaxResultsPerBeat}");
+            Calls.Add($"BindBlueprintMaterials:{input.NovelId}:{input.BlueprintId}:{input.MaxResultsPerBeat}:{input.SelectTopCandidate}");
             return ValueTask.FromResult<ReferenceBlueprintMaterialBindingResultPayload>(null!);
         }
 

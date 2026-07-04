@@ -765,6 +765,7 @@ export namespace reference {
     novel_id: number
     blueprint_id: number
     max_results_per_beat: number
+    select_top_candidate?: boolean | null
   }
 
   export interface BlueprintMaterialLink {

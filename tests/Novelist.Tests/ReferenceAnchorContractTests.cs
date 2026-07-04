@@ -95,6 +95,31 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void BindReferenceBlueprintMaterialsPayloadUsesStableSelectionJsonName()
+    {
+        var payload = new BindReferenceBlueprintMaterialsPayload(
+            NovelId: 42,
+            BlueprintId: 10,
+            MaxResultsPerBeat: 3,
+            SelectTopCandidate: true);
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(payload, BridgeJson.SerializerOptions));
+        var root = json.RootElement;
+
+        Assert.Equal(42, root.GetProperty("novel_id").GetInt64());
+        Assert.Equal(10, root.GetProperty("blueprint_id").GetInt64());
+        Assert.Equal(3, root.GetProperty("max_results_per_beat").GetInt32());
+        Assert.True(root.GetProperty("select_top_candidate").GetBoolean());
+        Assert.False(root.TryGetProperty("SelectTopCandidate", out _));
+
+        var defaulted = JsonSerializer.Deserialize<BindReferenceBlueprintMaterialsPayload>(
+            """{"novel_id":42,"blueprint_id":10,"max_results_per_beat":3}""",
+            BridgeJson.SerializerOptions);
+        Assert.NotNull(defaulted);
+        Assert.False(defaulted.SelectTopCandidate);
+    }
+
+    [Fact]
     public void ReferenceChapterBlueprintPayloadsUseStableSnakeCaseJsonNames()
     {
         var beat = new ReferenceChapterBlueprintBeatPayload(
