@@ -466,6 +466,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             targetBeats,
             selectedLinks,
             cancellationToken);
+        ReferenceAnchoredDraftPreflight.EnsureCandidateProvenance(targetBeats, selectedLinks, candidates);
         var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(blueprint, candidates, DateTimeOffset.UtcNow);
         await PersistDraftCandidatesAsync(blueprint.BlueprintId, candidates, cancellationToken);
 

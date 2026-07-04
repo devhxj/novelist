@@ -100,4 +100,38 @@ internal static class ReferenceAnchoredDraftPreflight
 
         return selectedLinks;
     }
+
+    public static void EnsureCandidateProvenance(
+        IReadOnlyList<ReferenceChapterBlueprintBeatPayload> targetBeats,
+        IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload> selectedLinks,
+        IReadOnlyList<ReferenceDraftParagraphCandidatePayload> candidates)
+    {
+        ArgumentNullException.ThrowIfNull(targetBeats);
+        ArgumentNullException.ThrowIfNull(selectedLinks);
+        ArgumentNullException.ThrowIfNull(candidates);
+        var targetBeatsById = targetBeats.ToDictionary(beat => beat.BeatId, StringComparer.Ordinal);
+        foreach (var candidate in candidates)
+        {
+            if (!targetBeatsById.TryGetValue(candidate.BeatId, out var beat))
+            {
+                throw new ArgumentException("Draft candidate provenance does not match a requested blueprint beat.", nameof(candidates));
+            }
+
+            if (ReferenceDraftProvenanceIds.IsNoReuseMaterialId(candidate.MaterialId))
+            {
+                if (string.IsNullOrWhiteSpace(beat.NoReuseReason))
+                {
+                    throw new ArgumentException("Draft candidate no-reuse provenance is not approved by the blueprint beat.", nameof(candidates));
+                }
+
+                continue;
+            }
+
+            if (!selectedLinks.TryGetValue(candidate.BeatId, out var link) ||
+                !string.Equals(link.MaterialId, candidate.MaterialId, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Draft candidate provenance does not match the current selected material link.", nameof(candidates));
+            }
+        }
+    }
 }

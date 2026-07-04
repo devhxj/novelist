@@ -123,6 +123,57 @@ public sealed class ReferenceAnchoredDraftPreflightTests
         Assert.Empty(links);
     }
 
+    [Fact]
+    public void EnsureCandidateProvenanceAcceptsCurrentSelectedLinksAndApprovedNoReuse()
+    {
+        var reusable = Beat("1:beat:1");
+        var noReuse = Beat("1:beat:2") with { NoReuseReason = "transition carries no reusable source material" };
+        var selectedLinks = new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>(StringComparer.Ordinal)
+        {
+            [reusable.BeatId] = Link(reusable.BeatId, "material-1")
+        };
+
+        ReferenceAnchoredDraftPreflight.EnsureCandidateProvenance(
+            [reusable, noReuse],
+            selectedLinks,
+            [
+                Candidate(reusable.BeatId, "material-1"),
+                Candidate(noReuse.BeatId, ReferenceDraftProvenanceIds.BuildNoReuseMaterialId(noReuse.BeatId))
+            ]);
+    }
+
+    [Fact]
+    public void EnsureCandidateProvenanceRejectsMaterialMismatch()
+    {
+        var beat = Beat("1:beat:1");
+        var selectedLinks = new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>(StringComparer.Ordinal)
+        {
+            [beat.BeatId] = Link(beat.BeatId, "material-1")
+        };
+
+        var exception = Assert.Throws<ArgumentException>(() =>
+            ReferenceAnchoredDraftPreflight.EnsureCandidateProvenance(
+                [beat],
+                selectedLinks,
+                [Candidate(beat.BeatId, "material-2")]));
+
+        Assert.Contains("selected material link", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void EnsureCandidateProvenanceRejectsUnapprovedNoReuse()
+    {
+        var beat = Beat("1:beat:1");
+
+        var exception = Assert.Throws<ArgumentException>(() =>
+            ReferenceAnchoredDraftPreflight.EnsureCandidateProvenance(
+                [beat],
+                new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>(StringComparer.Ordinal),
+                [Candidate(beat.BeatId, ReferenceDraftProvenanceIds.BuildNoReuseMaterialId(beat.BeatId))]));
+
+        Assert.Contains("no-reuse", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static ReferenceChapterBlueprintPayload Blueprint(
         string status = ReferenceBlueprintStates.MaterialBound,
         ReferenceChapterBlueprintReviewPayload? review = null)
@@ -259,5 +310,35 @@ public sealed class ReferenceAnchoredDraftPreflightTests
             string.Empty,
             ["interiority", "external_evidence"],
             []);
+    }
+
+    private static ReferenceBlueprintMaterialLinkPayload Link(string beatId, string materialId)
+    {
+        return new ReferenceBlueprintMaterialLinkPayload(
+            "link-1",
+            1,
+            beatId,
+            materialId,
+            "intended use",
+            ReferenceRewriteLevels.L1,
+            Selected: true,
+            Score: 1.0,
+            ScoreComponents: new Dictionary<string, double>(),
+            DateTimeOffset.UnixEpoch);
+    }
+
+    private static ReferenceDraftParagraphCandidatePayload Candidate(string beatId, string materialId)
+    {
+        return new ReferenceDraftParagraphCandidatePayload(
+            "candidate-1",
+            1,
+            beatId,
+            materialId,
+            ReferenceRewriteLevels.L1,
+            "candidate text",
+            ChangedSlots: [],
+            NonSlotEdits: [],
+            AuditStatus: "passed",
+            DateTimeOffset.UnixEpoch);
     }
 }

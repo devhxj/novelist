@@ -224,7 +224,7 @@ Recommended implementation slices:
 - [x] Draft generation rejects approved blueprints whose latest review hash/version no longer matches.
 - [x] Draft generation rejects beats without fresh material links unless the beat has an explicit approved `no_reuse_reason`.
 - [x] Draft generation rejects material links created against a different `analysis_contract_hash`.
-- [ ] Draft generation rejects candidates when the preflight cannot prove `blueprint -> approval -> material_link -> candidate` provenance.
+- [x] Draft generation rejects candidates when the preflight cannot prove `blueprint -> approval -> material_link -> candidate` provenance.
 - [ ] Draft generation consumes only reviewed blueprint beat facts, duties, execution track, material links, slot plans, and allowed rewrite levels.
 - [ ] Draft generation rejects candidates that violate the beat's paragraph intention, execution mode, or candidate rejection rule.
 - [ ] Draft generation never calls a model with unbounded "write this chapter" instructions; prompts must be beat-scoped and grounded in approved fields.
