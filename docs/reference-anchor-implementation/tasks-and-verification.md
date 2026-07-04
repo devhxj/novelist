@@ -168,7 +168,7 @@ Recommended implementation slices:
 - [x] A blueprint with approval but no current material links cannot generate draft candidates unless every requested beat has an approved `no_reuse_reason`.
 - [x] Editing approved analysis tracks, execution contract, known/forbidden facts, and beat reference query invalidates approval and requires re-review.
 - [x] Editing approved beat POV, character-state, emotion-mechanic, scene-fact, prose-duty, and material-query tag fields invalidates approval and records revision paths.
-- [ ] Editing any approved blueprint beat, analysis track, execution track, known/forbidden fact, or reference query invalidates approval and requires re-review.
+- [x] Editing any approved blueprint beat, analysis track, execution track, known/forbidden fact, or reference query invalidates approval and requires re-review.
 - [x] Blueprint revision records field paths, previous/new value hashes, origin, invalidated review id, and reason.
 - [x] Changing the source chapter plan hash marks existing blueprints stale.
 - [x] Material binding links candidate reference materials to beats with max rewrite levels.

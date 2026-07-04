@@ -488,34 +488,63 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             new ReferenceSlotValuePayload("object", "门缝血迹"),
             new ReferenceSlotValuePayload("reaction", "指尖发紧")
         };
+        var prefix = "beat:" + beatId + ":";
+        var changes = new (string Field, string Value)[]
+        {
+            ("narrative_function", "delay the reveal through pressure"),
+            ("logic_premise", "blood at the door changes the character choice"),
+            ("conflict_pressure", "the door forces a choice before safety returns"),
+            ("causality_in", "the character arrives because the previous clue points here"),
+            ("causality_out", "the character must act after seeing the blood"),
+            ("transition_in", "pressure from the prior clue carries into the doorway"),
+            ("transition_out", "the discovery pushes the next scene into consequence"),
+            ("pov_character", "周鸣"),
+            ("narrative_distance", "close"),
+            ("viewpoint_allowed_knowledge", JsonSerializer.Serialize(new[] { "周鸣看到门缝里的血迹" })),
+            ("viewpoint_forbidden_knowledge", JsonSerializer.Serialize(new[] { "周鸣不知道屋内真相" })),
+            ("character_states_before", JsonSerializer.Serialize(new[] { "周鸣保持克制" })),
+            ("character_states_after", JsonSerializer.Serialize(new[] { "周鸣 exposed" })),
+            ("character_goals", JsonSerializer.Serialize(new[] { "确认门后发生了什么" })),
+            ("character_misbeliefs", JsonSerializer.Serialize(new[] { "以为门后仍然安全" })),
+            ("relationship_pressure", JsonSerializer.Serialize(new[] { "同伴的沉默迫使周鸣独自判断" })),
+            ("emotion_trigger", "门缝里的血迹"),
+            ("emotion_before", "controlled"),
+            ("emotion_after", "alert"),
+            ("suppressed_reaction", "周鸣压住后退冲动"),
+            ("external_evidence", "指尖发紧"),
+            ("narration_strategy", "hold close interiority around the visible clue"),
+            ("rhythm_strategy", "slow the sentence before the turn"),
+            ("paragraph_intention", "linger on the threshold before action"),
+            ("execution_mode", "dwell"),
+            ("anti_screenplay_duty", "show pressure through interiority before movement"),
+            ("sensory_anchor_target", "cold metal at the door"),
+            ("subtext_plan", "make the hesitation imply fear without naming it"),
+            ("source_backed_detail_target", "blood line in the door seam"),
+            ("candidate_rejection_rule", "reject movement-only prose"),
+            ("scene_facts", JsonSerializer.Serialize(new[] { "门缝里的血迹" })),
+            ("forbidden_facts", JsonSerializer.Serialize(new[] { "屋内真相" })),
+            ("required_material_types", JsonSerializer.Serialize(new[] { ReferenceMaterialTypes.Sentence })),
+            ("max_rewrite_level", ReferenceRewriteLevels.L1),
+            ("slot_plan", JsonSerializer.Serialize(slotPlan)),
+            ("locked_phrase_policy", "preserve only cadence, not wording"),
+            ("no_reuse_reason", "transition carries approved pressure without reusable source"),
+            ("prose_duties", JsonSerializer.Serialize(new[] { "interiority", "external_evidence", "transition" })),
+            ("reference_query.query", "门缝里的血迹"),
+            ("reference_query.material_types", JsonSerializer.Serialize(new[] { ReferenceMaterialTypes.Sentence })),
+            ("reference_query.emotion_tags", JsonSerializer.Serialize(new[] { "alert" })),
+            ("reference_query.function_tags", JsonSerializer.Serialize(new[] { "identity_reveal" })),
+            ("reference_query.pov_tags", JsonSerializer.Serialize(new[] { "close" })),
+            ("reference_query.technique_tags", JsonSerializer.Serialize(new[] { "threshold" })),
+            ("reference_query.max_results", "4")
+        };
 
         var revised = await service.ReviseChapterBlueprintAsync(
             new ReviseReferenceChapterBlueprintPayload(
                 novel.Id,
                 blueprint.BlueprintId,
-                [
-                    new ReferenceBlueprintRevisionChangePayload("beat:" + beatId + ":pov_character", "周鸣"),
-                    new ReferenceBlueprintRevisionChangePayload(
-                        "beat:" + beatId + ":viewpoint_allowed_knowledge",
-                        JsonSerializer.Serialize(new[] { "周鸣看到门缝里的血迹" })),
-                    new ReferenceBlueprintRevisionChangePayload(
-                        "beat:" + beatId + ":character_states_after",
-                        JsonSerializer.Serialize(new[] { "周鸣 exposed" })),
-                    new ReferenceBlueprintRevisionChangePayload("beat:" + beatId + ":emotion_trigger", "门缝里的血迹"),
-                    new ReferenceBlueprintRevisionChangePayload("beat:" + beatId + ":external_evidence", "指尖发紧"),
-                    new ReferenceBlueprintRevisionChangePayload(
-                        "beat:" + beatId + ":scene_facts",
-                        JsonSerializer.Serialize(new[] { "门缝里的血迹" })),
-                    new ReferenceBlueprintRevisionChangePayload(
-                        "beat:" + beatId + ":prose_duties",
-                        JsonSerializer.Serialize(new[] { "interiority", "external_evidence", "transition" })),
-                    new ReferenceBlueprintRevisionChangePayload(
-                        "beat:" + beatId + ":reference_query.function_tags",
-                        JsonSerializer.Serialize(new[] { "identity_reveal" })),
-                    new ReferenceBlueprintRevisionChangePayload(
-                        "beat:" + beatId + ":slot_plan",
-                        JsonSerializer.Serialize(slotPlan))
-                ],
+                changes
+                    .Select(change => new ReferenceBlueprintRevisionChangePayload(prefix + change.Field, change.Value))
+                    .ToArray(),
                 "user",
                 "edit beat contract fields"),
             CancellationToken.None);
@@ -525,25 +554,30 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.NotEqual(blueprint.AnalysisContractHash, revised.AnalysisContractHash);
         Assert.Equal("周鸣", revisedBeat.PovCharacter);
         Assert.Equal(["周鸣看到门缝里的血迹"], revisedBeat.ViewpointAllowedKnowledge);
+        Assert.Equal(["周鸣不知道屋内真相"], revisedBeat.ViewpointForbiddenKnowledge);
+        Assert.Equal(["周鸣保持克制"], revisedBeat.CharacterStatesBefore);
         Assert.Equal(["周鸣 exposed"], revisedBeat.CharacterStatesAfter);
+        Assert.Equal(["确认门后发生了什么"], revisedBeat.CharacterGoals);
+        Assert.Equal(["以为门后仍然安全"], revisedBeat.CharacterMisbeliefs);
+        Assert.Equal(["同伴的沉默迫使周鸣独自判断"], revisedBeat.RelationshipPressure);
         Assert.Equal("门缝里的血迹", revisedBeat.EmotionTrigger);
         Assert.Equal("指尖发紧", revisedBeat.ExternalEvidence);
         Assert.Equal(["门缝里的血迹"], revisedBeat.SceneFacts);
+        Assert.Equal(["屋内真相"], revisedBeat.ForbiddenFacts);
         Assert.Equal(["interiority", "external_evidence", "transition"], revisedBeat.ProseDuties);
         Assert.Equal(["identity_reveal"], revisedBeat.ReferenceQuery.FunctionTags);
+        Assert.Equal(["alert"], revisedBeat.ReferenceQuery.EmotionTags);
+        Assert.Equal(["close"], revisedBeat.ReferenceQuery.PovTags);
+        Assert.Equal(["threshold"], revisedBeat.ReferenceQuery.TechniqueTags);
+        Assert.Equal(4, revisedBeat.ReferenceQuery.MaxResults);
         Assert.Equal(slotPlan, revisedBeat.SlotPlan);
         Assert.Null(revised.LatestReview);
 
         var revisionFieldPaths = await ReadRevisionFieldPathsAsync(options, blueprint.BlueprintId);
-        Assert.Contains("beat:" + beatId + ":pov_character", revisionFieldPaths);
-        Assert.Contains("beat:" + beatId + ":viewpoint_allowed_knowledge", revisionFieldPaths);
-        Assert.Contains("beat:" + beatId + ":character_states_after", revisionFieldPaths);
-        Assert.Contains("beat:" + beatId + ":emotion_trigger", revisionFieldPaths);
-        Assert.Contains("beat:" + beatId + ":external_evidence", revisionFieldPaths);
-        Assert.Contains("beat:" + beatId + ":scene_facts", revisionFieldPaths);
-        Assert.Contains("beat:" + beatId + ":prose_duties", revisionFieldPaths);
-        Assert.Contains("beat:" + beatId + ":reference_query.function_tags", revisionFieldPaths);
-        Assert.Contains("beat:" + beatId + ":slot_plan", revisionFieldPaths);
+        foreach (var (field, _) in changes)
+        {
+            Assert.Contains(prefix + field, revisionFieldPaths);
+        }
 
         await Assert.ThrowsAsync<ArgumentException>(async () =>
             await service.ApproveChapterBlueprintAsync(
