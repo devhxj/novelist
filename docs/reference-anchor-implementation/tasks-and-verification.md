@@ -216,7 +216,7 @@ Recommended implementation slices:
 
 - [x] `AdaptMaterialAsync` still supports standalone preview/audit.
 - [x] Draft generation rejects missing, failed, stale, or unapproved blueprints.
-- [ ] Draft generation rejects approved blueprints whose latest review hash/version no longer matches.
+- [x] Draft generation rejects approved blueprints whose latest review hash/version no longer matches.
 - [ ] Draft generation rejects beats without fresh material links unless the beat has an explicit approved `no_reuse_reason`.
 - [x] Draft generation rejects material links created against a different `analysis_contract_hash`.
 - [ ] Draft generation rejects candidates when the preflight cannot prove `blueprint -> approval -> material_link -> candidate` provenance.
@@ -256,6 +256,7 @@ Recommended implementation slices:
 - [x] integration test for `GenerateDraftFromBlueprintAsync`
 - [x] integration test proving `GenerateDraftFromBlueprintAsync` returns candidates without mutating chapter content
 - [x] integration test proving missing, failed, unapproved, and stale blueprint generation is blocked
+- [x] integration test proving approved blueprint draft generation is blocked when the latest review hash no longer matches
 - [x] bridge test proving `GenerateReferenceAnchoredDraft` returns a stable validation error before approval
 
 **Files likely touched:**

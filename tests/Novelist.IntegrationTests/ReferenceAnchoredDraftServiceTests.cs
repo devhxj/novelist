@@ -996,6 +996,48 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ApprovedBlueprintWithMismatchedLatestReviewRejectsDraftGeneration()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("草稿评审哈希门禁测试", "", ""), CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(
+            options,
+            novels,
+            new FileSystemPlanningService(options, novels));
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                20,
+                "第二十章蓝图",
+                "审批哈希必须保持一致",
+                AnchorIds: [],
+                KnownFacts: ["主角已经到场"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId),
+            CancellationToken.None);
+        await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, review.ReviewId),
+            CancellationToken.None);
+        await SetReviewContextHashAsync(options, review.ReviewId, "old-context-hash");
+
+        var reloaded = await service.GetChapterBlueprintAsync(novel.Id, blueprint.BlueprintId, CancellationToken.None);
+        Assert.NotNull(reloaded);
+        Assert.Equal(ReferenceBlueprintStates.Approved, reloaded.Status);
+        Assert.NotNull(reloaded.LatestReview);
+        Assert.NotEqual(reloaded.ContextHash, reloaded.LatestReview.ContextHash);
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.GenerateDraftFromBlueprintAsync(
+                new GenerateReferenceAnchoredDraftPayload(novel.Id, blueprint.BlueprintId, BeatIds: []),
+                CancellationToken.None));
+        Assert.Contains("current passing blueprint review", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ReviewPassedBlueprintWithoutExplicitApprovalCannotBindOrDraft()
     {
         var options = CreateOptions();
@@ -1734,6 +1776,30 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             """;
         command.Parameters.AddWithValue("$analysis_contract_hash", analysisContractHash);
         command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        var updated = await command.ExecuteNonQueryAsync();
+        Assert.True(updated > 0);
+    }
+
+    private static async ValueTask SetReviewContextHashAsync(
+        AppInitializationOptions options,
+        string reviewId,
+        string contextHash)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_chapter_blueprint_reviews
+            SET context_hash = $context_hash
+            WHERE review_id = $review_id;
+            """;
+        command.Parameters.AddWithValue("$context_hash", contextHash);
+        command.Parameters.AddWithValue("$review_id", reviewId);
         var updated = await command.ExecuteNonQueryAsync();
         Assert.True(updated > 0);
     }
