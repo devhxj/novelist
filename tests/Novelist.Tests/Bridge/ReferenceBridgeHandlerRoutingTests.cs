@@ -137,6 +137,40 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             service.Calls);
     }
 
+    [Fact]
+    public async Task ReferenceAnchorHandlersPreserveExistingBridgeErrorSemantics()
+    {
+        var service = new RecordingReferenceAnchorService();
+        var dispatcher = new BridgeDispatcher().RegisterReferenceAnchorHandlers(service);
+        var input = new CreateReferenceAnchorPayload(
+            42,
+            "Anchor",
+            null,
+            "../source.md",
+            "markdown",
+            "user_provided");
+
+        service.CreateAnchorException = new AppNotInitializedException();
+        using var appNotInitialized = await AssertErrorAsync(
+            dispatcher,
+            "CreateReferenceAnchor",
+            BridgeErrorCodes.AppNotInitialized,
+            input);
+        Assert.Equal("Application is not initialized.", appNotInitialized.RootElement.GetProperty("error").GetProperty("message").GetString());
+
+        service.CreateAnchorException = new InvalidContentPathException(
+            "../source.md",
+            "Parent-directory and empty path segments are not allowed.");
+        using var invalidPath = await AssertErrorAsync(
+            dispatcher,
+            "CreateReferenceAnchor",
+            BridgeErrorCodes.InvalidPath,
+            input);
+        var details = invalidPath.RootElement.GetProperty("error").GetProperty("details");
+        Assert.Equal("Parent-directory and empty path segments are not allowed.", details.GetProperty("path").GetString());
+        Assert.Equal("../source.md", details.GetProperty("value").GetString());
+    }
+
     private static async Task AssertOkAsync(BridgeDispatcher dispatcher, string method, params object?[] args)
     {
         var result = await dispatcher.DispatchAsync(Request(method, args));
@@ -146,6 +180,25 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         using var json = JsonDocument.Parse(result.OutboundJson);
         Assert.Equal("response", json.RootElement.GetProperty("kind").GetString());
         Assert.True(json.RootElement.GetProperty("ok").GetBoolean());
+    }
+
+    private static async Task<JsonDocument> AssertErrorAsync(
+        BridgeDispatcher dispatcher,
+        string method,
+        string expectedCode,
+        params object?[] args)
+    {
+        var result = await dispatcher.DispatchAsync(Request(method, args));
+        Assert.Null(result.CancelRequestId);
+        Assert.False(string.IsNullOrWhiteSpace(result.OutboundJson));
+
+        var json = JsonDocument.Parse(result.OutboundJson);
+        Assert.Equal("response", json.RootElement.GetProperty("kind").GetString());
+        Assert.Equal($"req_{method}", json.RootElement.GetProperty("id").GetString());
+        Assert.False(json.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal(expectedCode, json.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.False(json.RootElement.GetProperty("error").GetProperty("retryable").GetBoolean());
+        return json;
     }
 
     private static string Request(string method, object?[] args)
@@ -165,11 +218,19 @@ public sealed class ReferenceBridgeHandlerRoutingTests
     {
         public List<string> Calls { get; } = [];
 
+        public Exception? CreateAnchorException { get; set; }
+
         public ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(
             CreateReferenceAnchorPayload input,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (CreateAnchorException is { } exception)
+            {
+                CreateAnchorException = null;
+                throw exception;
+            }
+
             Calls.Add($"CreateAnchor:{input.NovelId}:{input.Title}:{input.Author}:{input.SourcePath}:{input.SourceKind}:{input.LicenseStatus}");
             return ValueTask.FromResult<ReferenceAnchorPayload>(null!);
         }
