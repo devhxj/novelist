@@ -117,7 +117,7 @@ internal static class ReferenceAnchoredDraftAuditor
 
             var emotionMechanics = ExtractPlannedEmotionMechanics(beat);
             if (emotionMechanics.Count > 0 &&
-                !emotionMechanics.Any(mechanic => candidate.Text.Contains(mechanic, StringComparison.OrdinalIgnoreCase)))
+                !HasPlannedEmotionMechanicEvidence(candidate.Text, emotionMechanics))
             {
                 var requiredMechanics = string.Join(", ", emotionMechanics);
                 blueprintErrors.Add($"Candidate {candidate.CandidateId} misses planned emotion mechanic evidence: {requiredMechanics}");
@@ -537,6 +537,42 @@ internal static class ReferenceAnchoredDraftAuditor
     private static bool IsGenericEmotionMechanicPhrase(string phrase)
     {
         return phrase is "情绪" or "反应" or "外部证据" or "触发" or "压抑反应" or "可见证据" or "变化";
+    }
+
+    private static bool HasPlannedEmotionMechanicEvidence(string candidateText, IReadOnlyList<string> mechanics)
+    {
+        return mechanics.Any(mechanic => candidateText.Contains(mechanic, StringComparison.OrdinalIgnoreCase) ||
+            HasEquivalentChineseEmotionMechanicEvidence(mechanic, candidateText));
+    }
+
+    private static bool HasEquivalentChineseEmotionMechanicEvidence(string mechanic, string candidateText)
+    {
+        if (string.IsNullOrWhiteSpace(mechanic) || string.IsNullOrWhiteSpace(candidateText))
+        {
+            return false;
+        }
+
+        if (ContainsAny(mechanic, ["指尖", "手指", "指节", "掌心", "手心", "拳"]) &&
+            ContainsAny(candidateText, ["指尖", "手指", "指节", "掌心", "手心", "拳"]) &&
+            ContainsAny(candidateText, ["发紧", "收紧", "绷紧", "攥紧", "捏紧", "蜷紧", "僵住", "发僵", "发颤", "颤", "抖"]))
+        {
+            return true;
+        }
+
+        if (ContainsAny(mechanic, ["喉咙", "嗓子", "声音", "呼吸", "气息"]) &&
+            ContainsAny(candidateText, ["喉咙", "嗓子", "声音", "呼吸", "气息"]) &&
+            ContainsAny(candidateText, ["发紧", "发涩", "发哑", "压低", "停住", "滞住", "咽", "堵"]))
+        {
+            return true;
+        }
+
+        if (ContainsAny(mechanic, ["咽下", "咽回", "忍住", "压下", "憋住", "没有回答", "没回答"]) &&
+            ContainsAny(candidateText, ["咽下", "咽回", "忍住", "压下", "憋住", "没有回答", "没回答", "沉默", "停顿"]))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static IReadOnlyList<string> FindMissingProseDutyEvidence(

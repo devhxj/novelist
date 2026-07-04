@@ -560,6 +560,28 @@ public sealed class ReferenceAnchoredDraftAuditorTests
     }
 
     [Fact]
+    public void BuildDraftAuditAllowsEquivalentExternalEmotionEvidence()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            EmotionBefore = "克制",
+            EmotionAfter = "紧张",
+            EmotionTrigger = "门缝里的血迹",
+            SuppressedReaction = "咽下回答",
+            ExternalEvidence = "指尖发紧"
+        });
+        var candidate = Candidate(blueprint, "雨声压低了整条街的呼吸，林岚心里一紧，手指在杯沿蜷紧，却仍然没有后退。");
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("passed", audit.Status);
+        Assert.DoesNotContain(audit.BlueprintErrors, item => item.Contains("emotion mechanic", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildDraftAuditAllowsApprovedEmotionAfterStateEvidence()
     {
         var blueprint = Blueprint(beat => beat with
