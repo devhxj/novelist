@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Dispatch, SetStateAction } from 'react'
+import type { ChangeEvent, Dispatch, SetStateAction } from 'react'
 import {
   BookMarked,
   CheckCircle2,
@@ -38,12 +38,50 @@ type BlueprintForm = {
 type BlueprintRevisionForm = {
   knownFacts: string
   forbiddenFacts: string
+  narrativeFunction: string
+  logicPremise: string
+  conflictPressure: string
+  causalityIn: string
+  causalityOut: string
+  transitionIn: string
+  transitionOut: string
   povCharacter: string
+  narrativeDistance: string
+  viewpointAllowedKnowledge: string
+  viewpointForbiddenKnowledge: string
+  characterStatesBefore: string
+  characterStatesAfter: string
+  characterGoals: string
+  characterMisbeliefs: string
+  relationshipPressure: string
   emotionTrigger: string
+  emotionBefore: string
+  emotionAfter: string
+  suppressedReaction: string
   externalEvidence: string
+  narrationStrategy: string
+  rhythmStrategy: string
   paragraphIntention: string
+  executionMode: string
+  antiScreenplayDuty: string
+  sensoryAnchorTarget: string
+  subtextPlan: string
+  sourceBackedDetailTarget: string
+  candidateRejectionRule: string
+  sceneFacts: string
+  beatForbiddenFacts: string
+  requiredMaterialTypes: string
+  maxRewriteLevel: string
+  lockedPhrasePolicy: string
+  noReuseReason: string
   proseDuties: string
   referenceQuery: string
+  referenceMaterialTypes: string
+  referenceEmotionTags: string
+  referenceFunctionTags: string
+  referencePovTags: string
+  referenceTechniqueTags: string
+  referenceMaxResults: string
 }
 
 type FindingSection = {
@@ -70,12 +108,50 @@ const EMPTY_BLUEPRINT_FORM: BlueprintForm = {
 const EMPTY_REVISION_FORM: BlueprintRevisionForm = {
   knownFacts: '',
   forbiddenFacts: '',
+  narrativeFunction: '',
+  logicPremise: '',
+  conflictPressure: '',
+  causalityIn: '',
+  causalityOut: '',
+  transitionIn: '',
+  transitionOut: '',
   povCharacter: '',
+  narrativeDistance: '',
+  viewpointAllowedKnowledge: '',
+  viewpointForbiddenKnowledge: '',
+  characterStatesBefore: '',
+  characterStatesAfter: '',
+  characterGoals: '',
+  characterMisbeliefs: '',
+  relationshipPressure: '',
   emotionTrigger: '',
+  emotionBefore: '',
+  emotionAfter: '',
+  suppressedReaction: '',
   externalEvidence: '',
+  narrationStrategy: '',
+  rhythmStrategy: '',
   paragraphIntention: '',
+  executionMode: '',
+  antiScreenplayDuty: '',
+  sensoryAnchorTarget: '',
+  subtextPlan: '',
+  sourceBackedDetailTarget: '',
+  candidateRejectionRule: '',
+  sceneFacts: '',
+  beatForbiddenFacts: '',
+  requiredMaterialTypes: '',
+  maxRewriteLevel: '',
+  lockedPhrasePolicy: '',
+  noReuseReason: '',
   proseDuties: '',
   referenceQuery: '',
+  referenceMaterialTypes: '',
+  referenceEmotionTags: '',
+  referenceFunctionTags: '',
+  referencePovTags: '',
+  referenceTechniqueTags: '',
+  referenceMaxResults: '',
 }
 
 const inputClass = 'w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
@@ -83,7 +159,7 @@ const actionButtonClass = 'inline-flex items-center gap-1.5 rounded bg-secondary
 
 function lines(value: string): string[] {
   return value
-    .split(/\r?\n|;/)
+    .split(/\r?\n|;|；/)
     .map(item => item.trim())
     .filter(Boolean)
 }
@@ -96,18 +172,80 @@ function sameList(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((item, index) => item === right[index])
 }
 
+function addStringChange(
+  changes: reference.BlueprintRevisionChange[],
+  fieldPath: string,
+  nextValue: string,
+  currentValue: string,
+) {
+  const trimmed = nextValue.trim()
+  if (trimmed !== currentValue) {
+    changes.push({ field_path: fieldPath, new_value: trimmed })
+  }
+}
+
+function addListChange(
+  changes: reference.BlueprintRevisionChange[],
+  fieldPath: string,
+  nextValue: string,
+  currentValue: string[],
+) {
+  const nextList = lines(nextValue)
+  if (!sameList(nextList, currentValue)) {
+    changes.push({ field_path: fieldPath, new_value: JSON.stringify(nextList) })
+  }
+}
+
 function formFromBlueprint(blueprint: reference.ChapterBlueprint | null): BlueprintRevisionForm {
   if (!blueprint) return EMPTY_REVISION_FORM
   const beat = blueprint.beats[0]
   return {
     knownFacts: multiline(blueprint.known_facts),
     forbiddenFacts: multiline(blueprint.forbidden_facts),
+    narrativeFunction: beat?.narrative_function ?? '',
+    logicPremise: beat?.logic_premise ?? '',
+    conflictPressure: beat?.conflict_pressure ?? '',
+    causalityIn: beat?.causality_in ?? '',
+    causalityOut: beat?.causality_out ?? '',
+    transitionIn: beat?.transition_in ?? '',
+    transitionOut: beat?.transition_out ?? '',
     povCharacter: beat?.pov_character ?? '',
+    narrativeDistance: beat?.narrative_distance ?? '',
+    viewpointAllowedKnowledge: multiline(beat?.viewpoint_allowed_knowledge),
+    viewpointForbiddenKnowledge: multiline(beat?.viewpoint_forbidden_knowledge),
+    characterStatesBefore: multiline(beat?.character_states_before),
+    characterStatesAfter: multiline(beat?.character_states_after),
+    characterGoals: multiline(beat?.character_goals),
+    characterMisbeliefs: multiline(beat?.character_misbeliefs),
+    relationshipPressure: multiline(beat?.relationship_pressure),
     emotionTrigger: beat?.emotion_trigger ?? '',
+    emotionBefore: beat?.emotion_before ?? '',
+    emotionAfter: beat?.emotion_after ?? '',
+    suppressedReaction: beat?.suppressed_reaction ?? '',
     externalEvidence: beat?.external_evidence ?? '',
+    narrationStrategy: beat?.narration_strategy ?? '',
+    rhythmStrategy: beat?.rhythm_strategy ?? '',
     paragraphIntention: beat?.paragraph_intention ?? '',
+    executionMode: beat?.execution_mode ?? '',
+    antiScreenplayDuty: beat?.anti_screenplay_duty ?? '',
+    sensoryAnchorTarget: beat?.sensory_anchor_target ?? '',
+    subtextPlan: beat?.subtext_plan ?? '',
+    sourceBackedDetailTarget: beat?.source_backed_detail_target ?? '',
+    candidateRejectionRule: beat?.candidate_rejection_rule ?? '',
+    sceneFacts: multiline(beat?.scene_facts),
+    beatForbiddenFacts: multiline(beat?.forbidden_facts),
+    requiredMaterialTypes: multiline(beat?.required_material_types),
+    maxRewriteLevel: beat?.max_rewrite_level ?? '',
+    lockedPhrasePolicy: beat?.locked_phrase_policy ?? '',
+    noReuseReason: beat?.no_reuse_reason ?? '',
     proseDuties: multiline(beat?.prose_duties),
     referenceQuery: beat?.reference_query.query ?? '',
+    referenceMaterialTypes: multiline(beat?.reference_query.material_types),
+    referenceEmotionTags: multiline(beat?.reference_query.emotion_tags),
+    referenceFunctionTags: multiline(beat?.reference_query.function_tags),
+    referencePovTags: multiline(beat?.reference_query.pov_tags),
+    referenceTechniqueTags: multiline(beat?.reference_query.technique_tags),
+    referenceMaxResults: beat ? String(beat.reference_query.max_results) : '',
   }
 }
 
@@ -377,40 +515,77 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     }
 
     const changes: reference.BlueprintRevisionChange[] = []
-    const knownFacts = lines(revisionForm.knownFacts)
-    const forbiddenFacts = lines(revisionForm.forbiddenFacts)
-    const proseDuties = lines(revisionForm.proseDuties)
-    const trimmed = {
-      povCharacter: revisionForm.povCharacter.trim(),
-      emotionTrigger: revisionForm.emotionTrigger.trim(),
-      externalEvidence: revisionForm.externalEvidence.trim(),
-      paragraphIntention: revisionForm.paragraphIntention.trim(),
-      referenceQuery: revisionForm.referenceQuery.trim(),
+    const prefix = `beat:${beat.beat_id}:`
+
+    addListChange(changes, 'known_facts', revisionForm.knownFacts, activeBlueprint.known_facts)
+    addListChange(changes, 'forbidden_facts', revisionForm.forbiddenFacts, activeBlueprint.forbidden_facts)
+
+    const beatStringFields: Array<[keyof BlueprintRevisionForm, string, string]> = [
+      ['narrativeFunction', 'narrative_function', beat.narrative_function],
+      ['logicPremise', 'logic_premise', beat.logic_premise],
+      ['conflictPressure', 'conflict_pressure', beat.conflict_pressure],
+      ['causalityIn', 'causality_in', beat.causality_in],
+      ['causalityOut', 'causality_out', beat.causality_out],
+      ['transitionIn', 'transition_in', beat.transition_in],
+      ['transitionOut', 'transition_out', beat.transition_out],
+      ['povCharacter', 'pov_character', beat.pov_character],
+      ['narrativeDistance', 'narrative_distance', beat.narrative_distance],
+      ['emotionTrigger', 'emotion_trigger', beat.emotion_trigger],
+      ['emotionBefore', 'emotion_before', beat.emotion_before],
+      ['emotionAfter', 'emotion_after', beat.emotion_after],
+      ['suppressedReaction', 'suppressed_reaction', beat.suppressed_reaction],
+      ['externalEvidence', 'external_evidence', beat.external_evidence],
+      ['narrationStrategy', 'narration_strategy', beat.narration_strategy],
+      ['rhythmStrategy', 'rhythm_strategy', beat.rhythm_strategy],
+      ['paragraphIntention', 'paragraph_intention', beat.paragraph_intention],
+      ['executionMode', 'execution_mode', beat.execution_mode],
+      ['antiScreenplayDuty', 'anti_screenplay_duty', beat.anti_screenplay_duty],
+      ['sensoryAnchorTarget', 'sensory_anchor_target', beat.sensory_anchor_target],
+      ['subtextPlan', 'subtext_plan', beat.subtext_plan],
+      ['sourceBackedDetailTarget', 'source_backed_detail_target', beat.source_backed_detail_target],
+      ['candidateRejectionRule', 'candidate_rejection_rule', beat.candidate_rejection_rule],
+      ['maxRewriteLevel', 'max_rewrite_level', beat.max_rewrite_level],
+      ['lockedPhrasePolicy', 'locked_phrase_policy', beat.locked_phrase_policy],
+      ['noReuseReason', 'no_reuse_reason', beat.no_reuse_reason],
+      ['referenceQuery', 'reference_query.query', beat.reference_query.query],
+    ]
+
+    const beatListFields: Array<[keyof BlueprintRevisionForm, string, string[]]> = [
+      ['viewpointAllowedKnowledge', 'viewpoint_allowed_knowledge', beat.viewpoint_allowed_knowledge],
+      ['viewpointForbiddenKnowledge', 'viewpoint_forbidden_knowledge', beat.viewpoint_forbidden_knowledge],
+      ['characterStatesBefore', 'character_states_before', beat.character_states_before],
+      ['characterStatesAfter', 'character_states_after', beat.character_states_after],
+      ['characterGoals', 'character_goals', beat.character_goals],
+      ['characterMisbeliefs', 'character_misbeliefs', beat.character_misbeliefs],
+      ['relationshipPressure', 'relationship_pressure', beat.relationship_pressure],
+      ['sceneFacts', 'scene_facts', beat.scene_facts],
+      ['beatForbiddenFacts', 'forbidden_facts', beat.forbidden_facts],
+      ['requiredMaterialTypes', 'required_material_types', beat.required_material_types],
+      ['proseDuties', 'prose_duties', beat.prose_duties],
+      ['referenceMaterialTypes', 'reference_query.material_types', beat.reference_query.material_types],
+      ['referenceEmotionTags', 'reference_query.emotion_tags', beat.reference_query.emotion_tags],
+      ['referenceFunctionTags', 'reference_query.function_tags', beat.reference_query.function_tags],
+      ['referencePovTags', 'reference_query.pov_tags', beat.reference_query.pov_tags],
+      ['referenceTechniqueTags', 'reference_query.technique_tags', beat.reference_query.technique_tags],
+    ]
+
+    for (const [formKey, fieldName, currentValue] of beatStringFields) {
+      addStringChange(changes, `${prefix}${fieldName}`, revisionForm[formKey], currentValue)
+    }
+    for (const [formKey, fieldName, currentValue] of beatListFields) {
+      addListChange(changes, `${prefix}${fieldName}`, revisionForm[formKey], currentValue)
     }
 
-    if (!sameList(knownFacts, activeBlueprint.known_facts)) {
-      changes.push({ field_path: 'known_facts', new_value: JSON.stringify(knownFacts) })
-    }
-    if (!sameList(forbiddenFacts, activeBlueprint.forbidden_facts)) {
-      changes.push({ field_path: 'forbidden_facts', new_value: JSON.stringify(forbiddenFacts) })
-    }
-    if (trimmed.povCharacter !== beat.pov_character) {
-      changes.push({ field_path: `beat:${beat.beat_id}:pov_character`, new_value: trimmed.povCharacter })
-    }
-    if (trimmed.emotionTrigger !== beat.emotion_trigger) {
-      changes.push({ field_path: `beat:${beat.beat_id}:emotion_trigger`, new_value: trimmed.emotionTrigger })
-    }
-    if (trimmed.externalEvidence !== beat.external_evidence) {
-      changes.push({ field_path: `beat:${beat.beat_id}:external_evidence`, new_value: trimmed.externalEvidence })
-    }
-    if (trimmed.paragraphIntention !== beat.paragraph_intention) {
-      changes.push({ field_path: `beat:${beat.beat_id}:paragraph_intention`, new_value: trimmed.paragraphIntention })
-    }
-    if (!sameList(proseDuties, beat.prose_duties)) {
-      changes.push({ field_path: `beat:${beat.beat_id}:prose_duties`, new_value: JSON.stringify(proseDuties) })
-    }
-    if (trimmed.referenceQuery !== beat.reference_query.query) {
-      changes.push({ field_path: `beat:${beat.beat_id}:reference_query.query`, new_value: trimmed.referenceQuery })
+    const nextMaxResults = revisionForm.referenceMaxResults.trim()
+    if (nextMaxResults !== String(beat.reference_query.max_results)) {
+      const parsed = Number.parseInt(nextMaxResults, 10)
+      if (!Number.isFinite(parsed) || parsed < 1 || parsed > 50) {
+        setError('引用最大结果数必须是 1 到 50 的整数')
+        return
+      }
+      if (String(parsed) !== String(beat.reference_query.max_results)) {
+        changes.push({ field_path: `${prefix}reference_query.max_results`, new_value: String(parsed) })
+      }
     }
 
     if (changes.length === 0) {
@@ -632,6 +807,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
+function RevisionSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <h5 className="text-[11px] font-semibold text-muted-foreground">{title}</h5>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {children}
+      </div>
+    </div>
+  )
+}
+
 function FindingSections({ sections, emptyText }: { sections: FindingSection[]; emptyText: string }) {
   if (sections.length === 0) {
     return <p className="mt-2 text-xs text-muted-foreground">{emptyText}</p>
@@ -693,6 +879,11 @@ function BlueprintDetail({
   const requiresReview = blueprint.status === 'draft' || blueprint.status === 'review_failed' || blueprint.status === 'stale'
   const reviewSections = review ? reviewFindings(review) : []
   const auditSections = draft?.audit ? auditFindings(draft.audit) : []
+  const editableBeat = blueprint.beats[0]
+  const updateRevisionField = (key: keyof BlueprintRevisionForm) =>
+    (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      onRevisionFormChange(form => ({ ...form, [key]: event.target.value }))
+    }
 
   return (
     <div className="min-w-0 rounded-lg border border-border bg-card p-4">
@@ -717,36 +908,166 @@ function BlueprintDetail({
 
       <div className="mt-4 rounded-md border border-border bg-background p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h4 className="text-xs font-semibold text-foreground">字段编辑</h4>
+          <h4 className="text-xs font-semibold text-foreground">
+            当前节拍字段{editableBeat ? <span className="ml-1 text-muted-foreground">#{editableBeat.beat_index}</span> : null}
+          </h4>
           <button onClick={onSaveEdits} disabled={loading} className={actionButtonClass}>
             <CheckCircle2 className="h-3.5 w-3.5" />保存修订
           </button>
         </div>
-        <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <Field label="已知事实">
-            <textarea value={revisionForm.knownFacts} onChange={event => onRevisionFormChange(form => ({ ...form, knownFacts: event.target.value }))} className={`${inputClass} min-h-20 resize-y`} />
-          </Field>
-          <Field label="禁止事实">
-            <textarea value={revisionForm.forbiddenFacts} onChange={event => onRevisionFormChange(form => ({ ...form, forbiddenFacts: event.target.value }))} className={`${inputClass} min-h-20 resize-y`} />
-          </Field>
-          <Field label="POV 角色">
-            <input value={revisionForm.povCharacter} onChange={event => onRevisionFormChange(form => ({ ...form, povCharacter: event.target.value }))} className={inputClass} />
-          </Field>
-          <Field label="引用查询">
-            <input value={revisionForm.referenceQuery} onChange={event => onRevisionFormChange(form => ({ ...form, referenceQuery: event.target.value }))} className={inputClass} />
-          </Field>
-          <Field label="情绪触发">
-            <input value={revisionForm.emotionTrigger} onChange={event => onRevisionFormChange(form => ({ ...form, emotionTrigger: event.target.value }))} className={inputClass} />
-          </Field>
-          <Field label="外部证据">
-            <input value={revisionForm.externalEvidence} onChange={event => onRevisionFormChange(form => ({ ...form, externalEvidence: event.target.value }))} className={inputClass} />
-          </Field>
-          <Field label="段落意图">
-            <textarea value={revisionForm.paragraphIntention} onChange={event => onRevisionFormChange(form => ({ ...form, paragraphIntention: event.target.value }))} className={`${inputClass} min-h-16 resize-y`} />
-          </Field>
-          <Field label="正文职责">
-            <textarea value={revisionForm.proseDuties} onChange={event => onRevisionFormChange(form => ({ ...form, proseDuties: event.target.value }))} className={`${inputClass} min-h-16 resize-y`} />
-          </Field>
+        <div className="mt-3 space-y-5">
+          <RevisionSection title="节拍逻辑与转场">
+            <Field label="叙事功能">
+              <textarea value={revisionForm.narrativeFunction} onChange={updateRevisionField('narrativeFunction')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="逻辑前提">
+              <textarea value={revisionForm.logicPremise} onChange={updateRevisionField('logicPremise')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="冲突压力">
+              <textarea value={revisionForm.conflictPressure} onChange={updateRevisionField('conflictPressure')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="因果进入">
+              <textarea value={revisionForm.causalityIn} onChange={updateRevisionField('causalityIn')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="因果输出">
+              <textarea value={revisionForm.causalityOut} onChange={updateRevisionField('causalityOut')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="转场进入">
+              <textarea value={revisionForm.transitionIn} onChange={updateRevisionField('transitionIn')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="转场输出">
+              <textarea value={revisionForm.transitionOut} onChange={updateRevisionField('transitionOut')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+          </RevisionSection>
+
+          <RevisionSection title="事实与 POV">
+            <Field label="已知事实">
+              <textarea value={revisionForm.knownFacts} onChange={updateRevisionField('knownFacts')} className={`${inputClass} min-h-20 resize-y`} />
+            </Field>
+            <Field label="全局禁止事实">
+              <textarea value={revisionForm.forbiddenFacts} onChange={updateRevisionField('forbiddenFacts')} className={`${inputClass} min-h-20 resize-y`} />
+            </Field>
+            <Field label="场景事实">
+              <textarea value={revisionForm.sceneFacts} onChange={updateRevisionField('sceneFacts')} className={`${inputClass} min-h-20 resize-y`} />
+            </Field>
+            <Field label="节拍禁止事实">
+              <textarea value={revisionForm.beatForbiddenFacts} onChange={updateRevisionField('beatForbiddenFacts')} className={`${inputClass} min-h-20 resize-y`} />
+            </Field>
+            <Field label="POV 角色">
+              <input value={revisionForm.povCharacter} onChange={updateRevisionField('povCharacter')} className={inputClass} />
+            </Field>
+            <Field label="叙述距离">
+              <input value={revisionForm.narrativeDistance} onChange={updateRevisionField('narrativeDistance')} className={inputClass} />
+            </Field>
+            <Field label="POV 可知边界">
+              <textarea value={revisionForm.viewpointAllowedKnowledge} onChange={updateRevisionField('viewpointAllowedKnowledge')} className={`${inputClass} min-h-20 resize-y`} />
+            </Field>
+            <Field label="POV 禁知边界">
+              <textarea value={revisionForm.viewpointForbiddenKnowledge} onChange={updateRevisionField('viewpointForbiddenKnowledge')} className={`${inputClass} min-h-20 resize-y`} />
+            </Field>
+          </RevisionSection>
+
+          <RevisionSection title="角色与情绪">
+            <Field label="角色前状态">
+              <textarea value={revisionForm.characterStatesBefore} onChange={updateRevisionField('characterStatesBefore')} className={`${inputClass} min-h-20 resize-y`} />
+            </Field>
+            <Field label="角色后状态">
+              <textarea value={revisionForm.characterStatesAfter} onChange={updateRevisionField('characterStatesAfter')} className={`${inputClass} min-h-20 resize-y`} />
+            </Field>
+            <Field label="角色目标">
+              <textarea value={revisionForm.characterGoals} onChange={updateRevisionField('characterGoals')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="角色误信">
+              <textarea value={revisionForm.characterMisbeliefs} onChange={updateRevisionField('characterMisbeliefs')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="关系压力">
+              <textarea value={revisionForm.relationshipPressure} onChange={updateRevisionField('relationshipPressure')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="情绪触发">
+              <input value={revisionForm.emotionTrigger} onChange={updateRevisionField('emotionTrigger')} className={inputClass} />
+            </Field>
+            <Field label="情绪前">
+              <input value={revisionForm.emotionBefore} onChange={updateRevisionField('emotionBefore')} className={inputClass} />
+            </Field>
+            <Field label="情绪后">
+              <input value={revisionForm.emotionAfter} onChange={updateRevisionField('emotionAfter')} className={inputClass} />
+            </Field>
+            <Field label="压抑反应">
+              <input value={revisionForm.suppressedReaction} onChange={updateRevisionField('suppressedReaction')} className={inputClass} />
+            </Field>
+            <Field label="外部证据">
+              <input value={revisionForm.externalEvidence} onChange={updateRevisionField('externalEvidence')} className={inputClass} />
+            </Field>
+          </RevisionSection>
+
+          <RevisionSection title="叙述与执行">
+            <Field label="叙述策略">
+              <textarea value={revisionForm.narrationStrategy} onChange={updateRevisionField('narrationStrategy')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="节奏策略">
+              <textarea value={revisionForm.rhythmStrategy} onChange={updateRevisionField('rhythmStrategy')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="段落意图">
+              <textarea value={revisionForm.paragraphIntention} onChange={updateRevisionField('paragraphIntention')} className={`${inputClass} min-h-20 resize-y`} />
+            </Field>
+            <Field label="执行模式">
+              <input value={revisionForm.executionMode} onChange={updateRevisionField('executionMode')} className={inputClass} />
+            </Field>
+            <Field label="反剧本职责">
+              <textarea value={revisionForm.antiScreenplayDuty} onChange={updateRevisionField('antiScreenplayDuty')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="感官锚点">
+              <input value={revisionForm.sensoryAnchorTarget} onChange={updateRevisionField('sensoryAnchorTarget')} className={inputClass} />
+            </Field>
+            <Field label="潜台词计划">
+              <textarea value={revisionForm.subtextPlan} onChange={updateRevisionField('subtextPlan')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="细节目标">
+              <textarea value={revisionForm.sourceBackedDetailTarget} onChange={updateRevisionField('sourceBackedDetailTarget')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="候选拒绝规则">
+              <textarea value={revisionForm.candidateRejectionRule} onChange={updateRevisionField('candidateRejectionRule')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="正文职责">
+              <textarea value={revisionForm.proseDuties} onChange={updateRevisionField('proseDuties')} className={`${inputClass} min-h-20 resize-y`} />
+            </Field>
+          </RevisionSection>
+
+          <RevisionSection title="引用与复用策略">
+            <Field label="引用查询">
+              <input value={revisionForm.referenceQuery} onChange={updateRevisionField('referenceQuery')} className={inputClass} />
+            </Field>
+            <Field label="引用最大结果数">
+              <input type="number" min={1} max={50} value={revisionForm.referenceMaxResults} onChange={updateRevisionField('referenceMaxResults')} className={inputClass} />
+            </Field>
+            <Field label="引用材料类型">
+              <textarea value={revisionForm.referenceMaterialTypes} onChange={updateRevisionField('referenceMaterialTypes')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="必需材料类型">
+              <textarea value={revisionForm.requiredMaterialTypes} onChange={updateRevisionField('requiredMaterialTypes')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="引用情绪标签">
+              <textarea value={revisionForm.referenceEmotionTags} onChange={updateRevisionField('referenceEmotionTags')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="引用功能标签">
+              <textarea value={revisionForm.referenceFunctionTags} onChange={updateRevisionField('referenceFunctionTags')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="引用 POV 标签">
+              <textarea value={revisionForm.referencePovTags} onChange={updateRevisionField('referencePovTags')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="引用技法标签">
+              <textarea value={revisionForm.referenceTechniqueTags} onChange={updateRevisionField('referenceTechniqueTags')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+            <Field label="最大改写级别">
+              <input value={revisionForm.maxRewriteLevel} onChange={updateRevisionField('maxRewriteLevel')} className={inputClass} />
+            </Field>
+            <Field label="锁定短语策略">
+              <input value={revisionForm.lockedPhrasePolicy} onChange={updateRevisionField('lockedPhrasePolicy')} className={inputClass} />
+            </Field>
+            <Field label="不复用理由">
+              <textarea value={revisionForm.noReuseReason} onChange={updateRevisionField('noReuseReason')} className={`${inputClass} min-h-16 resize-y`} />
+            </Field>
+          </RevisionSection>
         </div>
       </div>
 
