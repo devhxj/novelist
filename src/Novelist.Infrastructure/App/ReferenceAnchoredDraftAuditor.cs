@@ -73,6 +73,12 @@ internal static class ReferenceAnchoredDraftAuditor
                 requiredFixes.Add($"Keep candidate {candidate.CandidateId} inside POV boundary; show {leakedCharacter}'s state through external evidence instead of direct interior knowledge.");
             }
 
+            foreach (var distanceViolation in FindNarrativeDistanceViolations(beat, candidate.Text))
+            {
+                povErrors.Add($"Candidate {candidate.CandidateId} violates narrative distance: {distanceViolation}");
+                requiredFixes.Add($"Keep candidate {candidate.CandidateId} inside the approved narrative distance: {distanceViolation}");
+            }
+
             foreach (var forbidden in blueprint.ForbiddenFacts
                 .Concat(beat.ForbiddenFacts)
                 .Where(item => !string.IsNullOrWhiteSpace(item))
@@ -256,6 +262,23 @@ internal static class ReferenceAnchoredDraftAuditor
             text,
             escaped + @"的(恐惧|害怕|惧意|歉意|愧疚|后悔|悔意|怒意|愤怒|嫉妒|犹豫|迟疑|怀疑|算计|念头|想法|决心|恶意|杀意|贪念|不甘|绝望|希望|得意|慌乱)",
             RegexOptions.IgnoreCase);
+    }
+
+    private static IReadOnlyList<string> FindNarrativeDistanceViolations(
+        ReferenceChapterBlueprintBeatPayload beat,
+        string candidateText)
+    {
+        if (string.IsNullOrWhiteSpace(candidateText) ||
+            !ContainsAny(beat.NarrativeDistance, ["close", "limited", "贴近", "近距离", "有限视角"]))
+        {
+            return [];
+        }
+
+        return ContainsAny(
+            candidateText,
+            ["镜头", "画面切", "画面拉", "上帝视角", "全知", "读者可以看到", "we see", "camera"])
+            ? ["close narrative distance cannot use camera or omniscient framing."]
+            : [];
     }
 
     private static IReadOnlyList<string> FindUnsupportedFacts(

@@ -297,6 +297,26 @@ public sealed class ReferenceAnchoredDraftAuditorTests
     }
 
     [Fact]
+    public void BuildDraftAuditFailsWhenCandidateBreaksCloseNarrativeDistance()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            NarrativeDistance = "close",
+            PovCharacter = "林岚"
+        });
+        var candidate = Candidate(blueprint, "镜头拉远，读者可以看到周鸣藏在门后。");
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.PovErrors, item => item.Contains("narrative distance", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("approved narrative distance", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildDraftAuditFailsWhenRequiredProseTargetIsMissing()
     {
         var blueprint = Blueprint(beat => beat with

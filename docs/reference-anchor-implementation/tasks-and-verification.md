@@ -237,7 +237,7 @@ Recommended implementation slices:
 - [x] Unsupported new facts fail audit.
 - [x] Unsupported high-risk identity reveals fail audit unless the reveal is already present in approved known, scene, viewpoint, or slot facts.
 - [x] Forbidden facts fail audit even when the prose is otherwise fluent.
-- [ ] Draft candidates preserve beat POV, narrative distance, scene facts, forbidden facts, and prose duties.
+- [x] Draft candidates preserve beat POV, narrative distance, scene facts, forbidden facts, and prose duties.
 - [x] Draft candidates fail when non-POV character hidden emotion or intention is named directly instead of shown through observable evidence.
 - [x] Draft candidates fail when declared novelistic prose duties have no detectable evidence in the text.
 - [x] Draft candidates are audited for screenplay drift: dialogue/action-only paragraphs fail unless the beat explicitly allows a short exchange.
