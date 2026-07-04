@@ -291,6 +291,67 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateAnchorClassifiesChinesePunctuationDialogueParagraphAndNarrativeTags()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("中文提取标签测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "tag-cases.md",
+            """
+            # 第一章
+
+            门外是谁？雨声压低了街面！
+
+            他心里记得那枚钥匙。这时，脚步停在门口。
+
+            她说：别回头。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "中文标签参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        var rows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+
+        Assert.Contains(rows, row =>
+            row.MaterialType == ReferenceMaterialTypes.Passage &&
+            row.Text == "门外是谁？雨声压低了街面！");
+        Assert.Contains(rows, row =>
+            row.MaterialType == ReferenceMaterialTypes.Sentence &&
+            row.Text == "门外是谁？" &&
+            row.FunctionTag == "narration" &&
+            row.EmotionTag == "uncertain" &&
+            row.PovTag == "unknown");
+        Assert.Contains(rows, row =>
+            row.MaterialType == ReferenceMaterialTypes.Sentence &&
+            row.Text == "雨声压低了街面！" &&
+            row.FunctionTag == "environment" &&
+            row.EmotionTag == "heightened" &&
+            row.TechniqueTag == "sensory_detail");
+        Assert.Contains(rows, row =>
+            row.MaterialType == ReferenceMaterialTypes.Sentence &&
+            row.Text == "他心里记得那枚钥匙。" &&
+            row.FunctionTag == "interiority" &&
+            row.EmotionTag == "reflective" &&
+            row.PovTag == "close" &&
+            row.TechniqueTag == "interiority");
+        Assert.Contains(rows, row =>
+            row.MaterialType == ReferenceMaterialTypes.Sentence &&
+            row.Text == "这时，脚步停在门口。" &&
+            row.FunctionTag == "transition" &&
+            row.TechniqueTag == "transition");
+        Assert.Contains(rows, row =>
+            row.MaterialType == ReferenceMaterialTypes.Sentence &&
+            row.Text == "她说：别回头。" &&
+            row.FunctionTag == "dialogue" &&
+            row.EmotionTag == "spoken" &&
+            row.TechniqueTag == "dialogue_exchange");
+    }
+
+    [Fact]
     public async Task UpdateMaterialTagsMarksMaterialAsUserVerifiedAndSearchesByCorrectedTags()
     {
         var options = CreateOptions();
