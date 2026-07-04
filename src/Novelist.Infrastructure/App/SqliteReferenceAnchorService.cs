@@ -337,7 +337,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 ?? throw new ArgumentException("Reference material does not exist.", nameof(input));
             var declaredSlots = await ReadMaterialSlotsAsync(connection, material.MaterialId, cancellationToken);
             var adapted = ApplySlotValues(material.Text, declaredSlots, input.SlotValues);
-            var rewriteLevel = adapted.ChangedSlots.Count == 0 ? ReferenceRewriteLevels.L0 : ReferenceRewriteLevels.L1;
+            var rewriteLevel = ReferenceRewriteLevelClassifier.Classify(
+                material.Text,
+                adapted.Text,
+                adapted.ChangedSlots);
             var audit = BuildReuseAudit(
                 material,
                 adapted.Text,
@@ -381,7 +384,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
             var material = await ReadMaterialAsync(connection, input.NovelId, materialId, cancellationToken)
                 ?? throw new ArgumentException("Reference material does not exist.", nameof(input));
-            var rewriteLevel = ClassifyRewriteLevel(material.Text, candidateText);
+            var rewriteLevel = ReferenceRewriteLevelClassifier.Classify(material.Text, candidateText);
             var audit = BuildReuseAudit(
                 material,
                 candidateText,
@@ -1532,27 +1535,6 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             now);
     }
 
-    private static string ClassifyRewriteLevel(string sourceText, string candidateText)
-    {
-        if (string.Equals(sourceText, candidateText, StringComparison.Ordinal))
-        {
-            return ReferenceRewriteLevels.L0;
-        }
-
-        if (NormalizeForSimilarity(sourceText) == NormalizeForSimilarity(candidateText))
-        {
-            return ReferenceRewriteLevels.L2;
-        }
-
-        var similarity = CharacterJaccard(sourceText, candidateText);
-        if (similarity >= 0.88)
-        {
-            return ReferenceRewriteLevels.L2;
-        }
-
-        return similarity >= 0.45 ? ReferenceRewriteLevels.L3 : ReferenceRewriteLevels.L4;
-    }
-
     private static IReadOnlyList<string> FindUnsupportedRiskTokens(
         string sourceText,
         string candidateText,
@@ -1601,34 +1583,6 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         {
             throw new ArgumentException("Unsupported rewrite level.", nameof(rewriteLevel));
         }
-    }
-
-    private static string NormalizeForSimilarity(string value)
-    {
-        var builder = new StringBuilder(value.Length);
-        foreach (var ch in value)
-        {
-            if (!char.IsWhiteSpace(ch))
-            {
-                builder.Append(ch);
-            }
-        }
-
-        return builder.ToString();
-    }
-
-    private static double CharacterJaccard(string left, string right)
-    {
-        var leftSet = NormalizeForSimilarity(left).ToCharArray().ToHashSet();
-        var rightSet = NormalizeForSimilarity(right).ToCharArray().ToHashSet();
-        if (leftSet.Count == 0 && rightSet.Count == 0)
-        {
-            return 1;
-        }
-
-        var intersection = leftSet.Intersect(rightSet).Count();
-        var union = leftSet.Union(rightSet).Count();
-        return union == 0 ? 0 : intersection / (double)union;
     }
 
     private static bool IsSentenceTerminator(char value)
