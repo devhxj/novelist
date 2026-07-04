@@ -379,7 +379,7 @@ Recommended implementation slices:
 - [x] User feedback rows persist accept/reject/edit decisions.
 - [x] User-verified tags can override extractor tags.
 - [x] User-edited blueprint beats can be re-reviewed and approved.
-- [ ] Regression fixtures include previously bad blueprints and candidates.
+- [x] Regression fixtures include previously bad blueprints and candidates.
 - [x] Rebuild preserves user corrections where source segment hash is unchanged.
 - [x] Ranking can boost materials previously accepted for similar blueprint beats.
 
@@ -390,7 +390,7 @@ Recommended implementation slices:
 - [x] integration tests for user-verified material tag overrides
 - [x] integration test for preserving user-verified material tag overrides across rebuild when material text hash is unchanged
 - [x] integration test for re-reviewing and re-approving a user-edited blueprint beat
-- [ ] blueprint regression fixture tests
+- [x] blueprint regression fixture tests
 
 ## Required Test Matrix
 

@@ -23,4 +23,8 @@
     <ProjectReference Include="..\..\src\Novelist.Infrastructure\Novelist.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="Fixtures\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

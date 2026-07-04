@@ -1,0 +1,38 @@
+{
+  "blueprints": [
+    {
+      "name": "fake_emotion",
+      "mutation": "fake_emotion",
+      "expected_error": "fake emotion"
+    },
+    {
+      "name": "hard_transition",
+      "mutation": "hard_transition",
+      "expected_error": "pressure"
+    },
+    {
+      "name": "pov_leak",
+      "mutation": "pov_leak",
+      "expected_error": "周鸣是卧底"
+    },
+    {
+      "name": "material_mismatch",
+      "mutation": "material_mismatch",
+      "expected_error": "material fit"
+    }
+  ],
+  "draft_candidates": [
+    {
+      "name": "dialogue_only",
+      "mutation": "default",
+      "text": "“你来了？”\n“我来了。”",
+      "expected_error": "screenplay"
+    },
+    {
+      "name": "action_only",
+      "mutation": "action_only",
+      "text": "他推门进去。她转身。两人沉默。",
+      "expected_error": "action-only"
+    }
+  ]
+}
