@@ -102,6 +102,10 @@ public sealed class ReferenceRegressionFixtureTests
                 ParagraphIntention = "写得更好，更有代入感"
             },
             "unsupported_final_hook" => beat,
+            "unsupported_scene_fact" => beat with
+            {
+                SceneFacts = ["雨声压低了整条街的呼吸", "周鸣其实是卧底"]
+            },
             "material_mismatch" => beat with
             {
                 ReferenceQuery = beat.ReferenceQuery with

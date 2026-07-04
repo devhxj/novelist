@@ -41,6 +41,11 @@
       "expected_error": "final hook"
     },
     {
+      "name": "unsupported_scene_fact",
+      "mutation": "unsupported_scene_fact",
+      "expected_error": "scene fact"
+    },
+    {
       "name": "material_mismatch",
       "mutation": "material_mismatch",
       "expected_error": "material fit"

@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 5;
+    public const int CurrentReviewVersion = 6;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -212,6 +212,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "viewpoint_allowed_knowledge",
                     $"Beat {beat.BeatIndex} allows POV knowledge outside approved facts: {unsupportedFact}",
                     "Remove the unsupported POV knowledge or add it to approved known/scene facts before review.");
+            }
+
+            foreach (var unsupportedFact in FindUnsupportedSceneFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    continuityErrors,
+                    "continuity",
+                    beat,
+                    "scene_facts",
+                    $"Beat {beat.BeatIndex} introduces unsupported scene fact: {unsupportedFact}",
+                    "Remove the unsupported scene fact or add it to known facts or declared slot values before review.");
             }
 
             var proseDuties = beat.ProseDuties
@@ -523,6 +534,23 @@ internal static class ReferenceChapterBlueprintReviewer
                 yield return fact;
             }
         }
+    }
+
+    private static IEnumerable<string> FindUnsupportedSceneFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return beat.SceneFacts
+            .SelectMany(ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static bool IsAllowedFact(string fact, IReadOnlyList<string> allowedFacts)

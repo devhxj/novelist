@@ -148,6 +148,40 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsSceneFactOutsideKnownFacts()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            SceneFacts = ["雨声压低了整条街的呼吸", "周鸣其实是卧底"]
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ContinuityErrors, item => item.Contains("scene fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(review.ContinuityErrors, item => item.Contains("周鸣是卧底", StringComparison.Ordinal));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "continuity" &&
+                defect.FieldPath.Contains("scene_facts", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewAllowsSceneFactWhenKnownFactSetup()
+    {
+        var blueprint = Blueprint(
+            beat => beat with
+            {
+                SceneFacts = ["雨声压低了整条街的呼吸", "周鸣其实是卧底"]
+            },
+            knownFacts: ["雨声压低了整条街的呼吸", "周鸣是卧底"]);
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+    }
+
+    [Fact]
     public void BuildReviewFailsActionBeatWithoutNovelisticDuties()
     {
         var blueprint = Blueprint(beat => beat with
