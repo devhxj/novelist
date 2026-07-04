@@ -202,7 +202,7 @@ Draft generation must be understood as candidate assembly from approved blueprin
 
 Recommended implementation slices:
 
-1. Promote slot detection into first-class storage and make L1 adaptation depend on stored slot definitions.
+1. [x] Promote slot detection into first-class storage and make L1 adaptation depend on stored slot definitions.
 2. [x] Extract rewrite-level classification into a separately testable component.
 3. [x] Add a draft preflight component that loads blueprint, approval, review, and material links together and rejects stale hashes before any generation.
 4. Implement beat-level candidate generation for one approved and material-bound beat at a time.
@@ -245,7 +245,7 @@ Recommended implementation slices:
 
 **Verification:**
 
-- [ ] unit tests for slot extraction and slot-only replacement
+- [x] component/integration tests for slot extraction and slot-only replacement, covering brace styles, repeated slots, malformed placeholders, stable ids, offsets, and undeclared-slot rejection
 - [x] component tests for rewrite-level classifier covering L0, slot-only L1, light L2, loose L3, and unrelated L4
 - [x] component tests for draft preflight status, review-hash, target-beat, no-reuse, and material-link validation
 - [x] integration tests for draft preflight material-link hash validation
@@ -460,13 +460,13 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 
 The initial foundation has already started. Do not restart from Phase 0 unless contracts have regressed.
 
-Latest verified scope: `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal` passed after extracting `ReferenceRewriteLevelClassifier`, covering L0 exact reuse, slot-only L1, whitespace/connector L2, loose structural L3, and unrelated L4, and wiring `SqliteReferenceAnchorService` to use the classifier. Earlier full .NET tests passed after adding deterministic blueprint-review fixtures and gates for fake emotion mechanics, hard transition without narrative pressure, unapproved high-risk POV knowledge, missing prose duties, and material-query beat-fit mismatch, plus service/bridge regressions proving those strict review defects surface through structured review payloads. Earlier `frontend` lint/build passed after adding score-component display, revision controls, review categories, audit categories, changed-slot chips, and non-slot edit display.
+Latest verified scope: `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal` passed after extracting `ReferenceMaterialSlotDetector`, covering single/double brace slots, repeated slot ordinals, malformed placeholders, stable slot ids, and detected slot offsets, with `SqliteReferenceAnchorService` using the shared detector for slot counts and storage. Earlier full .NET tests passed after extracting `ReferenceRewriteLevelClassifier`, adding deterministic blueprint-review fixtures and gates, and proving strict review defects surface through structured service/bridge payloads. Earlier `frontend` lint/build passed after adding score-component display, revision controls, review categories, audit categories, changed-slot chips, and non-slot edit display.
 
 Recommended next session:
 
 1. Expand the beat editor to the remaining supported revision paths; leave complex object-list edits such as `slot_plan` for a focused schema slice.
 2. Split `ReferenceAnchorView` into focused child components before adding more UI fields, so the reference workflow remains reviewable.
-3. Add first-class slot extraction tests and then extend L2 non-slot edit reporting before expanding model-assisted adaptation.
+3. Extend L2 non-slot edit reporting before expanding model-assisted adaptation.
 
 Recommended following session:
 

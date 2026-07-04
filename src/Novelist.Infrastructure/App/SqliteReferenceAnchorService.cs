@@ -17,7 +17,6 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private static readonly Regex MarkdownHeadingPattern = new(@"^\s{0,3}#{1,6}\s+(.+?)\s*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex BlankLinePattern = new(@"\n\s*\n", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex RiskTokenPattern = new(@"[A-Za-z][A-Za-z0-9_]{1,}|\d+(?:\.\d+)?", RegexOptions.Compiled | RegexOptions.CultureInvariant);
-    private static readonly Regex SlotPattern = new(@"\{\{(?<name>[A-Za-z_][A-Za-z0-9_]*)\}\}|\{(?<name>[A-Za-z_][A-Za-z0-9_]*)\}", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly JsonSerializerOptions JsonOptions = BridgeJson.SerializerOptions;
     private static readonly string[] DialogueMarkers = ["“", "”", "「", "」", "『", "』", "\"", "说：", "道：", "问：", "答："];
     private static readonly string[] SensoryMarkers = ["雨", "风", "雪", "光", "声", "呼吸", "气味", "冷", "热", "疼", "黑", "亮"];
@@ -634,7 +633,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             insert.Parameters.AddWithValue("$created_at", FormatTimestamp(material.CreatedAt));
             await insert.ExecuteNonQueryAsync(cancellationToken);
 
-            foreach (var slot in DetectSlots(material))
+            foreach (var slot in ReferenceMaterialSlotDetector.Detect(material))
             {
                 await using var slotInsert = connection.CreateCommand();
                 slotInsert.Transaction = transaction;
@@ -1180,34 +1179,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
 
     private static int CountMaterialSlots(IReadOnlyList<ReferenceMaterialPayload> materials)
     {
-        return materials.Sum(material => DetectSlots(material).Count);
-    }
-
-    private static IReadOnlyList<ReferenceMaterialSlot> DetectSlots(ReferenceMaterialPayload material)
-    {
-        var slots = new List<ReferenceMaterialSlot>();
-        var ordinalByName = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (Match match in SlotPattern.Matches(material.Text))
-        {
-            var slotName = match.Groups["name"].Value.Trim();
-            if (slotName.Length == 0)
-            {
-                continue;
-            }
-
-            ordinalByName.TryGetValue(slotName, out var ordinal);
-            ordinal++;
-            ordinalByName[slotName] = ordinal;
-            slots.Add(new ReferenceMaterialSlot(
-                BuildSlotId(material.MaterialId, slotName, ordinal),
-                material.MaterialId,
-                slotName,
-                match.Value,
-                match.Index,
-                match.Index + match.Length));
-        }
-
-        return slots;
+        return materials.Sum(material => ReferenceMaterialSlotDetector.Detect(material).Count);
     }
 
     private static MaterialTags ClassifyMaterial(string text)
@@ -1655,13 +1627,6 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             $"{anchorId}:material:{type}:{segmentIndex}:{hash[..16]}");
     }
 
-    private static string BuildSlotId(string materialId, string slotName, int ordinal)
-    {
-        return string.Create(
-            CultureInfo.InvariantCulture,
-            $"{materialId}:slot:{slotName}:{ordinal}");
-    }
-
     private static bool ContainsAny(string text, IReadOnlyList<string> markers)
     {
         return markers.Any(marker => text.Contains(marker, StringComparison.Ordinal));
@@ -1812,14 +1777,6 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         double FunctionConfidence,
         double EmotionConfidence,
         double PovConfidence);
-
-    private sealed record ReferenceMaterialSlot(
-        string SlotId,
-        string MaterialId,
-        string SlotName,
-        string Placeholder,
-        int StartOffset,
-        int EndOffset);
 
     private sealed record AdaptedMaterial(
         string Text,
