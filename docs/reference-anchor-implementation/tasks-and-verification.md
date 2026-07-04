@@ -189,7 +189,7 @@ Recommended implementation slices:
 - [ ] integration test for generate/review/approve/stale lifecycle
 - [x] integration test for beat material binding and provenance joins
 - [x] integration test proving review-passed-without-approval cannot bind or draft
-- [ ] bridge test for `BindReferenceBlueprintMaterials` after approval and for failure before approval
+- [x] bridge test for `BindReferenceBlueprintMaterials` after approval and for failure before approval
 
 **Files likely touched:**
 
