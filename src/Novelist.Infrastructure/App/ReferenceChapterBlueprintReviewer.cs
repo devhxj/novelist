@@ -4,6 +4,8 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
+    public const int CurrentReviewVersion = 1;
+
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
         DateTimeOffset now)
@@ -191,6 +193,7 @@ internal static class ReferenceChapterBlueprintReviewer
             blueprint.ContextHash,
             blueprint.SourcePlanHash,
             blueprint.AnalysisContractHash,
+            CurrentReviewVersion,
             status,
             Math.Max(0, 1.0 - defectCount * 0.1),
             logicErrors,

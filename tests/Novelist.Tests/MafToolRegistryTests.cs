@@ -878,6 +878,7 @@ public sealed class MafToolRegistryTests
                 "context-hash",
                 "plan-hash",
                 "analysis-hash",
+                1,
                 ReferenceBlueprintReviewStatuses.Passed,
                 1,
                 [],

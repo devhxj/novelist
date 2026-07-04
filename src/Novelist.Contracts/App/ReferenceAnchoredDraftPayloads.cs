@@ -193,6 +193,7 @@ public sealed record ReferenceChapterBlueprintReviewPayload(
     [property: JsonPropertyName("context_hash")] string ContextHash,
     [property: JsonPropertyName("source_plan_hash")] string SourcePlanHash,
     [property: JsonPropertyName("analysis_contract_hash")] string AnalysisContractHash,
+    [property: JsonPropertyName("review_version")] int ReviewVersion,
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("score")] double Score,
     [property: JsonPropertyName("logic_errors")] IReadOnlyList<string> LogicErrors,

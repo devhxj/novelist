@@ -1671,14 +1671,14 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO reference_chapter_blueprint_reviews
-              (review_id, blueprint_id, context_hash, source_plan_hash, analysis_contract_hash,
+              (review_id, blueprint_id, context_hash, source_plan_hash, analysis_contract_hash, review_version,
                status, score, logic_errors_json, causality_errors_json,
                emotion_errors_json, narration_errors_json, execution_errors_json, character_state_errors_json, pov_errors_json,
                continuity_errors_json, transition_errors_json, forbidden_fact_errors_json,
                reference_binding_errors_json, material_fit_errors_json, screenplay_drift_risks_json,
                ai_prose_risks_json, novelistic_narration_errors_json, required_fixes_json, reviewed_at)
             VALUES
-              ($review_id, $blueprint_id, $context_hash, $source_plan_hash, $analysis_contract_hash,
+              ($review_id, $blueprint_id, $context_hash, $source_plan_hash, $analysis_contract_hash, $review_version,
                $status, $score, $logic_errors_json, $causality_errors_json,
                $emotion_errors_json, $narration_errors_json, $execution_errors_json, $character_state_errors_json, $pov_errors_json,
                $continuity_errors_json, $transition_errors_json, $forbidden_fact_errors_json,
@@ -1697,7 +1697,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT review_id, blueprint_id, context_hash, source_plan_hash, analysis_contract_hash,
+            SELECT review_id, blueprint_id, context_hash, source_plan_hash, analysis_contract_hash, review_version,
                    status, score, logic_errors_json, causality_errors_json,
                    emotion_errors_json, narration_errors_json, execution_errors_json, character_state_errors_json, pov_errors_json,
                    continuity_errors_json, transition_errors_json, forbidden_fact_errors_json,
@@ -1723,7 +1723,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT review_id, blueprint_id, context_hash, source_plan_hash, analysis_contract_hash,
+            SELECT review_id, blueprint_id, context_hash, source_plan_hash, analysis_contract_hash, review_version,
                    status, score, logic_errors_json, causality_errors_json,
                    emotion_errors_json, narration_errors_json, execution_errors_json, character_state_errors_json, pov_errors_json,
                    continuity_errors_json, transition_errors_json, forbidden_fact_errors_json,
@@ -1746,9 +1746,9 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             reader.GetString(2),
             reader.GetString(3),
             reader.GetString(4),
-            reader.GetString(5),
-            reader.GetDouble(6),
-            ReadJson<IReadOnlyList<string>>(reader.GetString(7)),
+            reader.GetInt32(5),
+            reader.GetString(6),
+            reader.GetDouble(7),
             ReadJson<IReadOnlyList<string>>(reader.GetString(8)),
             ReadJson<IReadOnlyList<string>>(reader.GetString(9)),
             ReadJson<IReadOnlyList<string>>(reader.GetString(10)),
@@ -1764,7 +1764,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             ReadJson<IReadOnlyList<string>>(reader.GetString(20)),
             ReadJson<IReadOnlyList<string>>(reader.GetString(21)),
             ReadJson<IReadOnlyList<string>>(reader.GetString(22)),
-            ParseTimestamp(reader.GetString(23)));
+            ReadJson<IReadOnlyList<string>>(reader.GetString(23)),
+            ParseTimestamp(reader.GetString(24)));
     }
 
     private static void AddReviewParameters(SqliteCommand command, ReferenceChapterBlueprintReviewPayload review)
@@ -1774,6 +1775,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         command.Parameters.AddWithValue("$context_hash", review.ContextHash);
         command.Parameters.AddWithValue("$source_plan_hash", review.SourcePlanHash);
         command.Parameters.AddWithValue("$analysis_contract_hash", review.AnalysisContractHash);
+        command.Parameters.AddWithValue("$review_version", review.ReviewVersion);
         command.Parameters.AddWithValue("$status", review.Status);
         command.Parameters.AddWithValue("$score", review.Score);
         command.Parameters.AddWithValue("$logic_errors_json", JsonSerializer.Serialize(review.LogicErrors, JsonOptions));
@@ -1920,6 +1922,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
               context_hash TEXT NOT NULL,
               source_plan_hash TEXT NOT NULL,
               analysis_contract_hash TEXT NOT NULL,
+              review_version INTEGER NOT NULL,
               status TEXT NOT NULL,
               score REAL NOT NULL,
               logic_errors_json TEXT NOT NULL,
@@ -2088,6 +2091,12 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             "reference_chapter_blueprint_reviews",
             "analysis_contract_hash",
             "TEXT NOT NULL DEFAULT ''",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_reviews",
+            "review_version",
+            "INTEGER NOT NULL DEFAULT 1",
             cancellationToken);
         await EnsureColumnAsync(
             connection,

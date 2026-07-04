@@ -41,6 +41,19 @@ public sealed class ReferenceAnchoredDraftPreflightTests
     }
 
     [Fact]
+    public void ReviewMatchesBlueprintRejectsReviewFromDifferentReviewVersion()
+    {
+        var blueprint = Blueprint();
+        var oldVersionReview = Review(reviewVersion: ReferenceChapterBlueprintReviewer.CurrentReviewVersion + 1);
+
+        Assert.False(ReferenceAnchoredDraftPreflight.ReviewMatchesBlueprint(blueprint, oldVersionReview));
+        Assert.Throws<ArgumentException>(() =>
+            ReferenceAnchoredDraftPreflight.EnsureCurrentPassingReview(
+                blueprint with { LatestReview = oldVersionReview },
+                "Material binding"));
+    }
+
+    [Fact]
     public void SelectTargetBeatsTrimsRequestedIdsAndRejectsMissingTargets()
     {
         var blueprint = Blueprint();
@@ -139,6 +152,7 @@ public sealed class ReferenceAnchoredDraftPreflightTests
         string contextHash = "context-hash",
         string sourceHash = "source-hash",
         string analysisHash = "analysis-hash",
+        int reviewVersion = ReferenceChapterBlueprintReviewer.CurrentReviewVersion,
         string status = ReferenceBlueprintReviewStatuses.Passed)
     {
         return new ReferenceChapterBlueprintReviewPayload(
@@ -147,6 +161,7 @@ public sealed class ReferenceAnchoredDraftPreflightTests
             contextHash,
             sourceHash,
             analysisHash,
+            reviewVersion,
             status,
             1.0,
             [],

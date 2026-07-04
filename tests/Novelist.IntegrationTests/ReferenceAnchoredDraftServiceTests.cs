@@ -506,6 +506,38 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ApproveBlueprintRejectsReviewVersionMismatch()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("评审版本门禁测试", "", ""), CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, new FileSystemPlanningService(options, novels));
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                22,
+                "第二十二章蓝图",
+                "审批必须匹配当前评审版本",
+                [],
+                KnownFacts: ["主角已经到场"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId),
+            CancellationToken.None);
+
+        await SetReviewVersionAsync(options, review.ReviewId, ReferenceChapterBlueprintReviewer.CurrentReviewVersion + 1);
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.ApproveChapterBlueprintAsync(
+                new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, review.ReviewId),
+                CancellationToken.None));
+
+        Assert.Contains("current passing review", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ReviewChapterBlueprintReusesExistingReviewForUnchangedContract()
     {
         var options = CreateOptions();
@@ -2189,6 +2221,30 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             WHERE review_id = $review_id;
             """;
         command.Parameters.AddWithValue("$context_hash", contextHash);
+        command.Parameters.AddWithValue("$review_id", reviewId);
+        var updated = await command.ExecuteNonQueryAsync();
+        Assert.True(updated > 0);
+    }
+
+    private static async ValueTask SetReviewVersionAsync(
+        AppInitializationOptions options,
+        string reviewId,
+        int reviewVersion)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_chapter_blueprint_reviews
+            SET review_version = $review_version
+            WHERE review_id = $review_id;
+            """;
+        command.Parameters.AddWithValue("$review_version", reviewVersion);
         command.Parameters.AddWithValue("$review_id", reviewId);
         var updated = await command.ExecuteNonQueryAsync();
         Assert.True(updated > 0);

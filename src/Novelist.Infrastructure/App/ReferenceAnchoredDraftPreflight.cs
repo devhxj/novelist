@@ -42,7 +42,8 @@ internal static class ReferenceAnchoredDraftPreflight
         return review.BlueprintId == blueprint.BlueprintId &&
             string.Equals(review.ContextHash, blueprint.ContextHash, StringComparison.Ordinal) &&
             string.Equals(review.SourcePlanHash, blueprint.SourcePlanHash, StringComparison.Ordinal) &&
-            string.Equals(review.AnalysisContractHash, blueprint.AnalysisContractHash, StringComparison.Ordinal);
+            string.Equals(review.AnalysisContractHash, blueprint.AnalysisContractHash, StringComparison.Ordinal) &&
+            review.ReviewVersion == ReferenceChapterBlueprintReviewer.CurrentReviewVersion;
     }
 
     public static IReadOnlyList<ReferenceChapterBlueprintBeatPayload> SelectTargetBeats(

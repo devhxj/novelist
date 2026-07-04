@@ -181,6 +181,7 @@ public sealed class ReferenceAnchorContractTests
             ContextHash: "context-hash",
             SourcePlanHash: "plan-hash",
             AnalysisContractHash: "analysis-hash",
+            ReviewVersion: 1,
             Status: ReferenceBlueprintReviewStatuses.Failed,
             Score: 0.45,
             LogicErrors: ["missing payoff"],
@@ -268,6 +269,7 @@ public sealed class ReferenceAnchorContractTests
         Assert.Equal("preserve physical afterbeat cadence", root.GetProperty("beats")[0].GetProperty("locked_phrase_policy").GetString());
         Assert.Equal("close interiority hesitation", root.GetProperty("beats")[0].GetProperty("reference_query").GetProperty("query").GetString());
         Assert.Equal("missing payoff", root.GetProperty("latest_review").GetProperty("logic_errors")[0].GetString());
+        Assert.Equal(1, root.GetProperty("latest_review").GetProperty("review_version").GetInt32());
         Assert.Equal("beat 2 lacks causality_in", root.GetProperty("latest_review").GetProperty("causality_errors")[0].GetString());
         Assert.Equal("emotion shift lacks external evidence", root.GetProperty("latest_review").GetProperty("emotion_errors")[0].GetString());
         Assert.Equal("dialogue beat lacks anti-screenplay duty", root.GetProperty("latest_review").GetProperty("narration_errors")[0].GetString());
