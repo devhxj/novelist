@@ -461,19 +461,19 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 
 The initial foundation has already started. Do not restart from Phase 0 unless contracts have regressed.
 
-Latest verified scope: `cd frontend && npm run build`, `cd frontend && npm run lint`, `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge' -v minimal`, and `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal` passed after adding structured current-beat `slot_plan` editing and backend `beat:{beat_id}:slot_plan` revision support. Earlier full .NET tests passed after extracting `ReferenceMaterialSlotDetector` and `ReferenceRewriteLevelClassifier`, adding deterministic blueprint-review fixtures and gates, and proving strict review defects surface through structured service/bridge payloads.
+Latest verified scope: `cd frontend && npm run build` and `cd frontend && npm run lint` passed after splitting `ReferenceAnchorView` into focused blueprint-detail, revision-helper, and shared-style modules. Earlier `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge' -v minimal` and `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal` passed after adding structured current-beat `slot_plan` editing and backend `beat:{beat_id}:slot_plan` revision support.
 
 Recommended next session:
 
-1. Split `ReferenceAnchorView` into focused child components before adding more UI fields, so the reference workflow remains reviewable.
-2. Add a native file-picker bridge for source import so the first UI does not rely only on raw local paths.
-3. Extend L2 non-slot edit reporting before expanding model-assisted adaptation.
+1. Add a native file-picker bridge for source import so the first UI does not rely only on raw local paths.
+2. Extend L2 non-slot edit reporting before expanding model-assisted adaptation.
+3. Add full frontend runtime verification after the reference-anchor panel is exercised against a real app bridge.
 
 Recommended following session:
 
-1. Add a native file-picker bridge for source import so the first UI does not rely only on raw local paths.
-2. Add explicit approval hash/version unit tests if approval logic is further split from the SQLite service.
-3. Add full frontend runtime verification after the reference-anchor panel is split into child components.
+1. Add explicit approval hash/version unit tests if approval logic is further split from the SQLite service.
+2. Add feedback persistence rows for accept/reject/edit decisions.
+3. Add ranking tests for user-verified material/tag boosts.
 
 Do not broaden frontend workflow beyond the review-first path until source corpus, material binding, blueprint review, and draft audit are reliable. The system's quality depends on immutable provenance, hard blueprint gates, and candidate audit before any manual insertion.
 
