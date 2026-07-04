@@ -16,6 +16,16 @@
       "expected_error": "周鸣是卧底"
     },
     {
+      "name": "missing_prose_duty",
+      "mutation": "missing_prose_duty",
+      "expected_error": "prose duties"
+    },
+    {
+      "name": "action_dialogue_only_beat",
+      "mutation": "action_dialogue_only",
+      "expected_error": "action/dialogue"
+    },
+    {
       "name": "material_mismatch",
       "mutation": "material_mismatch",
       "expected_error": "material fit"
@@ -33,6 +43,36 @@
       "mutation": "action_only",
       "text": "他推门进去。她转身。两人沉默。",
       "expected_error": "action-only"
+    },
+    {
+      "name": "forbidden_fact",
+      "mutation": "forbidden_fact",
+      "text": "雨声压低了整条街的呼吸，凶手身份在门后闪了一下。",
+      "expected_error": "forbidden fact"
+    },
+    {
+      "name": "unsupported_identity_reveal",
+      "mutation": "default",
+      "text": "雨声压低了整条街的呼吸，周鸣其实是卧底。",
+      "expected_error": "周鸣是卧底"
+    },
+    {
+      "name": "non_pov_interior_leak",
+      "mutation": "non_pov_character",
+      "text": "雨声压低了整条街的呼吸，周鸣心里明白她已经看穿了他。",
+      "expected_error": "non-POV interior"
+    },
+    {
+      "name": "close_narrative_distance",
+      "mutation": "default",
+      "text": "镜头拉远，读者可以看到周鸣藏在门后。",
+      "expected_error": "narrative distance"
+    },
+    {
+      "name": "missing_required_subtext",
+      "mutation": "required_subtext",
+      "text": "雨声压低了整条街的呼吸，林岚心里一紧，指尖停住。",
+      "expected_error": "required prose target"
     }
   ]
 }

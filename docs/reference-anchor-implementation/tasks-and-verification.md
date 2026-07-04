@@ -479,13 +479,12 @@ Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj -
 Recommended next session:
 
 1. Add full frontend runtime verification after the reference-anchor panel is exercised against a real app bridge.
-2. Add explicit `review_version` contract/storage coverage if review-version invalidation is introduced beyond the current blueprint id/context/source/analysis hash checks.
-3. Add regression fixtures for previously bad blueprints and draft candidates.
+2. Add fixture coverage for stale blueprint comparison behavior if the UI starts surfacing stale rows.
+3. Expand model-assisted adaptation only after deterministic audit gates stay stable.
 
 Recommended following session:
 
-1. Add fixture coverage for stale blueprint comparison behavior if the UI starts surfacing stale rows.
-2. Expand model-assisted adaptation only after deterministic audit gates stay stable.
+1. Keep broadening deterministic Chinese narration, emotion, and POV fixtures before adding optional model-assisted tagging.
 
 Do not broaden frontend workflow beyond the review-first path until source corpus, material binding, blueprint review, and draft audit are reliable. The system's quality depends on immutable provenance, hard blueprint gates, and candidate audit before any manual insertion.
 

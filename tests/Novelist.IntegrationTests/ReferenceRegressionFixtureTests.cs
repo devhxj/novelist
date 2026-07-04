@@ -81,6 +81,15 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 ViewpointAllowedKnowledge = ["雨声压低了整条街的呼吸", "周鸣是卧底"]
             },
+            "missing_prose_duty" => beat with
+            {
+                ProseDuties = []
+            },
+            "action_dialogue_only" => beat with
+            {
+                BeatType = ReferenceBlueprintBeatTypes.Action,
+                ProseDuties = ["action", "dialogue"]
+            },
             "material_mismatch" => beat with
             {
                 ReferenceQuery = beat.ReferenceQuery with
@@ -105,6 +114,19 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 ProseDuties = ["interiority", "external_evidence", "transition"],
                 AntiScreenplayDuty = "show pressure beyond action"
+            },
+            "forbidden_fact" => beat with
+            {
+                ForbiddenFacts = ["凶手身份"]
+            },
+            "non_pov_character" => beat with
+            {
+                PovCharacter = "林岚",
+                CharacterStatesBefore = ["林岚 controlled", "周鸣 guarded"]
+            },
+            "required_subtext" => beat with
+            {
+                SubtextPlan = "required: 没有回答"
             },
             _ => beat
         };
