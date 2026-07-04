@@ -231,12 +231,12 @@ Recommended implementation slices:
 - [x] Missing provenance fails audit.
 - [x] Unsupported new facts fail audit.
 - [x] Unsupported high-risk identity reveals fail audit unless the reveal is already present in approved known, scene, viewpoint, or slot facts.
-- [ ] Forbidden facts fail audit even when the prose is otherwise fluent.
+- [x] Forbidden facts fail audit even when the prose is otherwise fluent.
 - [ ] Draft candidates preserve beat POV, narrative distance, scene facts, forbidden facts, and prose duties.
 - [x] Draft candidates fail when non-POV character hidden emotion or intention is named directly instead of shown through observable evidence.
 - [x] Draft candidates fail when declared novelistic prose duties have no detectable evidence in the text.
 - [ ] Draft candidates are audited for screenplay drift: dialogue/action-only paragraphs fail unless the beat explicitly allows a short exchange.
-- [ ] Action-only candidates fail when the approved beat requires interiority, external evidence, sensory pressure, transition work, subtext, or delayed reaction.
+- [x] Action-only candidates fail when the approved beat requires interiority, external evidence, sensory pressure, transition work, subtext, or delayed reaction.
 - [ ] Draft candidates are audited for novelistic execution: paragraph intention, execution mode, anti-screenplay duty, sensory/subtext targets, and source-backed detail target.
 - [x] Draft candidates fail when a declared Chinese emotion change has no trigger, suppressed reaction, or external-evidence mechanic present in the text.
 - [ ] Draft candidates are audited against the beat's emotion trigger, suppressed reaction, external evidence, and after-state.
@@ -253,6 +253,7 @@ Recommended implementation slices:
 - [x] component tests for missing material provenance and unsupported fact detection covering key object/evidence terms, identity reveals, relationship reveals, and approved-fact allowance
 - [ ] unit tests for blueprint-to-draft audit rules
 - [x] component tests for dialogue-only drift, action-only drift, missing prose duty evidence, missing emotion evidence, POV leakage, and missing required prose target
+- [x] integration test for persisted draft audit forbidden-fact rejection
 - [x] integration test for `AdaptMaterialAsync`
 - [x] integration test for `GenerateDraftFromBlueprintAsync`
 - [x] integration test proving `GenerateDraftFromBlueprintAsync` returns candidates without mutating chapter content
