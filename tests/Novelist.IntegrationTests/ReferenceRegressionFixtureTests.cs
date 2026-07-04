@@ -98,6 +98,14 @@ public sealed class ReferenceRegressionFixtureTests
                 CharacterStatesBefore = ["controlled"],
                 CharacterStatesAfter = ["controlled"]
             },
+            "missing_character_misbeliefs" => beat with
+            {
+                CharacterMisbeliefs = []
+            },
+            "missing_relationship_pressure" => beat with
+            {
+                RelationshipPressure = []
+            },
             "generic_paragraph_intention" => beat with
             {
                 ParagraphIntention = "写得更好，更有代入感"

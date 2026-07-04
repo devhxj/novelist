@@ -280,6 +280,42 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsMissingCharacterMisbeliefs()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            CharacterMisbeliefs = []
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.CharacterStateErrors, item => item.Contains("misbelief", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "character_state" &&
+                defect.FieldPath.Contains("character_misbeliefs", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsMissingRelationshipPressure()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            RelationshipPressure = []
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.CharacterStateErrors, item => item.Contains("relationship pressure", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "character_state" &&
+                defect.FieldPath.Contains("relationship_pressure", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsGenericParagraphIntention()
     {
         var blueprint = Blueprint(beat => beat with

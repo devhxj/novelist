@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 7;
+    public const int CurrentReviewVersion = 8;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -179,6 +179,26 @@ internal static class ReferenceChapterBlueprintReviewer
                     "character_state",
                     $"Beat {beat.BeatIndex} is missing character state mechanics.",
                     "Fill character goals plus before/after state mechanics for this beat.");
+            }
+            else if (beat.CharacterMisbeliefs.Count == 0)
+            {
+                AddBeatDefect(
+                    characterStateErrors,
+                    "character_state",
+                    beat,
+                    "character_misbeliefs",
+                    $"Beat {beat.BeatIndex} is missing character misbelief mechanics.",
+                    "Fill character_misbeliefs so the beat exposes what the character misunderstands, avoids, or cannot yet see.");
+            }
+            else if (beat.RelationshipPressure.Count == 0)
+            {
+                AddBeatDefect(
+                    characterStateErrors,
+                    "character_state",
+                    beat,
+                    "relationship_pressure",
+                    $"Beat {beat.BeatIndex} is missing relationship pressure mechanics.",
+                    "Fill relationship_pressure so the beat exposes how the scene changes leverage, trust, distance, or obligation.");
             }
             else if (HasNoCharacterStateDelta(beat.CharacterStatesBefore, beat.CharacterStatesAfter))
             {

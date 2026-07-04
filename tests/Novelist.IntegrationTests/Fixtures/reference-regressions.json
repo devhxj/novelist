@@ -31,6 +31,16 @@
       "expected_error": "role-state delta"
     },
     {
+      "name": "missing_character_misbeliefs",
+      "mutation": "missing_character_misbeliefs",
+      "expected_error": "misbelief"
+    },
+    {
+      "name": "missing_relationship_pressure",
+      "mutation": "missing_relationship_pressure",
+      "expected_error": "relationship pressure"
+    },
+    {
       "name": "generic_paragraph_intention",
       "mutation": "generic_paragraph_intention",
       "expected_error": "generic paragraph intention"
