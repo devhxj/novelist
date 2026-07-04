@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
 using Novelist.Contracts.Bridge;
+using Novelist.Core.App;
 using Novelist.Core.Bridge;
 using Novelist.Infrastructure.App;
 
@@ -581,6 +582,85 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
                 new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, review.ReviewId),
                 CancellationToken.None);
         }
+    }
+
+    [Fact]
+    public async Task BindBlueprintMaterialsRejectsLexicalMatchesWithoutFunctionalFit()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("语义匹配门禁测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        var semanticOnlyMaterial = new ReferenceMaterialPayload(
+            MaterialId: "semantic-only-material",
+            AnchorId: 1,
+            SourceSegmentId: "segment-1",
+            MaterialType: ReferenceMaterialTypes.Sentence,
+            FunctionTag: "dialogue",
+            EmotionTag: "spoken",
+            SceneTag: "conversation",
+            PovTag: "unknown",
+            TechniqueTag: "dialogue_exchange",
+            FunctionConfidence: 0.8,
+            EmotionConfidence: 0.7,
+            PovConfidence: 0.55,
+            Text: "雨声压低了街的呼吸。",
+            SourceHash: "source-hash",
+            ExtractorVersion: "test",
+            UserVerified: false,
+            CreatedAt: DateTimeOffset.UtcNow);
+        var referenceAnchors = new FixedReferenceAnchorService(semanticOnlyMaterial);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+        var generated = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                41,
+                "语义匹配门禁蓝图",
+                "雨声压低",
+                [1],
+                KnownFacts: ["雨声压低了街的呼吸"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var revised = await service.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                generated.BlueprintId,
+                [
+                    new ReferenceBlueprintRevisionChangePayload(
+                        "beat:" + generated.Beats[0].BeatId + ":reference_query.query",
+                        "雨声压低"),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        "beat:" + generated.Beats[0].BeatId + ":reference_query.material_types",
+                        "[\"sentence\"]"),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        "beat:" + generated.Beats[0].BeatId + ":reference_query.function_tags",
+                        "[\"environment\"]"),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        "beat:" + generated.Beats[0].BeatId + ":reference_query.pov_tags",
+                        "[\"close\"]"),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        "beat:" + generated.Beats[0].BeatId + ":required_material_types",
+                        "[\"sentence\"]"),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        "beat:" + generated.Beats[0].BeatId + ":prose_duties",
+                        "[\"external_evidence\"]")
+                ],
+                "user",
+                "construct lexical-only binding fixture"),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId),
+            CancellationToken.None);
+        var approved = await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, review.ReviewId),
+            CancellationToken.None);
+
+        var result = await service.BindBlueprintMaterialsAsync(
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, approved.BlueprintId, MaxResultsPerBeat: 3),
+            CancellationToken.None);
+
+        Assert.Empty(result.Links);
     }
 
     [Fact]
@@ -1561,5 +1641,77 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.Null(result.CancelRequestId);
         Assert.False(string.IsNullOrWhiteSpace(result.OutboundJson));
         return JsonDocument.Parse(result.OutboundJson);
+    }
+
+    private sealed class FixedReferenceAnchorService : IReferenceAnchorService
+    {
+        private readonly ReferenceMaterialPayload _material;
+
+        public FixedReferenceAnchorService(ReferenceMaterialPayload material)
+        {
+            _material = material;
+        }
+
+        public ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(
+            SearchReferenceMaterialsPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialPayload>(
+                [_material],
+                Total: 1,
+                Page: input.Page,
+                Size: input.Size,
+                TotalPages: 1));
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceUserFeedbackPayload>> GetUserFeedbackAsync(
+            GetReferenceUserFeedbackPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<ReferenceUserFeedbackPayload>>([]);
+        }
+
+        public ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(
+            CreateReferenceAnchorPayload input,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(
+            long novelId,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public ValueTask<ReferenceAnchorBuildStatusPayload> RebuildAnchorAsync(
+            long novelId,
+            long anchorId,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public ValueTask<ReferenceAnchorBuildStatusPayload?> GetBuildStatusAsync(
+            long novelId,
+            long anchorId,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public ValueTask<AdaptReferenceMaterialResultPayload> AdaptMaterialAsync(
+            AdaptReferenceMaterialPayload input,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public ValueTask<ReferenceReuseAuditPayload> AuditCandidateAsync(
+            AuditReferenceReusePayload input,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public ValueTask<ReferenceUserFeedbackPayload> RecordUserFeedbackAsync(
+            RecordReferenceUserFeedbackPayload input,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public ValueTask DeleteAnchorAsync(
+            long novelId,
+            long anchorId,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

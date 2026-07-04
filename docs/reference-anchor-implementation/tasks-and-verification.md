@@ -168,7 +168,7 @@ Recommended implementation slices:
 - [ ] Changing the source chapter plan hash marks existing blueprints stale.
 - [ ] Material binding links candidate reference materials to beats with max rewrite levels.
 - [x] Material binding records and exposes score components: lexical, tag, function, emotion, POV, prose-duty, and user-verified boosts.
-- [ ] Material binding rejects semantic-only matches when function, POV, emotion, or prose-duty fit is absent.
+- [x] Material binding rejects semantic-only matches when function, POV, emotion, or prose-duty fit is absent.
 - [x] Material binding stores the `analysis_contract_hash` it was created against and is stale when that hash changes.
 - [x] Stale material links are not used for draft generation.
 
@@ -182,7 +182,7 @@ Recommended implementation slices:
 - [ ] unit tests for explicit approval hash/version matching
 - [x] integration tests for approval invalidation after beat, analysis, execution, known-fact, and reference-query edits
 - [ ] integration test for generate/review/approve/stale lifecycle
-- [ ] integration test for beat material binding and provenance joins
+- [x] integration test for beat material binding and provenance joins
 - [x] integration test proving review-passed-without-approval cannot bind or draft
 - [ ] bridge test for `BindReferenceBlueprintMaterials` after approval and for failure before approval
 
@@ -461,7 +461,7 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 
 The initial foundation has already started. Do not restart from Phase 0 unless contracts have regressed.
 
-Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge|MafToolRegistry' -v minimal`, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal`, `cd frontend && npm run build`, and `cd frontend && npm run lint` passed after adding accepted-feedback material binding boosts. Earlier reference-anchor verification passed after adding persisted reference user feedback rows for accept/reject/edit decisions, deterministic L2 non-slot edit reporting, the native `PickReferenceSourceFile` Photino bridge, and source-path picker button.
+Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge|MafToolRegistry' -v minimal`, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal`, `cd frontend && npm run build`, and `cd frontend && npm run lint` passed after adding accepted-feedback material binding boosts and semantic-only material binding rejection coverage. Earlier reference-anchor verification passed after adding persisted reference user feedback rows for accept/reject/edit decisions, deterministic L2 non-slot edit reporting, the native `PickReferenceSourceFile` Photino bridge, and source-path picker button.
 
 Recommended next session:
 
