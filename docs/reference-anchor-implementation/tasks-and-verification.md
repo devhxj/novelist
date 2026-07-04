@@ -10,19 +10,20 @@
 
 **Acceptance criteria:**
 
-- [ ] `ReferenceAnchorPayloads.cs` compiles.
-- [ ] `ReferenceAnchoredDraftPayloads.cs` compiles.
-- [ ] `IReferenceAnchorService.cs` compiles.
-- [ ] `IReferenceAnchoredDraftService.cs` compiles.
-- [ ] JSON property names match frontend snake_case.
-- [ ] Rewrite level constants, build states, blueprint states, beat types, and review statuses are documented in code or tests.
-- [ ] Blueprint contracts can represent logic, emotion, narration, character, reference-use, transition, and execution tracks.
-- [ ] Revision contracts can express field-level blueprint edits and approval invalidation reasons.
-- [ ] Review contracts expose separate logic, narration, execution, character-state, transition, material-fit, and novelistic-narration errors.
+- [x] `ReferenceAnchorPayloads.cs` compiles.
+- [x] `ReferenceAnchoredDraftPayloads.cs` compiles.
+- [x] `IReferenceAnchorService.cs` compiles.
+- [x] `IReferenceAnchoredDraftService.cs` compiles.
+- [x] JSON property names match frontend snake_case.
+- [x] Rewrite level constants, build states, blueprint states, beat types, and review statuses are documented in code or tests.
+- [x] Blueprint contracts can represent logic, emotion, narration, character, reference-use, transition, and execution tracks.
+- [x] Revision contracts can express field-level blueprint edits and approval invalidation reasons.
+- [x] Review contracts expose separate logic, narration, execution, character-state, transition, material-fit, and novelistic-narration errors.
 
 **Verification:**
 
-- [ ] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Bridge`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Bridge`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter ReferenceAnchorContractTests`
 
 **Files likely touched:**
 
