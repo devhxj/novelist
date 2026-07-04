@@ -1730,6 +1730,35 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.Contains("material", generated.RootElement.GetProperty("error").GetProperty("message").GetString(), StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task BridgeReferenceAnchoredDraftHandlersReturnStableValidationErrorForInvalidPayload()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var draftService = new SqliteReferenceAnchoredDraftService(
+            options,
+            novels,
+            new FileSystemPlanningService(options, novels));
+        var dispatcher = new BridgeDispatcher()
+            .RegisterCompatibilityAppMethodHandlers()
+            .RegisterReferenceAnchoredDraftHandlers(draftService);
+
+        using var invalid = ParseOutbound(await dispatcher.DispatchAsync("""
+            {
+              "kind": "request",
+              "id": "req_bad_reference_draft_args",
+              "method": "GetReferenceChapterBlueprints",
+              "payload": { "args": ["not-a-novel-id", null] }
+            }
+            """));
+
+        Assert.False(invalid.RootElement.GetProperty("ok").GetBoolean());
+        var error = invalid.RootElement.GetProperty("error");
+        Assert.Equal(BridgeErrorCodes.ValidationError, error.GetProperty("code").GetString());
+        Assert.Equal("Value must be an integer.", error.GetProperty("details").GetProperty("novelId").GetString());
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))

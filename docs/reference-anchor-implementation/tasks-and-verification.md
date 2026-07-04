@@ -279,17 +279,17 @@ Recommended implementation slices:
 - [ ] All reference-anchored draft bridge methods route to service operations.
 - [ ] Blueprint payloads preserve analysis tracks, transition plan, execution track, and review defect arrays without stringifying them into one markdown field.
 - [ ] `ReviseReferenceChapterBlueprint` invalidates approval and material links when reviewed fields change.
-- [ ] Invalid payloads return stable `VALIDATION_ERROR`.
+- [x] Invalid payloads return stable `VALIDATION_ERROR`.
 - [ ] app-not-initialized and invalid path errors use existing bridge semantics.
-- [ ] Draft generation through bridge fails for unapproved blueprints.
-- [ ] Frontend/backend method registry test passes.
-- [ ] Bridge handlers do not add HTTP endpoints or depend on ASP.NET Core host services.
+- [x] Draft generation through bridge fails for unapproved blueprints.
+- [x] Frontend/backend method registry test passes.
+- [x] Bridge handlers do not add HTTP endpoints or depend on ASP.NET Core host services.
 
 **Verification:**
 
-- [ ] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Bridge`
-- [ ] integration test dispatches representative reference-anchor requests
-- [ ] integration test dispatches representative reference-anchored draft requests
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Bridge`
+- [x] integration test dispatches representative reference-anchor requests
+- [x] integration test dispatches representative reference-anchored draft requests
 
 **Files likely touched:**
 
@@ -468,7 +468,7 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 
 The initial foundation has already started. Do not restart from Phase 0 unless contracts have regressed.
 
-Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|Bridge|MafToolRegistry' -v minimal` passed 45/45 and `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal` passed 113/113 after adding draft generation non-mutation, missing/failed/unapproved/stale status gates, latest-review hash gates, L1 slot preservation, L3/L4 rewrite-level gates, missing-provenance audit coverage, and forbidden/action-only draft-audit verification. Earlier frontend build/lint verification passed after the reference-anchor bridge and UI work; rerun `cd frontend && npm run build` and `cd frontend && npm run lint` before the next UI-facing change.
+Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Bridge -v minimal` passed 26/26, `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter MafToolRegistryTests -v minimal` passed 11/11, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceDraftTools -v minimal` passed 2/2, and `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal` passed 115/115 after adding MAF tool exposure/schema constraints and stable reference bridge invalid-payload coverage. Earlier frontend build/lint verification passed after the reference-anchor bridge and UI work; rerun `cd frontend && npm run build` and `cd frontend && npm run lint` before the next UI-facing change.
 
 Recommended next session:
 

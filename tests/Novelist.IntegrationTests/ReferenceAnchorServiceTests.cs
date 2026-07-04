@@ -778,6 +778,31 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task BridgeReferenceAnchorHandlersReturnStableValidationErrorForInvalidPayload()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var dispatcher = new BridgeDispatcher()
+            .RegisterCompatibilityAppMethodHandlers()
+            .RegisterReferenceAnchorHandlers(new SqliteReferenceAnchorService(options, novels));
+
+        using var invalid = ParseOutbound(await dispatcher.DispatchAsync("""
+            {
+              "kind": "request",
+              "id": "req_bad_reference_anchor_args",
+              "method": "GetReferenceAnchors",
+              "payload": { "args": ["not-a-novel-id"] }
+            }
+            """));
+
+        Assert.False(invalid.RootElement.GetProperty("ok").GetBoolean());
+        var error = invalid.RootElement.GetProperty("error");
+        Assert.Equal(BridgeErrorCodes.ValidationError, error.GetProperty("code").GetString());
+        Assert.Equal("Value must be an integer.", error.GetProperty("details").GetProperty("novelId").GetString());
+    }
+
+    [Fact]
     public async Task BridgeReferenceAnchorHandlersAdaptAndAuditMaterials()
     {
         var options = CreateOptions();
