@@ -948,7 +948,7 @@ This prevents a model from fixing a failed blueprint by rewriting the whole arti
 
 Do not use `SqliteVecTableProvisioner.BuildVectorTableName(long novelId, int dimensions)` directly because it creates story-memory names like `vec_novel_1_1536`.
 
-Add a reference-anchor specific helper, for example inside `SqliteReferenceAnchorService`:
+Use the reference-anchor specific helper in `SqliteVecTableProvisioner`:
 
 ```text
 vec_reference_anchor_{anchorId}_{dimensions}

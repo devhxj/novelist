@@ -1,5 +1,6 @@
 using Novelist.Contracts.App;
 using Novelist.Contracts.Bridge;
+using Novelist.Core.App;
 using Novelist.Core.Bridge;
 using Novelist.Infrastructure.App;
 using Microsoft.Data.Sqlite;
@@ -182,6 +183,149 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.NotNull(persisted);
         Assert.Equal(ReferenceAnchorBuildStates.FailedImport, persisted.Status);
         Assert.Equal(failed.LastError, persisted.LastError);
+    }
+
+    [Fact]
+    public async Task CreateAnchorProvisionsReferenceSpecificVectorsWhenEmbeddingConfigExists()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("参考向量测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "reference-vector.md",
+            """
+            # 第一章
+
+            雨声压低了整条街的呼吸。
+
+            他在门口停了很久。
+            """);
+        var embeddings = new DeterministicEmbeddingClient(dimensions: 3);
+        var provisioner = new RecordingSqliteVecTableProvisioner();
+        var service = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "custom",
+                "https://api.example.com/v1/embeddings",
+                "test-key",
+                "embed-v1",
+                3,
+                null)),
+            embeddings,
+            provisioner);
+
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "向量参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        var status = await service.GetBuildStatusAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, anchor.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, status.Status);
+        Assert.Equal("ready", status.Stage);
+        Assert.True(status.MaterialCount > 0);
+        Assert.Equal(status.MaterialCount, status.VectorCount);
+        Assert.True(string.IsNullOrWhiteSpace(status.LastError));
+
+        var request = Assert.Single(embeddings.Requests);
+        Assert.Equal(status.MaterialCount, request.Count);
+        Assert.Contains(request, text => text.Contains("雨声压低", StringComparison.Ordinal));
+        Assert.Equal(BuiltinOnnxEmbeddingModel.DocumentInputKind, Assert.Single(embeddings.Options).InputKind);
+
+        var provision = Assert.Single(provisioner.Provisions);
+        Assert.Equal($"vec_reference_anchor_{anchor.AnchorId}_3", provision.TableName);
+        Assert.Equal(3, provision.Dimensions);
+        Assert.Equal(status.MaterialCount, provision.Vectors.Count);
+        Assert.All(provision.Vectors, vector => Assert.StartsWith(anchor.AnchorId + ":material:", vector.ChunkId, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CreateAnchorRecordsFailedEmbeddingWhenSqliteVecUnavailable()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("参考向量失败测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("reference-vector-failure.md", "雨声压低了整条街的呼吸。");
+        var service = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "custom",
+                "https://api.example.com/v1/embeddings",
+                "test-key",
+                "embed-v1",
+                3,
+                null)),
+            new DeterministicEmbeddingClient(dimensions: 3),
+            new FailingSqliteVecTableProvisioner("sqlite-vec native extension is unavailable."));
+
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "向量失败参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        var status = await service.GetBuildStatusAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedEmbedding, anchor.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedEmbedding, status.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedEmbedding, status.Stage);
+        Assert.True(status.MaterialCount > 0);
+        Assert.Equal(0, status.VectorCount);
+        Assert.Contains("sqlite-vec", status.LastError, StringComparison.OrdinalIgnoreCase);
+
+        var materials = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "雨声",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        Assert.NotEmpty(materials.Items);
+    }
+
+    [Fact]
+    public async Task RebuildAnchorReprovisionsReferenceVectorsWhenEmbeddingConfigExists()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("参考向量重建测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("reference-vector-rebuild.md", "第一句。");
+        var embeddings = new DeterministicEmbeddingClient(dimensions: 3);
+        var provisioner = new RecordingSqliteVecTableProvisioner();
+        var service = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "custom",
+                "https://api.example.com/v1/embeddings",
+                "test-key",
+                "embed-v1",
+                3,
+                null)),
+            embeddings,
+            provisioner);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "重建向量参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        File.WriteAllText(sourcePath, "第一句。\n\n第二句带来新的雨声。");
+
+        var rebuilt = await service.RebuildAnchorAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, rebuilt.Status);
+        Assert.True(rebuilt.MaterialCount > 0);
+        Assert.Equal(rebuilt.MaterialCount, rebuilt.VectorCount);
+        Assert.Equal(2, provisioner.Provisions.Count);
+        Assert.All(provisioner.Provisions, provision => Assert.Equal($"vec_reference_anchor_{anchor.AnchorId}_3", provision.TableName));
+        Assert.Equal(2, embeddings.Requests.Count);
     }
 
     [Fact]
@@ -1510,4 +1654,92 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         string Text,
         string JoinedSegmentId,
         long SlotCount);
+
+    private sealed class StaticEmbeddingConfigurationService : IEmbeddingConfigurationService
+    {
+        private readonly EmbeddingRequestOptions? _options;
+
+        public StaticEmbeddingConfigurationService(EmbeddingRequestOptions? options)
+        {
+            _options = options;
+        }
+
+        public ValueTask<EmbeddingRequestOptions?> GetActiveEmbeddingOptionsAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(_options);
+        }
+    }
+
+    private sealed class DeterministicEmbeddingClient : IEmbeddingClient
+    {
+        private readonly int _dimensions;
+
+        public DeterministicEmbeddingClient(int dimensions)
+        {
+            _dimensions = dimensions;
+        }
+
+        public List<IReadOnlyList<string>> Requests { get; } = [];
+
+        public List<EmbeddingRequestOptions> Options { get; } = [];
+
+        public ValueTask<EmbeddingBatchResult> EmbedAsync(
+            IReadOnlyList<string> inputs,
+            EmbeddingRequestOptions options,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Requests.Add(inputs.ToArray());
+            Options.Add(options);
+            var items = inputs
+                .Select((input, index) => new EmbeddingItemResult(
+                    index,
+                    Enumerable.Range(0, _dimensions)
+                        .Select(offset => (float)(input.Length + offset))
+                        .ToArray()))
+                .ToArray();
+            return ValueTask.FromResult(new EmbeddingBatchResult(
+                options.ModelId,
+                _dimensions,
+                items,
+                new EmbeddingUsage(0, inputs.Sum(input => input.Length))));
+        }
+    }
+
+    private sealed class RecordingSqliteVecTableProvisioner : ISqliteVecTableProvisioner
+    {
+        public List<SqliteVecProvisionRequest> Provisions { get; } = [];
+
+        public ValueTask ProvisionAsync(
+            string databasePath,
+            SqliteVecProvisionRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Provisions.Add(request);
+            Assert.Contains("create virtual table", request.CreateTableSql, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains($"embedding float[{request.Dimensions}]", request.CreateTableSql, StringComparison.Ordinal);
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class FailingSqliteVecTableProvisioner : ISqliteVecTableProvisioner
+    {
+        private readonly string _message;
+
+        public FailingSqliteVecTableProvisioner(string message)
+        {
+            _message = message;
+        }
+
+        public ValueTask ProvisionAsync(
+            string databasePath,
+            SqliteVecProvisionRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new InvalidOperationException(_message);
+        }
+    }
 }

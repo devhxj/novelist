@@ -89,8 +89,8 @@ Current design note: narrative duty and external evidence are beat-level bluepri
 
 - [x] Search works without embedding configuration using lexical/tag ranking.
 - [x] Search records score components.
-- [ ] If embedding config exists, vectors are provisioned in reference-specific vec tables.
-- [ ] Missing sqlite-vec returns a recoverable status.
+- [x] If embedding config exists, vectors are provisioned in reference-specific vec tables.
+- [x] Missing sqlite-vec returns a recoverable status.
 - [x] Results are bounded and paginated.
 - [x] Search can filter by narrative duty, emotion transition, POV, technique, and material type.
 - [x] Beat-level material matching returns ranked candidates without selecting them automatically unless requested.
@@ -99,8 +99,8 @@ Current design note: narrative duty and external evidence are beat-level bluepri
 
 - [x] lexical ranking and pagination tests without embedding configuration
 - [x] search score-component contract and integration tests
-- [ ] fake embedding client test
-- [ ] fake sqlite-vec provisioner test
+- [x] fake embedding client test
+- [x] fake sqlite-vec provisioner test
 - [x] complete search filter tests for narrative duty and emotion transition coverage
 - [x] beat-to-material ranking tests
 

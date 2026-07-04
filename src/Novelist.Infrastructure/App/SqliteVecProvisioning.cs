@@ -175,6 +175,23 @@ public sealed class SqliteVecTableProvisioner : ISqliteVecTableProvisioner, ISql
             $"vec_novel_{novelId}_{dimensions}");
     }
 
+    public static string BuildReferenceAnchorVectorTableName(long anchorId, int dimensions)
+    {
+        if (anchorId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(anchorId), anchorId, "Reference anchor id must be positive.");
+        }
+
+        if (dimensions <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(dimensions), dimensions, "Vector dimensions must be positive.");
+        }
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"vec_reference_anchor_{anchorId}_{dimensions}");
+    }
+
     public static string BuildCreateTableSql(string tableName, int dimensions)
     {
         if (string.IsNullOrWhiteSpace(tableName) ||

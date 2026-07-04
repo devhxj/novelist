@@ -76,7 +76,12 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             chapterContentService,
             ragIndexService,
             ragIndexService);
-        var referenceAnchorService = new SqliteReferenceAnchorService(appOptions, novelService);
+        var referenceAnchorService = new SqliteReferenceAnchorService(
+            appOptions,
+            novelService,
+            embeddingService,
+            embeddingClient,
+            sqliteVecProvider);
         var referenceAnchoredDraftService = new SqliteReferenceAnchoredDraftService(
             appOptions,
             novelService,

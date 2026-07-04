@@ -14,6 +14,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
 {
     private const string BuildVersion = "reference-anchor-v1";
     private const long MaxSourceBytes = 20L * 1024L * 1024L;
+    private const int EmbeddingBatchSize = 64;
     private static readonly Regex MarkdownHeadingPattern = new(@"^\s{0,3}#{1,6}\s+(.+?)\s*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex BlankLinePattern = new(@"\n\s*\n", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex RiskTokenPattern = new(@"[A-Za-z][A-Za-z0-9_]{1,}|\d+(?:\.\d+)?", RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -50,14 +51,23 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
 
     private readonly AppInitializationOptions _options;
     private readonly INovelService _novels;
+    private readonly IEmbeddingConfigurationService _embeddingConfiguration;
+    private readonly IEmbeddingClient _embeddings;
+    private readonly ISqliteVecTableProvisioner _vecProvisioner;
     private readonly SemaphoreSlim _mutex = new(1, 1);
 
     public SqliteReferenceAnchorService(
         AppInitializationOptions? options = null,
-        INovelService? novels = null)
+        INovelService? novels = null,
+        IEmbeddingConfigurationService? embeddingConfiguration = null,
+        IEmbeddingClient? embeddings = null,
+        ISqliteVecTableProvisioner? vecProvisioner = null)
     {
         _options = options ?? new AppInitializationOptions();
         _novels = novels ?? new FileSystemNovelService(_options);
+        _embeddingConfiguration = embeddingConfiguration ?? new NullEmbeddingConfigurationService();
+        _embeddings = embeddings ?? new HybridEmbeddingClient();
+        _vecProvisioner = vecProvisioner ?? new SqliteVecTableProvisioner();
     }
 
     public async ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(
@@ -74,12 +84,18 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         var sourceKind = ValidateAllowedText(input.SourceKind, nameof(input.SourceKind), AllowedSourceKinds);
         var licenseStatus = ValidateAllowedText(input.LicenseStatus, nameof(input.LicenseStatus), AllowedLicenseStatuses);
         var source = await ReadSourceFileAsync(sourcePath, cancellationToken);
+        var embeddingOptions = await _embeddingConfiguration.GetActiveEmbeddingOptionsAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
+        var databasePath = await DatabasePathAsync(cancellationToken);
+        ReferenceAnchorPayload? stagedAnchor = null;
+        IReadOnlyList<ReferenceMaterialPayload> stagedMaterials = [];
+        var stagedSegmentCount = 0;
+        var stagedMaterialCount = 0;
+        var stagedSlotCount = 0;
 
         await _mutex.WaitAsync(cancellationToken);
         try
         {
-            var databasePath = await DatabasePathAsync(cancellationToken);
             await EnsureSchemaAsync(databasePath, cancellationToken);
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
@@ -102,17 +118,23 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             await ReplaceSegmentsAsync(connection, transaction, anchor.AnchorId, segments, cancellationToken);
             var slotCount = CountMaterialSlots(materials);
             await ReplaceMaterialsAsync(connection, transaction, anchor.AnchorId, materials, cancellationToken);
+            var initialStatus = embeddingOptions is not null && materials.Count > 0
+                ? ReferenceAnchorBuildStates.Embedding
+                : ReferenceAnchorBuildStates.Ready;
+            var initialStage = embeddingOptions is not null && materials.Count > 0
+                ? ReferenceAnchorBuildStates.Embedding
+                : "ready";
             var readyAnchor = anchor with
             {
-                Status = ReferenceAnchorBuildStates.Ready,
+                Status = initialStatus,
                 UpdatedAt = now
             };
             await UpdateAnchorBuildResultAsync(
                 connection,
                 transaction,
                 readyAnchor,
-                ReferenceAnchorBuildStates.Ready,
-                "ready",
+                initialStatus,
+                initialStage,
                 segments.Count,
                 materials.Count,
                 slotCount,
@@ -121,12 +143,32 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
-            return readyAnchor;
+            if (embeddingOptions is null || materials.Count == 0)
+            {
+                return readyAnchor;
+            }
+
+            stagedAnchor = readyAnchor;
+            stagedMaterials = materials;
+            stagedSegmentCount = segments.Count;
+            stagedMaterialCount = materials.Count;
+            stagedSlotCount = slotCount;
         }
         finally
         {
             _mutex.Release();
         }
+
+        var completed = await CompleteEmbeddingStageAsync(
+            databasePath,
+            stagedAnchor ?? throw new InvalidOperationException("Reference anchor embedding stage was not initialized."),
+            stagedSegmentCount,
+            stagedMaterialCount,
+            stagedSlotCount,
+            stagedMaterials,
+            embeddingOptions,
+            cancellationToken);
+        return completed.Anchor;
     }
 
     public async ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(
@@ -172,10 +214,17 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         ValidateNovelId(novelId);
         ValidateAnchorId(anchorId);
 
+        var databasePath = await DatabasePathAsync(cancellationToken);
+        ReferenceAnchorPayload? stagedAnchor = null;
+        IReadOnlyList<ReferenceMaterialPayload> stagedMaterials = [];
+        EmbeddingRequestOptions? stagedEmbeddingOptions = null;
+        var stagedSegmentCount = 0;
+        var stagedMaterialCount = 0;
+        var stagedSlotCount = 0;
+
         await _mutex.WaitAsync(cancellationToken);
         try
         {
-            var databasePath = await DatabasePathAsync(cancellationToken);
             await EnsureSchemaAsync(databasePath, cancellationToken);
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
             var anchor = await ReadAnchorAsync(connection, novelId, anchorId, cancellationToken);
@@ -189,11 +238,18 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 var materials = ApplyUserVerifiedTagOverrides(
                     BuildMaterials(anchor.AnchorId, segments, now),
                     userVerifiedMaterials);
+                var embeddingOptions = await _embeddingConfiguration.GetActiveEmbeddingOptionsAsync(cancellationToken);
                 await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                var initialStatus = embeddingOptions is not null && materials.Count > 0
+                    ? ReferenceAnchorBuildStates.Embedding
+                    : ReferenceAnchorBuildStates.Ready;
+                var initialStage = embeddingOptions is not null && materials.Count > 0
+                    ? ReferenceAnchorBuildStates.Embedding
+                    : "ready";
                 var readyAnchor = anchor with
                 {
                     SourceFileHash = source.Hash,
-                    Status = ReferenceAnchorBuildStates.Ready,
+                    Status = initialStatus,
                     UpdatedAt = now
                 };
                 await ReplaceSegmentsAsync(connection, transaction, anchor.AnchorId, segments, cancellationToken);
@@ -203,8 +259,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                     connection,
                     transaction,
                     readyAnchor,
-                    ReferenceAnchorBuildStates.Ready,
-                    "ready",
+                    initialStatus,
+                    initialStage,
                     segments.Count,
                     materials.Count,
                     slotCount,
@@ -212,7 +268,17 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                     now,
                     cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
-                return BuildStatus(readyAnchor, ReferenceAnchorBuildStates.Ready, "ready", segments.Count, materials.Count, slotCount, string.Empty, now);
+                if (embeddingOptions is null || materials.Count == 0)
+                {
+                    return BuildStatus(readyAnchor, ReferenceAnchorBuildStates.Ready, "ready", segments.Count, materials.Count, slotCount, string.Empty, now);
+                }
+
+                stagedAnchor = readyAnchor;
+                stagedMaterials = materials;
+                stagedEmbeddingOptions = embeddingOptions;
+                stagedSegmentCount = segments.Count;
+                stagedMaterialCount = materials.Count;
+                stagedSlotCount = slotCount;
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -243,6 +309,26 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         {
             _mutex.Release();
         }
+
+        var completed = await CompleteEmbeddingStageAsync(
+            databasePath,
+            stagedAnchor ?? throw new InvalidOperationException("Reference anchor rebuild embedding stage was not initialized."),
+            stagedSegmentCount,
+            stagedMaterialCount,
+            stagedSlotCount,
+            stagedMaterials,
+            stagedEmbeddingOptions ?? throw new InvalidOperationException("Reference anchor rebuild embedding options were not initialized."),
+            cancellationToken);
+        return BuildStatus(
+            completed.Anchor,
+            completed.Anchor.Status,
+            completed.Stage,
+            stagedSegmentCount,
+            stagedMaterialCount,
+            stagedSlotCount,
+            completed.LastError,
+            completed.Anchor.UpdatedAt,
+            completed.VectorCount);
     }
 
     public async ValueTask<ReferenceAnchorBuildStatusPayload?> GetBuildStatusAsync(
@@ -722,7 +808,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         int slotCount,
         string lastError,
         DateTimeOffset updatedAt,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int vectorCount = 0)
     {
         await using (var update = connection.CreateCommand())
         {
@@ -750,7 +837,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
               (anchor_id, status, stage, source_segment_count, material_count,
                slot_count, vector_count, last_error, updated_at)
             VALUES
-              ($anchor_id, $status, $stage, $source_segment_count, $material_count, $slot_count, 0, $last_error, $updated_at)
+              ($anchor_id, $status, $stage, $source_segment_count, $material_count, $slot_count, $vector_count, $last_error, $updated_at)
             ON CONFLICT(anchor_id) DO UPDATE SET
               status = excluded.status,
               stage = excluded.stage,
@@ -767,9 +854,194 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         upsert.Parameters.AddWithValue("$source_segment_count", sourceSegmentCount);
         upsert.Parameters.AddWithValue("$material_count", materialCount);
         upsert.Parameters.AddWithValue("$slot_count", slotCount);
+        upsert.Parameters.AddWithValue("$vector_count", vectorCount);
         upsert.Parameters.AddWithValue("$last_error", lastError);
         upsert.Parameters.AddWithValue("$updated_at", FormatTimestamp(updatedAt));
         await upsert.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async ValueTask<ReferenceAnchorBuildCompletion> CompleteEmbeddingStageAsync(
+        string databasePath,
+        ReferenceAnchorPayload anchor,
+        int sourceSegmentCount,
+        int materialCount,
+        int slotCount,
+        IReadOnlyList<ReferenceMaterialPayload> materials,
+        EmbeddingRequestOptions embeddingOptions,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var vectorCount = await ProvisionMaterialVectorsAsync(
+                databasePath,
+                anchor.AnchorId,
+                materials,
+                embeddingOptions,
+                cancellationToken);
+            var now = DateTimeOffset.UtcNow;
+            var readyAnchor = anchor with
+            {
+                Status = ReferenceAnchorBuildStates.Ready,
+                UpdatedAt = now
+            };
+            await UpdateAnchorBuildResultInNewTransactionAsync(
+                databasePath,
+                readyAnchor,
+                ReferenceAnchorBuildStates.Ready,
+                "ready",
+                sourceSegmentCount,
+                materialCount,
+                slotCount,
+                vectorCount,
+                string.Empty,
+                now,
+                cancellationToken);
+            return new ReferenceAnchorBuildCompletion(readyAnchor, "ready", vectorCount, string.Empty);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var failedAnchor = anchor with
+            {
+                Status = ReferenceAnchorBuildStates.FailedEmbedding,
+                UpdatedAt = now
+            };
+            var lastError = RedactError(exception.Message);
+            await UpdateAnchorBuildResultInNewTransactionAsync(
+                databasePath,
+                failedAnchor,
+                ReferenceAnchorBuildStates.FailedEmbedding,
+                ReferenceAnchorBuildStates.FailedEmbedding,
+                sourceSegmentCount,
+                materialCount,
+                slotCount,
+                0,
+                lastError,
+                now,
+                CancellationToken.None);
+            return new ReferenceAnchorBuildCompletion(failedAnchor, ReferenceAnchorBuildStates.FailedEmbedding, 0, lastError);
+        }
+    }
+
+    private async ValueTask<int> ProvisionMaterialVectorsAsync(
+        string databasePath,
+        long anchorId,
+        IReadOnlyList<ReferenceMaterialPayload> materials,
+        EmbeddingRequestOptions embeddingOptions,
+        CancellationToken cancellationToken)
+    {
+        if (materials.Count == 0)
+        {
+            return 0;
+        }
+
+        var materialEmbeddings = await EmbedMaterialsAsync(materials, embeddingOptions, cancellationToken);
+        if (materialEmbeddings.Count == 0)
+        {
+            return 0;
+        }
+
+        var dimensions = materialEmbeddings[0].Vector.Count;
+        if (dimensions <= 0)
+        {
+            throw new InvalidOperationException("Reference material embedding dimensions must be positive.");
+        }
+
+        var rowIds = await ReadMaterialRowIdsAsync(databasePath, anchorId, cancellationToken);
+        var vectors = new List<SqliteVecVectorRecord>(materialEmbeddings.Count);
+        foreach (var item in materialEmbeddings)
+        {
+            if (item.Vector.Count != dimensions)
+            {
+                throw new InvalidOperationException("Reference material embedding dimensions are inconsistent.");
+            }
+
+            if (!rowIds.TryGetValue(item.Material.MaterialId, out var rowId))
+            {
+                throw new InvalidOperationException("Reference material row id was not found for vector provisioning.");
+            }
+
+            vectors.Add(new SqliteVecVectorRecord(rowId, item.Material.MaterialId, item.Vector));
+        }
+
+        var tableName = SqliteVecTableProvisioner.BuildReferenceAnchorVectorTableName(anchorId, dimensions);
+        var provisionRequest = new SqliteVecProvisionRequest(
+            tableName,
+            dimensions,
+            SqliteVecTableProvisioner.BuildCreateTableSql(tableName, dimensions),
+            vectors);
+        await _vecProvisioner.ProvisionAsync(databasePath, provisionRequest, cancellationToken);
+        return vectors.Count;
+    }
+
+    private async ValueTask<IReadOnlyList<ReferenceMaterialEmbedding>> EmbedMaterialsAsync(
+        IReadOnlyList<ReferenceMaterialPayload> materials,
+        EmbeddingRequestOptions embeddingOptions,
+        CancellationToken cancellationToken)
+    {
+        var results = new List<ReferenceMaterialEmbedding>(materials.Count);
+        for (var offset = 0; offset < materials.Count; offset += EmbeddingBatchSize)
+        {
+            var batch = materials
+                .Skip(offset)
+                .Take(EmbeddingBatchSize)
+                .ToArray();
+            var response = await _embeddings.EmbedAsync(
+                batch.Select(item => item.Text).ToArray(),
+                embeddingOptions with { InputKind = BuiltinOnnxEmbeddingModel.DocumentInputKind },
+                cancellationToken);
+            if (response.Items.Count != batch.Length)
+            {
+                throw new InvalidOperationException("Embedding response count does not match the requested reference material batch.");
+            }
+
+            foreach (var item in response.Items.OrderBy(item => item.Index))
+            {
+                if (item.Index < 0 || item.Index >= batch.Length)
+                {
+                    throw new InvalidOperationException("Embedding response index is outside the reference material batch.");
+                }
+
+                results.Add(new ReferenceMaterialEmbedding(batch[item.Index], item.Vector));
+            }
+        }
+
+        return results;
+    }
+
+    private async ValueTask UpdateAnchorBuildResultInNewTransactionAsync(
+        string databasePath,
+        ReferenceAnchorPayload anchor,
+        string status,
+        string stage,
+        int sourceSegmentCount,
+        int materialCount,
+        int slotCount,
+        int vectorCount,
+        string lastError,
+        DateTimeOffset updatedAt,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await UpdateAnchorBuildResultAsync(
+            connection,
+            transaction,
+            anchor,
+            status,
+            stage,
+            sourceSegmentCount,
+            materialCount,
+            slotCount,
+            lastError,
+            updatedAt,
+            cancellationToken,
+            vectorCount);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private static async ValueTask ReplaceMaterialsAsync(
@@ -907,6 +1179,29 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
 
         return materials;
+    }
+
+    private static async ValueTask<IReadOnlyDictionary<string, long>> ReadMaterialRowIdsAsync(
+        string databasePath,
+        long anchorId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT rowid, material_id
+            FROM reference_materials
+            WHERE anchor_id = $anchor_id;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        var rowIds = new Dictionary<string, long>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rowIds[reader.GetString(1)] = reader.GetInt64(0);
+        }
+
+        return rowIds;
     }
 
     private static async ValueTask<ReferenceMaterialPayload?> ReadMaterialAsync(
@@ -2262,7 +2557,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         int materialCount,
         int slotCount,
         string lastError,
-        DateTimeOffset updatedAt)
+        DateTimeOffset updatedAt,
+        int vectorCount = 0)
     {
         return new ReferenceAnchorBuildStatusPayload(
             anchor.NovelId,
@@ -2272,7 +2568,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             sourceSegmentCount,
             materialCount,
             slotCount,
-            VectorCount: 0,
+            vectorCount,
             lastError,
             updatedAt);
     }
@@ -2367,6 +2663,16 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         double PovConfidence);
 
     private sealed record ReferenceMaterialHashKey(string MaterialType, string SourceHash);
+
+    private sealed record ReferenceAnchorBuildCompletion(
+        ReferenceAnchorPayload Anchor,
+        string Stage,
+        int VectorCount,
+        string LastError);
+
+    private sealed record ReferenceMaterialEmbedding(
+        ReferenceMaterialPayload Material,
+        IReadOnlyList<float> Vector);
 
     private sealed record AdaptedMaterial(
         string Text,

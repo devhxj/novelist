@@ -347,7 +347,6 @@ var referenceAnchorService = new SqliteReferenceAnchorService(
     novelService,
     embeddingService,
     embeddingClient,
-    sqliteVecProvider,
     sqliteVecProvider);
 
 var referenceAnchoredDraftService = new SqliteReferenceAnchoredDraftService(
