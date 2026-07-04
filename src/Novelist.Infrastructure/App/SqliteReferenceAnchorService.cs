@@ -24,6 +24,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private static readonly string[] InteriorityMarkers = ["心", "想", "觉得", "明白", "知道", "意识到", "记得", "忘了"];
     private static readonly string[] ActionMarkers = ["走", "停", "看", "拿", "推", "转", "站", "坐", "伸", "退", "进", "出"];
     private static readonly string[] TransitionMarkers = ["后来", "然后", "这时", "与此同时", "片刻", "很快", "直到"];
+    private static readonly string[] EmotionEvidenceMarkers = ["喉咙", "指尖", "手指", "掌心", "眼神", "目光", "声音", "沉默", "停顿", "没有回答", "避开", "咽下", "发紧", "发凉", "发涩", "发颤", "颤"];
+    private static readonly string[] RestrainedEmotionMarkers = ["没有回答", "却", "避开", "咽下", "忍住", "发紧", "发凉", "发涩", "沉默"];
+    private static readonly string[] LimitedPovMarkers = ["看不见", "没看见", "不知道", "并不知道", "没有察觉", "未曾发现", "无从知道"];
+    private static readonly string[] AfterbeatMarkers = ["移开目光", "垂下眼", "停了一下", "停住", "顿了顿", "沉默了一下", "攥紧", "松开"];
     private static readonly string[] AiRiskPhrases = ["无法言喻", "复杂的情绪", "某种意义上", "仿佛有什么", "命运的齿轮", "心中涌起"];
 
     private static readonly HashSet<string> AllowedSourceExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -1906,36 +1910,51 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         var hasInteriority = ContainsAny(text, InteriorityMarkers);
         var hasAction = ContainsAny(text, ActionMarkers);
         var hasTransition = ContainsAny(text, TransitionMarkers);
+        var hasEmotionEvidence = ContainsAny(text, EmotionEvidenceMarkers);
+        var hasLimitedPov = ContainsAny(text, LimitedPovMarkers);
+        var hasAfterbeat = ContainsAny(text, AfterbeatMarkers);
 
         var functionTag = isDialogue
             ? "dialogue"
             : hasInteriority
                 ? "interiority"
-                : hasSensory
-                    ? "environment"
-                    : hasTransition
-                        ? "transition"
-                        : hasAction
-                            ? "action"
-                            : "narration";
+                : hasAfterbeat && hasAction
+                    ? "action"
+                    : hasEmotionEvidence
+                        ? "emotion_evidence"
+                        : hasSensory
+                            ? "environment"
+                            : hasTransition
+                                ? "transition"
+                                : hasAction
+                                    ? "action"
+                                    : "narration";
         var techniqueTag = isDialogue
             ? "dialogue_exchange"
             : hasInteriority
                 ? "interiority"
-                : hasSensory
-                    ? "sensory_detail"
-                    : hasTransition
-                        ? "transition"
-                        : "plain";
+                : hasLimitedPov
+                    ? "limited_pov"
+                    : hasAfterbeat
+                        ? "afterbeat"
+                        : hasEmotionEvidence
+                            ? "external_evidence"
+                            : hasSensory
+                                ? "sensory_detail"
+                                : hasTransition
+                                    ? "transition"
+                                    : "plain";
         var emotionTag = hasInteriority
             ? "reflective"
-            : text.Contains('？', StringComparison.Ordinal) || text.Contains('?', StringComparison.Ordinal)
-                ? "uncertain"
-                : text.Contains('！', StringComparison.Ordinal) || text.Contains('!', StringComparison.Ordinal)
-                    ? "heightened"
-                    : isDialogue
-                        ? "spoken"
-                        : "neutral";
+            : ContainsAny(text, RestrainedEmotionMarkers)
+                ? "restrained"
+                : text.Contains('？', StringComparison.Ordinal) || text.Contains('?', StringComparison.Ordinal)
+                    ? "uncertain"
+                    : text.Contains('！', StringComparison.Ordinal) || text.Contains('!', StringComparison.Ordinal)
+                        ? "heightened"
+                        : isDialogue
+                            ? "spoken"
+                            : "neutral";
         var sceneTag = hasSensory
             ? "environment"
             : isDialogue
@@ -1949,11 +1968,11 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             functionTag,
             emotionTag,
             sceneTag,
-            hasInteriority ? "close" : "unknown",
+            hasLimitedPov ? "limited" : hasInteriority ? "close" : "unknown",
             techniqueTag,
             functionConfidence,
             emotionConfidence,
-            povConfidence);
+            hasLimitedPov ? 0.7 : povConfidence);
     }
 
     private static IReadOnlyList<TextSpan> SplitChapters(string sourceText)
@@ -2164,7 +2183,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         {
             "" => false,
             "interiority" => IsTag(material.FunctionTag, "interiority"),
-            "external_evidence" => IsTag(material.FunctionTag, "action") || IsTag(material.FunctionTag, "environment"),
+            "external_evidence" => IsTag(material.FunctionTag, "action") ||
+                IsTag(material.FunctionTag, "environment") ||
+                IsTag(material.FunctionTag, "emotion_evidence") ||
+                IsTag(material.TechniqueTag, "external_evidence"),
             "transition" => IsTag(material.FunctionTag, "transition"),
             "sensory" or "sensory_anchor" => IsTag(material.TechniqueTag, "sensory_detail"),
             "causality" => !IsTag(material.FunctionTag, "dialogue"),

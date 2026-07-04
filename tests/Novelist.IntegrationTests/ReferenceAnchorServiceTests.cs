@@ -623,6 +623,50 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateAnchorClassifiesChineseEmotionEvidenceLimitedPovAndAfterbeatTags()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("中文情绪视角标签测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "emotion-pov-tag-cases.md",
+            """
+            # 第一章
+
+            林岚没有回答，喉咙却发紧。
+
+            周鸣看不见她袖口下的手指正慢慢发凉。
+
+            他移开目光，指尖在门框上停了一下。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "中文情绪视角参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        var rows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+
+        Assert.Contains(rows, row =>
+            row.MaterialType == ReferenceMaterialTypes.Sentence &&
+            row.Text == "林岚没有回答，喉咙却发紧。" &&
+            row.FunctionTag == "emotion_evidence" &&
+            row.EmotionTag == "restrained" &&
+            row.TechniqueTag == "external_evidence");
+        Assert.Contains(rows, row =>
+            row.MaterialType == ReferenceMaterialTypes.Sentence &&
+            row.Text == "周鸣看不见她袖口下的手指正慢慢发凉。" &&
+            row.PovTag == "limited" &&
+            row.TechniqueTag == "limited_pov");
+        Assert.Contains(rows, row =>
+            row.MaterialType == ReferenceMaterialTypes.Sentence &&
+            row.Text == "他移开目光，指尖在门框上停了一下。" &&
+            row.FunctionTag == "action" &&
+            row.TechniqueTag == "afterbeat");
+    }
+
+    [Fact]
     public async Task UpdateMaterialTagsMarksMaterialAsUserVerifiedAndSearchesByCorrectedTags()
     {
         var options = CreateOptions();
