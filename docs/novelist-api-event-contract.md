@@ -133,7 +133,7 @@ These route shapes are no longer the first-pass product target. Keep them only a
 | `UpdateDataDir` | `PUT /api/app/data-dir` |
 | `GetPlatform` | `GET /api/app/platform` |
 
-Lifecycle-only Go methods `OnStartup` and `OnShutdown` are not frontend bindings. They map to Photino window lifecycle and ASP.NET Core host startup/shutdown.
+Lifecycle-only Go methods `OnStartup` and `OnShutdown` are not frontend bindings. They map to the Photino desktop process and window lifecycle.
 
 ### Settings and User Profile
 

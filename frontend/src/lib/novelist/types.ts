@@ -383,6 +383,14 @@ export namespace novel {
     updated_at: Timestamp
   }
 
+  export interface NovelCover {
+    novel_id: number
+    content_type: string
+    data_base64: string
+    length: number
+    last_modified: Timestamp
+  }
+
   export interface PreferenceItem {
     id: number
     novel_id: number

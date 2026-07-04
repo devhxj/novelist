@@ -465,7 +465,7 @@ If `make build` is not the active .NET path, use the current publish script and 
 | Hidden docs/tests keep depending on ASP.NET Core | Dependency returns later | Add grep gate for `Microsoft.AspNetCore`, `WebApplicationFactory`, `/covers`, `/hubs/events` |
 | `--server` is used by an external script | Startup behavior changes unexpectedly | Search build/package/scripts first; document removal; keep `--desktop` harmless during transition |
 | Changing SDK alters publish output | Installer misses files or runtime packs differ | Validate `dotnet publish`, publish script staging, and platform package smoke tests |
-| File URL start path contains spaces or non-ASCII | Startup URL fails on some systems | Create start URL via `new Uri(indexPath).AbsoluteUri`, not manual string concatenation |
+| Local start path contains spaces or non-ASCII | Startup URL fails on some systems | Pass the normalized filesystem path from `Path.GetFullPath` to `PhotinoWindow.Load`; in this Photino/WebView2 setup, passing a `file://` URI can make Photino report that the file was not found |
 | Direct file loading loses SPA fallback | Future routes may fail | Current frontend has no router; if router is added, prefer hash routing or a custom scheme fallback |
 
 ## Quality Gates

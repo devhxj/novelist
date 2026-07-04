@@ -13,7 +13,8 @@ References:
 ## Transport Rules
 
 - Packaged desktop mode uses Photino WebMessage for commands, queries, events, and desktop runtime operations.
-- ASP.NET Core loopback HTTP is optional for static assets, diagnostics, and integration tests. It must not become the default business transport.
+- Packaged desktop mode does not start ASP.NET Core/Kestrel. Built frontend assets load from local `frontend/dist`, and business calls use the bridge.
+- Development may point Photino at Vite with `--start-url=http://localhost:5173/`; that URL is only a frontend asset source, not a business API transport.
 - React components must not call `window.external` directly. They use `frontend/src/lib/novelist/bridge.ts`.
 - The bridge preserves current Wails method names during the compatibility phase.
 
@@ -114,11 +115,11 @@ Initial defaults:
 | Event batch window | 16 ms | Avoid flooding the WebView with token-by-token messages |
 | Max queued events per turn | 1000 | Prevent unbounded memory growth |
 
-Large binary payloads, such as avatar images or exports, should use file handles or chunked bridge messages rather than a single oversized WebMessage.
+Large binary payloads, such as avatar images or exports, should use file handles or chunked bridge messages rather than a single oversized WebMessage. `GetCover` is the current bounded exception: it returns base64 only when the stored cover is within `NovelCoverConstraints.MaxBridgeBytes`.
 
 ## Compatibility Method Coverage
 
-All 80 generated Wails bindings map to bridge methods with the same names:
+All current frontend App API methods map to bridge methods with the same names:
 
 ```text
 ApproveTool, CancelChat, Chat, CompressContext,
@@ -128,16 +129,18 @@ DeleteArcNode, DeleteCharacter, DeleteCover, DeleteLocation, DeleteNovel,
 DeletePreference, DeleteReaderPerspective, DeleteSkill, DeleteStoryArc,
 DeleteTimelineEntry, DiscoverModels, ExportNovel, ExtractStyle,
 GetAppConfig, GetArcNodes, GetChapterPlans, GetChapters,
-GetCharacterRelations, GetCharacters, GetContent, GetLLMConfig,
+GetCharacterRelations, GetCharacters, GetContent, GetCover,
+GetEmbeddingConfig, GetLLMConfig,
 GetLocationRelations, GetLocations, GetMaxChapterNumber, GetModels,
 GetNovels, GetPlatform, GetPreferences, GetReaderPerspectives,
 GetSession, GetSessionMessages, GetSessions, GetSettings, GetStoryArcs,
-GetTimelineEntries, GetWritingActivity, GetWritingStats,
+GetSqliteVecStatus, GetTimelineEntries, GetWritingActivity, GetWritingStats,
 Initialize, IsInitialized, ListSkills, ListSlashCommands,
-RebuildNovelIndex, SaveAvatar, SaveContent, SaveCover, SaveLLMConfig,
-SaveSettings, SaveUserName, SearchAll, SetActiveNovel, SetApprovalMode,
+RebuildNovelIndex, SaveAvatar, SaveContent, SaveCover, SaveEmbeddingConfig,
+SaveLLMConfig, SaveSettings, SaveUserName, SearchAll, SearchStoryMemory,
+SetActiveNovel, SetApprovalMode,
 SetChatPanelWidth, SetLastSession, SetReasoningEffort, SetSelectedModel,
-TestConnection, UpdateArcNode, UpdateChapterPlan, UpdateChapterTitle,
+TestEmbeddingConnection, TestConnection, UpdateArcNode, UpdateChapterPlan, UpdateChapterTitle,
 UpdateCharacter, UpdateDataDir, UpdateLocation, UpdateNovel,
 UpdatePreference, UpdateReaderPerspective, UpdateStoryArc,
 UpdateTimelineEntry

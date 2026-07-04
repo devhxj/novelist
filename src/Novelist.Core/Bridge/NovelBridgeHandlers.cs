@@ -39,6 +39,41 @@ public static class NovelBridgeHandlers
             return null;
         });
 
+        dispatcher.Register("GetCover", async (context, cancellationToken) =>
+        {
+            var novelId = ReadLongArg(context.Payload, 0, "novelId");
+            var cover = await service.GetCoverAsync(novelId, cancellationToken);
+            if (cover is null)
+            {
+                return null;
+            }
+
+            if (cover.Length > NovelCoverConstraints.MaxBridgeBytes)
+            {
+                throw new BridgeRequestException(
+                    BridgeErrorCodes.CoverTooLargeForBridge,
+                    "Cover image is too large to send through the bridge.",
+                    new
+                    {
+                        cover.Length,
+                        max_bytes = NovelCoverConstraints.MaxBridgeBytes
+                    });
+            }
+
+            if (!File.Exists(cover.LocalPath))
+            {
+                return null;
+            }
+
+            var bytes = await File.ReadAllBytesAsync(cover.LocalPath, cancellationToken);
+            return new NovelCoverPayload(
+                novelId,
+                cover.ContentType,
+                Convert.ToBase64String(bytes),
+                bytes.LongLength,
+                cover.LastModified);
+        });
+
         dispatcher.Register("SaveCover", async (context, cancellationToken) =>
         {
             await service.SaveCoverAsync(

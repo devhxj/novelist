@@ -30,4 +30,5 @@ public sealed record NovelCoverFile(
 public static class NovelCoverConstraints
 {
     public const int MaxBytes = 10 * 1024 * 1024;
+    public const int MaxBridgeBytes = 2 * 1024 * 1024;
 }

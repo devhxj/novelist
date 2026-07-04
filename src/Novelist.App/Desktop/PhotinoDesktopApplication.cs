@@ -1,13 +1,7 @@
-using Microsoft.AspNetCore.Hosting.Server;
-using Microsoft.AspNetCore.Hosting.Server.Features;
-using Microsoft.Extensions.DependencyInjection;
-using Novelist.App.Hosting;
-
 namespace Novelist.App.Desktop;
 
 public sealed class PhotinoDesktopApplication
 {
-    private const string LoopbackUrl = "http://127.0.0.1:0";
     private readonly IPhotinoWindowFactory _windowFactory;
 
     public PhotinoDesktopApplication(IPhotinoWindowFactory windowFactory)
@@ -23,43 +17,27 @@ public sealed class PhotinoDesktopApplication
 
     public void Run(string[] args, CancellationToken cancellationToken = default)
     {
-        var app = NovelistAppBuilder.Build(args);
-        app.Urls.Add(LoopbackUrl);
-        try
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var frontendAssets = DesktopFrontendAssets.TryResolve(args);
+        if (frontendAssets is not null)
         {
-            DesktopLaunchLog.Write("Starting loopback host");
-            app.StartAsync(cancellationToken).GetAwaiter().GetResult();
-            try
+            DesktopLaunchLog.Write("Resolved frontend assets at " + frontendAssets.DistPath);
+        }
+        else
+        {
+            DesktopLaunchLog.Write("Frontend assets not found.");
+            if (!PhotinoLaunchMode.HasStartUrlOverride(args))
             {
-                var localUrl = ResolveLocalUrl(app);
-                DesktopLaunchLog.Write("Loopback host started at " + localUrl);
-                var settings = PhotinoLaunchMode.CreateSettings(args, localUrl);
-                DesktopLaunchLog.Write("Creating Photino window");
-                new PhotinoDesktopHost(_windowFactory).Run(settings);
-                DesktopLaunchLog.Write("Photino window closed");
-            }
-            finally
-            {
-                DesktopLaunchLog.Write("Stopping loopback host");
-                app.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+                throw new InvalidOperationException(
+                    "Frontend assets were not found. Run `npm run build` from the frontend directory, " +
+                    "or debug with the `Novelist.App (Vite)` launch profile after starting the Vite dev server.");
             }
         }
-        finally
-        {
-            app.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        }
-    }
 
-    private static string ResolveLocalUrl(WebApplication app)
-    {
-        var server = app.Services.GetRequiredService<IServer>();
-        var addresses = server.Features.Get<IServerAddressesFeature>()?.Addresses;
-        var address = addresses?.FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(address))
-        {
-            throw new InvalidOperationException("The local web host did not publish a server address.");
-        }
-
-        return address.EndsWith("/", StringComparison.Ordinal) ? address : address + "/";
+        var settings = PhotinoLaunchMode.CreateSettings(args, frontendAssets?.StartUrl);
+        DesktopLaunchLog.Write("Creating Photino window");
+        new PhotinoDesktopHost(_windowFactory).Run(settings);
+        DesktopLaunchLog.Write("Photino window closed");
     }
 }

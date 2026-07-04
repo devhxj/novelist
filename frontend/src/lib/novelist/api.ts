@@ -105,6 +105,7 @@ export interface NovelistAppApi {
   GetCharacterRelations: AppMethod<[number], character.CharacterRelation[]>
   GetCharacters: AppMethod<[number], character.Character[]>
   GetContent: AppMethod<[number, string], string>
+  GetCover: AppMethod<[number], novel.NovelCover | null>
   GetEmbeddingConfig: AppMethod<[], EmbeddingConfigView>
   GetLLMConfig: AppMethod<[], llm.LLMConfigView>
   GetLocationRelations: AppMethod<[number], location.LocationRelation[]>
@@ -219,6 +220,7 @@ export const appApi: NovelistAppApi = {
   GetCharacterRelations: appMethod<NovelistAppApi['GetCharacterRelations']>('GetCharacterRelations'),
   GetCharacters: appMethod<NovelistAppApi['GetCharacters']>('GetCharacters'),
   GetContent: appMethod<NovelistAppApi['GetContent']>('GetContent'),
+  GetCover: appMethod<NovelistAppApi['GetCover']>('GetCover'),
   GetEmbeddingConfig: appMethod<NovelistAppApi['GetEmbeddingConfig']>('GetEmbeddingConfig'),
   GetLLMConfig: appMethod<NovelistAppApi['GetLLMConfig']>('GetLLMConfig'),
   GetLocationRelations: appMethod<NovelistAppApi['GetLocationRelations']>('GetLocationRelations'),

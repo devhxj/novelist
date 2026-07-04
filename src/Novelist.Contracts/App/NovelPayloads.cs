@@ -22,3 +22,10 @@ public sealed record UpdateNovelPayload(
 
 public sealed record SetActiveNovelPayload(
     [property: JsonPropertyName("novel_id")] long NovelId);
+
+public sealed record NovelCoverPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("content_type")] string ContentType,
+    [property: JsonPropertyName("data_base64")] string DataBase64,
+    [property: JsonPropertyName("length")] long Length,
+    [property: JsonPropertyName("last_modified")] DateTimeOffset LastModified);

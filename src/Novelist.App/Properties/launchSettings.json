@@ -1,22 +1,22 @@
 {
   "$schema": "https://json.schemastore.org/launchsettings.json",
   "profiles": {
-    "http": {
+    "Novelist.App": {
       "commandName": "Project",
       "dotnetRunMessages": true,
-      "launchBrowser": true,
-      "applicationUrl": "http://localhost:5187",
+      "launchBrowser": false,
+      "commandLineArgs": "--desktop",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "DOTNET_ENVIRONMENT": "Development"
       }
     },
-    "https": {
+    "Novelist.App (Vite)": {
       "commandName": "Project",
       "dotnetRunMessages": true,
-      "launchBrowser": true,
-      "applicationUrl": "https://localhost:7277;http://localhost:5187",
+      "launchBrowser": false,
+      "commandLineArgs": "--start-url=http://localhost:5173/",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "DOTNET_ENVIRONMENT": "Development"
       }
     }
   }

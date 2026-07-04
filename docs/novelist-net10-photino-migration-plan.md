@@ -70,13 +70,13 @@ window.novelist.events.on("agent:7", callback)
 
 `Novelist.App` owns a bridge dispatcher that receives JSON-RPC-like messages from `window.external.sendMessage`, routes them to application services, and returns responses or events through `SendWebMessage`.
 
-ASP.NET Core remains optional infrastructure for static asset hosting, debug endpoints, test hosting, and future remote-capable diagnostics. It is not the default business API transport in packaged desktop mode.
+This early migration plan originally allowed ASP.NET Core as optional static/debug/test infrastructure. That direction has since been superseded by `docs/remove-aspnetcore-host-plan.md`: packaged desktop mode loads local frontend assets directly and does not start ASP.NET Core/Kestrel.
 
 Primary transport responsibilities:
 
 - Photino WebMessage RPC for Wails-compatible commands and queries.
 - Photino WebMessage events for `chat:started`, `agent:{turnId}`, `file:changed`, title updates, and desktop runtime notifications.
-- ASP.NET Core optional debug/test surface for `/health`, built frontend assets, and integration testing only.
+- Local `frontend/dist` loading for packaged desktop; Vite `--start-url=` is a frontend development convenience only.
 - Background services stay in-process behind `Novelist.App` services, not behind HTTP endpoints.
 - ProblemDetails-compatible error objects are preserved inside bridge error payloads.
 
@@ -156,7 +156,7 @@ Packaged desktop mode should not expose a business HTTP API by default. The brid
 - prevent path traversal and absolute path access before file operations;
 - normalize errors into the bridge error envelope.
 
-If optional loopback HTTP is enabled for diagnostics or dev workflows, it must listen only on `127.0.0.1` with a random port and token. That surface is explicitly secondary and must not become the default product transport.
+If a future diagnostic HTTP surface is introduced, it needs a separate decision document and must listen only on `127.0.0.1` with a random port and token. That surface must remain outside the packaged product transport.
 
 ## Data Migration Strategy
 
@@ -484,7 +484,7 @@ Acceptance:
 
 - Windows installer starts without requiring Go, Wails, Node, Python, or ONNX.
 - App can open migrated data and run a basic chat.
-- Packaged app does not expose a business HTTP API by default; optional diagnostic HTTP uses loopback-only token protection.
+- Packaged app does not expose a business HTTP API or start Kestrel by default.
 
 ### Phase 9: Retire Go/Wails
 

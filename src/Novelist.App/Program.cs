@@ -1,4 +1,3 @@
-using Novelist.App.Hosting;
 using Novelist.App.Desktop;
 
 public partial class Program
@@ -15,18 +14,10 @@ public partial class Program
 
         try
         {
-            if (PhotinoLaunchMode.ShouldLaunchDesktop(args))
-            {
-                DesktopLaunchLog.Write("Launching desktop mode");
-                var desktopApplication = new PhotinoDesktopApplication(new PhotinoWindowFactory());
-                desktopApplication.Run(args);
-                DesktopLaunchLog.Write("Desktop mode exited normally");
-                return;
-            }
-
-            DesktopLaunchLog.Write("Launching server mode");
-            var app = NovelistAppBuilder.Build(args);
-            app.Run();
+            DesktopLaunchLog.Write("Launching desktop mode");
+            var desktopApplication = new PhotinoDesktopApplication(new PhotinoWindowFactory());
+            desktopApplication.Run(args);
+            DesktopLaunchLog.Write("Desktop mode exited normally");
         }
         catch (Exception exception)
         {

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Novelist.Contracts.App;
 using Novelist.Contracts.Bridge;
+using Novelist.Core.App;
 using Novelist.Core.Bridge;
 using Novelist.Infrastructure.App;
 
@@ -304,6 +305,91 @@ public sealed class NovelServiceTests : IDisposable
             """));
         Assert.True(deleteJson.RootElement.GetProperty("ok").GetBoolean());
         Assert.Null(await service.GetCoverAsync(novel.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task BridgeNovelHandlersReturnCoverPayloadAsBase64()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var service = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await service.CreateNovelAsync(
+            new CreateNovelPayload("桥接读取封面", "", ""),
+            CancellationToken.None);
+        var data = JpegCoverBytes();
+        await service.SaveCoverAsync(novel.Id, data, CancellationToken.None);
+        var dispatcher = new BridgeDispatcher()
+            .RegisterCompatibilityAppMethodHandlers()
+            .RegisterNovelHandlers(service);
+
+        using var json = ParseOutbound(await dispatcher.DispatchAsync($$"""
+            {
+              "kind": "request",
+              "id": "req_get_cover",
+              "method": "GetCover",
+              "payload": { "args": [{{novel.Id}}] }
+            }
+            """));
+
+        var result = json.RootElement.GetProperty("result");
+        Assert.Equal(novel.Id, result.GetProperty("novel_id").GetInt64());
+        Assert.Equal("image/jpeg", result.GetProperty("content_type").GetString());
+        Assert.Equal(Convert.ToBase64String(data), result.GetProperty("data_base64").GetString());
+        Assert.Equal(data.Length, result.GetProperty("length").GetInt64());
+        Assert.Equal(JsonValueKind.String, result.GetProperty("last_modified").ValueKind);
+    }
+
+    [Fact]
+    public async Task BridgeNovelHandlersReturnNullWhenCoverIsMissing()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var service = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await service.CreateNovelAsync(
+            new CreateNovelPayload("无桥接封面", "", ""),
+            CancellationToken.None);
+        var dispatcher = new BridgeDispatcher()
+            .RegisterCompatibilityAppMethodHandlers()
+            .RegisterNovelHandlers(service);
+
+        using var json = ParseOutbound(await dispatcher.DispatchAsync($$"""
+            {
+              "kind": "request",
+              "id": "req_missing_cover",
+              "method": "GetCover",
+              "payload": { "args": [{{novel.Id}}] }
+            }
+            """));
+
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("result").ValueKind);
+    }
+
+    [Fact]
+    public async Task BridgeNovelHandlersRejectCoverTooLargeForBridge()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var service = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await service.CreateNovelAsync(
+            new CreateNovelPayload("大封面", "", ""),
+            CancellationToken.None);
+        var data = new byte[NovelCoverConstraints.MaxBridgeBytes + 1];
+        JpegCoverBytes().CopyTo(data, 0);
+        await service.SaveCoverAsync(novel.Id, data, CancellationToken.None);
+        var dispatcher = new BridgeDispatcher()
+            .RegisterCompatibilityAppMethodHandlers()
+            .RegisterNovelHandlers(service);
+
+        using var json = ParseOutbound(await dispatcher.DispatchAsync($$"""
+            {
+              "kind": "request",
+              "id": "req_large_cover",
+              "method": "GetCover",
+              "payload": { "args": [{{novel.Id}}] }
+            }
+            """));
+
+        AssertBridgeError(json.RootElement, "req_large_cover", BridgeErrorCodes.CoverTooLargeForBridge);
     }
 
     [Fact]

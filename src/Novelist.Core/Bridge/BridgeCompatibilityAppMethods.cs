@@ -37,6 +37,7 @@ public static class BridgeCompatibilityAppMethods
         "GetCharacterRelations",
         "GetCharacters",
         "GetContent",
+        "GetCover",
         "GetEmbeddingConfig",
         "GetLLMConfig",
         "GetLocationRelations",

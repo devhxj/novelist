@@ -8,6 +8,7 @@ public static class BridgeErrorCodes
     public const string AppNotInitialized = "APP_NOT_INITIALIZED";
     public const string ValidationError = "VALIDATION_ERROR";
     public const string InvalidPath = "INVALID_PATH";
+    public const string CoverTooLargeForBridge = "COVER_TOO_LARGE_FOR_BRIDGE";
     public const string LlmProviderError = "LLM_PROVIDER_ERROR";
     public const string RagUnavailable = "RAG_UNAVAILABLE";
     public const string Cancelled = "CANCELLED";

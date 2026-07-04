@@ -6,14 +6,6 @@ namespace Novelist.IntegrationTests;
 public sealed class PhotinoDesktopHostTests
 {
     [Fact]
-    public void LaunchModeIsExplicit()
-    {
-        Assert.True(PhotinoLaunchMode.ShouldLaunchDesktop(Array.Empty<string>()));
-        Assert.True(PhotinoLaunchMode.ShouldLaunchDesktop([PhotinoLaunchMode.DesktopFlag]));
-        Assert.False(PhotinoLaunchMode.ShouldLaunchDesktop([PhotinoLaunchMode.ServerFlag]));
-    }
-
-    [Fact]
     public void LaunchSettingsUseStubUrlByDefault()
     {
         var settings = PhotinoLaunchMode.CreateSettings([PhotinoLaunchMode.DesktopFlag]);
@@ -29,9 +21,9 @@ public sealed class PhotinoDesktopHostTests
     {
         var settings = PhotinoLaunchMode.CreateSettings(
             [PhotinoLaunchMode.DesktopFlag],
-            "http://127.0.0.1:54321/");
+            @"C:\novelist\frontend\dist\index.html");
 
-        Assert.Equal("http://127.0.0.1:54321/", settings.StartUrl);
+        Assert.Equal(@"C:\novelist\frontend\dist\index.html", settings.StartUrl);
     }
 
     [Fact]
@@ -39,9 +31,16 @@ public sealed class PhotinoDesktopHostTests
     {
         var settings = PhotinoLaunchMode.CreateSettings(
             [PhotinoLaunchMode.DesktopFlag, "--start-url=http://localhost:5173/"],
-            "http://127.0.0.1:54321/");
+            @"C:\novelist\frontend\dist\index.html");
 
         Assert.Equal("http://localhost:5173/", settings.StartUrl);
+    }
+
+    [Fact]
+    public void HasStartUrlOverrideDetectsViteDebugUrl()
+    {
+        Assert.False(PhotinoLaunchMode.HasStartUrlOverride([PhotinoLaunchMode.DesktopFlag]));
+        Assert.True(PhotinoLaunchMode.HasStartUrlOverride(["--start-url=http://localhost:5173/"]));
     }
 
     [Fact]
@@ -58,17 +57,49 @@ public sealed class PhotinoDesktopHostTests
     }
 
     [Fact]
-    public async Task DesktopApplicationStartsLoopbackHostAndPassesUrlToWindow()
+    public async Task DesktopApplicationLoadsResolvedFrontendIndexWithoutLoopbackHost()
     {
+        var distPath = CreateDistFixture();
+        try
+        {
+            var factory = new CapturingWindowFactory();
+            var app = new PhotinoDesktopApplication(factory);
+
+            await app.RunAsync([PhotinoLaunchMode.DesktopFlag, $"{DesktopFrontendAssets.FrontendDistPrefix}{distPath}"]);
+
+            Assert.NotNull(factory.Settings);
+            Assert.Equal(Path.Combine(distPath, "index.html"), factory.Settings.StartUrl);
+            Assert.True(factory.Window.WaitForCloseCalled);
+        }
+        finally
+        {
+            if (Directory.Exists(distPath))
+            {
+                Directory.Delete(distPath, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void DesktopApplicationFailsClearlyWhenFrontendAssetsAreMissing()
+    {
+        var missingDistPath = Path.Combine(Path.GetTempPath(), "novelist-missing-dist-" + Guid.NewGuid().ToString("N"));
         var factory = new CapturingWindowFactory();
         var app = new PhotinoDesktopApplication(factory);
 
-        await app.RunAsync([PhotinoLaunchMode.DesktopFlag]);
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            app.Run([PhotinoLaunchMode.DesktopFlag, $"{DesktopFrontendAssets.FrontendDistPrefix}{missingDistPath}"]));
 
-        Assert.NotNull(factory.Settings);
-        Assert.StartsWith("http://127.0.0.1:", factory.Settings.StartUrl, StringComparison.Ordinal);
-        Assert.EndsWith("/", factory.Settings.StartUrl, StringComparison.Ordinal);
-        Assert.True(factory.Window.WaitForCloseCalled);
+        Assert.Contains("Frontend assets were not found", error.Message, StringComparison.Ordinal);
+        Assert.Null(factory.Settings);
+    }
+
+    private static string CreateDistFixture()
+    {
+        var distPath = Path.Combine(Path.GetTempPath(), "novelist-desktop-host-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(distPath);
+        File.WriteAllText(Path.Combine(distPath, "index.html"), "<!doctype html><title>novelist fixture</title>");
+        return distPath;
     }
 
     private sealed class CapturingWindowFactory : IPhotinoWindowFactory
