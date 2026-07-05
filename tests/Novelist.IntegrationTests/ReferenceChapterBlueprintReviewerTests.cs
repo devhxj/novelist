@@ -57,6 +57,31 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewWarnsWhenEveryBeatRequestsSameMaterialType()
+    {
+        var blueprint = Blueprint(beat => beat) with
+        {
+            Beats =
+            [
+                Beat("1:beat:1") with { BeatIndex = 1 },
+                Beat("1:beat:2") with { BeatIndex = 2 },
+                Beat("1:beat:3") with { BeatIndex = 3 }
+            ]
+        };
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+        Assert.Empty(review.RequiredFixes);
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "reference_binding" &&
+                defect.Severity == "warning" &&
+                defect.FieldPath.Contains("material_types", StringComparison.OrdinalIgnoreCase) &&
+                defect.Reason.Contains("same reference material type", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewAllowsEmotionEvidenceQueryForSubtextAndExternalEvidenceDuties()
     {
         var blueprint = Blueprint(beat => beat with

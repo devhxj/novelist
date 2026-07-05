@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 56;
+    public const int CurrentReviewVersion = 57;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -1303,6 +1303,27 @@ internal static class ReferenceChapterBlueprintReviewer
                 string.Empty,
                 $"Too many beats choose no_reuse_reason ({noReuseBeatCount} of {blueprint.Beats.Count}), reducing the value of the anchor layer.",
                 "Review whether these beats can bind reference materials; keep no_reuse_reason only for approved transition or non-reuse beats.");
+        }
+
+        var materialTypeSignatures = blueprint.Beats
+            .Where(beat => string.IsNullOrWhiteSpace(beat.NoReuseReason))
+            .Select(beat => string.Join(
+                ",",
+                beat.ReferenceQuery.MaterialTypes
+                    .Where(type => !string.IsNullOrWhiteSpace(type))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Order(StringComparer.OrdinalIgnoreCase)))
+            .Where(signature => signature.Length > 0)
+            .ToArray();
+        if (materialTypeSignatures.Length >= 3 &&
+            materialTypeSignatures.Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1)
+        {
+            AddWarningDefect(
+                "reference_binding",
+                "beats.reference_query.material_types",
+                string.Empty,
+                $"Every reference-bound beat asks for the same reference material type: {materialTypeSignatures[0]}.",
+                "Review whether different beats need chapter, paragraph, sentence, or passage material types based on narrative function.");
         }
 
         var defectCount = logicErrors.Count + causalityErrors.Count + emotionErrors.Count +
