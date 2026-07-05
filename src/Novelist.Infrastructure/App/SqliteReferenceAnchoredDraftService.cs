@@ -774,6 +774,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         AddScore(components, "confidence", material.FunctionConfidence + material.EmotionConfidence * 0.25 + material.PovConfidence * 0.25);
         AddScore(components, "user_verified", material.UserVerified ? 1.0 : 0);
         AddScore(components, "accepted_feedback", acceptedFeedbackMaterialIds.Contains(material.MaterialId) ? 2.0 : 0);
+        var embeddingFit = TryGetScoreComponent(material, "embedding", out var embeddingScore);
+        AddScore(components, "embedding", embeddingScore);
 
         var hasFunctionalFit = functionFit || emotionFit || povFit || proseDutyFit;
         var score = components.Values.Sum();
@@ -801,7 +803,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 povFit,
                 proseDutyFit,
                 materialTypeFit,
-                acceptedFeedbackMaterialIds.Contains(material.MaterialId)),
+                acceptedFeedbackMaterialIds.Contains(material.MaterialId),
+                embeddingFit),
             now);
         return new ScoredMaterialLink(link, analysisContractHash, components, hasFunctionalFit);
     }
@@ -814,7 +817,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         bool povFit,
         bool proseDutyFit,
         bool materialTypeFit,
-        bool acceptedFeedbackFit)
+        bool acceptedFeedbackFit,
+        bool embeddingFit)
     {
         var matches = new List<string>();
         if (materialTypeFit)
@@ -845,6 +849,11 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         if (acceptedFeedbackFit)
         {
             matches.Add("accepted feedback");
+        }
+
+        if (embeddingFit)
+        {
+            matches.Add("embedding rank");
         }
 
         var fit = matches.Count == 0 ? "lexical and confidence only" : string.Join(", ", matches);
@@ -915,6 +924,22 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         {
             components[name] = Math.Round(value, 4);
         }
+    }
+
+    private static bool TryGetScoreComponent(ReferenceMaterialPayload material, string name, out double value)
+    {
+        value = 0;
+        if (material.ScoreComponents is null ||
+            !material.ScoreComponents.TryGetValue(name, out var component) ||
+            component <= 0 ||
+            double.IsNaN(component) ||
+            double.IsInfinity(component))
+        {
+            return false;
+        }
+
+        value = component;
+        return true;
     }
 
     private static string BuildMaterialLinkId(long blueprintId, string beatId, string materialId)

@@ -58,6 +58,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private readonly IEmbeddingConfigurationService _embeddingConfiguration;
     private readonly IEmbeddingClient _embeddings;
     private readonly ISqliteVecTableProvisioner _vecProvisioner;
+    private readonly ISqliteVecQueryProvider _vecQuery;
     private readonly SemaphoreSlim _mutex = new(1, 1);
 
     public SqliteReferenceAnchorService(
@@ -65,13 +66,15 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         INovelService? novels = null,
         IEmbeddingConfigurationService? embeddingConfiguration = null,
         IEmbeddingClient? embeddings = null,
-        ISqliteVecTableProvisioner? vecProvisioner = null)
+        ISqliteVecTableProvisioner? vecProvisioner = null,
+        ISqliteVecQueryProvider? vecQuery = null)
     {
         _options = options ?? new AppInitializationOptions();
         _novels = novels ?? new FileSystemNovelService(_options);
         _embeddingConfiguration = embeddingConfiguration ?? new NullEmbeddingConfigurationService();
         _embeddings = embeddings ?? new HybridEmbeddingClient();
         _vecProvisioner = vecProvisioner ?? new SqliteVecTableProvisioner();
+        _vecQuery = vecQuery ?? (_vecProvisioner as ISqliteVecQueryProvider) ?? new SqliteVecTableProvisioner();
     }
 
     public async ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(
@@ -393,9 +396,21 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             }
 
             var all = await ReadMaterialsAsync(connection, input.NovelId, anchorIds, cancellationToken);
+            var embeddingScores = await TryBuildEmbeddingScoresAsync(
+                databasePath,
+                connection,
+                input,
+                anchorIds,
+                all.Count,
+                cancellationToken);
             var filtered = all
                 .Where(item => MatchesMaterialFilters(item, input))
-                .Select(item => new ScoredSearchMaterial(item, ScoreMaterialComponents(item, input)))
+                .Select(item => new ScoredSearchMaterial(
+                    item,
+                    ScoreMaterialComponents(
+                        item,
+                        input,
+                        embeddingScores.TryGetValue(item.MaterialId, out var embeddingScore) ? embeddingScore : 0)))
                 .OrderByDescending(item => item.Score)
                 .ThenBy(item => item.Material.AnchorId)
                 .ThenBy(item => item.Material.MaterialId, StringComparer.Ordinal)
@@ -1206,6 +1221,87 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
 
         return rowIds;
+    }
+
+    private static async ValueTask<IReadOnlyList<long>> ReadReadyVectorAnchorIdsAsync(
+        SqliteConnection connection,
+        IReadOnlyList<long> anchorIds,
+        CancellationToken cancellationToken)
+    {
+        if (anchorIds.Count == 0)
+        {
+            return [];
+        }
+
+        await using var command = connection.CreateCommand();
+        var parameterNames = new List<string>(anchorIds.Count);
+        for (var index = 0; index < anchorIds.Count; index++)
+        {
+            var parameterName = "$anchor_id_" + index.ToString(CultureInfo.InvariantCulture);
+            parameterNames.Add(parameterName);
+            command.Parameters.AddWithValue(parameterName, anchorIds[index]);
+        }
+
+        command.CommandText = $$"""
+            SELECT anchor_id
+            FROM reference_anchor_build_state
+            WHERE status = $status
+              AND vector_count > 0
+              AND anchor_id IN ({{string.Join(", ", parameterNames)}})
+            ORDER BY anchor_id ASC;
+            """;
+        command.Parameters.AddWithValue("$status", ReferenceAnchorBuildStates.Ready);
+        var ready = new List<long>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            ready.Add(reader.GetInt64(0));
+        }
+
+        return ready;
+    }
+
+    private static async ValueTask<IReadOnlyDictionary<long, IReadOnlyDictionary<long, string>>> ReadMaterialRowIdsAsync(
+        SqliteConnection connection,
+        IReadOnlyList<long> anchorIds,
+        CancellationToken cancellationToken)
+    {
+        if (anchorIds.Count == 0)
+        {
+            return new Dictionary<long, IReadOnlyDictionary<long, string>>();
+        }
+
+        await using var command = connection.CreateCommand();
+        var parameterNames = new List<string>(anchorIds.Count);
+        for (var index = 0; index < anchorIds.Count; index++)
+        {
+            var parameterName = "$anchor_id_" + index.ToString(CultureInfo.InvariantCulture);
+            parameterNames.Add(parameterName);
+            command.Parameters.AddWithValue(parameterName, anchorIds[index]);
+        }
+
+        command.CommandText = $$"""
+            SELECT anchor_id, rowid, material_id
+            FROM reference_materials
+            WHERE anchor_id IN ({{string.Join(", ", parameterNames)}});
+            """;
+        var byAnchor = new Dictionary<long, Dictionary<long, string>>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var anchorId = reader.GetInt64(0);
+            if (!byAnchor.TryGetValue(anchorId, out var rows))
+            {
+                rows = [];
+                byAnchor[anchorId] = rows;
+            }
+
+            rows[reader.GetInt64(1)] = reader.GetString(2);
+        }
+
+        return byAnchor.ToDictionary(
+            item => item.Key,
+            item => (IReadOnlyDictionary<long, string>)item.Value);
     }
 
     private static async ValueTask<ReferenceMaterialPayload?> ReadMaterialAsync(
@@ -2122,9 +2218,107 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             filters.Any(filter => string.Equals(value, filter, StringComparison.OrdinalIgnoreCase));
     }
 
+    private async ValueTask<IReadOnlyDictionary<string, double>> TryBuildEmbeddingScoresAsync(
+        string databasePath,
+        SqliteConnection connection,
+        SearchReferenceMaterialsPayload input,
+        IReadOnlyList<long> anchorIds,
+        int materialCount,
+        CancellationToken cancellationToken)
+    {
+        var normalizedQuery = (input.Query ?? string.Empty).Trim();
+        if (normalizedQuery.Length == 0 || materialCount == 0)
+        {
+            return new Dictionary<string, double>(StringComparer.Ordinal);
+        }
+
+        var readyAnchorIds = await ReadReadyVectorAnchorIdsAsync(connection, anchorIds, cancellationToken);
+        if (readyAnchorIds.Count == 0)
+        {
+            return new Dictionary<string, double>(StringComparer.Ordinal);
+        }
+
+        var embeddingOptions = await _embeddingConfiguration.GetActiveEmbeddingOptionsAsync(cancellationToken);
+        if (embeddingOptions is null)
+        {
+            return new Dictionary<string, double>(StringComparer.Ordinal);
+        }
+
+        EmbeddingBatchResult queryEmbedding;
+        try
+        {
+            queryEmbedding = await _embeddings.EmbedAsync(
+                [normalizedQuery],
+                embeddingOptions with { InputKind = BuiltinOnnxEmbeddingModel.QueryInputKind },
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return new Dictionary<string, double>(StringComparer.Ordinal);
+        }
+
+        if (queryEmbedding.Items.Count != 1)
+        {
+            return new Dictionary<string, double>(StringComparer.Ordinal);
+        }
+
+        var queryVector = queryEmbedding.Items[0].Vector;
+        var dimensions = queryEmbedding.Dimensions > 0 ? queryEmbedding.Dimensions : queryVector.Count;
+        if (dimensions <= 0 || queryVector.Count != dimensions)
+        {
+            return new Dictionary<string, double>(StringComparer.Ordinal);
+        }
+
+        var rowIds = await ReadMaterialRowIdsAsync(connection, readyAnchorIds, cancellationToken);
+        var scores = new Dictionary<string, double>(StringComparer.Ordinal);
+        var topK = Math.Clamp(materialCount, 1, 100);
+        foreach (var anchorId in readyAnchorIds)
+        {
+            if (!rowIds.TryGetValue(anchorId, out var anchorRowIds) || anchorRowIds.Count == 0)
+            {
+                continue;
+            }
+
+            var tableName = SqliteVecTableProvisioner.BuildReferenceAnchorVectorTableName(anchorId, dimensions);
+            IReadOnlyList<SqliteVecSearchRecord> vectorResults;
+            try
+            {
+                vectorResults = await _vecQuery.SearchAsync(
+                    databasePath,
+                    new SqliteVecSearchRequest(tableName, dimensions, queryVector, topK),
+                    cancellationToken);
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or SqliteException)
+            {
+                continue;
+            }
+
+            foreach (var result in vectorResults)
+            {
+                if (!anchorRowIds.TryGetValue(result.RowId, out var materialId))
+                {
+                    continue;
+                }
+
+                var score = EmbeddingDistanceScore(result.Distance);
+                if (score <= 0)
+                {
+                    continue;
+                }
+
+                scores[materialId] = scores.TryGetValue(materialId, out var existing)
+                    ? Math.Max(existing, score)
+                    : score;
+            }
+        }
+
+        return scores;
+    }
+
     private static IReadOnlyDictionary<string, double> ScoreMaterialComponents(
         ReferenceMaterialPayload material,
-        SearchReferenceMaterialsPayload input)
+        SearchReferenceMaterialsPayload input,
+        double embeddingScore)
     {
         var components = new Dictionary<string, double>(StringComparer.Ordinal);
         var normalizedQuery = (input.Query ?? string.Empty).Trim();
@@ -2141,9 +2335,20 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         AddScore(components, "tag", SearchTagScore(material, input));
         AddScore(components, "narrative_duty", NarrativeDutyScore(material, input.NarrativeDuties));
         AddScore(components, "emotion_transition", EmotionTransitionScore(material, input.EmotionTransitions));
+        AddScore(components, "embedding", embeddingScore);
         AddScore(components, "confidence", material.FunctionConfidence + material.EmotionConfidence * 0.2 + material.PovConfidence * 0.1);
         AddScore(components, "length", Math.Max(0, 1.0 - material.Text.Length / 500.0));
         return components;
+    }
+
+    private static double EmbeddingDistanceScore(double distance)
+    {
+        if (double.IsNaN(distance) || double.IsInfinity(distance) || distance < 0)
+        {
+            return 0;
+        }
+
+        return Math.Round(Math.Max(0, 4.0 - distance * 4.0), 4);
     }
 
     private static double SearchTagScore(

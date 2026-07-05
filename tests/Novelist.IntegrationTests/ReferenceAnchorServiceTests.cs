@@ -466,6 +466,198 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchMaterialsUsesEmbeddingScoreWhenVectorIndexIsReady()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("向量材料搜索测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "search-embedding-ranking.md",
+            """
+            # 第一章
+
+            雨声压低了门口。
+
+            他在门口停住。
+            """);
+        var embeddings = new DeterministicEmbeddingClient(dimensions: 3);
+        var vec = new RecordingSqliteVecTableProvisioner();
+        var service = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "custom",
+                "https://api.example.com/v1/embeddings",
+                "test-key",
+                "embed-v1",
+                3,
+                null)),
+            embeddings,
+            vec);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "向量搜索参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var discovered = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        var rainMaterial = Assert.Single(discovered.Items, item => item.Text == "雨声压低了门口。");
+        var doorwayMaterial = Assert.Single(discovered.Items, item => item.Text == "他在门口停住。");
+        var vectors = Assert.Single(vec.Provisions).Vectors;
+        var rainRowId = vectors.Single(vector => vector.ChunkId == rainMaterial.MaterialId).RowId;
+        var doorwayRowId = vectors.Single(vector => vector.ChunkId == doorwayMaterial.MaterialId).RowId;
+        vec.SearchRecords.Add(new SqliteVecSearchRecord(rainRowId, 0.02));
+        vec.SearchRecords.Add(new SqliteVecSearchRecord(doorwayRowId, 0.60));
+
+        var result = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "门口",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        Assert.Equal(2L, result.Total);
+        Assert.Equal("雨声压低了门口。", result.Items[0].Text);
+        var firstComponents = result.Items[0].ScoreComponents ?? throw new InvalidOperationException("Expected score components.");
+        var secondComponents = result.Items[1].ScoreComponents ?? throw new InvalidOperationException("Expected score components.");
+        Assert.True(firstComponents["embedding"] > secondComponents["embedding"]);
+        Assert.Equal(BuiltinOnnxEmbeddingModel.QueryInputKind, embeddings.Options.Last().InputKind);
+        Assert.Single(vec.SearchRequests);
+    }
+
+    [Fact]
+    public async Task SearchMaterialsFallsBackWhenEmbeddingQueryFails()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("向量搜索降级测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "search-embedding-fallback.md",
+            """
+            # 第一章
+
+            雨声压低了门口。
+
+            他在门口停住。
+            """);
+        var embeddingOptions = new EmbeddingRequestOptions(
+            "custom",
+            "https://api.example.com/v1/embeddings",
+            "test-key",
+            "embed-v1",
+            3,
+            null);
+        var vec = new RecordingSqliteVecTableProvisioner();
+        var buildService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            new DeterministicEmbeddingClient(dimensions: 3),
+            vec);
+        var anchor = await buildService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "向量降级参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var searchService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            new FailingEmbeddingClient(),
+            vec);
+
+        var result = await searchService.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "门口",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        Assert.Equal(2L, result.Total);
+        Assert.Equal("他在门口停住。", result.Items[0].Text);
+        var components = result.Items[0].ScoreComponents ?? throw new InvalidOperationException("Expected score components.");
+        Assert.True(components["lexical"] > 0);
+        Assert.DoesNotContain("embedding", components.Keys);
+        Assert.Empty(vec.SearchRequests);
+    }
+
+    [Fact]
+    public async Task SearchMaterialsDoesNotRequestEmbeddingWithoutReadyVectorIndex()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("无向量搜索测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "search-no-vector-index.md",
+            """
+            # 第一章
+
+            雨声压低了门口。
+
+            他在门口停住。
+            """);
+        var embeddings = new DeterministicEmbeddingClient(dimensions: 3);
+        var service = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "custom",
+                "https://api.example.com/v1/embeddings",
+                "test-key",
+                "embed-v1",
+                3,
+                null)),
+            embeddings,
+            new FailingSqliteVecTableProvisioner("sqlite-vec native extension is unavailable."));
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "无向量参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        var result = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "门口",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        Assert.Equal(2L, result.Total);
+        Assert.Single(embeddings.Requests);
+        var components = result.Items[0].ScoreComponents ?? throw new InvalidOperationException("Expected score components.");
+        Assert.DoesNotContain("embedding", components.Keys);
+    }
+
+    [Fact]
     public async Task SearchMaterialsFiltersByNarrativeDutyEmotionTransitionPovTechniqueAndType()
     {
         var options = CreateOptions();
@@ -1860,9 +2052,25 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         }
     }
 
-    private sealed class RecordingSqliteVecTableProvisioner : ISqliteVecTableProvisioner
+    private sealed class FailingEmbeddingClient : IEmbeddingClient
+    {
+        public ValueTask<EmbeddingBatchResult> EmbedAsync(
+            IReadOnlyList<string> inputs,
+            EmbeddingRequestOptions options,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("query embedding failed");
+        }
+    }
+
+    private sealed class RecordingSqliteVecTableProvisioner : ISqliteVecTableProvisioner, ISqliteVecQueryProvider
     {
         public List<SqliteVecProvisionRequest> Provisions { get; } = [];
+
+        public List<SqliteVecSearchRequest> SearchRequests { get; } = [];
+
+        public List<SqliteVecSearchRecord> SearchRecords { get; } = [];
 
         public ValueTask ProvisionAsync(
             string databasePath,
@@ -1874,6 +2082,17 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
             Assert.Contains("create virtual table", request.CreateTableSql, StringComparison.OrdinalIgnoreCase);
             Assert.Contains($"embedding float[{request.Dimensions}]", request.CreateTableSql, StringComparison.Ordinal);
             return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<IReadOnlyList<SqliteVecSearchRecord>> SearchAsync(
+            string databasePath,
+            SqliteVecSearchRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SearchRequests.Add(request);
+            return ValueTask.FromResult<IReadOnlyList<SqliteVecSearchRecord>>(
+                SearchRecords.Take(request.TopK).ToArray());
         }
     }
 

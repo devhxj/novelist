@@ -1029,6 +1029,89 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task BindBlueprintMaterialsCarriesSearchEmbeddingScoreIntoLinkComponents()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("绑定向量评分测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        var material = new ReferenceMaterialPayload(
+            MaterialId: "embedding-ranked-material",
+            AnchorId: 1,
+            SourceSegmentId: "segment-1",
+            MaterialType: ReferenceMaterialTypes.Sentence,
+            FunctionTag: "environment",
+            EmotionTag: "neutral",
+            SceneTag: "environment",
+            PovTag: "close",
+            TechniqueTag: "sensory_detail",
+            FunctionConfidence: 0.8,
+            EmotionConfidence: 0.7,
+            PovConfidence: 0.7,
+            Text: "雨声压低了门口。",
+            SourceHash: "source-hash",
+            ExtractorVersion: "test",
+            UserVerified: false,
+            CreatedAt: DateTimeOffset.UtcNow,
+            ScoreComponents: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                ["embedding"] = 3.8
+            });
+        var referenceAnchors = new FixedReferenceAnchorService(material, applySearchFilters: true);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+        var generated = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                45,
+                "绑定向量评分蓝图",
+                "雨声压低",
+                [1],
+                KnownFacts: ["雨声压低了门口"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var beatPath = "beat:" + generated.Beats[0].BeatId + ":";
+        var revised = await service.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                generated.BlueprintId,
+                [
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.query",
+                        "雨声压低"),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.material_types",
+                        JsonSerializer.Serialize(new[] { ReferenceMaterialTypes.Sentence })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.function_tags",
+                        JsonSerializer.Serialize(new[] { "environment" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.pov_tags",
+                        JsonSerializer.Serialize(new[] { "close" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "required_material_types",
+                        JsonSerializer.Serialize(new[] { ReferenceMaterialTypes.Sentence }))
+                ],
+                "user",
+                "construct embedding-scored material binding fixture"),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId),
+            CancellationToken.None);
+        await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, review.ReviewId),
+            CancellationToken.None);
+
+        var result = await service.BindBlueprintMaterialsAsync(
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, revised.BlueprintId, MaxResultsPerBeat: 1, SelectTopCandidate: true),
+            CancellationToken.None);
+
+        var selected = Assert.Single(result.Links, link => link.Selected);
+        Assert.True(selected.ScoreComponents["embedding"] > 0);
+        Assert.Contains("embedding", selected.FitExplanation, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task BindBlueprintMaterialsRejectsLexicalMatchesWithoutFunctionalFit()
     {
         var options = CreateOptions();
