@@ -604,6 +604,46 @@ public sealed class ReferenceChapterBlueprintReviewerTests
         Assert.Contains(review.MaterialFitErrors, item => item.Contains("material fit", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void BuildReviewFailsUnsupportedReferenceQueryFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            ReferenceQuery = beat.ReferenceQuery with
+            {
+                Query = "密室钥匙"
+            }
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ReferenceBindingErrors, item => item.Contains("unsupported reference query fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "reference_binding" &&
+                defect.FieldPath.Contains("reference_query", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewAllowsReferenceQueryFactWhenKnownFactApprovesIt()
+    {
+        var blueprint = Blueprint(
+            beat => beat with
+            {
+                ReferenceQuery = beat.ReferenceQuery with
+                {
+                    Query = "密室钥匙"
+                }
+            },
+            knownFacts: ["雨声压低了整条街的呼吸", "密室钥匙"]);
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+        Assert.DoesNotContain(review.ReferenceBindingErrors, item => item.Contains("reference query fact", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static ReferenceChapterBlueprintPayload Blueprint(
         Func<ReferenceChapterBlueprintBeatPayload, ReferenceChapterBlueprintBeatPayload> configureBeat,
         ReferenceChapterBlueprintExecutionTrackPayload? execution = null,

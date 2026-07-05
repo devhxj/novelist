@@ -390,6 +390,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "Align reference query tags with beat function, emotion, POV, technique, or prose duties.");
             }
 
+            foreach (var unsupportedReferenceQueryFact in FindUnsupportedReferenceQueryFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "reference_query",
+                    $"Beat {beat.BeatIndex} contains unsupported reference query fact: {unsupportedReferenceQueryFact}",
+                    "Set up the reference_query fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before material binding.");
+            }
+
             if (beat.SlotPlan.Any(slot => UsesGenericSlotPlan(slot.SlotName, slot.Value)))
             {
                 AddBeatDefect(
@@ -737,6 +748,24 @@ internal static class ReferenceChapterBlueprintReviewer
                 "随便", "任意", "某个", "某种", "一个东西", "某样东西", "占位",
                 "之后再填", "后面再填", "待定", "替换一下", "随便替换"
             ]);
+    }
+
+    private static IEnumerable<string> FindUnsupportedReferenceQueryFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ReferenceQuery.Query)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static IEnumerable<string> FindUnsupportedSlotPlanFacts(

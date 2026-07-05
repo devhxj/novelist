@@ -86,6 +86,11 @@
       "expected_error": "unsupported slot plan fact"
     },
     {
+      "name": "unsupported_reference_query_fact",
+      "mutation": "unsupported_reference_query_fact",
+      "expected_error": "unsupported reference query fact"
+    },
+    {
       "name": "unsupported_final_hook",
       "mutation": "unsupported_final_hook",
       "expected_error": "final hook"

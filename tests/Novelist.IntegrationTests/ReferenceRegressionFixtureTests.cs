@@ -144,6 +144,13 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 SlotPlan = [new ReferenceSlotValuePayload("object", "密室钥匙")]
             },
+            "unsupported_reference_query_fact" => beat with
+            {
+                ReferenceQuery = beat.ReferenceQuery with
+                {
+                    Query = "密室钥匙"
+                }
+            },
             "unsupported_final_hook" => beat,
             "unsupported_scene_fact" => beat with
             {
