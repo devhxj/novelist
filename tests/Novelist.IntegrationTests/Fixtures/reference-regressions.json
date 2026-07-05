@@ -46,6 +46,11 @@
       "expected_error": "周鸣是卧底"
     },
     {
+      "name": "forbidden_viewpoint_allowed_knowledge_fact",
+      "mutation": "forbidden_viewpoint_allowed_knowledge_fact",
+      "expected_error": "forbidden fact appears in viewpoint allowed knowledge"
+    },
+    {
       "name": "missing_prose_duty",
       "mutation": "missing_prose_duty",
       "expected_error": "prose duties"

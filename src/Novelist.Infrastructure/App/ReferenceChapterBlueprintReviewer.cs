@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 25;
+    public const int CurrentReviewVersion = 26;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -554,6 +554,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "scene_facts",
                     $"Forbidden fact appears in blueprint: {forbidden}",
                     "Remove the forbidden fact from beat scene facts or move it out of the forbidden fact set.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => beat.ViewpointAllowedKnowledge.Any(fact => ContainsForbidden(fact, forbidden))))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "viewpoint_allowed_knowledge",
+                    $"Forbidden fact appears in viewpoint allowed knowledge: {forbidden}",
+                    "Remove the forbidden fact from beat viewpoint_allowed_knowledge before it is treated as POV-approved.");
             }
 
             foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.ReferenceQuery.Query, forbidden)))
