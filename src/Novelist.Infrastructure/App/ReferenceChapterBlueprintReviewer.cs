@@ -369,6 +369,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "Rewrite source_backed_detail_target as a concrete detail from approved source material, such as an object, sensory cue, gesture, or environmental pressure.");
             }
 
+            foreach (var unsupportedSourceDetailTargetFact in FindUnsupportedSourceBackedDetailTargetFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    novelisticNarrationErrors,
+                    "novelistic_narration",
+                    beat,
+                    "source_backed_detail_target",
+                    $"Beat {beat.BeatIndex} contains unsupported source-backed detail target fact: {unsupportedSourceDetailTargetFact}",
+                    "Set up the source_backed_detail_target fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
             if (string.IsNullOrWhiteSpace(beat.ReferenceQuery.Query) || beat.RequiredMaterialTypes.Count == 0)
             {
                 AddBeatDefect(
@@ -759,6 +770,24 @@ internal static class ReferenceChapterBlueprintReviewer
                 "随便", "任意", "某个", "某种", "一个东西", "某样东西", "占位",
                 "之后再填", "后面再填", "待定", "替换一下", "随便替换"
             ]);
+    }
+
+    private static IEnumerable<string> FindUnsupportedSourceBackedDetailTargetFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.SourceBackedDetailTarget)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static IEnumerable<string> FindUnsupportedReferenceQueryFacts(

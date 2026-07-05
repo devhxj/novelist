@@ -505,6 +505,40 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsUnsupportedSourceBackedDetailTargetFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            SourceBackedDetailTarget = "密室钥匙"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.NovelisticNarrationErrors, item => item.Contains("unsupported source-backed detail target fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "novelistic_narration" &&
+                defect.FieldPath.Contains("source_backed_detail_target", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewAllowsSourceBackedDetailTargetFactWhenKnownFactApprovesIt()
+    {
+        var blueprint = Blueprint(
+            beat => beat with
+            {
+                SourceBackedDetailTarget = "密室钥匙"
+            },
+            knownFacts: ["雨声压低了整条街的呼吸", "密室钥匙"]);
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+        Assert.DoesNotContain(review.NovelisticNarrationErrors, item => item.Contains("source-backed detail target fact", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsGenericSlotPlan()
     {
         var blueprint = Blueprint(beat => beat with

@@ -76,6 +76,11 @@
       "expected_error": "generic source-backed detail target"
     },
     {
+      "name": "unsupported_source_backed_detail_target_fact",
+      "mutation": "unsupported_source_backed_detail_target_fact",
+      "expected_error": "unsupported source-backed detail target fact"
+    },
+    {
       "name": "generic_slot_plan",
       "mutation": "generic_slot_plan",
       "expected_error": "generic slot plan"
