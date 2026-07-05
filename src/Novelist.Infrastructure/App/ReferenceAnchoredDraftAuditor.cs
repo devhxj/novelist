@@ -283,6 +283,7 @@ internal static class ReferenceAnchoredDraftAuditor
         }
 
         violations.AddRange(FindUnperceivedPovFactReveals(beat, candidateText));
+        violations.AddRange(FindHiddenPositionBehindPovReveals(beat, candidateText));
         return violations;
     }
 
@@ -307,6 +308,34 @@ internal static class ReferenceAnchoredDraftAuditor
             {
                 yield return "limited POV cannot reveal unperceived facts to the reader.";
             }
+        }
+    }
+
+    private static IEnumerable<string> FindHiddenPositionBehindPovReveals(
+        ReferenceChapterBlueprintBeatPayload beat,
+        string candidateText)
+    {
+        if (string.IsNullOrWhiteSpace(beat.PovCharacter))
+        {
+            yield break;
+        }
+
+        var povCharacter = Regex.Escape(beat.PovCharacter.Trim());
+        var povCannotSeeBehind = Regex.IsMatch(
+            candidateText,
+            povCharacter + @"[^。！？!?；;\n]{0,18}(背对着|背对|没有回头|没回头|未回头|不曾回头|背身)",
+            RegexOptions.IgnoreCase);
+        if (!povCannotSeeBehind)
+        {
+            yield break;
+        }
+
+        if (Regex.IsMatch(
+            candidateText,
+            @"(门后|身后|背后|暗处|阴影里|走廊尽头)[^。！？!?；;\n]{0,20}(站着|藏|躲|握|看着|盯着|等着|无声|出现)",
+            RegexOptions.IgnoreCase))
+        {
+            yield return "limited POV cannot reveal hidden position behind the POV character.";
         }
     }
 

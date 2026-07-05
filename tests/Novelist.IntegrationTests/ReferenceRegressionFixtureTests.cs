@@ -161,6 +161,7 @@ public sealed class ReferenceRegressionFixtureTests
         return mutation switch
         {
             "pov_forbidden_scene_fact" => ["雨声压低了整条街的呼吸", "周鸣是卧底"],
+            "limited_pov_hidden_position" => ["雨声压低了整条街的呼吸", "周鸣在门后"],
             _ => ["雨声压低了整条街的呼吸"]
         };
     }
@@ -186,6 +187,11 @@ public sealed class ReferenceRegressionFixtureTests
                 CharacterStatesBefore = ["林岚 controlled", "周鸣 guarded"]
             },
             "limited_pov" => beat with
+            {
+                PovCharacter = "林岚",
+                NarrativeDistance = "limited"
+            },
+            "limited_pov_hidden_position" => beat with
             {
                 PovCharacter = "林岚",
                 NarrativeDistance = "limited"

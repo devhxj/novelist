@@ -355,6 +355,28 @@ public sealed class ReferenceAnchoredDraftAuditorTests
     }
 
     [Fact]
+    public void BuildDraftAuditFailsWhenLimitedPovRevealsHiddenPositionBehindPovCharacter()
+    {
+        var blueprint = Blueprint(
+            beat => beat with
+            {
+                NarrativeDistance = "limited",
+                PovCharacter = "林岚"
+            },
+            knownFacts: ["雨声压低了整条街的呼吸", "周鸣在门后"]);
+        var candidate = Candidate(blueprint, "雨声压低了整条街的呼吸，林岚背对着门，周鸣在门后无声地站着。");
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.PovErrors, item => item.Contains("hidden position", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(audit.UnsupportedFactErrors);
+    }
+
+    [Fact]
     public void BuildDraftAuditFailsWhenRequiredProseTargetIsMissing()
     {
         var blueprint = Blueprint(beat => beat with

@@ -131,6 +131,12 @@
       "expected_error": "unperceived"
     },
     {
+      "name": "limited_pov_hidden_position",
+      "mutation": "limited_pov_hidden_position",
+      "text": "雨声压低了整条街的呼吸，林岚背对着门，周鸣在门后无声地站着。",
+      "expected_error": "hidden position"
+    },
+    {
       "name": "missing_required_subtext",
       "mutation": "required_subtext",
       "text": "雨声压低了整条街的呼吸，林岚心里一紧，指尖停住。",
