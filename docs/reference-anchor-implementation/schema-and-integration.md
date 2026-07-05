@@ -2,11 +2,11 @@
 
 [Back to implementation index](../reference-anchor-implementation-plan.md).
 
-## Database Schema Plan
+## Database Schema
 
-Create schema in `SqliteReferenceAnchorService.EnsureSchemaAsync`.
+The current schema is created by `SqliteReferenceAnchorService.EnsureSchemaAsync` and `SqliteReferenceAnchoredDraftService.EnsureSchemaAsync` in the dedicated reference-anchor SQLite database.
 
-Tables:
+Current core tables:
 
 ```text
 reference_anchors
@@ -14,20 +14,19 @@ reference_anchor_build_state
 reference_source_segments
 reference_materials
 reference_material_slots
-reference_material_scores
 reference_reuse_candidates
 reference_reuse_audits
 reference_user_feedback
 reference_chapter_blueprints
 reference_chapter_blueprint_beats
 reference_chapter_blueprint_reviews
+reference_chapter_blueprint_approvals
 reference_chapter_blueprint_revisions
 reference_blueprint_material_links
 reference_draft_paragraph_candidates
-reference_draft_audits
 ```
 
-Minimum columns:
+Core columns:
 
 ```text
 reference_anchors
@@ -186,6 +185,17 @@ reference_chapter_blueprint_reviews
 - defects_json TEXT NOT NULL
 - reviewed_at TEXT NOT NULL
 
+reference_chapter_blueprint_approvals
+- approval_id TEXT PRIMARY KEY
+- blueprint_id INTEGER NOT NULL
+- review_id TEXT NOT NULL
+- context_hash TEXT NOT NULL
+- source_plan_hash TEXT NOT NULL
+- analysis_contract_hash TEXT NOT NULL
+- review_version INTEGER NOT NULL
+- approver_origin TEXT NOT NULL
+- approved_at TEXT NOT NULL
+
 reference_chapter_blueprint_revisions
 - revision_id TEXT PRIMARY KEY
 - blueprint_id INTEGER NOT NULL
@@ -227,21 +237,6 @@ reference_draft_paragraph_candidates
 - audit_status TEXT NOT NULL
 - created_at TEXT NOT NULL
 
-reference_draft_audits
-- audit_id TEXT PRIMARY KEY
-- candidate_id TEXT NOT NULL
-- blueprint_id INTEGER NOT NULL
-- beat_id TEXT NOT NULL
-- status TEXT NOT NULL
-- rewrite_level TEXT NOT NULL
-- provenance_errors_json TEXT NOT NULL
-- blueprint_errors_json TEXT NOT NULL
-- unsupported_fact_errors_json TEXT NOT NULL
-- pov_errors_json TEXT NOT NULL
-- ai_prose_risks_json TEXT NOT NULL
-- required_fixes_json TEXT NOT NULL
-- audited_at TEXT NOT NULL
-
 reference_user_feedback
 - feedback_id TEXT PRIMARY KEY
 - novel_id INTEGER NOT NULL
@@ -259,17 +254,19 @@ reference_user_feedback
 - created_at TEXT NOT NULL
 ```
 
-Add indexes:
+Current indexes:
 
 ```text
 idx_reference_anchors_novel
 idx_reference_segments_anchor_type
 idx_reference_materials_anchor_type
 idx_reference_materials_tags
+idx_reference_material_slots_material
 idx_reference_candidates_material
 idx_reference_blueprints_novel_chapter
 idx_reference_blueprint_beats_blueprint
 idx_reference_blueprint_reviews_blueprint
+idx_reference_blueprint_approvals_blueprint
 idx_reference_blueprint_revisions_blueprint
 idx_reference_blueprint_links_beat
 idx_reference_draft_candidates_blueprint
@@ -277,17 +274,17 @@ idx_reference_feedback_novel_target
 idx_reference_feedback_material
 ```
 
-Enable foreign key enforcement on every SQLite connection:
+Foreign key enforcement is enabled on reference-anchor SQLite connections:
 
 ```sql
 PRAGMA foreign_keys = ON;
 ```
 
-The current RAG service does not enable foreign keys because it has only two flat tables. Reference-anchor storage has real parent/child integrity and should enable it.
+The current RAG service does not enable foreign keys because it has only two flat tables. Reference-anchor storage has real parent/child integrity and enables it.
 
-## Bridge API Plan
+## Bridge API Surface
 
-Add:
+Current reference-anchor bridge methods:
 
 ```text
 CreateReferenceAnchor
@@ -340,11 +337,9 @@ Handler pattern should mirror `WorkspaceUtilityBridgeHandlers`:
 - return structured payloads
 - `UpdateReferenceMaterialTags` updates the stored material row for user-confirmed function, emotion, POV, scene, or technique tags and marks it `user_verified`
 
-## Desktop Composition Plan
+## Desktop Composition
 
-Update `src/Novelist.App/Desktop/PhotinoWindowFactory.cs`.
-
-Construct after embedding/RAG dependencies:
+`src/Novelist.App/Desktop/PhotinoWindowFactory.cs` constructs the reference services after embedding/RAG dependencies:
 
 ```csharp
 var referenceAnchorService = new SqliteReferenceAnchorService(
@@ -363,7 +358,7 @@ var referenceAnchoredDraftService = new SqliteReferenceAnchoredDraftService(
     llmService);
 ```
 
-Then:
+It passes both services into `NovelistMafToolRegistry` so chat tools can access reference-anchor operations:
 
 ```csharp
 var chatToolExecutor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
@@ -381,18 +376,18 @@ var chatToolExecutor = new NovelistMafChatToolExecutor(new NovelistMafToolRegist
     referenceAnchoredDraftService));
 ```
 
-And:
+It also registers both Photino bridge handler groups on the shared dispatcher:
 
 ```csharp
 .RegisterReferenceAnchorHandlers(referenceAnchorService)
 .RegisterReferenceAnchoredDraftHandlers(referenceAnchoredDraftService)
 ```
 
-The exact constructor should be added in a backward-compatible way:
+The `NovelistMafToolRegistry` constructor keeps backward-compatible defaults:
 
-- keep existing constructor signatures working for tests
-- add optional `IReferenceAnchorService? referenceAnchors = null` parameter near the end
-- add optional `IReferenceAnchoredDraftService? referenceDrafts = null` after reference anchors
+- existing constructor signatures still work for tests;
+- `IReferenceAnchorService? referenceAnchors = null` is optional;
+- `IReferenceAnchoredDraftService? referenceDrafts = null` is optional after reference anchors.
 
 ## Agent Tool Plan
 
@@ -451,7 +446,7 @@ Tool limits:
 
 Tool schemas must not expose `novel_id`, `session_id`, `turn_id`, or `tool_id`.
 
-Agent workflow order must be enforced in tool descriptions and service validation:
+Agent workflow order is enforced in tool descriptions and service validation:
 
 ```text
 search/reference context
@@ -466,14 +461,14 @@ search/reference context
   -> audit_reference_anchored_draft
 ```
 
-Agent hardening still required:
+Agent hardening currently covered:
 
-- tool-description regression tests proving models are told to create/review a blueprint before drafting;
-- schema regression tests proving internal fields remain hidden.
+- `ReferenceDraftToolDescriptionsEnforceBlueprintWorkflowOrder` proves models are told to generate/review/approve/bind before drafting and to avoid `SaveContent`;
+- reference tool schema tests prove `novel_id`, `session_id`, `turn_id`, and `tool_id` remain hidden.
 
-## Frontend Plan
+## Frontend Surface
 
-Update API/type layer:
+Current API/type layer:
 
 ```text
 frontend/src/lib/novelist/types.ts
@@ -481,7 +476,7 @@ frontend/src/lib/novelist/api.ts
 frontend/src/hooks/useApp.ts
 ```
 
-Add namespace:
+The owned TypeScript bridge exposes the `reference` namespace with:
 
 ```ts
 export namespace reference {
@@ -502,27 +497,23 @@ export namespace reference {
 }
 ```
 
-Add view components:
+Current view components:
 
 ```text
 frontend/src/components/reference-anchor/ReferenceAnchorView.tsx
-frontend/src/components/reference-anchor/ReferenceAnchorImportDialog.tsx
-frontend/src/components/reference-anchor/ReferenceMaterialSearch.tsx
-frontend/src/components/reference-anchor/ReferenceCandidatePreview.tsx
-frontend/src/components/reference-anchor/ReferenceChapterBlueprintView.tsx
-frontend/src/components/reference-anchor/ReferenceBlueprintBeatEditor.tsx
-frontend/src/components/reference-anchor/ReferenceBlueprintReviewPanel.tsx
-frontend/src/components/reference-anchor/ReferenceAnchoredDraftPreview.tsx
+frontend/src/components/reference-anchor/BlueprintDetail.tsx
+frontend/src/components/reference-anchor/blueprintRevision.ts
+frontend/src/components/reference-anchor/referenceAnchorStyles.ts
 ```
 
-Update:
+Current shell integration:
 
 ```text
 frontend/src/components/shell/ActivityBar.tsx
 frontend/src/views/WorkspaceView.tsx
 ```
 
-UI first version:
+Current main-panel workflow:
 
 - list anchors for active novel
 - create anchor from local `.txt`/`.md` path
@@ -540,7 +531,7 @@ UI first version:
 - bind reference materials to blueprint beats
 - generate draft candidates only from approved blueprints
 - show draft text alongside source material, blueprint beat, rewrite level, and audit result
-- copy candidate; no automatic insertion in phase 1
+- preview candidates; no automatic insertion in phase 1
 
 Current frontend status:
 

@@ -168,19 +168,19 @@ AppInitializationOptions
   -> BridgeDispatcher.Register...
 ```
 
-Reference-anchor service must be instantiated in this factory and passed to both:
+The current composition instantiates the reference-anchor service in this factory and passes it to both:
 
 - `ReferenceAnchorBridgeHandlers`
 - `NovelistMafToolRegistry`
 
-The anchored drafting service must be instantiated after the reference-anchor service because it consumes:
+The anchored drafting service is instantiated after the reference-anchor service because it consumes:
 
 - the immutable reference material bank;
 - chapter content and planning services;
 - world/timeline state used to prevent invented facts;
 - the LLM configuration used to create structured blueprints and prose candidates.
 
-It should be passed to:
+It is passed to:
 
 - `ReferenceAnchoredDraftBridgeHandlers`
 - `NovelistMafToolRegistry`
@@ -277,13 +277,13 @@ Do not reuse `RagChunkPayload` or `rag_chunks`; reference anchors need a separat
 
 The registry injects `NovelId` through `NovelistMafToolContext`. Tool schemas must not expose internal session fields unless intentionally part of the tool.
 
-Reference tools should be added as a new partial file:
+Reference tools live in a dedicated partial file:
 
 ```text
 src/Novelist.Agent/NovelistMafReferenceTools.cs
 ```
 
-The agent tools should retrieve/adapt/audit materials and generate/review blueprint-gated draft candidates, but must not call `SaveContent`.
+The agent tools retrieve/adapt/audit materials and generate/review blueprint-gated draft candidates, but must not call `SaveContent`.
 
 ### Frontend Model
 
@@ -294,13 +294,13 @@ Workspace UI is organized through:
 - `frontend/src/components/sidebar/SidePanel.tsx`
 - feature folders under `frontend/src/components/`
 
-Recommended frontend entry:
+Current reference-anchor frontend entry:
 
 ```text
 frontend/src/components/reference-anchor/ReferenceAnchorView.tsx
-frontend/src/components/reference-anchor/ReferenceAnchorList.tsx
-frontend/src/components/reference-anchor/ReferenceMaterialSearch.tsx
-frontend/src/components/reference-anchor/ReferenceCandidatePreview.tsx
+frontend/src/components/reference-anchor/BlueprintDetail.tsx
+frontend/src/components/reference-anchor/blueprintRevision.ts
+frontend/src/components/reference-anchor/referenceAnchorStyles.ts
 ```
 
-Add a new activity id, for example `reference`, in `ActivityBar`. Render the main view from `WorkspaceView`. A small list/filter panel can be added to `SidePanel` later, but the first UI can be a full main panel.
+`ActivityBar` includes the `reference` activity, and `WorkspaceView` renders `ReferenceAnchorView` for the active novel. A small list/filter panel can be added to `SidePanel` later, but the current UI is a full main panel.

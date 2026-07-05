@@ -418,7 +418,7 @@ Responsibilities:
 - beat draft candidate generator: receives one approved beat and selected material links, never a whole-chapter free-form writing prompt;
 - draft auditor: checks provenance, rewrite level, forbidden facts, POV boundary, prose duties, emotion evidence, and screenplay drift.
 
-Current in-progress code already has `ReferenceAnchoredDraftAuditor` extracted. The remaining reviewer, binder, normalizer, and candidate-generator components should be extracted incrementally as their rule sets grow. Do not expose these interfaces from `Novelist.Core` until there is a proven need for alternate implementations.
+Current code has `ReferenceChapterBlueprintNormalizer`, `ReferenceChapterBlueprintReviewer`, `ReferenceAnchoredDraftPreflight`, and `ReferenceAnchoredDraftAuditor` extracted as internal implementation components. Material binding and beat candidate generation still live inside `SqliteReferenceAnchoredDraftService`; extract them only if their rule sets grow enough to justify a separate component. Do not expose these internals from `Novelist.Core` until there is a proven need for alternate implementations.
 
 The key implementation invariant is that no component may both create and approve its own artifact:
 
@@ -436,9 +436,9 @@ This separation is what makes the layer robust. It prevents one LLM-shaped opera
 
 ### Import Semantics
 
-Phase 1 import should support only `.txt` and `.md`.
+Reference anchor import currently supports `.txt` and `.md`.
 
-`CreateReferenceAnchorPayload` should accept a user-provided local source path:
+`CreateReferenceAnchorPayload` accepts a user-provided local source path:
 
 ```csharp
 public sealed record CreateReferenceAnchorPayload(
@@ -457,10 +457,10 @@ Validation:
 - source path non-empty, max 1024 chars
 - source file must exist
 - source extension must be `.txt` or `.md`
-- source file max size should be capped in phase 1, for example 20 MB
+- source file max size is capped
 - license status must be an allowed enum string
 
-The service should read the source once and persist immutable source segments. It should not let agent tools read arbitrary source paths later.
+The service reads the source once and persists immutable source segments. Agent tools operate on imported anchor/material ids and must not read arbitrary source paths later.
 
 Unknown-license sources are allowed, but exact source text should not be exposed as a full search/library preview by default. The service keeps complete imported source segments and materials in SQLite for provenance, hashing, adaptation, binding, and audit, while `SearchReferenceMaterials` truncates preview text for anchors marked `license_status = unknown`.
 
@@ -774,7 +774,7 @@ The execution track is intentionally separate from the reference track. A refere
 
 Current contract status:
 
-- The in-progress payload now carries `logic_analysis`, `emotion_analysis`, `narration_analysis`, `character_analysis`, `reference_analysis`, `transition_plan`, and `execution_contract`.
+- The payload carries `logic_analysis`, `emotion_analysis`, `narration_analysis`, `character_analysis`, `reference_analysis`, `transition_plan`, and `execution_contract`.
 - `reference_analysis` must remain a first-class track. Beat-level `reference_query` fields are still required, but they are execution details under the chapter-level reference-use analysis, not a substitute for it.
 - Review must treat missing chapter-level reference analysis, missing beat-level reference queries, missing material types, missing intended use, missing rewrite levels, and missing no-reuse reasons as reference-track defects.
 
