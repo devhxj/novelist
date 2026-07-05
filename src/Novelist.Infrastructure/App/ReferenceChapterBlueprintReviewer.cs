@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 46;
+    public const int CurrentReviewVersion = 47;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -105,6 +105,28 @@ internal static class ReferenceChapterBlueprintReviewer
                 string.Empty,
                 $"Blueprint contains unsupported chapter function fact: {unsupportedChapterFunctionFact}",
                 "Set up the chapter_function fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
+        }
+
+        foreach (var unsupportedPreviousStateFact in FindUnsupportedPreviousStateFacts(blueprint))
+        {
+            AddDefect(
+                continuityErrors,
+                "continuity",
+                "previous_state",
+                string.Empty,
+                $"Blueprint contains unsupported previous state fact: {unsupportedPreviousStateFact}",
+                "Set up the previous_state fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
+        }
+
+        foreach (var unsupportedFinalStateFact in FindUnsupportedFinalStateFacts(blueprint))
+        {
+            AddDefect(
+                continuityErrors,
+                "continuity",
+                "final_state",
+                string.Empty,
+                $"Blueprint contains unsupported final state fact: {unsupportedFinalStateFact}",
+                "Set up the final_state fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
         }
 
         foreach (var beat in blueprint.Beats.OrderBy(item => item.BeatIndex))
@@ -766,6 +788,28 @@ internal static class ReferenceChapterBlueprintReviewer
                     string.Empty,
                     $"Forbidden fact appears in chapter function: {forbidden}",
                     "Remove the forbidden fact from the chapter function or move it out of the forbidden fact set.");
+            }
+
+            if (ContainsForbidden(blueprint.PreviousState, forbidden))
+            {
+                AddDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    "previous_state",
+                    string.Empty,
+                    $"Forbidden fact appears in previous state: {forbidden}",
+                    "Remove the forbidden fact from the previous state or move it out of the forbidden fact set.");
+            }
+
+            if (ContainsForbidden(blueprint.FinalState, forbidden))
+            {
+                AddDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    "final_state",
+                    string.Empty,
+                    $"Forbidden fact appears in final state: {forbidden}",
+                    "Remove the forbidden fact from the final state or move it out of the forbidden fact set.");
             }
 
             if (ContainsForbidden(blueprint.FinalHook, forbidden))
@@ -1496,6 +1540,38 @@ internal static class ReferenceChapterBlueprintReviewer
             .ToArray();
 
         return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(blueprint.ChapterFunction)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedPreviousStateFacts(ReferenceChapterBlueprintPayload blueprint)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SceneFacts))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.ViewpointAllowedKnowledge))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SlotPlan.Select(slot => slot.Value)))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(blueprint.PreviousState)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedFinalStateFacts(ReferenceChapterBlueprintPayload blueprint)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SceneFacts))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.ViewpointAllowedKnowledge))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SlotPlan.Select(slot => slot.Value)))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(blueprint.FinalState)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

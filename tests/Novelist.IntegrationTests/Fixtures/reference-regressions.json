@@ -166,6 +166,26 @@
       "expected_error": "forbidden fact appears in chapter function"
     },
     {
+      "name": "unsupported_previous_state_fact",
+      "mutation": "unsupported_previous_state_fact",
+      "expected_error": "unsupported previous state fact"
+    },
+    {
+      "name": "unsupported_final_state_fact",
+      "mutation": "unsupported_final_state_fact",
+      "expected_error": "unsupported final state fact"
+    },
+    {
+      "name": "forbidden_previous_state_fact",
+      "mutation": "forbidden_previous_state_fact",
+      "expected_error": "forbidden fact appears in previous state"
+    },
+    {
+      "name": "forbidden_final_state_fact",
+      "mutation": "forbidden_final_state_fact",
+      "expected_error": "forbidden fact appears in final state"
+    },
+    {
       "name": "generic_paragraph_intention",
       "mutation": "generic_paragraph_intention",
       "expected_error": "generic paragraph intention"
