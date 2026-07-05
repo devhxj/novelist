@@ -179,6 +179,7 @@ Targeted Phase 12 thin-slice checks completed:
 - [x] Orchestration binding can use `corpus_search_policy` include/exclude anchor filters and license-status filters when `anchor_ids` are omitted, while keeping the existing per-novel reference-anchor storage model.
 - [x] Reference material read paths now include `reference_anchors.novel_id = 0` workspace-corpus compatibility anchors for listing, search, adaptation, audit, tag correction, and per-novel feedback validation, while still excluding private anchors from other novels.
 - [x] A real SQLite orchestration run can omit explicit `anchor_ids`, resolve `novel_id = 0` workspace-corpus anchors through the default corpus policy, bind selected material links, generate audited candidates, and stop at final insertion without writing chapter prose.
+- [x] Real SQLite orchestration coverage proves workspace-corpus anchors are filtered by `corpus_search_policy.license_statuses` before binding selected materials.
 
 **Files likely touched:**
 

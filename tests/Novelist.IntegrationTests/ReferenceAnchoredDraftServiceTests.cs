@@ -3348,6 +3348,74 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReferenceOrchestrationRunFiltersWorkspaceCorpusAnchorsByLicensePolicy()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("共享语料授权过滤目标", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "雨声压低街道，主角在门口停住，心里意识到压力仍然压着呼吸。"),
+            CancellationToken.None);
+        var allowedSourcePath = CreateSourceFile(
+            "workspace-license-allowed.md",
+            """
+            # 第一章
+
+            雨声压低了街道，他在门口停住，心里意识到压力仍然压着呼吸。
+            """);
+        var unknownSourcePath = CreateSourceFile(
+            "workspace-license-unknown.md",
+            """
+            # 第一章
+
+            雨声压低了街道，他在门口停住，心里意识到另一个未经授权的秘密正在逼近。
+            """);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novels);
+        var allowedAnchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "授权共享参考", null, allowedSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var unknownAnchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "未知授权共享参考", null, unknownSourcePath, "markdown", "unknown"),
+            CancellationToken.None);
+        await MarkAnchorAsWorkspaceCorpusAsync(options, allowedAnchor.AnchorId);
+        await MarkAnchorAsWorkspaceCorpusAsync(options, unknownAnchor.AnchorId);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+
+        var started = await service.StartOrchestrationRunAsync(
+            new StartReferenceOrchestrationRunPayload(
+                novel.Id,
+                ChapterNumber: 15,
+                ChapterGoal: "雨声压低街道，主角在门口停住，心里意识到压力仍然压着呼吸",
+                KnownFacts: ["雨声压低街道", "主角在门口停住", "心里意识到压力仍然压着呼吸"],
+                ForbiddenFacts: ["未经授权的秘密"],
+                AnchorIds: null,
+                CorpusSearchPolicy: new ReferenceCorpusSearchPolicyPayload(
+                    "story_context",
+                    MaxResultsPerBeat: 3,
+                    LicenseStatuses: ["user_provided"],
+                    IncludeAnchorIds: [],
+                    ExcludeAnchorIds: []),
+                SourceConfirmed: true),
+            CancellationToken.None);
+        var completedSafeStages = await service.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                started.RunId,
+                ReferenceOrchestrationDecisionTypes.ApproveBlueprint,
+                started.ReviewId),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationStages.FinalInsertion, completedSafeStages.Stage);
+        var selectedLinks = await ReadSelectedMaterialLinksAsync(options, completedSafeStages.BlueprintId);
+        var selected = Assert.Single(selectedLinks);
+        Assert.StartsWith(allowedAnchor.AnchorId + ":material:", selected.MaterialId, StringComparison.Ordinal);
+        Assert.DoesNotContain(unknownAnchor.AnchorId + ":material:", selected.MaterialId, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReferenceOrchestrationRunUsesCorpusSearchPolicyWhenBindingMaterials()
     {
         var options = CreateOptions();
