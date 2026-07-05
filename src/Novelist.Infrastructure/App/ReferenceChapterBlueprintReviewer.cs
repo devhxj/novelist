@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 57;
+    public const int CurrentReviewVersion = 58;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -1324,6 +1324,28 @@ internal static class ReferenceChapterBlueprintReviewer
                 string.Empty,
                 $"Every reference-bound beat asks for the same reference material type: {materialTypeSignatures[0]}.",
                 "Review whether different beats need chapter, paragraph, sentence, or passage material types based on narrative function.");
+        }
+
+        var normalizedBeatDuties = blueprint.Beats
+            .Select(beat => NormalizeTags(beat.ProseDuties).ToArray())
+            .Where(duties => duties.Length > 0)
+            .ToArray();
+        var repeatedDuty = normalizedBeatDuties
+            .SelectMany(duties => duties)
+            .GroupBy(duty => duty, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new { Duty = group.Key, Count = group.Count() })
+            .OrderByDescending(item => item.Count)
+            .FirstOrDefault();
+        if (normalizedBeatDuties.Length >= 3 &&
+            repeatedDuty is not null &&
+            repeatedDuty.Count * 2 > normalizedBeatDuties.Length)
+        {
+            AddWarningDefect(
+                "execution",
+                "beats.prose_duties",
+                string.Empty,
+                $"Too many beats use the same narrative duty: {repeatedDuty.Duty} ({repeatedDuty.Count} of {normalizedBeatDuties.Length}).",
+                "Vary prose duties across beats so the blueprint distinguishes interiority, sensory pressure, subtext, transition, environment, or source detail work.");
         }
 
         var defectCount = logicErrors.Count + causalityErrors.Count + emotionErrors.Count +
