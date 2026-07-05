@@ -24,8 +24,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private static readonly string[] InteriorityMarkers = ["心", "想", "觉得", "明白", "知道", "意识到", "记得", "忘了"];
     private static readonly string[] ActionMarkers = ["走", "停", "看", "拿", "推", "转", "站", "坐", "伸", "退", "进", "出"];
     private static readonly string[] TransitionMarkers = ["后来", "然后", "这时", "与此同时", "片刻", "很快", "直到"];
-    private static readonly string[] EmotionEvidenceMarkers = ["喉咙", "指尖", "手指", "指节", "掌心", "眼神", "目光", "声音", "沉默", "停顿", "没有回答", "避开", "咽下", "发紧", "发凉", "发涩", "发颤", "颤", "扣紧", "蜷紧", "欲言又止"];
-    private static readonly string[] RestrainedEmotionMarkers = ["没有回答", "却", "避开", "咽下", "忍住", "发紧", "发凉", "发涩", "沉默", "扣紧", "蜷紧", "欲言又止"];
+    private static readonly string[] EmotionEvidenceMarkers = ["喉咙", "指尖", "手指", "指节", "掌心", "眼神", "目光", "声音", "沉默", "停顿", "没有回答", "避开", "咽下", "发紧", "发凉", "发涩", "发颤", "颤", "扣紧", "蜷紧", "欲言又止", "杯子推远"];
+    private static readonly string[] RestrainedEmotionMarkers = ["没有回答", "却", "避开", "咽下", "忍住", "发紧", "发凉", "发涩", "沉默", "扣紧", "蜷紧", "欲言又止", "杯子推远"];
     private static readonly string[] LimitedPovMarkers = ["看不见", "没看见", "不知道", "并不知道", "没有察觉", "未曾发现", "无从知道", "背对着", "背对", "没有回头", "没回头", "未回头"];
     private static readonly string[] AfterbeatMarkers = ["移开目光", "垂下眼", "停了一下", "停住", "顿了顿", "沉默了一下", "攥紧", "松开"];
     private static readonly string[] AiRiskPhrases = ["无法言喻", "复杂的情绪", "某种意义上", "仿佛有什么", "命运的齿轮", "心中涌起"];
@@ -2190,7 +2190,9 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             "transition" => IsTag(material.FunctionTag, "transition"),
             "sensory" or "sensory_anchor" => IsTag(material.TechniqueTag, "sensory_detail"),
             "causality" => !IsTag(material.FunctionTag, "dialogue"),
-            "subtext" => IsTag(material.FunctionTag, "dialogue") || IsTag(material.FunctionTag, "interiority"),
+            "subtext" => IsTag(material.FunctionTag, "dialogue") ||
+                IsTag(material.FunctionTag, "interiority") ||
+                IsTag(material.FunctionTag, "emotion_evidence"),
             "source_detail" or "source_backed_detail" => IsTag(material.FunctionTag, "environment") || IsTag(material.TechniqueTag, "sensory_detail"),
             "physical_afterbeat" or "afterbeat" => IsTag(material.TechniqueTag, "afterbeat") || IsTag(material.FunctionTag, "action"),
             var normalized => IsTag(material.FunctionTag, normalized) ||

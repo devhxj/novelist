@@ -516,6 +516,53 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchMaterialsMatchesSubtextDutyForObjectBasedExternalEvidence()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("潜台词外显证据测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "subtext-external-evidence.md",
+            """
+            # 第一章
+
+            她只把杯子推远。
+
+            她说：不用。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "潜台词外显证据参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        var result = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                Page: 1,
+                Size: 10,
+                NarrativeDuties: ["subtext"],
+                EmotionTransitions: ["neutral->restrained"]),
+            CancellationToken.None);
+
+        var material = Assert.Single(result.Items);
+        Assert.Equal("她只把杯子推远。", material.Text);
+        Assert.Equal("emotion_evidence", material.FunctionTag);
+        Assert.Equal("restrained", material.EmotionTag);
+        Assert.Equal("external_evidence", material.TechniqueTag);
+        Assert.NotNull(material.ScoreComponents);
+        Assert.True(material.ScoreComponents["narrative_duty"] > 0);
+        Assert.True(material.ScoreComponents["emotion_transition"] > 0);
+    }
+
+    [Fact]
     public async Task CreateAnchorPersistsMaterialProvenanceTagsAndSlots()
     {
         var options = CreateOptions();
