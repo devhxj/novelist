@@ -386,6 +386,7 @@ Important boundary rules:
 
 - `GenerateDraftFromBlueprintAsync` must reject unreviewed or failed blueprints.
 - The drafting service returns candidates only; it must not call `SaveContent`.
+- Full-chapter assembly remains deferred. The current public draft payload returns beat-scoped paragraph candidates plus audit data only; it must not expose `chapter_text`, `assembled_text`, or `full_chapter` fields until every participating beat candidate has passing audit/provenance and a separate insertion-confirmation design exists.
 - `ReviseChapterBlueprintAsync` must create an auditable revision entry and invalidate approval/material links when any reviewed field changes.
 - `ApproveChapterBlueprintAsync` must verify that the latest passing review matches the current `context_hash`, `source_plan_hash`, `analysis_contract_hash`, and `review_version`.
 - `BindBlueprintMaterialsAsync` must verify approval first, then create beat-material candidate links against the approved analysis contract. It defaults to returning ranked candidates without selecting them; callers must explicitly request top-candidate selection before draft generation. It must not bind materials to a draft, failed, stale, or merely review-passed blueprint.

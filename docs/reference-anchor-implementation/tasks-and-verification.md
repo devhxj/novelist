@@ -404,7 +404,7 @@ Recommended implementation slices:
 - [ ] Stale blueprint UI behavior is decided and covered by tests or documented manual verification: preserve read-only for comparison, hide by default, or expose with clear regeneration affordance.
 - [ ] Reference-anchor search scope is decided: dedicated panel only, global `SearchAll` integration, or a staged hybrid path.
 - [ ] Optional LLM-assisted material tagging/adaptation has a feature-flag/design decision and does not weaken deterministic review, binding, rewrite-level, or audit gates.
-- [ ] Full-chapter candidate assembly is either explicitly deferred or implemented only after every beat candidate can prove passing audit and provenance.
+- [x] Full-chapter candidate assembly is explicitly deferred: anchored draft APIs return beat-scoped paragraph candidates only, without `chapter_text`, `assembled_text`, or `full_chapter` fields, and existing generation still does not mutate chapter content.
 - [x] Source preview policy is decided for unknown-license anchors: material search/library previews return truncated exact text by default, while stored materials, provenance hashes, adaptation, binding, and audit still use the complete imported text.
 - [x] Generator reproducibility policy is decided: blueprint records expose `build_version` plus `context_hash`, `source_plan_hash`, and `analysis_contract_hash`; review/approval records carry `review_version`; prompt/schema snapshots are not persisted on blueprint rows to avoid prompt-churn.
 - [ ] Developer workflow expectation is finalized: `make dev` dependency on frontend build versus explicit Vite/build steps.
@@ -422,6 +422,7 @@ Targeted Phase 10 checks completed:
 
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter GeneratedBlueprintExposesStableGeneratorVersionWithoutPromptSnapshots -v minimal`
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter ReferenceChapterBlueprintPayloadsUseStableSnakeCaseJsonNames -v minimal`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter AnchoredDraftPayloadSerializesBeatCandidatesWithoutFullChapterAssembly -v minimal`
 
 **Files likely touched:**
 
@@ -509,6 +510,7 @@ workspace/global reference corpus
 - [ ] Existing per-novel anchors migrate or are readable through a compatibility layer without losing source hashes, segment ids, material ids, user-verified tags, feedback, or audit provenance.
 - [ ] Corpus records include visibility, license status, source trust, and optional user-defined tags, but no required per-novel binding gate.
 - [ ] Material search accepts story-context inputs and returns globally sourced candidates that are filtered by license/status policy and scored by beat function, emotion, POV, prose duty, technique, lexical similarity, embeddings when available, and feedback boosts.
+- [ ] Retrieval gaps are explicit states, not silent free-drafting fallbacks: automatic query expansion may run first, weak matches must be marked low confidence, optional no-reuse beats require approved reasons, and source-required beats must stop for user action.
 - [ ] Blueprint generation no longer requires `anchor_ids`; it may accept an optional corpus search policy or explicit include/exclude anchors for advanced control.
 - [ ] Material binding records exact selected corpus material ids against the current blueprint `analysis_contract_hash` so later draft candidates remain auditable.
 - [ ] Per-novel known facts, forbidden facts, timeline state, character state, and POV boundaries still gate whether a globally sourced material may be used.
@@ -523,6 +525,7 @@ workspace/global reference corpus
 - [ ] Service tests proving global corpus materials can be searched from different novels without duplicating source import.
 - [ ] Tests proving per-novel forbidden facts and POV boundaries still reject globally sourced materials/candidates.
 - [ ] Tests proving license/visibility policy filters corpus results before AI selection.
+- [ ] Retrieval-gap tests covering automatic query expansion, weak-match continuation, approved no-reuse continuation, and source-required stop states.
 - [ ] Binding/audit tests proving selected global material provenance is stored with blueprint hash and cannot be reused after blueprint edits.
 - [ ] Feedback tests proving global tag feedback and per-novel usage feedback have different scopes.
 - [ ] Bridge and agent tests proving `anchor_ids` are optional and AI-driven corpus retrieval is the default path.
@@ -632,6 +635,7 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 - Source ownership migration: convert `reference_anchors.novel_id` to nullable/visibility metadata, or create new corpus tables and compatibility views.
 - Material identity: keep current anchor-derived material ids, or introduce stable corpus material ids independent of importing novel.
 - Search policy: define default license/status filters, include/exclude controls, and whether explicit source opt-out is needed per run.
+- Retrieval gap policy: decide thresholds for automatic query expansion, weak-match warnings, approved no-reuse continuation, and mandatory user stop.
 - Feedback scope: which decisions should improve global corpus ranking, and which should remain per-novel because they depend on plot facts.
 - UI information architecture: separate corpus library management from reference-anchored drafting controls.
 - Agent authority: whether AI may import new corpus sources, or only search/use already imported sources.

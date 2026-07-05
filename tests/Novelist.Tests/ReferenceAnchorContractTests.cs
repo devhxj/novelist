@@ -511,6 +511,39 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void AnchoredDraftPayloadSerializesBeatCandidatesWithoutFullChapterAssembly()
+    {
+        var payload = new ReferenceAnchoredDraftPayload(
+            BlueprintId: 10,
+            Candidates:
+            [
+                new ReferenceDraftParagraphCandidatePayload(
+                    CandidateId: "candidate-1",
+                    BlueprintId: 10,
+                    BeatId: "beat-1",
+                    MaterialId: "material-1",
+                    RewriteLevel: ReferenceRewriteLevels.L1,
+                    Text: "候选段落",
+                    ChangedSlots: [new ReferenceSlotValuePayload("object", "门")],
+                    NonSlotEdits: [],
+                    AuditStatus: "passed",
+                    CreatedAt: DateTimeOffset.Parse("2026-07-05T00:00:00Z"))
+            ],
+            Audit: null);
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(payload, BridgeJson.SerializerOptions));
+        var root = json.RootElement;
+
+        Assert.Equal(10, root.GetProperty("blueprint_id").GetInt64());
+        var candidate = Assert.Single(root.GetProperty("candidates").EnumerateArray());
+        Assert.Equal("beat-1", candidate.GetProperty("beat_id").GetString());
+        Assert.Equal("候选段落", candidate.GetProperty("text").GetString());
+        Assert.False(root.TryGetProperty("chapter_text", out _));
+        Assert.False(root.TryGetProperty("assembled_text", out _));
+        Assert.False(root.TryGetProperty("full_chapter", out _));
+    }
+
+    [Fact]
     public void CompatibilityRegistryIncludesReferenceAnchorMethods()
     {
         string[] expected =

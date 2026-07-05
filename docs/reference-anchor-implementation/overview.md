@@ -83,8 +83,8 @@ Phase 10 follow-up areas:
 - decide and test stale-blueprint comparison/preservation behavior before surfacing stale rows more prominently in the UI;
 - continue broadening deterministic Chinese narration, emotion, POV, and unsupported-fact fixtures before enabling optional model-assisted tagging or adaptation;
 - decide whether reference-anchor search belongs only in the dedicated panel or also in global search;
-- decide whether and when passing beat candidates should be assembled into a full-chapter candidate;
-- close the remaining UX/product questions around source previews, generator reproducibility, and dev workflow expectations.
+- keep full-chapter assembly deferred until every beat candidate can prove passing audit/provenance and a separate insertion-confirmation design exists;
+- close the remaining UX/product questions around dev workflow expectations.
 
 ## 2026-07-05 Planning Update: AI-Orchestrated Low-Intervention Workflow
 
@@ -114,6 +114,8 @@ The novel supplies context, constraints, and safety boundaries:
 - user/license policy and risk tolerance.
 
 AI then searches the shared corpus and proposes the relevant source materials for the current beat. The system audits the proposal against provenance, rewrite budget, fact boundary, POV, and style-risk gates. Human intervention is reserved for source trust, policy exceptions, and final approval, not for pre-selecting which global corpus each novel may use.
+
+When the shared corpus cannot satisfy a beat, the system should treat it as a retrieval gap instead of silently falling back to free drafting. AI may broaden queries, weaken filters, or switch from concrete scene material to technique/style material automatically. If only weak matches exist, the candidate must carry low-confidence provenance and elevated audit risk. If the beat does not require source-backed detail, it may continue only with an approved no-reuse reason and only from current novel facts. If the beat requires reference-backed material, the workflow must stop so the user can import more corpus material, relax policy, revise the blueprint, or skip that beat.
 
 This changes the long-term storage direction: `novel_id` should remain on blueprints, candidates, audits, and per-novel feedback, but source libraries and extracted reference materials should move toward workspace/global scope with optional visibility/license metadata. Do not add a required `novel_reference_library_link` gate as the default model; it would recreate unnecessary manual setup and prevent AI from choosing the right corpus by story need.
 
