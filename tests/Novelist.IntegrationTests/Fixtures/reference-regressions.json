@@ -76,6 +76,11 @@
       "expected_error": "generic source-backed detail target"
     },
     {
+      "name": "generic_slot_plan",
+      "mutation": "generic_slot_plan",
+      "expected_error": "generic slot plan"
+    },
+    {
       "name": "unsupported_final_hook",
       "mutation": "unsupported_final_hook",
       "expected_error": "final hook"

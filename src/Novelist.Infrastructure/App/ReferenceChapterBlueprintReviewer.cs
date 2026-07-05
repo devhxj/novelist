@@ -390,6 +390,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "Align reference query tags with beat function, emotion, POV, technique, or prose duties.");
             }
 
+            if (beat.SlotPlan.Any(slot => UsesGenericSlotPlan(slot.SlotName, slot.Value)))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "slot_plan",
+                    $"Beat {beat.BeatIndex} uses generic slot plan.",
+                    "Rewrite slot_plan values as concrete approved replacements, such as a named object, place, sensory cue, or evidence item.");
+            }
+
             if (string.IsNullOrWhiteSpace(beat.NarrationStrategy))
             {
                 AddBeatDefect(
@@ -697,6 +708,23 @@ internal static class ReferenceChapterBlueprintReviewer
                 "rich detail", "richer detail", "具体一点", "加一点细节", "加点细节",
                 "加些细节", "增加细节", "补充细节", "丰富细节", "细节丰富",
                 "多写细节", "写得细一点", "写细一点", "加些描写", "画面更丰富"
+            ]);
+    }
+
+    private static bool UsesGenericSlotPlan(string slotName, string value)
+    {
+        if (string.IsNullOrWhiteSpace(slotName) || string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        return ContainsAny(
+            value,
+            [
+                "anything", "something", "placeholder", "replace later", "fill later",
+                "random", "whatever", "generic object", "generic place",
+                "随便", "任意", "某个", "某种", "一个东西", "某样东西", "占位",
+                "之后再填", "后面再填", "待定", "替换一下", "随便替换"
             ]);
     }
 

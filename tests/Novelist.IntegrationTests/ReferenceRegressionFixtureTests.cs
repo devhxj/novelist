@@ -136,6 +136,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 SourceBackedDetailTarget = "加一点细节，让画面更丰富"
             },
+            "generic_slot_plan" => beat with
+            {
+                SlotPlan = [new ReferenceSlotValuePayload("object", "随便替换一个东西")]
+            },
             "unsupported_final_hook" => beat,
             "unsupported_scene_fact" => beat with
             {
