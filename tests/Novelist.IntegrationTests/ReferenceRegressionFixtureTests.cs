@@ -220,6 +220,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 RhythmStrategy = "节奏自然流畅，快慢结合"
             },
+            "unsupported_rhythm_strategy_fact" => beat with
+            {
+                RhythmStrategy = "delay the 密室钥匙 reveal with a slow turn"
+            },
             "generic_source_backed_detail_target" => beat with
             {
                 SourceBackedDetailTarget = "加一点细节，让画面更丰富"

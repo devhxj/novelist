@@ -176,6 +176,11 @@
       "expected_error": "generic rhythm strategy"
     },
     {
+      "name": "unsupported_rhythm_strategy_fact",
+      "mutation": "unsupported_rhythm_strategy_fact",
+      "expected_error": "unsupported rhythm strategy fact"
+    },
+    {
       "name": "generic_source_backed_detail_target",
       "mutation": "generic_source_backed_detail_target",
       "expected_error": "generic source-backed detail target"

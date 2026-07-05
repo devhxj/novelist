@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 40;
+    public const int CurrentReviewVersion = 41;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -642,6 +642,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "rhythm_strategy",
                     $"Beat {beat.BeatIndex} uses generic rhythm strategy.",
                     "Rewrite rhythm_strategy with concrete pacing pressure, sentence movement, delay, turn, or release for this beat.");
+            }
+
+            foreach (var unsupportedRhythmStrategyFact in FindUnsupportedRhythmStrategyFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    narrationErrors,
+                    "narration",
+                    beat,
+                    "rhythm_strategy",
+                    $"Beat {beat.BeatIndex} contains unsupported rhythm strategy fact: {unsupportedRhythmStrategyFact}",
+                    "Set up the rhythm_strategy fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
             }
         }
 
@@ -1415,6 +1426,24 @@ internal static class ReferenceChapterBlueprintReviewer
             .ToArray();
 
         return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.NarrationStrategy)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedRhythmStrategyFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.RhythmStrategy)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

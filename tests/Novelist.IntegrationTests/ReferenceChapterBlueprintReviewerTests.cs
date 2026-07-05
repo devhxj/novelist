@@ -979,6 +979,24 @@ public sealed class ReferenceChapterBlueprintReviewerTests
         Assert.Contains(review.NarrationErrors, item => item.Contains("generic rhythm strategy", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(
             review.Defects,
+                defect => defect.Category == "narration" &&
+                defect.FieldPath.Contains("rhythm_strategy", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsUnsupportedRhythmStrategyFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            RhythmStrategy = "delay the 密室钥匙 reveal with a slow turn"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.NarrationErrors, item => item.Contains("unsupported rhythm strategy fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
             defect => defect.Category == "narration" &&
                 defect.FieldPath.Contains("rhythm_strategy", StringComparison.OrdinalIgnoreCase));
     }
