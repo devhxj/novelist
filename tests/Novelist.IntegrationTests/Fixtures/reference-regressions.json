@@ -121,6 +121,11 @@
       "expected_error": "forbidden fact appears in relationship pressure"
     },
     {
+      "name": "unsupported_narrative_function_fact",
+      "mutation": "unsupported_narrative_function_fact",
+      "expected_error": "unsupported narrative function fact"
+    },
+    {
       "name": "generic_paragraph_intention",
       "mutation": "generic_paragraph_intention",
       "expected_error": "generic paragraph intention"

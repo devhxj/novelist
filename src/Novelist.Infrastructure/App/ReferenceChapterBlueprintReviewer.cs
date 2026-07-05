@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 41;
+    public const int CurrentReviewVersion = 42;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -98,6 +98,17 @@ internal static class ReferenceChapterBlueprintReviewer
 
         foreach (var beat in blueprint.Beats.OrderBy(item => item.BeatIndex))
         {
+            foreach (var unsupportedNarrativeFunctionFact in FindUnsupportedNarrativeFunctionFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    logicErrors,
+                    "logic",
+                    beat,
+                    "narrative_function",
+                    $"Beat {beat.BeatIndex} contains unsupported narrative function fact: {unsupportedNarrativeFunctionFact}",
+                    "Set up the narrative_function fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
             if (beat.BeatIndex > 1 && string.IsNullOrWhiteSpace(beat.CausalityIn))
             {
                 AddBeatDefect(
@@ -1354,6 +1365,24 @@ internal static class ReferenceChapterBlueprintReviewer
             .ToArray();
 
         return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ParagraphIntention)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedNarrativeFunctionFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.NarrativeFunction)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

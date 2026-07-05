@@ -176,6 +176,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 RelationshipPressure = ["凶手身份"]
             },
+            "unsupported_narrative_function_fact" => beat with
+            {
+                NarrativeFunction = "delay the 密室钥匙 reveal through pressure"
+            },
             "generic_paragraph_intention" => beat with
             {
                 ParagraphIntention = "写得更好，更有代入感"
