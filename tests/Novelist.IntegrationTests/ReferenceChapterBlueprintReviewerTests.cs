@@ -107,6 +107,31 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewWarnsWhenAdjacentParagraphIntentionsRepeatMechanically()
+    {
+        var blueprint = Blueprint(beat => beat) with
+        {
+            Beats =
+            [
+                Beat("1:beat:1") with { BeatIndex = 1, ParagraphIntention = "dwell on visible hesitation before the choice" },
+                Beat("1:beat:2") with { BeatIndex = 2, ParagraphIntention = "dwell on visible hesitation before the choice" },
+                Beat("1:beat:3") with { BeatIndex = 3, ParagraphIntention = "dwell on visible hesitation before the choice" }
+            ]
+        };
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+        Assert.Empty(review.RequiredFixes);
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "execution" &&
+                defect.Severity == "warning" &&
+                defect.FieldPath.Contains("paragraph_intention", StringComparison.OrdinalIgnoreCase) &&
+                defect.Reason.Contains("repeat mechanically", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewAllowsEmotionEvidenceQueryForSubtextAndExternalEvidenceDuties()
     {
         var blueprint = Blueprint(beat => beat with

@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 58;
+    public const int CurrentReviewVersion = 59;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -1348,6 +1348,17 @@ internal static class ReferenceChapterBlueprintReviewer
                 "Vary prose duties across beats so the blueprint distinguishes interiority, sensory pressure, subtext, transition, environment, or source detail work.");
         }
 
+        var repeatedParagraphIntention = FindRepeatedAdjacentParagraphIntention(blueprint.Beats);
+        if (repeatedParagraphIntention is not null)
+        {
+            AddWarningDefect(
+                "execution",
+                "beats.paragraph_intention",
+                string.Empty,
+                $"Paragraph intentions repeat mechanically across adjacent beats: {repeatedParagraphIntention}.",
+                "Vary adjacent paragraph intentions so each beat has a distinct prose job instead of repeating the same execution instruction.");
+        }
+
         var defectCount = logicErrors.Count + causalityErrors.Count + emotionErrors.Count +
             narrationErrors.Count + executionErrors.Count + characterStateErrors.Count + povErrors.Count +
             continuityErrors.Count + transitionErrors.Count + forbiddenFactErrors.Count +
@@ -2441,6 +2452,45 @@ internal static class ReferenceChapterBlueprintReviewer
         return string.IsNullOrWhiteSpace(value)
             ? string.Empty
             : value.Trim().Replace('-', '_').ToLowerInvariant();
+    }
+
+    private static string? FindRepeatedAdjacentParagraphIntention(IReadOnlyList<ReferenceChapterBlueprintBeatPayload> beats)
+    {
+        string? previous = null;
+        var runLength = 0;
+        foreach (var beat in beats.OrderBy(beat => beat.BeatIndex))
+        {
+            var intention = NormalizeComparableText(beat.ParagraphIntention);
+            if (intention.Length == 0)
+            {
+                previous = null;
+                runLength = 0;
+                continue;
+            }
+
+            if (string.Equals(previous, intention, StringComparison.OrdinalIgnoreCase))
+            {
+                runLength++;
+                if (runLength >= 3)
+                {
+                    return beat.ParagraphIntention;
+                }
+            }
+            else
+            {
+                previous = intention;
+                runLength = 1;
+            }
+        }
+
+        return null;
+    }
+
+    private static string NormalizeComparableText(string value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : string.Join(' ', value.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant();
     }
 
     private static bool ContainsAnyTag(IReadOnlyList<string> values, IReadOnlyList<string> candidates)
