@@ -379,6 +379,7 @@ internal static class ReferenceAnchoredDraftAuditor
             .Select(match => NormalizeAuditableFactPhrase(match.Value))
             .Where(value => value.Length >= 2));
         facts.AddRange(ExtractAccessCredentialFacts(text));
+        facts.AddRange(ExtractLocationIdentifierFacts(text));
         facts.AddRange(ExtractIdentityRevealFacts(text));
         facts.AddRange(ExtractRelationshipRevealFacts(text));
         facts.AddRange(ExtractDeathOrDisappearanceRevealFacts(text));
@@ -409,6 +410,21 @@ internal static class ReferenceAnchoredDraftAuditor
         foreach (Match match in Regex.Matches(
             text,
             @"(?:^|[，。！？；;,\s、]|和|与)(?<fact>[\u4e00-\u9fffA-Za-z0-9]{0,8}(?:" + credentialTerms + @"))"))
+        {
+            var fact = match.Groups["fact"].Value.Trim('，', ',', '。', '.', '；', ';', '！', '!', '？', '?', '、');
+            if (fact.Length >= 2)
+            {
+                yield return fact;
+            }
+        }
+    }
+
+    private static IEnumerable<string> ExtractLocationIdentifierFacts(string text)
+    {
+        const string identifierTerms = "地址|门牌号|房间号|房号|车牌|车牌号|手机号|电话号码|电话|坐标|坐标点";
+        foreach (Match match in Regex.Matches(
+            text,
+            @"(?:^|[，。！？；;,\s、]|和|与)(?<fact>[\u4e00-\u9fffA-Za-z0-9]{0,8}?(?:" + identifierTerms + @"))"))
         {
             var fact = match.Groups["fact"].Value.Trim('，', ',', '。', '.', '；', ';', '！', '!', '？', '?', '、');
             if (fact.Length >= 2)

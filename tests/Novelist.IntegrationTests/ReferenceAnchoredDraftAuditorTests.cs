@@ -92,6 +92,22 @@ public sealed class ReferenceAnchoredDraftAuditorTests
     }
 
     [Fact]
+    public void BuildDraftAuditFailsWhenCandidateIntroducesUnsupportedLocationIdentifier()
+    {
+        var blueprint = Blueprint(beat => beat);
+        var candidate = Candidate(blueprint, "雨声压低了整条街的呼吸，旧楼地址写在纸背面。");
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.UnsupportedFactErrors, item => item.Contains("旧楼地址", StringComparison.Ordinal));
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("Remove unsupported fact", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BuildDraftAuditAllowsHighRiskFactWhenItIsSceneFact()
     {
         var blueprint = Blueprint(beat => beat with
@@ -698,6 +714,16 @@ public sealed class ReferenceAnchoredDraftAuditorTests
 
         Assert.Contains("旧楼门禁卡", facts);
         Assert.Contains("地下室通行证", facts);
+    }
+
+    [Fact]
+    public void ExtractAuditableFactPhrasesReadsLocationIdentifierFacts()
+    {
+        var facts = ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(
+            "雨声压低了整条街的呼吸，旧楼地址和地下室房间号都写在纸背面。");
+
+        Assert.Contains("旧楼地址", facts);
+        Assert.Contains("地下室房间号", facts);
     }
 
     [Fact]

@@ -123,6 +123,12 @@
       "expected_error": "旧楼门禁卡"
     },
     {
+      "name": "unsupported_location_identifier",
+      "mutation": "default",
+      "text": "雨声压低了整条街的呼吸，旧楼地址写在纸背面。",
+      "expected_error": "旧楼地址"
+    },
+    {
       "name": "non_pov_interior_leak",
       "mutation": "non_pov_character",
       "text": "雨声压低了整条街的呼吸，周鸣心里明白她已经看穿了他。",
