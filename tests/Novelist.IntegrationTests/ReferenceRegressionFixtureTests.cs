@@ -151,6 +151,17 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 MaxRewriteLevel = "LX"
             },
+            "unsupported_required_material_type" => beat with
+            {
+                RequiredMaterialTypes = ["invalid"]
+            },
+            "unsupported_reference_query_material_type" => beat with
+            {
+                ReferenceQuery = beat.ReferenceQuery with
+                {
+                    MaterialTypes = ["invalid"]
+                }
+            },
             "action_dialogue_only" => beat with
             {
                 BeatType = ReferenceBlueprintBeatTypes.Action,

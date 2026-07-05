@@ -1881,6 +1881,45 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsUnsupportedRequiredMaterialType()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            RequiredMaterialTypes = ["invalid"]
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ReferenceBindingErrors, item => item.Contains("unsupported required_material_types", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "reference_binding" &&
+                defect.FieldPath.Contains("required_material_types", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsUnsupportedReferenceQueryMaterialType()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            ReferenceQuery = beat.ReferenceQuery with
+            {
+                MaterialTypes = ["invalid"]
+            }
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ReferenceBindingErrors, item => item.Contains("unsupported reference_query.material_types", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "reference_binding" &&
+                defect.FieldPath.Contains("reference_query.material_types", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsMaterialQueryWithoutBeatFit()
     {
         var blueprint = Blueprint(beat => beat with

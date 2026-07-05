@@ -86,6 +86,16 @@
       "expected_error": "unsupported max_rewrite_level"
     },
     {
+      "name": "unsupported_required_material_type",
+      "mutation": "unsupported_required_material_type",
+      "expected_error": "unsupported required_material_types"
+    },
+    {
+      "name": "unsupported_reference_query_material_type",
+      "mutation": "unsupported_reference_query_material_type",
+      "expected_error": "unsupported reference_query.material_types"
+    },
+    {
       "name": "action_dialogue_only_beat",
       "mutation": "action_dialogue_only",
       "expected_error": "action/dialogue"

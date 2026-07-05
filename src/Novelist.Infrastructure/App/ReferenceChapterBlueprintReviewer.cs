@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 53;
+    public const int CurrentReviewVersion = 54;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -826,6 +826,28 @@ internal static class ReferenceChapterBlueprintReviewer
                     "max_rewrite_level",
                     $"Beat {beat.BeatIndex} uses unsupported max_rewrite_level: {beat.MaxRewriteLevel}",
                     "Set max_rewrite_level to L0, L1, L2, L3, or L4 before material binding.");
+            }
+
+            foreach (var unsupportedMaterialType in FindUnsupportedMaterialTypes(beat.RequiredMaterialTypes))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "required_material_types",
+                    $"Beat {beat.BeatIndex} uses unsupported required_material_types value: {unsupportedMaterialType}",
+                    "Set required_material_types to chapter, paragraph, sentence, or passage before material binding.");
+            }
+
+            foreach (var unsupportedMaterialType in FindUnsupportedMaterialTypes(beat.ReferenceQuery.MaterialTypes))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "reference_query.material_types",
+                    $"Beat {beat.BeatIndex} uses unsupported reference_query.material_types value: {unsupportedMaterialType}",
+                    "Set reference_query.material_types to chapter, paragraph, sentence, or passage before material search.");
             }
 
             if (string.IsNullOrWhiteSpace(beat.ReferenceQuery.Query) || beat.RequiredMaterialTypes.Count == 0)
@@ -2173,6 +2195,15 @@ internal static class ReferenceChapterBlueprintReviewer
 
         return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.NoReuseReason)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedMaterialTypes(IReadOnlyList<string> materialTypes)
+    {
+        return materialTypes
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Where(item => !ReferenceMaterialTypes.All.Contains(item, StringComparer.Ordinal))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
