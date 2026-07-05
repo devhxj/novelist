@@ -835,6 +835,24 @@ public sealed class ReferenceChapterBlueprintReviewerTests
         Assert.Contains(review.ExecutionErrors, item => item.Contains("generic candidate rejection rule", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(
             review.Defects,
+                defect => defect.Category == "execution" &&
+                defect.FieldPath.Contains("candidate_rejection_rule", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsUnsupportedCandidateRejectionRuleFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            CandidateRejectionRule = "reject if candidate reveals 密室钥匙 before the approved turn"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ExecutionErrors, item => item.Contains("unsupported candidate rejection rule fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
             defect => defect.Category == "execution" &&
                 defect.FieldPath.Contains("candidate_rejection_rule", StringComparison.OrdinalIgnoreCase));
     }

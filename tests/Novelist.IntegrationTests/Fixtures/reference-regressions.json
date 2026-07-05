@@ -141,6 +141,11 @@
       "expected_error": "generic candidate rejection rule"
     },
     {
+      "name": "unsupported_candidate_rejection_rule_fact",
+      "mutation": "unsupported_candidate_rejection_rule_fact",
+      "expected_error": "unsupported candidate rejection rule fact"
+    },
+    {
       "name": "generic_anti_screenplay_duty",
       "mutation": "generic_anti_screenplay_duty",
       "expected_error": "generic anti-screenplay duty"

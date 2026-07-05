@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 36;
+    public const int CurrentReviewVersion = 37;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -430,6 +430,17 @@ internal static class ReferenceChapterBlueprintReviewer
                         "candidate_rejection_rule",
                         $"Beat {beat.BeatIndex} uses generic candidate rejection rule.",
                         "Rewrite candidate_rejection_rule as a concrete failure condition, such as action-only, dialogue-only, missing evidence, POV leak, or unsupported reveal.");
+                }
+
+                foreach (var unsupportedCandidateRejectionRuleFact in FindUnsupportedCandidateRejectionRuleFacts(blueprint, beat))
+                {
+                    AddBeatDefect(
+                        executionErrors,
+                        "execution",
+                        beat,
+                        "candidate_rejection_rule",
+                        $"Beat {beat.BeatIndex} contains unsupported candidate rejection rule fact: {unsupportedCandidateRejectionRuleFact}",
+                        "Set up the candidate_rejection_rule fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
                 }
 
                 if (UsesGenericAntiScreenplayDuty(beat.AntiScreenplayDuty))
@@ -1299,6 +1310,24 @@ internal static class ReferenceChapterBlueprintReviewer
             .ToArray();
 
         return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ParagraphIntention)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedCandidateRejectionRuleFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.CandidateRejectionRule)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

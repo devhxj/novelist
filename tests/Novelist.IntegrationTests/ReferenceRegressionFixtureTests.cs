@@ -192,6 +192,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 CandidateRejectionRule = "不好的不要，质量差就拒绝"
             },
+            "unsupported_candidate_rejection_rule_fact" => beat with
+            {
+                CandidateRejectionRule = "reject if candidate reveals 密室钥匙 before the approved turn"
+            },
             "generic_anti_screenplay_duty" => beat with
             {
                 AntiScreenplayDuty = "避免剧本化"
