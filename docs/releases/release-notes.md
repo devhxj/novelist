@@ -27,6 +27,7 @@
 - 蓝图评审结果现在包含 `review_version`，审批和后续门禁会拒绝旧评审版本，避免评审规则升级后误用旧结果。
 - 蓝图评审现在会拒绝角色状态 before/after 完全相同的 beat，并把问题归入 character-state 缺陷，防止缺少角色状态变化的蓝图继续进入材料绑定和候选草稿生成。
 - 蓝图评审现在会拒绝缺少 `character_misbeliefs` 或 `relationship_pressure` 的 beat，让角色状态变化必须具备误信/盲点和关系压力支撑。
+- 蓝图评审现在会检查 `character_misbeliefs` 里的高风险事实，角色误信不能夹带未进入 known facts 或场景事实的关键物件、身份或证据。
 - 蓝图评审现在会拒绝“写得更好/更有代入感”这类泛化段落意图，并要求 `paragraph_intention` 写成可检查的具体正文职责。
 - 蓝图评审现在会拒绝“正常写/自然展开”这类泛化执行模式，并要求 `execution_mode` 写成可检查的起草操作。
 - 蓝图评审现在会拒绝“不好的不要/质量差就拒绝”这类泛化候选拒绝规则，并要求 `candidate_rejection_rule` 写清 action-only、POV 泄漏、缺证据等具体失败条件。

@@ -71,6 +71,11 @@
       "expected_error": "misbelief"
     },
     {
+      "name": "unsupported_character_misbelief_fact",
+      "mutation": "unsupported_character_misbelief_fact",
+      "expected_error": "unsupported character misbelief fact"
+    },
+    {
       "name": "missing_relationship_pressure",
       "mutation": "missing_relationship_pressure",
       "expected_error": "relationship pressure"

@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 26;
+    public const int CurrentReviewVersion = 27;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -242,6 +242,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "character_state_delta",
                     $"Beat {beat.BeatIndex} has no role-state delta between before and after states.",
                     "Change character_states_after to show the pressure, leverage, knowledge, relationship, or role-state delta created by this beat.");
+            }
+
+            foreach (var unsupportedCharacterMisbeliefFact in FindUnsupportedCharacterMisbeliefFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    characterStateErrors,
+                    "character_state",
+                    beat,
+                    "character_misbeliefs",
+                    $"Beat {beat.BeatIndex} contains unsupported character misbelief fact: {unsupportedCharacterMisbeliefFact}",
+                    "Move the character_misbeliefs fact into approved known facts or scene facts before using it as role-state pressure.");
             }
 
             if (beat.ViewpointForbiddenKnowledge.Any(forbidden =>
@@ -780,6 +791,23 @@ internal static class ReferenceChapterBlueprintReviewer
                     "表现出", "有反应", "很痛苦", "很难过", "很愤怒", "很开心",
                     "感觉不好", "说不清"
                 ]);
+    }
+
+    private static IEnumerable<string> FindUnsupportedCharacterMisbeliefFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var approvedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return beat.CharacterMisbeliefs
+            .SelectMany(ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases)
+            .Where(fact => !IsAllowedFact(fact, approvedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static IEnumerable<string> FindUnsupportedViewpointFacts(

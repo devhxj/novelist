@@ -571,6 +571,24 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsUnsupportedCharacterMisbeliefFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            CharacterMisbeliefs = ["密室钥匙"]
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.CharacterStateErrors, item => item.Contains("unsupported character misbelief fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "character_state" &&
+                defect.FieldPath.Contains("character_misbeliefs", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsMissingRelationshipPressure()
     {
         var blueprint = Blueprint(beat => beat with
