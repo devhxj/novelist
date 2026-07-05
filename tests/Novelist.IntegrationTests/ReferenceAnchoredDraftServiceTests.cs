@@ -3222,7 +3222,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ReferenceOrchestrationRunMarksFailureWhenDraftAuditFailsAfterBlueprintApproval()
+    public async Task ReferenceOrchestrationRunStopsForHighRiskDecisionWhenDraftAuditFailsAfterBlueprintApproval()
     {
         var options = CreateOptions();
         await InitializeAsync(options);
@@ -3266,7 +3266,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.Equal(ReferenceOrchestrationStages.BlueprintApproval, started.Stage);
         Assert.Equal(ReferenceOrchestrationDecisionTypes.ApproveBlueprint, started.CurrentDecision?.DecisionType);
 
-        var failed = await service.ResumeOrchestrationRunAsync(
+        var stopped = await service.ResumeOrchestrationRunAsync(
             new ResumeReferenceOrchestrationRunPayload(
                 novel.Id,
                 started.RunId,
@@ -3274,12 +3274,24 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
                 started.ReviewId),
             CancellationToken.None);
 
-        Assert.Equal(ReferenceOrchestrationRunStatuses.Failed, failed.Status);
-        Assert.Equal(ReferenceOrchestrationStages.DraftAudit, failed.Stage);
-        Assert.Equal(ReferenceOrchestrationStopReasons.DraftAuditFailed, failed.LastStopReason);
-        Assert.Null(failed.CurrentDecision);
-        Assert.NotEmpty(failed.CandidateIds);
-        Assert.Contains("凶手身份", failed.ErrorMessage);
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, stopped.Status);
+        Assert.Equal(ReferenceOrchestrationStages.DraftAudit, stopped.Stage);
+        Assert.Equal(ReferenceOrchestrationStopReasons.DraftAuditFailed, stopped.LastStopReason);
+        Assert.NotNull(stopped.CurrentDecision);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop, stopped.CurrentDecision.DecisionType);
+        Assert.Equal(ReferenceOrchestrationStopReasons.DraftAuditFailed, stopped.CurrentDecision.StopReason);
+        Assert.Contains("inspect_draft_audit", stopped.CurrentDecision.RequiredActions);
+        Assert.Contains("revise_blueprint_or_candidates", stopped.CurrentDecision.RequiredActions);
+        Assert.NotEmpty(stopped.CandidateIds);
+        Assert.Contains("凶手身份", stopped.ErrorMessage);
+        Assert.Contains(
+            stopped.CurrentDecision.ApprovalSummary.HighRiskFindings,
+            finding => finding.Contains("凶手身份", StringComparison.Ordinal));
+
+        var loaded = await service.GetOrchestrationRunAsync(novel.Id, started.RunId, CancellationToken.None);
+        Assert.NotNull(loaded);
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, loaded.Status);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop, loaded.CurrentDecision?.DecisionType);
 
         var resume = await Assert.ThrowsAsync<ArgumentException>(async () =>
             await service.ResumeOrchestrationRunAsync(
@@ -3289,7 +3301,31 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
                     ReferenceOrchestrationDecisionTypes.ApproveFinalInsertion,
                     string.Empty),
                 CancellationToken.None));
-        Assert.Contains("no pending decision", resume.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Decision type does not match", resume.Message, StringComparison.OrdinalIgnoreCase);
+
+        var resolved = await service.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                started.RunId,
+                ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop,
+                "acknowledged"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.Failed, resolved.Status);
+        Assert.Equal(ReferenceOrchestrationStages.DraftAudit, resolved.Stage);
+        Assert.Equal(ReferenceOrchestrationStopReasons.DraftAuditFailed, resolved.LastStopReason);
+        Assert.Null(resolved.CurrentDecision);
+        Assert.Contains("凶手身份", resolved.ErrorMessage);
+
+        var finalInsertionAfterResolve = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.ResumeOrchestrationRunAsync(
+                new ResumeReferenceOrchestrationRunPayload(
+                    novel.Id,
+                    started.RunId,
+                    ReferenceOrchestrationDecisionTypes.ApproveFinalInsertion,
+                    string.Empty),
+                CancellationToken.None));
+        Assert.Contains("no pending decision", finalInsertionAfterResolve.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     public void Dispose()

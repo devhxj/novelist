@@ -107,6 +107,7 @@ public static class ReferenceOrchestrationDecisionTypes
     public const string ConfirmSourceAndFacts = "confirm_source_and_facts";
     public const string ApplyBlueprintRevision = "apply_blueprint_revision";
     public const string ApproveBlueprint = "approve_blueprint";
+    public const string ResolveHighRiskStop = "resolve_high_risk_stop";
     public const string ApproveFinalInsertion = "approve_final_insertion";
 
     public static IReadOnlyList<string> All { get; } =
@@ -114,6 +115,7 @@ public static class ReferenceOrchestrationDecisionTypes
         ConfirmSourceAndFacts,
         ApplyBlueprintRevision,
         ApproveBlueprint,
+        ResolveHighRiskStop,
         ApproveFinalInsertion
     ];
 }

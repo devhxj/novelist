@@ -100,7 +100,9 @@ Targeted Phase 11 thin-slice checks completed:
 - [x] After user blueprint approval, orchestration automatically binds materials, generates beat candidates, runs draft audit, persists candidate ids, and stops for final insertion confirmation without calling `SaveContent`.
 - [x] Failed blueprint review can persist deterministic proposed field-level revisions in the required decision; approving that decision applies the revision, re-runs review, and stops for blueprint approval when the revision passes.
 - [x] Agent orchestration tools can start, inspect, list, and cancel runs while deliberately withholding resume/approval/revision/final-insertion tools; start arguments cannot pre-confirm source/fact decisions, pass `anchor_ids`, decision payloads, or prose text.
+- [x] Draft audit failure now persists as a high-risk `resolve_high_risk_stop` decision with candidate ids and audit findings; resolving that stop marks the run failed instead of inserting prose.
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Reference -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationRun -v minimal`
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter MafToolRegistryTests -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'ReferenceOrchestrationRunPersistsResumeAndCancelState|ReferenceAnchoredDraftServiceTests' -v minimal`
 - [x] `npm --prefix frontend run build`

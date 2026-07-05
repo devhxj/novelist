@@ -683,15 +683,25 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 approvedBlueprintRevision = BuildApprovedBlueprintRevisionPayload(run, input.DecisionPayload);
             }
 
-            updated = run with
-            {
-                Status = ReferenceOrchestrationRunStatuses.Running,
-                Stage = NextStageAfterDecision(decisionType),
-                CurrentDecision = null,
-                LastStopReason = string.Empty,
-                ErrorMessage = string.Empty,
-                UpdatedAt = DateTimeOffset.UtcNow
-            };
+            updated = string.Equals(decisionType, ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop, StringComparison.Ordinal)
+                ? run with
+                {
+                    Status = ReferenceOrchestrationRunStatuses.Failed,
+                    Stage = run.Stage,
+                    CurrentDecision = null,
+                    LastStopReason = run.LastStopReason,
+                    ErrorMessage = run.ErrorMessage,
+                    UpdatedAt = DateTimeOffset.UtcNow
+                }
+                : run with
+                {
+                    Status = ReferenceOrchestrationRunStatuses.Running,
+                    Stage = NextStageAfterDecision(decisionType, run.Stage),
+                    CurrentDecision = null,
+                    LastStopReason = string.Empty,
+                    ErrorMessage = string.Empty,
+                    UpdatedAt = DateTimeOffset.UtcNow
+                };
             await UpdateOrchestrationRunAsync(connection, updated, cancellationToken);
         }
         finally
@@ -3029,13 +3039,14 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         return normalized;
     }
 
-    private static string NextStageAfterDecision(string decisionType)
+    private static string NextStageAfterDecision(string decisionType, string currentStage)
     {
         return decisionType switch
         {
             ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts => ReferenceOrchestrationStages.BlueprintGeneration,
             ReferenceOrchestrationDecisionTypes.ApplyBlueprintRevision => ReferenceOrchestrationStages.BlueprintReview,
             ReferenceOrchestrationDecisionTypes.ApproveBlueprint => ReferenceOrchestrationStages.MaterialBinding,
+            ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop => currentStage,
             ReferenceOrchestrationDecisionTypes.ApproveFinalInsertion => ReferenceOrchestrationStages.FinalInsertion,
             _ => ReferenceOrchestrationStages.SourceConfirmation
         };
@@ -3096,9 +3107,9 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 
         return run with
         {
-            Status = ReferenceOrchestrationRunStatuses.Failed,
+            Status = ReferenceOrchestrationRunStatuses.WaitingForUser,
             Stage = ReferenceOrchestrationStages.DraftAudit,
-            CurrentDecision = null,
+            CurrentDecision = BuildHighRiskStopDecision(blueprint, audit),
             LastStopReason = ReferenceOrchestrationStopReasons.DraftAuditFailed,
             ErrorMessage = BuildDraftAuditFailureMessage(audit),
             UpdatedAt = DateTimeOffset.UtcNow
@@ -3171,6 +3182,18 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             ReferenceOrchestrationStopReasons.FinalInsertionRequired,
             "Draft candidates passed deterministic audit. Review or edit the candidates before final chapter insertion.",
             ["review_candidates", "edit_or_select_candidate", "approve_final_insertion"],
+            BuildDraftAuditApprovalSummary(blueprint, audit));
+    }
+
+    private static ReferenceOrchestrationRequiredDecisionPayload BuildHighRiskStopDecision(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceAnchoredDraftAuditPayload audit)
+    {
+        return new ReferenceOrchestrationRequiredDecisionPayload(
+            ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop,
+            ReferenceOrchestrationStopReasons.DraftAuditFailed,
+            "Draft audit found high-risk issues. Inspect the audit findings and revise the blueprint, material binding, or candidates before any insertion.",
+            ["inspect_draft_audit", "revise_blueprint_or_candidates", "restart_or_cancel_run"],
             BuildDraftAuditApprovalSummary(blueprint, audit));
     }
 
