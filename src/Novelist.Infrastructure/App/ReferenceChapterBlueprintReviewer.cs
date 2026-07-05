@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 23;
+    public const int CurrentReviewVersion = 24;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -576,6 +576,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "emotion_trigger",
                     $"Forbidden fact appears in emotion trigger: {forbidden}",
                     "Remove the forbidden fact from beat emotion_trigger before drafting.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.SuppressedReaction, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "suppressed_reaction",
+                    $"Forbidden fact appears in suppressed reaction: {forbidden}",
+                    "Remove the forbidden fact from beat suppressed_reaction before drafting.");
             }
 
             foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.ExternalEvidence, forbidden)))

@@ -31,6 +31,11 @@
       "expected_error": "unsupported suppressed reaction fact"
     },
     {
+      "name": "forbidden_suppressed_reaction_fact",
+      "mutation": "forbidden_suppressed_reaction_fact",
+      "expected_error": "forbidden fact appears in suppressed reaction"
+    },
+    {
       "name": "hard_transition",
       "mutation": "hard_transition",
       "expected_error": "pressure"
