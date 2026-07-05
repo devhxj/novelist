@@ -79,7 +79,7 @@ confirm source + chapter target + known/forbidden facts
 - [ ] Low-risk passing blueprints can proceed from approval to material binding and candidate generation without additional manual clicks.
 - [ ] High-risk conditions require an explicit stop: stale blueprint, new facts outside approved boundary, forbidden fact pressure, missing material provenance, L3/L4 rewrite risk, POV leak risk, or audit failure.
 - [ ] Advanced mode still exposes manual generate/review/revise/approve/bind/draft/audit controls for debugging and strict editorial review.
-- [ ] The orchestration flow never calls `SaveContent` or inserts chapter prose automatically; insertion remains a separate user-confirmed action.
+- [x] The orchestration flow never calls `SaveContent` or inserts chapter prose automatically; insertion remains a separate user-confirmed action.
 - [ ] Agent tool descriptions and UI copy make clear which decisions AI may automate and which decisions require the author.
 - [x] Telemetry or local run history records why the workflow stopped, what AI proposed, what the user approved/rejected, and which deterministic gate produced each block.
 
@@ -104,6 +104,7 @@ Targeted Phase 11 thin-slice checks completed:
 - [x] Material binding gaps now persist as a high-risk `resolve_high_risk_stop` decision with missing beat ids; resolving that stop marks the run failed instead of free-drafting.
 - [x] Stale blueprints now persist as a high-risk `resolve_high_risk_stop` decision when source-plan changes invalidate a pending approval or safe-stage continuation.
 - [x] Local orchestration event history now records run starts, required decisions, user resumes/approvals, stop reasons, deterministic gate stages, failures, and cancellations; `GetReferenceOrchestrationRunEvents` exposes it through the desktop bridge and frontend adapter.
+- [x] The reference-anchor page now mounts a default orchestration panel that starts runs without requiring selected anchors, shows run history, required decisions, approval summaries, candidate ids, and event history, and allows safe resume/cancel actions while leaving final insertion manual.
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Reference -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationRun -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationRunStopsForHighRiskDecisionWhenMaterialBindingHasMissingLinks -v minimal`
@@ -113,7 +114,7 @@ Targeted Phase 11 thin-slice checks completed:
 - [x] `npm --prefix frontend run build`
 - [x] `npm --prefix frontend run lint`
 
-These thin slices do not complete the Phase 11 automatic workflow. Proposed revision generation is currently deterministic and narrow; broader high-risk stop coverage, agent approval escalation/runtime history coverage, frontend runtime workflow, and shared-corpus default retrieval remain pending.
+These thin slices do not complete the Phase 11 automatic workflow. Proposed revision generation is currently deterministic and narrow; broader high-risk stop coverage, agent approval escalation/runtime history coverage, full Photino runtime workflow coverage, and shared-corpus default retrieval remain pending.
 
 **Files likely touched:**
 

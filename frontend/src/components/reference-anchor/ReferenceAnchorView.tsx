@@ -13,6 +13,7 @@ import {
 import { useApp } from '@/hooks/useApp'
 import type { reference } from '@/lib/novelist/types'
 import { BlueprintDetail } from './BlueprintDetail'
+import { OrchestrationPanel } from './OrchestrationPanel'
 import {
   EMPTY_REVISION_FORM,
   addListChange,
@@ -101,6 +102,9 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   const [materials, setMaterials] = useState<reference.Material[]>([])
   const [blueprints, setBlueprints] = useState<reference.ChapterBlueprintSummary[]>([])
   const [activeBlueprint, setActiveBlueprint] = useState<reference.ChapterBlueprint | null>(null)
+  const [orchestrationRuns, setOrchestrationRuns] = useState<reference.OrchestrationRun[]>([])
+  const [activeOrchestrationRun, setActiveOrchestrationRun] = useState<reference.OrchestrationRun | null>(null)
+  const [orchestrationEvents, setOrchestrationEvents] = useState<reference.OrchestrationRunEvent[]>([])
   const [binding, setBinding] = useState<reference.BlueprintMaterialBindingResult | null>(null)
   const [draft, setDraft] = useState<reference.AnchoredDraft | null>(null)
   const [anchorForm, setAnchorForm] = useState<AnchorForm>(EMPTY_ANCHOR_FORM)
@@ -108,6 +112,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   const [revisionForm, setRevisionForm] = useState<BlueprintRevisionForm>(EMPTY_REVISION_FORM)
   const [materialFilters, setMaterialFilters] = useState<MaterialSearchFilters>(EMPTY_MATERIAL_FILTERS)
   const [materialQuery, setMaterialQuery] = useState('')
+  const [orchestrationUseSelectedAnchors, setOrchestrationUseSelectedAnchors] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -140,12 +145,28 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     setBlueprints(list ?? [])
   }, [app, novelId])
 
+  const loadOrchestrationRuns = useCallback(async () => {
+    if (!novelId) {
+      setOrchestrationRuns([])
+      setActiveOrchestrationRun(null)
+      return
+    }
+
+    const list = await app.GetReferenceOrchestrationRuns(novelId, null)
+    const runs = list ?? []
+    setOrchestrationRuns(runs)
+    setActiveOrchestrationRun(current => {
+      if (!current) return runs[0] ?? null
+      return runs.find(item => item.run_id === current.run_id) ?? runs[0] ?? null
+    })
+  }, [app, novelId])
+
   useEffect(() => {
     let cancelled = false
     void (async () => {
       setLoading(true)
       try {
-        await Promise.all([loadAnchors(), loadBlueprints()])
+        await Promise.all([loadAnchors(), loadBlueprints(), loadOrchestrationRuns()])
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : '加载失败')
       } finally {
@@ -153,7 +174,25 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       }
     })()
     return () => { cancelled = true }
-  }, [loadAnchors, loadBlueprints])
+  }, [loadAnchors, loadBlueprints, loadOrchestrationRuns])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      if (!novelId || !activeOrchestrationRun) {
+        setOrchestrationEvents([])
+        return
+      }
+
+      try {
+        const list = await app.GetReferenceOrchestrationRunEvents(novelId, activeOrchestrationRun.run_id)
+        if (!cancelled) setOrchestrationEvents(list ?? [])
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : '加载编排事件失败')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [app, novelId, activeOrchestrationRun])
 
   async function run<T>(task: () => Promise<T>, success?: string): Promise<T | null> {
     setLoading(true)
@@ -249,6 +288,95 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       setBinding(null)
       setDraft(null)
       await loadBlueprints()
+    }
+  }
+
+  async function syncBlueprintFromRun(runPayload: reference.OrchestrationRun) {
+    if (runPayload.blueprint_id <= 0) return
+    const blueprint = await app.GetReferenceChapterBlueprint(novelId, runPayload.blueprint_id)
+    if (blueprint) {
+      setActiveBlueprint(blueprint)
+      setRevisionForm(formFromBlueprint(blueprint))
+      setBinding(null)
+      setDraft(null)
+      await loadBlueprints()
+    }
+  }
+
+  async function startOrchestration() {
+    const chapterNumber = Number.parseInt(blueprintForm.chapterNumber, 10)
+    if (!Number.isFinite(chapterNumber) || chapterNumber < 1) {
+      setError('请输入有效章节号')
+      return
+    }
+
+    const started = await run(() => app.StartReferenceOrchestrationRun({
+      novel_id: novelId,
+      chapter_number: chapterNumber,
+      chapter_goal: blueprintForm.chapterGoal.trim() || undefined,
+      known_facts: lines(blueprintForm.knownFacts),
+      forbidden_facts: lines(blueprintForm.forbiddenFacts),
+      anchor_ids: orchestrationUseSelectedAnchors ? selectedAnchorIds : null,
+      corpus_search_policy: {
+        mode: 'story_context',
+        max_results_per_beat: 3,
+        license_statuses: ['user_provided', 'unknown'],
+        include_anchor_ids: orchestrationUseSelectedAnchors ? selectedAnchorIds : [],
+        exclude_anchor_ids: [],
+      },
+      source_confirmed: false,
+    }), '编排已启动，等待确认来源与事实边界')
+    if (started) {
+      setActiveOrchestrationRun(started)
+      await loadOrchestrationRuns()
+    }
+  }
+
+  async function selectOrchestrationRun(runId: string) {
+    const selected = await run(() => app.GetReferenceOrchestrationRun(novelId, runId))
+    if (selected) {
+      setActiveOrchestrationRun(selected)
+      await syncBlueprintFromRun(selected)
+    }
+  }
+
+  async function resumeOrchestration(decisionType: string, decisionPayload: string) {
+    if (!activeOrchestrationRun) return
+    const runId = activeOrchestrationRun.run_id
+    const resumed = await run(() => app.ResumeReferenceOrchestrationRun({
+      novel_id: novelId,
+      run_id: runId,
+      decision_type: decisionType,
+      decision_payload: decisionPayload,
+    }), '编排已继续')
+    if (resumed) {
+      setActiveOrchestrationRun(resumed)
+      await syncBlueprintFromRun(resumed)
+      await loadOrchestrationRuns()
+      try {
+        const events = await app.GetReferenceOrchestrationRunEvents(novelId, runId)
+        setOrchestrationEvents(events ?? [])
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '加载编排事件失败')
+      }
+    }
+  }
+
+  async function cancelOrchestration(runId: string) {
+    const cancelled = await run(() => app.CancelReferenceOrchestrationRun({
+      novel_id: novelId,
+      run_id: runId,
+      reason: 'cancelled from reference orchestration panel',
+    }), '编排已取消')
+    if (cancelled) {
+      setActiveOrchestrationRun(cancelled)
+      await loadOrchestrationRuns()
+      try {
+        const events = await app.GetReferenceOrchestrationRunEvents(novelId, runId)
+        setOrchestrationEvents(events ?? [])
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '加载编排事件失败')
+      }
     }
   }
 
@@ -435,7 +563,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
           </div>
           <div className="flex items-center gap-2">
             {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-            <button onClick={() => { void loadAnchors(); void loadBlueprints() }} className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+            <button onClick={() => { void loadAnchors(); void loadBlueprints(); void loadOrchestrationRuns() }} className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
               <RefreshCcw className="h-3 w-3" />刷新
             </button>
           </div>
@@ -532,6 +660,29 @@ export default function ReferenceAnchorView({ novelId }: Props) {
           </section>
 
           <section className="min-w-0 space-y-4">
+            <OrchestrationPanel
+              chapterNumber={blueprintForm.chapterNumber}
+              chapterGoal={blueprintForm.chapterGoal}
+              knownFacts={blueprintForm.knownFacts}
+              forbiddenFacts={blueprintForm.forbiddenFacts}
+              useSelectedAnchors={orchestrationUseSelectedAnchors}
+              selectedAnchorCount={selectedAnchorIds.length}
+              runs={orchestrationRuns}
+              activeRun={activeOrchestrationRun}
+              events={orchestrationEvents}
+              loading={loading}
+              onChapterNumberChange={value => setBlueprintForm(form => ({ ...form, chapterNumber: value }))}
+              onChapterGoalChange={value => setBlueprintForm(form => ({ ...form, chapterGoal: value }))}
+              onKnownFactsChange={value => setBlueprintForm(form => ({ ...form, knownFacts: value }))}
+              onForbiddenFactsChange={value => setBlueprintForm(form => ({ ...form, forbiddenFacts: value }))}
+              onUseSelectedAnchorsChange={setOrchestrationUseSelectedAnchors}
+              onStart={startOrchestration}
+              onSelectRun={selectOrchestrationRun}
+              onRefresh={loadOrchestrationRuns}
+              onResume={resumeOrchestration}
+              onCancel={cancelOrchestration}
+            />
+
             <div className="rounded-lg border border-border bg-card p-4">
               <div className="flex flex-wrap items-end gap-3">
                 <div className="min-w-[220px] flex-1">
