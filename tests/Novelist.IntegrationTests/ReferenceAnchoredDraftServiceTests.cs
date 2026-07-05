@@ -2747,6 +2747,87 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.Equal("Value must be an integer.", error.GetProperty("details").GetProperty("novelId").GetString());
     }
 
+    [Fact]
+    public async Task ReferenceOrchestrationRunPersistsResumeAndCancelState()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("编排状态测试", "", ""), CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(
+            options,
+            novels,
+            new FileSystemPlanningService(options, novels));
+
+        var started = await service.StartOrchestrationRunAsync(
+            new StartReferenceOrchestrationRunPayload(
+                novel.Id,
+                ChapterNumber: 4,
+                ChapterGoal: "雨夜门口确认事实边界",
+                KnownFacts: ["林岚在门口", "雨声压低街道"],
+                ForbiddenFacts: ["凶手身份"],
+                AnchorIds: null,
+                CorpusSearchPolicy: new ReferenceCorpusSearchPolicyPayload(
+                    "story_context",
+                    MaxResultsPerBeat: 4,
+                    LicenseStatuses: ["user_provided", "unknown"],
+                    IncludeAnchorIds: [7],
+                    ExcludeAnchorIds: [9]),
+                SourceConfirmed: false),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, started.Status);
+        Assert.Equal(ReferenceOrchestrationStages.SourceConfirmation, started.Stage);
+        Assert.Equal(ReferenceOrchestrationStopReasons.SourceConfirmationRequired, started.LastStopReason);
+        Assert.NotNull(started.CurrentDecision);
+        Assert.Contains("confirm_source", started.CurrentDecision.RequiredActions);
+        Assert.Empty(started.AnchorIds);
+        Assert.Equal(4, started.CorpusSearchPolicy.MaxResultsPerBeat);
+
+        var reloadedService = new SqliteReferenceAnchoredDraftService(
+            options,
+            novels,
+            new FileSystemPlanningService(options, novels));
+        var loaded = await reloadedService.GetOrchestrationRunAsync(novel.Id, started.RunId, CancellationToken.None);
+        var list = await reloadedService.GetOrchestrationRunsAsync(novel.Id, 4, CancellationToken.None);
+
+        Assert.NotNull(loaded);
+        Assert.Equal(started.RunId, loaded.RunId);
+        Assert.Single(list);
+        Assert.Equal(started.RunId, list[0].RunId);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await reloadedService.ResumeOrchestrationRunAsync(
+                new ResumeReferenceOrchestrationRunPayload(
+                    novel.Id,
+                    started.RunId,
+                    ReferenceOrchestrationDecisionTypes.ApproveBlueprint,
+                    "wrong decision"),
+                CancellationToken.None));
+
+        var resumed = await reloadedService.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                started.RunId,
+                ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts,
+                "confirmed"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.Running, resumed.Status);
+        Assert.Equal(ReferenceOrchestrationStages.BlueprintGeneration, resumed.Stage);
+        Assert.Null(resumed.CurrentDecision);
+        Assert.Equal(string.Empty, resumed.LastStopReason);
+
+        var cancelled = await reloadedService.CancelOrchestrationRunAsync(
+            new CancelReferenceOrchestrationRunPayload(novel.Id, started.RunId, "user stopped run"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.Cancelled, cancelled.Status);
+        Assert.Equal(ReferenceOrchestrationStopReasons.Cancelled, cancelled.LastStopReason);
+        Assert.Equal("user stopped run", cancelled.ErrorMessage);
+        Assert.Null(cancelled.CurrentDecision);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))

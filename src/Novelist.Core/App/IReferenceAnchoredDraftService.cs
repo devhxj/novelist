@@ -41,4 +41,26 @@ public interface IReferenceAnchoredDraftService
     ValueTask<ReferenceAnchoredDraftAuditPayload> AuditDraftAgainstBlueprintAsync(
         AuditReferenceAnchoredDraftPayload input,
         CancellationToken cancellationToken);
+
+    ValueTask<ReferenceOrchestrationRunPayload> StartOrchestrationRunAsync(
+        StartReferenceOrchestrationRunPayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<IReadOnlyList<ReferenceOrchestrationRunPayload>> GetOrchestrationRunsAsync(
+        long novelId,
+        int? chapterNumber,
+        CancellationToken cancellationToken);
+
+    ValueTask<ReferenceOrchestrationRunPayload?> GetOrchestrationRunAsync(
+        long novelId,
+        string runId,
+        CancellationToken cancellationToken);
+
+    ValueTask<ReferenceOrchestrationRunPayload> ResumeOrchestrationRunAsync(
+        ResumeReferenceOrchestrationRunPayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<ReferenceOrchestrationRunPayload> CancelOrchestrationRunAsync(
+        CancelReferenceOrchestrationRunPayload input,
+        CancellationToken cancellationToken);
 }

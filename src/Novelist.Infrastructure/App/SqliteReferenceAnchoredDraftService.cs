@@ -534,6 +534,196 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         }
     }
 
+    public async ValueTask<ReferenceOrchestrationRunPayload> StartOrchestrationRunAsync(
+        StartReferenceOrchestrationRunPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        ValidateChapterNumber(input.ChapterNumber);
+        await EnsureNovelExistsAsync(input.NovelId, cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        var chapterGoal = NormalizeOptional(input.ChapterGoal, string.Empty, 2_000);
+        var knownFacts = NormalizeList(input.KnownFacts);
+        var forbiddenFacts = NormalizeList(input.ForbiddenFacts);
+        var anchorIds = NormalizeAnchorIds(input.AnchorIds);
+        var policy = NormalizeCorpusSearchPolicy(input.CorpusSearchPolicy);
+        var status = input.SourceConfirmed
+            ? ReferenceOrchestrationRunStatuses.Running
+            : ReferenceOrchestrationRunStatuses.WaitingForUser;
+        var stage = input.SourceConfirmed
+            ? ReferenceOrchestrationStages.BlueprintGeneration
+            : ReferenceOrchestrationStages.SourceConfirmation;
+        var currentDecision = input.SourceConfirmed
+            ? null
+            : BuildSourceConfirmationDecision(chapterGoal, knownFacts, forbiddenFacts, policy);
+        var run = new ReferenceOrchestrationRunPayload(
+            "run-" + Guid.NewGuid().ToString("N"),
+            input.NovelId,
+            input.ChapterNumber,
+            status,
+            stage,
+            chapterGoal,
+            knownFacts,
+            forbiddenFacts,
+            anchorIds,
+            policy,
+            BlueprintId: 0,
+            ReviewId: string.Empty,
+            CandidateIds: [],
+            currentDecision,
+            input.SourceConfirmed ? string.Empty : ReferenceOrchestrationStopReasons.SourceConfirmationRequired,
+            ErrorMessage: string.Empty,
+            now,
+            now);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            await InsertOrchestrationRunAsync(connection, run, cancellationToken);
+            return run;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<IReadOnlyList<ReferenceOrchestrationRunPayload>> GetOrchestrationRunsAsync(
+        long novelId,
+        int? chapterNumber,
+        CancellationToken cancellationToken)
+    {
+        ValidateNovelId(novelId);
+        if (chapterNumber is not null)
+        {
+            ValidateChapterNumber(chapterNumber.Value);
+        }
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            return await ReadOrchestrationRunsAsync(connection, novelId, chapterNumber, cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<ReferenceOrchestrationRunPayload?> GetOrchestrationRunAsync(
+        long novelId,
+        string runId,
+        CancellationToken cancellationToken)
+    {
+        ValidateNovelId(novelId);
+        var normalizedRunId = NormalizeRunId(runId);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            return await ReadOrchestrationRunAsync(connection, novelId, normalizedRunId, cancellationToken, required: false);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<ReferenceOrchestrationRunPayload> ResumeOrchestrationRunAsync(
+        ResumeReferenceOrchestrationRunPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        var runId = NormalizeRunId(input.RunId);
+        var decisionType = NormalizeOrchestrationDecisionType(input.DecisionType);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var run = await ReadOrchestrationRunAsync(connection, input.NovelId, runId, cancellationToken, required: true)
+                ?? throw new InvalidOperationException("Required orchestration run was not loaded.");
+            if (string.Equals(run.Status, ReferenceOrchestrationRunStatuses.Cancelled, StringComparison.Ordinal) ||
+                string.Equals(run.Status, ReferenceOrchestrationRunStatuses.Completed, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Orchestration run is not resumable.", nameof(input));
+            }
+
+            if (run.CurrentDecision is null)
+            {
+                throw new ArgumentException("Orchestration run has no pending decision.", nameof(input));
+            }
+
+            if (!string.Equals(run.CurrentDecision.DecisionType, decisionType, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Decision type does not match the pending orchestration decision.", nameof(input));
+            }
+
+            var updated = run with
+            {
+                Status = ReferenceOrchestrationRunStatuses.Running,
+                Stage = NextStageAfterDecision(decisionType),
+                CurrentDecision = null,
+                LastStopReason = string.Empty,
+                ErrorMessage = string.Empty,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            await UpdateOrchestrationRunAsync(connection, updated, cancellationToken);
+            return updated;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<ReferenceOrchestrationRunPayload> CancelOrchestrationRunAsync(
+        CancelReferenceOrchestrationRunPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        var runId = NormalizeRunId(input.RunId);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var run = await ReadOrchestrationRunAsync(connection, input.NovelId, runId, cancellationToken, required: true)
+                ?? throw new InvalidOperationException("Required orchestration run was not loaded.");
+            var updated = run with
+            {
+                Status = ReferenceOrchestrationRunStatuses.Cancelled,
+                CurrentDecision = null,
+                LastStopReason = ReferenceOrchestrationStopReasons.Cancelled,
+                ErrorMessage = NormalizeOptional(input.Reason, "cancelled", 500),
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            await UpdateOrchestrationRunAsync(connection, updated, cancellationToken);
+            return updated;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
     private async ValueTask<IReadOnlyList<ReferenceDraftParagraphCandidatePayload>> GenerateBeatCandidatesAsync(
         long novelId,
         ReferenceChapterBlueprintPayload blueprint,
@@ -1988,6 +2178,180 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static async ValueTask InsertOrchestrationRunAsync(
+        SqliteConnection connection,
+        ReferenceOrchestrationRunPayload run,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO reference_orchestration_runs
+              (run_id, novel_id, chapter_number, status, stage, chapter_goal,
+               known_facts_json, forbidden_facts_json, anchor_ids_json, corpus_search_policy_json,
+               blueprint_id, review_id, candidate_ids_json, current_decision_json,
+               last_stop_reason, error_message, created_at, updated_at)
+            VALUES
+              ($run_id, $novel_id, $chapter_number, $status, $stage, $chapter_goal,
+               $known_facts_json, $forbidden_facts_json, $anchor_ids_json, $corpus_search_policy_json,
+               $blueprint_id, $review_id, $candidate_ids_json, $current_decision_json,
+               $last_stop_reason, $error_message, $created_at, $updated_at);
+            """;
+        AddOrchestrationRunParameters(command, run);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask UpdateOrchestrationRunAsync(
+        SqliteConnection connection,
+        ReferenceOrchestrationRunPayload run,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_orchestration_runs
+            SET status = $status,
+                stage = $stage,
+                chapter_goal = $chapter_goal,
+                known_facts_json = $known_facts_json,
+                forbidden_facts_json = $forbidden_facts_json,
+                anchor_ids_json = $anchor_ids_json,
+                corpus_search_policy_json = $corpus_search_policy_json,
+                blueprint_id = $blueprint_id,
+                review_id = $review_id,
+                candidate_ids_json = $candidate_ids_json,
+                current_decision_json = $current_decision_json,
+                last_stop_reason = $last_stop_reason,
+                error_message = $error_message,
+                updated_at = $updated_at
+            WHERE novel_id = $novel_id AND run_id = $run_id;
+            """;
+        AddOrchestrationRunParameters(command, run);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static void AddOrchestrationRunParameters(
+        SqliteCommand command,
+        ReferenceOrchestrationRunPayload run)
+    {
+        command.Parameters.AddWithValue("$run_id", run.RunId);
+        command.Parameters.AddWithValue("$novel_id", run.NovelId);
+        command.Parameters.AddWithValue("$chapter_number", run.ChapterNumber);
+        command.Parameters.AddWithValue("$status", run.Status);
+        command.Parameters.AddWithValue("$stage", run.Stage);
+        command.Parameters.AddWithValue("$chapter_goal", run.ChapterGoal);
+        command.Parameters.AddWithValue("$known_facts_json", JsonSerializer.Serialize(run.KnownFacts, JsonOptions));
+        command.Parameters.AddWithValue("$forbidden_facts_json", JsonSerializer.Serialize(run.ForbiddenFacts, JsonOptions));
+        command.Parameters.AddWithValue("$anchor_ids_json", JsonSerializer.Serialize(run.AnchorIds, JsonOptions));
+        command.Parameters.AddWithValue("$corpus_search_policy_json", JsonSerializer.Serialize(run.CorpusSearchPolicy, JsonOptions));
+        command.Parameters.AddWithValue("$blueprint_id", run.BlueprintId);
+        command.Parameters.AddWithValue("$review_id", run.ReviewId);
+        command.Parameters.AddWithValue("$candidate_ids_json", JsonSerializer.Serialize(run.CandidateIds, JsonOptions));
+        command.Parameters.AddWithValue("$current_decision_json", run.CurrentDecision is null ? string.Empty : JsonSerializer.Serialize(run.CurrentDecision, JsonOptions));
+        command.Parameters.AddWithValue("$last_stop_reason", run.LastStopReason);
+        command.Parameters.AddWithValue("$error_message", run.ErrorMessage);
+        command.Parameters.AddWithValue("$created_at", FormatTimestamp(run.CreatedAt));
+        command.Parameters.AddWithValue("$updated_at", FormatTimestamp(run.UpdatedAt));
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceOrchestrationRunPayload>> ReadOrchestrationRunsAsync(
+        SqliteConnection connection,
+        long novelId,
+        int? chapterNumber,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = chapterNumber is null
+            ? """
+              SELECT run_id, novel_id, chapter_number, status, stage, chapter_goal,
+                     known_facts_json, forbidden_facts_json, anchor_ids_json, corpus_search_policy_json,
+                     blueprint_id, review_id, candidate_ids_json, current_decision_json,
+                     last_stop_reason, error_message, created_at, updated_at
+              FROM reference_orchestration_runs
+              WHERE novel_id = $novel_id
+              ORDER BY updated_at DESC, run_id DESC;
+              """
+            : """
+              SELECT run_id, novel_id, chapter_number, status, stage, chapter_goal,
+                     known_facts_json, forbidden_facts_json, anchor_ids_json, corpus_search_policy_json,
+                     blueprint_id, review_id, candidate_ids_json, current_decision_json,
+                     last_stop_reason, error_message, created_at, updated_at
+              FROM reference_orchestration_runs
+              WHERE novel_id = $novel_id AND chapter_number = $chapter_number
+              ORDER BY updated_at DESC, run_id DESC;
+              """;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        if (chapterNumber is not null)
+        {
+            command.Parameters.AddWithValue("$chapter_number", chapterNumber.Value);
+        }
+
+        var runs = new List<ReferenceOrchestrationRunPayload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            runs.Add(ReadOrchestrationRun(reader));
+        }
+
+        return runs;
+    }
+
+    private static async ValueTask<ReferenceOrchestrationRunPayload?> ReadOrchestrationRunAsync(
+        SqliteConnection connection,
+        long novelId,
+        string runId,
+        CancellationToken cancellationToken,
+        bool required)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT run_id, novel_id, chapter_number, status, stage, chapter_goal,
+                   known_facts_json, forbidden_facts_json, anchor_ids_json, corpus_search_policy_json,
+                   blueprint_id, review_id, candidate_ids_json, current_decision_json,
+                   last_stop_reason, error_message, created_at, updated_at
+            FROM reference_orchestration_runs
+            WHERE novel_id = $novel_id AND run_id = $run_id;
+            """;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$run_id", runId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (await reader.ReadAsync(cancellationToken))
+        {
+            return ReadOrchestrationRun(reader);
+        }
+
+        if (required)
+        {
+            throw new ArgumentException("Orchestration run does not exist.", nameof(runId));
+        }
+
+        return null;
+    }
+
+    private static ReferenceOrchestrationRunPayload ReadOrchestrationRun(SqliteDataReader reader)
+    {
+        var decisionJson = reader.GetString(13);
+        return new ReferenceOrchestrationRunPayload(
+            reader.GetString(0),
+            reader.GetInt64(1),
+            reader.GetInt32(2),
+            reader.GetString(3),
+            reader.GetString(4),
+            reader.GetString(5),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(6)),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(7)),
+            ReadJson<IReadOnlyList<long>>(reader.GetString(8)),
+            ReadJson<ReferenceCorpusSearchPolicyPayload>(reader.GetString(9)),
+            reader.GetInt64(10),
+            reader.GetString(11),
+            ReadJson<IReadOnlyList<string>>(reader.GetString(12)),
+            string.IsNullOrWhiteSpace(decisionJson)
+                ? null
+                : ReadJson<ReferenceOrchestrationRequiredDecisionPayload>(decisionJson),
+            reader.GetString(14),
+            reader.GetString(15),
+            ParseTimestamp(reader.GetString(16)),
+            ParseTimestamp(reader.GetString(17)));
+    }
+
     private async ValueTask EnsureSchemaAsync(string databasePath, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
@@ -2168,6 +2532,27 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
               FOREIGN KEY(blueprint_id) REFERENCES reference_chapter_blueprints(blueprint_id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS reference_orchestration_runs (
+              run_id TEXT PRIMARY KEY,
+              novel_id INTEGER NOT NULL,
+              chapter_number INTEGER NOT NULL,
+              status TEXT NOT NULL,
+              stage TEXT NOT NULL,
+              chapter_goal TEXT NOT NULL,
+              known_facts_json TEXT NOT NULL,
+              forbidden_facts_json TEXT NOT NULL,
+              anchor_ids_json TEXT NOT NULL,
+              corpus_search_policy_json TEXT NOT NULL,
+              blueprint_id INTEGER NOT NULL,
+              review_id TEXT NOT NULL,
+              candidate_ids_json TEXT NOT NULL,
+              current_decision_json TEXT NOT NULL,
+              last_stop_reason TEXT NOT NULL,
+              error_message TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_reference_blueprints_novel_chapter
               ON reference_chapter_blueprints(novel_id, chapter_number);
 
@@ -2188,6 +2573,9 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 
             CREATE INDEX IF NOT EXISTS idx_reference_draft_candidates_blueprint
               ON reference_draft_paragraph_candidates(blueprint_id, beat_id, created_at);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_orchestration_runs_novel_chapter
+              ON reference_orchestration_runs(novel_id, chapter_number, updated_at);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         await EnsureColumnAsync(
@@ -2399,6 +2787,90 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             .Where(value => value > 0)
             .Distinct()
             .ToArray() ?? [];
+    }
+
+    private static ReferenceCorpusSearchPolicyPayload NormalizeCorpusSearchPolicy(
+        ReferenceCorpusSearchPolicyPayload? policy)
+    {
+        if (policy is null)
+        {
+            return new ReferenceCorpusSearchPolicyPayload(
+                "story_context",
+                MaxResultsPerBeat: 3,
+                LicenseStatuses: ["user_provided"],
+                IncludeAnchorIds: [],
+                ExcludeAnchorIds: []);
+        }
+
+        var mode = NormalizeOptional(policy.Mode, "story_context", 80);
+        var maxResultsPerBeat = Math.Clamp(policy.MaxResultsPerBeat <= 0 ? 3 : policy.MaxResultsPerBeat, 1, 20);
+        var licenseStatuses = NormalizeList(policy.LicenseStatuses);
+        return new ReferenceCorpusSearchPolicyPayload(
+            mode,
+            maxResultsPerBeat,
+            licenseStatuses.Count == 0 ? ["user_provided"] : licenseStatuses,
+            NormalizeAnchorIds(policy.IncludeAnchorIds),
+            NormalizeAnchorIds(policy.ExcludeAnchorIds));
+    }
+
+    private static string NormalizeRunId(string? runId)
+    {
+        if (string.IsNullOrWhiteSpace(runId))
+        {
+            throw new ArgumentException("Orchestration run id is required.", nameof(runId));
+        }
+
+        return runId.Trim();
+    }
+
+    private static string NormalizeOrchestrationDecisionType(string? decisionType)
+    {
+        var normalized = NormalizeOptional(decisionType, string.Empty, 120);
+        if (!ReferenceOrchestrationDecisionTypes.All.Contains(normalized, StringComparer.Ordinal))
+        {
+            throw new ArgumentException("Unsupported orchestration decision type.", nameof(decisionType));
+        }
+
+        return normalized;
+    }
+
+    private static string NextStageAfterDecision(string decisionType)
+    {
+        return decisionType switch
+        {
+            ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts => ReferenceOrchestrationStages.BlueprintGeneration,
+            ReferenceOrchestrationDecisionTypes.ApplyBlueprintRevision => ReferenceOrchestrationStages.BlueprintReview,
+            ReferenceOrchestrationDecisionTypes.ApproveBlueprint => ReferenceOrchestrationStages.MaterialBinding,
+            ReferenceOrchestrationDecisionTypes.ApproveFinalInsertion => ReferenceOrchestrationStages.FinalInsertion,
+            _ => ReferenceOrchestrationStages.SourceConfirmation
+        };
+    }
+
+    private static ReferenceOrchestrationRequiredDecisionPayload BuildSourceConfirmationDecision(
+        string chapterGoal,
+        IReadOnlyList<string> knownFacts,
+        IReadOnlyList<string> forbiddenFacts,
+        ReferenceCorpusSearchPolicyPayload policy)
+    {
+        var summary = "Confirm source trust and chapter fact boundaries before reference orchestration runs safe stages.";
+        var factBoundaryChanges = knownFacts
+            .Select(fact => "known: " + fact)
+            .Concat(forbiddenFacts.Select(fact => "forbidden: " + fact))
+            .Take(20)
+            .ToArray();
+        return new ReferenceOrchestrationRequiredDecisionPayload(
+            ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts,
+            ReferenceOrchestrationStopReasons.SourceConfirmationRequired,
+            summary,
+            ["confirm_source", "confirm_known_facts", "confirm_forbidden_facts"],
+            new ReferenceOrchestrationApprovalSummaryPayload(
+                string.IsNullOrWhiteSpace(chapterGoal) ? "chapter goal not provided" : chapterGoal,
+                "not selected",
+                factBoundaryChanges,
+                "pending blueprint generation",
+                "search policy: " + policy.Mode,
+                "L2",
+                []));
     }
 
     private static string BuildBlueprintPremise(string? planText, string chapterFunction)

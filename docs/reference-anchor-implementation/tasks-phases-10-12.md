@@ -93,6 +93,16 @@ confirm source + chapter target + known/forbidden facts
 - [ ] Agent tool tests proving the orchestrator cannot approve blueprint revisions, expand fact boundaries, or insert prose without explicit approval.
 - [ ] Frontend runtime test or manual smoke test proving the default flow requires only necessary confirmations while advanced controls remain available.
 
+Targeted Phase 11 thin-slice checks completed:
+
+- [x] Contract, bridge, SQLite state persistence shell, and frontend adapter types now exist for starting, listing, inspecting, resuming, and cancelling orchestration runs.
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Reference -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'ReferenceOrchestrationRunPersistsResumeAndCancelState|ReferenceAnchoredDraftServiceTests' -v minimal`
+- [x] `npm --prefix frontend run build`
+- [x] `npm --prefix frontend run lint`
+
+This thin slice does not complete the Phase 11 automatic workflow. The happy path, failed-review revision path, high-risk stops, agent tool constraints, and frontend runtime workflow remain pending.
+
 **Files likely touched:**
 
 - `src/Novelist.Contracts/App/ReferenceAnchoredDraftPayloads.cs`

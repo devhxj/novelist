@@ -1013,6 +1013,83 @@ public sealed class MafToolRegistryTests
                 [],
                 DateTimeOffset.UtcNow));
         }
+
+        public ValueTask<ReferenceOrchestrationRunPayload> StartOrchestrationRunAsync(
+            StartReferenceOrchestrationRunPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(BuildRun(input.NovelId, input.ChapterNumber, input.ChapterGoal ?? string.Empty));
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceOrchestrationRunPayload>> GetOrchestrationRunsAsync(
+            long novelId,
+            int? chapterNumber,
+            CancellationToken cancellationToken)
+        {
+            IReadOnlyList<ReferenceOrchestrationRunPayload> runs = [BuildRun(novelId, chapterNumber ?? 1, "goal")];
+            return ValueTask.FromResult(runs);
+        }
+
+        public ValueTask<ReferenceOrchestrationRunPayload?> GetOrchestrationRunAsync(
+            long novelId,
+            string runId,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<ReferenceOrchestrationRunPayload?>(BuildRun(novelId, 1, "goal") with { RunId = runId });
+        }
+
+        public ValueTask<ReferenceOrchestrationRunPayload> ResumeOrchestrationRunAsync(
+            ResumeReferenceOrchestrationRunPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(BuildRun(input.NovelId, 1, "goal") with
+            {
+                RunId = input.RunId,
+                Status = ReferenceOrchestrationRunStatuses.Running,
+                CurrentDecision = null
+            });
+        }
+
+        public ValueTask<ReferenceOrchestrationRunPayload> CancelOrchestrationRunAsync(
+            CancelReferenceOrchestrationRunPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(BuildRun(input.NovelId, 1, "goal") with
+            {
+                RunId = input.RunId,
+                Status = ReferenceOrchestrationRunStatuses.Cancelled,
+                LastStopReason = ReferenceOrchestrationStopReasons.Cancelled
+            });
+        }
+
+        private static ReferenceOrchestrationRunPayload BuildRun(long novelId, int chapterNumber, string chapterGoal)
+        {
+            var now = DateTimeOffset.UtcNow;
+            return new ReferenceOrchestrationRunPayload(
+                "run-1",
+                novelId,
+                chapterNumber,
+                ReferenceOrchestrationRunStatuses.WaitingForUser,
+                ReferenceOrchestrationStages.SourceConfirmation,
+                chapterGoal,
+                [],
+                [],
+                [],
+                new ReferenceCorpusSearchPolicyPayload("story_context", 3, ["user_provided"], [], []),
+                0,
+                string.Empty,
+                [],
+                new ReferenceOrchestrationRequiredDecisionPayload(
+                    ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts,
+                    ReferenceOrchestrationStopReasons.SourceConfirmationRequired,
+                    "confirm source",
+                    ["confirm_source"],
+                    new ReferenceOrchestrationApprovalSummaryPayload("function", "pov", [], "emotion", "materials", "L2", [])),
+                ReferenceOrchestrationStopReasons.SourceConfirmationRequired,
+                string.Empty,
+                now,
+                now);
+        }
     }
 
     private sealed class RecordingPreferenceService : IPreferenceService

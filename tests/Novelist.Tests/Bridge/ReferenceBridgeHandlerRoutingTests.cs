@@ -121,6 +121,26 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         await AssertOkAsync(dispatcher, "BindReferenceBlueprintMaterials", new BindReferenceBlueprintMaterialsPayload(42, 501, 3, SelectTopCandidate: true));
         await AssertOkAsync(dispatcher, "GenerateReferenceAnchoredDraft", new GenerateReferenceAnchoredDraftPayload(42, 501, ["beat-1", "beat-2"]));
         await AssertOkAsync(dispatcher, "AuditReferenceAnchoredDraft", new AuditReferenceAnchoredDraftPayload(42, 501, ["candidate-1"]));
+        await AssertOkAsync(dispatcher, "StartReferenceOrchestrationRun", new StartReferenceOrchestrationRunPayload(
+            42,
+            7,
+            "tighten the reveal",
+            ["known clue"],
+            ["culprit identity"],
+            null,
+            new ReferenceCorpusSearchPolicyPayload("story_context", 3, ["user_provided"], [99], []),
+            SourceConfirmed: false));
+        await AssertOkAsync(dispatcher, "GetReferenceOrchestrationRuns", 42L, 7);
+        await AssertOkAsync(dispatcher, "GetReferenceOrchestrationRun", 42L, "run-1");
+        await AssertOkAsync(dispatcher, "ResumeReferenceOrchestrationRun", new ResumeReferenceOrchestrationRunPayload(
+            42,
+            "run-1",
+            ReferenceOrchestrationDecisionTypes.ApproveBlueprint,
+            "review-1"));
+        await AssertOkAsync(dispatcher, "CancelReferenceOrchestrationRun", new CancelReferenceOrchestrationRunPayload(
+            42,
+            "run-1",
+            "user cancelled"));
 
         Assert.Equal(
             [
@@ -132,7 +152,12 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "ApproveChapterBlueprint:42:501:review-1",
                 "BindBlueprintMaterials:42:501:3:True",
                 "GenerateDraftFromBlueprint:42:501:beat-1,beat-2",
-                "AuditDraftAgainstBlueprint:42:501:candidate-1"
+                "AuditDraftAgainstBlueprint:42:501:candidate-1",
+                "StartOrchestrationRun:42:7:tighten the reveal:known clue:culprit identity:<null>:story_context:3:user_provided:99::<false>",
+                "GetOrchestrationRuns:42:7",
+                "GetOrchestrationRun:42:run-1",
+                "ResumeOrchestrationRun:42:run-1:approve_blueprint:review-1",
+                "CancelOrchestrationRun:42:run-1:user cancelled"
             ],
             service.Calls);
     }
@@ -419,6 +444,55 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             Calls.Add($"AuditDraftAgainstBlueprint:{input.NovelId}:{input.BlueprintId}:{string.Join(',', input.CandidateIds)}");
             return ValueTask.FromResult<ReferenceAnchoredDraftAuditPayload>(null!);
         }
+
+        public ValueTask<ReferenceOrchestrationRunPayload> StartOrchestrationRunAsync(
+            StartReferenceOrchestrationRunPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add(
+                $"StartOrchestrationRun:{input.NovelId}:{input.ChapterNumber}:{input.ChapterGoal}:{string.Join(',', input.KnownFacts)}:{string.Join(',', input.ForbiddenFacts)}:{FormatNullableLongs(input.AnchorIds)}:{input.CorpusSearchPolicy.Mode}:{input.CorpusSearchPolicy.MaxResultsPerBeat}:{string.Join(',', input.CorpusSearchPolicy.LicenseStatuses)}:{string.Join(',', input.CorpusSearchPolicy.IncludeAnchorIds)}:{string.Join(',', input.CorpusSearchPolicy.ExcludeAnchorIds)}:<{input.SourceConfirmed.ToString().ToLowerInvariant()}>");
+            return ValueTask.FromResult<ReferenceOrchestrationRunPayload>(null!);
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceOrchestrationRunPayload>> GetOrchestrationRunsAsync(
+            long novelId,
+            int? chapterNumber,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"GetOrchestrationRuns:{novelId}:{chapterNumber?.ToString() ?? "<null>"}");
+            IReadOnlyList<ReferenceOrchestrationRunPayload> runs = [];
+            return ValueTask.FromResult(runs);
+        }
+
+        public ValueTask<ReferenceOrchestrationRunPayload?> GetOrchestrationRunAsync(
+            long novelId,
+            string runId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"GetOrchestrationRun:{novelId}:{runId}");
+            return ValueTask.FromResult<ReferenceOrchestrationRunPayload?>(null);
+        }
+
+        public ValueTask<ReferenceOrchestrationRunPayload> ResumeOrchestrationRunAsync(
+            ResumeReferenceOrchestrationRunPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"ResumeOrchestrationRun:{input.NovelId}:{input.RunId}:{input.DecisionType}:{input.DecisionPayload}");
+            return ValueTask.FromResult<ReferenceOrchestrationRunPayload>(null!);
+        }
+
+        public ValueTask<ReferenceOrchestrationRunPayload> CancelOrchestrationRunAsync(
+            CancelReferenceOrchestrationRunPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"CancelOrchestrationRun:{input.NovelId}:{input.RunId}:{input.Reason}");
+            return ValueTask.FromResult<ReferenceOrchestrationRunPayload>(null!);
+        }
     }
 
     private static string FormatSlots(IReadOnlyList<ReferenceSlotValuePayload> slots)
@@ -429,5 +503,10 @@ public sealed class ReferenceBridgeHandlerRoutingTests
     private static string FormatRevisionChanges(IReadOnlyList<ReferenceBlueprintRevisionChangePayload> changes)
     {
         return string.Join(',', changes.Select(change => $"{change.FieldPath}={change.NewValue}"));
+    }
+
+    private static string FormatNullableLongs(IReadOnlyList<long>? values)
+    {
+        return values is null ? "<null>" : string.Join(',', values);
     }
 }

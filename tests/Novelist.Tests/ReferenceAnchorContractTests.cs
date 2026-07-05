@@ -381,6 +381,91 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void ReferenceOrchestrationPayloadsUseStableSnakeCaseJsonNames()
+    {
+        var policy = new ReferenceCorpusSearchPolicyPayload(
+            Mode: "story_context",
+            MaxResultsPerBeat: 4,
+            LicenseStatuses: ["user_provided"],
+            IncludeAnchorIds: [7],
+            ExcludeAnchorIds: [9]);
+        var input = new StartReferenceOrchestrationRunPayload(
+            NovelId: 42,
+            ChapterNumber: 7,
+            ChapterGoal: "rain-night confrontation",
+            KnownFacts: ["林岚在门口"],
+            ForbiddenFacts: ["凶手身份"],
+            AnchorIds: null,
+            CorpusSearchPolicy: policy,
+            SourceConfirmed: false);
+
+        using var inputJson = JsonDocument.Parse(JsonSerializer.Serialize(input, BridgeJson.SerializerOptions));
+        var inputRoot = inputJson.RootElement;
+
+        Assert.Equal(42, inputRoot.GetProperty("novel_id").GetInt64());
+        Assert.Equal(7, inputRoot.GetProperty("chapter_number").GetInt32());
+        Assert.Equal("rain-night confrontation", inputRoot.GetProperty("chapter_goal").GetString());
+        Assert.Equal("林岚在门口", inputRoot.GetProperty("known_facts")[0].GetString());
+        Assert.Equal("凶手身份", inputRoot.GetProperty("forbidden_facts")[0].GetString());
+        Assert.Equal(JsonValueKind.Null, inputRoot.GetProperty("anchor_ids").ValueKind);
+        Assert.False(inputRoot.GetProperty("source_confirmed").GetBoolean());
+        var policyRoot = inputRoot.GetProperty("corpus_search_policy");
+        Assert.Equal("story_context", policyRoot.GetProperty("mode").GetString());
+        Assert.Equal(4, policyRoot.GetProperty("max_results_per_beat").GetInt32());
+        Assert.Equal("user_provided", policyRoot.GetProperty("license_statuses")[0].GetString());
+        Assert.Equal(7, policyRoot.GetProperty("include_anchor_ids")[0].GetInt64());
+        Assert.Equal(9, policyRoot.GetProperty("exclude_anchor_ids")[0].GetInt64());
+        Assert.False(inputRoot.TryGetProperty("NovelId", out _));
+
+        var run = new ReferenceOrchestrationRunPayload(
+            RunId: "run-1",
+            NovelId: 42,
+            ChapterNumber: 7,
+            Status: ReferenceOrchestrationRunStatuses.WaitingForUser,
+            Stage: ReferenceOrchestrationStages.SourceConfirmation,
+            ChapterGoal: "rain-night confrontation",
+            KnownFacts: ["林岚在门口"],
+            ForbiddenFacts: ["凶手身份"],
+            AnchorIds: [],
+            CorpusSearchPolicy: policy,
+            BlueprintId: 0,
+            ReviewId: "",
+            CandidateIds: [],
+            CurrentDecision: new ReferenceOrchestrationRequiredDecisionPayload(
+                DecisionType: ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts,
+                StopReason: ReferenceOrchestrationStopReasons.SourceConfirmationRequired,
+                Summary: "Confirm sources and fact boundaries before automation.",
+                RequiredActions: ["confirm_source", "confirm_facts"],
+                ApprovalSummary: new ReferenceOrchestrationApprovalSummaryPayload(
+                    ChapterFunction: "turn hesitation into action",
+                    Pov: "林岚 close",
+                    FactBoundaryChanges: [],
+                    EmotionalTrajectory: "guarded -> resolved",
+                    MaterialUsePlan: "bind by beat function",
+                    RewriteBudget: "L2",
+                    HighRiskFindings: [])),
+            LastStopReason: ReferenceOrchestrationStopReasons.SourceConfirmationRequired,
+            ErrorMessage: "",
+            CreatedAt: DateTimeOffset.Parse("2026-07-05T00:00:00Z"),
+            UpdatedAt: DateTimeOffset.Parse("2026-07-05T00:00:00Z"));
+
+        using var runJson = JsonDocument.Parse(JsonSerializer.Serialize(run, BridgeJson.SerializerOptions));
+        var runRoot = runJson.RootElement;
+
+        Assert.Equal("run-1", runRoot.GetProperty("run_id").GetString());
+        Assert.Equal("waiting_for_user", runRoot.GetProperty("status").GetString());
+        Assert.Equal("source_confirmation", runRoot.GetProperty("stage").GetString());
+        Assert.Equal(0, runRoot.GetProperty("blueprint_id").GetInt64());
+        Assert.Equal("", runRoot.GetProperty("review_id").GetString());
+        Assert.Equal("source_confirmation_required", runRoot.GetProperty("last_stop_reason").GetString());
+        var decision = runRoot.GetProperty("current_decision");
+        Assert.Equal("confirm_source_and_facts", decision.GetProperty("decision_type").GetString());
+        Assert.Equal("confirm_source", decision.GetProperty("required_actions")[0].GetString());
+        Assert.Equal("turn hesitation into action", decision.GetProperty("approval_summary").GetProperty("chapter_function").GetString());
+        Assert.False(runRoot.TryGetProperty("RunId", out _));
+    }
+
+    [Fact]
     public void ReferenceReuseAuditPayloadsExposeNonSlotEditsAsSnakeCase()
     {
         var payload = new ReferenceReuseAuditPayload(
@@ -504,6 +589,10 @@ public sealed class ReferenceAnchorContractTests
         Assert.Contains(ReferenceBlueprintStates.MaterialBound, ReferenceBlueprintStates.All);
         Assert.Contains(ReferenceBlueprintBeatTypes.Interiority, ReferenceBlueprintBeatTypes.All);
         Assert.Contains(ReferenceBlueprintReviewStatuses.Failed, ReferenceBlueprintReviewStatuses.All);
+        Assert.Contains(ReferenceOrchestrationRunStatuses.WaitingForUser, ReferenceOrchestrationRunStatuses.All);
+        Assert.Contains(ReferenceOrchestrationStages.SourceConfirmation, ReferenceOrchestrationStages.All);
+        Assert.Contains(ReferenceOrchestrationDecisionTypes.ApproveBlueprint, ReferenceOrchestrationDecisionTypes.All);
+        Assert.Contains(ReferenceOrchestrationStopReasons.FinalInsertionRequired, ReferenceOrchestrationStopReasons.All);
         Assert.Contains(ReferenceFeedbackDecisions.Accepted, ReferenceFeedbackDecisions.All);
         Assert.Contains(ReferenceFeedbackDecisions.Rejected, ReferenceFeedbackDecisions.All);
         Assert.Contains(ReferenceFeedbackDecisions.Edited, ReferenceFeedbackDecisions.All);
@@ -567,7 +656,12 @@ public sealed class ReferenceAnchorContractTests
             "ApproveReferenceChapterBlueprint",
             "BindReferenceBlueprintMaterials",
             "GenerateReferenceAnchoredDraft",
-            "AuditReferenceAnchoredDraft"
+            "AuditReferenceAnchoredDraft",
+            "StartReferenceOrchestrationRun",
+            "GetReferenceOrchestrationRuns",
+            "GetReferenceOrchestrationRun",
+            "ResumeReferenceOrchestrationRun",
+            "CancelReferenceOrchestrationRun"
         ];
 
         foreach (var method in expected)

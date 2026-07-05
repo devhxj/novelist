@@ -27,6 +27,11 @@ ApproveReferenceChapterBlueprint
 BindReferenceBlueprintMaterials
 GenerateReferenceAnchoredDraft
 AuditReferenceAnchoredDraft
+StartReferenceOrchestrationRun
+GetReferenceOrchestrationRuns
+GetReferenceOrchestrationRun
+ResumeReferenceOrchestrationRun
+CancelReferenceOrchestrationRun
 ```
 
 `SearchReferenceMaterials` returns paged `ReferenceMaterialPayload` items. Search requests accept optional `narrative_duties` and `emotion_transitions` filters in addition to material type, function, emotion, POV, and technique filters. Search responses attach optional `score_components` to each returned material for ranking explainability; stored material rows do not persist those transient components. When the active Embeddings configuration matches a ready reference vector index, search adds transient `embedding` scores from sqlite-vec results and falls back to lexical/tag ranking if query embedding or vector search is unavailable. For anchors whose `license_status` is `unknown`, search/library preview payloads truncate exact source text by default; the full imported material text remains in SQLite and is still used for provenance, adaptation, material binding, and audit.
@@ -34,6 +39,8 @@ AuditReferenceAnchoredDraft
 Reference material search remains separate from workspace-wide `SearchAll` in the current implementation. `SearchAll` continues to return workspace entities, chapter/content matches, and story-memory RAG hits; reference material results are exposed through `SearchReferenceMaterials` and the dedicated reference UI so license-sensitive previews, ranking explanations, and material filters stay under the reference-anchor policy. Any future global search integration should be a staged opt-in change with explicit result types and preview rules.
 
 `ReferenceChapterBlueprintPayload` exposes `build_version`, `context_hash`, `source_plan_hash`, and `analysis_contract_hash` as the reproducibility surface for generated blueprints. Blueprint rows do not persist prompt text, prompt templates, or schema snapshots; `review_version` is stored on review and approval rows so gate decisions remain auditable without prompt-churn in the blueprint table.
+
+The Phase 11 orchestration bridge surface is currently a run-state contract and persistence shell. `StartReferenceOrchestrationRun` accepts chapter goal, known facts, forbidden facts, optional explicit `anchor_ids`, and a `corpus_search_policy`. When `source_confirmed` is false, the run persists as `waiting_for_user` at `source_confirmation` with a required decision; when true, the run starts at `blueprint_generation`. `GetReferenceOrchestrationRuns`, `GetReferenceOrchestrationRun`, `ResumeReferenceOrchestrationRun`, and `CancelReferenceOrchestrationRun` allow clients to inspect, resume, and cancel the persisted run. This shell does not yet execute the automatic Phase 11 happy path of blueprint generation, deterministic review, material binding, candidate generation, or draft audit.
 
 Implementation files:
 

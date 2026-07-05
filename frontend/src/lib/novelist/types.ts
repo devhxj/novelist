@@ -844,6 +844,77 @@ export namespace reference {
     required_fixes: string[]
     audited_at: Timestamp
   }
+
+  export interface CorpusSearchPolicy {
+    mode: string
+    max_results_per_beat: number
+    license_statuses: string[]
+    include_anchor_ids: number[]
+    exclude_anchor_ids: number[]
+  }
+
+  export interface StartOrchestrationRunInput {
+    novel_id: number
+    chapter_number: number
+    chapter_goal?: string | null
+    known_facts: string[]
+    forbidden_facts: string[]
+    anchor_ids?: number[] | null
+    corpus_search_policy: CorpusSearchPolicy
+    source_confirmed?: boolean
+  }
+
+  export interface OrchestrationApprovalSummary {
+    chapter_function: string
+    pov: string
+    fact_boundary_changes: string[]
+    emotional_trajectory: string
+    material_use_plan: string
+    rewrite_budget: string
+    high_risk_findings: string[]
+  }
+
+  export interface OrchestrationRequiredDecision {
+    decision_type: string
+    stop_reason: string
+    summary: string
+    required_actions: string[]
+    approval_summary: OrchestrationApprovalSummary
+  }
+
+  export interface OrchestrationRun {
+    run_id: string
+    novel_id: number
+    chapter_number: number
+    status: string
+    stage: string
+    chapter_goal: string
+    known_facts: string[]
+    forbidden_facts: string[]
+    anchor_ids: number[]
+    corpus_search_policy: CorpusSearchPolicy
+    blueprint_id: number
+    review_id: string
+    candidate_ids: string[]
+    current_decision?: OrchestrationRequiredDecision | null
+    last_stop_reason: string
+    error_message: string
+    created_at: Timestamp
+    updated_at: Timestamp
+  }
+
+  export interface ResumeOrchestrationRunInput {
+    novel_id: number
+    run_id: string
+    decision_type: string
+    decision_payload: string
+  }
+
+  export interface CancelOrchestrationRunInput {
+    novel_id: number
+    run_id: string
+    reason: string
+  }
 }
 
 export namespace search {

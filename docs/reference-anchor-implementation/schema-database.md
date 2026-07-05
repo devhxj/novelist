@@ -24,6 +24,7 @@ reference_chapter_blueprint_approvals
 reference_chapter_blueprint_revisions
 reference_blueprint_material_links
 reference_draft_paragraph_candidates
+reference_orchestration_runs
 ```
 
 Core columns:
@@ -237,6 +238,26 @@ reference_draft_paragraph_candidates
 - audit_status TEXT NOT NULL
 - created_at TEXT NOT NULL
 
+reference_orchestration_runs
+- run_id TEXT PRIMARY KEY
+- novel_id INTEGER NOT NULL
+- chapter_number INTEGER NOT NULL
+- status TEXT NOT NULL
+- stage TEXT NOT NULL
+- chapter_goal TEXT NOT NULL
+- known_facts_json TEXT NOT NULL
+- forbidden_facts_json TEXT NOT NULL
+- anchor_ids_json TEXT NOT NULL
+- corpus_search_policy_json TEXT NOT NULL
+- blueprint_id INTEGER NOT NULL
+- review_id TEXT NOT NULL
+- candidate_ids_json TEXT NOT NULL
+- current_decision_json TEXT NOT NULL
+- last_stop_reason TEXT NOT NULL
+- error_message TEXT NOT NULL
+- created_at TEXT NOT NULL
+- updated_at TEXT NOT NULL
+
 reference_user_feedback
 - feedback_id TEXT PRIMARY KEY
 - novel_id INTEGER NOT NULL
@@ -270,6 +291,7 @@ idx_reference_blueprint_approvals_blueprint
 idx_reference_blueprint_revisions_blueprint
 idx_reference_blueprint_links_beat
 idx_reference_draft_candidates_blueprint
+idx_reference_orchestration_runs_novel_chapter
 idx_reference_feedback_novel_target
 idx_reference_feedback_material
 ```
@@ -281,3 +303,5 @@ PRAGMA foreign_keys = ON;
 ```
 
 The current RAG service does not enable foreign keys because it has only two flat tables. Reference-anchor storage has real parent/child integrity and enables it.
+
+`reference_orchestration_runs` is the Phase 11 run-state shell. It persists stage/status, source/fact decision details, optional explicit anchors, corpus search policy, artifact ids, stop reason, and error text so a run can be inspected or resumed after restart. The current implementation records state transitions only; later Phase 11 slices must attach real blueprint, review, material-binding, draft-candidate, and audit artifacts to these columns.

@@ -61,6 +61,33 @@ public static class ReferenceAnchoredDraftBridgeHandlers
                 ReadObjectArg<AuditReferenceAnchoredDraftPayload>(context.Payload, 0, "input"),
                 cancellationToken));
 
+        dispatcher.Register("StartReferenceOrchestrationRun", async (context, cancellationToken) =>
+            await service.StartOrchestrationRunAsync(
+                ReadObjectArg<StartReferenceOrchestrationRunPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
+        dispatcher.Register("GetReferenceOrchestrationRuns", async (context, cancellationToken) =>
+            await service.GetOrchestrationRunsAsync(
+                ReadLongArg(context.Payload, 0, "novelId"),
+                ReadNullableIntArg(context.Payload, 1, "chapterNumber"),
+                cancellationToken));
+
+        dispatcher.Register("GetReferenceOrchestrationRun", async (context, cancellationToken) =>
+            await service.GetOrchestrationRunAsync(
+                ReadLongArg(context.Payload, 0, "novelId"),
+                ReadStringArg(context.Payload, 1, "runId"),
+                cancellationToken));
+
+        dispatcher.Register("ResumeReferenceOrchestrationRun", async (context, cancellationToken) =>
+            await service.ResumeOrchestrationRunAsync(
+                ReadObjectArg<ResumeReferenceOrchestrationRunPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
+        dispatcher.Register("CancelReferenceOrchestrationRun", async (context, cancellationToken) =>
+            await service.CancelOrchestrationRunAsync(
+                ReadObjectArg<CancelReferenceOrchestrationRunPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
         return dispatcher;
     }
 
@@ -108,6 +135,23 @@ public static class ReferenceAnchoredDraftBridgeHandlers
         }
 
         return number;
+    }
+
+    private static string ReadStringArg(JsonElement? payload, int index, string argumentName)
+    {
+        var value = ReadArg(payload, index, argumentName);
+        if (value.ValueKind != JsonValueKind.String)
+        {
+            throw Invalid(argumentName, "Value must be a string.");
+        }
+
+        var text = value.GetString();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw Invalid(argumentName, "Value must not be empty.");
+        }
+
+        return text;
     }
 
     private static JsonElement ReadArg(JsonElement? payload, int index, string argumentName)

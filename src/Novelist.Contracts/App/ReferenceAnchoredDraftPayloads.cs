@@ -60,6 +60,88 @@ public static class ReferenceBlueprintReviewStatuses
     public static IReadOnlyList<string> All { get; } = [Passed, Failed];
 }
 
+public static class ReferenceOrchestrationRunStatuses
+{
+    public const string Running = "running";
+    public const string WaitingForUser = "waiting_for_user";
+    public const string Completed = "completed";
+    public const string Failed = "failed";
+    public const string Cancelled = "cancelled";
+
+    public static IReadOnlyList<string> All { get; } =
+    [
+        Running,
+        WaitingForUser,
+        Completed,
+        Failed,
+        Cancelled
+    ];
+}
+
+public static class ReferenceOrchestrationStages
+{
+    public const string SourceConfirmation = "source_confirmation";
+    public const string BlueprintGeneration = "blueprint_generation";
+    public const string BlueprintReview = "blueprint_review";
+    public const string BlueprintApproval = "blueprint_approval";
+    public const string MaterialBinding = "material_binding";
+    public const string DraftGeneration = "draft_generation";
+    public const string DraftAudit = "draft_audit";
+    public const string FinalInsertion = "final_insertion";
+
+    public static IReadOnlyList<string> All { get; } =
+    [
+        SourceConfirmation,
+        BlueprintGeneration,
+        BlueprintReview,
+        BlueprintApproval,
+        MaterialBinding,
+        DraftGeneration,
+        DraftAudit,
+        FinalInsertion
+    ];
+}
+
+public static class ReferenceOrchestrationDecisionTypes
+{
+    public const string ConfirmSourceAndFacts = "confirm_source_and_facts";
+    public const string ApplyBlueprintRevision = "apply_blueprint_revision";
+    public const string ApproveBlueprint = "approve_blueprint";
+    public const string ApproveFinalInsertion = "approve_final_insertion";
+
+    public static IReadOnlyList<string> All { get; } =
+    [
+        ConfirmSourceAndFacts,
+        ApplyBlueprintRevision,
+        ApproveBlueprint,
+        ApproveFinalInsertion
+    ];
+}
+
+public static class ReferenceOrchestrationStopReasons
+{
+    public const string SourceConfirmationRequired = "source_confirmation_required";
+    public const string FactBoundaryApprovalRequired = "fact_boundary_approval_required";
+    public const string BlueprintApprovalRequired = "blueprint_approval_required";
+    public const string BlueprintRevisionApprovalRequired = "blueprint_revision_approval_required";
+    public const string HighRiskGateBlocked = "high_risk_gate_blocked";
+    public const string DraftAuditFailed = "draft_audit_failed";
+    public const string FinalInsertionRequired = "final_insertion_required";
+    public const string Cancelled = "cancelled";
+
+    public static IReadOnlyList<string> All { get; } =
+    [
+        SourceConfirmationRequired,
+        FactBoundaryApprovalRequired,
+        BlueprintApprovalRequired,
+        BlueprintRevisionApprovalRequired,
+        HighRiskGateBlocked,
+        DraftAuditFailed,
+        FinalInsertionRequired,
+        Cancelled
+    ];
+}
+
 public sealed record GenerateReferenceChapterBlueprintPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("chapter_number")] int ChapterNumber,
@@ -295,3 +377,67 @@ public sealed record ReferenceAnchoredDraftAuditPayload(
     [property: JsonPropertyName("ai_prose_risks")] IReadOnlyList<string> AiProseRisks,
     [property: JsonPropertyName("required_fixes")] IReadOnlyList<string> RequiredFixes,
     [property: JsonPropertyName("audited_at")] DateTimeOffset AuditedAt);
+
+public sealed record ReferenceCorpusSearchPolicyPayload(
+    [property: JsonPropertyName("mode")] string Mode,
+    [property: JsonPropertyName("max_results_per_beat")] int MaxResultsPerBeat,
+    [property: JsonPropertyName("license_statuses")] IReadOnlyList<string> LicenseStatuses,
+    [property: JsonPropertyName("include_anchor_ids")] IReadOnlyList<long> IncludeAnchorIds,
+    [property: JsonPropertyName("exclude_anchor_ids")] IReadOnlyList<long> ExcludeAnchorIds);
+
+public sealed record StartReferenceOrchestrationRunPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("chapter_number")] int ChapterNumber,
+    [property: JsonPropertyName("chapter_goal")] string? ChapterGoal,
+    [property: JsonPropertyName("known_facts")] IReadOnlyList<string> KnownFacts,
+    [property: JsonPropertyName("forbidden_facts")] IReadOnlyList<string> ForbiddenFacts,
+    [property: JsonPropertyName("anchor_ids")] IReadOnlyList<long>? AnchorIds,
+    [property: JsonPropertyName("corpus_search_policy")] ReferenceCorpusSearchPolicyPayload CorpusSearchPolicy,
+    [property: JsonPropertyName("source_confirmed")] bool SourceConfirmed = false);
+
+public sealed record ReferenceOrchestrationApprovalSummaryPayload(
+    [property: JsonPropertyName("chapter_function")] string ChapterFunction,
+    [property: JsonPropertyName("pov")] string Pov,
+    [property: JsonPropertyName("fact_boundary_changes")] IReadOnlyList<string> FactBoundaryChanges,
+    [property: JsonPropertyName("emotional_trajectory")] string EmotionalTrajectory,
+    [property: JsonPropertyName("material_use_plan")] string MaterialUsePlan,
+    [property: JsonPropertyName("rewrite_budget")] string RewriteBudget,
+    [property: JsonPropertyName("high_risk_findings")] IReadOnlyList<string> HighRiskFindings);
+
+public sealed record ReferenceOrchestrationRequiredDecisionPayload(
+    [property: JsonPropertyName("decision_type")] string DecisionType,
+    [property: JsonPropertyName("stop_reason")] string StopReason,
+    [property: JsonPropertyName("summary")] string Summary,
+    [property: JsonPropertyName("required_actions")] IReadOnlyList<string> RequiredActions,
+    [property: JsonPropertyName("approval_summary")] ReferenceOrchestrationApprovalSummaryPayload ApprovalSummary);
+
+public sealed record ReferenceOrchestrationRunPayload(
+    [property: JsonPropertyName("run_id")] string RunId,
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("chapter_number")] int ChapterNumber,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("stage")] string Stage,
+    [property: JsonPropertyName("chapter_goal")] string ChapterGoal,
+    [property: JsonPropertyName("known_facts")] IReadOnlyList<string> KnownFacts,
+    [property: JsonPropertyName("forbidden_facts")] IReadOnlyList<string> ForbiddenFacts,
+    [property: JsonPropertyName("anchor_ids")] IReadOnlyList<long> AnchorIds,
+    [property: JsonPropertyName("corpus_search_policy")] ReferenceCorpusSearchPolicyPayload CorpusSearchPolicy,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("review_id")] string ReviewId,
+    [property: JsonPropertyName("candidate_ids")] IReadOnlyList<string> CandidateIds,
+    [property: JsonPropertyName("current_decision")] ReferenceOrchestrationRequiredDecisionPayload? CurrentDecision,
+    [property: JsonPropertyName("last_stop_reason")] string LastStopReason,
+    [property: JsonPropertyName("error_message")] string ErrorMessage,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
+    [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt);
+
+public sealed record ResumeReferenceOrchestrationRunPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("run_id")] string RunId,
+    [property: JsonPropertyName("decision_type")] string DecisionType,
+    [property: JsonPropertyName("decision_payload")] string DecisionPayload);
+
+public sealed record CancelReferenceOrchestrationRunPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("run_id")] string RunId,
+    [property: JsonPropertyName("reason")] string Reason);

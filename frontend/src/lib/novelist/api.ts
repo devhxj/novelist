@@ -80,6 +80,7 @@ export interface NovelistAppApi {
   AuditReferenceReuse: AppMethod<[reference.AuditReuseInput], reference.ReuseAudit>
   BindReferenceBlueprintMaterials: AppMethod<[reference.BindBlueprintMaterialsInput], reference.BlueprintMaterialBindingResult>
   CancelChat: AppMethod<[string], void>
+  CancelReferenceOrchestrationRun: AppMethod<[reference.CancelOrchestrationRunInput], reference.OrchestrationRun>
   Chat: AppMethod<[app.ChatInput], app.ChatResult>
   CompressContext: AppMethod<[app.CompressInput], app.CompressResult>
   CreateArcNode: AppMethod<[number, app.CreateArcNodeInput], storyarc.ArcNode>
@@ -130,6 +131,8 @@ export interface NovelistAppApi {
   GetReferenceAnchors: AppMethod<[number], reference.Anchor[]>
   GetReferenceChapterBlueprint: AppMethod<[number, number], reference.ChapterBlueprint | null>
   GetReferenceChapterBlueprints: AppMethod<[number, number | null], reference.ChapterBlueprintSummary[]>
+  GetReferenceOrchestrationRun: AppMethod<[number, string], reference.OrchestrationRun | null>
+  GetReferenceOrchestrationRuns: AppMethod<[number, number | null], reference.OrchestrationRun[]>
   GetReferenceUserFeedback: AppMethod<[reference.GetUserFeedbackInput], reference.UserFeedback[]>
   GetSession: AppMethod<[string], app.SessionDetail>
   GetSessionMessages: AppMethod<[string], session.Message[]>
@@ -148,6 +151,7 @@ export interface NovelistAppApi {
   RebuildReferenceAnchor: AppMethod<[number, number], reference.BuildStatus>
   RebuildNovelIndex: AppMethod<[number], void>
   RecordReferenceUserFeedback: AppMethod<[reference.RecordUserFeedbackInput], reference.UserFeedback>
+  ResumeReferenceOrchestrationRun: AppMethod<[reference.ResumeOrchestrationRunInput], reference.OrchestrationRun>
   ReviseReferenceChapterBlueprint: AppMethod<[reference.ReviseChapterBlueprintInput], reference.ChapterBlueprint>
   ReviewReferenceChapterBlueprint: AppMethod<[reference.ReviewChapterBlueprintInput], reference.ChapterBlueprintReview>
   SaveAvatar: AppMethod<[number[]], void>
@@ -166,6 +170,7 @@ export interface NovelistAppApi {
   SetLastSession: AppMethod<[string], void>
   SetReasoningEffort: AppMethod<[string], void>
   SetSelectedModel: AppMethod<[string, string], void>
+  StartReferenceOrchestrationRun: AppMethod<[reference.StartOrchestrationRunInput], reference.OrchestrationRun>
   TestEmbeddingConnection: AppMethod<[EmbeddingConfigView], void>
   TestConnection: AppMethod<[app.TestConnectionInput], void>
   UpdateArcNode: AppMethod<[number, number, app.UpdateArcNodeInput], void>
@@ -216,6 +221,7 @@ export const appApi: NovelistAppApi = {
   AuditReferenceReuse: appMethod<NovelistAppApi['AuditReferenceReuse']>('AuditReferenceReuse'),
   BindReferenceBlueprintMaterials: appMethod<NovelistAppApi['BindReferenceBlueprintMaterials']>('BindReferenceBlueprintMaterials'),
   CancelChat: appMethod<NovelistAppApi['CancelChat']>('CancelChat'),
+  CancelReferenceOrchestrationRun: appMethod<NovelistAppApi['CancelReferenceOrchestrationRun']>('CancelReferenceOrchestrationRun'),
   Chat: ((...args) => invokeAppArgs('Chat', args, { timeoutMs: null })) as NovelistAppApi['Chat'],
   CompressContext: appMethod<NovelistAppApi['CompressContext']>('CompressContext'),
   CreateArcNode: appMethod<NovelistAppApi['CreateArcNode']>('CreateArcNode'),
@@ -266,6 +272,8 @@ export const appApi: NovelistAppApi = {
   GetReferenceAnchors: appMethod<NovelistAppApi['GetReferenceAnchors']>('GetReferenceAnchors'),
   GetReferenceChapterBlueprint: appMethod<NovelistAppApi['GetReferenceChapterBlueprint']>('GetReferenceChapterBlueprint'),
   GetReferenceChapterBlueprints: appMethod<NovelistAppApi['GetReferenceChapterBlueprints']>('GetReferenceChapterBlueprints'),
+  GetReferenceOrchestrationRun: appMethod<NovelistAppApi['GetReferenceOrchestrationRun']>('GetReferenceOrchestrationRun'),
+  GetReferenceOrchestrationRuns: appMethod<NovelistAppApi['GetReferenceOrchestrationRuns']>('GetReferenceOrchestrationRuns'),
   GetReferenceUserFeedback: appMethod<NovelistAppApi['GetReferenceUserFeedback']>('GetReferenceUserFeedback'),
   GetSession: appMethod<NovelistAppApi['GetSession']>('GetSession'),
   GetSessionMessages: appMethod<NovelistAppApi['GetSessionMessages']>('GetSessionMessages'),
@@ -284,6 +292,7 @@ export const appApi: NovelistAppApi = {
   RebuildReferenceAnchor: appMethod<NovelistAppApi['RebuildReferenceAnchor']>('RebuildReferenceAnchor'),
   RebuildNovelIndex: appMethod<NovelistAppApi['RebuildNovelIndex']>('RebuildNovelIndex'),
   RecordReferenceUserFeedback: appMethod<NovelistAppApi['RecordReferenceUserFeedback']>('RecordReferenceUserFeedback'),
+  ResumeReferenceOrchestrationRun: appMethod<NovelistAppApi['ResumeReferenceOrchestrationRun']>('ResumeReferenceOrchestrationRun'),
   ReviseReferenceChapterBlueprint: appMethod<NovelistAppApi['ReviseReferenceChapterBlueprint']>('ReviseReferenceChapterBlueprint'),
   ReviewReferenceChapterBlueprint: appMethod<NovelistAppApi['ReviewReferenceChapterBlueprint']>('ReviewReferenceChapterBlueprint'),
   SaveAvatar: appMethod<NovelistAppApi['SaveAvatar']>('SaveAvatar'),
@@ -302,6 +311,7 @@ export const appApi: NovelistAppApi = {
   SetLastSession: appMethod<NovelistAppApi['SetLastSession']>('SetLastSession'),
   SetReasoningEffort: appMethod<NovelistAppApi['SetReasoningEffort']>('SetReasoningEffort'),
   SetSelectedModel: appMethod<NovelistAppApi['SetSelectedModel']>('SetSelectedModel'),
+  StartReferenceOrchestrationRun: appMethod<NovelistAppApi['StartReferenceOrchestrationRun']>('StartReferenceOrchestrationRun'),
   TestEmbeddingConnection: appMethod<NovelistAppApi['TestEmbeddingConnection']>('TestEmbeddingConnection'),
   TestConnection: appMethod<NovelistAppApi['TestConnection']>('TestConnection'),
   UpdateArcNode: appMethod<NovelistAppApi['UpdateArcNode']>('UpdateArcNode'),
