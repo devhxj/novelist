@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 15;
+    public const int CurrentReviewVersion = 16;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -532,6 +532,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "source_backed_detail_target",
                     $"Forbidden fact appears in source-backed detail target: {forbidden}",
                     "Remove the forbidden fact from beat source_backed_detail_target before drafting.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.SensoryAnchorTarget, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "sensory_anchor_target",
+                    $"Forbidden fact appears in sensory anchor target: {forbidden}",
+                    "Remove the forbidden fact from beat sensory_anchor_target before drafting.");
             }
         }
 

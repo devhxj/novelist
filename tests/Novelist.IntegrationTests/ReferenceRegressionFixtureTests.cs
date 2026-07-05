@@ -149,6 +149,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 SensoryAnchorTarget = "密室钥匙"
             },
+            "forbidden_sensory_anchor_target_fact" => beat with
+            {
+                SensoryAnchorTarget = "凶手身份"
+            },
             "generic_slot_plan" => beat with
             {
                 SlotPlan = [new ReferenceSlotValuePayload("object", "随便替换一个东西")]
@@ -212,6 +216,7 @@ public sealed class ReferenceRegressionFixtureTests
             "pov_forbidden_scene_fact" => ["雨声压低了整条街的呼吸", "周鸣是卧底"],
             "forbidden_reference_query_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_source_backed_detail_target_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
+            "forbidden_sensory_anchor_target_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "limited_pov_hidden_position" => ["雨声压低了整条街的呼吸", "周鸣在门后"],
             "limited_pov_offstage_fact" => ["雨声压低了整条街的呼吸", "周鸣握住那把钥匙", "那把钥匙"],
             "limited_pov_barrier_offstage_action" => ["雨声压低了整条街的呼吸", "周鸣按住门把"],
@@ -225,6 +230,7 @@ public sealed class ReferenceRegressionFixtureTests
         {
             "forbidden_reference_query_fact" => ["凶手身份"],
             "forbidden_source_backed_detail_target_fact" => ["凶手身份"],
+            "forbidden_sensory_anchor_target_fact" => ["凶手身份"],
             _ => []
         };
     }

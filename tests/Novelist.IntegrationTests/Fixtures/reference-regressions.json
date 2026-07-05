@@ -91,6 +91,11 @@
       "expected_error": "unsupported sensory anchor target fact"
     },
     {
+      "name": "forbidden_sensory_anchor_target_fact",
+      "mutation": "forbidden_sensory_anchor_target_fact",
+      "expected_error": "forbidden fact appears in sensory anchor target"
+    },
+    {
       "name": "generic_slot_plan",
       "mutation": "generic_slot_plan",
       "expected_error": "generic slot plan"
