@@ -180,6 +180,24 @@ public sealed class ReferenceAnchoredDraftAuditorTests
     }
 
     [Fact]
+    public void BuildDraftAuditFailsWhenCandidateIntroducesUnsupportedCommunicationEvidence()
+    {
+        var blueprint = Blueprint(beat => beat);
+        var candidate = Candidate(blueprint, "雨声压低了整条街的呼吸，手机里的聊天记录、通话记录和转账记录都被压在账本下面。");
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.UnsupportedFactErrors, item => item.Contains("聊天记录", StringComparison.Ordinal));
+        Assert.Contains(audit.UnsupportedFactErrors, item => item.Contains("通话记录", StringComparison.Ordinal));
+        Assert.Contains(audit.UnsupportedFactErrors, item => item.Contains("转账记录", StringComparison.Ordinal));
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("Remove unsupported fact", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BuildDraftAuditAllowsSensitiveIdentifierWhenItIsSceneFact()
     {
         var blueprint = Blueprint(beat => beat with
@@ -961,6 +979,17 @@ public sealed class ReferenceAnchoredDraftAuditorTests
         Assert.Contains("袖口纤维", facts);
         Assert.Contains("鞋印", facts);
         Assert.Contains("DNA报告", facts);
+    }
+
+    [Fact]
+    public void ExtractAuditableFactPhrasesReadsCommunicationEvidenceFacts()
+    {
+        var facts = ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(
+            "雨声压低了整条街的呼吸，手机里的聊天记录、通话记录和转账记录都被压在账本下面。");
+
+        Assert.Contains("聊天记录", facts);
+        Assert.Contains("通话记录", facts);
+        Assert.Contains("转账记录", facts);
     }
 
     [Fact]

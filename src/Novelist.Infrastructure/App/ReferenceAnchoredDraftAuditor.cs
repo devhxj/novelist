@@ -446,6 +446,7 @@ internal static class ReferenceAnchoredDraftAuditor
         facts.AddRange(ExtractLegalDocumentFacts(text));
         facts.AddRange(ExtractDangerousArtifactFacts(text));
         facts.AddRange(ExtractForensicEvidenceFacts(text));
+        facts.AddRange(ExtractCommunicationEvidenceFacts(text));
         facts.AddRange(ExtractLocationIdentifierFacts(text));
         facts.AddRange(ExtractIdentityRevealFacts(text));
         facts.AddRange(ExtractRelationshipRevealFacts(text));
@@ -554,6 +555,35 @@ internal static class ReferenceAnchoredDraftAuditor
             @"(?:^|[，。！？；;,\s、]|和|与)(?<fact>[\u4e00-\u9fffA-Za-z0-9]{0,8}?(?:上的|下的|里的|内的|旁的|边的)?(?:" + forensicTerms + @"))"))
         {
             var fact = NormalizeDelimitedAuditableFact(match.Groups["fact"].Value);
+            if (fact.Length >= 2)
+            {
+                yield return fact;
+            }
+        }
+    }
+
+    private static IEnumerable<string> ExtractCommunicationEvidenceFacts(string text)
+    {
+        const string communicationTerms = "聊天记录|通话记录|转账记录|交易记录|汇款记录|短信记录|邮件记录|监控录像|监控视频|录音文件|录音|录像|照片";
+        foreach (Match match in Regex.Matches(
+            text,
+            @"(?:^|[，。！？；;,\s、]|和|与)(?<fact>[\u4e00-\u9fffA-Za-z0-9]{0,8}?(?:里(?:的)?)?(?:" + communicationTerms + @"))"))
+        {
+            var fact = NormalizeDelimitedAuditableFact(match.Groups["fact"].Value);
+            var containerIndex = fact.LastIndexOf("里的", StringComparison.Ordinal);
+            if (containerIndex >= 0 && containerIndex < fact.Length - 2)
+            {
+                fact = fact[(containerIndex + 2)..];
+            }
+            else
+            {
+                containerIndex = fact.LastIndexOf('里');
+                if (containerIndex >= 0 && containerIndex < fact.Length - 1)
+                {
+                    fact = fact[(containerIndex + 1)..];
+                }
+            }
+
             if (fact.Length >= 2)
             {
                 yield return fact;
