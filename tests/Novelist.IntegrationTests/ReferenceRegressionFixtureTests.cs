@@ -19,6 +19,7 @@ public sealed class ReferenceRegressionFixtureTests
             var blueprint = Blueprint(
                 beat => ApplyBlueprintMutation(beat, mutation),
                 knownFacts: KnownFactsForMutation(mutation),
+                forbiddenFacts: ForbiddenFactsForMutation(mutation),
                 finalHook: FinalHookForMutation(mutation));
 
             var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
@@ -151,6 +152,13 @@ public sealed class ReferenceRegressionFixtureTests
                     Query = "密室钥匙"
                 }
             },
+            "forbidden_reference_query_fact" => beat with
+            {
+                ReferenceQuery = beat.ReferenceQuery with
+                {
+                    Query = "凶手身份"
+                }
+            },
             "unsupported_final_hook" => beat,
             "unsupported_scene_fact" => beat with
             {
@@ -190,10 +198,20 @@ public sealed class ReferenceRegressionFixtureTests
         return mutation switch
         {
             "pov_forbidden_scene_fact" => ["雨声压低了整条街的呼吸", "周鸣是卧底"],
+            "forbidden_reference_query_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "limited_pov_hidden_position" => ["雨声压低了整条街的呼吸", "周鸣在门后"],
             "limited_pov_offstage_fact" => ["雨声压低了整条街的呼吸", "周鸣握住那把钥匙", "那把钥匙"],
             "limited_pov_barrier_offstage_action" => ["雨声压低了整条街的呼吸", "周鸣按住门把"],
             _ => ["雨声压低了整条街的呼吸"]
+        };
+    }
+
+    private static IReadOnlyList<string> ForbiddenFactsForMutation(string mutation)
+    {
+        return mutation switch
+        {
+            "forbidden_reference_query_fact" => ["凶手身份"],
+            _ => []
         };
     }
 
@@ -278,6 +296,7 @@ public sealed class ReferenceRegressionFixtureTests
     private static ReferenceChapterBlueprintPayload Blueprint(
         Func<ReferenceChapterBlueprintBeatPayload, ReferenceChapterBlueprintBeatPayload> configureBeat,
         IReadOnlyList<string>? knownFacts = null,
+        IReadOnlyList<string>? forbiddenFacts = null,
         string finalHook = "hook")
     {
         var beat = configureBeat(Beat("1:beat:1"));
@@ -315,7 +334,7 @@ public sealed class ReferenceRegressionFixtureTests
             "林岚",
             "close",
             knownFacts ?? ["雨声压低了整条街的呼吸"],
-            [],
+            forbiddenFacts ?? [],
             [],
             [beat],
             LatestReview: null,

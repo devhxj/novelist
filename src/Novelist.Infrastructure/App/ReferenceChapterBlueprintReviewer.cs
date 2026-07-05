@@ -489,6 +489,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     $"Forbidden fact appears in blueprint: {forbidden}",
                     "Remove the forbidden fact from beat scene facts or move it out of the forbidden fact set.");
             }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.ReferenceQuery.Query, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "reference_query",
+                    $"Forbidden fact appears in reference query: {forbidden}",
+                    "Remove the forbidden fact from beat reference_query before material binding.");
+            }
         }
 
         foreach (var unsupportedFact in FindUnsupportedFinalHookFacts(blueprint))

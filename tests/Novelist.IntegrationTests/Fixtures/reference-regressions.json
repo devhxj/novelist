@@ -91,6 +91,11 @@
       "expected_error": "unsupported reference query fact"
     },
     {
+      "name": "forbidden_reference_query_fact",
+      "mutation": "forbidden_reference_query_fact",
+      "expected_error": "forbidden fact appears in reference query"
+    },
+    {
       "name": "unsupported_final_hook",
       "mutation": "unsupported_final_hook",
       "expected_error": "final hook"
