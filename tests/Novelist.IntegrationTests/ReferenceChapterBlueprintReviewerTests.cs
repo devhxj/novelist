@@ -1333,6 +1333,45 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsUnsupportedNoReuseReasonFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            NoReuseReason = "transition carries 密室钥匙 without reusable source"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ReferenceBindingErrors, item => item.Contains("unsupported no_reuse_reason fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "reference_binding" &&
+                defect.FieldPath.Contains("no_reuse_reason", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsForbiddenFactInNoReuseReason()
+    {
+        var blueprint = Blueprint(
+            beat => beat with
+            {
+                NoReuseReason = "transition carries 凶手身份 without reusable source"
+            },
+            forbiddenFacts: ["凶手身份"],
+            knownFacts: ["雨声压低了整条街的呼吸", "凶手身份"]);
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ForbiddenFactErrors, item => item.Contains("no_reuse_reason", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "forbidden_fact" &&
+                defect.FieldPath.Contains("no_reuse_reason", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsHardTransitionWithoutNarrativePressure()
     {
         var blueprint = Blueprint(beat => beat with

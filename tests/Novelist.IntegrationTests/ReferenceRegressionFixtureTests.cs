@@ -292,6 +292,14 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 SlotPlan = [new ReferenceSlotValuePayload("object", "凶手身份")]
             },
+            "unsupported_no_reuse_reason_fact" => beat with
+            {
+                NoReuseReason = "transition carries 密室钥匙 without reusable source"
+            },
+            "forbidden_no_reuse_reason_fact" => beat with
+            {
+                NoReuseReason = "transition carries 凶手身份 without reusable source"
+            },
             "unsupported_reference_query_fact" => beat with
             {
                 ReferenceQuery = beat.ReferenceQuery with
@@ -356,6 +364,7 @@ public sealed class ReferenceRegressionFixtureTests
             "forbidden_external_evidence_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_reference_query_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_slot_plan_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
+            "forbidden_no_reuse_reason_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_source_backed_detail_target_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_sensory_anchor_target_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_subtext_plan_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
@@ -380,6 +389,7 @@ public sealed class ReferenceRegressionFixtureTests
             "forbidden_external_evidence_fact" => ["凶手身份"],
             "forbidden_reference_query_fact" => ["凶手身份"],
             "forbidden_slot_plan_fact" => ["凶手身份"],
+            "forbidden_no_reuse_reason_fact" => ["凶手身份"],
             "forbidden_source_backed_detail_target_fact" => ["凶手身份"],
             "forbidden_sensory_anchor_target_fact" => ["凶手身份"],
             "forbidden_subtext_plan_fact" => ["凶手身份"],

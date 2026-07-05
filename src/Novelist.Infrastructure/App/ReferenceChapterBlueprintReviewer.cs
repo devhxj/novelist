@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 44;
+    public const int CurrentReviewVersion = 45;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -668,6 +668,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "Move the slot_plan fact into approved known facts, scene facts, or viewpoint knowledge before using it as a replacement.");
             }
 
+            foreach (var unsupportedNoReuseReasonFact in FindUnsupportedNoReuseReasonFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "no_reuse_reason",
+                    $"Beat {beat.BeatIndex} contains unsupported no_reuse_reason fact: {unsupportedNoReuseReasonFact}",
+                    "Set up the no_reuse_reason fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before skipping material binding.");
+            }
+
             if (string.IsNullOrWhiteSpace(beat.NarrationStrategy))
             {
                 AddBeatDefect(
@@ -833,6 +844,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "slot_plan",
                     $"Forbidden fact appears in slot plan: {forbidden}",
                     "Remove the forbidden fact from beat slot_plan before using it as a replacement.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.NoReuseReason, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "no_reuse_reason",
+                    $"Forbidden fact appears in no_reuse_reason: {forbidden}",
+                    "Remove the forbidden fact from beat no_reuse_reason before skipping material binding.");
             }
 
             foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.EmotionTrigger, forbidden)))
@@ -1075,6 +1097,11 @@ internal static class ReferenceChapterBlueprintReviewer
         if (beat.SlotPlan.Any(slot => ContainsForbidden(slot.Value, forbidden)))
         {
             yield return "slot_plan";
+        }
+
+        if (ContainsForbidden(beat.NoReuseReason, forbidden))
+        {
+            yield return "no_reuse_reason";
         }
     }
 
@@ -1684,6 +1711,24 @@ internal static class ReferenceChapterBlueprintReviewer
         return beat.SlotPlan
             .Select(slot => slot.Value)
             .SelectMany(ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedNoReuseReasonFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.NoReuseReason)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

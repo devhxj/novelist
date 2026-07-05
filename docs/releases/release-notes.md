@@ -68,6 +68,7 @@
 - 蓝图评审现在会阻止 `slot_plan` 使用 forbidden facts，禁止项不能作为槽位替换值进入候选草稿。
 - 蓝图评审现在也会检查 `reference_query.query` 里的高风险事实，未批准的“密室钥匙”等搜索目标不能直接进入材料绑定流程。
 - 蓝图评审现在会阻止 `reference_query.query` 使用 forbidden facts，即使该事实已出现在上下文里，也不能被拿去做参考材料搜索目标。
+- 蓝图评审现在会检查 `no_reuse_reason` 里的高风险事实并阻止 forbidden facts，过渡 beat 不能借“无需材料复用”绕过事实审批。
 - 蓝图评审现在会检查 `source_backed_detail_target` 里的高风险事实，必写的“密室钥匙”等细节目标必须先进入已批准事实范围。
 - 蓝图评审现在会阻止 `source_backed_detail_target` 使用 forbidden facts，禁止项不能成为候选草稿的必写细节。
 - 蓝图评审现在也会检查 `sensory_anchor_target` 里的高风险事实，必写的感官锚点必须先进入已批准事实范围。

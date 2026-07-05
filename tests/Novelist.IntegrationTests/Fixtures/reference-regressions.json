@@ -266,6 +266,16 @@
       "expected_error": "forbidden fact appears in slot plan"
     },
     {
+      "name": "unsupported_no_reuse_reason_fact",
+      "mutation": "unsupported_no_reuse_reason_fact",
+      "expected_error": "unsupported no_reuse_reason fact"
+    },
+    {
+      "name": "forbidden_no_reuse_reason_fact",
+      "mutation": "forbidden_no_reuse_reason_fact",
+      "expected_error": "forbidden fact appears in no_reuse_reason"
+    },
+    {
       "name": "unsupported_reference_query_fact",
       "mutation": "unsupported_reference_query_fact",
       "expected_error": "unsupported reference query fact"
