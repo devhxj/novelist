@@ -171,6 +171,10 @@ public sealed partial class NovelistMafToolRegistry
         private const string BindMaterialsDescription = "为已通过 approve_reference_chapter_blueprint 批准的蓝图 beat 返回参考材料候选；默认不自动选中，进入 generate_reference_anchored_draft 前需显式 select_top_candidate=true。";
         private const string GenerateDraftDescription = "从已按 generate_reference_chapter_blueprint -> review_reference_chapter_blueprint -> approve_reference_chapter_blueprint -> bind_reference_blueprint_materials 且 select_top_candidate=true 准备好的 approved/material_bound 蓝图生成候选段落；只返回 candidates，随后调用 audit_reference_anchored_draft，不调用 SaveContent，不直接写章节。";
         private const string AuditDraftDescription = "按 candidate_id 审计 generate_reference_anchored_draft 生成的 reference-anchored 草稿候选。纯检查工具，不写章节。";
+        private const string StartOrchestrationDescription = "启动默认 reference orchestration 候选流程。novel_id 由运行时注入；agent 只能提供章节目标、已知/禁止事实和 corpus policy，不能确认 source/fact，不能批准 blueprint revision，不能批准 final insertion，这些决策必须由作者完成。";
+        private const string GetOrchestrationRunsDescription = "列出当前小说的 reference orchestration 运行历史，可按章节过滤；只读工具，不批准、不恢复、不写章节。";
+        private const string GetOrchestrationRunDescription = "读取单个 reference orchestration run 的状态、当前停点和 required decision；只读工具，不批准、不恢复、不写章节。";
+        private const string CancelOrchestrationDescription = "取消当前小说的 reference orchestration run；不能批准 source/fact、blueprint revision 或 final insertion，也不能写入章节正文。";
 
         private readonly IReferenceAnchoredDraftService _referenceDrafts;
         private readonly NovelistMafToolContext _context;
@@ -195,6 +199,10 @@ public sealed partial class NovelistMafToolRegistry
             tools.Add(CreateFunction(nameof(BindReferenceBlueprintMaterialsAsync), "bind_reference_blueprint_materials", BindMaterialsDescription));
             tools.Add(CreateFunction(nameof(GenerateReferenceAnchoredDraftAsync), "generate_reference_anchored_draft", GenerateDraftDescription));
             tools.Add(CreateFunction(nameof(AuditReferenceAnchoredDraftAsync), "audit_reference_anchored_draft", AuditDraftDescription));
+            tools.Add(CreateFunction(nameof(StartReferenceOrchestrationRunAsync), "start_reference_orchestration_run", StartOrchestrationDescription));
+            tools.Add(CreateFunction(nameof(GetReferenceOrchestrationRunsAsync), "get_reference_orchestration_runs", GetOrchestrationRunsDescription));
+            tools.Add(CreateFunction(nameof(GetReferenceOrchestrationRunAsync), "get_reference_orchestration_run", GetOrchestrationRunDescription));
+            tools.Add(CreateFunction(nameof(CancelReferenceOrchestrationRunAsync), "cancel_reference_orchestration_run", CancelOrchestrationDescription));
         }
 
         private AIFunction CreateFunction(string methodName, string toolName, string description)
@@ -328,6 +336,85 @@ public sealed partial class NovelistMafToolRegistry
         {
             return _referenceDrafts.AuditDraftAgainstBlueprintAsync(
                 new AuditReferenceAnchoredDraftPayload(_context.NovelId, blueprint_id, candidate_ids),
+                cancellationToken);
+        }
+
+        [Description(StartOrchestrationDescription)]
+        private ValueTask<ReferenceOrchestrationRunPayload> StartReferenceOrchestrationRunAsync(
+            [Description("目标章节号")]
+            int chapter_number,
+            [Description("用户给定的本章目标或章节计划摘要")]
+            string? chapter_goal = null,
+            [Description("本章允许使用的已知事实；新增或扩大事实边界仍需要作者确认")]
+            string[]? known_facts = null,
+            [Description("本章禁止引入的事实")]
+            string[]? forbidden_facts = null,
+            [Description("高级包含过滤：允许 corpus 检索优先考虑的参考锚定 id；不等于已审批锚点选择")]
+            long[]? include_anchor_ids = null,
+            [Description("高级排除过滤：本次 corpus 检索排除的参考锚定 id")]
+            long[]? exclude_anchor_ids = null,
+            [Description("允许的来源许可状态，默认 user_provided")]
+            string[]? license_statuses = null,
+            [Description("每个 beat 最多检索候选数，默认 3，范围 1-10")]
+            int max_results_per_beat = 0,
+            [Description("语料检索模式，默认 story_context")]
+            string? corpus_search_mode = null,
+            CancellationToken cancellationToken = default)
+        {
+            var policy = new ReferenceCorpusSearchPolicyPayload(
+                string.IsNullOrWhiteSpace(corpus_search_mode) ? "story_context" : corpus_search_mode.Trim(),
+                Math.Clamp(max_results_per_beat <= 0 ? 3 : max_results_per_beat, 1, 10),
+                license_statuses is { Length: > 0 } ? license_statuses : ["user_provided"],
+                include_anchor_ids ?? [],
+                exclude_anchor_ids ?? []);
+
+            return _referenceDrafts.StartOrchestrationRunAsync(
+                new StartReferenceOrchestrationRunPayload(
+                    _context.NovelId,
+                    chapter_number,
+                    chapter_goal,
+                    known_facts ?? [],
+                    forbidden_facts ?? [],
+                    AnchorIds: null,
+                    policy,
+                    SourceConfirmed: false),
+                cancellationToken);
+        }
+
+        [Description(GetOrchestrationRunsDescription)]
+        private ValueTask<IReadOnlyList<ReferenceOrchestrationRunPayload>> GetReferenceOrchestrationRunsAsync(
+            [Description("章节号过滤；小于等于 0 表示全部章节")]
+            int chapter_number = 0,
+            CancellationToken cancellationToken = default)
+        {
+            return _referenceDrafts.GetOrchestrationRunsAsync(
+                _context.NovelId,
+                chapter_number <= 0 ? null : chapter_number,
+                cancellationToken);
+        }
+
+        [Description(GetOrchestrationRunDescription)]
+        private ValueTask<ReferenceOrchestrationRunPayload?> GetReferenceOrchestrationRunAsync(
+            [Description("orchestration run id")]
+            string run_id,
+            CancellationToken cancellationToken = default)
+        {
+            return _referenceDrafts.GetOrchestrationRunAsync(_context.NovelId, run_id, cancellationToken);
+        }
+
+        [Description(CancelOrchestrationDescription)]
+        private ValueTask<ReferenceOrchestrationRunPayload> CancelReferenceOrchestrationRunAsync(
+            [Description("orchestration run id")]
+            string run_id,
+            [Description("取消原因")]
+            string? reason = null,
+            CancellationToken cancellationToken = default)
+        {
+            return _referenceDrafts.CancelOrchestrationRunAsync(
+                new CancelReferenceOrchestrationRunPayload(
+                    _context.NovelId,
+                    run_id,
+                    string.IsNullOrWhiteSpace(reason) ? "agent_cancelled" : reason),
                 cancellationToken);
         }
     }

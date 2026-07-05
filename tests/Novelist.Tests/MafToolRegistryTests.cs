@@ -227,6 +227,14 @@ public sealed class MafToolRegistryTests
         Assert.Contains("bind_reference_blueprint_materials", names);
         Assert.Contains("generate_reference_anchored_draft", names);
         Assert.Contains("audit_reference_anchored_draft", names);
+        Assert.Contains("start_reference_orchestration_run", names);
+        Assert.Contains("get_reference_orchestration_runs", names);
+        Assert.Contains("get_reference_orchestration_run", names);
+        Assert.Contains("cancel_reference_orchestration_run", names);
+        Assert.DoesNotContain("resume_reference_orchestration_run", names);
+        Assert.DoesNotContain("approve_reference_orchestration_decision", names);
+        Assert.DoesNotContain("apply_reference_blueprint_revision", names);
+        Assert.DoesNotContain("insert_reference_anchored_draft", names);
 
         foreach (var tool in tools.Where(tool => tool.Name.Contains("reference", StringComparison.Ordinal)))
         {
@@ -255,6 +263,38 @@ public sealed class MafToolRegistryTests
         Assert.True(bindMaterialsProperties.TryGetProperty("blueprint_id", out _));
         Assert.True(bindMaterialsProperties.TryGetProperty("max_results_per_beat", out _));
         Assert.True(bindMaterialsProperties.TryGetProperty("select_top_candidate", out _));
+
+        var startOrchestration = tools.Single(tool => tool.Name == "start_reference_orchestration_run");
+        AssertToolDescriptionContains(
+            startOrchestration,
+            "source/fact",
+            "blueprint revision",
+            "final insertion",
+            "作者");
+        Assert.True(startOrchestration.JsonSchema.TryGetProperty("properties", out var startOrchestrationProperties));
+        Assert.True(startOrchestrationProperties.TryGetProperty("chapter_number", out _));
+        Assert.True(startOrchestrationProperties.TryGetProperty("chapter_goal", out _));
+        Assert.True(startOrchestrationProperties.TryGetProperty("known_facts", out _));
+        Assert.True(startOrchestrationProperties.TryGetProperty("forbidden_facts", out _));
+        Assert.True(startOrchestrationProperties.TryGetProperty("include_anchor_ids", out _));
+        Assert.True(startOrchestrationProperties.TryGetProperty("exclude_anchor_ids", out _));
+        Assert.True(startOrchestrationProperties.TryGetProperty("license_statuses", out _));
+        Assert.False(startOrchestrationProperties.TryGetProperty("anchor_ids", out _));
+        Assert.False(startOrchestrationProperties.TryGetProperty("source_confirmed", out _));
+        Assert.False(startOrchestrationProperties.TryGetProperty("decision_type", out _));
+        Assert.False(startOrchestrationProperties.TryGetProperty("decision_payload", out _));
+        Assert.False(startOrchestrationProperties.TryGetProperty("content", out _));
+        Assert.False(startOrchestrationProperties.TryGetProperty("text", out _));
+
+        var getRuns = tools.Single(tool => tool.Name == "get_reference_orchestration_runs");
+        Assert.True(getRuns.JsonSchema.GetProperty("properties").TryGetProperty("chapter_number", out _));
+
+        var getRun = tools.Single(tool => tool.Name == "get_reference_orchestration_run");
+        Assert.True(getRun.JsonSchema.GetProperty("properties").TryGetProperty("run_id", out _));
+
+        var cancelRun = tools.Single(tool => tool.Name == "cancel_reference_orchestration_run");
+        Assert.True(cancelRun.JsonSchema.GetProperty("properties").TryGetProperty("run_id", out _));
+        Assert.True(cancelRun.JsonSchema.GetProperty("properties").TryGetProperty("reason", out _));
     }
 
     [Fact]
@@ -379,6 +419,66 @@ public sealed class MafToolRegistryTests
         Assert.Equal(501, drafts.LastBind.BlueprintId);
         Assert.Equal(4, drafts.LastBind.MaxResultsPerBeat);
         Assert.True(drafts.LastBind.SelectTopCandidate);
+    }
+
+    [Fact]
+    public async Task ReferenceOrchestrationAgentToolStartsRunWithoutApprovingHumanDecisions()
+    {
+        var drafts = new RecordingReferenceAnchoredDraftService();
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors: null,
+            referenceDrafts: drafts));
+
+        var result = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 1),
+            new ChatToolCall(
+                "call_reference_orchestration_start",
+                "start_reference_orchestration_run",
+                """
+                {
+                  "chapter_number": 8,
+                  "chapter_goal": "雨夜逼问后让主角确认盟友隐瞒了港口线索",
+                  "known_facts": ["主角已经知道港口暗号"],
+                  "forbidden_facts": ["不能揭露内鬼身份"],
+                  "include_anchor_ids": [7],
+                  "exclude_anchor_ids": [9],
+                  "license_statuses": ["user_provided"],
+                  "max_results_per_beat": 4
+                }
+                """),
+            CancellationToken.None);
+
+        Assert.True(result.Success, result.Error);
+        Assert.NotNull(drafts.LastStart);
+        Assert.Equal(23, drafts.LastStart.NovelId);
+        Assert.Equal(8, drafts.LastStart.ChapterNumber);
+        Assert.Equal("雨夜逼问后让主角确认盟友隐瞒了港口线索", drafts.LastStart.ChapterGoal);
+        Assert.Equal(["主角已经知道港口暗号"], drafts.LastStart.KnownFacts);
+        Assert.Equal(["不能揭露内鬼身份"], drafts.LastStart.ForbiddenFacts);
+        Assert.Null(drafts.LastStart.AnchorIds);
+        Assert.False(drafts.LastStart.SourceConfirmed);
+        Assert.Equal("story_context", drafts.LastStart.CorpusSearchPolicy.Mode);
+        Assert.Equal(4, drafts.LastStart.CorpusSearchPolicy.MaxResultsPerBeat);
+        Assert.Equal(["user_provided"], drafts.LastStart.CorpusSearchPolicy.LicenseStatuses);
+        Assert.Equal([7], drafts.LastStart.CorpusSearchPolicy.IncludeAnchorIds);
+        Assert.Equal([9], drafts.LastStart.CorpusSearchPolicy.ExcludeAnchorIds);
+
+        var data = result.Data!.Value;
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, data.GetProperty("status").GetString());
+        Assert.Equal(ReferenceOrchestrationStages.SourceConfirmation, data.GetProperty("stage").GetString());
+        Assert.Equal(
+            ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts,
+            data.GetProperty("current_decision").GetProperty("decision_type").GetString());
     }
 
     [Fact]
@@ -880,6 +980,8 @@ public sealed class MafToolRegistryTests
     {
         public BindReferenceBlueprintMaterialsPayload? LastBind { get; private set; }
 
+        public StartReferenceOrchestrationRunPayload? LastStart { get; private set; }
+
         public ValueTask<ReferenceChapterBlueprintPayload> GenerateChapterBlueprintAsync(
             GenerateReferenceChapterBlueprintPayload input,
             CancellationToken cancellationToken)
@@ -1018,6 +1120,7 @@ public sealed class MafToolRegistryTests
             StartReferenceOrchestrationRunPayload input,
             CancellationToken cancellationToken)
         {
+            LastStart = input;
             return ValueTask.FromResult(BuildRun(input.NovelId, input.ChapterNumber, input.ChapterGoal ?? string.Empty));
         }
 

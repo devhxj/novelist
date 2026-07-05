@@ -82,12 +82,23 @@ generate_reference_anchored_draft
 audit_reference_anchored_draft
 ```
 
+Default orchestration tools are exposed through the same draft adapter:
+
+```text
+start_reference_orchestration_run
+get_reference_orchestration_runs
+get_reference_orchestration_run
+cancel_reference_orchestration_run
+```
+
 Current status:
 
 - tool registration is optional: reference tools appear only when reference services are configured;
 - `novel_id` is injected from `NovelistMafToolContext`, not exposed to the model schema;
 - reference tools do not expose session/turn/tool internals;
 - reference draft tools return blueprints, material links, candidates, and audits only;
+- orchestration tools let the agent start, inspect, list, and cancel runs, but do not expose a generic resume/approval tool;
+- `start_reference_orchestration_run` always starts with `source_confirmed=false`, uses include/exclude anchors only inside `corpus_search_policy`, and cannot pass `anchor_ids`, `decision_type`, or `decision_payload`;
 - no reference tool is allowed to call `SaveContent` or mutate chapter prose.
 
 Tool limits:
@@ -104,10 +115,15 @@ Tool limits:
 - `bind_reference_blueprint_materials`: allowed only after explicit approval; returns ranked candidates by beat duty fit, not only semantic similarity; `select_top_candidate` defaults to `false` and must be `true` to mark each beat's top candidate selected for draft generation
 - `generate_reference_anchored_draft`: requires an approved and material-bound `blueprint_id`; returns beat-scoped candidates only, not an assembled full chapter
 - `audit_reference_anchored_draft`: pure check only
+- `start_reference_orchestration_run`: requires `chapter_number`; accepts optional chapter goal, known facts, forbidden facts, corpus search mode, include/exclude anchor filters, license statuses, and max results per beat; it does not confirm source/license or fact-boundary changes
+- `get_reference_orchestration_runs`: read-only run history, optional chapter filter
+- `get_reference_orchestration_run`: read-only run detail including current required decision
+- `cancel_reference_orchestration_run`: cancels a run only; it cannot approve source/fact, blueprint revision, blueprint approval, or final insertion
 - no `SaveContent`
 - no direct file path reads
 
 Tool schemas must not expose `novel_id`, `session_id`, `turn_id`, or `tool_id`.
+Orchestration tool schemas also must not expose `source_confirmed`, `anchor_ids`, `decision_type`, `decision_payload`, free-form `content`, or `text` fields that could let the model bypass author gates.
 
 Agent workflow order is enforced in tool descriptions and service validation:
 
@@ -127,4 +143,6 @@ search/reference context
 Agent hardening currently covered:
 
 - `ReferenceDraftToolDescriptionsEnforceBlueprintWorkflowOrder` proves models are told to generate/review/approve/bind before drafting and to avoid `SaveContent`;
+- `ReferenceOrchestrationAgentToolStartsRunWithoutApprovingHumanDecisions` proves the default agent orchestration entry starts at the source/fact confirmation gate and cannot pre-confirm it;
 - reference tool schema tests prove `novel_id`, `session_id`, `turn_id`, and `tool_id` remain hidden.
+- orchestration tool schema tests prove resume/approval/revision/final-insertion tools are not registered for the agent surface and that start arguments cannot carry source confirmation, decision payloads, or prose text.
