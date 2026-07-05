@@ -196,6 +196,16 @@
       "expected_error": "forbidden fact appears in logic analysis"
     },
     {
+      "name": "unsupported_logic_analysis_point_fact",
+      "mutation": "unsupported_logic_analysis_point_fact",
+      "expected_error": "unsupported logic analysis point fact"
+    },
+    {
+      "name": "forbidden_logic_analysis_point_fact",
+      "mutation": "forbidden_logic_analysis_point_fact",
+      "expected_error": "forbidden fact appears in logic analysis point"
+    },
+    {
       "name": "generic_paragraph_intention",
       "mutation": "generic_paragraph_intention",
       "expected_error": "generic paragraph intention"

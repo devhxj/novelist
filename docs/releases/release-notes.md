@@ -37,7 +37,7 @@
 - 蓝图评审现在会阻止 `relationship_pressure` 使用 forbidden facts，禁止项不能被声明成关系压力。
 - 蓝图评审现在会执行 beat 自己的 `forbidden_facts`，同一 beat 禁止揭示的事实不能再出现在场景事实、POV 知识、角色状态或执行目标里。
 - 蓝图评审现在会检查 `chapter_function` 里的高风险事实并阻止 forbidden facts，章节功能不能夹带未批准的关键物件、身份或证据。
-- 蓝图评审现在会检查 `logic_analysis.summary` 里的高风险事实并阻止 forbidden facts，逻辑分析摘要不能夹带未批准的关键物件、身份或证据。
+- 蓝图评审现在会检查 `logic_analysis.summary` 和 `logic_analysis.points` 里的高风险事实并阻止 forbidden facts，逻辑分析摘要和要点不能夹带未批准的关键物件、身份或证据。
 - 蓝图评审现在会检查 `previous_state` 和 `final_state` 里的高风险事实并阻止 forbidden facts，章节起止状态不能夹带未批准的关键物件、身份或证据。
 - 蓝图评审现在会检查 `narrative_function` 里的高风险事实，叙事功能不能夹带未批准的关键物件、身份或证据。
 - 蓝图评审现在会检查 `logic_premise` 和 `conflict_pressure` 里的高风险事实，逻辑前提和冲突压力不能夹带未批准的关键物件、身份或证据。
