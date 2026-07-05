@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:reference-anchor": "node scripts/reference-anchor-mock-workflow.mjs"
+    "test:reference-anchor": "node scripts/reference-anchor-mock-workflow.mjs",
+    "test:app": "node scripts/app-mock-workflow.mjs"
   },
   "dependencies": {
     "@antv/g6": "^5.1.1",

@@ -13,3 +13,5 @@
 - 参考锚定编排在材料绑定缺少必需 beat 的选中材料时会停在高风险决策点，提示补充/选择参考材料或调整蓝图策略后再重跑。
 - 参考锚定编排在待批准蓝图因章节计划变化而失效时会停在高风险决策点，要求重新生成/评审蓝图后再继续。
 - 新增 `npm --prefix frontend run test:reference-anchor`，用真实浏览器和 mocked Photino bridge 覆盖参考锚定前端完整工作流，并验证不会自动调用 `SaveContent` 写入正文。
+- 新增 `npm --prefix frontend run test:app`，用真实浏览器和 mocked Photino bridge 覆盖工作区、章节、搜索、聊天、设置、元数据面板和参考锚定入口的前端回归烟测。
+- 地点侧栏的展开与删除控件现在使用有效的按钮结构，避免浏览器控制台报错并改善键盘/辅助技术交互。

@@ -99,31 +99,37 @@ export default function LocationList({ novelId }: Props) {
     const hasChildren = node.children.length > 0
     return (
       <div key={loc.id} className="group">
-        <button
-          onClick={() => { if (hasChildren) toggle(loc.id) }}
-          className="w-full flex items-center gap-1.5 px-3 py-1.5 text-left hover:bg-muted/50 transition-colors"
-          style={{ paddingLeft: `${12 + depth * 16}px` }}
+        <div
+          className="w-full flex items-center hover:bg-muted/50 transition-colors"
         >
-          {hasChildren ? (
-            <ChevronRight
-              className={`w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}
-            />
-          ) : (
-            <span className="w-3.5 shrink-0" />
-          )}
-          <MapPin className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-          <span className="flex-1 text-sm truncate">{loc.name}</span>
-          {loc.location_type && (
-            <span className="text-[10px] text-muted-foreground/60 shrink-0">{loc.location_type}</span>
-          )}
+          <button
+            type="button"
+            onClick={() => { if (hasChildren) toggle(loc.id) }}
+            className={`flex flex-1 min-w-0 items-center gap-1.5 py-1.5 pr-1 text-left ${hasChildren ? '' : 'cursor-default'}`}
+            style={{ paddingLeft: `${12 + depth * 16}px` }}
+            aria-label={hasChildren ? `${isExpanded ? '折叠' : '展开'} ${loc.name}` : loc.name}
+          >
+            {hasChildren ? (
+              <ChevronRight
+                className={`w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}
+              />
+            ) : (
+              <span className="w-3.5 shrink-0" />
+            )}
+            <MapPin className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <span className="flex-1 text-sm truncate">{loc.name}</span>
+            {loc.location_type && (
+              <span className="text-[10px] text-muted-foreground/60 shrink-0">{loc.location_type}</span>
+            )}
+          </button>
           <button
             onClick={(e) => { e.stopPropagation(); handleDelete(loc.id) }}
-            className="shrink-0 p-0.5 rounded text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+            className="mr-3 shrink-0 p-0.5 rounded text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
             title="删除"
           >
             <Trash2 className="h-3 w-3" />
           </button>
-        </button>
+        </div>
         {isExpanded && hasChildren && (
           <div>
             {node.children.map(child => renderNode(child, depth + 1))}
