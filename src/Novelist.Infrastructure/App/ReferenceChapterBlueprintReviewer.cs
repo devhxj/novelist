@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 54;
+    public const int CurrentReviewVersion = 55;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -301,6 +301,17 @@ internal static class ReferenceChapterBlueprintReviewer
 
         foreach (var beat in blueprint.Beats.OrderBy(item => item.BeatIndex))
         {
+            if (string.IsNullOrWhiteSpace(beat.NarrativeFunction))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "narrative_function",
+                    $"Beat {beat.BeatIndex} is missing intended use.",
+                    "Fill narrative_function so material links can record a concrete intended use before binding.");
+            }
+
             foreach (var unsupportedNarrativeFunctionFact in FindUnsupportedNarrativeFunctionFacts(blueprint, beat))
             {
                 AddBeatDefect(

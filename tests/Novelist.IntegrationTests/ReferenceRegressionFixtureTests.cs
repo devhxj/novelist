@@ -218,6 +218,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 NarrativeFunction = "delay the 密室钥匙 reveal through pressure"
             },
+            "missing_intended_use" => beat with
+            {
+                NarrativeFunction = string.Empty
+            },
             "unsupported_logic_premise_fact" => beat with
             {
                 LogicPremise = "密室钥匙 changes the choice"

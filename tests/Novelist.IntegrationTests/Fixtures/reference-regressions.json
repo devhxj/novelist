@@ -161,6 +161,11 @@
       "expected_error": "unsupported narrative function fact"
     },
     {
+      "name": "missing_intended_use",
+      "mutation": "missing_intended_use",
+      "expected_error": "intended use"
+    },
+    {
       "name": "unsupported_logic_premise_fact",
       "mutation": "unsupported_logic_premise_fact",
       "expected_error": "unsupported logic premise fact"

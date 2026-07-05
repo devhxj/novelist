@@ -66,6 +66,7 @@
 - 蓝图评审现在会检查 `locked_phrase_policy` 里的高风险事实并阻止 forbidden facts，锁定短语策略不能夹带未批准的关键物件、身份或证据。
 - 蓝图评审现在会在材料绑定前拒绝非法 `max_rewrite_level`，改写预算必须是 L0-L4 的有效等级。
 - 蓝图评审现在会在材料搜索前拒绝非法 `required_material_types` 和 `reference_query.material_types`，材料类型必须使用受支持的 chapter、paragraph、sentence 或 passage。
+- 蓝图评审现在会在材料绑定前拒绝缺少 intended use 的 beat，`narrative_function` 必须写清材料链接的具体用途。
 - 蓝图评审现在会检查 `narrative_function` 里的高风险事实，叙事功能不能夹带未批准的关键物件、身份或证据。
 - 蓝图评审现在会检查 `logic_premise` 和 `conflict_pressure` 里的高风险事实，逻辑前提和冲突压力不能夹带未批准的关键物件、身份或证据。
 - 蓝图评审现在会检查 `causality_in/out` 和 `transition_in/out` 里的高风险事实，因果与转场说明不能夹带未批准的关键物件、身份或证据。

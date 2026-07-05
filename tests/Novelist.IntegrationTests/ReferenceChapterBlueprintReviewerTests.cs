@@ -94,6 +94,24 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsMissingNarrativeFunctionAsReferenceDefect()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            NarrativeFunction = string.Empty
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ReferenceBindingErrors, item => item.Contains("intended use", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "reference_binding" &&
+                defect.FieldPath.Contains("narrative_function", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsUnsupportedLogicPremiseFact()
     {
         var blueprint = Blueprint(beat => beat with
