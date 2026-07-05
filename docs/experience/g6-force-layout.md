@@ -47,7 +47,7 @@ layout: {
 
 ## personality 字段是 JSON 字符串
 
-Go 端 `personality` 字段存的是 JSON 自由格式（LLM 写入），前端需要 `JSON.parse()` 后再展示，不能直接当文本渲染。
+`personality` 字段存的是 JSON 自由格式（LLM 写入），前端需要 `JSON.parse()` 后再展示，不能直接当文本渲染。
 
 ## CanvasEvent.CLICK 会冒泡
 

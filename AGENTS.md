@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Novelist is a .NET 10 + Photino.NET desktop app with a React/Vite frontend. The primary backend lives under `src/`: `Novelist.App` hosts the desktop/window and optional local asset server, `Novelist.Contracts` owns bridge DTOs, `Novelist.Core` owns app interfaces and bridge dispatch, `Novelist.Infrastructure` owns filesystem/storage/RAG implementations, and `Novelist.Agent` owns Microsoft Agent Framework tool adapters. Tests live under `tests/Novelist.Tests` and `tests/Novelist.IntegrationTests`. React/TypeScript source is in `frontend/src/`; `frontend/src/lib/novelist/` is the owned bridge adapter. The retired Go desktop implementation has been removed from mainline; historical behavior is captured in `docs/` contracts and migration notes.
+Novelist is a .NET 10 + Photino.NET desktop app with a React/Vite frontend. The primary backend lives under `src/`: `Novelist.App` hosts the desktop window and local frontend asset resolution, `Novelist.Contracts` owns bridge DTOs, `Novelist.Core` owns app interfaces and bridge dispatch, `Novelist.Infrastructure` owns filesystem/storage/RAG implementations, and `Novelist.Agent` owns Microsoft Agent Framework tool adapters. Tests live under `tests/Novelist.Tests` and `tests/Novelist.IntegrationTests`. React/TypeScript source is in `frontend/src/`; `frontend/src/lib/novelist/` is the owned bridge adapter.
 
 ## Build, Test, and Development Commands
 

@@ -653,6 +653,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         var decisionType = NormalizeOrchestrationDecisionType(input.DecisionType);
 
         ReferenceOrchestrationRunPayload updated;
+        ReviseReferenceChapterBlueprintPayload? approvedBlueprintRevision = null;
         await _mutex.WaitAsync(cancellationToken);
         try
         {
@@ -677,6 +678,11 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 throw new ArgumentException("Decision type does not match the pending orchestration decision.", nameof(input));
             }
 
+            if (string.Equals(decisionType, ReferenceOrchestrationDecisionTypes.ApplyBlueprintRevision, StringComparison.Ordinal))
+            {
+                approvedBlueprintRevision = BuildApprovedBlueprintRevisionPayload(run, input.DecisionPayload);
+            }
+
             updated = run with
             {
                 Status = ReferenceOrchestrationRunStatuses.Running,
@@ -691,6 +697,11 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         finally
         {
             _mutex.Release();
+        }
+
+        if (approvedBlueprintRevision is not null)
+        {
+            return await AdvanceApprovedBlueprintRevisionAsync(updated, approvedBlueprintRevision, cancellationToken);
         }
 
         return ShouldRunOrchestrationSafeStages(updated)
@@ -818,6 +829,52 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             }
 
             return current;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            var failed = current with
+            {
+                Status = ReferenceOrchestrationRunStatuses.Failed,
+                CurrentDecision = null,
+                LastStopReason = string.Empty,
+                ErrorMessage = NormalizeOptional(exception.Message, "orchestration failed", 1_000),
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            return await PersistOrchestrationRunAsync(failed, cancellationToken);
+        }
+    }
+
+    private async ValueTask<ReferenceOrchestrationRunPayload> AdvanceApprovedBlueprintRevisionAsync(
+        ReferenceOrchestrationRunPayload run,
+        ReviseReferenceChapterBlueprintPayload approvedRevision,
+        CancellationToken cancellationToken)
+    {
+        var current = run;
+        try
+        {
+            var revised = await ReviseChapterBlueprintAsync(approvedRevision, cancellationToken);
+            current = await PersistOrchestrationRunAsync(
+                current with
+                {
+                    Stage = ReferenceOrchestrationStages.BlueprintReview,
+                    BlueprintId = revised.BlueprintId,
+                    ReviewId = string.Empty,
+                    CandidateIds = [],
+                    UpdatedAt = DateTimeOffset.UtcNow
+                },
+                cancellationToken);
+
+            var review = await ReviewChapterBlueprintAsync(
+                new ReviewReferenceChapterBlueprintPayload(current.NovelId, revised.BlueprintId),
+                cancellationToken);
+            var reviewedBlueprint = await GetChapterBlueprintAsync(current.NovelId, revised.BlueprintId, cancellationToken)
+                ?? revised;
+            current = BuildPostReviewOrchestrationRun(current, reviewedBlueprint, review);
+            return await PersistOrchestrationRunAsync(current, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -2056,6 +2113,9 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 reference_analysis_json = $reference_analysis_json,
                 transition_plan_json = $transition_plan_json,
                 execution_contract_json = $execution_contract_json,
+                previous_state = $previous_state,
+                final_state = $final_state,
+                final_hook = $final_hook,
                 known_facts_json = $known_facts_json,
                 forbidden_facts_json = $forbidden_facts_json,
                 approved_review_id = '',
@@ -2072,6 +2132,9 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         command.Parameters.AddWithValue("$reference_analysis_json", JsonSerializer.Serialize(blueprint.ReferenceAnalysis, JsonOptions));
         command.Parameters.AddWithValue("$transition_plan_json", JsonSerializer.Serialize(blueprint.TransitionPlan, JsonOptions));
         command.Parameters.AddWithValue("$execution_contract_json", JsonSerializer.Serialize(blueprint.ExecutionContract, JsonOptions));
+        command.Parameters.AddWithValue("$previous_state", blueprint.PreviousState);
+        command.Parameters.AddWithValue("$final_state", blueprint.FinalState);
+        command.Parameters.AddWithValue("$final_hook", blueprint.FinalHook);
         command.Parameters.AddWithValue("$known_facts_json", JsonSerializer.Serialize(blueprint.KnownFacts, JsonOptions));
         command.Parameters.AddWithValue("$forbidden_facts_json", JsonSerializer.Serialize(blueprint.ForbiddenFacts, JsonOptions));
         command.Parameters.AddWithValue("$updated_at", FormatTimestamp(blueprint.UpdatedAt));
@@ -3085,12 +3148,18 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         ReferenceChapterBlueprintPayload blueprint,
         ReferenceChapterBlueprintReviewPayload review)
     {
+        var proposal = BuildBlueprintRevisionProposal(blueprint, review);
         return new ReferenceOrchestrationRequiredDecisionPayload(
             ReferenceOrchestrationDecisionTypes.ApplyBlueprintRevision,
             ReferenceOrchestrationStopReasons.BlueprintRevisionApprovalRequired,
-            "Deterministic blueprint review failed. Inspect required fixes and approve a blueprint revision before orchestration can continue.",
-            ["inspect_review", "revise_blueprint", "approve_blueprint_revision"],
-            BuildBlueprintApprovalSummary(blueprint, review));
+            proposal.Changes.Count == 0
+                ? "Deterministic blueprint review failed. No automatic field-level revision is available; inspect required fixes before continuing."
+                : "Deterministic blueprint review failed. Inspect the proposed field-level revision before applying it.",
+            proposal.Changes.Count == 0
+                ? ["inspect_review", "revise_blueprint"]
+                : ["inspect_review", "inspect_proposed_revision", "revise_blueprint", "approve_blueprint_revision"],
+            BuildBlueprintApprovalSummary(blueprint, review),
+            proposal);
     }
 
     private static ReferenceOrchestrationRequiredDecisionPayload BuildFinalInsertionDecision(
@@ -3103,6 +3172,206 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             "Draft candidates passed deterministic audit. Review or edit the candidates before final chapter insertion.",
             ["review_candidates", "edit_or_select_candidate", "approve_final_insertion"],
             BuildDraftAuditApprovalSummary(blueprint, audit));
+    }
+
+    private static ReferenceOrchestrationBlueprintRevisionProposalPayload BuildBlueprintRevisionProposal(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintReviewPayload review)
+    {
+        var changes = review.Defects
+            .Where(defect => string.Equals(defect.Severity, "error", StringComparison.OrdinalIgnoreCase))
+            .Select(defect => BuildProposedRevisionChange(blueprint, defect))
+            .Where(change => change is not null)
+            .Select(change => change!)
+            .GroupBy(change => change.FieldPath, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+
+        return new ReferenceOrchestrationBlueprintRevisionProposalPayload(
+            blueprint.BlueprintId,
+            review.ReviewId,
+            "orchestrator",
+            "deterministic blueprint review fix proposal",
+            changes);
+    }
+
+    private static ReviseReferenceChapterBlueprintPayload BuildApprovedBlueprintRevisionPayload(
+        ReferenceOrchestrationRunPayload run,
+        string decisionPayload)
+    {
+        var proposal = ReadApprovedBlueprintRevisionProposal(run, decisionPayload);
+        if (proposal.Changes.Count == 0)
+        {
+            throw new ArgumentException("Blueprint revision approval requires at least one proposed change.", nameof(decisionPayload));
+        }
+
+        if (proposal.BlueprintId != run.BlueprintId)
+        {
+            throw new ArgumentException("Blueprint revision proposal does not match the current orchestration blueprint.", nameof(decisionPayload));
+        }
+
+        if (!string.Equals(proposal.ReviewId, run.ReviewId, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Blueprint revision proposal does not match the current orchestration review.", nameof(decisionPayload));
+        }
+
+        return new ReviseReferenceChapterBlueprintPayload(
+            run.NovelId,
+            proposal.BlueprintId,
+            proposal.Changes,
+            NormalizeOptional(proposal.Origin, "orchestrator", 80),
+            NormalizeOptional(proposal.RevisionReason, "approved orchestration blueprint revision", 500));
+    }
+
+    private static ReferenceOrchestrationBlueprintRevisionProposalPayload ReadApprovedBlueprintRevisionProposal(
+        ReferenceOrchestrationRunPayload run,
+        string decisionPayload)
+    {
+        if (!string.IsNullOrWhiteSpace(decisionPayload) &&
+            decisionPayload.TrimStart().StartsWith("{", StringComparison.Ordinal))
+        {
+            try
+            {
+                return JsonSerializer.Deserialize<ReferenceOrchestrationBlueprintRevisionProposalPayload>(decisionPayload, JsonOptions)
+                    ?? throw new ArgumentException("Blueprint revision decision payload must not be null.", nameof(decisionPayload));
+            }
+            catch (JsonException exception)
+            {
+                throw new ArgumentException("Blueprint revision decision payload must match the proposed revision shape.", nameof(decisionPayload), exception);
+            }
+        }
+
+        return run.CurrentDecision?.ProposedBlueprintRevision
+            ?? throw new ArgumentException("Blueprint revision approval requires a pending proposed revision.", nameof(decisionPayload));
+    }
+
+    private static ReferenceBlueprintRevisionChangePayload? BuildProposedRevisionChange(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintReviewDefectPayload defect)
+    {
+        var fieldPath = NormalizeOptional(defect.FieldPath, string.Empty, 500);
+        if (string.IsNullOrWhiteSpace(fieldPath))
+        {
+            return null;
+        }
+
+        if (string.Equals(fieldPath, "final_hook", StringComparison.Ordinal))
+        {
+            return new ReferenceBlueprintRevisionChangePayload(
+                fieldPath,
+                "hook follows the approved beat consequence without exposing forbidden facts");
+        }
+
+        if (string.Equals(fieldPath, "previous_state", StringComparison.Ordinal))
+        {
+            return new ReferenceBlueprintRevisionChangePayload(
+                fieldPath,
+                "previous state remains bounded by approved known facts");
+        }
+
+        if (string.Equals(fieldPath, "final_state", StringComparison.Ordinal))
+        {
+            return new ReferenceBlueprintRevisionChangePayload(
+                fieldPath,
+                "final state follows the approved chapter function");
+        }
+
+        if (fieldPath.EndsWith(":causality_out", StringComparison.Ordinal))
+        {
+            return new ReferenceBlueprintRevisionChangePayload(
+                fieldPath,
+                "beat consequence carries story pressure forward without exposing forbidden facts");
+        }
+
+        if (fieldPath.EndsWith(":transition_out", StringComparison.Ordinal))
+        {
+            return new ReferenceBlueprintRevisionChangePayload(
+                fieldPath,
+                "transition pressure carries the beat consequence forward");
+        }
+
+        if (fieldPath.EndsWith(":character_state_delta", StringComparison.Ordinal))
+        {
+            var beat = FindBlueprintBeatForDefect(blueprint, defect);
+            return beat is null
+                ? null
+                : new ReferenceBlueprintRevisionChangePayload(
+                    "beat:" + beat.BeatId + ":character_states_after",
+                    JsonSerializer.Serialize(new[] { "pressure changes the character's available action" }, JsonOptions));
+        }
+
+        if (fieldPath.EndsWith(":scene_facts", StringComparison.Ordinal))
+        {
+            var beat = FindBlueprintBeatForDefect(blueprint, defect);
+            return beat is null
+                ? null
+                : new ReferenceBlueprintRevisionChangePayload(
+                    fieldPath,
+                    JsonSerializer.Serialize(
+                        RemoveForbiddenValues(beat.SceneFacts, blueprint.ForbiddenFacts),
+                        JsonOptions));
+        }
+
+        if (fieldPath.EndsWith(":emotion_mechanic", StringComparison.Ordinal))
+        {
+            var beat = FindBlueprintBeatForDefect(blueprint, defect);
+            if (beat is null)
+            {
+                return null;
+            }
+
+            var prefix = "beat:" + beat.BeatId + ":";
+            return new ReferenceBlueprintRevisionChangePayload(
+                prefix + "external_evidence",
+                "a visible pause and changed action show the pressure");
+        }
+
+        if (fieldPath.EndsWith(":candidate_rejection_rule", StringComparison.Ordinal))
+        {
+            return new ReferenceBlueprintRevisionChangePayload(
+                fieldPath,
+                "reject action-only, dialogue-only, missing-evidence, POV-leaking, or unsupported-reveal prose");
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<string> RemoveForbiddenValues(
+        IReadOnlyList<string> values,
+        IReadOnlyList<string> forbiddenFacts)
+    {
+        return values
+            .Where(value => !forbiddenFacts.Any(forbidden =>
+                !string.IsNullOrWhiteSpace(forbidden) &&
+                !string.IsNullOrWhiteSpace(value) &&
+                value.Contains(forbidden, StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
+    }
+
+    private static ReferenceChapterBlueprintBeatPayload? FindBlueprintBeatForDefect(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintReviewDefectPayload defect)
+    {
+        if (!string.IsNullOrWhiteSpace(defect.BeatId))
+        {
+            return blueprint.Beats.FirstOrDefault(beat => string.Equals(beat.BeatId, defect.BeatId, StringComparison.Ordinal));
+        }
+
+        const string prefix = "beat:";
+        if (!defect.FieldPath.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var field = defect.FieldPath[prefix.Length..];
+        var separator = field.IndexOf(':', StringComparison.Ordinal);
+        if (separator <= 0)
+        {
+            return null;
+        }
+
+        var beatId = field[..separator];
+        return blueprint.Beats.FirstOrDefault(beat => string.Equals(beat.BeatId, beatId, StringComparison.Ordinal));
     }
 
     private static ReferenceOrchestrationApprovalSummaryPayload BuildBlueprintApprovalSummary(
@@ -3366,6 +3635,18 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                     invalidatedReviewId);
                 return blueprint with { ForbiddenFacts = newValues };
             }
+
+            case "previous_state":
+                AddRevisionRow(revisionRows, change.FieldPath, blueprint.PreviousState, change.NewValue, origin, reason, invalidatedReviewId);
+                return blueprint with { PreviousState = NormalizeOptional(change.NewValue, string.Empty, 2_000) };
+
+            case "final_state":
+                AddRevisionRow(revisionRows, change.FieldPath, blueprint.FinalState, change.NewValue, origin, reason, invalidatedReviewId);
+                return blueprint with { FinalState = NormalizeOptional(change.NewValue, string.Empty, 2_000) };
+
+            case "final_hook":
+                AddRevisionRow(revisionRows, change.FieldPath, blueprint.FinalHook, change.NewValue, origin, reason, invalidatedReviewId);
+                return blueprint with { FinalHook = NormalizeOptional(change.NewValue, string.Empty, 2_000) };
 
             default:
                 if (TryApplyAnalysisTrackRevision(

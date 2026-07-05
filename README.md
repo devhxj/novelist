@@ -140,8 +140,6 @@
 - 参考材料导入现在能识别更多中文叙事标签，包括外显情绪证据、背对/未回头的有限视角、动作后拍，以及“欲言又止/指节扣紧”这类克制情绪证据。
 - 重建参考锚点时会保留文本哈希未变化材料的用户校正标签，避免源文件小幅调整后丢失人工确认结果。
 
-完整历史见 [Release Notes](docs/releases/release-notes.md)。
-
 ## 跟通用 AI 聊天有什么不同
 
 | | 通用 AI 聊天 | Novelist |
@@ -290,7 +288,7 @@ AI 不会直接改正文。每次编辑系统先生成 Diff，等你批准再写
 
 ## 安装
 
-从 [Releases](https://github.com/sigpanic/goink/releases) 下载对应平台安装包：
+从 [Releases](https://github.com/devhxj/goink/releases) 下载对应平台安装包：
 
 - **Windows** — 运行安装程序
 - **macOS** — 打开 DMG，拖入 Applications
@@ -302,7 +300,7 @@ AI 不会直接改正文。每次编辑系统先生成 Diff，等你批准再写
 
 ```bash
 sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0 curl file unzip
-git clone https://github.com/sigpanic/goink
+git clone https://github.com/devhxj/goink
 cd goink
 dotnet restore Novelist.slnx
 npm --prefix frontend ci

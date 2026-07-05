@@ -409,7 +409,15 @@ public sealed record ReferenceOrchestrationRequiredDecisionPayload(
     [property: JsonPropertyName("stop_reason")] string StopReason,
     [property: JsonPropertyName("summary")] string Summary,
     [property: JsonPropertyName("required_actions")] IReadOnlyList<string> RequiredActions,
-    [property: JsonPropertyName("approval_summary")] ReferenceOrchestrationApprovalSummaryPayload ApprovalSummary);
+    [property: JsonPropertyName("approval_summary")] ReferenceOrchestrationApprovalSummaryPayload ApprovalSummary,
+    [property: JsonPropertyName("proposed_blueprint_revision")] ReferenceOrchestrationBlueprintRevisionProposalPayload? ProposedBlueprintRevision = null);
+
+public sealed record ReferenceOrchestrationBlueprintRevisionProposalPayload(
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("review_id")] string ReviewId,
+    [property: JsonPropertyName("origin")] string Origin,
+    [property: JsonPropertyName("revision_reason")] string RevisionReason,
+    [property: JsonPropertyName("changes")] IReadOnlyList<ReferenceBlueprintRevisionChangePayload> Changes);
 
 public sealed record ReferenceOrchestrationRunPayload(
     [property: JsonPropertyName("run_id")] string RunId,

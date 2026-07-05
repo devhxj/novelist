@@ -169,7 +169,7 @@ Dual-layer sandbox security isolation—regex whitelist only allows legitimate p
 
 ## Installation
 
-Download the installer for your platform from [Releases](https://github.com/sigpanic/goink/releases):
+Download the installer for your platform from [Releases](https://github.com/devhxj/goink/releases):
 
 - **Windows** — Run the installer
 - **macOS** — Open DMG, drag to Applications
@@ -181,7 +181,7 @@ Requires an LLM API Key (built-in DeepSeek, GLM, MiMo templates; compatible with
 
 ```bash
 sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0 curl file unzip
-git clone https://github.com/sigpanic/goink
+git clone https://github.com/devhxj/goink
 cd goink
 dotnet restore Novelist.slnx
 npm --prefix frontend ci
@@ -189,6 +189,8 @@ make deps
 make build   # production build
 make dev     # Photino desktop dev mode
 ```
+
+`make dev` does not build frontend assets automatically. For local desktop mode, run `npm --prefix frontend run build` first so `frontend/dist` exists. For frontend-only debugging, run `make frontend-dev`, then launch the desktop host with `--start-url=http://localhost:5173/`.
 
 ## Tech Stack
 

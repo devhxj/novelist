@@ -880,6 +880,15 @@ export namespace reference {
     summary: string
     required_actions: string[]
     approval_summary: OrchestrationApprovalSummary
+    proposed_blueprint_revision?: OrchestrationBlueprintRevisionProposal | null
+  }
+
+  export interface OrchestrationBlueprintRevisionProposal {
+    blueprint_id: number
+    review_id: string
+    origin: string
+    revision_reason: string
+    changes: BlueprintRevisionChange[]
   }
 
   export interface OrchestrationRun {

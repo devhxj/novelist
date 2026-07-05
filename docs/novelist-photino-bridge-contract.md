@@ -7,7 +7,6 @@ This is the primary frontend/backend contract for the Photino.NET migration. It 
 References:
 
 - Photino.NET supports JavaScript-to-.NET messages through `window.external.sendMessage(...)` and .NET-to-JavaScript messages through `SendWebMessage(...)`: https://github.com/tryphotino/photino.Samples
-- Current Wails contract inventory: [novelist-api-event-contract.md](./novelist-api-event-contract.md)
 - Golden payload fixtures: [contracts/golden](./contracts/golden/)
 
 ## Transport Rules
@@ -16,7 +15,7 @@ References:
 - Packaged desktop mode does not start ASP.NET Core/Kestrel. Built frontend assets load from local `frontend/dist`, and business calls use the bridge.
 - Development may point Photino at Vite with `--start-url=http://localhost:5173/`; that URL is only a frontend asset source, not a business API transport.
 - React components must not call `window.external` directly. They use `frontend/src/lib/novelist/bridge.ts`.
-- The bridge preserves current Wails method names during the compatibility phase.
+- The bridge keeps stable method names where they are part of the owned frontend adapter contract.
 
 ## Message Envelopes
 
@@ -133,17 +132,30 @@ GetCharacterRelations, GetCharacters, GetContent, GetCover,
 GetEmbeddingConfig, GetLLMConfig,
 GetLocationRelations, GetLocations, GetMaxChapterNumber, GetModels,
 GetNovels, GetPlatform, GetPreferences, GetReaderPerspectives,
-GetSession, GetSessionMessages, GetSessions, GetSettings, GetStoryArcs,
-GetSqliteVecStatus, GetTimelineEntries, GetWritingActivity, GetWritingStats,
+GetReferenceAnchorBuildStatus, GetReferenceAnchors,
+GetReferenceChapterBlueprint, GetReferenceChapterBlueprints,
+GetReferenceOrchestrationRun, GetReferenceOrchestrationRuns,
+GetReferenceUserFeedback, GetSession, GetSessionMessages, GetSessions,
+GetSettings, GetSqliteVecStatus, GetStoryArcs,
+GetTimelineEntries, GetWritingActivity, GetWritingStats,
 Initialize, IsInitialized, ListSkills, ListSlashCommands,
-RebuildNovelIndex, SaveAvatar, SaveContent, SaveCover, SaveEmbeddingConfig,
-SaveLLMConfig, SaveSettings, SaveUserName, SearchAll, SearchStoryMemory,
-SetActiveNovel, SetApprovalMode,
+ImportReferenceAnchor, RebuildNovelIndex, RebuildReferenceAnchor,
+RecordReferenceUserFeedback, ResumeReferenceOrchestrationRun,
+ReviseReferenceChapterBlueprint, ReviewReferenceChapterBlueprint,
+SaveAvatar, SaveContent, SaveCover, SaveEmbeddingConfig,
+SaveLLMConfig, SaveSettings, SaveUserName, SearchAll, SearchReferenceMaterials,
+SearchStoryMemory, SetActiveNovel, SetApprovalMode,
 SetChatPanelWidth, SetLastSession, SetReasoningEffort, SetSelectedModel,
-TestEmbeddingConnection, TestConnection, UpdateArcNode, UpdateChapterPlan, UpdateChapterTitle,
-UpdateCharacter, UpdateDataDir, UpdateLocation, UpdateNovel,
+StartReferenceOrchestrationRun, TestConnection, TestEmbeddingConnection,
+UpdateArcNode, UpdateChapterPlan, UpdateChapterTitle,
+UpdateCharacter, UpdateDataDir, UpdateReferenceMaterialTags,
+UpdateLocation, UpdateNovel,
 UpdatePreference, UpdateReaderPerspective, UpdateStoryArc,
-UpdateTimelineEntry
+UpdateTimelineEntry,
+AdaptReferenceMaterial, ApproveReferenceChapterBlueprint,
+AuditReferenceAnchoredDraft, AuditReferenceReuse,
+BindReferenceBlueprintMaterials, CancelReferenceOrchestrationRun,
+GenerateReferenceAnchoredDraft, GenerateReferenceChapterBlueprint
 ```
 
 ## Event Coverage

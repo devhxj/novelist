@@ -443,7 +443,13 @@ public sealed class ReferenceAnchorContractTests
                     EmotionalTrajectory: "guarded -> resolved",
                     MaterialUsePlan: "bind by beat function",
                     RewriteBudget: "L2",
-                    HighRiskFindings: [])),
+                    HighRiskFindings: []),
+                ProposedBlueprintRevision: new ReferenceOrchestrationBlueprintRevisionProposalPayload(
+                    BlueprintId: 501,
+                    ReviewId: "review-1",
+                    Origin: "orchestrator",
+                    RevisionReason: "deterministic fix proposal",
+                    Changes: [new ReferenceBlueprintRevisionChangePayload("final_hook", "approved hook")])),
             LastStopReason: ReferenceOrchestrationStopReasons.SourceConfirmationRequired,
             ErrorMessage: "",
             CreatedAt: DateTimeOffset.Parse("2026-07-05T00:00:00Z"),
@@ -462,6 +468,10 @@ public sealed class ReferenceAnchorContractTests
         Assert.Equal("confirm_source_and_facts", decision.GetProperty("decision_type").GetString());
         Assert.Equal("confirm_source", decision.GetProperty("required_actions")[0].GetString());
         Assert.Equal("turn hesitation into action", decision.GetProperty("approval_summary").GetProperty("chapter_function").GetString());
+        var proposal = decision.GetProperty("proposed_blueprint_revision");
+        Assert.Equal(501, proposal.GetProperty("blueprint_id").GetInt64());
+        Assert.Equal("review-1", proposal.GetProperty("review_id").GetString());
+        Assert.Equal("final_hook", proposal.GetProperty("changes")[0].GetProperty("field_path").GetString());
         Assert.False(runRoot.TryGetProperty("RunId", out _));
     }
 

@@ -42,4 +42,4 @@ Core implementation phases 0-9 are complete in the task tracker. Phase 10 tracks
 3. Use the schema and integration topic pages while wiring bridge, desktop, agent, or frontend surfaces.
 4. Use the task phase pages for implementation sequencing, and the verification page for acceptance tests and guardrails.
 
-The companion design document remains [Reference Anchor Layer Plan](reference-anchor-layer-plan.md).
+The companion technical baseline remains [Reference Anchor Layer Technical Baseline](reference-anchor-layer-plan.md).

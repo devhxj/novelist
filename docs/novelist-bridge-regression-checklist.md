@@ -1,26 +1,27 @@
-# Novelist Migration Contract Verification Checklist
+# Novelist Bridge Regression Checklist
 
 ## Purpose
 
-Use this checklist before completing each migration slice from Go/Wails to novelist on Photino.NET + .NET 10. A slice is not complete until the relevant checks pass or a documented exception exists in the progress tracker.
+Use this checklist when changing the active Novelist Photino bridge, frontend DTOs, bridge payloads, or desktop runtime behavior. The goal is to prevent regressions in the .NET 10 + Photino product path.
 
 Primary references:
 
-- [API and event contract](./novelist-api-event-contract.md)
 - [Photino bridge contract](./novelist-photino-bridge-contract.md)
 - [Golden fixtures](./contracts/golden/)
-- [Migration progress](./novelist-migration-progress.md)
 
-## Baseline Checks
+## Active Baseline Checks
 
-Run these whenever the Wails compatibility surface changes.
+Run these whenever bridge methods, frontend DTOs, desktop runtime startup, packaging, or compatibility behavior changes.
 
 | Check | Verification |
 | --- | --- |
-| Generated frontend binding count remains understood | `rg -n '^export function' frontend/src/lib/wailsjs/go/app/App.d.ts` and compare with the 80-function baseline in the contract |
-| Exported Go `App` methods remain inventoried until retired | `rg -n '^func \(a \*App\) [A-Z]' app` and confirm lifecycle-only methods are not treated as frontend bindings |
-| Every callable binding has a target Photino bridge method | Review `Compatibility Method Coverage` in `docs/novelist-photino-bridge-contract.md`; missing count must be `0` |
-| Direct Wails imports are tracked | `rg -n 'wailsjs|@wailsapp|runtime' frontend/src` and compare with the documented import-removal list |
+| No retired Wails surface returns to active code | `rg -n 'wailsjs|@wailsapp|wails build|wails dev|frontend/src/lib/wailsjs' frontend/src src tests scripts build .github Makefile --glob '!**/bin/**' --glob '!**/obj/**' --glob '!build/bin/**'` returns no matches |
+| No Go runtime source returns to mainline | `rg --files | rg '(^|/)(main\.go|go\.mod|go\.sum|wails\.json)$|^app/|^internal/|frontend/src/lib/wailsjs|download-onnx'` returns no tracked active source files |
+| Every frontend bridge method has a backend registration | `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Bridge -v minimal` |
+| Frontend DTOs compile against the owned bridge adapter | `npm --prefix frontend run build` |
+| Packaged desktop path stays Photino-only | `rg -n 'Microsoft\.AspNetCore|WebApplication|MapGet|MapHub|SignalR|HealthResponse|WebApplicationFactory|Mvc\.Testing' src tests --glob '!**/bin/**' --glob '!**/obj/**'` returns no matches |
+| Local frontend assets remain file-loadable | `npm --prefix frontend run build` and confirm `frontend/dist/index.html` references `./assets/` |
+| Runtime documentation matches build scripts | Review `README.md`, `README_EN.md`, `docs/build-setup.md`, and `docs/build/cross-platform-build.md` when `Makefile`, package scripts, or launch arguments change |
 
 ## Golden Fixture Checks
 
@@ -64,7 +65,7 @@ Required fixture coverage:
 | --- | --- |
 | Envelope shape | Requests, responses, errors, events, and cancels match `docs/novelist-photino-bridge-contract.md` |
 | Request correlation | Every response preserves the request `id`; duplicate or missing ids are rejected |
-| Field naming | Results preserve existing snake_case and exact legacy fields such as `ID` on settings |
+| Field naming | Results preserve stable frontend DTO field names, including exact fields such as `ID` on settings |
 | Error shape | Failures return bridge error objects with stable `code`, `message`, optional `details`, and no stack traces |
 | Path inputs | `GetContent`, `SaveContent`, tools, and export paths reject absolute paths and `..` traversal |
 | Long-running commands | `Chat`, `CompressContext`, `RebuildNovelIndex`, and export operations support cancellation or bounded timeouts |
@@ -82,7 +83,7 @@ Required fixture coverage:
 | `file:changed` | Emitted after approved file writes and includes relative `path` plus `novel_id` |
 | `chat:session_created` | Still emitted for compatibility even though current components do not consume it |
 | `chat:title_updated` | Still emitted after async title generation |
-| Unsubscribe behavior | Frontend adapter returns a cleanup function matching Wails `EventsOn` behavior |
+| Unsubscribe behavior | Frontend adapter returns a cleanup function for each event subscription |
 
 ## Frontend Adapter Checks
 
@@ -95,9 +96,9 @@ Required fixture coverage:
 
 ## Completion Rule
 
-Before marking a task complete in `docs/novelist-migration-progress.md`:
+Before marking bridge, runtime, packaging, or feature-specific contract work complete:
 
 1. Record the exact verification command or review method.
 2. Link any new fixture, contract, or test file.
-3. Note any deferred incompatibility explicitly with owner task and phase.
-4. Update current task and next task immediately.
+3. Note any deferred incompatibility explicitly with owner task and target phase.
+4. Update the feature-specific implementation plan when one exists.
