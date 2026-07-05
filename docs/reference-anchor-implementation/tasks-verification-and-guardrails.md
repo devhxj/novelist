@@ -26,6 +26,13 @@ cd frontend
 npm run test:reference-anchor
 ```
 
+Run after Phase 13 app-wide Playwright coverage exists:
+
+```text
+cd frontend
+npm run test:app
+```
+
 Targeted new tests:
 
 ```text
@@ -105,6 +112,15 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 - UI information architecture: separate corpus library management from reference-anchored drafting controls.
 - Agent authority: whether AI may import new corpus sources, or only search/use already imported sources.
 
+## Phase 13 App-Wide Playwright Decisions To Close
+
+- Suite boundary: keep `test:reference-anchor` as a deep feature workflow and add `test:app` for broad product regression, or consolidate both under a shared Playwright runner with separate projects.
+- Fixture strategy: use one shared mocked Novelist bridge fixture for shell/editor/search/chat/settings flows, or split fixtures by surface to keep failures easier to diagnose.
+- Selector policy: rely on accessible roles/names by default and add `data-testid` only for controls whose visible labels are intentionally dynamic.
+- Visual baseline scope: decide which desktop screenshots are stable enough for regression and which flows should remain DOM/assertion-only.
+- Real Photino boundary: keep app-wide coverage on Vite plus mocked bridge, with real Photino limited to asset loading and representative production bridge routing.
+- CI policy: decide whether app-wide Playwright runs on every PR or only on frontend-affecting changes until runtime is stable enough.
+
 ## Recommended Next Coding Sessions
 
 Start with Phase 10. Do not restart from Phase 0 unless contracts have regressed.
@@ -121,6 +137,7 @@ Recommended following session:
 1. Keep broadening deterministic Chinese narration, emotion, POV, and unsupported-fact fixtures; any optional model-assisted tagging or adaptation should be designed later as an explicit opt-in path that feeds the deterministic gates.
 2. Design Phase 11 orchestration contracts before changing UI, so frontend, bridge, service, and agent tools share the same run-state model.
 3. Design Phase 12 shared-corpus contracts before migrating storage, so global materials can be reused without weakening per-novel safety gates.
+4. Add Phase 13 app-wide Playwright coverage after the core reference-anchor harness is stable, so shell/editor/search/chat/settings regressions are tested alongside reference-anchor smoke coverage.
 
 Do not broaden frontend workflow beyond the review-first path until source corpus, material binding, blueprint review, and draft audit are reliable. The system's quality depends on immutable provenance, hard blueprint gates, and candidate audit before any manual insertion.
 

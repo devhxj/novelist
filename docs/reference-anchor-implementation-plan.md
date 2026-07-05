@@ -4,7 +4,7 @@ This implementation plan has been split into focused companion documents so each
 
 ## Status
 
-Core implementation phases 0-9 are complete in the task tracker. Phase 10 tracks product hardening, runtime verification, and design-closure work. Phase 11 tracks the AI-orchestrated low-intervention workflow that keeps hard gates but reduces routine manual steps. Phase 12 tracks the shared reference corpus model where AI chooses relevant materials from global libraries by story context instead of requiring per-novel binding.
+Core implementation phases 0-9 are complete in the task tracker. Phase 10 tracks product hardening, runtime verification, and design-closure work. Phase 11 tracks the AI-orchestrated low-intervention workflow that keeps hard gates but reduces routine manual steps. Phase 12 tracks the shared reference corpus model where AI chooses relevant materials from global libraries by story context instead of requiring per-novel binding. Phase 13 tracks app-wide Playwright regression coverage for the whole Novelist frontend, not only the reference-anchor workflow.
 
 ## Date
 
@@ -15,7 +15,7 @@ Core implementation phases 0-9 are complete in the task tracker. Phase 10 tracks
 - [Overview and architecture](reference-anchor-implementation/overview.md): stable overview index for status/scope, planning updates, and architecture map.
 - [Implementation decisions](reference-anchor-implementation/decisions.md): stable decisions index for foundation, pipeline, quality, material, and audit decisions.
 - [Schema and integration plan](reference-anchor-implementation/schema-and-integration.md): stable integration index for database, bridge, desktop/agent, and frontend surfaces.
-- [Tasks, tests, and guardrails](reference-anchor-implementation/tasks-and-verification.md): stable task index for phase breakdowns, test matrix, guardrails, and open Phase 10-12 work.
+- [Tasks, tests, and guardrails](reference-anchor-implementation/tasks-and-verification.md): stable task index for phase breakdowns, test matrix, guardrails, and open Phase 10-13 work.
 
 ## Topic Documents
 
@@ -33,6 +33,7 @@ Core implementation phases 0-9 are complete in the task tracker. Phase 10 tracks
 - [Tasks phases 0-4](reference-anchor-implementation/tasks-phases-0-4.md)
 - [Tasks phases 5-9](reference-anchor-implementation/tasks-phases-5-9.md)
 - [Tasks phases 10-12](reference-anchor-implementation/tasks-phases-10-12.md)
+- [Tasks phase 13](reference-anchor-implementation/tasks-phase-13.md)
 - [Verification and guardrails](reference-anchor-implementation/tasks-verification-and-guardrails.md)
 
 ## Reading Order

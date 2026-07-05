@@ -91,3 +91,16 @@ AI then searches the shared corpus and proposes the relevant source materials fo
 When the shared corpus cannot satisfy a beat, the system should treat it as a retrieval gap instead of silently falling back to free drafting. AI may broaden queries, weaken filters, or switch from concrete scene material to technique/style material automatically. If only weak matches exist, the candidate must carry low-confidence provenance and elevated audit risk. If the beat does not require source-backed detail, it may continue only with an approved no-reuse reason and only from current novel facts. If the beat requires reference-backed material, the workflow must stop so the user can import more corpus material, relax policy, revise the blueprint, or skip that beat.
 
 This changes the long-term storage direction: `novel_id` should remain on blueprints, candidates, audits, and per-novel feedback, but source libraries and extracted reference materials should move toward workspace/global scope with optional visibility/license metadata. Do not add a required `novel_reference_library_link` gate as the default model; it would recreate unnecessary manual setup and prevent AI from choosing the right corpus by story need.
+
+## 2026-07-05 Planning Update: App-Wide Playwright Coverage
+
+The existing Playwright direction started as a reference-anchor workflow harness. That remains useful, but it is too narrow to be the frontend regression boundary for the product.
+
+Phase 13 should add an app-wide Playwright suite that covers the whole Novelist desktop frontend through a deterministic mocked Photino bridge. The suite should verify shell navigation, novel and chapter workflows, editor save behavior, search/RAG presentation, chat and tool-call rendering, metadata panels, settings, import/export affordances, and a reference-anchor smoke path. Deep reference-anchor orchestration, blueprint, material binding, candidate, audit, and screenshot checks should stay in the dedicated `test:reference-anchor` suite.
+
+This keeps the testing model layered:
+
+- app-wide Playwright tests catch cross-product UI regressions and bridge-call guardrail failures;
+- reference-anchor Playwright tests keep deep feature workflow coverage;
+- .NET unit/integration tests own service, storage, bridge, and production composition behavior;
+- real Photino smoke remains a narrow runtime boundary check unless a later phase introduces stable desktop automation.
