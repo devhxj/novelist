@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 13;
+    public const int CurrentReviewVersion = 14;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -357,6 +357,18 @@ internal static class ReferenceChapterBlueprintReviewer
                     "Add subtext_plan, sensory_anchor_target, or source_backed_detail_target so the beat can draft as prose.");
             }
 
+            if (!string.IsNullOrWhiteSpace(beat.SourceBackedDetailTarget) &&
+                UsesGenericSourceBackedDetailTarget(beat.SourceBackedDetailTarget))
+            {
+                AddBeatDefect(
+                    novelisticNarrationErrors,
+                    "novelistic_narration",
+                    beat,
+                    "source_backed_detail_target",
+                    $"Beat {beat.BeatIndex} uses generic source-backed detail target.",
+                    "Rewrite source_backed_detail_target as a concrete detail from approved source material, such as an object, sensory cue, gesture, or environmental pressure.");
+            }
+
             if (string.IsNullOrWhiteSpace(beat.ReferenceQuery.Query) || beat.RequiredMaterialTypes.Count == 0)
             {
                 AddBeatDefect(
@@ -673,6 +685,18 @@ internal static class ReferenceChapterBlueprintReviewer
                 "正常节奏", "节奏正常", "常规节奏", "自然节奏", "节奏自然",
                 "节奏自然流畅", "自然流畅", "节奏流畅", "保持节奏", "控制节奏",
                 "快慢结合", "有张有弛", "张弛有度"
+            ]);
+    }
+
+    private static bool UsesGenericSourceBackedDetailTarget(string value)
+    {
+        return ContainsAny(
+            value,
+            [
+                "add detail", "add details", "more detail", "some detail", "make it detailed",
+                "rich detail", "richer detail", "具体一点", "加一点细节", "加点细节",
+                "加些细节", "增加细节", "补充细节", "丰富细节", "细节丰富",
+                "多写细节", "写得细一点", "写细一点", "加些描写", "画面更丰富"
             ]);
     }
 

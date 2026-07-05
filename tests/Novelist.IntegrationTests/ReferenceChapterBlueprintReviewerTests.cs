@@ -442,6 +442,24 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsGenericSourceBackedDetailTarget()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            SourceBackedDetailTarget = "加一点细节，让画面更丰富"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.NovelisticNarrationErrors, item => item.Contains("generic source-backed detail target", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "novelistic_narration" &&
+                defect.FieldPath.Contains("source_backed_detail_target", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsHardTransitionWithoutNarrativePressure()
     {
         var blueprint = Blueprint(beat => beat with

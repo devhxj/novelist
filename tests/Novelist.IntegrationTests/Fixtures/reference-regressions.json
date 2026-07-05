@@ -71,6 +71,11 @@
       "expected_error": "generic rhythm strategy"
     },
     {
+      "name": "generic_source_backed_detail_target",
+      "mutation": "generic_source_backed_detail_target",
+      "expected_error": "generic source-backed detail target"
+    },
+    {
       "name": "unsupported_final_hook",
       "mutation": "unsupported_final_hook",
       "expected_error": "final hook"
