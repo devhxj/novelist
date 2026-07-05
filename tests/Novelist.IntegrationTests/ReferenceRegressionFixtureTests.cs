@@ -177,6 +177,7 @@ public sealed class ReferenceRegressionFixtureTests
             "pov_forbidden_scene_fact" => ["雨声压低了整条街的呼吸", "周鸣是卧底"],
             "limited_pov_hidden_position" => ["雨声压低了整条街的呼吸", "周鸣在门后"],
             "limited_pov_offstage_fact" => ["雨声压低了整条街的呼吸", "周鸣握住那把钥匙", "那把钥匙"],
+            "limited_pov_barrier_offstage_action" => ["雨声压低了整条街的呼吸", "周鸣按住门把"],
             _ => ["雨声压低了整条街的呼吸"]
         };
     }
@@ -212,6 +213,11 @@ public sealed class ReferenceRegressionFixtureTests
                 NarrativeDistance = "limited"
             },
             "limited_pov_hidden_position" => beat with
+            {
+                PovCharacter = "林岚",
+                NarrativeDistance = "limited"
+            },
+            "limited_pov_barrier_offstage_action" => beat with
             {
                 PovCharacter = "林岚",
                 NarrativeDistance = "limited"

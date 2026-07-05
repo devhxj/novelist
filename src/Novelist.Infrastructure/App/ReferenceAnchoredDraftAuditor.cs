@@ -290,6 +290,7 @@ internal static class ReferenceAnchoredDraftAuditor
 
         violations.AddRange(FindUnperceivedPovFactReveals(beat, candidateText));
         violations.AddRange(FindOffstageFactRevealsAfterBlockedPerception(beat, candidateText));
+        violations.AddRange(FindBarrierSeparatedOffstageActionReveals(beat, candidateText));
         violations.AddRange(FindHiddenPositionBehindPovReveals(beat, candidateText));
         return violations;
     }
@@ -342,6 +343,34 @@ internal static class ReferenceAnchoredDraftAuditor
         if (Regex.IsMatch(candidateText, pattern, RegexOptions.IgnoreCase))
         {
             yield return "limited POV cannot reveal offstage facts after blocked perception.";
+        }
+    }
+
+    private static IEnumerable<string> FindBarrierSeparatedOffstageActionReveals(
+        ReferenceChapterBlueprintBeatPayload beat,
+        string candidateText)
+    {
+        if (string.IsNullOrWhiteSpace(beat.PovCharacter))
+        {
+            yield break;
+        }
+
+        var povCharacter = Regex.Escape(beat.PovCharacter.Trim());
+        const string barrier = "(?:隔着门|隔着墙|门内|屋内|墙这边|门这边|房间里)";
+        const string perceptionLimit = "(?:只听见|只听到|只能听见|只能听到|听见的只有|听到的只有|看不见|看不到|没看见|没有看见)";
+        const string offstagePlace = "(?:门外|墙外|隔壁|门后|屋外|走廊)";
+        const string revealMarker = "(?:已经|早已|正|正在|悄悄|无声|忽然)?";
+        const string offstageAction = "(?:按住|握|拿|塞|藏|站|等|盯|看|靠近|离开|打开|关上|推|放下)";
+        var pattern = povCharacter +
+            @"[^。！？!?；;\n]{0,30}" + barrier +
+            @"[^。！？!?；;\n]{0,24}" + perceptionLimit +
+            @"[^。！？!?；;\n]{0,48}" + offstagePlace +
+            @"[^。！？!?；;\n]{0,24}" + revealMarker +
+            @"[^。！？!?；;\n]{0,16}" + offstageAction;
+
+        if (Regex.IsMatch(candidateText, pattern, RegexOptions.IgnoreCase))
+        {
+            yield return "limited POV cannot reveal barrier-separated offstage action.";
         }
     }
 

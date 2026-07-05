@@ -188,6 +188,12 @@
       "expected_error": "hidden position"
     },
     {
+      "name": "limited_pov_barrier_offstage_action",
+      "mutation": "limited_pov_barrier_offstage_action",
+      "text": "雨声压低了整条街的呼吸，林岚隔着门，只听见雨声，门外周鸣正在抬手按住门把。",
+      "expected_error": "barrier-separated"
+    },
+    {
       "name": "missing_required_subtext",
       "mutation": "required_subtext",
       "text": "雨声压低了整条街的呼吸，林岚心里一紧，指尖停住。",
