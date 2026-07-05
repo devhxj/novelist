@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 60;
+    public const int CurrentReviewVersion = 61;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -1369,6 +1369,20 @@ internal static class ReferenceChapterBlueprintReviewer
                 "Confirm the beat needs a higher rewrite budget, or lower max_rewrite_level to L1 before material binding.");
         }
 
+        var emotionChangeBeats = blueprint.Beats
+            .Where(beat => !string.Equals(beat.EmotionBefore, beat.EmotionAfter, StringComparison.Ordinal))
+            .ToArray();
+        if (emotionChangeBeats.Length >= 3 &&
+            emotionChangeBeats.All(UsesImmediateEmotionTransition))
+        {
+            AddWarningDefect(
+                "emotion",
+                "beats.emotion_transition",
+                string.Empty,
+                "Emotion transitions are all direct and immediate, with no suppression, delay, or misdirection.",
+                "Add suppression, delayed release, restraint, misdirection, or withheld reaction to at least one emotion-changing beat.");
+        }
+
         var defectCount = logicErrors.Count + causalityErrors.Count + emotionErrors.Count +
             narrationErrors.Count + executionErrors.Count + characterStateErrors.Count + povErrors.Count +
             continuityErrors.Count + transitionErrors.Count + forbiddenFactErrors.Count +
@@ -2506,6 +2520,27 @@ internal static class ReferenceChapterBlueprintReviewer
     private static bool ExceedsDefaultRewriteLevel(string rewriteLevel)
     {
         return rewriteLevel is ReferenceRewriteLevels.L2 or ReferenceRewriteLevels.L3 or ReferenceRewriteLevels.L4;
+    }
+
+    private static bool UsesImmediateEmotionTransition(ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var transitionPlan = string.Join(
+            " ",
+            [
+                beat.SuppressedReaction,
+                beat.RhythmStrategy,
+                beat.SubtextPlan,
+                beat.NarrationStrategy,
+                beat.ParagraphIntention,
+                beat.ExecutionMode
+            ]);
+        return !ContainsAny(
+            transitionPlan,
+            [
+                "delay", "delayed", "withhold", "withheld", "misdirect", "misdirection", "restrain", "restraint",
+                "suppress", "suppressed", "slow release", "defer", "deferred",
+                "延迟", "滞后", "压住", "克制", "误导", "保留", "不说破", "后拍", "迟疑", "隐忍"
+            ]);
     }
 
     private static bool ContainsAnyTag(IReadOnlyList<string> values, IReadOnlyList<string> candidates)

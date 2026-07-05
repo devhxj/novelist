@@ -152,6 +152,44 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewWarnsWhenEmotionTransitionsAreAllImmediate()
+    {
+        static ReferenceChapterBlueprintBeatPayload ImmediateEmotionBeat(string beatId, int beatIndex)
+        {
+            return Beat(beatId) with
+            {
+                BeatIndex = beatIndex,
+                EmotionBefore = "controlled",
+                EmotionAfter = "heightened",
+                SuppressedReaction = "direct reaction",
+                RhythmStrategy = "immediate release",
+                SubtextPlan = "state emotion directly"
+            };
+        }
+
+        var blueprint = Blueprint(beat => beat) with
+        {
+            Beats =
+            [
+                ImmediateEmotionBeat("1:beat:1", 1),
+                ImmediateEmotionBeat("1:beat:2", 2),
+                ImmediateEmotionBeat("1:beat:3", 3)
+            ]
+        };
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+        Assert.Empty(review.RequiredFixes);
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "emotion" &&
+                defect.Severity == "warning" &&
+                defect.FieldPath.Contains("emotion", StringComparison.OrdinalIgnoreCase) &&
+                defect.Reason.Contains("direct and immediate", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewAllowsEmotionEvidenceQueryForSubtextAndExternalEvidenceDuties()
     {
         var blueprint = Blueprint(beat => beat with
