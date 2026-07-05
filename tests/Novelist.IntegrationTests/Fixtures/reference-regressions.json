@@ -101,6 +101,11 @@
       "expected_error": "unsupported subtext plan fact"
     },
     {
+      "name": "forbidden_subtext_plan_fact",
+      "mutation": "forbidden_subtext_plan_fact",
+      "expected_error": "forbidden fact appears in subtext plan"
+    },
+    {
       "name": "generic_slot_plan",
       "mutation": "generic_slot_plan",
       "expected_error": "generic slot plan"
