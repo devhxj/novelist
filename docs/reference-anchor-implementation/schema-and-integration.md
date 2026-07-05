@@ -214,7 +214,7 @@ reference_blueprint_material_links
 - status TEXT NOT NULL
 - created_at TEXT NOT NULL
 
-`score_components_json` currently records material type, function, emotion, POV, prose-duty, lexical, confidence, `user_verified`, and accepted-feedback boosts when applicable.
+`score_components_json` currently records material type, function, emotion, POV, prose-duty, lexical, embedding similarity, confidence, `user_verified`, and accepted-feedback boosts when applicable.
 
 reference_draft_paragraph_candidates
 - candidate_id TEXT PRIMARY KEY
@@ -313,7 +313,7 @@ GenerateReferenceAnchoredDraft
 AuditReferenceAnchoredDraft
 ```
 
-`SearchReferenceMaterials` returns paged `ReferenceMaterialPayload` items. Search requests accept optional `narrative_duties` and `emotion_transitions` filters in addition to material type, function, emotion, POV, and technique filters. Search responses attach optional `score_components` to each returned material for ranking explainability; stored material rows do not persist those transient components.
+`SearchReferenceMaterials` returns paged `ReferenceMaterialPayload` items. Search requests accept optional `narrative_duties` and `emotion_transitions` filters in addition to material type, function, emotion, POV, and technique filters. Search responses attach optional `score_components` to each returned material for ranking explainability; stored material rows do not persist those transient components. When the active Embeddings configuration matches a ready reference vector index, search adds transient `embedding` scores from sqlite-vec results and falls back to lexical/tag ranking if query embedding or vector search is unavailable.
 
 Implementation files:
 

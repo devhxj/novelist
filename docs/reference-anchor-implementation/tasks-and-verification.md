@@ -94,6 +94,7 @@ Current design note: narrative duty and external evidence are beat-level bluepri
 - [x] Results are bounded and paginated.
 - [x] Search can filter by narrative duty, emotion transition, POV, technique, and material type.
 - [x] Beat-level material matching returns ranked candidates without selecting them automatically unless requested.
+- [x] Ready reference vector indexes contribute transient `embedding` score components to material search and blueprint binding, while embedding/vector failures fall back to lexical/tag ranking.
 
 **Verification:**
 
@@ -102,6 +103,7 @@ Current design note: narrative duty and external evidence are beat-level bluepri
 - [x] fake embedding client test
 - [x] fake sqlite-vec provisioner test
 - [x] complete search filter tests for narrative duty and emotion transition coverage
+- [x] search embedding-score integration tests and binding score propagation tests
 - [x] beat-to-material ranking tests
 
 **Files likely touched:**
