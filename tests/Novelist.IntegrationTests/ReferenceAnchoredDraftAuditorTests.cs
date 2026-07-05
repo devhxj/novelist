@@ -455,6 +455,26 @@ public sealed class ReferenceAnchoredDraftAuditorTests
     }
 
     [Fact]
+    public void BuildDraftAuditFailsWhenCandidateStatesNonPovCharacterHiddenIntention()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            PovCharacter = "林岚",
+            CharacterStatesBefore = ["林岚 controlled", "周鸣 guarded"]
+        });
+        var candidate = Candidate(blueprint, "雨声压低了整条街的呼吸，周鸣打算把她引开，却只把手按在门把上。");
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.PovErrors, item => item.Contains("周鸣", StringComparison.Ordinal));
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("external evidence", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildDraftAuditAllowsPovCharacterInteriorKnowledge()
     {
         var blueprint = Blueprint(beat => beat with

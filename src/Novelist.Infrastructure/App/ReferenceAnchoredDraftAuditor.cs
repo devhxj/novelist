@@ -212,7 +212,8 @@ internal static class ReferenceAnchoredDraftAuditor
         return ExtractCandidateCharacterNames(beat)
             .Where(character => !string.Equals(character, povCharacter, StringComparison.OrdinalIgnoreCase))
             .Where(character => ContainsDirectInteriorKnowledge(candidateText, character) ||
-                ContainsNamedHiddenState(candidateText, character))
+                ContainsNamedHiddenState(candidateText, character) ||
+                ContainsHiddenIntention(candidateText, character))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -267,6 +268,15 @@ internal static class ReferenceAnchoredDraftAuditor
         return Regex.IsMatch(
             text,
             escaped + @"的(恐惧|害怕|惧意|歉意|愧疚|后悔|悔意|怒意|愤怒|嫉妒|犹豫|迟疑|怀疑|算计|念头|想法|决心|恶意|杀意|贪念|不甘|绝望|希望|得意|慌乱)",
+            RegexOptions.IgnoreCase);
+    }
+
+    private static bool ContainsHiddenIntention(string text, string character)
+    {
+        var escaped = Regex.Escape(character);
+        return Regex.IsMatch(
+            text,
+            escaped + @"[^。！？!?；;\n]{0,12}(打算|准备|企图|试图|想要|要把|要将|盘算|计划|决定)[^。！？!?；;\n]{1,24}",
             RegexOptions.IgnoreCase);
     }
 
