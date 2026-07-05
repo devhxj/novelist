@@ -8,7 +8,7 @@
 
 **Acceptance criteria:**
 
-- [ ] Full reference-anchor frontend workflow is covered by Playwright screenshot/DOM tests with a mocked Novelist bridge: create/rebuild anchor, search material, generate/review/revise/approve blueprint, bind materials, generate candidates, inspect audit, stale/disabled states, final-insertion stop, and no automatic chapter insertion.
+- [x] Full reference-anchor frontend workflow is covered by Playwright screenshot/DOM tests with a mocked Novelist bridge: create/rebuild anchor, search material, generate/review/revise/approve blueprint, bind materials, generate candidates, inspect audit, stale/disabled states, final-insertion stop, and no automatic chapter insertion.
 - [ ] Real Photino desktop verification is reduced to a minimal runtime smoke: the app loads the reference panel, the bridge can call representative reference methods through the production composition, and no runtime path auto-inserts chapter prose.
 - [x] Stale blueprint UI behavior is decided and covered by build/lint verification: preserve stale blueprints read-only for comparison, disable review/approval/revision/material binding/candidate generation, and show a regeneration prompt.
 - [x] Reference-anchor search scope is decided: keep reference material results in the dedicated reference panel/API for the current implementation; any global `SearchAll` integration must be a later staged opt-in change with its own result taxonomy and preview policy.
@@ -25,7 +25,7 @@
 - [ ] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj`
 - [ ] `cd frontend && npm run build`
 - [ ] `cd frontend && npm run lint`
-- [ ] Playwright mock-bridge reference-anchor workflow screenshot/DOM suite; record the exact command after the Playwright harness is added.
+- [x] `cd frontend && npm run test:reference-anchor`
 - [ ] Minimal real Photino smoke covering app load, representative bridge invocation, and no automatic chapter insertion.
 
 Targeted Phase 10 checks completed:
@@ -37,6 +37,7 @@ Targeted Phase 10 checks completed:
 - [x] Frontend stale-blueprint UI check: stale blueprints are retained read-only for comparison, with review/approval/revision/binding/candidate actions disabled and a regeneration prompt shown.
 - [x] `cd frontend && npm run build`
 - [x] `cd frontend && npm run lint`
+- [x] `cd frontend && npm run test:reference-anchor` covers the reference-anchor panel in a real browser with a mocked Photino `window.external` bridge, including create/rebuild/search, blueprint revision/review/approval, material binding, candidate generation/audit, default orchestration through final-insertion stop, stale blueprint disabled controls, screenshots in `output/playwright/`, and a bridge-call assertion that `SaveContent` is never invoked.
 - [x] Documentation closure check: `overview.md`, `schema-and-integration.md`, and `decisions.md` describe Phase 0-9 bridge, desktop composition, agent tools, frontend entry, import semantics, extracted blueprint components, and current SQLite tables as implemented/current rather than as pending work.
 - [x] Documentation check: `Makefile`, `README.md`, `docs/build-setup.md`, and `schema-and-integration.md` agree that `make dev` uses prebuilt `frontend/dist` or an explicit Vite `--start-url`.
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter MaterialTaggingAndAdaptationRemainDeterministicWithoutModelAssistedConfiguration -v minimal`

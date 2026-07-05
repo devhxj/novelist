@@ -6,6 +6,7 @@ spike_test
 
 # Test and dev
 dev_test/
+/output/playwright/
 
 # ONNX model files (downloaded at runtime)
 models/

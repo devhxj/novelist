@@ -22,8 +22,8 @@ npm run lint
 Run after Phase 10 frontend workflow hardening once the Playwright harness exists:
 
 ```text
-# command to be recorded with the harness
-Playwright mock-bridge reference-anchor workflow screenshots + DOM assertions
+cd frontend
+npm run test:reference-anchor
 ```
 
 Targeted new tests:
