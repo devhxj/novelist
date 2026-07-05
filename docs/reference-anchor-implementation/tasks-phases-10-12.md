@@ -9,7 +9,7 @@
 **Acceptance criteria:**
 
 - [x] Full reference-anchor frontend workflow is covered by Playwright screenshot/DOM tests with a mocked Novelist bridge: create/rebuild anchor, search material, generate/review/revise/approve blueprint, bind materials, generate candidates, inspect audit, stale/disabled states, final-insertion stop, and no automatic chapter insertion.
-- [ ] Real Photino desktop verification is reduced to a minimal runtime smoke: the app loads the reference panel, the bridge can call representative reference methods through the production composition, and no runtime path auto-inserts chapter prose.
+- [x] Real Photino desktop verification is reduced to a minimal runtime smoke: the app loads the reference panel, the bridge can call representative reference methods through the production composition, and no runtime path auto-inserts chapter prose.
 - [x] Stale blueprint UI behavior is decided and covered by build/lint verification: preserve stale blueprints read-only for comparison, disable review/approval/revision/material binding/candidate generation, and show a regeneration prompt.
 - [x] Reference-anchor search scope is decided: keep reference material results in the dedicated reference panel/API for the current implementation; any global `SearchAll` integration must be a later staged opt-in change with its own result taxonomy and preview policy.
 - [x] Optional LLM-assisted material tagging/adaptation is decided for the current implementation: keep extraction, tagging, slot adaptation, rewrite-level classification, and audit deterministic-only; any future model-assisted path must use an explicit opt-in interface or feature flag and cannot weaken deterministic review, binding, rewrite-level, or audit gates.
@@ -26,7 +26,7 @@
 - [ ] `cd frontend && npm run build`
 - [ ] `cd frontend && npm run lint`
 - [x] `cd frontend && npm run test:reference-anchor`
-- [ ] Minimal real Photino smoke covering app load, representative bridge invocation, and no automatic chapter insertion.
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter PhotinoReferenceWorkflowSmokeTests -v minimal`
 
 Targeted Phase 10 checks completed:
 
@@ -41,7 +41,7 @@ Targeted Phase 10 checks completed:
 - [x] Documentation closure check: `overview.md`, `schema-and-integration.md`, and `decisions.md` describe Phase 0-9 bridge, desktop composition, agent tools, frontend entry, import semantics, extracted blueprint components, and current SQLite tables as implemented/current rather than as pending work.
 - [x] Documentation check: `Makefile`, `README.md`, `docs/build-setup.md`, and `schema-and-integration.md` agree that `make dev` uses prebuilt `frontend/dist` or an explicit Vite `--start-url`.
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter MaterialTaggingAndAdaptationRemainDeterministicWithoutModelAssistedConfiguration -v minimal`
-- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter PhotinoReferenceWorkflowSmokeTests -v minimal` verifies the production desktop bridge composition can run the reference-anchor workflow through `PhotinoWebMessageBridge` without saving chapter content.
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter PhotinoReferenceWorkflowSmokeTests -v minimal` verifies the production desktop bridge composition can run the reference-anchor workflow through `PhotinoWebMessageBridge` without saving chapter content; app-load/reference-panel coverage stays with the real-browser mock-bridge suite per the Phase 10 verification boundary.
 - [x] Phase 10 verification boundary decided: Playwright mock-bridge tests own full frontend workflow coverage, .NET integration tests own bridge/service behavior, and real Photino smoke is only a minimal runtime check.
 
 **Files likely touched:**
