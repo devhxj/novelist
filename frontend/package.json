@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:reference-anchor": "node scripts/reference-anchor-mock-workflow.mjs",
-    "test:app": "node scripts/app-mock-workflow.mjs"
+    "test:app": "node scripts/app-mock-workflow.mjs",
+    "verify": "npm run build && npm run lint && npm run test:reference-anchor && npm run test:app"
   },
   "dependencies": {
     "@antv/g6": "^5.1.1",

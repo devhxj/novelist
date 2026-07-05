@@ -181,6 +181,8 @@ export default function ChatInput({ disabled, isLoading, placeholder, slashItems
         />
         {isLoading && !hasContent ? (
           <button
+            type="button"
+            aria-label="停止生成"
             onClick={handleStopClick}
             className="w-[52px] h-[36px] min-w-[52px] flex items-center justify-center rounded-xl bg-destructive text-destructive-foreground shadow-md transition-all hover:bg-destructive/85 shrink-0"
           >
@@ -188,6 +190,8 @@ export default function ChatInput({ disabled, isLoading, placeholder, slashItems
           </button>
         ) : (
           <button
+            type="button"
+            aria-label="发送消息"
             disabled={disabled || !hasContent}
             onClick={handleSendClick}
             className="w-[52px] h-[36px] min-w-[52px] flex items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 text-white shadow-md shadow-amber-500/20 transition-all hover:-translate-y-px hover:shadow-lg hover:shadow-amber-500/30 disabled:bg-muted disabled:text-muted-foreground/40 disabled:shadow-none disabled:hover:translate-y-0 shrink-0"

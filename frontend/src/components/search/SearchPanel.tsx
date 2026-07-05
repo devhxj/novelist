@@ -28,6 +28,7 @@ const GROUP_ORDER = ['content', 'character', 'location', 'chapter', 'timeline', 
 export default function SearchPanel({ novelId, query, results, onResultsChange, onNavigateEntity, onNavigateChapter }: Props) {
   const app = useApp()
   const [loading, setLoading] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
   const [selectedIdx, setSelectedIdx] = useState(-1)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -41,6 +42,7 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
 
   const doSearch = useCallback(async (q: string, reqId: number) => {
     if (!q.trim() || !novelId) {
+      setSearchError(null)
       onResultsChangeRef.current(q, [])
       setLoading(false)
       return
@@ -49,10 +51,13 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
     try {
       const data = await app.SearchAll(novelId, q.trim()) as unknown as SearchResult[]
       if (reqIdRef.current !== reqId) return
+      setSearchError(null)
       setSelectedIdx(-1)
       onResultsChangeRef.current(q, data ?? [])
     } catch {
       if (reqIdRef.current !== reqId) return
+      setSelectedIdx(-1)
+      setSearchError('搜索失败，请稍后重试')
       onResultsChangeRef.current(q, [])
     } finally {
       if (reqIdRef.current === reqId) setLoading(false)
@@ -98,9 +103,15 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
     } else if (e.key === 'Enter' && selectedIdx >= 0 && selectedIdx < flatList.length) {
       selectResult(flatList[selectedIdx])
     } else if (e.key === 'Escape') {
+      setSearchError(null)
       onResultsChange('', [])
       inputRef.current?.blur()
     }
+  }
+
+  function handleQueryChange(value: string) {
+    setSearchError(null)
+    onResultsChange(value, [])
   }
 
   function selectResult(r: SearchResult) {
@@ -113,8 +124,14 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
   }
 
   function clearSearch() {
+    setSearchError(null)
     onResultsChange('', [])
     inputRef.current?.focus()
+  }
+
+  function retrySearch() {
+    reqIdRef.current++
+    void doSearch(query, reqIdRef.current)
   }
 
   // auto-focus
@@ -132,7 +149,7 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
             ref={inputRef}
             type="text"
             value={query}
-            onChange={e => onResultsChange(e.target.value, [])}
+            onChange={e => handleQueryChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="搜索人物、地点、时间线、正文..."
             className="w-full h-7 rounded-md border bg-background pl-7 pr-7 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -157,6 +174,19 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
         ) : loading ? (
           <div className="flex items-center justify-center h-20">
             <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+          </div>
+        ) : searchError ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center px-4">
+              <p className="text-xs text-red-500">{searchError}</p>
+              <button
+                type="button"
+                onClick={retrySearch}
+                className="mt-2 text-xs text-primary underline cursor-pointer"
+              >
+                重试
+              </button>
+            </div>
           </div>
         ) : grouped.length === 0 ? (
           <div className="flex items-center justify-center h-full">

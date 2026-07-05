@@ -16,8 +16,8 @@ This phase is intentionally broader than reference anchors. The reference-anchor
 - [ ] Shell navigation is covered across primary activities: bookshelf/workspace, editor, chat, search, reference, characters, locations, timeline/story arcs, preferences/readers, profile, and settings/help affordances where available.
 - [ ] Novel and chapter workflows are covered with fixture data: create/edit/select novel, list chapters, open chapter tabs, switch tabs, preserve active selection, and show expected side-panel counts.
 - [ ] Content editing is covered: editor render, text edits, save through the bridge, dirty-state behavior, save failure display, and no accidental saves when switching unrelated panels.
-- [ ] Search/RAG UI is covered: global search query, result rendering, empty state, failure state, and result preview without leaking raw reference-source internals into the global search path unless a later design explicitly enables it.
-- [ ] Chat and agent UI is covered at presentation level: send prompt, stream assistant text/tool-call states from mocked events, render tool cards/web-search cards, handle cancellation/failure, and keep generated content out of chapter files unless the user explicitly saves through an editor flow.
+- [x] Search/RAG UI is covered: global search query, result rendering, empty state, failure state, and result preview without leaking raw reference-source internals into the global search path unless a later design explicitly enables it.
+- [x] Chat and agent UI is covered at presentation level: send prompt, stream assistant text/tool-call states from mocked events, render tool cards/web-search cards, handle cancellation/failure, and keep generated content out of chapter files unless the user explicitly saves through an editor flow.
 - [ ] Metadata surfaces are covered: character, location, timeline/story-arc, preference, reader, skill, and profile panels render fixture data, empty states, and representative create/edit/delete or inspect actions where those actions exist.
 - [ ] Settings are covered: provider/model/embedding configuration panes render, validate required fields, persist safe settings through the bridge, and never require live API keys, local model files, or network access.
 - [ ] Import/export and file-picker affordances are covered with mocked paths and temporary fixtures; tests must not read or write real user projects outside test temp directories.
@@ -32,7 +32,7 @@ This phase is intentionally broader than reference anchors. The reference-anchor
 - [ ] `npm --prefix frontend run lint`
 - [ ] `npm --prefix frontend run test:reference-anchor`
 - [x] `npm --prefix frontend run test:app`
-- [ ] At least one CI-friendly command can run all frontend verification without relying on an installed Photino desktop shell.
+- [x] At least one CI-friendly command can run all frontend verification without relying on an installed Photino desktop shell.
 - [ ] Real Photino coverage remains a minimal boundary smoke unless a later phase adds stable desktop automation: app loads built assets, representative bridge calls route through production composition, and no path auto-inserts chapter prose.
 
 **Recommended Playwright suite slices:**
@@ -48,10 +48,13 @@ This phase is intentionally broader than reference anchors. The reference-anchor
 
 - [x] `npm run test:app` now runs a standalone real-browser Vite workflow with a deterministic mocked `window.external` bridge and screenshots under `output/playwright/`.
 - [x] The first app-wide suite covers workspace load, shell/book/chapter navigation, chapter open through `GetContent`, global search result navigation, chat prompt plus streamed assistant/tool/web-search presentation, settings panes, metadata panel fixture rendering, skill list rendering, and the reference-anchor entry point.
+- [x] The app-wide suite now covers search prompt, empty, failure, retry, content, character, and RAG result states, and asserts global search does not expose raw reference-source paths.
+- [x] Chat presentation coverage now includes explicit stop/cancel behavior via `CancelChat` and mocked agent failure rendering, while generated assistant text still never writes chapter files.
 - [x] The suite records bridge calls and asserts no implicit `SaveContent`, no external URL open, and no reference file picker or other mutating bridge calls during the smoke path.
+- [x] `npm run verify` runs the frontend build, lint, deep reference-anchor workflow, and app-wide workflow without requiring the Photino desktop shell.
 - [x] The app-wide console-error guard caught and fixed an invalid nested-button structure in the location side panel; the mocked chat usage payload now matches the `ContextRing` contract so the smoke does not mask NaN rendering warnings.
 
-This first slice does not complete Phase 13. Empty/error bootstrap states, create/edit/delete workflows, Monaco content editing/save/failure behavior, chat cancellation/failure, import/export/file-picker paths, responsive viewport coverage, and CI aggregation remain pending.
+This first slice does not complete Phase 13. Empty/error bootstrap states, create/edit/delete workflows, Monaco content editing/save/failure behavior, import/export/file-picker paths, and responsive viewport coverage remain pending.
 
 **Files likely touched:**
 

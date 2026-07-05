@@ -114,10 +114,23 @@ async function verifyChapterWorkflow(page) {
 async function verifySearchWorkflow(page) {
   await page.getByTitle('搜索').click()
   const searchInput = page.getByPlaceholder('搜索人物、地点、时间线、正文...')
+
+  await expectVisible(page.getByText('输入关键词搜索'), 'search prompt')
+
+  await searchInput.fill('没有结果')
+  await expectVisible(page.getByText('无搜索结果'), 'empty search state')
+
+  await searchInput.fill('搜索失败')
+  await expectVisible(page.getByText('搜索失败，请稍后重试'), 'search failure state')
+  await page.getByRole('button', { name: '重试' }).click()
+  await expectVisible(page.getByText('无搜索结果'), 'search retry recovery')
+
   await searchInput.fill('雨夜')
   await expectVisible(page.getByText('正文匹配 (1)'), 'content search group')
   await expectVisible(page.getByText('人物 (1)'), 'character search group')
+  await expectVisible(page.getByText('语义匹配 (1)'), 'semantic search group')
   await expectVisible(page.getByText('林岚在').first(), 'content result preview')
+  await expectHidden(page.getByText('D:\\books\\rain-reference.md'), 'reference source path in global search')
 
   await page.locator('aside').getByRole('button', { name: /雨夜线索/ }).click()
   await expectVisible(page.getByText('第1章 雨夜线索').first(), 'search opened chapter')
@@ -132,6 +145,19 @@ async function verifyChatWorkflow(page) {
   await expectVisible(page.getByText('读取章节列表').first(), 'tool card')
   await expectVisible(page.getByText('搜索完成').first(), 'web search card')
   await expectVisible(page.getByText('建议先保留受限视角').first(), 'assistant message')
+
+  await input.fill('停止生成这个回复')
+  await input.press('Enter')
+  await expectVisible(page.getByText('停止生成这个回复'), 'cancellable chat prompt')
+  await page.getByRole('button', { name: '停止生成' }).click()
+  await expectVisible(page.getByText('对话已停止'), 'chat stopped state')
+  await waitForBridgeCall(page, 'CancelChat')
+  await page.getByRole('button', { name: '发送消息' }).waitFor({ state: 'visible', timeout: 12_000 })
+
+  await input.fill('触发失败态')
+  await input.press('Enter')
+  await expectVisible(page.getByText('触发失败态'), 'failing chat prompt')
+  await expectVisible(page.getByText('模拟模型失败，请重试'), 'chat failure state')
 }
 
 async function verifySettingsWorkflow(page) {
@@ -208,6 +234,7 @@ async function verifyBridgeCalls(page) {
     'GetPreferences',
     'ListSkills',
     'GetReferenceAnchors',
+    'CancelChat',
   ]
 
   for (const method of requiredMethods) {
@@ -228,6 +255,12 @@ async function expectVisible(locator, description) {
   })
 }
 
+async function expectHidden(locator, description) {
+  await locator.waitFor({ state: 'hidden', timeout: 12_000 }).catch((error) => {
+    throw new Error(`Expected hidden: ${description}`, { cause: error })
+  })
+}
+
 async function waitForBridgeCallArg(page, method, argIndex, expectedValue) {
   await page.waitForFunction(
     ({ method, argIndex, expectedValue }) => {
@@ -235,6 +268,14 @@ async function waitForBridgeCallArg(page, method, argIndex, expectedValue) {
         call.method === method && call.args[argIndex] === expectedValue)
     },
     { method, argIndex, expectedValue },
+    { timeout: 12_000 },
+  )
+}
+
+async function waitForBridgeCall(page, method) {
+  await page.waitForFunction(
+    (method) => window.__appMockState.calls.some((call) => call.method === method),
+    method,
     { timeout: 12_000 },
   )
 }
@@ -332,6 +373,7 @@ function installAppMockBridge() {
     calls: [],
     nextSessionId: 1,
     nextTurnId: 101,
+    searchFailureRecovered: false,
   }
 
   window.localStorage.removeItem('goink_tabs_all')
@@ -548,7 +590,31 @@ function installAppMockBridge() {
   async function chat(input) {
     const sessionId = input?.session_id || `session-app-${state.nextSessionId++}`
     const turnId = state.nextTurnId++
+    const message = String(input?.message ?? '')
     emit('chat:started', { turn_id: turnId })
+
+    if (message.includes('停止生成')) {
+      await wait(600)
+      return {
+        session_id: sessionId,
+        turn_id: turnId,
+        final_text: '',
+      }
+    }
+
+    if (message.includes('触发失败态')) {
+      await wait(50)
+      emit(`agent:${turnId}`, agentEvent(turnId, 1, {
+        type: 5,
+        error: '模拟模型失败，请重试',
+      }))
+      await wait(50)
+      return {
+        session_id: sessionId,
+        turn_id: turnId,
+        final_text: '',
+      }
+    }
 
     await wait(100)
     emit(`agent:${turnId}`, agentEvent(turnId, 1, {
@@ -624,6 +690,14 @@ function installAppMockBridge() {
 
   function searchAll(query) {
     if (!query?.trim()) return []
+    if (query.includes('没有结果')) return []
+    if (query.includes('搜索失败')) {
+      if (!state.searchFailureRecovered) {
+        state.searchFailureRecovered = true
+        throw new Error('Mock search failure')
+      }
+      return []
+    }
     return [
       {
         type: 'content',
@@ -654,6 +728,21 @@ function installAppMockBridge() {
         match_len: 0,
         relevance: 0.8,
         panel_id: 'characters',
+      },
+      {
+        type: 'rag',
+        id: 3,
+        title: '雨夜语义片段',
+        subtitle: '第1章',
+        chapter_num: 1,
+        file_path: 'chapters/1.md',
+        match_prefix: '语义结果只指向章节内容，不暴露参考源路径。',
+        match_hit: '',
+        match_suffix: '',
+        match_position: 0,
+        match_len: 0,
+        relevance: 0.86,
+        panel_id: '',
       },
     ]
   }
