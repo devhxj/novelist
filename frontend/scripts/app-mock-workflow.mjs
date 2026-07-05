@@ -149,17 +149,65 @@ function isIgnorableDevServerConsoleError(text) {
 }
 
 async function verifyShellNavigation(page) {
-  await page.getByTitle('书架').click()
-  await expectVisible(page.getByText('共'), 'bookshelf toolbar')
+  await clickActivity(page, '书架')
+  await expectVisible(page.getByRole('button', { name: '新建作品' }), 'bookshelf create action')
   await expectVisible(page.getByText('全局回归小说').first(), 'bookshelf novel')
 
-  await page.getByTitle('章节').click()
+  await clickActivity(page, '章节')
   await expectVisible(page.getByText('章节 (2)'), 'chapter count')
   await expectVisible(page.getByRole('button', { name: /故事状态/ }), 'goink entry')
+  await ensureChapterBlockExpanded(page)
+  await page.locator('aside').getByRole('button', { name: /雨夜线索/ }).click()
+  await expectVisible(page.getByText('第1章 雨夜线索').first(), 'editor tab from shell navigation')
+  await expectVisible(page.locator('.monaco-editor').first(), 'editor surface from shell navigation')
+  await expectVisible(page.getByPlaceholder('输入消息，按 / 调用技能...'), 'chat panel from shell navigation')
 
-  await page.locator('header').getByTitle('帮助').click()
+  await clickActivity(page, '搜索')
+  await expectVisible(page.getByPlaceholder('搜索人物、地点、时间线、正文...'), 'search sidebar from shell navigation')
+  await expectVisible(page.getByText('输入关键词搜索'), 'search prompt from shell navigation')
+
+  await clickActivity(page, '参考锚定')
+  await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'reference panel from shell navigation')
+
+  await clickActivity(page, '角色')
+  await expectVisible(page.getByRole('heading', { name: /角色/ }), 'characters panel from shell navigation')
+
+  await clickActivity(page, '地点')
+  await expectVisible(page.getByRole('heading', { name: /地点/ }), 'locations panel from shell navigation')
+
+  await clickActivity(page, '弧线')
+  await expectVisible(page.getByRole('heading', { name: /弧线节点/ }), 'story arcs panel from shell navigation')
+
+  await clickActivity(page, '时间线')
+  await expectVisible(page.getByRole('heading', { name: /章节计划/ }), 'timeline panel from shell navigation')
+
+  await clickActivity(page, '偏好')
+  await expectVisible(page.getByRole('heading', { name: /创作偏好/ }), 'preferences panel from shell navigation')
+
+  await clickActivity(page, '读者视角')
+  await expectVisible(page.getByRole('heading', { name: /读者视角/ }), 'reader panel from shell navigation')
+
+  await clickActivity(page, '技能')
+  await expectVisible(page.getByText('技能 (2)'), 'skills panel from shell navigation')
+
+  await page.locator('header').getByRole('button', { name: '个人中心' }).click()
+  await expectVisible(page.getByText('Mock User'), 'profile panel from shell navigation')
+  await expectVisible(page.getByText('累计字数'), 'profile stats from shell navigation')
+
+  await clickActivity(page, '章节')
+  await expectVisible(page.getByPlaceholder('输入消息，按 / 调用技能...'), 'chat panel restored after profile navigation')
+
+  await page.locator('header').getByRole('button', { name: '帮助' }).click()
   await expectVisible(page.getByText('欢迎使用 Novelist'), 'help dialog')
   await page.locator('.fixed').getByRole('button', { name: '✕' }).click()
+
+  await page.locator('header').getByRole('button', { name: '设置' }).click()
+  await expectVisible(page.getByText('基础设置'), 'settings affordance from shell navigation')
+  await page.locator('.fixed').getByRole('button', { name: '✕' }).click()
+}
+
+async function clickActivity(page, label) {
+  await page.locator('nav').first().getByRole('button', { name: label }).click()
 }
 
 async function verifyChapterWorkflow(page) {
@@ -395,6 +443,8 @@ async function verifyBridgeCalls(page) {
     'GetTimelineEntries',
     'GetReaderPerspectives',
     'GetPreferences',
+    'GetWritingActivity',
+    'GetWritingStats',
     'ListSkills',
     'GetReferenceAnchors',
     'CancelChat',

@@ -7,6 +7,7 @@
 - 正文编辑器现在使用本地打包的 Monaco 资源，桌面或 CI 离线环境不再卡在编辑器 Loading；保存失败会在编辑区显示明确提示并保留未保存状态。
 - `npm --prefix frontend run test:app` 现在覆盖章节正文编辑、显式保存、保存失败提示、脏状态切换，以及干净状态切换面板不会额外写入正文。
 - `npm --prefix frontend run test:app` 现在覆盖模型与 Embeddings 设置的必填校验、mock 桥接保存和内置 ONNX 向量配置路径，全程不需要真实 API Key、本地模型文件或网络访问。
+- `npm --prefix frontend run test:app` 现在会显式遍历书架、章节/编辑器、聊天面板、搜索、参考锚定、角色、地点、弧线、时间线、偏好、读者视角、技能、个人中心、帮助和设置入口。
 
 ### 2026-07-05
 
