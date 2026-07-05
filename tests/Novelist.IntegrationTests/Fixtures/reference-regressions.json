@@ -81,6 +81,11 @@
       "expected_error": "generic slot plan"
     },
     {
+      "name": "unsupported_slot_plan_fact",
+      "mutation": "unsupported_slot_plan_fact",
+      "expected_error": "unsupported slot plan fact"
+    },
+    {
       "name": "unsupported_final_hook",
       "mutation": "unsupported_final_hook",
       "expected_error": "final hook"

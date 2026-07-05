@@ -401,6 +401,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "Rewrite slot_plan values as concrete approved replacements, such as a named object, place, sensory cue, or evidence item.");
             }
 
+            foreach (var unsupportedSlotPlanFact in FindUnsupportedSlotPlanFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "slot_plan",
+                    $"Beat {beat.BeatIndex} contains unsupported slot plan fact: {unsupportedSlotPlanFact}",
+                    "Move the slot_plan fact into approved known facts, scene facts, or viewpoint knowledge before using it as a replacement.");
+            }
+
             if (string.IsNullOrWhiteSpace(beat.NarrationStrategy))
             {
                 AddBeatDefect(
@@ -726,6 +737,25 @@ internal static class ReferenceChapterBlueprintReviewer
                 "随便", "任意", "某个", "某种", "一个东西", "某样东西", "占位",
                 "之后再填", "后面再填", "待定", "替换一下", "随便替换"
             ]);
+    }
+
+    private static IEnumerable<string> FindUnsupportedSlotPlanFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return beat.SlotPlan
+            .Select(slot => slot.Value)
+            .SelectMany(ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static IEnumerable<string> FindUnsupportedFinalHookFacts(ReferenceChapterBlueprintPayload blueprint)

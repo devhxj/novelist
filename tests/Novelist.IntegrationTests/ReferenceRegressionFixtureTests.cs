@@ -140,6 +140,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 SlotPlan = [new ReferenceSlotValuePayload("object", "随便替换一个东西")]
             },
+            "unsupported_slot_plan_fact" => beat with
+            {
+                SlotPlan = [new ReferenceSlotValuePayload("object", "密室钥匙")]
+            },
             "unsupported_final_hook" => beat,
             "unsupported_scene_fact" => beat with
             {
