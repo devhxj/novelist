@@ -847,7 +847,8 @@ internal static class ReferenceAnchoredDraftAuditor
     private static bool IsAuditableProseDuty(string duty)
     {
         return duty is "interiority" or "external_evidence" or "transition" or "causality" or
-            "sensory" or "sensory_anchor" or "subtext" or "source_detail" or "source_backed_detail";
+            "sensory" or "sensory_anchor" or "subtext" or "delayed_reaction" or "withheld_reaction" or
+            "source_detail" or "source_backed_detail";
     }
 
     private static bool HasProseDutyEvidence(
@@ -862,6 +863,7 @@ internal static class ReferenceAnchoredDraftAuditor
             "transition" or "causality" => HasTransitionEvidence(candidateText),
             "sensory" or "sensory_anchor" => HasSensoryEvidence(candidateText),
             "subtext" => HasSubtextEvidence(candidateText),
+            "delayed_reaction" or "withheld_reaction" => HasDelayedReactionEvidence(candidateText),
             "source_detail" or "source_backed_detail" => HasSourceDetailEvidence(beat, candidateText),
             _ => false
         };
@@ -976,6 +978,16 @@ internal static class ReferenceAnchoredDraftAuditor
         [
             "没说", "没有说", "不说", "沉默", "停顿", "避开", "咽下", "忍住",
             "压下", "装作", "像没听见", "没有回答"
+        ]);
+    }
+
+    private static bool HasDelayedReactionEvidence(string text)
+    {
+        return ContainsAny(text,
+        [
+            "停顿", "停了一下", "停了一会", "停了一会儿", "迟疑", "犹豫",
+            "话到嘴边", "咽下", "咽回", "咽了回去", "忍住", "压下", "压住",
+            "没有立刻", "没有马上", "没有回答", "没回答", "沉默", "隔了片刻", "过了片刻"
         ]);
     }
 

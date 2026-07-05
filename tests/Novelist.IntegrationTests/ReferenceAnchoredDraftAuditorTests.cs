@@ -778,6 +778,45 @@ public sealed class ReferenceAnchoredDraftAuditorTests
     }
 
     [Fact]
+    public void BuildDraftAuditFailsWhenDelayedReactionDutyHasNoEvidence()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            ProseDuties = ["delayed_reaction"],
+            AntiScreenplayDuty = "show delayed reaction instead of direct action"
+        });
+        var candidate = Candidate(blueprint, "雨声压低了整条街的呼吸，门口的灯光照在他的肩上，冷意贴着袖口。");
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.BlueprintErrors, item => item.Contains("delayed_reaction", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("delayed_reaction", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildDraftAuditAllowsDelayedReactionDutyWhenCandidateShowsWithheldReaction()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            ProseDuties = ["delayed_reaction"],
+            AntiScreenplayDuty = "show delayed reaction instead of direct action"
+        });
+        var candidate = Candidate(blueprint, "雨声压低了整条街的呼吸，他到了门口，话到嘴边又咽了回去。");
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("passed", audit.Status);
+        Assert.DoesNotContain(audit.BlueprintErrors, item => item.Contains("delayed_reaction", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildDraftAuditFailsWhenCandidateViolatesParagraphExecutionContract()
     {
         var blueprint = Blueprint(beat => beat with
