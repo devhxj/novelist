@@ -90,6 +90,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 EmotionTrigger = "密室钥匙"
             },
+            "forbidden_emotion_trigger_fact" => beat with
+            {
+                EmotionTrigger = "凶手身份"
+            },
             "hard_transition" => beat with
             {
                 TransitionIn = "来到旧宅",
@@ -234,6 +238,7 @@ public sealed class ReferenceRegressionFixtureTests
         return mutation switch
         {
             "pov_forbidden_scene_fact" => ["雨声压低了整条街的呼吸", "周鸣是卧底"],
+            "forbidden_emotion_trigger_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_external_evidence_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_reference_query_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_source_backed_detail_target_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
@@ -250,6 +255,7 @@ public sealed class ReferenceRegressionFixtureTests
     {
         return mutation switch
         {
+            "forbidden_emotion_trigger_fact" => ["凶手身份"],
             "forbidden_external_evidence_fact" => ["凶手身份"],
             "forbidden_reference_query_fact" => ["凶手身份"],
             "forbidden_source_backed_detail_target_fact" => ["凶手身份"],

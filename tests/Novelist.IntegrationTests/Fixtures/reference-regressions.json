@@ -21,6 +21,11 @@
       "expected_error": "unsupported emotion trigger fact"
     },
     {
+      "name": "forbidden_emotion_trigger_fact",
+      "mutation": "forbidden_emotion_trigger_fact",
+      "expected_error": "forbidden fact appears in emotion trigger"
+    },
+    {
       "name": "hard_transition",
       "mutation": "hard_transition",
       "expected_error": "pressure"
