@@ -781,6 +781,24 @@ public sealed class ReferenceChapterBlueprintReviewerTests
         Assert.Contains(review.ExecutionErrors, item => item.Contains("generic paragraph intention", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(
             review.Defects,
+                defect => defect.Category == "execution" &&
+                defect.FieldPath.Contains("paragraph_intention", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsUnsupportedParagraphIntentionFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            ParagraphIntention = "停留在密室钥匙造成的迟疑"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ExecutionErrors, item => item.Contains("unsupported paragraph intention fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
             defect => defect.Category == "execution" &&
                 defect.FieldPath.Contains("paragraph_intention", StringComparison.OrdinalIgnoreCase));
     }

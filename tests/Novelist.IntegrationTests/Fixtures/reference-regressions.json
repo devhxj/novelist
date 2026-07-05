@@ -126,6 +126,11 @@
       "expected_error": "generic paragraph intention"
     },
     {
+      "name": "unsupported_paragraph_intention_fact",
+      "mutation": "unsupported_paragraph_intention_fact",
+      "expected_error": "unsupported paragraph intention fact"
+    },
+    {
       "name": "generic_execution_mode",
       "mutation": "generic_execution_mode",
       "expected_error": "generic execution mode"

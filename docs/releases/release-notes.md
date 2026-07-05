@@ -36,6 +36,7 @@
 - 蓝图评审现在会检查 `relationship_pressure` 里的高风险事实，关系压力不能夹带未进入 known facts 或场景事实的关键物件、身份或证据。
 - 蓝图评审现在会阻止 `relationship_pressure` 使用 forbidden facts，禁止项不能被声明成关系压力。
 - 蓝图评审现在会执行 beat 自己的 `forbidden_facts`，同一 beat 禁止揭示的事实不能再出现在场景事实、POV 知识、角色状态或执行目标里。
+- 蓝图评审现在会检查 `paragraph_intention` 里的高风险事实，段落意图不能夹带未批准的关键物件、身份或证据。
 - 蓝图评审现在会拒绝“写得更好/更有代入感”这类泛化段落意图，并要求 `paragraph_intention` 写成可检查的具体正文职责。
 - 蓝图评审现在会拒绝“正常写/自然展开”这类泛化执行模式，并要求 `execution_mode` 写成可检查的起草操作。
 - 蓝图评审现在会拒绝“不好的不要/质量差就拒绝”这类泛化候选拒绝规则，并要求 `candidate_rejection_rule` 写清 action-only、POV 泄漏、缺证据等具体失败条件。

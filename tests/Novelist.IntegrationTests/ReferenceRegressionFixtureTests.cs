@@ -180,6 +180,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 ParagraphIntention = "写得更好，更有代入感"
             },
+            "unsupported_paragraph_intention_fact" => beat with
+            {
+                ParagraphIntention = "停留在密室钥匙造成的迟疑"
+            },
             "generic_execution_mode" => beat with
             {
                 ExecutionMode = "正常写，自然展开"

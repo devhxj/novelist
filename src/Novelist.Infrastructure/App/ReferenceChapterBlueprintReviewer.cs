@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 35;
+    public const int CurrentReviewVersion = 36;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -397,6 +397,17 @@ internal static class ReferenceChapterBlueprintReviewer
                         "paragraph_intention",
                         $"Beat {beat.BeatIndex} uses generic paragraph intention.",
                         "Rewrite paragraph_intention as a concrete prose job, such as dwell, withhold, reveal, contrast, linger, or turn tied to this beat.");
+                }
+
+                foreach (var unsupportedParagraphIntentionFact in FindUnsupportedParagraphIntentionFacts(blueprint, beat))
+                {
+                    AddBeatDefect(
+                        executionErrors,
+                        "execution",
+                        beat,
+                        "paragraph_intention",
+                        $"Beat {beat.BeatIndex} contains unsupported paragraph intention fact: {unsupportedParagraphIntentionFact}",
+                        "Set up the paragraph_intention fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
                 }
 
                 if (UsesGenericExecutionMode(beat.ExecutionMode))
@@ -1270,6 +1281,24 @@ internal static class ReferenceChapterBlueprintReviewer
             .ToArray();
 
         return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.SubtextPlan)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedParagraphIntentionFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ParagraphIntention)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
