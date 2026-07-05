@@ -247,6 +247,51 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsUnsupportedLogicAnalysisSummaryFact()
+    {
+        var blueprint = Blueprint(beat => beat) with
+        {
+            LogicAnalysis = new ReferenceChapterBlueprintAnalysisTrackPayload(
+                "logic",
+                "logic turns on 密室钥匙",
+                ["point"])
+        };
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.LogicErrors, item => item.Contains("unsupported logic analysis fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "logic" &&
+                defect.FieldPath.Contains("logic_analysis.summary", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsForbiddenFactInLogicAnalysisSummary()
+    {
+        var blueprint = Blueprint(
+            beat => beat,
+            forbiddenFacts: ["凶手身份"],
+            knownFacts: ["雨声压低了整条街的呼吸", "凶手身份"]) with
+        {
+            LogicAnalysis = new ReferenceChapterBlueprintAnalysisTrackPayload(
+                "logic",
+                "logic turns on 凶手身份",
+                ["point"])
+        };
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ForbiddenFactErrors, item => item.Contains("logic analysis", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "forbidden_fact" &&
+                defect.FieldPath.Contains("logic_analysis.summary", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsMissingCausalityOut()
     {
         var blueprint = Blueprint(beat => beat with

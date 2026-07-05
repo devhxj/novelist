@@ -186,6 +186,16 @@
       "expected_error": "forbidden fact appears in final state"
     },
     {
+      "name": "unsupported_logic_analysis_summary_fact",
+      "mutation": "unsupported_logic_analysis_summary_fact",
+      "expected_error": "unsupported logic analysis fact"
+    },
+    {
+      "name": "forbidden_logic_analysis_summary_fact",
+      "mutation": "forbidden_logic_analysis_summary_fact",
+      "expected_error": "forbidden fact appears in logic analysis"
+    },
+    {
       "name": "generic_paragraph_intention",
       "mutation": "generic_paragraph_intention",
       "expected_error": "generic paragraph intention"

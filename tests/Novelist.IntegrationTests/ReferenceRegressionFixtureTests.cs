@@ -23,7 +23,8 @@ public sealed class ReferenceRegressionFixtureTests
                 finalHook: FinalHookForMutation(mutation),
                 chapterFunction: ChapterFunctionForMutation(mutation),
                 previousState: PreviousStateForMutation(mutation),
-                finalState: FinalStateForMutation(mutation));
+                finalState: FinalStateForMutation(mutation),
+                logicAnalysisSummary: LogicAnalysisSummaryForMutation(mutation));
 
             var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
             var messages = AllReviewMessages(review).ToArray();
@@ -213,6 +214,8 @@ public sealed class ReferenceRegressionFixtureTests
             "unsupported_final_state_fact" => beat,
             "forbidden_previous_state_fact" => beat,
             "forbidden_final_state_fact" => beat,
+            "unsupported_logic_analysis_summary_fact" => beat,
+            "forbidden_logic_analysis_summary_fact" => beat,
             "generic_paragraph_intention" => beat with
             {
                 ParagraphIntention = "写得更好，更有代入感"
@@ -387,6 +390,16 @@ public sealed class ReferenceRegressionFixtureTests
         };
     }
 
+    private static string LogicAnalysisSummaryForMutation(string mutation)
+    {
+        return mutation switch
+        {
+            "unsupported_logic_analysis_summary_fact" => "logic turns on 密室钥匙",
+            "forbidden_logic_analysis_summary_fact" => "logic turns on 凶手身份",
+            _ => "logic"
+        };
+    }
+
     private static IReadOnlyList<string> KnownFactsForMutation(string mutation)
     {
         return mutation switch
@@ -401,6 +414,7 @@ public sealed class ReferenceRegressionFixtureTests
             "forbidden_chapter_function_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_previous_state_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_final_state_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
+            "forbidden_logic_analysis_summary_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_emotion_trigger_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_suppressed_reaction_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_external_evidence_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
@@ -429,6 +443,7 @@ public sealed class ReferenceRegressionFixtureTests
             "forbidden_chapter_function_fact" => ["凶手身份"],
             "forbidden_previous_state_fact" => ["凶手身份"],
             "forbidden_final_state_fact" => ["凶手身份"],
+            "forbidden_logic_analysis_summary_fact" => ["凶手身份"],
             "forbidden_emotion_trigger_fact" => ["凶手身份"],
             "forbidden_suppressed_reaction_fact" => ["凶手身份"],
             "forbidden_external_evidence_fact" => ["凶手身份"],
@@ -527,7 +542,8 @@ public sealed class ReferenceRegressionFixtureTests
         string finalHook = "hook",
         string chapterFunction = "雨夜压力",
         string previousState = "previous",
-        string finalState = "final")
+        string finalState = "final",
+        string logicAnalysisSummary = "logic")
     {
         var beat = configureBeat(Beat("1:beat:1"));
         return new ReferenceChapterBlueprintPayload(
@@ -544,7 +560,7 @@ public sealed class ReferenceRegressionFixtureTests
             0,
             1,
             chapterFunction,
-            new ReferenceChapterBlueprintAnalysisTrackPayload("logic", "logic", ["point"]),
+            new ReferenceChapterBlueprintAnalysisTrackPayload("logic", logicAnalysisSummary, ["point"]),
             new ReferenceChapterBlueprintAnalysisTrackPayload("emotion", "emotion", ["point"]),
             new ReferenceChapterBlueprintAnalysisTrackPayload("narration", "narration", ["point"]),
             new ReferenceChapterBlueprintAnalysisTrackPayload("character", "character", ["point"]),

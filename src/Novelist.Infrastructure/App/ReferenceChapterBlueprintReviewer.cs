@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 47;
+    public const int CurrentReviewVersion = 48;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -105,6 +105,17 @@ internal static class ReferenceChapterBlueprintReviewer
                 string.Empty,
                 $"Blueprint contains unsupported chapter function fact: {unsupportedChapterFunctionFact}",
                 "Set up the chapter_function fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
+        }
+
+        foreach (var unsupportedLogicAnalysisFact in FindUnsupportedLogicAnalysisSummaryFacts(blueprint))
+        {
+            AddDefect(
+                logicErrors,
+                "logic",
+                "logic_analysis.summary",
+                string.Empty,
+                $"Blueprint contains unsupported logic analysis fact: {unsupportedLogicAnalysisFact}",
+                "Set up the logic_analysis.summary fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
         }
 
         foreach (var unsupportedPreviousStateFact in FindUnsupportedPreviousStateFacts(blueprint))
@@ -788,6 +799,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     string.Empty,
                     $"Forbidden fact appears in chapter function: {forbidden}",
                     "Remove the forbidden fact from the chapter function or move it out of the forbidden fact set.");
+            }
+
+            if (ContainsForbidden(blueprint.LogicAnalysis.Summary, forbidden))
+            {
+                AddDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    "logic_analysis.summary",
+                    string.Empty,
+                    $"Forbidden fact appears in logic analysis: {forbidden}",
+                    "Remove the forbidden fact from logic_analysis.summary or move it out of the forbidden fact set.");
             }
 
             if (ContainsForbidden(blueprint.PreviousState, forbidden))
@@ -1540,6 +1562,22 @@ internal static class ReferenceChapterBlueprintReviewer
             .ToArray();
 
         return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(blueprint.ChapterFunction)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedLogicAnalysisSummaryFacts(ReferenceChapterBlueprintPayload blueprint)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SceneFacts))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.ViewpointAllowedKnowledge))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SlotPlan.Select(slot => slot.Value)))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(blueprint.LogicAnalysis.Summary)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
