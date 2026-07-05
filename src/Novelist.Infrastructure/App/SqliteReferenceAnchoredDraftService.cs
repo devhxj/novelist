@@ -393,10 +393,32 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 
         ReferenceAnchoredDraftPreflight.EnsureCurrentPassingReview(blueprint, "Material binding");
 
+        var searchAnchorIds = blueprint.PrimaryAnchorId > 0
+            ? [blueprint.PrimaryAnchorId]
+            : Array.Empty<long>();
+        return await BindBlueprintMaterialsCoreAsync(
+            input.NovelId,
+            blueprint,
+            referenceAnchors,
+            maxResultsPerBeat,
+            input.SelectTopCandidate,
+            searchAnchorIds,
+            cancellationToken);
+    }
+
+    private async ValueTask<ReferenceBlueprintMaterialBindingResultPayload> BindBlueprintMaterialsCoreAsync(
+        long novelId,
+        ReferenceChapterBlueprintPayload blueprint,
+        IReferenceAnchorService referenceAnchors,
+        int maxResultsPerBeat,
+        bool selectTopCandidate,
+        IReadOnlyList<long> searchAnchorIds,
+        CancellationToken cancellationToken)
+    {
         var now = DateTimeOffset.UtcNow;
         var acceptedFeedbackMaterialIds = await LoadAcceptedFeedbackMaterialIdsAsync(
             referenceAnchors,
-            input.NovelId,
+            novelId,
             cancellationToken);
         var boundLinks = new List<ScoredMaterialLink>();
         foreach (var beat in blueprint.Beats.OrderBy(item => item.BeatIndex))
@@ -408,8 +430,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 
             var materials = await SearchMaterialsForBeatAsync(
                 referenceAnchors,
-                input.NovelId,
-                blueprint.PrimaryAnchorId,
+                novelId,
+                searchAnchorIds,
                 beat,
                 maxResultsPerBeat,
                 cancellationToken);
@@ -423,7 +445,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 
             for (var index = 0; index < scored.Length; index++)
             {
-                boundLinks.Add(scored[index] with { Link = scored[index].Link with { Selected = input.SelectTopCandidate && index == 0 } });
+                boundLinks.Add(scored[index] with { Link = scored[index].Link with { Selected = selectTopCandidate && index == 0 } });
             }
         }
 
@@ -832,12 +854,22 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                     },
                     cancellationToken);
 
-                var binding = await BindBlueprintMaterialsAsync(
-                    new BindReferenceBlueprintMaterialsPayload(
-                        current.NovelId,
-                        approved.BlueprintId,
-                        current.CorpusSearchPolicy.MaxResultsPerBeat,
-                        SelectTopCandidate: true),
+                var referenceAnchors = _referenceAnchors
+                    ?? throw new ArgumentException("Reference material binding requires a configured reference anchor service.", nameof(run));
+                var orchestrationSearchAnchorIds = await ResolveOrchestrationSearchAnchorIdsAsync(
+                    referenceAnchors,
+                    current.NovelId,
+                    current.AnchorIds,
+                    approved.PrimaryAnchorId,
+                    current.CorpusSearchPolicy,
+                    cancellationToken);
+                var binding = await BindBlueprintMaterialsCoreAsync(
+                    current.NovelId,
+                    approved,
+                    referenceAnchors,
+                    current.CorpusSearchPolicy.MaxResultsPerBeat,
+                    selectTopCandidate: true,
+                    orchestrationSearchAnchorIds,
                     cancellationToken);
                 var missingMaterialBeatIds = FindMissingSelectedMaterialBeatIds(approved, binding);
                 if (missingMaterialBeatIds.Count > 0)
@@ -1115,18 +1147,18 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
     private static async ValueTask<IReadOnlyList<ReferenceMaterialPayload>> SearchMaterialsForBeatAsync(
         IReferenceAnchorService referenceAnchors,
         long novelId,
-        long primaryAnchorId,
+        IReadOnlyList<long> anchorIds,
         ReferenceChapterBlueprintBeatPayload beat,
         int maxResultsPerBeat,
         CancellationToken cancellationToken)
     {
-        var anchorIds = primaryAnchorId > 0 ? new[] { primaryAnchorId } : Array.Empty<long>();
+        var searchAnchorIds = NormalizeAnchorIds(anchorIds);
         var query = beat.ReferenceQuery;
         var size = Math.Clamp(maxResultsPerBeat * 5, maxResultsPerBeat, 100);
         var result = await referenceAnchors.SearchMaterialsAsync(
             new SearchReferenceMaterialsPayload(
                 novelId,
-                anchorIds,
+                searchAnchorIds,
                 query.Query,
                 query.MaterialTypes.Count > 0 ? query.MaterialTypes : beat.RequiredMaterialTypes,
                 query.EmotionTags,
@@ -1145,7 +1177,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         var fallback = await referenceAnchors.SearchMaterialsAsync(
             new SearchReferenceMaterialsPayload(
                 novelId,
-                anchorIds,
+                searchAnchorIds,
                 string.Empty,
                 query.MaterialTypes.Count > 0 ? query.MaterialTypes : beat.RequiredMaterialTypes,
                 query.EmotionTags,
@@ -1156,6 +1188,46 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 Size: size),
             cancellationToken);
         return fallback.Items;
+    }
+
+    private static async ValueTask<IReadOnlyList<long>> ResolveOrchestrationSearchAnchorIdsAsync(
+        IReferenceAnchorService referenceAnchors,
+        long novelId,
+        IReadOnlyList<long> runAnchorIds,
+        long primaryAnchorId,
+        ReferenceCorpusSearchPolicyPayload policy,
+        CancellationToken cancellationToken)
+    {
+        var includeAnchorIds = NormalizeAnchorIds(policy.IncludeAnchorIds);
+        var excludeAnchorIds = NormalizeAnchorIds(policy.ExcludeAnchorIds).ToHashSet();
+        var licenseStatuses = NormalizeList(policy.LicenseStatuses)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var needsAllAnchors = includeAnchorIds.Count == 0 &&
+            runAnchorIds.Count == 0 &&
+            primaryAnchorId <= 0;
+        var needsLicenseFilter = licenseStatuses.Count > 0;
+        IReadOnlyList<ReferenceAnchorPayload> anchors = [];
+        if (needsAllAnchors || needsLicenseFilter)
+        {
+            anchors = await referenceAnchors.GetAnchorsAsync(novelId, cancellationToken);
+        }
+
+        var candidateAnchorIds = includeAnchorIds.Count > 0
+            ? includeAnchorIds
+            : runAnchorIds.Count > 0
+                ? NormalizeAnchorIds(runAnchorIds)
+                : primaryAnchorId > 0
+                    ? [primaryAnchorId]
+                    : anchors.Select(anchor => anchor.AnchorId).ToArray();
+        var anchorsById = anchors.ToDictionary(anchor => anchor.AnchorId);
+        return candidateAnchorIds
+            .Where(anchorId => !excludeAnchorIds.Contains(anchorId))
+            .Where(anchorId =>
+                licenseStatuses.Count == 0 ||
+                (anchorsById.TryGetValue(anchorId, out var anchor) &&
+                    licenseStatuses.Contains(anchor.LicenseStatus)))
+            .Distinct()
+            .ToArray();
     }
 
     private static async ValueTask<IReadOnlySet<string>> LoadAcceptedFeedbackMaterialIdsAsync(

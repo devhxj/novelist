@@ -3275,6 +3275,128 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReferenceOrchestrationRunUsesCorpusSearchPolicyWhenBindingMaterials()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("编排语料策略测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "雨声压低街道，主角在门口停住。"),
+            CancellationToken.None);
+        var includeAnchorId = 707L;
+        var unknownLicenseAnchorId = 808L;
+        var excludedAnchorId = 909L;
+        var referenceAnchors = new FixedReferenceAnchorService(
+            [
+                new ReferenceMaterialPayload(
+                    MaterialId: "included-corpus-material",
+                    AnchorId: includeAnchorId,
+                    SourceSegmentId: "seg-included",
+                    MaterialType: ReferenceMaterialTypes.Sentence,
+                    FunctionTag: "interiority",
+                    EmotionTag: "pressure",
+                    SceneTag: "rain",
+                    PovTag: "close",
+                    TechniqueTag: "sensory",
+                    FunctionConfidence: 1,
+                    EmotionConfidence: 1,
+                    PovConfidence: 1,
+                    Text: "雨声压低了街道，他在门口停住，把那口气慢慢咽回去。",
+                    SourceHash: "included-hash",
+                    ExtractorVersion: "test",
+                    UserVerified: true,
+                    ScoreComponents: null,
+                    CreatedAt: DateTimeOffset.UtcNow),
+                new ReferenceMaterialPayload(
+                    MaterialId: "unknown-license-corpus-material",
+                    AnchorId: unknownLicenseAnchorId,
+                    SourceSegmentId: "seg-unknown-license",
+                    MaterialType: ReferenceMaterialTypes.Sentence,
+                    FunctionTag: "interiority",
+                    EmotionTag: "pressure",
+                    SceneTag: "rain",
+                    PovTag: "close",
+                    TechniqueTag: "sensory",
+                    FunctionConfidence: 1,
+                    EmotionConfidence: 1,
+                    PovConfidence: 1,
+                    Text: "雨声压低了街道，他在门口停住，陌生档案被递到掌心。",
+                    SourceHash: "unknown-license-hash",
+                    ExtractorVersion: "test",
+                    UserVerified: true,
+                    ScoreComponents: null,
+                    CreatedAt: DateTimeOffset.UtcNow),
+                new ReferenceMaterialPayload(
+                    MaterialId: "excluded-corpus-material",
+                    AnchorId: excludedAnchorId,
+                    SourceSegmentId: "seg-excluded",
+                    MaterialType: ReferenceMaterialTypes.Sentence,
+                    FunctionTag: "interiority",
+                    EmotionTag: "pressure",
+                    SceneTag: "rain",
+                    PovTag: "close",
+                    TechniqueTag: "sensory",
+                    FunctionConfidence: 1,
+                    EmotionConfidence: 1,
+                    PovConfidence: 1,
+                    Text: "雨声压低了街道，他在门口停住，凶手身份在门后亮出来。",
+                    SourceHash: "excluded-hash",
+                    ExtractorVersion: "test",
+                    UserVerified: true,
+                    ScoreComponents: null,
+                    CreatedAt: DateTimeOffset.UtcNow)
+            ],
+            applySearchFilters: true,
+            licenseStatuses: new Dictionary<long, string>
+            {
+                [unknownLicenseAnchorId] = "unknown"
+            });
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+
+        var started = await service.StartOrchestrationRunAsync(
+            new StartReferenceOrchestrationRunPayload(
+                novel.Id,
+                ChapterNumber: 12,
+                ChapterGoal: "雨声压低街道，主角在门口停住",
+                KnownFacts: ["雨声压低街道", "主角在门口停住"],
+                ForbiddenFacts: ["凶手身份"],
+                AnchorIds: null,
+                CorpusSearchPolicy: new ReferenceCorpusSearchPolicyPayload(
+                    "story_context",
+                    MaxResultsPerBeat: 3,
+                    LicenseStatuses: ["user_provided"],
+                    IncludeAnchorIds: [],
+                    ExcludeAnchorIds: [excludedAnchorId]),
+                SourceConfirmed: true),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, started.Status);
+        Assert.Equal(ReferenceOrchestrationStages.BlueprintApproval, started.Stage);
+
+        var completedSafeStages = await service.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                started.RunId,
+                ReferenceOrchestrationDecisionTypes.ApproveBlueprint,
+                started.ReviewId),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, completedSafeStages.Status);
+        Assert.Equal(ReferenceOrchestrationStages.FinalInsertion, completedSafeStages.Stage);
+        Assert.NotEmpty(referenceAnchors.SearchInputs);
+        Assert.All(referenceAnchors.SearchInputs, input =>
+        {
+            Assert.Equal([includeAnchorId], input.AnchorIds);
+            Assert.DoesNotContain(excludedAnchorId, input.AnchorIds);
+        });
+        var adapted = Assert.Single(referenceAnchors.AdaptInputs);
+        Assert.Equal("included-corpus-material", adapted.MaterialId);
+    }
+
+    [Fact]
     public async Task ReferenceOrchestrationRunMarksFailureWhenReferenceMaterialServiceIsMissing()
     {
         var options = CreateOptions();
@@ -3804,6 +3926,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     {
         private readonly IReadOnlyList<ReferenceMaterialPayload> _materials;
         private readonly bool _applySearchFilters;
+        private readonly IReadOnlyDictionary<long, string> _licenseStatuses;
         private readonly List<SearchReferenceMaterialsPayload> _searchInputs = [];
         private readonly List<AdaptReferenceMaterialPayload> _adaptInputs = [];
 
@@ -3816,6 +3939,17 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         {
             _materials = [material];
             _applySearchFilters = applySearchFilters;
+            _licenseStatuses = new Dictionary<long, string>();
+        }
+
+        public FixedReferenceAnchorService(
+            IReadOnlyList<ReferenceMaterialPayload> materials,
+            bool applySearchFilters = false,
+            IReadOnlyDictionary<long, string>? licenseStatuses = null)
+        {
+            _materials = materials;
+            _applySearchFilters = applySearchFilters;
+            _licenseStatuses = licenseStatuses ?? new Dictionary<long, string>();
         }
 
         public ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(
@@ -3838,13 +3972,19 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             SearchReferenceMaterialsPayload input,
             ReferenceMaterialPayload material)
         {
-            return MatchesAnyFilter(material.MaterialType, input.MaterialTypes) &&
+            return MatchesAnchorFilter(material.AnchorId, input.AnchorIds) &&
+                MatchesAnyFilter(material.MaterialType, input.MaterialTypes) &&
                 MatchesAnyFilter(material.EmotionTag, input.EmotionTags) &&
                 MatchesAnyFilter(material.FunctionTag, input.FunctionTags) &&
                 MatchesAnyFilter(material.PovTag, input.PovTags) &&
                 MatchesAnyFilter(material.TechniqueTag, input.TechniqueTags) &&
                 (string.IsNullOrWhiteSpace(input.Query) ||
                     material.Text.Contains(input.Query, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool MatchesAnchorFilter(long anchorId, IReadOnlyList<long> filters)
+        {
+            return filters.Count == 0 || filters.Contains(anchorId);
         }
 
         private static bool MatchesAnyFilter(string value, IReadOnlyList<string> filters)
@@ -3872,8 +4012,29 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
 
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(
             long novelId,
-            CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
+            CancellationToken cancellationToken)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var anchors = _materials
+                .GroupBy(material => material.AnchorId)
+                .Select(group => new ReferenceAnchorPayload(
+                    group.Key,
+                    novelId,
+                    "fixed anchor " + group.Key.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    string.Empty,
+                    "fixed.md",
+                    "markdown",
+                    _licenseStatuses.TryGetValue(group.Key, out var licenseStatus)
+                        ? licenseStatus
+                        : "user_provided",
+                    "hash-" + group.Key.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    "test",
+                    ReferenceAnchorBuildStates.Ready,
+                    now,
+                    now))
+                .ToArray();
+            return ValueTask.FromResult<IReadOnlyList<ReferenceAnchorPayload>>(anchors);
+        }
 
         public ValueTask<ReferenceAnchorBuildStatusPayload> RebuildAnchorAsync(
             long novelId,
