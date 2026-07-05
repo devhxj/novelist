@@ -56,6 +56,11 @@ public interface IReferenceAnchoredDraftService
         string runId,
         CancellationToken cancellationToken);
 
+    ValueTask<IReadOnlyList<ReferenceOrchestrationRunEventPayload>> GetOrchestrationRunEventsAsync(
+        long novelId,
+        string runId,
+        CancellationToken cancellationToken);
+
     ValueTask<ReferenceOrchestrationRunPayload> ResumeOrchestrationRunAsync(
         ResumeReferenceOrchestrationRunPayload input,
         CancellationToken cancellationToken);

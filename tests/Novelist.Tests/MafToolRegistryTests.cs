@@ -1141,6 +1141,15 @@ public sealed class MafToolRegistryTests
             return ValueTask.FromResult<ReferenceOrchestrationRunPayload?>(BuildRun(novelId, 1, "goal") with { RunId = runId });
         }
 
+        public ValueTask<IReadOnlyList<ReferenceOrchestrationRunEventPayload>> GetOrchestrationRunEventsAsync(
+            long novelId,
+            string runId,
+            CancellationToken cancellationToken)
+        {
+            IReadOnlyList<ReferenceOrchestrationRunEventPayload> events = [];
+            return ValueTask.FromResult(events);
+        }
+
         public ValueTask<ReferenceOrchestrationRunPayload> ResumeOrchestrationRunAsync(
             ResumeReferenceOrchestrationRunPayload input,
             CancellationToken cancellationToken)

@@ -441,6 +441,18 @@ public sealed record ReferenceOrchestrationRunPayload(
     [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
     [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt);
 
+public sealed record ReferenceOrchestrationRunEventPayload(
+    [property: JsonPropertyName("event_id")] long EventId,
+    [property: JsonPropertyName("run_id")] string RunId,
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("event_type")] string EventType,
+    [property: JsonPropertyName("stage")] string Stage,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("stop_reason")] string StopReason,
+    [property: JsonPropertyName("decision_type")] string DecisionType,
+    [property: JsonPropertyName("summary")] string Summary,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
+
 public sealed record ResumeReferenceOrchestrationRunPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("run_id")] string RunId,

@@ -132,6 +132,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             SourceConfirmed: false));
         await AssertOkAsync(dispatcher, "GetReferenceOrchestrationRuns", 42L, 7);
         await AssertOkAsync(dispatcher, "GetReferenceOrchestrationRun", 42L, "run-1");
+        await AssertOkAsync(dispatcher, "GetReferenceOrchestrationRunEvents", 42L, "run-1");
         await AssertOkAsync(dispatcher, "ResumeReferenceOrchestrationRun", new ResumeReferenceOrchestrationRunPayload(
             42,
             "run-1",
@@ -156,6 +157,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "StartOrchestrationRun:42:7:tighten the reveal:known clue:culprit identity:<null>:story_context:3:user_provided:99::<false>",
                 "GetOrchestrationRuns:42:7",
                 "GetOrchestrationRun:42:run-1",
+                "GetOrchestrationRunEvents:42:run-1",
                 "ResumeOrchestrationRun:42:run-1:approve_blueprint:review-1",
                 "CancelOrchestrationRun:42:run-1:user cancelled"
             ],
@@ -474,6 +476,17 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"GetOrchestrationRun:{novelId}:{runId}");
             return ValueTask.FromResult<ReferenceOrchestrationRunPayload?>(null);
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceOrchestrationRunEventPayload>> GetOrchestrationRunEventsAsync(
+            long novelId,
+            string runId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"GetOrchestrationRunEvents:{novelId}:{runId}");
+            IReadOnlyList<ReferenceOrchestrationRunEventPayload> events = [];
+            return ValueTask.FromResult(events);
         }
 
         public ValueTask<ReferenceOrchestrationRunPayload> ResumeOrchestrationRunAsync(

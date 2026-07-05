@@ -473,6 +473,29 @@ public sealed class ReferenceAnchorContractTests
         Assert.Equal("review-1", proposal.GetProperty("review_id").GetString());
         Assert.Equal("final_hook", proposal.GetProperty("changes")[0].GetProperty("field_path").GetString());
         Assert.False(runRoot.TryGetProperty("RunId", out _));
+
+        var runEvent = new ReferenceOrchestrationRunEventPayload(
+            EventId: 12,
+            RunId: "run-1",
+            NovelId: 42,
+            EventType: "decision_resumed",
+            Stage: ReferenceOrchestrationStages.BlueprintApproval,
+            Status: ReferenceOrchestrationRunStatuses.Running,
+            StopReason: ReferenceOrchestrationStopReasons.BlueprintApprovalRequired,
+            DecisionType: ReferenceOrchestrationDecisionTypes.ApproveBlueprint,
+            Summary: "user approved blueprint review-1",
+            CreatedAt: DateTimeOffset.Parse("2026-07-05T00:01:00Z"));
+
+        using var eventJson = JsonDocument.Parse(JsonSerializer.Serialize(runEvent, BridgeJson.SerializerOptions));
+        var eventRoot = eventJson.RootElement;
+        Assert.Equal(12, eventRoot.GetProperty("event_id").GetInt64());
+        Assert.Equal("run-1", eventRoot.GetProperty("run_id").GetString());
+        Assert.Equal("decision_resumed", eventRoot.GetProperty("event_type").GetString());
+        Assert.Equal("blueprint_approval", eventRoot.GetProperty("stage").GetString());
+        Assert.Equal("blueprint_approval_required", eventRoot.GetProperty("stop_reason").GetString());
+        Assert.Equal("approve_blueprint", eventRoot.GetProperty("decision_type").GetString());
+        Assert.Equal("user approved blueprint review-1", eventRoot.GetProperty("summary").GetString());
+        Assert.False(eventRoot.TryGetProperty("EventId", out _));
     }
 
     [Fact]

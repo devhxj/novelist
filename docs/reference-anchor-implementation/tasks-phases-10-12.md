@@ -81,7 +81,7 @@ confirm source + chapter target + known/forbidden facts
 - [ ] Advanced mode still exposes manual generate/review/revise/approve/bind/draft/audit controls for debugging and strict editorial review.
 - [ ] The orchestration flow never calls `SaveContent` or inserts chapter prose automatically; insertion remains a separate user-confirmed action.
 - [ ] Agent tool descriptions and UI copy make clear which decisions AI may automate and which decisions require the author.
-- [ ] Telemetry or local run history records why the workflow stopped, what AI proposed, what the user approved/rejected, and which deterministic gate produced each block.
+- [x] Telemetry or local run history records why the workflow stopped, what AI proposed, what the user approved/rejected, and which deterministic gate produced each block.
 
 **Verification:**
 
@@ -103,6 +103,7 @@ Targeted Phase 11 thin-slice checks completed:
 - [x] Draft audit failure now persists as a high-risk `resolve_high_risk_stop` decision with candidate ids and audit findings; resolving that stop marks the run failed instead of inserting prose.
 - [x] Material binding gaps now persist as a high-risk `resolve_high_risk_stop` decision with missing beat ids; resolving that stop marks the run failed instead of free-drafting.
 - [x] Stale blueprints now persist as a high-risk `resolve_high_risk_stop` decision when source-plan changes invalidate a pending approval or safe-stage continuation.
+- [x] Local orchestration event history now records run starts, required decisions, user resumes/approvals, stop reasons, deterministic gate stages, failures, and cancellations; `GetReferenceOrchestrationRunEvents` exposes it through the desktop bridge and frontend adapter.
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Reference -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationRun -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationRunStopsForHighRiskDecisionWhenMaterialBindingHasMissingLinks -v minimal`

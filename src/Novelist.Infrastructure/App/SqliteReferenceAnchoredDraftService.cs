@@ -643,6 +643,28 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         }
     }
 
+    public async ValueTask<IReadOnlyList<ReferenceOrchestrationRunEventPayload>> GetOrchestrationRunEventsAsync(
+        long novelId,
+        string runId,
+        CancellationToken cancellationToken)
+    {
+        ValidateNovelId(novelId);
+        var normalizedRunId = NormalizeRunId(runId);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            return await ReadOrchestrationRunEventsAsync(connection, novelId, normalizedRunId, cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
     public async ValueTask<ReferenceOrchestrationRunPayload> ResumeOrchestrationRunAsync(
         ResumeReferenceOrchestrationRunPayload input,
         CancellationToken cancellationToken)
@@ -683,6 +705,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 approvedBlueprintRevision = BuildApprovedBlueprintRevisionPayload(run, input.DecisionPayload);
             }
 
+            var decisionSummary = BuildOrchestrationDecisionResumedSummary(decisionType, input.DecisionPayload);
             updated = string.Equals(decisionType, ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop, StringComparison.Ordinal)
                 ? run with
                 {
@@ -702,7 +725,13 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                     ErrorMessage = string.Empty,
                     UpdatedAt = DateTimeOffset.UtcNow
                 };
-            await UpdateOrchestrationRunAsync(connection, updated, cancellationToken);
+            await UpdateOrchestrationRunAsync(
+                connection,
+                updated,
+                cancellationToken,
+                eventType: "decision_resumed",
+                eventSummary: decisionSummary,
+                decisionType: decisionType);
         }
         finally
         {
@@ -2416,12 +2445,30 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             """;
         AddOrchestrationRunParameters(command, run);
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await InsertOrchestrationRunEventAsync(
+            connection,
+            run,
+            "run_started",
+            BuildOrchestrationEventSummary(run),
+            cancellationToken);
+        if (run.CurrentDecision is not null)
+        {
+            await InsertOrchestrationRunEventAsync(
+                connection,
+                run,
+                "required_decision",
+                BuildOrchestrationEventSummary(run),
+                cancellationToken);
+        }
     }
 
     private static async ValueTask UpdateOrchestrationRunAsync(
         SqliteConnection connection,
         ReferenceOrchestrationRunPayload run,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? eventType = null,
+        string? eventSummary = null,
+        string? decisionType = null)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
@@ -2444,6 +2491,13 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             """;
         AddOrchestrationRunParameters(command, run);
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await InsertOrchestrationRunEventAsync(
+            connection,
+            run,
+            eventType ?? BuildOrchestrationEventType(run),
+            eventSummary ?? BuildOrchestrationEventSummary(run),
+            cancellationToken,
+            decisionType);
     }
 
     private static void AddOrchestrationRunParameters(
@@ -2468,6 +2522,70 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         command.Parameters.AddWithValue("$error_message", run.ErrorMessage);
         command.Parameters.AddWithValue("$created_at", FormatTimestamp(run.CreatedAt));
         command.Parameters.AddWithValue("$updated_at", FormatTimestamp(run.UpdatedAt));
+    }
+
+    private static async ValueTask InsertOrchestrationRunEventAsync(
+        SqliteConnection connection,
+        ReferenceOrchestrationRunPayload run,
+        string eventType,
+        string summary,
+        CancellationToken cancellationToken,
+        string? decisionType = null)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO reference_orchestration_run_events
+              (run_id, novel_id, event_type, stage, status, stop_reason, decision_type, summary, created_at)
+            VALUES
+              ($run_id, $novel_id, $event_type, $stage, $status, $stop_reason, $decision_type, $summary, $created_at);
+            """;
+        command.Parameters.AddWithValue("$run_id", run.RunId);
+        command.Parameters.AddWithValue("$novel_id", run.NovelId);
+        command.Parameters.AddWithValue("$event_type", eventType);
+        command.Parameters.AddWithValue("$stage", run.Stage);
+        command.Parameters.AddWithValue("$status", run.Status);
+        command.Parameters.AddWithValue("$stop_reason", run.LastStopReason);
+        command.Parameters.AddWithValue("$decision_type", decisionType ?? run.CurrentDecision?.DecisionType ?? string.Empty);
+        command.Parameters.AddWithValue("$summary", NormalizeOptional(summary, eventType, 1_000));
+        command.Parameters.AddWithValue("$created_at", FormatTimestamp(run.UpdatedAt));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceOrchestrationRunEventPayload>> ReadOrchestrationRunEventsAsync(
+        SqliteConnection connection,
+        long novelId,
+        string runId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT event_id, run_id, novel_id, event_type, stage, status,
+                   stop_reason, decision_type, summary, created_at
+            FROM reference_orchestration_run_events
+            WHERE novel_id = $novel_id AND run_id = $run_id
+            ORDER BY event_id ASC;
+            """;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$run_id", runId);
+
+        var events = new List<ReferenceOrchestrationRunEventPayload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            events.Add(new ReferenceOrchestrationRunEventPayload(
+                reader.GetInt64(0),
+                reader.GetString(1),
+                reader.GetInt64(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5),
+                reader.GetString(6),
+                reader.GetString(7),
+                reader.GetString(8),
+                ParseTimestamp(reader.GetString(9))));
+        }
+
+        return events;
     }
 
     private static async ValueTask<IReadOnlyList<ReferenceOrchestrationRunPayload>> ReadOrchestrationRunsAsync(
@@ -2771,6 +2889,20 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
               updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS reference_orchestration_run_events (
+              event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+              run_id TEXT NOT NULL,
+              novel_id INTEGER NOT NULL,
+              event_type TEXT NOT NULL,
+              stage TEXT NOT NULL,
+              status TEXT NOT NULL,
+              stop_reason TEXT NOT NULL,
+              decision_type TEXT NOT NULL,
+              summary TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(run_id) REFERENCES reference_orchestration_runs(run_id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_reference_blueprints_novel_chapter
               ON reference_chapter_blueprints(novel_id, chapter_number);
 
@@ -2794,6 +2926,9 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 
             CREATE INDEX IF NOT EXISTS idx_reference_orchestration_runs_novel_chapter
               ON reference_orchestration_runs(novel_id, chapter_number, updated_at);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_orchestration_run_events_run
+              ON reference_orchestration_run_events(novel_id, run_id, event_id);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         await EnsureColumnAsync(
@@ -3691,6 +3826,68 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         return string.IsNullOrWhiteSpace(run.Stage)
             ? ReferenceOrchestrationStages.BlueprintApproval
             : run.Stage;
+    }
+
+    private static string BuildOrchestrationEventType(ReferenceOrchestrationRunPayload run)
+    {
+        if (string.Equals(run.Status, ReferenceOrchestrationRunStatuses.Cancelled, StringComparison.Ordinal))
+        {
+            return "run_cancelled";
+        }
+
+        if (string.Equals(run.Status, ReferenceOrchestrationRunStatuses.Failed, StringComparison.Ordinal))
+        {
+            return "run_failed";
+        }
+
+        if (string.Equals(run.Status, ReferenceOrchestrationRunStatuses.Completed, StringComparison.Ordinal))
+        {
+            return "run_completed";
+        }
+
+        if (string.Equals(run.Status, ReferenceOrchestrationRunStatuses.WaitingForUser, StringComparison.Ordinal) &&
+            run.CurrentDecision is not null)
+        {
+            return "required_decision";
+        }
+
+        return "run_updated";
+    }
+
+    private static string BuildOrchestrationDecisionResumedSummary(string decisionType, string decisionPayload)
+    {
+        var normalizedPayload = NormalizeOptional(decisionPayload, "no decision payload", 700);
+        return "decision resumed: " + decisionType + "; decision_payload: " + normalizedPayload;
+    }
+
+    private static string BuildOrchestrationEventSummary(ReferenceOrchestrationRunPayload run)
+    {
+        if (string.Equals(run.Status, ReferenceOrchestrationRunStatuses.Cancelled, StringComparison.Ordinal))
+        {
+            return NormalizeOptional(run.ErrorMessage, "orchestration run cancelled", 1_000);
+        }
+
+        if (string.Equals(run.Status, ReferenceOrchestrationRunStatuses.Failed, StringComparison.Ordinal))
+        {
+            return NormalizeOptional(run.ErrorMessage, "orchestration run failed", 1_000);
+        }
+
+        if (run.CurrentDecision is not null)
+        {
+            return NormalizeOptional(
+                run.CurrentDecision.Summary,
+                "required decision: " + run.CurrentDecision.DecisionType,
+                1_000);
+        }
+
+        if (!string.IsNullOrWhiteSpace(run.LastStopReason))
+        {
+            return "orchestration stopped: " + run.LastStopReason;
+        }
+
+        return string.IsNullOrWhiteSpace(run.ReviewId)
+            ? "orchestration advanced to " + run.Stage
+            : "orchestration advanced to " + run.Stage + " after " + run.ReviewId;
     }
 
     private static string BuildBlueprintPremise(string? planText, string chapterFunction)

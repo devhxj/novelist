@@ -98,6 +98,7 @@ Current status:
 - reference tools do not expose session/turn/tool internals;
 - reference draft tools return blueprints, material links, candidates, and audits only;
 - orchestration tools let the agent start, inspect, list, and cancel runs, but do not expose a generic resume/approval tool;
+- local orchestration event history is exposed through the desktop bridge as `GetReferenceOrchestrationRunEvents`; it is not exposed as an Agent approval or resume tool;
 - `start_reference_orchestration_run` always starts with `source_confirmed=false`, uses include/exclude anchors only inside `corpus_search_policy`, and cannot pass `anchor_ids`, `decision_type`, or `decision_payload`;
 - no reference tool is allowed to call `SaveContent` or mutate chapter prose.
 

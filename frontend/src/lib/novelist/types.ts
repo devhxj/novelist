@@ -912,6 +912,19 @@ export namespace reference {
     updated_at: Timestamp
   }
 
+  export interface OrchestrationRunEvent {
+    event_id: number
+    run_id: string
+    novel_id: number
+    event_type: string
+    stage: string
+    status: string
+    stop_reason: string
+    decision_type: string
+    summary: string
+    created_at: Timestamp
+  }
+
   export interface ResumeOrchestrationRunInput {
     novel_id: number
     run_id: string

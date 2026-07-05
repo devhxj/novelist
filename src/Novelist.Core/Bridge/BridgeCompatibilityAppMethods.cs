@@ -63,6 +63,7 @@ public static class BridgeCompatibilityAppMethods
         "GetReferenceChapterBlueprint",
         "GetReferenceChapterBlueprints",
         "GetReferenceOrchestrationRun",
+        "GetReferenceOrchestrationRunEvents",
         "GetReferenceOrchestrationRuns",
         "GetReferenceUserFeedback",
         "GetSession",

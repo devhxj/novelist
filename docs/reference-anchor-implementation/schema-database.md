@@ -25,6 +25,7 @@ reference_chapter_blueprint_revisions
 reference_blueprint_material_links
 reference_draft_paragraph_candidates
 reference_orchestration_runs
+reference_orchestration_run_events
 ```
 
 Core columns:
@@ -258,6 +259,18 @@ reference_orchestration_runs
 - created_at TEXT NOT NULL
 - updated_at TEXT NOT NULL
 
+reference_orchestration_run_events
+- event_id INTEGER PRIMARY KEY AUTOINCREMENT
+- run_id TEXT NOT NULL
+- novel_id INTEGER NOT NULL
+- event_type TEXT NOT NULL
+- stage TEXT NOT NULL
+- status TEXT NOT NULL
+- stop_reason TEXT NOT NULL
+- decision_type TEXT NOT NULL
+- summary TEXT NOT NULL
+- created_at TEXT NOT NULL
+
 reference_user_feedback
 - feedback_id TEXT PRIMARY KEY
 - novel_id INTEGER NOT NULL
@@ -292,6 +305,7 @@ idx_reference_blueprint_revisions_blueprint
 idx_reference_blueprint_links_beat
 idx_reference_draft_candidates_blueprint
 idx_reference_orchestration_runs_novel_chapter
+idx_reference_orchestration_run_events_run
 idx_reference_feedback_novel_target
 idx_reference_feedback_material
 ```
@@ -304,4 +318,6 @@ PRAGMA foreign_keys = ON;
 
 The current RAG service does not enable foreign keys because it has only two flat tables. Reference-anchor storage has real parent/child integrity and enables it.
 
-`reference_orchestration_runs` is the Phase 11 run history and resume surface. It persists stage/status, source/fact decision details, optional explicit anchors, corpus search policy, artifact ids, stop reason, and error text so a run can be inspected or resumed after restart. The current implementation records generated `blueprint_id` and deterministic `review_id` after source confirmation, stores pending required decisions in `current_decision_json`, can persist a proposed field-level blueprint revision inside that decision, stops for blueprint approval or revision, then after blueprint approval can record generated `candidate_ids_json` and stop for final insertion. Stale blueprint detection persists as a high-risk `resolve_high_risk_stop` decision with `stale_blueprint` in the approval summary, so a run can be inspected after the source plan invalidates a pending or approved blueprint. Material binding gaps persist as a high-risk `resolve_high_risk_stop` decision at `material_binding`, with `high_risk_gate_blocked`, missing beat ids in the approval summary, and error text retained for inspection; resolving that stop marks the run failed without free-drafting. Draft audit failure persists as a high-risk `resolve_high_risk_stop` decision at `draft_audit`, with candidate ids, stop reason, and error text retained for inspection; resolving that stop marks the run failed without inserting prose. Draft audit details remain available by re-auditing the persisted candidates; a later slice can add a first-class audit history column/table if the UI needs durable audit snapshots.
+`reference_orchestration_runs` is the Phase 11 run state and resume surface. It persists stage/status, source/fact decision details, optional explicit anchors, corpus search policy, artifact ids, stop reason, and error text so a run can be inspected or resumed after restart. The current implementation records generated `blueprint_id` and deterministic `review_id` after source confirmation, stores pending required decisions in `current_decision_json`, can persist a proposed field-level blueprint revision inside that decision, stops for blueprint approval or revision, then after blueprint approval can record generated `candidate_ids_json` and stop for final insertion. Stale blueprint detection persists as a high-risk `resolve_high_risk_stop` decision with `stale_blueprint` in the approval summary, so a run can be inspected after the source plan invalidates a pending or approved blueprint. Material binding gaps persist as a high-risk `resolve_high_risk_stop` decision at `material_binding`, with `high_risk_gate_blocked`, missing beat ids in the approval summary, and error text retained for inspection; resolving that stop marks the run failed without free-drafting. Draft audit failure persists as a high-risk `resolve_high_risk_stop` decision at `draft_audit`, with candidate ids, stop reason, and error text retained for inspection; resolving that stop marks the run failed without inserting prose. Draft audit details remain available by re-auditing the persisted candidates; a later slice can add a first-class audit history column/table if the UI needs durable audit snapshots.
+
+`reference_orchestration_run_events` is the append-only local run history for that state surface. It records `run_started`, `required_decision`, `decision_resumed`, `run_updated`, `run_failed`, `run_completed`, and `run_cancelled` events with the stage/status snapshot, stop reason, decision type, and compact summary. This gives the desktop bridge a durable answer for why a workflow stopped, what decision the AI proposed, what the user approved or cancelled, and which deterministic gate produced a block.

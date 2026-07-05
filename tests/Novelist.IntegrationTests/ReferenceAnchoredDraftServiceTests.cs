@@ -2795,6 +2795,13 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.Equal(started.RunId, loaded.RunId);
         Assert.Single(list);
         Assert.Equal(started.RunId, list[0].RunId);
+        var initialEvents = await reloadedService.GetOrchestrationRunEventsAsync(novel.Id, started.RunId, CancellationToken.None);
+        Assert.Contains(initialEvents, item =>
+            string.Equals(item.EventType, "run_started", StringComparison.Ordinal) &&
+            string.Equals(item.DecisionType, ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts, StringComparison.Ordinal));
+        Assert.Contains(initialEvents, item =>
+            string.Equals(item.EventType, "required_decision", StringComparison.Ordinal) &&
+            string.Equals(item.StopReason, ReferenceOrchestrationStopReasons.SourceConfirmationRequired, StringComparison.Ordinal));
 
         await Assert.ThrowsAsync<ArgumentException>(async () =>
             await reloadedService.ResumeOrchestrationRunAsync(
@@ -2832,6 +2839,14 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.NotNull(blueprint.LatestReview);
         Assert.Equal(resumed.ReviewId, blueprint.LatestReview.ReviewId);
         Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, blueprint.LatestReview.Status);
+        var resumedEvents = await reloadedService.GetOrchestrationRunEventsAsync(novel.Id, started.RunId, CancellationToken.None);
+        Assert.Contains(resumedEvents, item =>
+            string.Equals(item.EventType, "decision_resumed", StringComparison.Ordinal) &&
+            string.Equals(item.DecisionType, ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts, StringComparison.Ordinal) &&
+            item.Summary.Contains("confirmed", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(resumedEvents, item =>
+            string.Equals(item.EventType, "required_decision", StringComparison.Ordinal) &&
+            string.Equals(item.DecisionType, ReferenceOrchestrationDecisionTypes.ApproveBlueprint, StringComparison.Ordinal));
 
         var cancelled = await reloadedService.CancelOrchestrationRunAsync(
             new CancelReferenceOrchestrationRunPayload(novel.Id, started.RunId, "user stopped run"),
@@ -2841,6 +2856,11 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.Equal(ReferenceOrchestrationStopReasons.Cancelled, cancelled.LastStopReason);
         Assert.Equal("user stopped run", cancelled.ErrorMessage);
         Assert.Null(cancelled.CurrentDecision);
+        var cancelledEvents = await reloadedService.GetOrchestrationRunEventsAsync(novel.Id, started.RunId, CancellationToken.None);
+        Assert.Contains(cancelledEvents, item =>
+            string.Equals(item.EventType, "run_cancelled", StringComparison.Ordinal) &&
+            item.Summary.Contains("user stopped run", StringComparison.Ordinal));
+        Assert.True(cancelledEvents.Select(item => item.EventId).SequenceEqual(cancelledEvents.Select(item => item.EventId).Order()));
     }
 
     [Fact]

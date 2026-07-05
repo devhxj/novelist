@@ -132,6 +132,7 @@ export interface NovelistAppApi {
   GetReferenceChapterBlueprint: AppMethod<[number, number], reference.ChapterBlueprint | null>
   GetReferenceChapterBlueprints: AppMethod<[number, number | null], reference.ChapterBlueprintSummary[]>
   GetReferenceOrchestrationRun: AppMethod<[number, string], reference.OrchestrationRun | null>
+  GetReferenceOrchestrationRunEvents: AppMethod<[number, string], reference.OrchestrationRunEvent[]>
   GetReferenceOrchestrationRuns: AppMethod<[number, number | null], reference.OrchestrationRun[]>
   GetReferenceUserFeedback: AppMethod<[reference.GetUserFeedbackInput], reference.UserFeedback[]>
   GetSession: AppMethod<[string], app.SessionDetail>
@@ -273,6 +274,7 @@ export const appApi: NovelistAppApi = {
   GetReferenceChapterBlueprint: appMethod<NovelistAppApi['GetReferenceChapterBlueprint']>('GetReferenceChapterBlueprint'),
   GetReferenceChapterBlueprints: appMethod<NovelistAppApi['GetReferenceChapterBlueprints']>('GetReferenceChapterBlueprints'),
   GetReferenceOrchestrationRun: appMethod<NovelistAppApi['GetReferenceOrchestrationRun']>('GetReferenceOrchestrationRun'),
+  GetReferenceOrchestrationRunEvents: appMethod<NovelistAppApi['GetReferenceOrchestrationRunEvents']>('GetReferenceOrchestrationRunEvents'),
   GetReferenceOrchestrationRuns: appMethod<NovelistAppApi['GetReferenceOrchestrationRuns']>('GetReferenceOrchestrationRuns'),
   GetReferenceUserFeedback: appMethod<NovelistAppApi['GetReferenceUserFeedback']>('GetReferenceUserFeedback'),
   GetSession: appMethod<NovelistAppApi['GetSession']>('GetSession'),
