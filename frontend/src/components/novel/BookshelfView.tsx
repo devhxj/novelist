@@ -90,6 +90,7 @@ export default function BookshelfView({
                     {/* 悬浮封面上传按钮 */}
                     <button
                       onClick={(e) => handleCoverClick(n.id, e)}
+                      aria-label={`更换封面 ${n.title}`}
                       className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
                       title="更换封面"
                     >
@@ -117,6 +118,7 @@ export default function BookshelfView({
                 <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={(e) => { e.stopPropagation(); onExportNovel(n) }}
+                    aria-label={`导出作品 ${n.title}`}
                     className="w-7 h-7 flex items-center justify-center rounded-md bg-background/90 border shadow-sm hover:bg-muted transition-colors"
                     title="导出"
                   >
@@ -124,6 +126,7 @@ export default function BookshelfView({
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); onEditNovel(n) }}
+                    aria-label={`编辑作品 ${n.title}`}
                     className="w-7 h-7 flex items-center justify-center rounded-md bg-background/90 border shadow-sm hover:bg-muted transition-colors"
                     title="编辑"
                   >
@@ -131,6 +134,7 @@ export default function BookshelfView({
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); onDeleteNovel(n) }}
+                    aria-label={`删除作品 ${n.title}`}
                     className="w-7 h-7 flex items-center justify-center rounded-md bg-background/90 border shadow-sm hover:bg-danger-bg hover:border-danger-border transition-colors"
                     title="删除"
                   >

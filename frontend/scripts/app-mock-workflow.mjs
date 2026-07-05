@@ -46,6 +46,9 @@ async function main() {
     logStep('checking explicit editor save path')
     await verifyEditorSaveWorkflow(browser, url, consoleErrors, pageErrors)
 
+    logStep('checking novel and chapter workflow')
+    await verifyNovelChapterWorkflow(browser, url, consoleErrors, pageErrors)
+
     logStep('checking search path')
     await verifySearchWorkflow(page)
     await page.screenshot({ path: path.join(outputDir, 'app-03-search.png'), fullPage: true })
@@ -150,14 +153,14 @@ function isIgnorableDevServerConsoleError(text) {
 
 async function verifyShellNavigation(page) {
   await clickActivity(page, '书架')
-  await expectVisible(page.getByRole('button', { name: '新建作品' }), 'bookshelf create action')
+  await expectVisible(page.getByRole('button', { name: '新建作品' }).last(), 'bookshelf create action')
   await expectVisible(page.getByText('全局回归小说').first(), 'bookshelf novel')
 
   await clickActivity(page, '章节')
   await expectVisible(page.getByText('章节 (2)'), 'chapter count')
   await expectVisible(page.getByRole('button', { name: /故事状态/ }), 'goink entry')
   await ensureChapterBlockExpanded(page)
-  await page.locator('aside').getByRole('button', { name: /雨夜线索/ }).click()
+  await chapterButton(page, '雨夜线索').click()
   await expectVisible(page.getByText('第1章 雨夜线索').first(), 'editor tab from shell navigation')
   await expectVisible(page.locator('.monaco-editor').first(), 'editor surface from shell navigation')
   await expectVisible(page.getByPlaceholder('输入消息，按 / 调用技能...'), 'chat panel from shell navigation')
@@ -214,8 +217,8 @@ async function verifyChapterWorkflow(page) {
   await page.getByTitle('章节').click()
   await ensureChapterBlockExpanded(page)
 
-  await expectVisible(page.getByRole('button', { name: /雨夜线索/ }), 'first chapter in side panel')
-  await page.getByRole('button', { name: /雨夜线索/ }).click()
+  await expectVisible(chapterButton(page, '雨夜线索'), 'first chapter in side panel')
+  await chapterButton(page, '雨夜线索').click()
   await expectVisible(page.getByText('第1章 雨夜线索').first(), 'chapter tab title')
   await waitForBridgeCallArg(page, 'GetContent', 1, 'chapters/1.md')
 
@@ -234,7 +237,7 @@ async function verifyEditorSaveWorkflow(browser, url, consoleErrors, pageErrors)
 
   await page.getByTitle('章节').click()
   await ensureChapterBlockExpanded(page)
-  await page.locator('aside').getByRole('button', { name: /雨夜线索/ }).click()
+  await chapterButton(page, '雨夜线索').click()
   await expectVisible(page.getByText('第1章 雨夜线索').first(), 'editable chapter tab')
   await expectVisible(page.locator('.monaco-editor').first(), 'monaco editor render')
   await expectVisible(page.getByText('已保存'), 'initial saved status')
@@ -254,7 +257,7 @@ async function verifyEditorSaveWorkflow(browser, url, consoleErrors, pageErrors)
   await ensureChapterBlockExpanded(page)
   await assertBridgeCallCount(page, 'SaveContent', saveCountAfterSuccess)
 
-  await page.locator('aside').getByRole('button', { name: /旧城门/ }).click()
+  await chapterButton(page, '旧城门').click()
   await expectVisible(page.getByText('第2章 旧城门').first(), 'second chapter tab')
   await page.evaluate(() => { window.__appMockState.failNextSaveContent = true })
   await replaceEditorText(page, '旧城门下，保存失败片段仍留在编辑器。')
@@ -271,8 +274,78 @@ async function verifyEditorSaveWorkflow(browser, url, consoleErrors, pageErrors)
   await page.close()
 }
 
+async function verifyNovelChapterWorkflow(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(browser, consoleErrors, pageErrors, { initialized: true })
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'novel workflow workspace')
+
+  await clickActivity(page, '书架')
+  await page.getByRole('button', { name: '新建作品' }).last().click()
+  await page.getByPlaceholder('输入书名').fill('回归新书')
+  await page.getByPlaceholder('如：玄幻、科幻、都市...').fill('科幻')
+  await page.getByPlaceholder('简单介绍一下这部作品（可选）').fill('覆盖小说创建与选择流程')
+  await page.locator('.fixed').getByRole('button', { name: '保存' }).click()
+  await waitForBridgeCall(page, 'CreateNovel')
+  await expectVisible(page.getByText('回归新书').first(), 'created novel visible')
+  await expectVisible(page.getByText('章节 (0)'), 'created novel empty chapter count')
+  await expectVisible(page.getByText('暂无章节'), 'created novel empty chapter state')
+  await assertActiveNovelId(page, 43)
+
+  await clickActivity(page, '书架')
+  await page.locator('aside').getByRole('button', { name: /全局回归小说/ }).click()
+  await waitForBridgeCallArg(page, 'SetActiveNovel', 0, { novel_id: 42 })
+  await expectVisible(page.getByText('章节 (2)'), 'original novel chapter count restored')
+  await assertActiveNovelId(page, 42)
+
+  await clickActivity(page, '书架')
+  await page.getByRole('button', { name: '编辑作品 全局回归小说' }).click({ force: true })
+  await page.getByPlaceholder('输入书名').fill('全局回归小说-修订')
+  await page.getByPlaceholder('如：玄幻、科幻、都市...').fill('悬疑')
+  await page.getByPlaceholder('简单介绍一下这部作品（可选）').fill('已通过回归流程编辑作品')
+  await page.locator('.fixed').getByRole('button', { name: '保存' }).click()
+  await waitForBridgeCall(page, 'UpdateNovel')
+  await expectVisible(page.getByText('全局回归小说-修订').first(), 'updated novel visible')
+
+  await clickActivity(page, '章节')
+  await expectVisible(page.getByText('章节 (2)'), 'updated novel chapter count')
+  await ensureChapterBlockExpanded(page)
+  await chapterButton(page, '雨夜线索').click()
+  await expectVisible(page.getByText('第1章 雨夜线索').first(), 'first chapter tab before second tab')
+  await chapterButton(page, '旧城门').click()
+  await expectVisible(page.getByText('第2章 旧城门').first(), 'second chapter tab')
+  await expectVisible(page.getByText('第1章 雨夜线索').first(), 'first chapter tab preserved')
+  await page.getByText('第1章 雨夜线索').first().click()
+  await assertActiveTabTitle(page, '第1章 雨夜线索')
+  await assertSelectedChapterPath(page, 'chapters/1.md')
+
+  await page.getByRole('button', { name: '新建章节' }).click()
+  await page.getByPlaceholder('章节标题').fill('新章验收')
+  await page.getByRole('button', { name: '添加' }).click()
+  await waitForBridgeCall(page, 'CreateChapter')
+  await expectVisible(page.getByText('章节 (3)'), 'chapter count after create')
+  await ensureChapterBlockExpanded(page)
+  await expectVisible(chapterButton(page, '新章验收'), 'created chapter visible')
+
+  await page.getByRole('button', { name: '编辑章节 新章验收' }).click({ force: true })
+  await page.locator('aside input[value="新章验收"]').fill('新章验收-改名')
+  await page.keyboard.press('Enter')
+  await waitForBridgeCall(page, 'UpdateChapterTitle')
+  await expectVisible(chapterButton(page, '新章验收-改名'), 'renamed chapter visible')
+
+  await chapterButton(page, '新章验收-改名').click()
+  await expectVisible(page.getByText('第3章 新章验收-改名').first(), 'renamed chapter tab')
+  await waitForBridgeCallArg(page, 'GetContent', 1, 'chapters/3.md')
+  await assertSelectedChapterPath(page, 'chapters/3.md')
+  await assertChapterTitle(page, 42, 3, '新章验收-改名')
+
+  await assertBridgeCallCount(page, 'DeleteNovel', 0)
+  await assertBridgeCallCount(page, 'SaveCover', 0)
+  await assertBridgeCallCount(page, 'ExportNovel', 0)
+  await page.close()
+}
+
 async function ensureChapterBlockExpanded(page) {
-  const firstChapter = page.locator('aside').getByRole('button', { name: /雨夜线索/ })
+  const firstChapter = chapterButton(page, '雨夜线索')
   if (await firstChapter.isVisible()) return
 
   const chapterBlock = page.getByRole('button', { name: /第 1 - 2 章/ })
@@ -280,6 +353,14 @@ async function ensureChapterBlockExpanded(page) {
     await chapterBlock.click()
   }
   await expectVisible(firstChapter, 'expanded first chapter')
+}
+
+function chapterButton(page, title) {
+  return page.locator('aside').getByRole('button', { name: new RegExp(`第\\d+章\\s+${escapeRegExp(title)}`) })
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 async function verifySearchWorkflow(page) {
@@ -303,7 +384,7 @@ async function verifySearchWorkflow(page) {
   await expectVisible(page.getByText('林岚在').first(), 'content result preview')
   await expectHidden(page.getByText('D:\\books\\rain-reference.md'), 'reference source path in global search')
 
-  await page.locator('aside').getByRole('button', { name: /雨夜线索/ }).click()
+  await page.locator('aside').getByRole('button', { name: /^雨夜线索/ }).click()
   await expectVisible(page.getByText('第1章 雨夜线索').first(), 'search opened chapter')
 }
 
@@ -533,7 +614,7 @@ async function waitForBridgeCallArg(page, method, argIndex, expectedValue) {
   await page.waitForFunction(
     ({ method, argIndex, expectedValue }) => {
       return window.__appMockState.calls.some((call) =>
-        call.method === method && call.args[argIndex] === expectedValue)
+        call.method === method && JSON.stringify(call.args[argIndex]) === JSON.stringify(expectedValue))
     },
     { method, argIndex, expectedValue },
     { timeout: 12_000 },
@@ -546,6 +627,38 @@ async function waitForBridgeCall(page, method) {
     method,
     { timeout: 12_000 },
   )
+}
+
+async function assertActiveNovelId(page, expectedNovelId) {
+  const actual = await page.evaluate(() => window.__appMockState.activeNovelId)
+  assert.equal(actual, expectedNovelId)
+}
+
+async function assertSelectedChapterPath(page, expectedPath) {
+  const activeClasses = await page.locator('aside').getByRole('button', { name: /第\d+章/ }).evaluateAll((buttons) =>
+    buttons
+      .map((button) => ({ text: button.textContent ?? '', className: button.getAttribute('class') ?? '' }))
+      .filter((button) => button.className.includes('bg-primary/10')),
+  )
+  assert(activeClasses.some((button) => button.text.includes(expectedPath.endsWith('3.md') ? '新章验收-改名' : expectedPath.endsWith('2.md') ? '旧城门' : '雨夜线索')), `Expected selected chapter for ${expectedPath}.`)
+}
+
+async function assertActiveTabTitle(page, expectedTitle) {
+  const activeTabs = await page.locator('main').locator('div').evaluateAll((nodes) =>
+    nodes
+      .map((node) => ({ text: node.textContent ?? '', className: node.getAttribute('class') ?? '' }))
+      .filter((node) => node.className.includes('border-t-blue-500')),
+  )
+  assert(activeTabs.some((tab) => tab.text.includes(expectedTitle)), `Expected active tab ${expectedTitle}.`)
+}
+
+async function assertChapterTitle(page, novelId, chapterNumber, expectedTitle) {
+  const actual = await page.evaluate(({ novelId, chapterNumber }) => {
+    return window.__appMockState.chaptersByNovelId[String(novelId)]
+      ?.find((chapter) => chapter.chapter_number === chapterNumber)
+      ?.title ?? ''
+  }, { novelId, chapterNumber })
+  assert.equal(actual, expectedTitle)
 }
 
 function startVite(port) {
@@ -668,8 +781,35 @@ function installConfigurableAppMockBridge(options = {}) {
     created_at: now,
     updated_at: now,
   }
+  const defaultChapters = [
+    {
+      id: 1,
+      novel_id: 42,
+      chapter_number: 1,
+      title: '雨夜线索',
+      summary: '林岚在雨夜发现桌面痕迹。',
+      word_count: 1200,
+      file_path: 'chapters/1.md',
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      id: 2,
+      novel_id: 42,
+      chapter_number: 2,
+      title: '旧城门',
+      summary: '暗号被雨水冲淡。',
+      word_count: 980,
+      file_path: 'chapters/2.md',
+      created_at: now,
+      updated_at: now,
+    },
+  ]
   const state = {
     calls: [],
+    activeNovelId: options.settings?.last_novel_id ?? defaultSettings.last_novel_id,
+    nextNovelId: 43,
+    nextChapterId: 3,
     nextSessionId: 1,
     nextTurnId: 101,
     searchFailureRecovered: false,
@@ -685,6 +825,7 @@ function installConfigurableAppMockBridge(options = {}) {
     },
     initialized: options.initialized ?? true,
     novels: options.novels ?? [defaultNovel],
+    chaptersByNovelId: options.chaptersByNovelId ?? { 42: defaultChapters },
     settings: options.settings ?? defaultSettings,
   }
 
@@ -759,6 +900,7 @@ function installConfigurableAppMockBridge(options = {}) {
         state.initialized = true
         state.novels = options.afterInitializeNovels ?? state.novels
         state.settings = options.afterInitializeSettings ?? state.settings
+        state.activeNovelId = state.settings.last_novel_id
         return null
       case 'GetSettings': return state.settings
       case 'GetPlatform': return { os: 'win32', defaultPath: options.platformDefaultPath ?? 'D:\\NovelistData' }
@@ -766,7 +908,6 @@ function installConfigurableAppMockBridge(options = {}) {
       case 'runtime.window.minimize':
       case 'runtime.window.toggleMaximize':
       case 'runtime.app.quit':
-      case 'SetActiveNovel':
       case 'SetLastSession':
       case 'SetSelectedModel':
       case 'SetReasoningEffort':
@@ -785,9 +926,19 @@ function installConfigurableAppMockBridge(options = {}) {
         state.savedEmbeddingConfig = args[0]
         return null
       case 'GetAppConfig': return { data_dir: options.platformDefaultPath ?? 'D:\\NovelistData' }
+      case 'SetActiveNovel':
+        state.activeNovelId = args[0]?.novel_id ?? state.activeNovelId
+        state.settings.last_novel_id = state.activeNovelId
+        return null
       case 'GetNovels': return state.novels
+      case 'CreateNovel': return createNovel(args[0])
+      case 'UpdateNovel': return updateNovel(args[0], args[1])
       case 'GetCover': return null
-      case 'GetChapters': return chapters()
+      case 'GetChapters': return chapters(args[0])
+      case 'CreateChapter': return createChapter(args[0])
+      case 'UpdateChapterTitle':
+        updateChapterTitle(args[0], args[1], args[2])
+        return null
       case 'GetContent': return content(args[1])
       case 'SaveContent': return saveContent(args[0])
       case 'GetModels': return [availableModel()]
@@ -824,31 +975,66 @@ function installConfigurableAppMockBridge(options = {}) {
     }
   }
 
-  function chapters() {
-    return [
-      {
-        id: 1,
-        novel_id: 42,
-        chapter_number: 1,
-        title: '雨夜线索',
-        summary: '林岚在雨夜发现桌面痕迹。',
-        word_count: 1200,
-        file_path: 'chapters/1.md',
-        created_at: now,
-        updated_at: now,
-      },
-      {
-        id: 2,
-        novel_id: 42,
-        chapter_number: 2,
-        title: '旧城门',
-        summary: '暗号被雨水冲淡。',
-        word_count: 980,
-        file_path: 'chapters/2.md',
-        created_at: now,
-        updated_at: now,
-      },
-    ]
+  function createNovel(input) {
+    const novel = {
+      id: state.nextNovelId++,
+      title: String(input?.title ?? ''),
+      genre: String(input?.genre ?? ''),
+      description: String(input?.description ?? ''),
+      created_at: now,
+      updated_at: now,
+    }
+    state.novels = [...state.novels, novel]
+    state.chaptersByNovelId[novel.id] = []
+    return novel
+  }
+
+  function updateNovel(novelId, input) {
+    const existing = state.novels.find((novel) => novel.id === novelId)
+    if (!existing) throw new Error(`Novel ${novelId} not found.`)
+    const updated = {
+      ...existing,
+      title: String(input?.title ?? existing.title),
+      genre: String(input?.genre ?? existing.genre ?? ''),
+      description: String(input?.description ?? existing.description ?? ''),
+      updated_at: now,
+    }
+    state.novels = state.novels.map((novel) => novel.id === novelId ? updated : novel)
+    return updated
+  }
+
+  function chapters(novelId = state.activeNovelId) {
+    return [...(state.chaptersByNovelId[String(novelId)] ?? [])]
+  }
+
+  function createChapter(input) {
+    const novelId = input?.novel_id ?? state.activeNovelId
+    const list = state.chaptersByNovelId[String(novelId)] ?? []
+    const chapterNumber = list.reduce((max, chapter) => Math.max(max, chapter.chapter_number), 0) + 1
+    const chapter = {
+      id: state.nextChapterId++,
+      novel_id: novelId,
+      chapter_number: chapterNumber,
+      title: String(input?.title ?? ''),
+      summary: '',
+      word_count: 0,
+      file_path: `chapters/${chapterNumber}.md`,
+      created_at: now,
+      updated_at: now,
+    }
+    state.chaptersByNovelId[String(novelId)] = [...list, chapter]
+    state.contentByPath[chapter.file_path] = ''
+    return chapter
+  }
+
+  function updateChapterTitle(novelId, chapterNumber, title) {
+    const key = String(novelId)
+    const list = state.chaptersByNovelId[key] ?? []
+    state.chaptersByNovelId[key] = list.map((chapter) =>
+      chapter.chapter_number === chapterNumber
+        ? { ...chapter, title: String(title ?? chapter.title), updated_at: now }
+        : chapter,
+    )
   }
 
   function content(filePath) {

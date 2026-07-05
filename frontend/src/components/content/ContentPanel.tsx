@@ -58,10 +58,11 @@ interface Props {
   novelId: number
   onContentChange?: (content: string) => void
   onDirtyChange?: (isDirty: boolean) => void
+  onActiveFileChange?: (target: { path: string; title: string } | null) => void
 }
 
 const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel(
-  { novelId, onContentChange, onDirtyChange }, ref
+  { novelId, onContentChange, onDirtyChange, onActiveFileChange }, ref
 ) {
   const app = useApp()
   const {
@@ -99,6 +100,14 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   useEffect(() => {
     onDirtyChange?.(activeTab?.isDirty ?? false)
   }, [activeTab?.isDirty, onDirtyChange])
+
+  useEffect(() => {
+    if (activeTab?.type === 'file') {
+      onActiveFileChange?.({ path: activeTab.path, title: activeTab.title })
+    } else {
+      onActiveFileChange?.(null)
+    }
+  }, [activeTab?.path, activeTab?.title, activeTab?.type, onActiveFileChange])
 
   // 从 localStorage 恢复 tab 后，自动加载文件内容
   const loadedRef = useRef<Set<string>>(new Set())

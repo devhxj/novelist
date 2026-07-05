@@ -126,6 +126,7 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
         <div className="flex items-center gap-0.5">
           <button
             onClick={onExportNovel}
+            aria-label="导出作品"
             className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             title="导出"
           >
@@ -133,6 +134,7 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
           </button>
           <button
             onClick={() => setShowCreateChapter(true)}
+            aria-label="新建章节"
             className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
           >
             <Plus className="w-4 h-4" />
@@ -238,6 +240,7 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
                         {editingId !== ch.id && (
                           <button
                             onClick={e => { e.stopPropagation(); startEdit(ch) }}
+                            aria-label={`编辑章节 ${ch.title}`}
                             className="shrink-0 w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-muted text-muted-foreground hover:text-foreground transition-all mr-1"
                           >
                             <Pencil className="w-3 h-3" />

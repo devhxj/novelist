@@ -378,7 +378,13 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
             onExportNovel={(n) => setExportNovelId(n.id)}
           />
         ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && activePanel !== 'reference' && activePanel !== 'profile' && (
-          <ContentPanel ref={contentRef} novelId={activeNovelId} onContentChange={setActiveContent} onDirtyChange={setIsDirty} />
+          <ContentPanel
+            ref={contentRef}
+            novelId={activeNovelId}
+            onContentChange={setActiveContent}
+            onDirtyChange={setIsDirty}
+            onActiveFileChange={setTabTarget}
+          />
         )}
 
         {activePanel === 'characters' ? (

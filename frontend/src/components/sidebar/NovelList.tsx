@@ -29,6 +29,7 @@ export default function NovelList({
         </span>
         <button
           onClick={() => setShowCreate(true)}
+          aria-label="新建作品"
           className="w-6 h-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
         >
           <Plus className="w-4 h-4" />

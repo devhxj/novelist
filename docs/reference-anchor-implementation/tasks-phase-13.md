@@ -14,7 +14,7 @@ This phase is intentionally broader than reference anchors. The reference-anchor
 - [x] The app-wide suite starts the Vite app in a real browser and injects a deterministic mocked Novelist bridge before app code calls `window.external`.
 - [x] Workspace bootstrap is covered: empty state or init screen, project/novel load, bridge unavailable state, app error state, and stable recovery messaging.
 - [x] Shell navigation is covered across primary activities: bookshelf/workspace, editor, chat, search, reference, characters, locations, timeline/story arcs, preferences/readers, profile, and settings/help affordances where available.
-- [ ] Novel and chapter workflows are covered with fixture data: create/edit/select novel, list chapters, open chapter tabs, switch tabs, preserve active selection, and show expected side-panel counts.
+- [x] Novel and chapter workflows are covered with fixture data: create/edit/select novel, list chapters, open chapter tabs, switch tabs, preserve active selection, and show expected side-panel counts.
 - [x] Content editing is covered: editor render, text edits, save through the bridge, dirty-state behavior, save failure display, and no accidental saves when switching unrelated panels.
 - [x] Search/RAG UI is covered: global search query, result rendering, empty state, failure state, and result preview without leaking raw reference-source internals into the global search path unless a later design explicitly enables it.
 - [x] Chat and agent UI is covered at presentation level: send prompt, stream assistant text/tool-call states from mocked events, render tool cards/web-search cards, handle cancellation/failure, and keep generated content out of chapter files unless the user explicitly saves through an editor flow.
@@ -50,6 +50,7 @@ This phase is intentionally broader than reference anchors. The reference-anchor
 - [x] Bootstrap coverage now exercises the first-run init screen, post-init empty bookshelf, initialized empty workspace, bridge-unavailable recovery screen, and startup-check failure retry path.
 - [x] The first app-wide suite covers workspace load, shell/book/chapter navigation, chapter open through `GetContent`, global search result navigation, chat prompt plus streamed assistant/tool/web-search presentation, settings panes, metadata panel fixture rendering, skill list rendering, and the reference-anchor entry point.
 - [x] Shell navigation coverage now explicitly visits bookshelf/workspace, chapter/editor/chat surfaces, search, reference, characters, locations, story arcs, timeline, preferences, reader perspective, skills, profile, help, and settings using role/name selectors where the UI exposes accessible controls.
+- [x] Novel/chapter workflow coverage now creates and selects a novel, edits novel metadata, restores the original novel's chapter list, opens multiple chapter tabs, switches tabs while preserving active side-panel selection, creates a chapter, renames it, and verifies the mocked bridge state.
 - [x] The app-wide suite now covers search prompt, empty, failure, retry, content, character, and RAG result states, and asserts global search does not expose raw reference-source paths.
 - [x] Chat presentation coverage now includes explicit stop/cancel behavior via `CancelChat` and mocked agent failure rendering, while generated assistant text still never writes chapter files.
 - [x] Monaco now loads from bundled local assets instead of the default CDN path, so desktop/CI smoke tests can prove the editor renders without network access.
@@ -59,7 +60,7 @@ This phase is intentionally broader than reference anchors. The reference-anchor
 - [x] `npm run verify` runs the frontend build, lint, deep reference-anchor workflow, and app-wide workflow without requiring the Photino desktop shell.
 - [x] The app-wide console-error guard caught and fixed an invalid nested-button structure in the location side panel; the mocked chat usage payload now matches the `ContextRing` contract so the smoke does not mask NaN rendering warnings.
 
-This first slice does not complete Phase 13. Create/edit/delete workflows, import/export/file-picker paths, and responsive viewport coverage remain pending.
+This first slice does not complete Phase 13. Metadata create/edit/delete workflows, import/export/file-picker paths, and responsive viewport coverage remain pending.
 
 **Files likely touched:**
 
