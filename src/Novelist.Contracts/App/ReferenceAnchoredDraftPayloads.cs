@@ -124,7 +124,11 @@ public sealed record ReferenceChapterBlueprintPayload(
     [property: JsonPropertyName("beats")] IReadOnlyList<ReferenceChapterBlueprintBeatPayload> Beats,
     [property: JsonPropertyName("latest_review")] ReferenceChapterBlueprintReviewPayload? LatestReview,
     [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
-    [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt);
+    [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt)
+{
+    [JsonPropertyName("build_version")]
+    public string BuildVersion { get; init; } = string.Empty;
+}
 
 public sealed record ReferenceChapterBlueprintBeatPayload(
     [property: JsonPropertyName("beat_id")] string BeatId,

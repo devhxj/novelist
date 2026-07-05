@@ -632,6 +632,14 @@ Normalization rules before persistence:
 - compute `analysis_contract_hash` from normalized beat and analysis fields;
 - persist generator version and review version so old blueprints can be marked stale after rule changes.
 
+Reproducibility policy:
+
+- Persist and expose the generator `build_version` on each blueprint.
+- Persist and expose `context_hash`, `source_plan_hash`, and `analysis_contract_hash` as the stable reproduction anchors for the inputs and normalized analysis contract.
+- Persist `review_version` on review and approval rows, not as mutable blueprint prompt metadata.
+- Do not persist prompt text, prompt templates, or schema snapshots on blueprint rows. Prompt/schema changes should move `build_version` or reviewer version forward when they affect generated contracts, avoiding database churn from routine prompt wording edits.
+- Future LLM-assisted generation can add a separate opt-in run log if needed for debugging, but that log must not become a required approval or draft-generation gate.
+
 Recommended staged implementation:
 
 1. **Deterministic scaffold:** build a minimal but fully structured IR from existing chapter plan text, previous state, and anchor filters. This proves storage, review, invalidation, and bridge behavior without depending on model quality.
@@ -782,6 +790,7 @@ ReferenceChapterBlueprintPayload
 - context_hash
 - analysis_contract_hash
 - blueprint_version
+- build_version
 - parent_blueprint_id
 - primary_anchor_id
 - chapter_function

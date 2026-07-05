@@ -1065,7 +1065,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             now);
         return payload with
         {
-            AnalysisContractHash = ReferenceChapterBlueprintNormalizer.ComputeAnalysisContractHash(payload)
+            AnalysisContractHash = ReferenceChapterBlueprintNormalizer.ComputeAnalysisContractHash(payload),
+            BuildVersion = BuildVersion
         };
     }
 
@@ -1238,7 +1239,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                    primary_anchor_id, chapter_function, logic_analysis_json, emotion_analysis_json,
                    narration_analysis_json, character_analysis_json, reference_analysis_json, transition_plan_json, execution_contract_json,
                    previous_state, final_state, final_hook, global_pov, global_narrative_distance,
-                   known_facts_json, forbidden_facts_json, risk_flags_json, created_at, updated_at
+                   known_facts_json, forbidden_facts_json, risk_flags_json, build_version, created_at, updated_at
             FROM reference_chapter_blueprints
             WHERE novel_id = $novel_id AND blueprint_id = $blueprint_id;
             """;
@@ -1284,8 +1285,9 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             ReadJson<IReadOnlyList<string>>(reader.GetString(25)),
             ReadJson<IReadOnlyList<string>>(reader.GetString(26)),
             ReadJson<IReadOnlyList<string>>(reader.GetString(27)),
-            ParseTimestamp(reader.GetString(28)),
-            ParseTimestamp(reader.GetString(29)));
+            reader.GetString(28),
+            ParseTimestamp(reader.GetString(29)),
+            ParseTimestamp(reader.GetString(30)));
 
         var beats = await ReadBeatsAsync(connection, blueprintId, cancellationToken);
         var latestReview = await ReadLatestReviewAsync(connection, blueprintId, row.AnalysisContractHash, cancellationToken);
@@ -1321,7 +1323,10 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             beats,
             latestReview,
             row.CreatedAt,
-            row.UpdatedAt);
+            row.UpdatedAt)
+        {
+            BuildVersion = row.BuildVersion
+        };
         return await ApplyBlueprintStalenessAsync(connection, blueprint, cancellationToken);
     }
 
@@ -3041,6 +3046,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         IReadOnlyList<string> KnownFacts,
         IReadOnlyList<string> ForbiddenFacts,
         IReadOnlyList<string> RiskFlags,
+        string BuildVersion,
         DateTimeOffset CreatedAt,
         DateTimeOffset UpdatedAt);
 

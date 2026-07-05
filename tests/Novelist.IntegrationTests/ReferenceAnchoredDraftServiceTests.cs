@@ -159,6 +159,46 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GeneratedBlueprintExposesStableGeneratorVersionWithoutPromptSnapshots()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("蓝图生成器版本测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "主角在门口停住，决定确认线索。"),
+            CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning);
+
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                ChapterNumber: 25,
+                Title: "第二十五章蓝图",
+                ChapterGoal: "确认线索并压住情绪",
+                AnchorIds: [],
+                KnownFacts: ["主角已经到达门口"],
+                ForbiddenFacts: ["凶手身份"]),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId),
+            CancellationToken.None);
+        var stored = await ReadBlueprintReproducibilityRowAsync(options, blueprint.BlueprintId);
+        var columns = await ReadTableColumnsAsync(options, "reference_chapter_blueprints");
+
+        Assert.Equal("reference-blueprint-v1", blueprint.BuildVersion);
+        Assert.Equal("reference-blueprint-v1", stored.BuildVersion);
+        Assert.Equal(blueprint.ContextHash, stored.ContextHash);
+        Assert.Equal(blueprint.SourcePlanHash, stored.SourcePlanHash);
+        Assert.Equal(blueprint.AnalysisContractHash, stored.AnalysisContractHash);
+        Assert.Equal(ReferenceChapterBlueprintReviewer.CurrentReviewVersion, review.ReviewVersion);
+        Assert.DoesNotContain(columns, name => name.Contains("prompt", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(columns, name => name.Contains("schema_snapshot", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task GenerateChapterBlueprintDoesNotPersistProseLikePlanAsBeatDuty()
     {
         var options = CreateOptions();
@@ -2780,6 +2820,63 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         int ReviewVersion,
         string ApproverOrigin,
         DateTimeOffset ApprovedAt);
+
+    private static async ValueTask<BlueprintReproducibilityRow> ReadBlueprintReproducibilityRowAsync(
+        AppInitializationOptions options,
+        long blueprintId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT build_version, context_hash, source_plan_hash, analysis_contract_hash
+            FROM reference_chapter_blueprints
+            WHERE blueprint_id = $blueprint_id;
+            """;
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        return new BlueprintReproducibilityRow(
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.GetString(3));
+    }
+
+    private sealed record BlueprintReproducibilityRow(
+        string BuildVersion,
+        string ContextHash,
+        string SourcePlanHash,
+        string AnalysisContractHash);
+
+    private static async ValueTask<IReadOnlyList<string>> ReadTableColumnsAsync(
+        AppInitializationOptions options,
+        string tableName)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM pragma_table_info($table_name) ORDER BY cid ASC;";
+        command.Parameters.AddWithValue("$table_name", tableName);
+        var columns = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            columns.Add(reader.GetString(0));
+        }
+
+        return columns;
+    }
 
     private static async ValueTask SetMaterialLinkAnalysisHashAsync(
         AppInitializationOptions options,

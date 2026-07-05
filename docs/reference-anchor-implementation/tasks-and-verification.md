@@ -406,7 +406,7 @@ Recommended implementation slices:
 - [ ] Optional LLM-assisted material tagging/adaptation has a feature-flag/design decision and does not weaken deterministic review, binding, rewrite-level, or audit gates.
 - [ ] Full-chapter candidate assembly is either explicitly deferred or implemented only after every beat candidate can prove passing audit and provenance.
 - [x] Source preview policy is decided for unknown-license anchors: material search/library previews return truncated exact text by default, while stored materials, provenance hashes, adaptation, binding, and audit still use the complete imported text.
-- [ ] Generator reproducibility policy is decided: store generator version/context hash only, or persist prompt/schema metadata without creating prompt-churn in the database.
+- [x] Generator reproducibility policy is decided: blueprint records expose `build_version` plus `context_hash`, `source_plan_hash`, and `analysis_contract_hash`; review/approval records carry `review_version`; prompt/schema snapshots are not persisted on blueprint rows to avoid prompt-churn.
 - [ ] Developer workflow expectation is finalized: `make dev` dependency on frontend build versus explicit Vite/build steps.
 - [ ] `overview.md`, `schema-and-integration.md`, and `decisions.md` no longer describe completed Phase 0-9 items as incomplete.
 
@@ -417,6 +417,11 @@ Recommended implementation slices:
 - [ ] `cd frontend && npm run build`
 - [ ] `cd frontend && npm run lint`
 - [ ] Manual desktop smoke test of the full Phase 10 workflow in Photino.
+
+Targeted Phase 10 checks completed:
+
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter GeneratedBlueprintExposesStableGeneratorVersionWithoutPromptSnapshots -v minimal`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter ReferenceChapterBlueprintPayloadsUseStableSnakeCaseJsonNames -v minimal`
 
 **Files likely touched:**
 

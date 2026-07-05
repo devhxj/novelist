@@ -278,7 +278,10 @@ public sealed class ReferenceAnchorContractTests
             Beats: [beat],
             LatestReview: review,
             CreatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
-            UpdatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"));
+            UpdatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"))
+        {
+            BuildVersion = "reference-blueprint-v1"
+        };
 
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(payload, BridgeJson.SerializerOptions));
         var root = json.RootElement;
@@ -289,6 +292,7 @@ public sealed class ReferenceAnchorContractTests
         Assert.Equal("plan-hash", root.GetProperty("source_plan_hash").GetString());
         Assert.Equal("analysis-hash", root.GetProperty("analysis_contract_hash").GetString());
         Assert.Equal(1, root.GetProperty("blueprint_version").GetInt32());
+        Assert.Equal("reference-blueprint-v1", root.GetProperty("build_version").GetString());
         Assert.Equal("logic", root.GetProperty("logic_analysis").GetProperty("track").GetString());
         Assert.Equal("emotion", root.GetProperty("emotion_analysis").GetProperty("track").GetString());
         Assert.Equal("narration", root.GetProperty("narration_analysis").GetProperty("track").GetString());

@@ -623,6 +623,7 @@ export namespace reference {
     context_hash: string
     analysis_contract_hash: string
     blueprint_version: number
+    build_version: string
     parent_blueprint_id: number
     primary_anchor_id: number
     chapter_function: string
