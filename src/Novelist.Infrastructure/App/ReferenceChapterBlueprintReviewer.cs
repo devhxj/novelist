@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 29;
+    public const int CurrentReviewVersion = 30;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -242,6 +242,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "character_state_delta",
                     $"Beat {beat.BeatIndex} has no role-state delta between before and after states.",
                     "Change character_states_after to show the pressure, leverage, knowledge, relationship, or role-state delta created by this beat.");
+            }
+
+            foreach (var unsupportedCharacterStateFact in FindUnsupportedCharacterStateFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    characterStateErrors,
+                    "character_state",
+                    beat,
+                    "character_states",
+                    $"Beat {beat.BeatIndex} contains unsupported character state fact: {unsupportedCharacterStateFact}",
+                    "Move the character state fact into approved known facts or scene facts before using it as role-state context.");
             }
 
             foreach (var unsupportedCharacterGoalFact in FindUnsupportedCharacterGoalFacts(blueprint, beat))
@@ -813,6 +824,24 @@ internal static class ReferenceChapterBlueprintReviewer
                     "表现出", "有反应", "很痛苦", "很难过", "很愤怒", "很开心",
                     "感觉不好", "说不清"
                 ]);
+    }
+
+    private static IEnumerable<string> FindUnsupportedCharacterStateFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var approvedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return beat.CharacterStatesBefore
+            .Concat(beat.CharacterStatesAfter)
+            .SelectMany(ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases)
+            .Where(fact => !IsAllowedFact(fact, approvedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static IEnumerable<string> FindUnsupportedCharacterGoalFacts(

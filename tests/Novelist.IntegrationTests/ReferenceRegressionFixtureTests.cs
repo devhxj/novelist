@@ -133,6 +133,11 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 CharacterMisbeliefs = []
             },
+            "unsupported_character_state_fact" => beat with
+            {
+                CharacterStatesBefore = ["controlled"],
+                CharacterStatesAfter = ["密室钥匙"]
+            },
             "unsupported_character_goal_fact" => beat with
             {
                 CharacterGoals = ["密室钥匙"]

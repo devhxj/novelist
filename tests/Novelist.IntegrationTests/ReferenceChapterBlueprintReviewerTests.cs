@@ -571,6 +571,25 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsUnsupportedCharacterStateFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            CharacterStatesBefore = ["controlled"],
+            CharacterStatesAfter = ["密室钥匙"]
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.CharacterStateErrors, item => item.Contains("unsupported character state fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "character_state" &&
+                defect.FieldPath.Contains("character_states", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsUnsupportedCharacterGoalFact()
     {
         var blueprint = Blueprint(beat => beat with
