@@ -192,6 +192,40 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsUnsupportedSuppressedReactionFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            SuppressedReaction = "密室钥匙"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.EmotionErrors, item => item.Contains("unsupported suppressed reaction fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "emotion" &&
+                defect.FieldPath.Contains("suppressed_reaction", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewAllowsSuppressedReactionFactWhenKnownFactApprovesIt()
+    {
+        var blueprint = Blueprint(
+            beat => beat with
+            {
+                SuppressedReaction = "密室钥匙"
+            },
+            knownFacts: ["雨声压低了整条街的呼吸", "密室钥匙"]);
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+        Assert.DoesNotContain(review.EmotionErrors, item => item.Contains("suppressed reaction fact", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsForbiddenFactInFinalHook()
     {
         var blueprint = Blueprint(

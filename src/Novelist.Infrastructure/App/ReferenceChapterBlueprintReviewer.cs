@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 22;
+    public const int CurrentReviewVersion = 23;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -190,6 +190,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "emotion_trigger",
                     $"Beat {beat.BeatIndex} contains unsupported emotion trigger fact: {unsupportedEmotionTriggerFact}",
                     "Set up the emotion_trigger fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            foreach (var unsupportedSuppressedReactionFact in FindUnsupportedSuppressedReactionFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    emotionErrors,
+                    "emotion",
+                    beat,
+                    "suppressed_reaction",
+                    $"Beat {beat.BeatIndex} contains unsupported suppressed reaction fact: {unsupportedSuppressedReactionFact}",
+                    "Set up the suppressed_reaction fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
             }
 
             if (beat.CharacterGoals.Count == 0 || beat.CharacterStatesBefore.Count == 0 || beat.CharacterStatesAfter.Count == 0)
@@ -902,6 +913,24 @@ internal static class ReferenceChapterBlueprintReviewer
             .ToArray();
 
         return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.EmotionTrigger)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedSuppressedReactionFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.SuppressedReaction)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

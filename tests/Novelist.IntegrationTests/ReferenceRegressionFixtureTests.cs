@@ -94,6 +94,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 EmotionTrigger = "凶手身份"
             },
+            "unsupported_suppressed_reaction_fact" => beat with
+            {
+                SuppressedReaction = "密室钥匙"
+            },
             "hard_transition" => beat with
             {
                 TransitionIn = "来到旧宅",
