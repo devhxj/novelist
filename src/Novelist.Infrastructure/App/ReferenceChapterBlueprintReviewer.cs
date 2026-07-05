@@ -511,6 +511,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     $"Forbidden fact appears in reference query: {forbidden}",
                     "Remove the forbidden fact from beat reference_query before material binding.");
             }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.SourceBackedDetailTarget, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "source_backed_detail_target",
+                    $"Forbidden fact appears in source-backed detail target: {forbidden}",
+                    "Remove the forbidden fact from beat source_backed_detail_target before drafting.");
+            }
         }
 
         foreach (var unsupportedFact in FindUnsupportedFinalHookFacts(blueprint))
