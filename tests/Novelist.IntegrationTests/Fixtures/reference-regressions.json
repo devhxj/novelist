@@ -156,6 +156,16 @@
       "expected_error": "unsupported conflict pressure fact"
     },
     {
+      "name": "unsupported_chapter_function_fact",
+      "mutation": "unsupported_chapter_function_fact",
+      "expected_error": "unsupported chapter function fact"
+    },
+    {
+      "name": "forbidden_chapter_function_fact",
+      "mutation": "forbidden_chapter_function_fact",
+      "expected_error": "forbidden fact appears in chapter function"
+    },
+    {
       "name": "generic_paragraph_intention",
       "mutation": "generic_paragraph_intention",
       "expected_error": "generic paragraph intention"

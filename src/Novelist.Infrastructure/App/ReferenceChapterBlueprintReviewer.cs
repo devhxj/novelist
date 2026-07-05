@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 45;
+    public const int CurrentReviewVersion = 46;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -94,6 +94,17 @@ internal static class ReferenceChapterBlueprintReviewer
                 string.Empty,
                 "Blueprint must contain at least one beat.",
                 "Add at least one reviewable beat before running blueprint review.");
+        }
+
+        foreach (var unsupportedChapterFunctionFact in FindUnsupportedChapterFunctionFacts(blueprint))
+        {
+            AddDefect(
+                logicErrors,
+                "logic",
+                "chapter_function",
+                string.Empty,
+                $"Blueprint contains unsupported chapter function fact: {unsupportedChapterFunctionFact}",
+                "Set up the chapter_function fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
         }
 
         foreach (var beat in blueprint.Beats.OrderBy(item => item.BeatIndex))
@@ -746,6 +757,17 @@ internal static class ReferenceChapterBlueprintReviewer
 
         foreach (var forbidden in blueprint.ForbiddenFacts.Where(item => !string.IsNullOrWhiteSpace(item)))
         {
+            if (ContainsForbidden(blueprint.ChapterFunction, forbidden))
+            {
+                AddDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    "chapter_function",
+                    string.Empty,
+                    $"Forbidden fact appears in chapter function: {forbidden}",
+                    "Remove the forbidden fact from the chapter function or move it out of the forbidden fact set.");
+            }
+
             if (ContainsForbidden(blueprint.FinalHook, forbidden))
             {
                 AddDefect(
@@ -1458,6 +1480,22 @@ internal static class ReferenceChapterBlueprintReviewer
             .ToArray();
 
         return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ParagraphIntention)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedChapterFunctionFacts(ReferenceChapterBlueprintPayload blueprint)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SceneFacts))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.ViewpointAllowedKnowledge))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SlotPlan.Select(slot => slot.Value)))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(blueprint.ChapterFunction)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

@@ -130,6 +130,45 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsUnsupportedChapterFunctionFact()
+    {
+        var blueprint = Blueprint(beat => beat) with
+        {
+            ChapterFunction = "turn pressure around 密室钥匙"
+        };
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.LogicErrors, item => item.Contains("unsupported chapter function fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "logic" &&
+                defect.FieldPath.Contains("chapter_function", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsForbiddenFactInChapterFunction()
+    {
+        var blueprint = Blueprint(
+            beat => beat,
+            forbiddenFacts: ["凶手身份"],
+            knownFacts: ["雨声压低了整条街的呼吸", "凶手身份"]) with
+        {
+            ChapterFunction = "turn pressure around 凶手身份"
+        };
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ForbiddenFactErrors, item => item.Contains("chapter function", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "forbidden_fact" &&
+                defect.FieldPath.Contains("chapter_function", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsMissingCausalityOut()
     {
         var blueprint = Blueprint(beat => beat with
