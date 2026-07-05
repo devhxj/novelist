@@ -188,6 +188,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 ExecutionMode = "正常写，自然展开"
             },
+            "unsupported_execution_mode_fact" => beat with
+            {
+                ExecutionMode = "withhold 密室钥匙 until the turn"
+            },
             "generic_candidate_rejection_rule" => beat with
             {
                 CandidateRejectionRule = "不好的不要，质量差就拒绝"

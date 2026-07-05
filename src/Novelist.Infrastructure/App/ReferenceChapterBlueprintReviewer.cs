@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 37;
+    public const int CurrentReviewVersion = 38;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -419,6 +419,17 @@ internal static class ReferenceChapterBlueprintReviewer
                         "execution_mode",
                         $"Beat {beat.BeatIndex} uses generic execution mode.",
                         "Rewrite execution_mode as a concrete drafting operation, such as dwell, compress, withhold, reveal, braid evidence, or stage interiority.");
+                }
+
+                foreach (var unsupportedExecutionModeFact in FindUnsupportedExecutionModeFacts(blueprint, beat))
+                {
+                    AddBeatDefect(
+                        executionErrors,
+                        "execution",
+                        beat,
+                        "execution_mode",
+                        $"Beat {beat.BeatIndex} contains unsupported execution mode fact: {unsupportedExecutionModeFact}",
+                        "Set up the execution_mode fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
                 }
 
                 if (UsesGenericCandidateRejectionRule(beat.CandidateRejectionRule))
@@ -1310,6 +1321,24 @@ internal static class ReferenceChapterBlueprintReviewer
             .ToArray();
 
         return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ParagraphIntention)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedExecutionModeFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ExecutionMode)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

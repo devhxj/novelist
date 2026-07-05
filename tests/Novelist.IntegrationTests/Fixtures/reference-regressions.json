@@ -136,6 +136,11 @@
       "expected_error": "generic execution mode"
     },
     {
+      "name": "unsupported_execution_mode_fact",
+      "mutation": "unsupported_execution_mode_fact",
+      "expected_error": "unsupported execution mode fact"
+    },
+    {
       "name": "generic_candidate_rejection_rule",
       "mutation": "generic_candidate_rejection_rule",
       "expected_error": "generic candidate rejection rule"

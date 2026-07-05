@@ -822,6 +822,24 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsUnsupportedExecutionModeFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            ExecutionMode = "withhold 密室钥匙 until the turn"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ExecutionErrors, item => item.Contains("unsupported execution mode fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "execution" &&
+                defect.FieldPath.Contains("execution_mode", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsGenericCandidateRejectionRule()
     {
         var blueprint = Blueprint(beat => beat with
