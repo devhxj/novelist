@@ -145,6 +145,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 SourceBackedDetailTarget = "凶手身份"
             },
+            "unsupported_sensory_anchor_target_fact" => beat with
+            {
+                SensoryAnchorTarget = "密室钥匙"
+            },
             "generic_slot_plan" => beat with
             {
                 SlotPlan = [new ReferenceSlotValuePayload("object", "随便替换一个东西")]

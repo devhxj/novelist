@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 14;
+    public const int CurrentReviewVersion = 15;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -378,6 +378,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "source_backed_detail_target",
                     $"Beat {beat.BeatIndex} contains unsupported source-backed detail target fact: {unsupportedSourceDetailTargetFact}",
                     "Set up the source_backed_detail_target fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            foreach (var unsupportedSensoryAnchorTargetFact in FindUnsupportedSensoryAnchorTargetFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    novelisticNarrationErrors,
+                    "novelistic_narration",
+                    beat,
+                    "sensory_anchor_target",
+                    $"Beat {beat.BeatIndex} contains unsupported sensory anchor target fact: {unsupportedSensoryAnchorTargetFact}",
+                    "Set up the sensory_anchor_target fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
             }
 
             if (string.IsNullOrWhiteSpace(beat.ReferenceQuery.Query) || beat.RequiredMaterialTypes.Count == 0)
@@ -796,6 +807,24 @@ internal static class ReferenceChapterBlueprintReviewer
             .ToArray();
 
         return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.SourceBackedDetailTarget)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedSensoryAnchorTargetFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.SensoryAnchorTarget)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

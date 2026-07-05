@@ -86,6 +86,11 @@
       "expected_error": "forbidden fact appears in source-backed detail target"
     },
     {
+      "name": "unsupported_sensory_anchor_target_fact",
+      "mutation": "unsupported_sensory_anchor_target_fact",
+      "expected_error": "unsupported sensory anchor target fact"
+    },
+    {
       "name": "generic_slot_plan",
       "mutation": "generic_slot_plan",
       "expected_error": "generic slot plan"
