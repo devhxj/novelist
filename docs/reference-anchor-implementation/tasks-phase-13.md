@@ -20,7 +20,7 @@ This phase is intentionally broader than reference anchors. The reference-anchor
 - [x] Chat and agent UI is covered at presentation level: send prompt, stream assistant text/tool-call states from mocked events, render tool cards/web-search cards, handle cancellation/failure, and keep generated content out of chapter files unless the user explicitly saves through an editor flow.
 - [ ] Metadata surfaces are covered: character, location, timeline/story-arc, preference, reader, skill, and profile panels render fixture data, empty states, and representative create/edit/delete or inspect actions where those actions exist.
 - [x] Settings are covered: provider/model/embedding configuration panes render, validate required fields, persist safe settings through the bridge, and never require live API keys, local model files, or network access.
-- [ ] Import/export and file-picker affordances are covered with mocked paths and temporary fixtures; tests must not read or write real user projects outside test temp directories.
+- [x] Import/export and file-picker affordances are covered with mocked paths and temporary fixtures; tests must not read or write real user projects outside test temp directories.
 - [x] Reference-anchor coverage is included as a smoke path in the app-wide suite, while deep anchor orchestration, blueprint, material binding, candidate, audit, and screenshot checks remain in `npm run test:reference-anchor`.
 - [x] Visual checks capture stable screenshots for bootstrap states, shell, editor, search, chat, settings, metadata panels, and reference entry point at the default desktop viewport; any smaller responsive viewport is scoped to layout integrity, not full workflow duplication.
 - [ ] Test selectors are stable and intentional: prefer accessible roles/names and add `data-testid` only where accessible selectors would be brittle.
@@ -51,6 +51,7 @@ This phase is intentionally broader than reference anchors. The reference-anchor
 - [x] The first app-wide suite covers workspace load, shell/book/chapter navigation, chapter open through `GetContent`, global search result navigation, chat prompt plus streamed assistant/tool/web-search presentation, settings panes, metadata panel fixture rendering, skill list rendering, and the reference-anchor entry point.
 - [x] Shell navigation coverage now explicitly visits bookshelf/workspace, chapter/editor/chat surfaces, search, reference, characters, locations, story arcs, timeline, preferences, reader perspective, skills, profile, help, and settings using role/name selectors where the UI exposes accessible controls.
 - [x] Novel/chapter workflow coverage now creates and selects a novel, edits novel metadata, restores the original novel's chapter list, opens multiple chapter tabs, switches tabs while preserving active side-panel selection, creates a chapter, renames it, and verifies the mocked bridge state.
+- [x] Import/export and file-picker coverage now exports from both chapter and bookshelf affordances, uploads mocked cover/avatar files through hidden file inputs, picks a mocked reference source path, creates a reference anchor from it, and asserts no real project paths or implicit chapter saves are touched.
 - [x] The app-wide suite now covers search prompt, empty, failure, retry, content, character, and RAG result states, and asserts global search does not expose raw reference-source paths.
 - [x] Chat presentation coverage now includes explicit stop/cancel behavior via `CancelChat` and mocked agent failure rendering, while generated assistant text still never writes chapter files.
 - [x] Monaco now loads from bundled local assets instead of the default CDN path, so desktop/CI smoke tests can prove the editor renders without network access.
@@ -60,7 +61,7 @@ This phase is intentionally broader than reference anchors. The reference-anchor
 - [x] `npm run verify` runs the frontend build, lint, deep reference-anchor workflow, and app-wide workflow without requiring the Photino desktop shell.
 - [x] The app-wide console-error guard caught and fixed an invalid nested-button structure in the location side panel; the mocked chat usage payload now matches the `ContextRing` contract so the smoke does not mask NaN rendering warnings.
 
-This first slice does not complete Phase 13. Metadata create/edit/delete workflows, import/export/file-picker paths, and responsive viewport coverage remain pending.
+This first slice does not complete Phase 13. Metadata create/edit/delete workflows and responsive viewport coverage remain pending.
 
 **Files likely touched:**
 

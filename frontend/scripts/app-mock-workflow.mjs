@@ -49,6 +49,9 @@ async function main() {
     logStep('checking novel and chapter workflow')
     await verifyNovelChapterWorkflow(browser, url, consoleErrors, pageErrors)
 
+    logStep('checking import export and file-picker paths')
+    await verifyImportExportFilePickerWorkflow(browser, url, consoleErrors, pageErrors)
+
     logStep('checking search path')
     await verifySearchWorkflow(page)
     await page.screenshot({ path: path.join(outputDir, 'app-03-search.png'), fullPage: true })
@@ -341,6 +344,73 @@ async function verifyNovelChapterWorkflow(browser, url, consoleErrors, pageError
   await assertBridgeCallCount(page, 'DeleteNovel', 0)
   await assertBridgeCallCount(page, 'SaveCover', 0)
   await assertBridgeCallCount(page, 'ExportNovel', 0)
+  await page.close()
+}
+
+async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    pickedReferenceSourceFile: 'D:\\NovelistTestFixtures\\reference-source.md',
+  })
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'file-picker workflow workspace')
+
+  await clickActivity(page, '章节')
+  await page.getByRole('button', { name: '导出作品' }).click()
+  await expectVisible(page.getByRole('heading', { name: '导出作品' }), 'chapter export dialog')
+  await page.getByRole('button', { name: /Markdown/ }).click()
+  await page.locator('.fixed').getByRole('button', { name: '导出' }).click()
+  await expectVisible(page.getByText('✓ 导出成功'), 'chapter export success')
+  await waitForBridgeCallArg(page, 'ExportNovel', 1, 'markdown')
+  await page.locator('.fixed').getByRole('button', { name: '完成' }).click()
+
+  await clickActivity(page, '书架')
+  await page.getByRole('button', { name: '导出作品 全局回归小说' }).click({ force: true })
+  await expectVisible(page.getByRole('heading', { name: '导出作品' }), 'bookshelf export dialog')
+  await page.getByRole('button', { name: /TXT/ }).click()
+  await page.locator('.fixed').getByRole('button', { name: '导出' }).click()
+  await expectVisible(page.getByText('✓ 导出成功'), 'bookshelf export success')
+  await waitForBridgeCallArg(page, 'ExportNovel', 1, 'txt')
+  await page.locator('.fixed').getByRole('button', { name: '完成' }).click()
+
+  await page.getByRole('button', { name: '更换封面 全局回归小说' }).click({ force: true })
+  const coverInput = page.locator('input[type="file"][accept="image/*"]').first()
+  await coverInput.setInputFiles({
+    name: 'cover.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+  })
+  await waitForBridgeCall(page, 'SaveCover')
+  await assertLastBinaryCall(page, 'SaveCover', 8)
+
+  await page.locator('header').getByRole('button', { name: '个人中心' }).click()
+  await expectVisible(page.getByText('Mock User'), 'profile before avatar upload')
+  const avatarInput = page.locator('input[type="file"][accept="image/*"]').first()
+  await avatarInput.setInputFiles({
+    name: 'avatar.jpg',
+    mimeType: 'image/jpeg',
+    buffer: Buffer.from([255, 216, 255, 224]),
+  })
+  await waitForBridgeCall(page, 'SaveAvatar')
+  await assertLastBinaryCall(page, 'SaveAvatar', 4)
+
+  await clickActivity(page, '参考锚定')
+  await page.getByRole('button', { name: '选择参考源文件' }).click()
+  await waitForBridgeCall(page, 'PickReferenceSourceFile')
+  await expectVisible(page.locator('input[value="D:\\\\NovelistTestFixtures\\\\reference-source.md"]'), 'picked reference source path')
+  await expectSelectedValue(page.locator('select').first(), 'markdown')
+  await page.getByPlaceholder('参考书名').fill('文件选择参考')
+  await page.getByRole('button', { name: /^创建$/ }).click()
+  await waitForBridgeCall(page, 'CreateReferenceAnchor')
+  await expectVisible(page.getByText('参考锚点已创建'), 'reference anchor created from picked file')
+  await assertCreatedReferenceAnchor(page, {
+    title: '文件选择参考',
+    sourcePath: 'D:\\NovelistTestFixtures\\reference-source.md',
+    sourceKind: 'markdown',
+  })
+
+  await assertBridgeCallCount(page, 'SaveContent', 0)
+  await assertBridgeCallCount(page, 'runtime.shell.openExternal', 0)
   await page.close()
 }
 
@@ -661,6 +731,27 @@ async function assertChapterTitle(page, novelId, chapterNumber, expectedTitle) {
   assert.equal(actual, expectedTitle)
 }
 
+async function assertLastBinaryCall(page, method, expectedByteCount) {
+  const actual = await page.evaluate((method) => {
+    const call = window.__appMockState.calls.filter((item) => item.method === method).at(-1)
+    const payload = call?.args.at(-1)
+    return Array.isArray(payload) ? payload.length : 0
+  }, method)
+  assert.equal(actual, expectedByteCount, `Expected ${method} to receive ${expectedByteCount} bytes, got ${actual}.`)
+}
+
+async function expectSelectedValue(locator, expectedValue) {
+  const actual = await locator.inputValue()
+  assert.equal(actual, expectedValue)
+}
+
+async function assertCreatedReferenceAnchor(page, expected) {
+  const actual = await page.evaluate(() => window.__appMockState.createdReferenceAnchors.at(-1))
+  assert.equal(actual?.title, expected.title)
+  assert.equal(actual?.source_path, expected.sourcePath)
+  assert.equal(actual?.source_kind, expected.sourceKind)
+}
+
 function startVite(port) {
   const viteBin = path.join(frontendRoot, 'node_modules', 'vite', 'bin', 'vite.js')
 
@@ -816,6 +907,10 @@ function installConfigurableAppMockBridge(options = {}) {
     failNextSaveContent: false,
     savedLLMConfig: null,
     savedEmbeddingConfig: null,
+    exportedNovels: [],
+    savedCovers: [],
+    savedAvatars: [],
+    createdReferenceAnchors: [],
     contentByPath: {
       'goink.md': '## 当前状态\n林岚正在调查旧城门。',
       'chapters/1.md': '林岚在雨夜旧宅门前停住。\n\n她看见桌上的水痕。',
@@ -934,6 +1029,15 @@ function installConfigurableAppMockBridge(options = {}) {
       case 'CreateNovel': return createNovel(args[0])
       case 'UpdateNovel': return updateNovel(args[0], args[1])
       case 'GetCover': return null
+      case 'SaveCover':
+        state.savedCovers.push({ novel_id: args[0], byte_count: Array.isArray(args[1]) ? args[1].length : 0 })
+        return null
+      case 'SaveAvatar':
+        state.savedAvatars.push({ byte_count: Array.isArray(args[0]) ? args[0].length : 0 })
+        return null
+      case 'ExportNovel':
+        state.exportedNovels.push({ novel_id: args[0], format: args[1] })
+        return null
       case 'GetChapters': return chapters(args[0])
       case 'CreateChapter': return createChapter(args[0])
       case 'UpdateChapterTitle':
@@ -967,6 +1071,8 @@ function installConfigurableAppMockBridge(options = {}) {
       case 'GetEmbeddingConfig': return embeddingConfig()
       case 'GetSqliteVecStatus': return sqliteVecStatus()
       case 'GetReferenceAnchors': return referenceAnchors()
+      case 'PickReferenceSourceFile': return options.pickedReferenceSourceFile ?? null
+      case 'CreateReferenceAnchor': return createReferenceAnchor(args[0])
       case 'GetReferenceChapterBlueprints': return []
       case 'GetReferenceOrchestrationRuns': return []
       case 'GetReferenceOrchestrationRunEvents': return []
@@ -1503,7 +1609,27 @@ function installConfigurableAppMockBridge(options = {}) {
         created_at: now,
         updated_at: now,
       },
+      ...state.createdReferenceAnchors,
     ]
+  }
+
+  function createReferenceAnchor(input) {
+    const anchor = {
+      anchor_id: 200 + state.createdReferenceAnchors.length,
+      novel_id: input?.novel_id ?? state.activeNovelId,
+      title: String(input?.title ?? ''),
+      author: String(input?.author ?? ''),
+      source_path: String(input?.source_path ?? ''),
+      source_kind: String(input?.source_kind ?? ''),
+      license_status: String(input?.license_status ?? ''),
+      source_file_hash: `hash-created-${state.createdReferenceAnchors.length}`,
+      build_version: 'mock-reference-v1',
+      status: 'ready',
+      created_at: now,
+      updated_at: now,
+    }
+    state.createdReferenceAnchors.push(anchor)
+    return anchor
   }
 
   function pageResult(items) {

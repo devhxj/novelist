@@ -116,7 +116,12 @@ export default function ProfileView() {
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-8">
         {/* 头像 + 问候 */}
         <div className="flex items-center gap-4">
-          <div className="relative group flex-shrink-0 cursor-pointer select-none" onClick={handleAvatarClick}>
+          <button
+            type="button"
+            aria-label="更换头像"
+            className="relative group flex-shrink-0 cursor-pointer select-none border-0 bg-transparent p-0"
+            onClick={handleAvatarClick}
+          >
             {avatarErrored ? (
               <div className="w-14 h-14 rounded-full bg-muted bg-secondary flex items-center justify-center">
                 <User className="w-7 h-7 text-muted-foreground" />
@@ -132,7 +137,7 @@ export default function ProfileView() {
             <div className="absolute inset-0 rounded-full flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
               <Camera className="w-5 h-5 text-white" />
             </div>
-          </div>
+          </button>
           <div>
             {editingName ? (
               <input

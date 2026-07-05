@@ -34,6 +34,7 @@
 - `npm --prefix frontend run test:app` 现在覆盖模型与 Embeddings 设置的必填校验、mock 桥接保存和内置 ONNX 向量配置路径，全程不需要真实 API Key、本地模型文件或网络访问。
 - `npm --prefix frontend run test:app` 现在会显式遍历书架、章节/编辑器、聊天面板、搜索、参考锚定、角色、地点、弧线、时间线、偏好、读者视角、技能、个人中心、帮助和设置入口。
 - `npm --prefix frontend run test:app` 现在覆盖小说创建/编辑/选择、章节创建/重命名、多章节标签切换和侧栏选中同步；切换已打开的章节标签时，章节侧栏会跟随当前正文。
+- `npm --prefix frontend run test:app` 现在覆盖导出、封面/头像上传、参考源文件选择和参考锚点创建的 mocked 文件路径；重复打开导出对话时不再沿用上次成功状态。
 
 ## 跟通用 AI 聊天有什么不同
 

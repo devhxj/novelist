@@ -33,13 +33,11 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-export default function ExportDialog({ open, novelTitle, onClose, onExport }: Props) {
+function ExportDialogContent({ novelTitle, onClose, onExport }: Omit<Props, 'open'>) {
   const [format, setFormat] = useState<'epub' | 'markdown' | 'txt'>('epub')
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
-
-  if (!open) return null
 
   async function handleExport() {
     if (exporting) return
@@ -136,5 +134,18 @@ export default function ExportDialog({ open, novelTitle, onClose, onExport }: Pr
         </div>
       </div>
     </div>
+  )
+}
+
+export default function ExportDialog({ open, novelTitle, onClose, onExport }: Props) {
+  if (!open) return null
+
+  return (
+    <ExportDialogContent
+      key={novelTitle}
+      novelTitle={novelTitle}
+      onClose={onClose}
+      onExport={onExport}
+    />
   )
 }
