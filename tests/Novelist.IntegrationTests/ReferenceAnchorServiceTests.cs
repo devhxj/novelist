@@ -638,6 +638,8 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
 
             周鸣看不见她袖口下的手指正慢慢发凉。
 
+            林岚背对着门，没有回头。
+
             他移开目光，指尖在门框上停了一下。
 
             她欲言又止，指节慢慢扣紧。
@@ -659,6 +661,11 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.Contains(rows, row =>
             row.MaterialType == ReferenceMaterialTypes.Sentence &&
             row.Text == "周鸣看不见她袖口下的手指正慢慢发凉。" &&
+            row.PovTag == "limited" &&
+            row.TechniqueTag == "limited_pov");
+        Assert.Contains(rows, row =>
+            row.MaterialType == ReferenceMaterialTypes.Sentence &&
+            row.Text == "林岚背对着门，没有回头。" &&
             row.PovTag == "limited" &&
             row.TechniqueTag == "limited_pov");
         Assert.Contains(rows, row =>
