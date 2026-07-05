@@ -177,6 +177,7 @@ workspace/global reference corpus
 Targeted Phase 12 thin-slice checks completed:
 
 - [x] Orchestration binding can use `corpus_search_policy` include/exclude anchor filters and license-status filters when `anchor_ids` are omitted, while keeping the existing per-novel reference-anchor storage model.
+- [x] Reference material read paths now include `reference_anchors.novel_id = 0` workspace-corpus compatibility anchors for listing, search, adaptation, audit, tag correction, and per-novel feedback validation, while still excluding private anchors from other novels.
 
 **Files likely touched:**
 

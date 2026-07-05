@@ -45,6 +45,8 @@ reference_anchors
 - created_at TEXT NOT NULL
 - updated_at TEXT NOT NULL
 
+`reference_anchors.novel_id = 0` is reserved as the workspace-corpus compatibility owner. Public create/rebuild/delete APIs still require a positive novel id. Read paths for listing anchors, build status, material search, material adaptation, reuse audit, tag correction, and per-novel feedback validation include the active novel's private anchors plus `novel_id = 0` workspace anchors, while continuing to exclude private anchors owned by other novels. `reference_user_feedback.novel_id` remains the consuming novel id, so feedback about a shared material is still scoped to the novel that used it.
+
 reference_source_segments
 - segment_id TEXT PRIMARY KEY
 - anchor_id INTEGER NOT NULL

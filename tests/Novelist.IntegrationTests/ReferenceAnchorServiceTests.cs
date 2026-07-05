@@ -389,6 +389,189 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchMaterialsIncludesWorkspaceCorpusAnchorsWithoutLeakingOtherNovelPrivateAnchors()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var targetNovel = await novels.CreateNovelAsync(new CreateNovelPayload("共享语料目标", "", ""), CancellationToken.None);
+        var otherNovel = await novels.CreateNovelAsync(new CreateNovelPayload("其他小说私有参考", "", ""), CancellationToken.None);
+        var workspaceSourcePath = CreateSourceFile(
+            "workspace-corpus.md",
+            """
+            # 第一章
+
+            雨声压低了街道，他在门口停住，把那口气慢慢咽回去。
+            """);
+        var privateSourcePath = CreateSourceFile(
+            "private-anchor.md",
+            """
+            # 第一章
+
+            雨声压低了街道，但这里是另一部小说的私有参考。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var workspaceAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(targetNovel.Id, "工作区共享参考", null, workspaceSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var privateAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(otherNovel.Id, "其他小说参考", null, privateSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        await MarkAnchorAsWorkspaceCorpusAsync(options, workspaceAnchor.AnchorId);
+
+        var defaultSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                targetNovel.Id,
+                AnchorIds: [],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        Assert.Contains(defaultSearch.Items, item => item.AnchorId == workspaceAnchor.AnchorId);
+        Assert.DoesNotContain(defaultSearch.Items, item => item.AnchorId == privateAnchor.AnchorId);
+
+        var explicitWorkspaceSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                targetNovel.Id,
+                AnchorIds: [workspaceAnchor.AnchorId],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        Assert.Contains(explicitWorkspaceSearch.Items, item => item.AnchorId == workspaceAnchor.AnchorId);
+
+        var explicitPrivateSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                targetNovel.Id,
+                AnchorIds: [privateAnchor.AnchorId],
+                Query: "私有参考",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        Assert.Empty(explicitPrivateSearch.Items);
+    }
+
+    [Fact]
+    public async Task AdaptAndAuditCanUseWorkspaceCorpusMaterialsWithoutReadingOtherNovelPrivateMaterials()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var targetNovel = await novels.CreateNovelAsync(new CreateNovelPayload("共享材料消费目标", "", ""), CancellationToken.None);
+        var otherNovel = await novels.CreateNovelAsync(new CreateNovelPayload("隔离小说", "", ""), CancellationToken.None);
+        var workspaceSourcePath = CreateSourceFile("workspace-slots.md", "他握住{{object}}，没有立刻说话。");
+        var privateSourcePath = CreateSourceFile("private-slots.md", "他握住{{object}}，说出了另一部小说的秘密。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var workspaceAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(targetNovel.Id, "工作区槽位参考", null, workspaceSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var privateAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(otherNovel.Id, "私有槽位参考", null, privateSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        await MarkAnchorAsWorkspaceCorpusAsync(options, workspaceAnchor.AnchorId);
+        var workspaceMaterial = Assert.Single((await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                targetNovel.Id,
+                AnchorIds: [workspaceAnchor.AnchorId],
+                Query: "{{object}}",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None)).Items);
+        var privateMaterial = Assert.Single((await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                otherNovel.Id,
+                AnchorIds: [privateAnchor.AnchorId],
+                Query: "{{object}}",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None)).Items);
+
+        var adapted = await service.AdaptMaterialAsync(
+            new AdaptReferenceMaterialPayload(
+                targetNovel.Id,
+                workspaceMaterial.MaterialId,
+                [new ReferenceSlotValuePayload("object", "门把手")],
+                ReferenceRewriteLevels.L1,
+                SceneFacts: ["门把手"]),
+            CancellationToken.None);
+        var audit = await service.AuditCandidateAsync(
+            new AuditReferenceReusePayload(
+                targetNovel.Id,
+                workspaceMaterial.MaterialId,
+                workspaceMaterial.Text,
+                ReferenceRewriteLevels.L0,
+                SceneFacts: []),
+            CancellationToken.None);
+
+        Assert.Equal("passed", adapted.Audit.Status);
+        Assert.Equal("passed", audit.Status);
+        var feedback = await service.RecordUserFeedbackAsync(
+            new RecordReferenceUserFeedbackPayload(
+                targetNovel.Id,
+                ReferenceFeedbackTargetTypes.ReuseCandidate,
+                adapted.CandidateId,
+                ReferenceFeedbackDecisions.Accepted,
+                workspaceMaterial.MaterialId,
+                adapted.CandidateId,
+                BlueprintId: 0,
+                BeatId: string.Empty,
+                FeedbackTags: ["workspace_corpus_usage"],
+                Note: "current novel accepts a workspace corpus candidate",
+                EditedText: string.Empty,
+                Origin: "user"),
+            CancellationToken.None);
+        Assert.Equal(targetNovel.Id, feedback.NovelId);
+        Assert.Equal(workspaceMaterial.MaterialId, feedback.MaterialId);
+        Assert.Equal(adapted.CandidateId, feedback.CandidateId);
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.AdaptMaterialAsync(
+                new AdaptReferenceMaterialPayload(
+                    targetNovel.Id,
+                    privateMaterial.MaterialId,
+                    [new ReferenceSlotValuePayload("object", "门把手")],
+                    ReferenceRewriteLevels.L1,
+                    SceneFacts: ["门把手"]),
+                CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.AuditCandidateAsync(
+                new AuditReferenceReusePayload(
+                    targetNovel.Id,
+                    privateMaterial.MaterialId,
+                    "他握住门把手，说出了另一部小说的秘密。",
+                    ReferenceRewriteLevels.L2,
+                    SceneFacts: ["门把手"]),
+                CancellationToken.None));
+    }
+
+    [Fact]
     public async Task SearchMaterialsTruncatesUnknownLicenseSourcePreviewButKeepsStoredText()
     {
         var options = CreateOptions();
@@ -2068,6 +2251,28 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         }
 
         return rows;
+    }
+
+    private static async ValueTask MarkAnchorAsWorkspaceCorpusAsync(
+        AppInitializationOptions options,
+        long anchorId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_anchors
+            SET novel_id = 0
+            WHERE anchor_id = $anchor_id;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        var updated = await command.ExecuteNonQueryAsync();
+        Assert.Equal(1, updated);
     }
 
     private static JsonDocument ParseOutbound(BridgeDispatchResult result)

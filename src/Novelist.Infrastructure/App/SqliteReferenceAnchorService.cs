@@ -13,6 +13,7 @@ namespace Novelist.Infrastructure.App;
 public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
 {
     private const string BuildVersion = "reference-anchor-v1";
+    private const long WorkspaceCorpusNovelId = 0;
     private const long MaxSourceBytes = 20L * 1024L * 1024L;
     private const int EmbeddingBatchSize = 64;
     private const int UnknownLicensePreviewMaxChars = 48;
@@ -195,10 +196,12 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 SELECT anchor_id, novel_id, title, author, source_path, source_kind, license_status,
                        source_file_hash, build_version, status, created_at, updated_at
                 FROM reference_anchors
-                WHERE novel_id = $novel_id
-                ORDER BY created_at ASC, anchor_id ASC;
+                WHERE novel_id = $novel_id OR novel_id = $workspace_corpus_novel_id
+                ORDER BY CASE WHEN novel_id = $novel_id THEN 0 ELSE 1 END,
+                         created_at ASC, anchor_id ASC;
                 """;
             command.Parameters.AddWithValue("$novel_id", novelId);
+            command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
             var anchors = new List<ReferenceAnchorPayload>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
@@ -358,9 +361,11 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                        s.material_count, s.slot_count, s.vector_count, s.last_error, s.updated_at
                 FROM reference_anchor_build_state s
                 INNER JOIN reference_anchors a ON a.anchor_id = s.anchor_id
-                WHERE a.novel_id = $novel_id AND s.anchor_id = $anchor_id;
+                WHERE (a.novel_id = $novel_id OR a.novel_id = $workspace_corpus_novel_id)
+                  AND s.anchor_id = $anchor_id;
                 """;
             command.Parameters.AddWithValue("$novel_id", novelId);
+            command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
             command.Parameters.AddWithValue("$anchor_id", anchorId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             return await reader.ReadAsync(cancellationToken) ? ReadBuildStatus(reader) : null;
@@ -1152,10 +1157,12 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         command.CommandText = """
             SELECT anchor_id
             FROM reference_anchors
-            WHERE novel_id = $novel_id
-            ORDER BY anchor_id ASC;
+            WHERE novel_id = $novel_id OR novel_id = $workspace_corpus_novel_id
+            ORDER BY CASE WHEN novel_id = $novel_id THEN 0 ELSE 1 END,
+                     anchor_id ASC;
             """;
         command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
         var anchorIds = new List<long>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -1193,11 +1200,13 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                    m.text, m.source_hash, m.extractor_version, m.user_verified, m.created_at
             FROM reference_materials m
             INNER JOIN reference_anchors a ON a.anchor_id = m.anchor_id
-            WHERE a.novel_id = $novel_id
+            WHERE (a.novel_id = $novel_id OR a.novel_id = $workspace_corpus_novel_id)
               AND m.anchor_id IN ({{string.Join(", ", parameterNames)}})
-            ORDER BY m.anchor_id ASC, m.material_id ASC;
+            ORDER BY CASE WHEN a.novel_id = $novel_id THEN 0 ELSE 1 END,
+                     m.anchor_id ASC, m.material_id ASC;
             """;
         command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
         var materials = new List<ReferenceMaterialPayload>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -1231,12 +1240,13 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         command.CommandText = $$"""
             SELECT anchor_id
             FROM reference_anchors
-            WHERE novel_id = $novel_id
+            WHERE (novel_id = $novel_id OR novel_id = $workspace_corpus_novel_id)
               AND license_status = $license_status
               AND anchor_id IN ({{string.Join(", ", parameterNames)}})
             ORDER BY anchor_id ASC;
             """;
         command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
         command.Parameters.AddWithValue("$license_status", "unknown");
         var result = new HashSet<long>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1366,9 +1376,11 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                    m.text, m.source_hash, m.extractor_version, m.user_verified, m.created_at
             FROM reference_materials m
             INNER JOIN reference_anchors a ON a.anchor_id = m.anchor_id
-            WHERE a.novel_id = $novel_id AND m.material_id = $material_id;
+            WHERE (a.novel_id = $novel_id OR a.novel_id = $workspace_corpus_novel_id)
+              AND m.material_id = $material_id;
             """;
         command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
         command.Parameters.AddWithValue("$material_id", materialId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken) ? ReadMaterial(reader) : null;
@@ -1470,7 +1482,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
               AND anchor_id IN (
                 SELECT anchor_id
                 FROM reference_anchors
-                WHERE novel_id = $novel_id
+                WHERE novel_id = $novel_id OR novel_id = $workspace_corpus_novel_id
               );
             """;
         command.Parameters.AddWithValue("$function_tag", material.FunctionTag);
@@ -1483,6 +1495,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         command.Parameters.AddWithValue("$pov_confidence", material.PovConfidence);
         command.Parameters.AddWithValue("$material_id", material.MaterialId);
         command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
         var affected = await command.ExecuteNonQueryAsync(cancellationToken);
         if (affected == 0)
         {
@@ -1685,10 +1698,12 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             FROM reference_reuse_candidates c
             INNER JOIN reference_materials m ON m.material_id = c.material_id
             INNER JOIN reference_anchors a ON a.anchor_id = m.anchor_id
-            WHERE a.novel_id = $novel_id AND c.candidate_id = $candidate_id
+            WHERE (a.novel_id = $novel_id OR a.novel_id = $workspace_corpus_novel_id)
+              AND c.candidate_id = $candidate_id
             LIMIT 1;
             """;
         command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
         command.Parameters.AddWithValue("$candidate_id", candidateId);
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is not null;
