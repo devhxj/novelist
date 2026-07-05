@@ -43,6 +43,9 @@ async function main() {
     await verifyChapterWorkflow(page)
     await page.screenshot({ path: path.join(outputDir, 'app-02-editor.png'), fullPage: true })
 
+    logStep('checking explicit editor save path')
+    await verifyEditorSaveWorkflow(browser, url, consoleErrors, pageErrors)
+
     logStep('checking search path')
     await verifySearchWorkflow(page)
     await page.screenshot({ path: path.join(outputDir, 'app-03-search.png'), fullPage: true })
@@ -151,10 +154,7 @@ async function verifyShellNavigation(page) {
 
 async function verifyChapterWorkflow(page) {
   await page.getByTitle('章节').click()
-  const chapterBlock = page.getByRole('button', { name: /第 1 - 2 章/ })
-  if (await chapterBlock.isVisible()) {
-    await chapterBlock.click()
-  }
+  await ensureChapterBlockExpanded(page)
 
   await expectVisible(page.getByRole('button', { name: /雨夜线索/ }), 'first chapter in side panel')
   await page.getByRole('button', { name: /雨夜线索/ }).click()
@@ -163,6 +163,65 @@ async function verifyChapterWorkflow(page) {
 
   await page.getByRole('button', { name: /故事状态/ }).click()
   await expectVisible(page.getByText('故事状态').first(), 'story state tab')
+}
+
+async function verifyEditorSaveWorkflow(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    allowSaveContent: true,
+  })
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'editor save workspace')
+  await assertBridgeCallCount(page, 'SaveContent', 0)
+
+  await page.getByTitle('章节').click()
+  await ensureChapterBlockExpanded(page)
+  await page.locator('aside').getByRole('button', { name: /雨夜线索/ }).click()
+  await expectVisible(page.getByText('第1章 雨夜线索').first(), 'editable chapter tab')
+  await expectVisible(page.locator('.monaco-editor').first(), 'monaco editor render')
+  await expectVisible(page.getByText('已保存'), 'initial saved status')
+
+  const savedText = '林岚在雨夜旧宅门前停住。\n\n她把显式保存片段留在正文里。'
+  await replaceEditorText(page, savedText)
+  await expectVisible(page.getByText('未保存'), 'dirty status after edit')
+  await page.keyboard.press(shortcutKey('S'))
+  await waitForSaveContent(page, 'chapters/1.md', '显式保存片段')
+  await expectVisible(page.getByText('已保存'), 'saved status after explicit save')
+  await assertStoredContent(page, 'chapters/1.md', savedText)
+  const saveCountAfterSuccess = await bridgeCallCount(page, 'SaveContent')
+  assert(saveCountAfterSuccess >= 1, 'Expected edited chapter to be saved at least once.')
+
+  await page.getByTitle('搜索').click()
+  await page.getByTitle('章节').click()
+  await ensureChapterBlockExpanded(page)
+  await assertBridgeCallCount(page, 'SaveContent', saveCountAfterSuccess)
+
+  await page.locator('aside').getByRole('button', { name: /旧城门/ }).click()
+  await expectVisible(page.getByText('第2章 旧城门').first(), 'second chapter tab')
+  await page.evaluate(() => { window.__appMockState.failNextSaveContent = true })
+  await replaceEditorText(page, '旧城门下，保存失败片段仍留在编辑器。')
+  await expectVisible(page.getByText('未保存'), 'dirty status after failed edit')
+  await page.keyboard.press(shortcutKey('S'))
+  await expectVisible(page.getByText('保存失败：模拟保存失败，请重试'), 'save failure alert')
+  await expectVisible(page.getByText('未保存'), 'dirty status retained after failed save')
+  const saveCountAfterFailure = await bridgeCallCount(page, 'SaveContent')
+  assert(saveCountAfterFailure > saveCountAfterSuccess, 'Expected failed explicit save to call SaveContent.')
+
+  await page.getByTitle('搜索').click()
+  await delay(700)
+  await assertBridgeCallCount(page, 'SaveContent', saveCountAfterFailure)
+  await page.close()
+}
+
+async function ensureChapterBlockExpanded(page) {
+  const firstChapter = page.locator('aside').getByRole('button', { name: /雨夜线索/ })
+  if (await firstChapter.isVisible()) return
+
+  const chapterBlock = page.getByRole('button', { name: /第 1 - 2 章/ })
+  if (await chapterBlock.isVisible()) {
+    await chapterBlock.click()
+  }
+  await expectVisible(firstChapter, 'expanded first chapter')
 }
 
 async function verifySearchWorkflow(page) {
@@ -301,6 +360,47 @@ async function verifyBridgeCalls(page) {
 
   const saveCandidates = methods.filter(method => method.startsWith('Save') || method.startsWith('Update') || method.startsWith('Delete'))
   assert.deepEqual(saveCandidates, [], `Unexpected mutating bridge calls:\n${saveCandidates.join('\n')}`)
+}
+
+async function replaceEditorText(page, content) {
+  const editor = page.locator('.monaco-editor').first()
+  await expectVisible(editor, 'content editor')
+  await page.waitForFunction(() => typeof window.__novelistEditor?.setValue === 'function', null, { timeout: 12_000 })
+  await page.evaluate((content) => window.__novelistEditor.setValue(content), content)
+}
+
+function shortcutKey(key) {
+  return `${process.platform === 'darwin' ? 'Meta' : 'Control'}+${key}`
+}
+
+async function waitForSaveContent(page, path, expectedText) {
+  await page.waitForFunction(
+    ({ path, expectedText }) => {
+      return window.__appMockState.calls.some((call) =>
+        call.method === 'SaveContent' &&
+        call.args[0]?.path === path &&
+        String(call.args[0]?.content ?? '').includes(expectedText))
+    },
+    { path, expectedText },
+    { timeout: 12_000 },
+  )
+}
+
+async function assertStoredContent(page, path, expectedContent) {
+  const actual = await page.evaluate((path) => window.__appMockState.contentByPath[path], path)
+  assert.equal(actual, expectedContent)
+}
+
+async function assertBridgeCallCount(page, method, expectedCount) {
+  const actual = await bridgeCallCount(page, method)
+  assert.equal(actual, expectedCount, `Expected ${expectedCount} ${method} calls, got ${actual}.`)
+}
+
+async function bridgeCallCount(page, method) {
+  return await page.evaluate(
+    (method) => window.__appMockState.calls.filter((call) => call.method === method).length,
+    method,
+  )
 }
 
 async function expectVisible(locator, description) {
@@ -459,6 +559,14 @@ function installConfigurableAppMockBridge(options = {}) {
     nextSessionId: 1,
     nextTurnId: 101,
     searchFailureRecovered: false,
+    failNextSaveContent: false,
+    contentByPath: {
+      'goink.md': '## 当前状态\n林岚正在调查旧城门。',
+      'chapters/1.md': '林岚在雨夜旧宅门前停住。\n\n她看见桌上的水痕。',
+      'chapters/2.md': '旧城门下，暗号被雨水冲淡。',
+      'skills/rhythm.md': '---\nname: 节奏控制\n---\n保持停顿和动作之间的张力。',
+      '/builtin/skills/dialogue.md': '---\nname: 对话潜台词\n---\n用话外之意推动场景。',
+    },
     initialized: options.initialized ?? true,
     novels: options.novels ?? [defaultNovel],
     settings: options.settings ?? defaultSettings,
@@ -495,7 +603,7 @@ function installConfigurableAppMockBridge(options = {}) {
       const args = Array.isArray(envelope.payload?.args) ? envelope.payload.args : []
       state.calls.push({ method: envelope.method, args })
 
-      if (envelope.method === 'SaveContent') {
+      if (envelope.method === 'SaveContent' && !options.allowSaveContent) {
         throw new Error('SaveContent is forbidden in the app-wide smoke unless the test explicitly edits content.')
       }
 
@@ -559,6 +667,7 @@ function installConfigurableAppMockBridge(options = {}) {
       case 'GetCover': return null
       case 'GetChapters': return chapters()
       case 'GetContent': return content(args[1])
+      case 'SaveContent': return saveContent(args[0])
       case 'GetModels': return [availableModel()]
       case 'GetSessions': return pageResult([])
       case 'GetSession': return sessionDetail(args[0])
@@ -621,14 +730,22 @@ function installConfigurableAppMockBridge(options = {}) {
   }
 
   function content(filePath) {
-    const map = {
-      'goink.md': '## 当前状态\n林岚正在调查旧城门。',
-      'chapters/1.md': '林岚在雨夜旧宅门前停住。\n\n她看见桌上的水痕。',
-      'chapters/2.md': '旧城门下，暗号被雨水冲淡。',
-      'skills/rhythm.md': '---\nname: 节奏控制\n---\n保持停顿和动作之间的张力。',
-      '/builtin/skills/dialogue.md': '---\nname: 对话潜台词\n---\n用话外之意推动场景。',
+    return state.contentByPath[filePath] ?? ''
+  }
+
+  function saveContent(input) {
+    if (!options.allowSaveContent) {
+      throw new Error('SaveContent is forbidden in the app-wide smoke unless the test explicitly edits content.')
     }
-    return map[filePath] ?? ''
+    if (state.failNextSaveContent) {
+      state.failNextSaveContent = false
+      throw new Error('模拟保存失败，请重试')
+    }
+    if (!input?.path) {
+      throw new Error('SaveContent requires a path.')
+    }
+    state.contentByPath[input.path] = String(input.content ?? '')
+    return null
   }
 
   function availableModel() {

@@ -26,6 +26,21 @@ interface FileChangedEvent {
   path?: string
 }
 
+interface SaveErrorState {
+  tabId: string
+  message: string
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  return fallback
+}
+
+function saveErrorText(message: string): string {
+  return message.startsWith('保存失败') ? message : `保存失败：${message}`
+}
+
 export interface ContentPanelHandle {
   openFile: (path: string, title: string, readOnly?: boolean, initialViewMode?: string) => void
   openFileWithHighlight: (path: string, title: string, matchPos: number, matchLen: number) => void
@@ -57,6 +72,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
 
   const { theme } = useTheme()
   const [isLoading, setIsLoading] = useState(false)
+  const [saveError, setSaveError] = useState<SaveErrorState | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
@@ -147,8 +163,14 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
 
   const doSave = useCallback(async (tabId: string, path: string, content: string) => {
     if (!novelIdRef.current) return
-    await app.SaveContent({ novel_id: novelIdRef.current, path, content })
-    updateTab(tabId, { isDirty: false })
+    try {
+      setSaveError(null)
+      await app.SaveContent({ novel_id: novelIdRef.current, path, content })
+      updateTab(tabId, { isDirty: false })
+    } catch (error) {
+      setSaveError({ tabId, message: errorMessage(error, '保存失败，请重试') })
+      throw error
+    }
   }, [app, updateTab])
 
   // Ctrl+S 立即保存
@@ -158,7 +180,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
         e.preventDefault()
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
         const s = savingRef.current
-        if (s) doSave(s.id, s.path, s.content)
+        if (s) void doSave(s.id, s.path, s.content).catch(() => undefined)
       }
     }
     window.addEventListener('keydown', handler)
@@ -168,6 +190,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   const handleEditorChange = useCallback((tabId: string, value: string | undefined) => {
     const content = value ?? ''
     updateTab(tabId, { content, isDirty: true })
+    setSaveError(current => current?.tabId === tabId ? null : current)
     onContentChange?.(content)
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
@@ -177,7 +200,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     saveTimerRef.current = setTimeout(() => {
       if (!savingRef.current) return
       const s = savingRef.current
-      doSave(s.id, s.path, s.content)
+      void doSave(s.id, s.path, s.content).catch(() => undefined)
     }, 500)
   }, [tabs, updateTab, doSave, onContentChange])
 
@@ -230,7 +253,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
       const s = savingRef.current
       if (!s) return
-      doSave(s.id, s.path, s.content)
+      void doSave(s.id, s.path, s.content).catch(() => undefined)
     })
     // 编辑器挂载后检查待处理高亮（直接取 Monaco model 内容，避免 ref 时序问题）。
     const pending = pendingHighlightRef.current
@@ -554,6 +577,15 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
           )}
         </div>
       </div>
+      {saveError?.tabId === activeTab.id && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs leading-relaxed text-destructive"
+        >
+          {saveErrorText(saveError.message)}
+        </div>
+      )}
 
       <div className="flex-1 min-h-0">
         {isLoading ? (
