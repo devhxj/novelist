@@ -16,6 +16,11 @@
       "expected_error": "forbidden fact appears in external evidence"
     },
     {
+      "name": "unsupported_emotion_trigger_fact",
+      "mutation": "unsupported_emotion_trigger_fact",
+      "expected_error": "unsupported emotion trigger fact"
+    },
+    {
       "name": "hard_transition",
       "mutation": "hard_transition",
       "expected_error": "pressure"

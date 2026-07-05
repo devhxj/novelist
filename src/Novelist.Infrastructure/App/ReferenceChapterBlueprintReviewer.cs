@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 20;
+    public const int CurrentReviewVersion = 21;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -179,6 +179,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "external_evidence",
                     $"Beat {beat.BeatIndex} contains unsupported external evidence fact: {unsupportedExternalEvidenceFact}",
                     "Set up the external_evidence fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            foreach (var unsupportedEmotionTriggerFact in FindUnsupportedEmotionTriggerFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    emotionErrors,
+                    "emotion",
+                    beat,
+                    "emotion_trigger",
+                    $"Beat {beat.BeatIndex} contains unsupported emotion trigger fact: {unsupportedEmotionTriggerFact}",
+                    "Set up the emotion_trigger fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
             }
 
             if (beat.CharacterGoals.Count == 0 || beat.CharacterStatesBefore.Count == 0 || beat.CharacterStatesAfter.Count == 0)
@@ -862,6 +873,24 @@ internal static class ReferenceChapterBlueprintReviewer
             .ToArray();
 
         return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ExternalEvidence)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedEmotionTriggerFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.EmotionTrigger)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
