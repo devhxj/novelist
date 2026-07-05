@@ -78,6 +78,10 @@ public sealed class ReferenceRegressionFixtureTests
                 SuppressedReaction = "有反应",
                 ExternalEvidence = "表现出痛苦"
             },
+            "unsupported_external_evidence_fact" => beat with
+            {
+                ExternalEvidence = "密室钥匙"
+            },
             "hard_transition" => beat with
             {
                 TransitionIn = "来到旧宅",

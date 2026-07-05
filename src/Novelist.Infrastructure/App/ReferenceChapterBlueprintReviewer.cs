@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 18;
+    public const int CurrentReviewVersion = 19;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -168,6 +168,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "emotion_mechanic",
                     $"Beat {beat.BeatIndex} uses fake emotion mechanic; trigger, suppressed reaction, and external evidence must be concrete.",
                     "Replace generic emotion mechanics with concrete trigger, suppressed reaction, and observable evidence.");
+            }
+
+            foreach (var unsupportedExternalEvidenceFact in FindUnsupportedExternalEvidenceFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    emotionErrors,
+                    "emotion",
+                    beat,
+                    "external_evidence",
+                    $"Beat {beat.BeatIndex} contains unsupported external evidence fact: {unsupportedExternalEvidenceFact}",
+                    "Set up the external_evidence fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
             }
 
             if (beat.CharacterGoals.Count == 0 || beat.CharacterStatesBefore.Count == 0 || beat.CharacterStatesAfter.Count == 0)
@@ -825,6 +836,24 @@ internal static class ReferenceChapterBlueprintReviewer
                 "随便", "任意", "某个", "某种", "一个东西", "某样东西", "占位",
                 "之后再填", "后面再填", "待定", "替换一下", "随便替换"
             ]);
+    }
+
+    private static IEnumerable<string> FindUnsupportedExternalEvidenceFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ExternalEvidence)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static IEnumerable<string> FindUnsupportedSourceBackedDetailTargetFacts(

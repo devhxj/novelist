@@ -6,6 +6,11 @@
       "expected_error": "fake emotion"
     },
     {
+      "name": "unsupported_external_evidence_fact",
+      "mutation": "unsupported_external_evidence_fact",
+      "expected_error": "unsupported external evidence fact"
+    },
+    {
       "name": "hard_transition",
       "mutation": "hard_transition",
       "expected_error": "pressure"

@@ -124,6 +124,40 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsUnsupportedExternalEvidenceFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            ExternalEvidence = "密室钥匙"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.EmotionErrors, item => item.Contains("unsupported external evidence fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "emotion" &&
+                defect.FieldPath.Contains("external_evidence", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewAllowsExternalEvidenceFactWhenKnownFactApprovesIt()
+    {
+        var blueprint = Blueprint(
+            beat => beat with
+            {
+                ExternalEvidence = "密室钥匙"
+            },
+            knownFacts: ["雨声压低了整条街的呼吸", "密室钥匙"]);
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+        Assert.DoesNotContain(review.EmotionErrors, item => item.Contains("external evidence fact", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsForbiddenFactInFinalHook()
     {
         var blueprint = Blueprint(
