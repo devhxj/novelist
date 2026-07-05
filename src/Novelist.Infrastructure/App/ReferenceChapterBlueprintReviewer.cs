@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 51;
+    public const int CurrentReviewVersion = 52;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -882,6 +882,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "Set up the no_reuse_reason fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before skipping material binding.");
             }
 
+            foreach (var unsupportedLockedPhrasePolicyFact in FindUnsupportedLockedPhrasePolicyFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "locked_phrase_policy",
+                    $"Beat {beat.BeatIndex} contains unsupported locked_phrase_policy fact: {unsupportedLockedPhrasePolicyFact}",
+                    "Set up the locked_phrase_policy fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before freezing phrase reuse constraints.");
+            }
+
             if (string.IsNullOrWhiteSpace(beat.NarrationStrategy))
             {
                 AddBeatDefect(
@@ -1120,6 +1131,17 @@ internal static class ReferenceChapterBlueprintReviewer
                     "no_reuse_reason",
                     $"Forbidden fact appears in no_reuse_reason: {forbidden}",
                     "Remove the forbidden fact from beat no_reuse_reason before skipping material binding.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.LockedPhrasePolicy, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "locked_phrase_policy",
+                    $"Forbidden fact appears in locked_phrase_policy: {forbidden}",
+                    "Remove the forbidden fact from beat locked_phrase_policy before freezing phrase reuse constraints.");
             }
 
             foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.EmotionTrigger, forbidden)))
@@ -1377,6 +1399,11 @@ internal static class ReferenceChapterBlueprintReviewer
         if (ContainsForbidden(beat.NoReuseReason, forbidden))
         {
             yield return "no_reuse_reason";
+        }
+
+        if (ContainsForbidden(beat.LockedPhrasePolicy, forbidden))
+        {
+            yield return "locked_phrase_policy";
         }
     }
 
@@ -2134,6 +2161,24 @@ internal static class ReferenceChapterBlueprintReviewer
             .ToArray();
 
         return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.NoReuseReason)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedLockedPhrasePolicyFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.LockedPhrasePolicy)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

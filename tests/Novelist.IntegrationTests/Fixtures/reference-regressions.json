@@ -486,6 +486,16 @@
       "expected_error": "forbidden fact appears in no_reuse_reason"
     },
     {
+      "name": "unsupported_locked_phrase_policy_fact",
+      "mutation": "unsupported_locked_phrase_policy_fact",
+      "expected_error": "unsupported locked_phrase_policy fact"
+    },
+    {
+      "name": "forbidden_locked_phrase_policy_fact",
+      "mutation": "forbidden_locked_phrase_policy_fact",
+      "expected_error": "forbidden fact appears in locked_phrase_policy"
+    },
+    {
       "name": "unsupported_reference_query_fact",
       "mutation": "unsupported_reference_query_fact",
       "expected_error": "unsupported reference query fact"

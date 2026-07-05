@@ -1922,6 +1922,45 @@ public sealed class ReferenceChapterBlueprintReviewerTests
         Assert.DoesNotContain(review.ReferenceBindingErrors, item => item.Contains("reference query fact", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void BuildReviewFailsUnsupportedLockedPhrasePolicyFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            LockedPhrasePolicy = "preserve cadence around 密室钥匙"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ReferenceBindingErrors, item => item.Contains("unsupported locked_phrase_policy fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "reference_binding" &&
+                defect.FieldPath.Contains("locked_phrase_policy", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsForbiddenFactInLockedPhrasePolicy()
+    {
+        var blueprint = Blueprint(
+            beat => beat with
+            {
+                LockedPhrasePolicy = "preserve cadence around 凶手身份"
+            },
+            forbiddenFacts: ["凶手身份"],
+            knownFacts: ["雨声压低了整条街的呼吸", "凶手身份"]);
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ForbiddenFactErrors, item => item.Contains("locked_phrase_policy", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "forbidden_fact" &&
+                defect.FieldPath.Contains("locked_phrase_policy", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static ReferenceChapterBlueprintPayload Blueprint(
         Func<ReferenceChapterBlueprintBeatPayload, ReferenceChapterBlueprintBeatPayload> configureBeat,
         ReferenceChapterBlueprintExecutionTrackPayload? execution = null,

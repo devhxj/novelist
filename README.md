@@ -63,6 +63,7 @@
 - 蓝图评审现在会检查 `logic_analysis`、`emotion_analysis`、`narration_analysis`、`character_analysis`、`reference_analysis` 和 `transition_plan` 的摘要/要点里的高风险事实并阻止 forbidden facts，分析轨道不能夹带未批准的关键物件、身份或证据。
 - 蓝图评审现在会检查 `execution_contract` 的摘要、段落意图、执行模式、防剧本化职责、细节目标和候选拒绝规则里的高风险事实并阻止 forbidden facts，执行合同不能夹带未批准的关键物件、身份或证据。
 - 蓝图评审现在会检查 `previous_state` 和 `final_state` 里的高风险事实并阻止 forbidden facts，章节起止状态不能夹带未批准的关键物件、身份或证据。
+- 蓝图评审现在会检查 `locked_phrase_policy` 里的高风险事实并阻止 forbidden facts，锁定短语策略不能夹带未批准的关键物件、身份或证据。
 - 蓝图评审现在会检查 `narrative_function` 里的高风险事实，叙事功能不能夹带未批准的关键物件、身份或证据。
 - 蓝图评审现在会检查 `logic_premise` 和 `conflict_pressure` 里的高风险事实，逻辑前提和冲突压力不能夹带未批准的关键物件、身份或证据。
 - 蓝图评审现在会检查 `causality_in/out` 和 `transition_in/out` 里的高风险事实，因果与转场说明不能夹带未批准的关键物件、身份或证据。
