@@ -76,6 +76,22 @@ public sealed class ReferenceAnchoredDraftAuditorTests
     }
 
     [Fact]
+    public void BuildDraftAuditFailsWhenCandidateIntroducesUnsupportedAccessCredential()
+    {
+        var blueprint = Blueprint(beat => beat);
+        var candidate = Candidate(blueprint, "雨声压低了整条街的呼吸，旧楼门禁卡在抽屉底下露出一角。");
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.UnsupportedFactErrors, item => item.Contains("旧楼门禁卡", StringComparison.Ordinal));
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("Remove unsupported fact", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BuildDraftAuditAllowsHighRiskFactWhenItIsSceneFact()
     {
         var blueprint = Blueprint(beat => beat with
@@ -650,6 +666,16 @@ public sealed class ReferenceAnchoredDraftAuditorTests
 
         Assert.Contains("旧宅暗门", facts);
         Assert.Contains("一只药瓶", facts);
+    }
+
+    [Fact]
+    public void ExtractAuditableFactPhrasesReadsAccessCredentialFacts()
+    {
+        var facts = ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(
+            "雨声压低了整条街的呼吸，旧楼门禁卡和地下室通行证被压在账本下面。");
+
+        Assert.Contains("旧楼门禁卡", facts);
+        Assert.Contains("地下室通行证", facts);
     }
 
     [Fact]

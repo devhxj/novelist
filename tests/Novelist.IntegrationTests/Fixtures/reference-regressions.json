@@ -107,6 +107,12 @@
       "expected_error": "周鸣是卧底"
     },
     {
+      "name": "unsupported_access_credential",
+      "mutation": "default",
+      "text": "雨声压低了整条街的呼吸，旧楼门禁卡在抽屉底下露出一角。",
+      "expected_error": "旧楼门禁卡"
+    },
+    {
       "name": "non_pov_interior_leak",
       "mutation": "non_pov_character",
       "text": "雨声压低了整条街的呼吸，周鸣心里明白她已经看穿了他。",

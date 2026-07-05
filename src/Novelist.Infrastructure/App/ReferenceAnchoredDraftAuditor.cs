@@ -349,6 +349,7 @@ internal static class ReferenceAnchoredDraftAuditor
         facts.AddRange(Regex.Matches(text, pattern)
             .Select(match => NormalizeAuditableFactPhrase(match.Value))
             .Where(value => value.Length >= 2));
+        facts.AddRange(ExtractAccessCredentialFacts(text));
         facts.AddRange(ExtractIdentityRevealFacts(text));
         facts.AddRange(ExtractRelationshipRevealFacts(text));
         facts.AddRange(ExtractDeathOrDisappearanceRevealFacts(text));
@@ -371,6 +372,21 @@ internal static class ReferenceAnchoredDraftAuditor
         }
 
         return normalized;
+    }
+
+    private static IEnumerable<string> ExtractAccessCredentialFacts(string text)
+    {
+        const string credentialTerms = "门禁卡|门卡|房卡|通行证|工牌|胸牌|证件|钥匙卡|身份卡|ID卡|id卡|U盘|硬盘|存储卡";
+        foreach (Match match in Regex.Matches(
+            text,
+            @"(?:^|[，。！？；;,\s、]|和|与)(?<fact>[\u4e00-\u9fffA-Za-z0-9]{0,8}(?:" + credentialTerms + @"))"))
+        {
+            var fact = match.Groups["fact"].Value.Trim('，', ',', '。', '.', '；', ';', '！', '!', '？', '?', '、');
+            if (fact.Length >= 2)
+            {
+                yield return fact;
+            }
+        }
     }
 
     private static IEnumerable<string> ExtractIdentityRevealFacts(string text)
