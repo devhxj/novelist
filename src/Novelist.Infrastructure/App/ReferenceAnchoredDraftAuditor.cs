@@ -415,6 +415,7 @@ internal static class ReferenceAnchoredDraftAuditor
         facts.AddRange(ExtractAccessCredentialFacts(text));
         facts.AddRange(ExtractSensitiveIdentifierFacts(text));
         facts.AddRange(ExtractLegalDocumentFacts(text));
+        facts.AddRange(ExtractDangerousArtifactFacts(text));
         facts.AddRange(ExtractLocationIdentifierFacts(text));
         facts.AddRange(ExtractIdentityRevealFacts(text));
         facts.AddRange(ExtractRelationshipRevealFacts(text));
@@ -461,6 +462,21 @@ internal static class ReferenceAnchoredDraftAuditor
         foreach (Match match in Regex.Matches(
             text,
             @"(?:^|[，。！？；;,\s、]|和|与)(?<fact>[\u4e00-\u9fffA-Za-z0-9]{0,8}?(?:" + legalDocumentTerms + @"))"))
+        {
+            var fact = NormalizeDelimitedAuditableFact(match.Groups["fact"].Value);
+            if (fact.Length >= 2)
+            {
+                yield return fact;
+            }
+        }
+    }
+
+    private static IEnumerable<string> ExtractDangerousArtifactFacts(string text)
+    {
+        const string artifactTerms = "消音手枪|改装手枪|手枪|枪支|步枪|猎枪|霰弹枪|冲锋枪|弹匣|子弹|炸药包|炸药|爆炸物|雷管|引信|毒剂配方|毒剂|毒药|毒针|伪造处方|处方单|处方笺|麻醉剂|镇静剂|注射器|手术刀";
+        foreach (Match match in Regex.Matches(
+            text,
+            @"(?:^|[，。！？；;,\s、]|和|与)(?<fact>[\u4e00-\u9fffA-Za-z0-9]{0,8}?(?:" + artifactTerms + @"))"))
         {
             var fact = NormalizeDelimitedAuditableFact(match.Groups["fact"].Value);
             if (fact.Length >= 2)

@@ -143,6 +143,25 @@ public sealed class ReferenceAnchoredDraftAuditorTests
     }
 
     [Fact]
+    public void BuildDraftAuditFailsWhenCandidateIntroducesUnsupportedDangerousArtifact()
+    {
+        var blueprint = Blueprint(beat => beat);
+        var candidate = Candidate(blueprint, "雨声压低了整条街的呼吸，消音手枪、炸药包、毒剂配方和伪造处方都被压在账本下面。");
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.UnsupportedFactErrors, item => item.Contains("消音手枪", StringComparison.Ordinal));
+        Assert.Contains(audit.UnsupportedFactErrors, item => item.Contains("炸药包", StringComparison.Ordinal));
+        Assert.Contains(audit.UnsupportedFactErrors, item => item.Contains("毒剂配方", StringComparison.Ordinal));
+        Assert.Contains(audit.UnsupportedFactErrors, item => item.Contains("伪造处方", StringComparison.Ordinal));
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("Remove unsupported fact", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BuildDraftAuditAllowsSensitiveIdentifierWhenItIsSceneFact()
     {
         var blueprint = Blueprint(beat => beat with
@@ -176,6 +195,25 @@ public sealed class ReferenceAnchoredDraftAuditorTests
 
         Assert.Equal("passed", audit.Status);
         Assert.DoesNotContain(audit.UnsupportedFactErrors, item => item.Contains("旧宅股权转让协议", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BuildDraftAuditAllowsDangerousArtifactWhenItIsSceneFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            SceneFacts = [.. beat.SceneFacts, "消音手枪", "毒剂配方"]
+        });
+        var candidate = Candidate(blueprint, "雨声压低了整条街的呼吸，消音手枪和毒剂配方被塞进抽屉夹层。");
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("passed", audit.Status);
+        Assert.DoesNotContain(audit.UnsupportedFactErrors, item => item.Contains("消音手枪", StringComparison.Ordinal));
+        Assert.DoesNotContain(audit.UnsupportedFactErrors, item => item.Contains("毒剂配方", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -859,6 +897,18 @@ public sealed class ReferenceAnchoredDraftAuditorTests
 
         Assert.Contains("旧宅股权转让协议", facts);
         Assert.Contains("地下室产权证明", facts);
+    }
+
+    [Fact]
+    public void ExtractAuditableFactPhrasesReadsDangerousArtifactFacts()
+    {
+        var facts = ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(
+            "雨声压低了整条街的呼吸，消音手枪、炸药包、毒剂配方和伪造处方都被压在账本下面。");
+
+        Assert.Contains("消音手枪", facts);
+        Assert.Contains("炸药包", facts);
+        Assert.Contains("毒剂配方", facts);
+        Assert.Contains("伪造处方", facts);
     }
 
     [Fact]

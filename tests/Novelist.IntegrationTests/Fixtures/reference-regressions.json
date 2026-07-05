@@ -152,6 +152,12 @@
       "expected_error": "旧宅股权转让协议"
     },
     {
+      "name": "unsupported_dangerous_artifact",
+      "mutation": "default",
+      "text": "雨声压低了整条街的呼吸，消音手枪和毒剂配方都被压在账本下面。",
+      "expected_error": "消音手枪"
+    },
+    {
       "name": "non_pov_interior_leak",
       "mutation": "non_pov_character",
       "text": "雨声压低了整条街的呼吸，周鸣心里明白她已经看穿了他。",
