@@ -738,35 +738,86 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         var current = run;
         try
         {
-            if (!string.Equals(current.Stage, ReferenceOrchestrationStages.BlueprintGeneration, StringComparison.Ordinal))
+            if (string.Equals(current.Stage, ReferenceOrchestrationStages.BlueprintGeneration, StringComparison.Ordinal))
             {
-                return current;
+                var blueprint = await GenerateChapterBlueprintAsync(
+                    new GenerateReferenceChapterBlueprintPayload(
+                        current.NovelId,
+                        current.ChapterNumber,
+                        Title: null,
+                        current.ChapterGoal,
+                        current.AnchorIds,
+                        current.KnownFacts,
+                        current.ForbiddenFacts),
+                    cancellationToken);
+                current = await PersistOrchestrationRunAsync(
+                    current with
+                    {
+                        Stage = ReferenceOrchestrationStages.BlueprintReview,
+                        BlueprintId = blueprint.BlueprintId,
+                        UpdatedAt = DateTimeOffset.UtcNow
+                    },
+                    cancellationToken);
+
+                var review = await ReviewChapterBlueprintAsync(
+                    new ReviewReferenceChapterBlueprintPayload(current.NovelId, blueprint.BlueprintId),
+                    cancellationToken);
+                current = BuildPostReviewOrchestrationRun(current, blueprint, review);
+                return await PersistOrchestrationRunAsync(current, cancellationToken);
             }
 
-            var blueprint = await GenerateChapterBlueprintAsync(
-                new GenerateReferenceChapterBlueprintPayload(
-                    current.NovelId,
-                    current.ChapterNumber,
-                    Title: null,
-                    current.ChapterGoal,
-                    current.AnchorIds,
-                    current.KnownFacts,
-                    current.ForbiddenFacts),
-                cancellationToken);
-            current = await PersistOrchestrationRunAsync(
-                current with
-                {
-                    Stage = ReferenceOrchestrationStages.BlueprintReview,
-                    BlueprintId = blueprint.BlueprintId,
-                    UpdatedAt = DateTimeOffset.UtcNow
-                },
-                cancellationToken);
+            if (string.Equals(current.Stage, ReferenceOrchestrationStages.MaterialBinding, StringComparison.Ordinal))
+            {
+                var approved = await ApproveChapterBlueprintAsync(
+                    new ApproveReferenceChapterBlueprintPayload(
+                        current.NovelId,
+                        current.BlueprintId,
+                        current.ReviewId),
+                    cancellationToken);
+                current = await PersistOrchestrationRunAsync(
+                    current with
+                    {
+                        Stage = ReferenceOrchestrationStages.MaterialBinding,
+                        UpdatedAt = DateTimeOffset.UtcNow
+                    },
+                    cancellationToken);
 
-            var review = await ReviewChapterBlueprintAsync(
-                new ReviewReferenceChapterBlueprintPayload(current.NovelId, blueprint.BlueprintId),
-                cancellationToken);
-            current = BuildPostReviewOrchestrationRun(current, blueprint, review);
-            return await PersistOrchestrationRunAsync(current, cancellationToken);
+                await BindBlueprintMaterialsAsync(
+                    new BindReferenceBlueprintMaterialsPayload(
+                        current.NovelId,
+                        approved.BlueprintId,
+                        current.CorpusSearchPolicy.MaxResultsPerBeat,
+                        SelectTopCandidate: true),
+                    cancellationToken);
+                current = await PersistOrchestrationRunAsync(
+                    current with
+                    {
+                        Stage = ReferenceOrchestrationStages.DraftGeneration,
+                        UpdatedAt = DateTimeOffset.UtcNow
+                    },
+                    cancellationToken);
+
+                var draft = await GenerateDraftFromBlueprintAsync(
+                    new GenerateReferenceAnchoredDraftPayload(current.NovelId, approved.BlueprintId, BeatIds: []),
+                    cancellationToken);
+                var candidateIds = draft.Candidates.Select(candidate => candidate.CandidateId).ToArray();
+                current = await PersistOrchestrationRunAsync(
+                    current with
+                    {
+                        Stage = ReferenceOrchestrationStages.DraftAudit,
+                        CandidateIds = candidateIds,
+                        UpdatedAt = DateTimeOffset.UtcNow
+                    },
+                    cancellationToken);
+
+                var audit = await AuditDraftAgainstBlueprintAsync(
+                    new AuditReferenceAnchoredDraftPayload(current.NovelId, approved.BlueprintId, candidateIds),
+                    cancellationToken);
+                current = BuildPostDraftAuditOrchestrationRun(current, approved, audit);
+                return await PersistOrchestrationRunAsync(current, cancellationToken);
+            }
+
+            return current;
         }
         catch (OperationCanceledException)
         {
@@ -2931,7 +2982,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
     {
         return string.Equals(run.Status, ReferenceOrchestrationRunStatuses.Running, StringComparison.Ordinal) &&
             run.CurrentDecision is null &&
-            string.Equals(run.Stage, ReferenceOrchestrationStages.BlueprintGeneration, StringComparison.Ordinal);
+            (string.Equals(run.Stage, ReferenceOrchestrationStages.BlueprintGeneration, StringComparison.Ordinal) ||
+                string.Equals(run.Stage, ReferenceOrchestrationStages.MaterialBinding, StringComparison.Ordinal));
     }
 
     private static ReferenceOrchestrationRunPayload BuildPostReviewOrchestrationRun(
@@ -2956,6 +3008,36 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 : BuildBlueprintRevisionDecision(blueprint, review),
             LastStopReason = stopReason,
             ErrorMessage = string.Empty,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+    }
+
+    private static ReferenceOrchestrationRunPayload BuildPostDraftAuditOrchestrationRun(
+        ReferenceOrchestrationRunPayload run,
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceAnchoredDraftAuditPayload audit)
+    {
+        var auditPassed = string.Equals(audit.Status, "passed", StringComparison.Ordinal);
+        if (auditPassed)
+        {
+            return run with
+            {
+                Status = ReferenceOrchestrationRunStatuses.WaitingForUser,
+                Stage = ReferenceOrchestrationStages.FinalInsertion,
+                CurrentDecision = BuildFinalInsertionDecision(blueprint, audit),
+                LastStopReason = ReferenceOrchestrationStopReasons.FinalInsertionRequired,
+                ErrorMessage = string.Empty,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+        }
+
+        return run with
+        {
+            Status = ReferenceOrchestrationRunStatuses.Failed,
+            Stage = ReferenceOrchestrationStages.DraftAudit,
+            CurrentDecision = null,
+            LastStopReason = ReferenceOrchestrationStopReasons.DraftAuditFailed,
+            ErrorMessage = BuildDraftAuditFailureMessage(audit),
             UpdatedAt = DateTimeOffset.UtcNow
         };
     }
@@ -3011,6 +3093,18 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             BuildBlueprintApprovalSummary(blueprint, review));
     }
 
+    private static ReferenceOrchestrationRequiredDecisionPayload BuildFinalInsertionDecision(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceAnchoredDraftAuditPayload audit)
+    {
+        return new ReferenceOrchestrationRequiredDecisionPayload(
+            ReferenceOrchestrationDecisionTypes.ApproveFinalInsertion,
+            ReferenceOrchestrationStopReasons.FinalInsertionRequired,
+            "Draft candidates passed deterministic audit. Review or edit the candidates before final chapter insertion.",
+            ["review_candidates", "edit_or_select_candidate", "approve_final_insertion"],
+            BuildDraftAuditApprovalSummary(blueprint, audit));
+    }
+
     private static ReferenceOrchestrationApprovalSummaryPayload BuildBlueprintApprovalSummary(
         ReferenceChapterBlueprintPayload blueprint,
         ReferenceChapterBlueprintReviewPayload review)
@@ -3055,6 +3149,58 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             materialUsePlan,
             rewriteBudget,
             highRiskFindings);
+    }
+
+    private static ReferenceOrchestrationApprovalSummaryPayload BuildDraftAuditApprovalSummary(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceAnchoredDraftAuditPayload audit)
+    {
+        var factBoundaryChanges = blueprint.KnownFacts
+            .Select(fact => "known: " + fact)
+            .Concat(blueprint.ForbiddenFacts.Select(fact => "forbidden: " + fact))
+            .Take(20)
+            .ToArray();
+        var emotionalTrajectory = blueprint.Beats.Count == 0
+            ? blueprint.EmotionAnalysis.Summary
+            : blueprint.Beats[0].EmotionBefore + " -> " + blueprint.Beats[^1].EmotionAfter;
+        var highRiskFindings = audit.ProvenanceErrors
+            .Select(error => "provenance: " + error)
+            .Concat(audit.BlueprintErrors.Select(error => "blueprint: " + error))
+            .Concat(audit.UnsupportedFactErrors.Select(error => "unsupported_fact: " + error))
+            .Concat(audit.PovErrors.Select(error => "pov: " + error))
+            .Concat(audit.AiProseRisks.Select(risk => "ai_prose: " + risk))
+            .Concat(audit.RequiredFixes.Select(fix => "required_fix: " + fix))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.Ordinal)
+            .Take(20)
+            .ToArray();
+
+        return new ReferenceOrchestrationApprovalSummaryPayload(
+            blueprint.ChapterFunction,
+            string.IsNullOrWhiteSpace(blueprint.GlobalPov) ? "not selected" : blueprint.GlobalPov,
+            factBoundaryChanges,
+            emotionalTrajectory,
+            "selected candidates audited against bound reference materials",
+            audit.RewriteLevel,
+            highRiskFindings);
+    }
+
+    private static string BuildDraftAuditFailureMessage(ReferenceAnchoredDraftAuditPayload audit)
+    {
+        var failures = audit.RequiredFixes
+            .Concat(audit.ProvenanceErrors)
+            .Concat(audit.BlueprintErrors)
+            .Concat(audit.UnsupportedFactErrors)
+            .Concat(audit.PovErrors)
+            .Concat(audit.AiProseRisks)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.Ordinal)
+            .Take(5)
+            .ToArray();
+        return NormalizeOptional(
+            string.Join("; ", failures),
+            "Draft audit failed.",
+            1_000);
     }
 
     private static string BuildBlueprintPremise(string? planText, string chapterFunction)
