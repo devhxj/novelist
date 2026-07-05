@@ -71,6 +71,11 @@
       "expected_error": "misbelief"
     },
     {
+      "name": "unsupported_character_goal_fact",
+      "mutation": "unsupported_character_goal_fact",
+      "expected_error": "unsupported character goal fact"
+    },
+    {
       "name": "unsupported_character_misbelief_fact",
       "mutation": "unsupported_character_misbelief_fact",
       "expected_error": "unsupported character misbelief fact"

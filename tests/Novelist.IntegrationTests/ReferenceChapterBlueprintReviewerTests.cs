@@ -571,6 +571,24 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsUnsupportedCharacterGoalFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            CharacterGoals = ["密室钥匙"]
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.CharacterStateErrors, item => item.Contains("unsupported character goal fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "character_state" &&
+                defect.FieldPath.Contains("character_goals", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsUnsupportedCharacterMisbeliefFact()
     {
         var blueprint = Blueprint(beat => beat with
