@@ -51,6 +51,11 @@
       "expected_error": "generic execution mode"
     },
     {
+      "name": "generic_candidate_rejection_rule",
+      "mutation": "generic_candidate_rejection_rule",
+      "expected_error": "generic candidate rejection rule"
+    },
+    {
       "name": "generic_anti_screenplay_duty",
       "mutation": "generic_anti_screenplay_duty",
       "expected_error": "generic anti-screenplay duty"

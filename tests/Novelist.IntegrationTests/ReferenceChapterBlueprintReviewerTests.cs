@@ -352,6 +352,24 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsGenericCandidateRejectionRule()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            CandidateRejectionRule = "不好的不要，质量差就拒绝"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ExecutionErrors, item => item.Contains("generic candidate rejection rule", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "execution" &&
+                defect.FieldPath.Contains("candidate_rejection_rule", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsGenericAntiScreenplayDuty()
     {
         var blueprint = Blueprint(beat => beat with

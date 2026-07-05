@@ -114,6 +114,10 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 ExecutionMode = "正常写，自然展开"
             },
+            "generic_candidate_rejection_rule" => beat with
+            {
+                CandidateRejectionRule = "不好的不要，质量差就拒绝"
+            },
             "generic_anti_screenplay_duty" => beat with
             {
                 AntiScreenplayDuty = "避免剧本化"

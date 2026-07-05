@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 12;
+    public const int CurrentReviewVersion = 13;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -319,6 +319,17 @@ internal static class ReferenceChapterBlueprintReviewer
                         "Rewrite execution_mode as a concrete drafting operation, such as dwell, compress, withhold, reveal, braid evidence, or stage interiority.");
                 }
 
+                if (UsesGenericCandidateRejectionRule(beat.CandidateRejectionRule))
+                {
+                    AddBeatDefect(
+                        executionErrors,
+                        "execution",
+                        beat,
+                        "candidate_rejection_rule",
+                        $"Beat {beat.BeatIndex} uses generic candidate rejection rule.",
+                        "Rewrite candidate_rejection_rule as a concrete failure condition, such as action-only, dialogue-only, missing evidence, POV leak, or unsupported reveal.");
+                }
+
                 if (UsesGenericAntiScreenplayDuty(beat.AntiScreenplayDuty))
                 {
                     AddBeatDefect(
@@ -614,6 +625,17 @@ internal static class ReferenceChapterBlueprintReviewer
                 "execute normally", "as needed", "naturally", "smoothly",
                 "正常写", "正常执行", "常规执行", "按常规", "根据需要",
                 "自然展开", "自然推进", "顺着写", "流畅推进", "正常推进"
+            ]);
+    }
+
+    private static bool UsesGenericCandidateRejectionRule(string value)
+    {
+        return ContainsAny(
+            value,
+            [
+                "bad output", "low quality", "poor quality", "not good", "if bad",
+                "质量差", "不好的不要", "不好就拒绝", "写得不好", "不够好",
+                "效果不好", "不合适就拒绝", "不满意", "看起来不好", "泛泛而谈"
             ]);
     }
 
