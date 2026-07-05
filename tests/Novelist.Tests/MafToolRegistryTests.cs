@@ -258,6 +258,60 @@ public sealed class MafToolRegistryTests
     }
 
     [Fact]
+    public void ReferenceDraftToolDescriptionsEnforceBlueprintWorkflowOrder()
+    {
+        var registry = new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors: new RecordingReferenceAnchorService(),
+            referenceDrafts: new RecordingReferenceAnchoredDraftService());
+
+        var tools = registry.CreateTools(new NovelistMafToolContext(17))
+            .Where(tool => tool.Name.Contains("reference", StringComparison.Ordinal))
+            .ToDictionary(tool => tool.Name);
+
+        AssertToolDescriptionContains(
+            tools["generate_reference_chapter_blueprint"],
+            "review_reference_chapter_blueprint",
+            "不生成正文");
+        AssertToolDescriptionContains(
+            tools["review_reference_chapter_blueprint"],
+            "generate_reference_chapter_blueprint",
+            "revise_reference_chapter_blueprint",
+            "approve_reference_chapter_blueprint");
+        AssertToolDescriptionContains(
+            tools["approve_reference_chapter_blueprint"],
+            "review_reference_chapter_blueprint",
+            "bind_reference_blueprint_materials");
+        AssertToolDescriptionContains(
+            tools["bind_reference_blueprint_materials"],
+            "approve_reference_chapter_blueprint",
+            "select_top_candidate=true",
+            "generate_reference_anchored_draft");
+        AssertToolDescriptionContains(
+            tools["generate_reference_anchored_draft"],
+            "generate_reference_chapter_blueprint",
+            "review_reference_chapter_blueprint",
+            "approve_reference_chapter_blueprint",
+            "bind_reference_blueprint_materials",
+            "select_top_candidate=true",
+            "audit_reference_anchored_draft",
+            "SaveContent");
+        AssertToolDescriptionContains(
+            tools["audit_reference_anchored_draft"],
+            "generate_reference_anchored_draft",
+            "纯检查");
+    }
+
+    [Fact]
     public async Task ReferenceMaterialToolInjectsNovelContext()
     {
         var anchors = new RecordingReferenceAnchorService();
@@ -483,6 +537,14 @@ public sealed class MafToolRegistryTests
         Assert.Equal("检索 DeepSeek web search 文档", searchResult.Data!.Value.GetProperty("queries")[0].GetString());
         Assert.Equal("综合摘要", searchResult.Data.Value.GetProperty("summary").GetString());
         Assert.Equal("https://example.test/source", searchResult.Data.Value.GetProperty("sources")[0].GetProperty("url").GetString());
+    }
+
+    private static void AssertToolDescriptionContains(AIFunction tool, params string[] expectedParts)
+    {
+        foreach (var expected in expectedParts)
+        {
+            Assert.Contains(expected, tool.Description, StringComparison.Ordinal);
+        }
     }
 
     private sealed class RecordingStoryMemorySearchService : IStoryMemorySearchService

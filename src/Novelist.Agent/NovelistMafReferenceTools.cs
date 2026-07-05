@@ -164,13 +164,13 @@ public sealed partial class NovelistMafToolRegistry
 
     private sealed class ReferenceDraftMafTools
     {
-        private const string GenerateBlueprintDescription = "生成当前小说某章节的 reference-anchored Chapter Narrative Blueprint。只生成结构化蓝图，不生成正文。";
-        private const string ReviewBlueprintDescription = "评审 reference-anchored 蓝图。纯检查工具，不静默修订蓝图。";
-        private const string ReviseBlueprintDescription = "按字段路径修订蓝图，并使已批准 review/material links 失效。";
-        private const string ApproveBlueprintDescription = "批准已通过评审的蓝图。只有批准后的蓝图才能绑定材料和生成候选。";
-        private const string BindMaterialsDescription = "为已通过评审并已批准的蓝图 beat 返回参考材料候选；默认不自动选中，进入草稿生成前需显式 select_top_candidate=true。";
-        private const string GenerateDraftDescription = "从 approved/material_bound 蓝图和已选择材料链接生成候选段落；只返回 candidates，不调用 SaveContent，不直接写章节。";
-        private const string AuditDraftDescription = "按 candidate_id 审计已生成的 reference-anchored 草稿候选。纯检查工具，不写章节。";
+        private const string GenerateBlueprintDescription = "生成当前小说某章节的 reference-anchored Chapter Narrative Blueprint。只生成结构化蓝图，不生成正文；下一步必须调用 review_reference_chapter_blueprint。";
+        private const string ReviewBlueprintDescription = "评审由 generate_reference_chapter_blueprint 生成或修订后的 reference-anchored 蓝图。纯检查工具，不静默修订蓝图；失败时调用 revise_reference_chapter_blueprint 后重新评审，通过后才能调用 approve_reference_chapter_blueprint。";
+        private const string ReviseBlueprintDescription = "按字段路径修订蓝图，并使已批准 review/material links 失效；修订后必须再调用 review_reference_chapter_blueprint。";
+        private const string ApproveBlueprintDescription = "批准已通过 review_reference_chapter_blueprint 的蓝图。只有批准后的蓝图才能调用 bind_reference_blueprint_materials 并生成候选。";
+        private const string BindMaterialsDescription = "为已通过 approve_reference_chapter_blueprint 批准的蓝图 beat 返回参考材料候选；默认不自动选中，进入 generate_reference_anchored_draft 前需显式 select_top_candidate=true。";
+        private const string GenerateDraftDescription = "从已按 generate_reference_chapter_blueprint -> review_reference_chapter_blueprint -> approve_reference_chapter_blueprint -> bind_reference_blueprint_materials 且 select_top_candidate=true 准备好的 approved/material_bound 蓝图生成候选段落；只返回 candidates，随后调用 audit_reference_anchored_draft，不调用 SaveContent，不直接写章节。";
+        private const string AuditDraftDescription = "按 candidate_id 审计 generate_reference_anchored_draft 生成的 reference-anchored 草稿候选。纯检查工具，不写章节。";
 
         private readonly IReferenceAnchoredDraftService _referenceDrafts;
         private readonly NovelistMafToolContext _context;
