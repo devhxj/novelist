@@ -3275,6 +3275,79 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReferenceOrchestrationRunUsesWorkspaceCorpusAnchorsWithoutExplicitAnchorIds()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("共享语料编排目标", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "雨声压低街道，主角在门口停住，心里意识到压力仍然压着呼吸。"),
+            CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "workspace-corpus-orchestration.md",
+            """
+            # 第一章
+
+            雨声压低了街道，他在门口停住，心里意识到压力仍然压着呼吸。
+            """);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novels);
+        var workspaceAnchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "工作区编排共享参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        await MarkAnchorAsWorkspaceCorpusAsync(options, workspaceAnchor.AnchorId);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+
+        var started = await service.StartOrchestrationRunAsync(
+            new StartReferenceOrchestrationRunPayload(
+                novel.Id,
+                ChapterNumber: 14,
+                ChapterGoal: "雨声压低街道，主角在门口停住，心里意识到压力仍然压着呼吸",
+                KnownFacts: ["雨声压低街道", "主角在门口停住", "心里意识到压力仍然压着呼吸"],
+                ForbiddenFacts: [],
+                AnchorIds: null,
+                CorpusSearchPolicy: new ReferenceCorpusSearchPolicyPayload(
+                    "story_context",
+                    MaxResultsPerBeat: 3,
+                    LicenseStatuses: ["user_provided"],
+                    IncludeAnchorIds: [],
+                    ExcludeAnchorIds: []),
+                SourceConfirmed: true),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, started.Status);
+        Assert.Equal(ReferenceOrchestrationStages.BlueprintApproval, started.Stage);
+        Assert.Empty(started.AnchorIds);
+
+        var completedSafeStages = await service.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                started.RunId,
+                ReferenceOrchestrationDecisionTypes.ApproveBlueprint,
+                started.ReviewId),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, completedSafeStages.Status);
+        Assert.Equal(ReferenceOrchestrationStages.FinalInsertion, completedSafeStages.Stage);
+        Assert.Equal(ReferenceOrchestrationStopReasons.FinalInsertionRequired, completedSafeStages.LastStopReason);
+        Assert.NotEmpty(completedSafeStages.CandidateIds);
+
+        var audit = await service.AuditDraftAgainstBlueprintAsync(
+            new AuditReferenceAnchoredDraftPayload(
+                novel.Id,
+                completedSafeStages.BlueprintId,
+                completedSafeStages.CandidateIds),
+            CancellationToken.None);
+        Assert.Equal("passed", audit.Status);
+
+        var selectedLinks = await ReadSelectedMaterialLinksAsync(options, completedSafeStages.BlueprintId);
+        var selected = Assert.Single(selectedLinks);
+        Assert.StartsWith(workspaceAnchor.AnchorId + ":material:", selected.MaterialId, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReferenceOrchestrationRunUsesCorpusSearchPolicyWhenBindingMaterials()
     {
         var options = CreateOptions();
@@ -3750,6 +3823,70 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         }
 
         return columns;
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceBlueprintMaterialLinkPayload>> ReadSelectedMaterialLinksAsync(
+        AppInitializationOptions options,
+        long blueprintId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT link_id, blueprint_id, beat_id, material_id, intended_use, max_rewrite_level,
+                   selected, score, score_components_json, fit_explanation, created_at
+            FROM reference_blueprint_material_links
+            WHERE blueprint_id = $blueprint_id AND selected != 0
+            ORDER BY beat_id ASC, material_id ASC;
+            """;
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        var links = new List<ReferenceBlueprintMaterialLinkPayload>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            links.Add(new ReferenceBlueprintMaterialLinkPayload(
+                reader.GetString(0),
+                reader.GetInt64(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5),
+                reader.GetInt32(6) != 0,
+                reader.GetDouble(7),
+                JsonSerializer.Deserialize<IReadOnlyDictionary<string, double>>(reader.GetString(8), BridgeJson.SerializerOptions)
+                    ?? new Dictionary<string, double>(),
+                reader.GetString(9),
+                DateTimeOffset.Parse(reader.GetString(10))));
+        }
+
+        return links;
+    }
+
+    private static async ValueTask MarkAnchorAsWorkspaceCorpusAsync(
+        AppInitializationOptions options,
+        long anchorId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_anchors
+            SET novel_id = 0
+            WHERE anchor_id = $anchor_id;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        var updated = await command.ExecuteNonQueryAsync();
+        Assert.Equal(1, updated);
     }
 
     private static async ValueTask SetMaterialLinkAnalysisHashAsync(
