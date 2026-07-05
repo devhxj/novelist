@@ -4,7 +4,7 @@
 
 ## Desktop Composition
 
-`src/Novelist.App/Desktop/PhotinoWindowFactory.cs` constructs the reference services after embedding/RAG dependencies:
+`src/Novelist.App/Desktop/DesktopBridgeComposition.cs` constructs the desktop bridge service graph used by `PhotinoWindowFactory` and by desktop bridge smoke tests. The reference services are created after embedding/RAG dependencies:
 
 ```csharp
 var referenceAnchorService = new SqliteReferenceAnchorService(
@@ -16,11 +16,9 @@ var referenceAnchorService = new SqliteReferenceAnchorService(
 
 var referenceAnchoredDraftService = new SqliteReferenceAnchoredDraftService(
     appOptions,
-    referenceAnchorService,
-    chapterContentService,
+    novelService,
     planningService,
-    worldService,
-    llmService);
+    referenceAnchorService);
 ```
 
 It passes both services into `NovelistMafToolRegistry` so chat tools can access reference-anchor operations:
@@ -41,7 +39,7 @@ var chatToolExecutor = new NovelistMafChatToolExecutor(new NovelistMafToolRegist
     referenceAnchoredDraftService));
 ```
 
-It also registers both Photino bridge handler groups on the shared dispatcher:
+`PhotinoWindowFactory` remains responsible for window setup and routes `RegisterWebMessageReceivedHandler` into the bridge returned by `DesktopBridgeComposition.CreateBridge(...)`. The composition helper registers both Photino bridge handler groups on the shared dispatcher:
 
 ```csharp
 .RegisterReferenceAnchorHandlers(referenceAnchorService)
