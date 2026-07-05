@@ -721,7 +721,28 @@ public sealed class ReferenceChapterBlueprintReviewerTests
         Assert.Contains(review.CharacterStateErrors, item => item.Contains("unsupported relationship pressure fact", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(
             review.Defects,
-            defect => defect.Category == "character_state" &&
+                defect => defect.Category == "character_state" &&
+                defect.FieldPath.Contains("relationship_pressure", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsForbiddenFactInRelationshipPressure()
+    {
+        var blueprint = Blueprint(
+            beat => beat with
+            {
+                RelationshipPressure = ["凶手身份"]
+            },
+            forbiddenFacts: ["凶手身份"],
+            knownFacts: ["雨声压低了整条街的呼吸", "凶手身份"]);
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ForbiddenFactErrors, item => item.Contains("relationship pressure", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "forbidden_fact" &&
                 defect.FieldPath.Contains("relationship_pressure", StringComparison.OrdinalIgnoreCase));
     }
 
