@@ -163,8 +163,9 @@ export function BlueprintDetail({
   }
 
   const review = blueprint.latest_review
-  const canApprove = review?.status === 'passed' && blueprint.status !== 'approved' && blueprint.status !== 'material_bound'
-  const requiresReview = blueprint.status === 'draft' || blueprint.status === 'review_failed' || blueprint.status === 'stale'
+  const isStale = blueprint.status === 'stale'
+  const canApprove = review?.status === 'passed' && blueprint.status !== 'approved' && blueprint.status !== 'material_bound' && !isStale
+  const requiresReview = blueprint.status === 'draft' || blueprint.status === 'review_failed'
   const reviewSections = review ? reviewFindings(review) : []
   const reviewDefects = review?.defects?.filter(defect => defect.reason || defect.required_fix) ?? []
   const auditSections = draft?.audit ? auditFindings(draft.audit) : []
@@ -202,7 +203,7 @@ export function BlueprintDetail({
           <p className={`mt-1 text-xs ${statusTone(blueprint.status)}`}>{blueprint.status}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button onClick={onReview} disabled={loading} className={actionButtonClass}><ShieldCheck className="h-3.5 w-3.5" />评审</button>
+          <button onClick={onReview} disabled={loading || isStale} className={actionButtonClass}><ShieldCheck className="h-3.5 w-3.5" />评审</button>
           <button onClick={onApprove} disabled={loading || !canApprove} className={actionButtonClass}><CheckCircle2 className="h-3.5 w-3.5" />批准</button>
           <button onClick={onBind} disabled={loading || (blueprint.status !== 'approved' && blueprint.status !== 'material_bound')} className={actionButtonClass}><Link2 className="h-3.5 w-3.5" />绑定</button>
           <button onClick={onGenerateDraft} disabled={loading || blueprint.status !== 'material_bound'} className={actionButtonClass}><Wand2 className="h-3.5 w-3.5" />候选</button>
@@ -215,16 +216,23 @@ export function BlueprintDetail({
         </div>
       )}
 
+      {isStale && (
+        <div className="mt-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs leading-relaxed text-destructive">
+          章节规划已变化。此蓝图保留为只读对比，不能继续评审、批准、修订、绑定材料或生成候选；请生成新的章节蓝图。
+        </div>
+      )}
+
       <div className="mt-4 rounded-md border border-border bg-background p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h4 className="text-xs font-semibold text-foreground">
             当前节拍字段{editableBeat ? <span className="ml-1 text-muted-foreground">#{editableBeat.beat_index}</span> : null}
           </h4>
-          <button onClick={onSaveEdits} disabled={loading} className={actionButtonClass}>
+          <button onClick={onSaveEdits} disabled={loading || isStale} className={actionButtonClass}>
             <CheckCircle2 className="h-3.5 w-3.5" />保存修订
           </button>
         </div>
-        <div className="mt-3 space-y-5">
+        <fieldset disabled={isStale} className="mt-3 space-y-5">
+          <legend className="sr-only">蓝图修订字段</legend>
           <RevisionSection title="节拍逻辑与转场">
             <Field label="叙事功能">
               <textarea value={revisionForm.narrativeFunction} onChange={updateRevisionField('narrativeFunction')} className={`${inputClass} min-h-16 resize-y`} />
@@ -410,7 +418,7 @@ export function BlueprintDetail({
               <textarea value={revisionForm.noReuseReason} onChange={updateRevisionField('noReuseReason')} className={`${inputClass} min-h-16 resize-y`} />
             </Field>
           </RevisionSection>
-        </div>
+        </fieldset>
       </div>
 
       <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">

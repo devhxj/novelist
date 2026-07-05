@@ -401,7 +401,7 @@ Recommended implementation slices:
 **Acceptance criteria:**
 
 - [ ] Full reference-anchor workflow is exercised in the real Photino desktop shell through the bridge: create/rebuild anchor, search material, generate/review/revise/approve blueprint, bind materials, generate candidates, inspect audit, and confirm no automatic chapter insertion.
-- [ ] Stale blueprint UI behavior is decided and covered by tests or documented manual verification: preserve read-only for comparison, hide by default, or expose with clear regeneration affordance.
+- [x] Stale blueprint UI behavior is decided and covered by build/lint verification: preserve stale blueprints read-only for comparison, disable review/approval/revision/material binding/candidate generation, and show a regeneration prompt.
 - [x] Reference-anchor search scope is decided: keep reference material results in the dedicated reference panel/API for the current implementation; any global `SearchAll` integration must be a later staged opt-in change with its own result taxonomy and preview policy.
 - [ ] Optional LLM-assisted material tagging/adaptation has a feature-flag/design decision and does not weaken deterministic review, binding, rewrite-level, or audit gates.
 - [x] Full-chapter candidate assembly is explicitly deferred: anchored draft APIs return beat-scoped paragraph candidates only, without `chapter_text`, `assembled_text`, or `full_chapter` fields, and existing generation still does not mutate chapter content.
@@ -424,6 +424,9 @@ Targeted Phase 10 checks completed:
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter GeneratedBlueprintExposesStableGeneratorVersionWithoutPromptSnapshots -v minimal`
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter ReferenceChapterBlueprintPayloadsUseStableSnakeCaseJsonNames -v minimal`
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter AnchoredDraftPayloadSerializesBeatCandidatesWithoutFullChapterAssembly -v minimal`
+- [x] Frontend stale-blueprint UI check: stale blueprints are retained read-only for comparison, with review/approval/revision/binding/candidate actions disabled and a regeneration prompt shown.
+- [x] `cd frontend && npm run build`
+- [x] `cd frontend && npm run lint`
 - [x] Documentation closure check: `overview.md`, `schema-and-integration.md`, and `decisions.md` describe Phase 0-9 bridge, desktop composition, agent tools, frontend entry, import semantics, extracted blueprint components, and current SQLite tables as implemented/current rather than as pending work.
 - [x] Documentation check: `Makefile`, `README.md`, `docs/build-setup.md`, and `schema-and-integration.md` agree that `make dev` uses prebuilt `frontend/dist` or an explicit Vite `--start-url`.
 
@@ -619,7 +622,7 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 - Failed review assistance: keep revision fully manual/agent-driven, or add field-level fix suggestions that remain separate from approval.
 - Transition/no-reuse policy: require every generated paragraph to trace to material, or allow approved no-reuse transition beats without direct links.
 - Candidate assembly: keep beat-level candidates only, or assemble a full-chapter candidate after all beats pass audit.
-- Stale blueprint UX: preserve stale blueprints read-only for comparison, hide them by default, or show them with regeneration prompts.
+- Stale blueprint UX: resolved for the current implementation. Preserve stale blueprints read-only for comparison, keep them visible, disable review/approval/revision/material binding/candidate generation, and show a regeneration prompt.
 - Development workflow: resolved as explicit frontend build/Vite steps for faster backend-only loops.
 
 ## Phase 11 Automation Decisions To Close
@@ -652,8 +655,7 @@ Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj -
 Recommended next session:
 
 1. Execute the full desktop workflow in Photino and record any runtime-only bridge/UI gaps under Phase 10.
-2. Decide stale blueprint UI behavior and add coverage if stale rows remain visible.
-3. Close the model-assisted tagging/adaptation decision before adding any optional LLM path.
+2. Close the model-assisted tagging/adaptation decision before adding any optional LLM path.
 
 Recommended following session:
 

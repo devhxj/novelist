@@ -80,11 +80,12 @@ As of 2026-07-04, the implementation has moved beyond a pure planning document:
 Phase 10 follow-up areas:
 
 - run the full reference-anchor workflow in the real desktop shell through the Photino bridge, not only through service and bridge tests;
-- decide and test stale-blueprint comparison/preservation behavior before surfacing stale rows more prominently in the UI;
 - continue broadening deterministic Chinese narration, emotion, POV, and unsupported-fact fixtures before enabling optional model-assisted tagging or adaptation;
 - keep reference-anchor search in the dedicated reference panel/API for now; any global search integration should be a later staged opt-in design;
 - keep full-chapter assembly deferred until every beat candidate can prove passing audit/provenance and a separate insertion-confirmation design exists;
 - keep the desktop development loop explicit: prebuild `frontend/dist` for `make dev`, or run Vite and launch with `--start-url`.
+
+Stale blueprint UI policy: keep stale blueprints visible as read-only comparison artifacts. The reference panel disables review, approval, revision, material binding, and candidate generation for stale blueprints and prompts the user to generate a new blueprint from the changed chapter plan.
 
 ## 2026-07-05 Planning Update: AI-Orchestrated Low-Intervention Workflow
 
