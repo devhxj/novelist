@@ -126,6 +126,16 @@
       "expected_error": "unsupported narrative function fact"
     },
     {
+      "name": "unsupported_logic_premise_fact",
+      "mutation": "unsupported_logic_premise_fact",
+      "expected_error": "unsupported logic premise fact"
+    },
+    {
+      "name": "unsupported_conflict_pressure_fact",
+      "mutation": "unsupported_conflict_pressure_fact",
+      "expected_error": "unsupported conflict pressure fact"
+    },
+    {
       "name": "generic_paragraph_intention",
       "mutation": "generic_paragraph_intention",
       "expected_error": "generic paragraph intention"

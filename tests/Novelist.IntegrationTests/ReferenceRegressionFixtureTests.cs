@@ -180,6 +180,14 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 NarrativeFunction = "delay the 密室钥匙 reveal through pressure"
             },
+            "unsupported_logic_premise_fact" => beat with
+            {
+                LogicPremise = "密室钥匙 changes the choice"
+            },
+            "unsupported_conflict_pressure_fact" => beat with
+            {
+                ConflictPressure = "密室钥匙 forces a choice"
+            },
             "generic_paragraph_intention" => beat with
             {
                 ParagraphIntention = "写得更好，更有代入感"

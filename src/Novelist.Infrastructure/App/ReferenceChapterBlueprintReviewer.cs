@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 42;
+    public const int CurrentReviewVersion = 43;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -107,6 +107,28 @@ internal static class ReferenceChapterBlueprintReviewer
                     "narrative_function",
                     $"Beat {beat.BeatIndex} contains unsupported narrative function fact: {unsupportedNarrativeFunctionFact}",
                     "Set up the narrative_function fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            foreach (var unsupportedLogicPremiseFact in FindUnsupportedLogicPremiseFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    logicErrors,
+                    "logic",
+                    beat,
+                    "logic_premise",
+                    $"Beat {beat.BeatIndex} contains unsupported logic premise fact: {unsupportedLogicPremiseFact}",
+                    "Set up the logic_premise fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            foreach (var unsupportedConflictPressureFact in FindUnsupportedConflictPressureFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    logicErrors,
+                    "logic",
+                    beat,
+                    "conflict_pressure",
+                    $"Beat {beat.BeatIndex} contains unsupported conflict pressure fact: {unsupportedConflictPressureFact}",
+                    "Set up the conflict_pressure fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
             }
 
             if (beat.BeatIndex > 1 && string.IsNullOrWhiteSpace(beat.CausalityIn))
@@ -1383,6 +1405,42 @@ internal static class ReferenceChapterBlueprintReviewer
             .ToArray();
 
         return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.NarrativeFunction)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedLogicPremiseFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.LogicPremise)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedConflictPressureFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ConflictPressure)
             .Where(fact => !IsAllowedFact(fact, allowedFacts))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

@@ -94,6 +94,42 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsUnsupportedLogicPremiseFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            LogicPremise = "密室钥匙 changes the choice"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.LogicErrors, item => item.Contains("unsupported logic premise fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "logic" &&
+                defect.FieldPath.Contains("logic_premise", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsUnsupportedConflictPressureFact()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            ConflictPressure = "密室钥匙 forces a choice"
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.LogicErrors, item => item.Contains("unsupported conflict pressure fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "logic" &&
+                defect.FieldPath.Contains("conflict_pressure", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsMissingCausalityOut()
     {
         var blueprint = Blueprint(beat => beat with
