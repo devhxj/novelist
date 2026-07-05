@@ -20,6 +20,27 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewAllowsEmotionEvidenceQueryForSubtextAndExternalEvidenceDuties()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            ProseDuties = ["subtext", "external_evidence"],
+            ReferenceQuery = beat.ReferenceQuery with
+            {
+                FunctionTags = ["emotion_evidence"],
+                EmotionTags = [],
+                PovTags = [],
+                TechniqueTags = []
+            }
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+        Assert.Empty(review.MaterialFitErrors);
+    }
+
+    [Fact]
     public void BuildReviewFailsMissingExecutionTrack()
     {
         var blueprint = Blueprint(

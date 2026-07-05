@@ -875,11 +875,18 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                     string.Equals(material.FunctionTag, "interiority", StringComparison.OrdinalIgnoreCase)) ||
                 (string.Equals(duty, "external_evidence", StringComparison.OrdinalIgnoreCase) &&
                     (string.Equals(material.FunctionTag, "action", StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(material.FunctionTag, "environment", StringComparison.OrdinalIgnoreCase))) ||
+                     string.Equals(material.FunctionTag, "environment", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(material.FunctionTag, "emotion_evidence", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(material.TechniqueTag, "external_evidence", StringComparison.OrdinalIgnoreCase))) ||
                 (string.Equals(duty, "transition", StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(material.FunctionTag, "transition", StringComparison.OrdinalIgnoreCase)) ||
                 (string.Equals(duty, "sensory", StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(material.TechniqueTag, "sensory_detail", StringComparison.OrdinalIgnoreCase)) ||
+                (string.Equals(duty, "subtext", StringComparison.OrdinalIgnoreCase) &&
+                    (string.Equals(material.FunctionTag, "dialogue", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(material.FunctionTag, "interiority", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(material.FunctionTag, "emotion_evidence", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(material.TechniqueTag, "external_evidence", StringComparison.OrdinalIgnoreCase))) ||
                 (string.Equals(duty, "causality", StringComparison.OrdinalIgnoreCase) &&
                     !string.Equals(material.FunctionTag, "dialogue", StringComparison.OrdinalIgnoreCase)))
             {

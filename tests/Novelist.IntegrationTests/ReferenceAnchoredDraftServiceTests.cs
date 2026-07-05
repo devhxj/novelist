@@ -1203,6 +1203,95 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task BindBlueprintMaterialsTreatsEmotionEvidenceAsSubtextAndExternalEvidenceDutyFit()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("外显潜台词绑定测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        var subtextEvidenceMaterial = new ReferenceMaterialPayload(
+            MaterialId: "subtext-evidence-material",
+            AnchorId: 1,
+            SourceSegmentId: "segment-1",
+            MaterialType: ReferenceMaterialTypes.Sentence,
+            FunctionTag: "emotion_evidence",
+            EmotionTag: "restrained",
+            SceneTag: "scene",
+            PovTag: "unknown",
+            TechniqueTag: "external_evidence",
+            FunctionConfidence: 0.8,
+            EmotionConfidence: 0.7,
+            PovConfidence: 0.55,
+            Text: "她只把杯子推远。",
+            SourceHash: "source-hash",
+            ExtractorVersion: "test",
+            UserVerified: false,
+            CreatedAt: DateTimeOffset.UtcNow);
+        var referenceAnchors = new FixedReferenceAnchorService(subtextEvidenceMaterial, applySearchFilters: true);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+        var generated = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                43,
+                "外显潜台词绑定蓝图",
+                "杯子推远",
+                [1],
+                KnownFacts: ["她只把杯子推远"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var beatPath = "beat:" + generated.Beats[0].BeatId + ":";
+        var revised = await service.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                generated.BlueprintId,
+                [
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.query",
+                        "杯子推远"),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.material_types",
+                        JsonSerializer.Serialize(new[] { ReferenceMaterialTypes.Sentence })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.function_tags",
+                        JsonSerializer.Serialize(Array.Empty<string>())),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.emotion_tags",
+                        JsonSerializer.Serialize(Array.Empty<string>())),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.pov_tags",
+                        JsonSerializer.Serialize(Array.Empty<string>())),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.technique_tags",
+                        JsonSerializer.Serialize(new[] { "external_evidence" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "required_material_types",
+                        JsonSerializer.Serialize(new[] { ReferenceMaterialTypes.Sentence })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "prose_duties",
+                        JsonSerializer.Serialize(new[] { "subtext", "external_evidence" }))
+                ],
+                "user",
+                "verify emotion evidence duty binding"),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId),
+            CancellationToken.None);
+        var approved = await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, review.ReviewId),
+            CancellationToken.None);
+
+        var result = await service.BindBlueprintMaterialsAsync(
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, approved.BlueprintId, MaxResultsPerBeat: 3, SelectTopCandidate: true),
+            CancellationToken.None);
+
+        var selected = Assert.Single(result.Links, link => link.Selected);
+        Assert.Equal("subtext-evidence-material", selected.MaterialId);
+        Assert.True(selected.ScoreComponents["prose_duty"] > 0);
+        Assert.Contains("prose duty", selected.FitExplanation, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task GenerateDraftFromBlueprintSendsOnlyBeatScopedReviewedInputsToAdapter()
     {
         var options = CreateOptions();

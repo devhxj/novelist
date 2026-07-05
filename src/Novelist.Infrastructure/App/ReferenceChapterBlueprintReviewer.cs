@@ -804,7 +804,7 @@ internal static class ReferenceChapterBlueprintReviewer
             "environment" => ContainsAnyTag(proseDuties, ["external_evidence", "sensory", "sensory_anchor", "source_detail", "source_backed_detail"]),
             "narration" => ContainsAnyTag(proseDuties, ["interiority", "transition", "causality", "subtext"]),
             "interiority" => ContainsAnyTag(proseDuties, ["interiority"]),
-            "emotion" or "afterbeat" => ContainsAnyTag(proseDuties, ["interiority", "external_evidence", "subtext"]),
+            "emotion" or "emotion_evidence" or "afterbeat" => ContainsAnyTag(proseDuties, ["interiority", "external_evidence", "subtext"]),
             "transition" => ContainsAnyTag(proseDuties, ["transition", "causality"]),
             "dialogue" => ContainsAnyTag(proseDuties, ["dialogue", "subtext"]),
             "action" => ContainsAnyTag(proseDuties, ["action"]),
