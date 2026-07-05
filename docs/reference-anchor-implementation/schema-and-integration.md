@@ -544,10 +544,10 @@ Current frontend status:
 - `frontend/src/components/reference-anchor/ReferenceAnchorView.tsx` exists as the first full main-panel implementation.
 - `ActivityBar.tsx` has a `reference` activity entry.
 - `WorkspaceView.tsx` renders `ReferenceAnchorView` for the active novel.
-- The first panel supports anchor create/rebuild/list, material search, blueprint generate/list/detail/review/approve, material binding, and draft candidate preview.
-- The first panel does not yet provide field-level beat editing, a dedicated side-panel list/filter, separated child components, material score-component explanations, or copy-to-clipboard controls.
+- The first panel supports anchor create/rebuild/list, native reference source file selection with raw path fallback, material search with score-component explanations, blueprint generate/list/detail/review/approve, field-level beat editing through `ReviseReferenceChapterBlueprint`, typed `slot_plan` rows, material binding with score-component explanations, and draft candidate preview.
+- Remaining UI hardening belongs to Phase 10 and later: dedicated side-panel list/filter behavior, fuller workflow polish in the real Photino runtime, stale-blueprint UX decisions, source preview policy, optional full-chapter assembly, and copy-to-clipboard or insertion-confirmation affordances.
 
-If direct file picker is needed, add it as a separate runtime capability later. Do not block backend implementation on an open-file native dialog.
+The direct reference source file picker is implemented as a desktop runtime capability through the Photino bridge. Raw path entry remains available for development and fallback workflows.
 
 ### Desktop Debugging Plan
 

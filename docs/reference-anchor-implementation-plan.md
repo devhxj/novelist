@@ -4,7 +4,7 @@ This implementation plan has been split into focused companion documents so each
 
 ## Status
 
-Implementation in progress.
+Core implementation phases 0-9 are complete in the task tracker. Phase 10 tracks product hardening, runtime verification, and design-closure work. Phase 11 tracks the AI-orchestrated low-intervention workflow that keeps hard gates but reduces routine manual steps. Phase 12 tracks the shared reference corpus model where AI chooses relevant materials from global libraries by story context instead of requiring per-novel binding.
 
 ## Date
 
@@ -15,7 +15,7 @@ Implementation in progress.
 - [Overview and architecture](reference-anchor-implementation/overview.md): scope, review-first workflow update, current implementation snapshot, and architecture map.
 - [Implementation decisions](reference-anchor-implementation/decisions.md): storage, blueprint workflow, review strategy, adaptation strategy, and audit strategy.
 - [Schema and integration plan](reference-anchor-implementation/schema-and-integration.md): database schema, bridge APIs, desktop composition, agent tools, frontend workflow, and desktop debugging notes.
-- [Tasks, tests, and guardrails](reference-anchor-implementation/tasks-and-verification.md): phased task breakdown, required test matrix, critical guardrails, open questions, and recommended next sessions.
+- [Tasks, tests, and guardrails](reference-anchor-implementation/tasks-and-verification.md): phased task breakdown, required test matrix, critical guardrails, and open Phase 10-12 completion tasks.
 
 ## Reading Order
 

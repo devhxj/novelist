@@ -5,9 +5,9 @@
 
 ## Status
 
-Implementation in progress.
+Phases 0-9 are complete in the task tracker. Remaining work is tracked explicitly in `tasks-and-verification.md`: Phase 10 covers product hardening, real desktop/frontend runtime verification, stale-blueprint UX decisions, optional model-assisted expansion, and documentation closure; Phase 11 covers AI-orchestrated low-intervention workflow design; Phase 12 covers shared reference corpus and AI-driven material selection across novels.
 
-This plan is still the source of truth for the target design, but parts of the foundation have already landed in the current .NET/Photino codebase. Treat implemented sections as scaffolding unless their phase acceptance criteria and verification commands are complete.
+This plan is still the source of truth for the target design. Treat Phase 10, Phase 11, and Phase 12 as the only open implementation-plan phases unless contracts, storage, bridge, agent, or frontend behavior regresses.
 
 ## Date
 
@@ -77,15 +77,45 @@ As of 2026-07-04, the implementation has moved beyond a pure planning document:
 - bridge handlers exist for reference anchor import/search/adapt/audit and blueprint generate/list/get/review/approve/bind/draft/audit entry points, with integration coverage for material binding, pre-approval draft-generation rejection, approved-without-material-links draft-generation rejection, bound draft generation, and persisted draft audit;
 - MAF agent tools now expose reference anchor search/adapt/audit and blueprint generate/review/revise/approve/bind/draft/audit operations with `novel_id` injected from tool context and without direct chapter mutation.
 
-Known incomplete areas:
+Phase 10 follow-up areas:
 
-- material extraction tags are still early deterministic heuristics and need stronger Chinese narration/emotion/POV coverage;
-- blueprint generation currently proves the storage/review lifecycle and carries a first-class reference-use track, but still needs richer deterministic fixtures for causality, fake emotion, narration duty, character-state, POV boundary, paragraph intention, and anti-screenplay failures;
-- blueprint material binding is deterministic and persisted, with embedding-backed material search/binding scores when a reference vector index is ready; it still needs manual-edit stale-link invalidation, score-component UI exposure, and fuller material-fit explanations per beat;
-- draft generation and draft audit are now persisted and bridge-accessible; draft audit logic is extracted into a focused auditor component with component-level coverage; it rejects candidates that contain blueprint/beat forbidden facts, can enforce explicit `required phrase:` prose targets from beat execution fields, fails dialogue-only and action-only screenplay drift when a beat requires novelistic execution, enforces explicit `required external evidence:` / `required emotion evidence:` targets from beat emotion evidence fields, rejects conservative high-risk unsupported facts such as undeclared keys, identities, passwords, evidence, communication or transaction records, files, coordinates, codes, and similar plot-bearing objects, and fails direct non-POV character interior-knowledge leaks when candidate prose states another character's thoughts, knowledge, hidden emotion, or hidden intention; broader POV boundary inference, broader prose-duty checks, non-explicit emotion-evidence inference, and broader unsupported-fact extraction still need stronger deterministic rules before treating it as finished product behavior;
-- the dedicated frontend workflow now has a first in-app `reference` activity entry and `ReferenceAnchorView` main panel for anchor create/rebuild, material search, blueprint generate/review/approve, material binding, and draft candidate/audit preview; field-level beat editing, sidebar list/filter integration, split subcomponents, richer score explanations, and full workflow polish are still incomplete;
-- agent tools are available as a foundation, with end-to-end MAF coverage for generate/review/approve/bind/draft/audit, approval invalidation after revision, forbidden-fact audit defect reporting, and stale blueprint rejection after source chapter plan changes;
-- full integration and frontend verification must be rerun after each implementation slice.
+- run the full reference-anchor workflow in the real desktop shell through the Photino bridge, not only through service and bridge tests;
+- decide and test stale-blueprint comparison/preservation behavior before surfacing stale rows more prominently in the UI;
+- continue broadening deterministic Chinese narration, emotion, POV, and unsupported-fact fixtures before enabling optional model-assisted tagging or adaptation;
+- decide whether reference-anchor search belongs only in the dedicated panel or also in global search;
+- decide whether and when passing beat candidates should be assembled into a full-chapter candidate;
+- close the remaining UX/product questions around source previews, generator reproducibility, and dev workflow expectations.
+
+## 2026-07-05 Planning Update: AI-Orchestrated Low-Intervention Workflow
+
+The strict review-first workflow should remain the internal safety model, but it should not become the default user interaction model. The default product flow should let AI automate routine sequencing while stopping only at decisions that require human authorship or risk acceptance.
+
+The target user-facing flow is:
+
+```text
+user confirms source/goal/fact boundary
+  -> AI orchestrates blueprint generation and deterministic review
+  -> user approves a compact blueprint/risk summary, or asks AI to revise defects
+  -> AI binds materials, generates beat candidates, and runs draft audit
+  -> user selects or edits the final candidate before any chapter insertion
+```
+
+Manual phase-by-phase controls remain available as an advanced mode, but the normal path should not require separate clicks for review, material binding, candidate generation, and audit when deterministic gates can run safely. AI may suggest revisions and choose routine defaults, but it must not approve blueprints, expand fact boundaries, bypass stale-link checks, or insert prose without explicit user confirmation.
+
+## 2026-07-05 Planning Update: Shared Corpus, Not Per-Novel Binding
+
+Reference sources, generated materials, style examples, scene examples, and technique libraries should be shared foundation data for the whole workspace. They should not be owned by or manually bound to a specific novel before they become usable.
+
+The novel supplies context, constraints, and safety boundaries:
+
+- current chapter goal or plan;
+- known facts and forbidden facts;
+- POV, timeline, character state, and narrative distance;
+- user/license policy and risk tolerance.
+
+AI then searches the shared corpus and proposes the relevant source materials for the current beat. The system audits the proposal against provenance, rewrite budget, fact boundary, POV, and style-risk gates. Human intervention is reserved for source trust, policy exceptions, and final approval, not for pre-selecting which global corpus each novel may use.
+
+This changes the long-term storage direction: `novel_id` should remain on blueprints, candidates, audits, and per-novel feedback, but source libraries and extracted reference materials should move toward workspace/global scope with optional visibility/license metadata. Do not add a required `novel_reference_library_link` gate as the default model; it would recreate unnecessary manual setup and prevent AI from choosing the right corpus by story need.
 
 ## Current Architecture Map
 

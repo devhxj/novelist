@@ -394,6 +394,149 @@ Recommended implementation slices:
 - [x] integration test for re-reviewing and re-approving a user-edited blueprint beat
 - [x] blueprint regression fixture tests
 
+### Phase 10: Product Hardening and Design Closure
+
+**Description:** Convert the remaining loose recommendations and open design questions into a final hardening phase. Phases 0-9 are considered the core implementation; Phase 10 is complete only when runtime verification, UX decisions, and optional-expansion boundaries are explicit and tested.
+
+**Acceptance criteria:**
+
+- [ ] Full reference-anchor workflow is exercised in the real Photino desktop shell through the bridge: create/rebuild anchor, search material, generate/review/revise/approve blueprint, bind materials, generate candidates, inspect audit, and confirm no automatic chapter insertion.
+- [ ] Stale blueprint UI behavior is decided and covered by tests or documented manual verification: preserve read-only for comparison, hide by default, or expose with clear regeneration affordance.
+- [ ] Reference-anchor search scope is decided: dedicated panel only, global `SearchAll` integration, or a staged hybrid path.
+- [ ] Optional LLM-assisted material tagging/adaptation has a feature-flag/design decision and does not weaken deterministic review, binding, rewrite-level, or audit gates.
+- [ ] Full-chapter candidate assembly is either explicitly deferred or implemented only after every beat candidate can prove passing audit and provenance.
+- [ ] Source preview policy is decided for unknown-license anchors, including whether exact source text is truncated by default.
+- [ ] Generator reproducibility policy is decided: store generator version/context hash only, or persist prompt/schema metadata without creating prompt-churn in the database.
+- [ ] Developer workflow expectation is finalized: `make dev` dependency on frontend build versus explicit Vite/build steps.
+- [ ] `overview.md`, `schema-and-integration.md`, and `decisions.md` no longer describe completed Phase 0-9 items as incomplete.
+
+**Verification:**
+
+- [ ] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj`
+- [ ] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj`
+- [ ] `cd frontend && npm run build`
+- [ ] `cd frontend && npm run lint`
+- [ ] Manual desktop smoke test of the full Phase 10 workflow in Photino.
+
+**Files likely touched:**
+
+- `frontend/src/components/reference-anchor/*`
+- `frontend/src/views/WorkspaceView.tsx`
+- `frontend/src/lib/novelist/*`
+- `src/Novelist.Infrastructure/App/SqliteReferenceAnchorService.cs`
+- `src/Novelist.Infrastructure/App/SqliteReferenceAnchoredDraftService.cs`
+- `tests/Novelist.IntegrationTests/*Reference*Tests.cs`
+- `docs/reference-anchor-implementation/*.md`
+
+### Phase 11: AI-Orchestrated Low-Intervention Workflow
+
+**Description:** Build the default reference-anchored experience around AI automation instead of manual step-by-step operation. The hard gates from earlier phases stay mandatory, but routine sequencing is handled by an orchestrator so users only intervene for source trust, chapter intent, fact boundaries, blueprint/risk approval, and final prose insertion. The orchestrator should select relevant materials from the available corpus by story context rather than requiring the user to pre-select anchors for every run.
+
+**Default workflow target:**
+
+```text
+confirm source + chapter target + known/forbidden facts
+  -> auto-generate blueprint
+  -> auto-run deterministic review
+  -> if failed: AI proposes field-level revisions, user approves applying them
+  -> if passed: user approves compact blueprint/risk summary
+  -> auto-bind materials
+  -> auto-generate beat candidates
+  -> auto-run draft audit
+  -> user selects/edits final candidate before insertion
+```
+
+**Acceptance criteria:**
+
+- [ ] A single user command can start a reference-anchored candidate run for a chapter using chapter goal/plan, known facts, forbidden facts, and an optional corpus search policy; selected anchors are an advanced override, not a required default.
+- [ ] The orchestration run persists stage status, errors, generated artifacts, and the current required user decision so it can be resumed after app restart.
+- [ ] The orchestrator automatically performs safe stages: blueprint generation, deterministic blueprint review, material binding after approval, beat candidate generation, and draft audit.
+- [ ] The orchestrator stops for required human decisions: source/license confirmation, known/forbidden fact boundary changes, blueprint approval, AI-proposed blueprint revision application, and final chapter insertion.
+- [ ] A compact approval summary shows chapter function, POV, fact boundary changes, emotional trajectory, material-use plan, rewrite budget, and high-risk findings without forcing users to inspect every field.
+- [ ] Failed blueprint reviews can trigger AI-suggested field-level fixes, but suggested fixes are stored as proposed revisions and require user or explicit agent approval before application.
+- [ ] Low-risk passing blueprints can proceed from approval to material binding and candidate generation without additional manual clicks.
+- [ ] High-risk conditions require an explicit stop: stale blueprint, new facts outside approved boundary, forbidden fact pressure, missing material provenance, L3/L4 rewrite risk, POV leak risk, or audit failure.
+- [ ] Advanced mode still exposes manual generate/review/revise/approve/bind/draft/audit controls for debugging and strict editorial review.
+- [ ] The orchestration flow never calls `SaveContent` or inserts chapter prose automatically; insertion remains a separate user-confirmed action.
+- [ ] Agent tool descriptions and UI copy make clear which decisions AI may automate and which decisions require the author.
+- [ ] Telemetry or local run history records why the workflow stopped, what AI proposed, what the user approved/rejected, and which deterministic gate produced each block.
+
+**Verification:**
+
+- [ ] Unit tests for orchestration state transitions and resume behavior.
+- [ ] Integration tests for happy path: one command reaches audited candidates after user blueprint approval.
+- [ ] Integration tests for failed-review path: AI proposes revisions, user approves, re-review passes, then binding/draft continues.
+- [ ] Integration tests proving orchestration stops for stale blueprints, forbidden facts, unsupported facts, missing material links, and draft audit failure.
+- [ ] Bridge tests for starting, resuming, cancelling, and inspecting orchestration runs.
+- [ ] Agent tool tests proving the orchestrator cannot approve blueprint revisions, expand fact boundaries, or insert prose without explicit approval.
+- [ ] Frontend runtime test or manual smoke test proving the default flow requires only necessary confirmations while advanced controls remain available.
+
+**Files likely touched:**
+
+- `src/Novelist.Contracts/App/ReferenceAnchoredDraftPayloads.cs`
+- `src/Novelist.Core/App/IReferenceAnchoredDraftService.cs`
+- `src/Novelist.Infrastructure/App/SqliteReferenceAnchoredDraftService.cs`
+- `src/Novelist.Core/Bridge/ReferenceAnchoredDraftBridgeHandlers.cs`
+- `src/Novelist.Agent/NovelistMafReferenceTools.cs`
+- `frontend/src/components/reference-anchor/*`
+- `frontend/src/lib/novelist/api.ts`
+- `frontend/src/lib/novelist/types.ts`
+- `tests/Novelist.Tests/*Reference*Tests.cs`
+- `tests/Novelist.IntegrationTests/*Reference*Tests.cs`
+
+### Phase 12: Shared Reference Corpus and AI-Driven Material Selection
+
+**Description:** Promote reference sources, extracted materials, style examples, scene examples, and technique libraries from per-novel assets into shared workspace-level corpus infrastructure. Novels should not bind libraries manually as a prerequisite. AI should retrieve and rank relevant materials from the shared corpus at blueprint/binding time using the current story context, while deterministic gates keep provenance, license, rewrite, fact, and POV safety intact.
+
+**Target model:**
+
+```text
+workspace/global reference corpus
+  -> AI retrieves candidates by chapter goal, beat duty, POV, emotion, scene facts, and style need
+  -> binder records which corpus materials were selected for this blueprint contract
+  -> draft candidates must trace to selected corpus material or approved no-reuse reason
+  -> per-novel facts, audits, approvals, and feedback remain isolated
+```
+
+**Acceptance criteria:**
+
+- [ ] Reference source libraries and extracted materials can exist without `novel_id` ownership.
+- [ ] Existing per-novel anchors migrate or are readable through a compatibility layer without losing source hashes, segment ids, material ids, user-verified tags, feedback, or audit provenance.
+- [ ] Corpus records include visibility, license status, source trust, and optional user-defined tags, but no required per-novel binding gate.
+- [ ] Material search accepts story-context inputs and returns globally sourced candidates that are filtered by license/status policy and scored by beat function, emotion, POV, prose duty, technique, lexical similarity, embeddings when available, and feedback boosts.
+- [ ] Blueprint generation no longer requires `anchor_ids`; it may accept an optional corpus search policy or explicit include/exclude anchors for advanced control.
+- [ ] Material binding records exact selected corpus material ids against the current blueprint `analysis_contract_hash` so later draft candidates remain auditable.
+- [ ] Per-novel known facts, forbidden facts, timeline state, character state, and POV boundaries still gate whether a globally sourced material may be used.
+- [ ] AI can explain why it selected each material and which story need it satisfies, without requiring the user to manually choose libraries first.
+- [ ] User feedback is split into global corpus feedback and per-novel usage feedback; accepting a material for one novel must not silently make it safe for another novel with different facts or POV.
+- [ ] Agent tools search the shared corpus by injected novel context but do not expose arbitrary file reads or allow the model to bypass source/license filters.
+- [ ] UI provides corpus management as a library feature and reference-anchored drafting as an automatic retrieval feature, not as a per-novel setup checklist.
+
+**Verification:**
+
+- [ ] Migration tests from per-novel `reference_anchors` to shared corpus records or compatibility reads.
+- [ ] Service tests proving global corpus materials can be searched from different novels without duplicating source import.
+- [ ] Tests proving per-novel forbidden facts and POV boundaries still reject globally sourced materials/candidates.
+- [ ] Tests proving license/visibility policy filters corpus results before AI selection.
+- [ ] Binding/audit tests proving selected global material provenance is stored with blueprint hash and cannot be reused after blueprint edits.
+- [ ] Feedback tests proving global tag feedback and per-novel usage feedback have different scopes.
+- [ ] Bridge and agent tests proving `anchor_ids` are optional and AI-driven corpus retrieval is the default path.
+- [ ] Frontend smoke test for corpus management and default automatic material selection.
+
+**Files likely touched:**
+
+- `src/Novelist.Contracts/App/ReferenceAnchorPayloads.cs`
+- `src/Novelist.Contracts/App/ReferenceAnchoredDraftPayloads.cs`
+- `src/Novelist.Core/App/IReferenceAnchorService.cs`
+- `src/Novelist.Core/App/IReferenceAnchoredDraftService.cs`
+- `src/Novelist.Infrastructure/App/SqliteReferenceAnchorService.cs`
+- `src/Novelist.Infrastructure/App/SqliteReferenceAnchoredDraftService.cs`
+- `src/Novelist.Agent/NovelistMafReferenceTools.cs`
+- `frontend/src/components/reference-anchor/*`
+- `tests/Novelist.Tests/*Reference*Tests.cs`
+- `tests/Novelist.IntegrationTests/*Reference*Tests.cs`
+- `docs/reference-anchor-implementation/schema-and-integration.md`
+
 ## Required Test Matrix
 
 Run after backend phases:
@@ -455,38 +598,56 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 - Do not ship blueprint-gated drafting without blueprint review tests and draft audit tests.
 - Do not add frontend API methods without updating `BridgeCompatibilityAppMethods`.
 
-## Open Implementation Questions
+## Phase 10 Design Decisions To Close
 
-- Should exact source text previews be truncated by default for unknown-license anchors?
-- Should source segments store the full original line text or normalized text only?
-- Should material extraction be purely deterministic in phase 1, or should optional LLM tagging be available behind a feature flag?
-- Should reference-anchor search results be included in global `SearchAll`, or remain isolated in the dedicated Reference Anchor panel?
-- Should blueprint generation consume existing `ChapterPlanPayload.Content` as the primary chapter target, or should the UI add a dedicated "chapter goal" input for reference-anchored drafting?
-- Should manual blueprint edits require immediate re-review before material binding, or only before draft generation?
-- Should blueprint revision overwrite a draft blueprint in place or always create a new `parent_blueprint_id` lineage row?
-- Should blueprint generator prompts be stored for reproducibility, or only generator version/context hash to avoid prompt churn in the database?
-- Should failed deterministic review support auto-suggested field-level fixes, or should revision be fully manual/agent-driven in a separate explicit operation?
-- Which analysis fields should become first-class typed contract records immediately, and which can remain JSON arrays/objects in the first SQLite implementation?
-- Should transition beats be allowed to generate prose without a direct material link, or must every generated paragraph trace to at least one reference material?
-- Should the first version draft per beat only, or assemble a full chapter candidate after every beat passes audit?
-- Should stale blueprints be preserved read-only for comparison, or hidden from the default UI after a plan hash change?
-- Should `make dev` depend on `frontend-build`, or should development keep explicit separate frontend build/Vite steps to avoid slower backend-only loops?
+- Unknown-license source previews: truncate exact source text by default, show only derived metadata, or leave current full preview behavior.
+- Source segment text policy: keep full original line text, normalized text, or both.
+- Optional model assistance: keep deterministic-only extraction/adaptation, or add LLM-assisted tagging/adaptation behind an explicit feature flag.
+- Search scope: keep reference-anchor results isolated, include them in global `SearchAll`, or expose a staged opt-in integration.
+- Revision lineage: keep in-place draft blueprint revision, or create `parent_blueprint_id` lineage rows for every material contract edit.
+- Failed review assistance: keep revision fully manual/agent-driven, or add field-level fix suggestions that remain separate from approval.
+- Transition/no-reuse policy: require every generated paragraph to trace to material, or allow approved no-reuse transition beats without direct links.
+- Candidate assembly: keep beat-level candidates only, or assemble a full-chapter candidate after all beats pass audit.
+- Stale blueprint UX: preserve stale blueprints read-only for comparison, hide them by default, or show them with regeneration prompts.
+- Development workflow: make `make dev` depend on frontend build, or keep explicit frontend build/Vite steps for faster backend-only loops.
+
+## Phase 11 Automation Decisions To Close
+
+- Default stop points: which risks always require human confirmation, and which low-risk stages can continue automatically.
+- Approval granularity: whether approving a compact blueprint summary approves the entire current analysis contract or only selected beats.
+- AI revision authority: whether AI may apply its own proposed revision in agent mode, or whether every proposed blueprint change requires user approval.
+- Run persistence: whether orchestration runs live only in SQLite reference-anchor storage or also appear in chat/session history.
+- Candidate insertion UX: whether final insertion is copy-only, diff-preview insertion, or a separate approved chapter-edit operation.
+- Advanced mode boundary: which manual controls remain visible by default and which move behind an advanced/debug toggle.
+- Failure recovery: whether users should resume from the failed stage, regenerate from scratch, or branch a new blueprint revision.
+
+## Phase 12 Shared Corpus Decisions To Close
+
+- Corpus scope: workspace-only for now, or also support user-level/importable library packs later.
+- Source ownership migration: convert `reference_anchors.novel_id` to nullable/visibility metadata, or create new corpus tables and compatibility views.
+- Material identity: keep current anchor-derived material ids, or introduce stable corpus material ids independent of importing novel.
+- Search policy: define default license/status filters, include/exclude controls, and whether explicit source opt-out is needed per run.
+- Feedback scope: which decisions should improve global corpus ranking, and which should remain per-novel because they depend on plot facts.
+- UI information architecture: separate corpus library management from reference-anchored drafting controls.
+- Agent authority: whether AI may import new corpus sources, or only search/use already imported sources.
 
 ## Recommended Next Coding Sessions
 
-The initial foundation has already started. Do not restart from Phase 0 unless contracts have regressed.
+Start with Phase 10. Do not restart from Phase 0 unless contracts have regressed.
 
 Latest verified scope: `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Bridge -v minimal` passed 29/29, `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter ReferenceAnchorContractTests -v minimal` passed 10/10, `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter MafToolRegistryTests -v minimal` passed 11/11, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceAnchorServiceTests -v minimal` passed 26/26, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceAnchor -v minimal` passed 89/89, `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter ReferenceChapterBlueprintPayloadsUseStableSnakeCaseJsonNames -v minimal` passed 1/1, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'FullyQualifiedName~ReviseApprovedBlueprintInvalidatesApprovalAndMaterialLinks|FullyQualifiedName~BridgeReferenceAnchoredDraftHandlersGenerateReviewAndApproveBlueprint' -v minimal` passed 2/2, `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceDraftTools -v minimal` passed 2/2, and `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter Reference -v minimal` passed 124/124 after adding full reference bridge service-routing coverage, reference bridge app-not-initialized/invalid-path semantics coverage, MAF tool exposure/schema constraints, stable reference bridge invalid-payload coverage, structured blueprint bridge payload verification, approval/material-link invalidation coverage, complete Phase 1 create/import/rebuild/failure-status coverage, Phase 2 material provenance/tag/slot coverage, blueprint tag-filter/prose-duty binding coverage, extractor Chinese punctuation/dialogue/paragraph plus emotion/POV/function-tag coverage, Phase 3 lexical ranking/pagination coverage, Phase 3 search score-component coverage, and Phase 3 narrative-duty/emotion-transition search filtering coverage. `cd frontend && npm run build` and `cd frontend && npm run lint` passed after adding optional reference material search scoring and filter fields to the frontend types.
 
 Recommended next session:
 
-1. Add full frontend runtime verification after the reference-anchor panel is exercised against a real app bridge.
-2. Add fixture coverage for stale blueprint comparison behavior if the UI starts surfacing stale rows.
-3. Expand model-assisted adaptation only after deterministic audit gates stay stable.
+1. Execute the full desktop workflow in Photino and record any runtime-only bridge/UI gaps under Phase 10.
+2. Decide stale blueprint UI behavior and add coverage if stale rows remain visible.
+3. Close the model-assisted tagging/adaptation decision before adding any optional LLM path.
 
 Recommended following session:
 
-1. Keep broadening deterministic Chinese narration, emotion, and POV fixtures before adding optional model-assisted tagging.
+1. Keep broadening deterministic Chinese narration, emotion, POV, and unsupported-fact fixtures before enabling optional model-assisted tagging or adaptation.
+2. Design Phase 11 orchestration contracts before changing UI, so frontend, bridge, service, and agent tools share the same run-state model.
+3. Design Phase 12 shared-corpus contracts before migrating storage, so global materials can be reused without weakening per-novel safety gates.
 
 Do not broaden frontend workflow beyond the review-first path until source corpus, material binding, blueprint review, and draft audit are reliable. The system's quality depends on immutable provenance, hard blueprint gates, and candidate audit before any manual insertion.
 
