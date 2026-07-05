@@ -4,7 +4,7 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 34;
+    public const int CurrentReviewVersion = 35;
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -331,6 +331,20 @@ internal static class ReferenceChapterBlueprintReviewer
                     "scene_facts",
                     $"Beat {beat.BeatIndex} scene fact conflicts with forbidden POV knowledge: {forbiddenFact}",
                     "Remove the forbidden POV fact from scene_facts or move the beat to a POV that may know it.");
+            }
+
+            foreach (var forbidden in beat.ForbiddenFacts.Where(item => !string.IsNullOrWhiteSpace(item)))
+            {
+                foreach (var field in FindBeatScopedForbiddenFactFields(beat, forbidden))
+                {
+                    AddBeatDefect(
+                        forbiddenFactErrors,
+                        "forbidden_fact",
+                        beat,
+                        field,
+                        $"Beat forbidden fact appears in {FormatFieldName(field)}: {forbidden}",
+                        $"Remove the beat forbidden fact from {field} before it becomes part of the draft contract.");
+                }
             }
 
             var proseDuties = beat.ProseDuties
@@ -844,6 +858,86 @@ internal static class ReferenceChapterBlueprintReviewer
     {
         return !string.IsNullOrWhiteSpace(value) &&
             value.Contains(forbidden, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> FindBeatScopedForbiddenFactFields(
+        ReferenceChapterBlueprintBeatPayload beat,
+        string forbidden)
+    {
+        if (beat.SceneFacts.Any(fact => ContainsForbidden(fact, forbidden)))
+        {
+            yield return "scene_facts";
+        }
+
+        if (beat.ViewpointAllowedKnowledge.Any(fact => ContainsForbidden(fact, forbidden)))
+        {
+            yield return "viewpoint_allowed_knowledge";
+        }
+
+        if (beat.CharacterStatesBefore.Concat(beat.CharacterStatesAfter).Any(state => ContainsForbidden(state, forbidden)))
+        {
+            yield return "character_states";
+        }
+
+        if (beat.CharacterGoals.Any(goal => ContainsForbidden(goal, forbidden)))
+        {
+            yield return "character_goals";
+        }
+
+        if (beat.CharacterMisbeliefs.Any(misbelief => ContainsForbidden(misbelief, forbidden)))
+        {
+            yield return "character_misbeliefs";
+        }
+
+        if (beat.RelationshipPressure.Any(pressure => ContainsForbidden(pressure, forbidden)))
+        {
+            yield return "relationship_pressure";
+        }
+
+        if (ContainsForbidden(beat.EmotionTrigger, forbidden))
+        {
+            yield return "emotion_trigger";
+        }
+
+        if (ContainsForbidden(beat.SuppressedReaction, forbidden))
+        {
+            yield return "suppressed_reaction";
+        }
+
+        if (ContainsForbidden(beat.ExternalEvidence, forbidden))
+        {
+            yield return "external_evidence";
+        }
+
+        if (ContainsForbidden(beat.SourceBackedDetailTarget, forbidden))
+        {
+            yield return "source_backed_detail_target";
+        }
+
+        if (ContainsForbidden(beat.SensoryAnchorTarget, forbidden))
+        {
+            yield return "sensory_anchor_target";
+        }
+
+        if (ContainsForbidden(beat.SubtextPlan, forbidden))
+        {
+            yield return "subtext_plan";
+        }
+
+        if (ContainsForbidden(beat.ReferenceQuery.Query, forbidden))
+        {
+            yield return "reference_query";
+        }
+
+        if (beat.SlotPlan.Any(slot => ContainsForbidden(slot.Value, forbidden)))
+        {
+            yield return "slot_plan";
+        }
+    }
+
+    private static string FormatFieldName(string field)
+    {
+        return field.Replace('_', ' ');
     }
 
     private static bool HasTransitionPressure(string value)

@@ -51,6 +51,11 @@
       "expected_error": "forbidden fact appears in viewpoint allowed knowledge"
     },
     {
+      "name": "beat_forbidden_scene_fact",
+      "mutation": "beat_forbidden_scene_fact",
+      "expected_error": "beat forbidden fact appears in scene facts"
+    },
+    {
       "name": "missing_prose_duty",
       "mutation": "missing_prose_duty",
       "expected_error": "prose duties"

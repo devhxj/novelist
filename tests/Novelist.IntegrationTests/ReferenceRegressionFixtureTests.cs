@@ -115,6 +115,11 @@ public sealed class ReferenceRegressionFixtureTests
             {
                 ViewpointAllowedKnowledge = ["雨声压低了整条街的呼吸", "凶手身份"]
             },
+            "beat_forbidden_scene_fact" => beat with
+            {
+                SceneFacts = ["雨声压低了整条街的呼吸", "凶手身份"],
+                ForbiddenFacts = ["凶手身份"]
+            },
             "missing_prose_duty" => beat with
             {
                 ProseDuties = []
@@ -288,6 +293,7 @@ public sealed class ReferenceRegressionFixtureTests
         return mutation switch
         {
             "pov_forbidden_scene_fact" => ["雨声压低了整条街的呼吸", "周鸣是卧底"],
+            "beat_forbidden_scene_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_viewpoint_allowed_knowledge_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_character_state_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],
             "forbidden_character_goal_fact" => ["雨声压低了整条街的呼吸", "凶手身份"],

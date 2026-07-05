@@ -240,6 +240,27 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsBeatScopedForbiddenFactInSceneFacts()
+    {
+        var blueprint = Blueprint(
+            beat => beat with
+            {
+                SceneFacts = ["雨声压低了整条街的呼吸", "凶手身份"],
+                ForbiddenFacts = ["凶手身份"]
+            },
+            knownFacts: ["雨声压低了整条街的呼吸", "凶手身份"]);
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ForbiddenFactErrors, item => item.Contains("beat forbidden fact", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "forbidden_fact" &&
+                defect.FieldPath.Contains("scene_facts", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsForbiddenFactInReferenceQuery()
     {
         var blueprint = Blueprint(
