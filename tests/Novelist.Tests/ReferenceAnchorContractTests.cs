@@ -603,6 +603,7 @@ public sealed class ReferenceAnchorContractTests
         Assert.Contains(ReferenceOrchestrationStages.SourceConfirmation, ReferenceOrchestrationStages.All);
         Assert.Contains(ReferenceOrchestrationDecisionTypes.ApproveBlueprint, ReferenceOrchestrationDecisionTypes.All);
         Assert.Contains(ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop, ReferenceOrchestrationDecisionTypes.All);
+        Assert.Contains(ReferenceOrchestrationStopReasons.HighRiskGateBlocked, ReferenceOrchestrationStopReasons.All);
         Assert.Contains(ReferenceOrchestrationStopReasons.FinalInsertionRequired, ReferenceOrchestrationStopReasons.All);
         Assert.Contains(ReferenceOrchestrationStopReasons.DraftAuditFailed, ReferenceOrchestrationStopReasons.All);
         Assert.Contains(ReferenceFeedbackDecisions.Accepted, ReferenceFeedbackDecisions.All);

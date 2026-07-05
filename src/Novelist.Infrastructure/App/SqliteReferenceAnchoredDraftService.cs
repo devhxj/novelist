@@ -803,13 +803,20 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                     },
                     cancellationToken);
 
-                await BindBlueprintMaterialsAsync(
+                var binding = await BindBlueprintMaterialsAsync(
                     new BindReferenceBlueprintMaterialsPayload(
                         current.NovelId,
                         approved.BlueprintId,
                         current.CorpusSearchPolicy.MaxResultsPerBeat,
                         SelectTopCandidate: true),
                     cancellationToken);
+                var missingMaterialBeatIds = FindMissingSelectedMaterialBeatIds(approved, binding);
+                if (missingMaterialBeatIds.Count > 0)
+                {
+                    current = BuildMaterialBindingHighRiskStopRun(current, approved, missingMaterialBeatIds);
+                    return await PersistOrchestrationRunAsync(current, cancellationToken);
+                }
+
                 current = await PersistOrchestrationRunAsync(
                     current with
                     {
@@ -3197,6 +3204,34 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             BuildDraftAuditApprovalSummary(blueprint, audit));
     }
 
+    private static ReferenceOrchestrationRunPayload BuildMaterialBindingHighRiskStopRun(
+        ReferenceOrchestrationRunPayload run,
+        ReferenceChapterBlueprintPayload blueprint,
+        IReadOnlyList<string> missingBeatIds)
+    {
+        return run with
+        {
+            Status = ReferenceOrchestrationRunStatuses.WaitingForUser,
+            Stage = ReferenceOrchestrationStages.MaterialBinding,
+            CurrentDecision = BuildMaterialBindingHighRiskStopDecision(blueprint, missingBeatIds),
+            LastStopReason = ReferenceOrchestrationStopReasons.HighRiskGateBlocked,
+            ErrorMessage = BuildMaterialBindingGapFailureMessage(missingBeatIds),
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+    }
+
+    private static ReferenceOrchestrationRequiredDecisionPayload BuildMaterialBindingHighRiskStopDecision(
+        ReferenceChapterBlueprintPayload blueprint,
+        IReadOnlyList<string> missingBeatIds)
+    {
+        return new ReferenceOrchestrationRequiredDecisionPayload(
+            ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop,
+            ReferenceOrchestrationStopReasons.HighRiskGateBlocked,
+            "Material binding could not select current reference material for every required beat. Inspect the binding gap before any draft generation.",
+            ["inspect_material_binding", "import_or_select_reference_material", "revise_blueprint_or_policy", "restart_or_cancel_run"],
+            BuildMaterialBindingGapApprovalSummary(blueprint, missingBeatIds));
+    }
+
     private static ReferenceOrchestrationBlueprintRevisionProposalPayload BuildBlueprintRevisionProposal(
         ReferenceChapterBlueprintPayload blueprint,
         ReferenceChapterBlueprintReviewPayload review)
@@ -3477,6 +3512,37 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             highRiskFindings);
     }
 
+    private static ReferenceOrchestrationApprovalSummaryPayload BuildMaterialBindingGapApprovalSummary(
+        ReferenceChapterBlueprintPayload blueprint,
+        IReadOnlyList<string> missingBeatIds)
+    {
+        var factBoundaryChanges = blueprint.KnownFacts
+            .Select(fact => "known: " + fact)
+            .Concat(blueprint.ForbiddenFacts.Select(fact => "forbidden: " + fact))
+            .Take(20)
+            .ToArray();
+        var emotionalTrajectory = blueprint.Beats.Count == 0
+            ? blueprint.EmotionAnalysis.Summary
+            : blueprint.Beats[0].EmotionBefore + " -> " + blueprint.Beats[^1].EmotionAfter;
+        var rewriteBudget = blueprint.Beats
+            .Select(beat => beat.MaxRewriteLevel)
+            .OrderByDescending(RewriteLevelRank)
+            .FirstOrDefault() ?? ReferenceRewriteLevels.L0;
+        var highRiskFindings = missingBeatIds
+            .Select(beatId => "missing_material_link: " + beatId)
+            .Take(20)
+            .ToArray();
+
+        return new ReferenceOrchestrationApprovalSummaryPayload(
+            blueprint.ChapterFunction,
+            string.IsNullOrWhiteSpace(blueprint.GlobalPov) ? "not selected" : blueprint.GlobalPov,
+            factBoundaryChanges,
+            emotionalTrajectory,
+            "material binding did not select required reference links for every source-backed beat",
+            rewriteBudget,
+            highRiskFindings);
+    }
+
     private static string BuildDraftAuditFailureMessage(ReferenceAnchoredDraftAuditPayload audit)
     {
         var failures = audit.RequiredFixes
@@ -3493,6 +3559,30 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             string.Join("; ", failures),
             "Draft audit failed.",
             1_000);
+    }
+
+    private static string BuildMaterialBindingGapFailureMessage(IReadOnlyList<string> missingBeatIds)
+    {
+        var suffix = missingBeatIds.Count == 0
+            ? string.Empty
+            : " Missing beat ids: " + string.Join(", ", missingBeatIds.Take(10)) + ".";
+        return NormalizeOptional(
+            "Reference-anchored draft generation requires selected reference material links for every target beat and the current blueprint analysis contract." + suffix,
+            "Material binding did not produce required selected reference material links.",
+            1_000);
+    }
+
+    private static IReadOnlyList<string> FindMissingSelectedMaterialBeatIds(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceBlueprintMaterialBindingResultPayload binding)
+    {
+        var selectedBeatIds = binding.Links
+            .Where(link => link.Selected)
+            .Select(link => link.BeatId)
+            .ToHashSet(StringComparer.Ordinal);
+        return ReferenceAnchoredDraftPreflight.RequiredMaterialBeatIds(blueprint.Beats)
+            .Where(beatId => !selectedBeatIds.Contains(beatId))
+            .ToArray();
     }
 
     private static string BuildBlueprintPremise(string? planText, string chapterFunction)

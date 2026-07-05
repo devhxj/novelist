@@ -3176,7 +3176,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ReferenceOrchestrationRunMarksFailureWhenApprovedBlueprintCannotBindMaterials()
+    public async Task ReferenceOrchestrationRunMarksFailureWhenReferenceMaterialServiceIsMissing()
     {
         var options = CreateOptions();
         await InitializeAsync(options);
@@ -3219,6 +3219,78 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.Null(failed.CurrentDecision);
         Assert.Empty(failed.CandidateIds);
         Assert.Contains("Reference material binding requires a configured reference anchor service", failed.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ReferenceOrchestrationRunStopsForHighRiskDecisionWhenMaterialBindingHasMissingLinks()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("编排材料缺口测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "主角在门口停住，必须用来源材料支撑雨夜压力。"),
+            CancellationToken.None);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novels);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+
+        var started = await service.StartOrchestrationRunAsync(
+            new StartReferenceOrchestrationRunPayload(
+                novel.Id,
+                ChapterNumber: 11,
+                ChapterGoal: "雨夜门口的压力必须有来源材料支撑",
+                KnownFacts: ["主角在门口"],
+                ForbiddenFacts: [],
+                AnchorIds: null,
+                CorpusSearchPolicy: new ReferenceCorpusSearchPolicyPayload(
+                    "story_context",
+                    MaxResultsPerBeat: 3,
+                    LicenseStatuses: ["user_provided"],
+                    IncludeAnchorIds: [],
+                    ExcludeAnchorIds: []),
+                SourceConfirmed: true),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, started.Status);
+        Assert.Equal(ReferenceOrchestrationStages.BlueprintApproval, started.Stage);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ApproveBlueprint, started.CurrentDecision?.DecisionType);
+
+        var stopped = await service.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                started.RunId,
+                ReferenceOrchestrationDecisionTypes.ApproveBlueprint,
+                started.ReviewId),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, stopped.Status);
+        Assert.Equal(ReferenceOrchestrationStages.MaterialBinding, stopped.Stage);
+        Assert.Equal(ReferenceOrchestrationStopReasons.HighRiskGateBlocked, stopped.LastStopReason);
+        Assert.NotNull(stopped.CurrentDecision);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop, stopped.CurrentDecision.DecisionType);
+        Assert.Equal(ReferenceOrchestrationStopReasons.HighRiskGateBlocked, stopped.CurrentDecision.StopReason);
+        Assert.Contains("inspect_material_binding", stopped.CurrentDecision.RequiredActions);
+        Assert.Contains("import_or_select_reference_material", stopped.CurrentDecision.RequiredActions);
+        Assert.Empty(stopped.CandidateIds);
+        Assert.Contains("selected reference material links", stopped.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            stopped.CurrentDecision.ApprovalSummary.HighRiskFindings,
+            finding => finding.Contains("missing_material_link", StringComparison.Ordinal));
+
+        var resolved = await service.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                started.RunId,
+                ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop,
+                "acknowledged"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.Failed, resolved.Status);
+        Assert.Equal(ReferenceOrchestrationStages.MaterialBinding, resolved.Stage);
+        Assert.Equal(ReferenceOrchestrationStopReasons.HighRiskGateBlocked, resolved.LastStopReason);
+        Assert.Null(resolved.CurrentDecision);
     }
 
     [Fact]
