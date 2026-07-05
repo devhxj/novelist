@@ -80,7 +80,7 @@ Current main-panel workflow:
 - list orchestration runs, inspect the active run, view required decisions, approval summary, candidate ids, and local event history
 - resume required source/fact, blueprint revision, blueprint approval, and high-risk-stop decisions from the reference panel
 - cancel orchestration runs
-- stop at final insertion with candidate ids visible; no frontend path automatically inserts candidate prose into chapter content
+- stop at final insertion with candidate ids visible; the final-insertion decision is not resumable from the panel, and no frontend path automatically inserts candidate prose into chapter content
 
 Current frontend status:
 

@@ -3275,6 +3275,78 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReferenceOrchestrationRunRejectsFinalInsertionResumeAndKeepsManualInsertionBoundary()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("最终插入边界测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "雨声压低街道，主角在门口停住，确认线索后去找证人。"),
+            CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "orchestration-final-insertion-boundary.md",
+            """
+            # 第一章
+
+            雨声压低了整条街的呼吸。
+
+            他在门口停了很久。
+            """);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "最终插入边界参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+        var started = await service.StartOrchestrationRunAsync(
+            new StartReferenceOrchestrationRunPayload(
+                novel.Id,
+                ChapterNumber: 16,
+                ChapterGoal: "雨声压低了整条街的呼吸",
+                KnownFacts: ["雨声压低了整条街的呼吸", "主角在门口"],
+                ForbiddenFacts: [],
+                AnchorIds: [anchor.AnchorId],
+                CorpusSearchPolicy: new ReferenceCorpusSearchPolicyPayload(
+                    "story_context",
+                    MaxResultsPerBeat: 3,
+                    LicenseStatuses: ["user_provided"],
+                    IncludeAnchorIds: [anchor.AnchorId],
+                    ExcludeAnchorIds: []),
+                SourceConfirmed: true),
+            CancellationToken.None);
+        var stopped = await service.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                started.RunId,
+                ReferenceOrchestrationDecisionTypes.ApproveBlueprint,
+                started.ReviewId),
+            CancellationToken.None);
+        Assert.Equal(ReferenceOrchestrationStages.FinalInsertion, stopped.Stage);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ApproveFinalInsertion, stopped.CurrentDecision?.DecisionType);
+        Assert.NotEmpty(stopped.CandidateIds);
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.ResumeOrchestrationRunAsync(
+                new ResumeReferenceOrchestrationRunPayload(
+                    novel.Id,
+                    started.RunId,
+                    ReferenceOrchestrationDecisionTypes.ApproveFinalInsertion,
+                    string.Join('\n', stopped.CandidateIds)),
+                CancellationToken.None));
+
+        Assert.Contains("Final insertion", exception.Message, StringComparison.OrdinalIgnoreCase);
+        var loaded = await service.GetOrchestrationRunAsync(novel.Id, started.RunId, CancellationToken.None);
+        Assert.NotNull(loaded);
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, loaded.Status);
+        Assert.Equal(ReferenceOrchestrationStages.FinalInsertion, loaded.Stage);
+        Assert.Equal(ReferenceOrchestrationStopReasons.FinalInsertionRequired, loaded.LastStopReason);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ApproveFinalInsertion, loaded.CurrentDecision?.DecisionType);
+        Assert.Equal(stopped.CandidateIds, loaded.CandidateIds);
+    }
+
+    [Fact]
     public async Task ReferenceOrchestrationRunUsesWorkspaceCorpusAnchorsWithoutExplicitAnchorIds()
     {
         var options = CreateOptions();

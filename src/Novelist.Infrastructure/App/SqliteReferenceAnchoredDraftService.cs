@@ -722,6 +722,13 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 throw new ArgumentException("Decision type does not match the pending orchestration decision.", nameof(input));
             }
 
+            if (string.Equals(decisionType, ReferenceOrchestrationDecisionTypes.ApproveFinalInsertion, StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    "Final insertion must be handled through a separate user-confirmed chapter edit path.",
+                    nameof(input));
+            }
+
             if (string.Equals(decisionType, ReferenceOrchestrationDecisionTypes.ApplyBlueprintRevision, StringComparison.Ordinal))
             {
                 approvedBlueprintRevision = BuildApprovedBlueprintRevisionPayload(run, input.DecisionPayload);
