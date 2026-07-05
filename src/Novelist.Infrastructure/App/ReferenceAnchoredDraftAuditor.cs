@@ -445,6 +445,7 @@ internal static class ReferenceAnchoredDraftAuditor
         facts.AddRange(ExtractSensitiveIdentifierFacts(text));
         facts.AddRange(ExtractLegalDocumentFacts(text));
         facts.AddRange(ExtractDangerousArtifactFacts(text));
+        facts.AddRange(ExtractForensicEvidenceFacts(text));
         facts.AddRange(ExtractLocationIdentifierFacts(text));
         facts.AddRange(ExtractIdentityRevealFacts(text));
         facts.AddRange(ExtractRelationshipRevealFacts(text));
@@ -536,6 +537,21 @@ internal static class ReferenceAnchoredDraftAuditor
         foreach (Match match in Regex.Matches(
             text,
             @"(?:^|[，。！？；;,\s、]|和|与)(?<fact>[\u4e00-\u9fffA-Za-z0-9]{0,8}?(?:" + sensitiveTerms + @")(?:\s*(?:是|为|:|：)?\s*[A-Za-z0-9][A-Za-z0-9\-]{1,24})?)"))
+        {
+            var fact = NormalizeDelimitedAuditableFact(match.Groups["fact"].Value);
+            if (fact.Length >= 2)
+            {
+                yield return fact;
+            }
+        }
+    }
+
+    private static IEnumerable<string> ExtractForensicEvidenceFacts(string text)
+    {
+        const string forensicTerms = "DNA报告|DNA样本|DNA结果|指纹报告|指纹|掌纹|鞋印|脚印|血迹样本|血样|毛发|纤维|皮屑|唾液|凶器";
+        foreach (Match match in Regex.Matches(
+            text,
+            @"(?:^|[，。！？；;,\s、]|和|与)(?<fact>[\u4e00-\u9fffA-Za-z0-9]{0,8}?(?:上的|下的|里的|内的|旁的|边的)?(?:" + forensicTerms + @"))"))
         {
             var fact = NormalizeDelimitedAuditableFact(match.Groups["fact"].Value);
             if (fact.Length >= 2)
