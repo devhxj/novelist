@@ -152,7 +152,7 @@ export function BlueprintDetail({
 }: BlueprintDetailProps) {
   if (!blueprint) {
     return (
-      <div className="rounded-lg border border-dashed border-border bg-card/60 p-6">
+      <div data-testid="reference-blueprint-detail" className="rounded-lg border border-dashed border-border bg-card/60 p-6">
         <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
           <FileSearch className="h-8 w-8 text-muted-foreground" />
           <p className="mt-3 text-sm font-medium text-foreground">尚未选择蓝图</p>
@@ -196,7 +196,7 @@ export function BlueprintDetail({
   }
 
   return (
-    <div className="min-w-0 rounded-lg border border-border bg-card p-4">
+    <div data-testid="reference-blueprint-detail" className="min-w-0 rounded-lg border border-border bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="truncate text-sm font-semibold text-foreground">第{blueprint.chapter_number}章 · {blueprint.title}</h3>

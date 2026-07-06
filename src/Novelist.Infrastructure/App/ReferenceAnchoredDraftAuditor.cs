@@ -49,6 +49,11 @@ internal static class ReferenceAnchoredDraftAuditor
                 requiredFixes.Add($"Candidate {candidate.CandidateId} failed reference reuse audit.");
             }
 
+            if (RewriteLevelRank(candidate.RewriteLevel) >= RewriteLevelRank(ReferenceRewriteLevels.L3))
+            {
+                requiredFixes.Add($"Candidate {candidate.CandidateId} uses high-risk rewrite level {candidate.RewriteLevel}.");
+            }
+
             var allowsShortDialogueExchange = AllowsExplicitShortDialogueExchange(beat, candidate.Text);
             if ((string.Equals(beat.BeatType, ReferenceBlueprintBeatTypes.DialogueExchange, StringComparison.Ordinal) ||
                     beat.ProseDuties.All(duty => string.Equals(duty, "dialogue", StringComparison.OrdinalIgnoreCase) ||

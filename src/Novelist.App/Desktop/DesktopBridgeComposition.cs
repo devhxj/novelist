@@ -30,6 +30,7 @@ public static class DesktopBridgeComposition
         var worldService = new FileSystemWorldEntityService(options, novelService);
         var planningService = new FileSystemPlanningService(options, novelService);
         var llmService = new FileSystemLlmConfigurationService(options);
+        var chatCompletionClient = new StandardChatCompletionClient(llmService);
         var sqliteVecResolver = new PackagedSqliteVecExtensionResolver();
         var sqliteVecProvider = new SqliteVecTableProvisioner(sqliteVecResolver);
         var embeddingClient = new HybridEmbeddingClient();
@@ -73,7 +74,8 @@ public static class DesktopBridgeComposition
             options,
             novelService,
             planningService,
-            referenceAnchorService);
+            referenceAnchorService,
+            new AiReferenceBlueprintRevisionProposalProvider(settingsService, chatCompletionClient));
         var webFetchService = new HttpWebFetchService();
         var webSearchService = new DeepSeekWebSearchService(llmService);
         var subagentRunner = new DeferredSubagentRunner();
@@ -95,7 +97,7 @@ public static class DesktopBridgeComposition
             novelService,
             settingsService,
             llmService,
-            new StandardChatCompletionClient(llmService),
+            chatCompletionClient,
             eventSink,
             approvalCoordinator,
             chatToolExecutor,

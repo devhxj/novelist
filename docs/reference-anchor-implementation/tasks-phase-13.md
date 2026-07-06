@@ -18,22 +18,22 @@ This phase is intentionally broader than reference anchors. The reference-anchor
 - [x] Content editing is covered: editor render, text edits, save through the bridge, dirty-state behavior, save failure display, and no accidental saves when switching unrelated panels.
 - [x] Search/RAG UI is covered: global search query, result rendering, empty state, failure state, and result preview without leaking raw reference-source internals into the global search path unless a later design explicitly enables it.
 - [x] Chat and agent UI is covered at presentation level: send prompt, stream assistant text/tool-call states from mocked events, render tool cards/web-search cards, handle cancellation/failure, and keep generated content out of chapter files unless the user explicitly saves through an editor flow.
-- [ ] Metadata surfaces are covered: character, location, timeline/story-arc, preference, reader, skill, and profile panels render fixture data, empty states, and representative create/edit/delete or inspect actions where those actions exist.
+- [x] Metadata surfaces are covered: character, location, timeline/story-arc, preference, reader, skill, and profile panels render fixture data, empty states, and representative create/edit/delete or inspect actions where those actions exist.
 - [x] Settings are covered: provider/model/embedding configuration panes render, validate required fields, persist safe settings through the bridge, and never require live API keys, local model files, or network access.
 - [x] Import/export and file-picker affordances are covered with mocked paths and temporary fixtures; tests must not read or write real user projects outside test temp directories.
 - [x] Reference-anchor coverage is included as a smoke path in the app-wide suite, while deep anchor orchestration, blueprint, material binding, candidate, audit, and screenshot checks remain in `npm run test:reference-anchor`.
-- [x] Visual checks capture stable screenshots for bootstrap states, shell, editor, search, chat, settings, metadata panels, and reference entry point at the default desktop viewport; any smaller responsive viewport is scoped to layout integrity, not full workflow duplication.
-- [ ] Test selectors are stable and intentional: prefer accessible roles/names and add `data-testid` only where accessible selectors would be brittle.
+- [x] Visual checks capture stable screenshots for bootstrap states, shell, editor, search, chat, settings, metadata panels, reference entry point, and a compact viewport layout smoke; any smaller responsive viewport is scoped to layout integrity, not full workflow duplication.
+- [x] Test selectors are stable and intentional: prefer accessible roles/names and add `data-testid` only where accessible selectors would be brittle.
 - [x] The suite records bridge calls and asserts high-risk guardrails, especially no implicit `SaveContent`, no direct arbitrary file read, no live network/model dependency, and no automatic chapter mutation from agent or reference workflows.
 
 **Verification:**
 
-- [ ] `npm --prefix frontend run build`
-- [ ] `npm --prefix frontend run lint`
-- [ ] `npm --prefix frontend run test:reference-anchor`
+- [x] `npm --prefix frontend run build`
+- [x] `npm --prefix frontend run lint`
+- [x] `npm --prefix frontend run test:reference-anchor`
 - [x] `npm --prefix frontend run test:app`
 - [x] At least one CI-friendly command can run all frontend verification without relying on an installed Photino desktop shell.
-- [ ] Real Photino coverage remains a minimal boundary smoke unless a later phase adds stable desktop automation: app loads built assets, representative bridge calls route through production composition, and no path auto-inserts chapter prose.
+- [x] Real Photino coverage remains a minimal boundary smoke unless a later phase adds stable desktop automation: app loads built assets, representative bridge calls route through production composition, and no path auto-inserts chapter prose.
 
 **Recommended Playwright suite slices:**
 
@@ -57,11 +57,14 @@ This phase is intentionally broader than reference anchors. The reference-anchor
 - [x] Monaco now loads from bundled local assets instead of the default CDN path, so desktop/CI smoke tests can prove the editor renders without network access.
 - [x] The app-wide suite now covers explicit chapter text edits, `SaveContent` persistence, dirty/saved status transitions, save failure messaging, and no extra save when switching unrelated panels after a clean save.
 - [x] Settings coverage now validates missing API-key handling, persists mocked LLM provider and ONNX embedding configuration through the bridge, verifies built-in embedding readiness/test success, and avoids live keys, local model files, network calls, model discovery, file pickers, or external links.
+- [x] Metadata coverage now verifies empty states plus representative create/edit/delete or inspect flows for characters, locations, story arcs and nodes, timeline chapter plans and entries, reader perspective entries, preferences, profile name edits, and skill filtering/inspection/deletion, using role/name selectors or scoped locators instead of brittle global text matches.
+- [x] Compact viewport coverage now opens the shell at 900x720, checks editor/chat, metadata, and reference surfaces, captures `output/playwright/app-08-compact.png`, and asserts no implicit `SaveContent`.
+- [x] Real Photino boundary smoke is covered by targeted .NET integration tests for frontend dist resolution/window startup plus `PhotinoWebMessageBridge` reference workflow routing through the production desktop composition without saving chapter content.
 - [x] The suite records bridge calls and asserts no implicit `SaveContent`, no external URL open, and no reference file picker or other mutating bridge calls during the smoke path.
 - [x] `npm run verify` runs the frontend build, lint, deep reference-anchor workflow, and app-wide workflow without requiring the Photino desktop shell.
 - [x] The app-wide console-error guard caught and fixed an invalid nested-button structure in the location side panel; the mocked chat usage payload now matches the `ContextRing` contract so the smoke does not mask NaN rendering warnings.
 
-This first slice does not complete Phase 13. Metadata create/edit/delete workflows and responsive viewport coverage remain pending.
+Phase 13 is complete at the planned app-wide regression boundary. Future work may still split the monolithic script into per-surface specs or broaden real desktop automation, but those are outside this phase's accepted smoke boundary.
 
 **Files likely touched:**
 

@@ -1139,6 +1139,125 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task WorkspaceCorpusFeedbackBoostsOnlyTheNovelThatRecordedUsage()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var sourceNovel = await novels.CreateNovelAsync(new CreateNovelPayload("共享反馈来源小说", "", ""), CancellationToken.None);
+        var otherNovel = await novels.CreateNovelAsync(new CreateNovelPayload("共享反馈隔离小说", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        var sourcePath = CreateSourceFile(
+            "workspace-feedback-ranking.md",
+            """
+            # 第一章
+
+            雨声压低了街的呼吸。
+
+            雨声压低了街的呼吸，她想起旧门。
+            """);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(sourceNovel.Id, "工作区反馈排序参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        await MarkAnchorAsWorkspaceCorpusAsync(options, anchor.AnchorId);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+        var materials = await referenceAnchors.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                sourceNovel.Id,
+                [anchor.AnchorId],
+                "雨声压低",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        var acceptedMaterial = Assert.Single(materials.Items, item => item.Text == "雨声压低了街的呼吸。");
+        var defaultPreferredMaterial = Assert.Single(materials.Items, item => item.Text == "雨声压低了街的呼吸，她想起旧门。");
+
+        var sourceBaselineBlueprint = await CreateApprovedWorkspaceSentenceBlueprintAsync(sourceNovel.Id, 41);
+        var sourceBaseline = await service.BindBlueprintMaterialsAsync(
+            new BindReferenceBlueprintMaterialsPayload(sourceNovel.Id, sourceBaselineBlueprint.BlueprintId, MaxResultsPerBeat: 2, SelectTopCandidate: true),
+            CancellationToken.None);
+        var sourceBaselineSelected = Assert.Single(sourceBaseline.Links, item => item.Selected);
+        Assert.Equal(defaultPreferredMaterial.MaterialId, sourceBaselineSelected.MaterialId);
+        Assert.DoesNotContain("accepted_feedback", sourceBaselineSelected.ScoreComponents.Keys);
+
+        await referenceAnchors.RecordUserFeedbackAsync(
+            new RecordReferenceUserFeedbackPayload(
+                sourceNovel.Id,
+                ReferenceFeedbackTargetTypes.Material,
+                acceptedMaterial.MaterialId,
+                ReferenceFeedbackDecisions.Accepted,
+                acceptedMaterial.MaterialId,
+                CandidateId: "",
+                BlueprintId: sourceBaselineBlueprint.BlueprintId,
+                BeatId: sourceBaselineBlueprint.Beats[0].BeatId,
+                FeedbackTags: ["source_novel_usage"],
+                Note: "source novel accepts this shared material",
+                EditedText: "",
+                Origin: "user"),
+            CancellationToken.None);
+
+        var sourceBoostedBlueprint = await CreateApprovedWorkspaceSentenceBlueprintAsync(sourceNovel.Id, 42);
+        var sourceBoosted = await service.BindBlueprintMaterialsAsync(
+            new BindReferenceBlueprintMaterialsPayload(sourceNovel.Id, sourceBoostedBlueprint.BlueprintId, MaxResultsPerBeat: 2, SelectTopCandidate: true),
+            CancellationToken.None);
+        var sourceBoostedSelected = Assert.Single(sourceBoosted.Links, item => item.Selected);
+        Assert.Equal(acceptedMaterial.MaterialId, sourceBoostedSelected.MaterialId);
+        Assert.True(sourceBoostedSelected.ScoreComponents["accepted_feedback"] > 0);
+
+        var otherBlueprint = await CreateApprovedWorkspaceSentenceBlueprintAsync(otherNovel.Id, 41);
+        var otherBinding = await service.BindBlueprintMaterialsAsync(
+            new BindReferenceBlueprintMaterialsPayload(otherNovel.Id, otherBlueprint.BlueprintId, MaxResultsPerBeat: 2, SelectTopCandidate: true),
+            CancellationToken.None);
+        var otherSelected = Assert.Single(otherBinding.Links, item => item.Selected);
+        Assert.Equal(defaultPreferredMaterial.MaterialId, otherSelected.MaterialId);
+        Assert.DoesNotContain("accepted_feedback", otherSelected.ScoreComponents.Keys);
+
+        async Task<ReferenceChapterBlueprintPayload> CreateApprovedWorkspaceSentenceBlueprintAsync(long novelId, int chapterNumber)
+        {
+            var generated = await service.GenerateChapterBlueprintAsync(
+                new GenerateReferenceChapterBlueprintPayload(
+                    novelId,
+                    chapterNumber,
+                    "共享反馈排序蓝图",
+                    "雨声压低",
+                    AnchorIds: [],
+                    KnownFacts: ["雨声压低了街的呼吸"],
+                    ForbiddenFacts: []),
+                CancellationToken.None);
+            var revised = await service.ReviseChapterBlueprintAsync(
+                new ReviseReferenceChapterBlueprintPayload(
+                    novelId,
+                    generated.BlueprintId,
+                    [
+                        new ReferenceBlueprintRevisionChangePayload(
+                            "beat:" + generated.Beats[0].BeatId + ":reference_query.query",
+                            "雨声压低"),
+                        new ReferenceBlueprintRevisionChangePayload(
+                            "beat:" + generated.Beats[0].BeatId + ":reference_query.material_types",
+                            "[\"sentence\"]"),
+                        new ReferenceBlueprintRevisionChangePayload(
+                            "beat:" + generated.Beats[0].BeatId + ":required_material_types",
+                            "[\"sentence\"]")
+                    ],
+                    "user",
+                    "limit workspace ranking fixture to sentence materials"),
+                CancellationToken.None);
+            var review = await service.ReviewChapterBlueprintAsync(
+                new ReviewReferenceChapterBlueprintPayload(novelId, revised.BlueprintId),
+                CancellationToken.None);
+            return await service.ApproveChapterBlueprintAsync(
+                new ApproveReferenceChapterBlueprintPayload(novelId, revised.BlueprintId, review.ReviewId),
+                CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task BindBlueprintMaterialsCarriesSearchEmbeddingScoreIntoLinkComponents()
     {
         var options = CreateOptions();
@@ -2116,6 +2235,88 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
             await service.GenerateDraftFromBlueprintAsync(
                 new GenerateReferenceAnchoredDraftPayload(novel.Id, blueprint.BlueprintId, BeatIds: []),
+                CancellationToken.None));
+
+        Assert.Contains("current blueprint analysis contract", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task WorkspaceCorpusMaterialLinksAreBoundToCurrentBlueprintAnalysisContract()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("共享语料哈希门禁测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        var sourcePath = CreateSourceFile(
+            "workspace-material-link-hash-anchor.md",
+            """
+            # 第一章
+
+            雨声压低了整条街的呼吸。
+            """);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "共享材料哈希参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        await MarkAnchorAsWorkspaceCorpusAsync(options, anchor.AnchorId);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                21,
+                "第二十一章蓝图",
+                "雨声压低了整条街的呼吸",
+                AnchorIds: [],
+                KnownFacts: ["雨声压低了整条街的呼吸"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId),
+            CancellationToken.None);
+        var approved = await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, review.ReviewId),
+            CancellationToken.None);
+        await service.BindBlueprintMaterialsAsync(
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, approved.BlueprintId, 2, SelectTopCandidate: true),
+            CancellationToken.None);
+
+        var boundLinks = await ReadSelectedMaterialLinksAsync(options, approved.BlueprintId);
+        var selected = Assert.Single(boundLinks);
+        Assert.StartsWith(anchor.AnchorId + ":material:", selected.MaterialId, StringComparison.Ordinal);
+        var linkStates = await ReadMaterialLinkStatesAsync(options, approved.BlueprintId);
+        Assert.NotEmpty(linkStates);
+        Assert.All(linkStates, link =>
+        {
+            Assert.Equal(approved.AnalysisContractHash, link.AnalysisContractHash);
+            Assert.Equal("active", link.Status);
+        });
+
+        var revised = await service.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                approved.BlueprintId,
+                [new ReferenceBlueprintRevisionChangePayload(
+                    "beat:" + approved.Beats[0].BeatId + ":external_evidence",
+                    "visible pause and changed action demonstrate the pressure")],
+                "user",
+                "change analysis contract after workspace material binding"),
+            CancellationToken.None);
+
+        Assert.NotEqual(approved.AnalysisContractHash, revised.AnalysisContractHash);
+        Assert.All(await ReadMaterialLinkStatesAsync(options, approved.BlueprintId), link =>
+            Assert.Equal("stale", link.Status));
+
+        var revisionReview = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId),
+            CancellationToken.None);
+        await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, revisionReview.ReviewId),
+            CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.GenerateDraftFromBlueprintAsync(
+                new GenerateReferenceAnchoredDraftPayload(novel.Id, revised.BlueprintId, BeatIds: []),
                 CancellationToken.None));
 
         Assert.Contains("current blueprint analysis contract", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -3187,6 +3388,283 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReferenceOrchestrationRunRejectsClientModifiedBlueprintRevisionProposal()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("编排修订防替换测试", "", ""), CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(
+            options,
+            novels,
+            new FileSystemPlanningService(options, novels));
+
+        var run = await service.StartOrchestrationRunAsync(
+            new StartReferenceOrchestrationRunPayload(
+                novel.Id,
+                ChapterNumber: 17,
+                ChapterGoal: "测试禁用事实门禁",
+                KnownFacts: ["门"],
+                ForbiddenFacts: ["final hook"],
+                AnchorIds: null,
+                CorpusSearchPolicy: new ReferenceCorpusSearchPolicyPayload(
+                    "story_context",
+                    MaxResultsPerBeat: 3,
+                    LicenseStatuses: ["user_provided"],
+                    IncludeAnchorIds: [],
+                    ExcludeAnchorIds: []),
+                SourceConfirmed: true),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ApplyBlueprintRevision, run.CurrentDecision?.DecisionType);
+        Assert.NotNull(run.CurrentDecision?.ProposedBlueprintRevision);
+        var modifiedProposal = run.CurrentDecision.ProposedBlueprintRevision with
+        {
+            Changes =
+            [
+                new ReferenceBlueprintRevisionChangePayload(
+                    "final_hook",
+                    "client supplied replacement that was never proposed")
+            ]
+        };
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.ResumeOrchestrationRunAsync(
+                new ResumeReferenceOrchestrationRunPayload(
+                    novel.Id,
+                    run.RunId,
+                    ReferenceOrchestrationDecisionTypes.ApplyBlueprintRevision,
+                    JsonSerializer.Serialize(modifiedProposal, BridgeJson.SerializerOptions)),
+                CancellationToken.None));
+
+        Assert.Contains("pending orchestration proposal", exception.Message, StringComparison.OrdinalIgnoreCase);
+
+        var loaded = await service.GetOrchestrationRunAsync(novel.Id, run.RunId, CancellationToken.None);
+        Assert.NotNull(loaded);
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, loaded.Status);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ApplyBlueprintRevision, loaded.CurrentDecision?.DecisionType);
+        Assert.Equal(run.CurrentDecision.ProposedBlueprintRevision.Changes, loaded.CurrentDecision?.ProposedBlueprintRevision?.Changes);
+
+        var blueprint = await service.GetChapterBlueprintAsync(novel.Id, run.BlueprintId, CancellationToken.None);
+        Assert.NotNull(blueprint);
+        Assert.Equal(ReferenceBlueprintStates.ReviewFailed, blueprint.Status);
+        Assert.Contains("final hook", blueprint.FinalHook, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(await ReadRevisionFieldPathsAsync(options, run.BlueprintId));
+    }
+
+    [Fact]
+    public async Task ReferenceOrchestrationRunPersistsInjectedBlueprintRevisionProposalUntilUserApprovesIt()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("编排注入修订建议测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "雨声压低街道，主角在门口停住。"),
+            CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "orchestration-injected-revision.md",
+            """
+            # 第一章
+
+            雨声压低了整条街的呼吸。
+
+            他在门口停了很久。
+            """);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "注入修订参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var proposalProvider = new FixedBlueprintRevisionProposalProvider(
+            Origin: "ai_assistant",
+            RevisionReason: "AI suggested field-level fix proposal",
+            Changes:
+            [
+                new ReferenceBlueprintRevisionChangePayload(
+                    "final_hook",
+                    "AI suggested hook stays inside approved known facts")
+            ]);
+        var service = new SqliteReferenceAnchoredDraftService(
+            options,
+            novels,
+            planning,
+            referenceAnchors,
+            proposalProvider);
+
+        var run = await service.StartOrchestrationRunAsync(
+            new StartReferenceOrchestrationRunPayload(
+                novel.Id,
+                ChapterNumber: 16,
+                ChapterGoal: "雨声压低了整条街的呼吸",
+                KnownFacts: ["雨声压低了整条街的呼吸", "主角在门口"],
+                ForbiddenFacts: ["final hook"],
+                AnchorIds: [anchor.AnchorId],
+                CorpusSearchPolicy: new ReferenceCorpusSearchPolicyPayload(
+                    "story_context",
+                    MaxResultsPerBeat: 3,
+                    LicenseStatuses: ["user_provided"],
+                    IncludeAnchorIds: [anchor.AnchorId],
+                    ExcludeAnchorIds: []),
+                SourceConfirmed: true),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, run.Status);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ApplyBlueprintRevision, run.CurrentDecision?.DecisionType);
+        Assert.NotNull(run.CurrentDecision?.ProposedBlueprintRevision);
+        Assert.Equal(run.BlueprintId, proposalProvider.LastBlueprintId);
+        Assert.Equal(run.ReviewId, proposalProvider.LastReviewId);
+        Assert.Equal(run.BlueprintId, run.CurrentDecision.ProposedBlueprintRevision.BlueprintId);
+        Assert.Equal(run.ReviewId, run.CurrentDecision.ProposedBlueprintRevision.ReviewId);
+        Assert.Equal("ai_assistant", run.CurrentDecision.ProposedBlueprintRevision.Origin);
+        Assert.Equal("AI suggested field-level fix proposal", run.CurrentDecision.ProposedBlueprintRevision.RevisionReason);
+        var proposedChange = Assert.Single(run.CurrentDecision.ProposedBlueprintRevision.Changes);
+        Assert.Equal("final_hook", proposedChange.FieldPath);
+        Assert.Contains("AI suggested hook", proposedChange.NewValue, StringComparison.Ordinal);
+
+        var beforeApproval = await service.GetChapterBlueprintAsync(novel.Id, run.BlueprintId, CancellationToken.None);
+        Assert.NotNull(beforeApproval);
+        Assert.Equal(ReferenceBlueprintStates.ReviewFailed, beforeApproval.Status);
+        Assert.Contains("final hook", beforeApproval.FinalHook, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(await ReadRevisionFieldPathsAsync(options, run.BlueprintId));
+
+        var afterApproval = await service.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                run.RunId,
+                ReferenceOrchestrationDecisionTypes.ApplyBlueprintRevision,
+                string.Empty),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, afterApproval.Status);
+        Assert.Equal(ReferenceOrchestrationStages.BlueprintApproval, afterApproval.Stage);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ApproveBlueprint, afterApproval.CurrentDecision?.DecisionType);
+        var revised = await service.GetChapterBlueprintAsync(novel.Id, afterApproval.BlueprintId, CancellationToken.None);
+        Assert.NotNull(revised);
+        Assert.Equal(ReferenceBlueprintStates.ReviewPassed, revised.Status);
+        Assert.Equal("AI suggested hook stays inside approved known facts", revised.FinalHook);
+        var revisionFieldPaths = await ReadRevisionFieldPathsAsync(options, run.BlueprintId);
+        Assert.Contains("final_hook", revisionFieldPaths);
+
+        var completedSafeStages = await service.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                afterApproval.RunId,
+                ReferenceOrchestrationDecisionTypes.ApproveBlueprint,
+                afterApproval.ReviewId),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, completedSafeStages.Status);
+        Assert.Equal(ReferenceOrchestrationStages.FinalInsertion, completedSafeStages.Stage);
+        Assert.Equal(ReferenceOrchestrationStopReasons.FinalInsertionRequired, completedSafeStages.LastStopReason);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ApproveFinalInsertion, completedSafeStages.CurrentDecision?.DecisionType);
+        Assert.NotEmpty(completedSafeStages.CandidateIds);
+    }
+
+    [Fact]
+    public async Task ReferenceOrchestrationRunPersistsAiBlueprintRevisionProposalUntilUserApprovesIt()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("编排 AI 修订建议测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "雨声压低街道，主角在门口停住。"),
+            CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "orchestration-ai-revision.md",
+            """
+            # 第一章
+
+            雨声压低了整条街的呼吸。
+
+            他在门口停了很久。
+            """);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "AI 修订参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var chat = new RecordingChatCompletionClient(
+            """
+            {
+              "origin": "ignored",
+              "revision_reason": "AI suggested field-level fix proposal",
+              "changes": [
+                { "field_path": "final_hook", "new_value": "AI suggested hook stays inside approved known facts" },
+                { "field_path": "known_facts", "new_value": "[\"client should not get this\"]" }
+              ]
+            }
+            """);
+        var proposalProvider = new AiReferenceBlueprintRevisionProposalProvider(
+            new FixedAppSettingsService("deepseek/deepseek-chat", "high"),
+            chat);
+        var service = new SqliteReferenceAnchoredDraftService(
+            options,
+            novels,
+            planning,
+            referenceAnchors,
+            proposalProvider);
+
+        var run = await service.StartOrchestrationRunAsync(
+            new StartReferenceOrchestrationRunPayload(
+                novel.Id,
+                ChapterNumber: 18,
+                ChapterGoal: "雨声压低了整条街的呼吸",
+                KnownFacts: ["雨声压低了整条街的呼吸", "主角在门口"],
+                ForbiddenFacts: ["final hook"],
+                AnchorIds: [anchor.AnchorId],
+                CorpusSearchPolicy: new ReferenceCorpusSearchPolicyPayload(
+                    "story_context",
+                    MaxResultsPerBeat: 3,
+                    LicenseStatuses: ["user_provided"],
+                    IncludeAnchorIds: [anchor.AnchorId],
+                    ExcludeAnchorIds: []),
+                SourceConfirmed: true),
+            CancellationToken.None);
+
+        Assert.Equal(1, chat.CallCount);
+        Assert.NotNull(chat.LastRequest);
+        Assert.Equal("deepseek", chat.LastRequest.ProviderName);
+        Assert.Equal("deepseek-chat", chat.LastRequest.ModelId);
+        Assert.Equal("high", chat.LastRequest.ReasoningEffort);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ApplyBlueprintRevision, run.CurrentDecision?.DecisionType);
+        Assert.NotNull(run.CurrentDecision?.ProposedBlueprintRevision);
+        Assert.Equal(run.BlueprintId, run.CurrentDecision.ProposedBlueprintRevision.BlueprintId);
+        Assert.Equal(run.ReviewId, run.CurrentDecision.ProposedBlueprintRevision.ReviewId);
+        Assert.Equal("ai_assistant", run.CurrentDecision.ProposedBlueprintRevision.Origin);
+        Assert.Equal("AI suggested field-level fix proposal", run.CurrentDecision.ProposedBlueprintRevision.RevisionReason);
+        var proposedChange = Assert.Single(run.CurrentDecision.ProposedBlueprintRevision.Changes);
+        Assert.Equal("final_hook", proposedChange.FieldPath);
+        Assert.Equal("AI suggested hook stays inside approved known facts", proposedChange.NewValue);
+
+        var beforeApproval = await service.GetChapterBlueprintAsync(novel.Id, run.BlueprintId, CancellationToken.None);
+        Assert.NotNull(beforeApproval);
+        Assert.Equal(ReferenceBlueprintStates.ReviewFailed, beforeApproval.Status);
+        Assert.Contains("final hook", beforeApproval.FinalHook, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(await ReadRevisionFieldPathsAsync(options, run.BlueprintId));
+
+        var afterApproval = await service.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                run.RunId,
+                ReferenceOrchestrationDecisionTypes.ApplyBlueprintRevision,
+                string.Empty),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, afterApproval.Status);
+        Assert.Equal(ReferenceOrchestrationStages.BlueprintApproval, afterApproval.Stage);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ApproveBlueprint, afterApproval.CurrentDecision?.DecisionType);
+        var revised = await service.GetChapterBlueprintAsync(novel.Id, afterApproval.BlueprintId, CancellationToken.None);
+        Assert.NotNull(revised);
+        Assert.Equal(ReferenceBlueprintStates.ReviewPassed, revised.Status);
+        Assert.Equal("AI suggested hook stays inside approved known facts", revised.FinalHook);
+        Assert.Contains("final_hook", await ReadRevisionFieldPathsAsync(options, run.BlueprintId));
+    }
+
+    [Fact]
     public async Task ReferenceOrchestrationRunAfterBlueprintApprovalGeneratesAuditedCandidatesAndStopsForFinalInsertion()
     {
         var options = CreateOptions();
@@ -3834,6 +4312,192 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.Contains("no pending decision", finalInsertionAfterResolve.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task ReferenceOrchestrationRunStopsForHighRiskDecisionWhenDraftCandidateLeaksPovKnowledge()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("编排POV泄漏测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "雨声压低街道，主角在门口停住。"),
+            CancellationToken.None);
+        var material = BuildFixedMaterial(
+            "pov-leak-material",
+            "雨声压低街道，他在门口停住，指尖发凉，心里意识到压力仍然压着呼吸。");
+        var referenceAnchors = new FixedReferenceAnchorService(
+            material,
+            applySearchFilters: true,
+            adaptedTextByMaterialId: new Dictionary<string, string>
+            {
+                [material.MaterialId] = "因为雨声压低街道，主角在门口停住，指尖发凉，心里意识到压力仍然压着呼吸。只是那阵沉默没有散开，凶手身份在门后亮出来。"
+            });
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+
+        var started = await service.StartOrchestrationRunAsync(
+            new StartReferenceOrchestrationRunPayload(
+                novel.Id,
+                ChapterNumber: 13,
+                ChapterGoal: "雨声压低街道，主角在门口停住",
+                KnownFacts: ["雨声压低街道", "主角在门口停住"],
+                ForbiddenFacts: ["凶手身份"],
+                AnchorIds: null,
+                CorpusSearchPolicy: new ReferenceCorpusSearchPolicyPayload(
+                    "story_context",
+                    MaxResultsPerBeat: 3,
+                    LicenseStatuses: ["user_provided"],
+                    IncludeAnchorIds: [],
+                    ExcludeAnchorIds: []),
+                SourceConfirmed: true),
+            CancellationToken.None);
+
+        var stopped = await service.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                started.RunId,
+                ReferenceOrchestrationDecisionTypes.ApproveBlueprint,
+                started.ReviewId),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, stopped.Status);
+        Assert.Equal(ReferenceOrchestrationStages.DraftAudit, stopped.Stage);
+        Assert.Equal(ReferenceOrchestrationStopReasons.DraftAuditFailed, stopped.LastStopReason);
+        Assert.NotNull(stopped.CurrentDecision);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop, stopped.CurrentDecision.DecisionType);
+        Assert.Contains("凶手身份", stopped.ErrorMessage);
+        Assert.Contains(
+            stopped.CurrentDecision.ApprovalSummary.HighRiskFindings,
+            finding => finding.Contains("pov:", StringComparison.Ordinal) &&
+                finding.Contains("凶手身份", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReferenceOrchestrationRunStopsForHighRiskDecisionWhenDraftCandidateIntroducesUnsupportedFact()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("编排未支持事实测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "雨声压低街道，主角在门口停住。"),
+            CancellationToken.None);
+        var material = BuildFixedMaterial(
+            "unsupported-fact-material",
+            "雨声压低街道，他在门口停住，指尖发凉，心里意识到压力仍然压着呼吸。");
+        var referenceAnchors = new FixedReferenceAnchorService(
+            material,
+            applySearchFilters: true,
+            adaptedTextByMaterialId: new Dictionary<string, string>
+            {
+                [material.MaterialId] = "因为雨声压低街道，主角在门口停住，指尖发凉，心里意识到压力仍然压着呼吸。只是那阵沉默没有散开，陌生档案被递到掌心。"
+            });
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+
+        var started = await service.StartOrchestrationRunAsync(
+            new StartReferenceOrchestrationRunPayload(
+                novel.Id,
+                ChapterNumber: 14,
+                ChapterGoal: "雨声压低街道，主角在门口停住",
+                KnownFacts: ["雨声压低街道", "主角在门口停住"],
+                ForbiddenFacts: ["凶手身份"],
+                AnchorIds: null,
+                CorpusSearchPolicy: new ReferenceCorpusSearchPolicyPayload(
+                    "story_context",
+                    MaxResultsPerBeat: 3,
+                    LicenseStatuses: ["user_provided"],
+                    IncludeAnchorIds: [],
+                    ExcludeAnchorIds: []),
+                SourceConfirmed: true),
+            CancellationToken.None);
+
+        var stopped = await service.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                started.RunId,
+                ReferenceOrchestrationDecisionTypes.ApproveBlueprint,
+                started.ReviewId),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, stopped.Status);
+        Assert.Equal(ReferenceOrchestrationStages.DraftAudit, stopped.Stage);
+        Assert.Equal(ReferenceOrchestrationStopReasons.DraftAuditFailed, stopped.LastStopReason);
+        Assert.NotNull(stopped.CurrentDecision);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop, stopped.CurrentDecision.DecisionType);
+        Assert.Contains("陌生档案", stopped.ErrorMessage);
+        Assert.Contains(
+            stopped.CurrentDecision.ApprovalSummary.HighRiskFindings,
+            finding => finding.Contains("unsupported_fact:", StringComparison.Ordinal) &&
+                finding.Contains("陌生档案", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(ReferenceRewriteLevels.L3)]
+    [InlineData(ReferenceRewriteLevels.L4)]
+    public async Task ReferenceOrchestrationRunStopsForHighRiskDecisionWhenDraftCandidateUsesHighRewriteLevel(
+        string rewriteLevel)
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("编排高改写测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "雨声压低街道，主角在门口停住。"),
+            CancellationToken.None);
+        var material = BuildFixedMaterial(
+            "high-rewrite-material-" + rewriteLevel,
+            "雨声压低街道，他在门口停住，指尖发凉，心里意识到压力仍然压着呼吸。");
+        var referenceAnchors = new FixedReferenceAnchorService(
+            material,
+            applySearchFilters: true,
+            rewriteLevelByMaterialId: new Dictionary<string, string>
+            {
+                [material.MaterialId] = rewriteLevel
+            });
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+
+        var started = await service.StartOrchestrationRunAsync(
+            new StartReferenceOrchestrationRunPayload(
+                novel.Id,
+                ChapterNumber: 15,
+                ChapterGoal: "雨声压低街道，主角在门口停住",
+                KnownFacts: ["雨声压低街道", "主角在门口停住"],
+                ForbiddenFacts: ["凶手身份"],
+                AnchorIds: null,
+                CorpusSearchPolicy: new ReferenceCorpusSearchPolicyPayload(
+                    "story_context",
+                    MaxResultsPerBeat: 3,
+                    LicenseStatuses: ["user_provided"],
+                    IncludeAnchorIds: [],
+                    ExcludeAnchorIds: []),
+                SourceConfirmed: true),
+            CancellationToken.None);
+
+        var stopped = await service.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                started.RunId,
+                ReferenceOrchestrationDecisionTypes.ApproveBlueprint,
+                started.ReviewId),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, stopped.Status);
+        Assert.Equal(ReferenceOrchestrationStages.DraftAudit, stopped.Stage);
+        Assert.Equal(ReferenceOrchestrationStopReasons.DraftAuditFailed, stopped.LastStopReason);
+        Assert.NotNull(stopped.CurrentDecision);
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop, stopped.CurrentDecision.DecisionType);
+        Assert.Equal(rewriteLevel, stopped.CurrentDecision.ApprovalSummary.RewriteBudget);
+        Assert.Contains(rewriteLevel, stopped.ErrorMessage);
+        Assert.Contains(
+            stopped.CurrentDecision.ApprovalSummary.HighRiskFindings,
+            finding => finding.Contains(rewriteLevel, StringComparison.Ordinal));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -4005,6 +4669,132 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         }
 
         return links;
+    }
+
+    private static async ValueTask<IReadOnlyList<MaterialLinkStateRow>> ReadMaterialLinkStatesAsync(
+        AppInitializationOptions options,
+        long blueprintId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT link_id, analysis_contract_hash, status
+            FROM reference_blueprint_material_links
+            WHERE blueprint_id = $blueprint_id
+            ORDER BY link_id ASC;
+            """;
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        var rows = new List<MaterialLinkStateRow>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            rows.Add(new MaterialLinkStateRow(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2)));
+        }
+
+        return rows;
+    }
+
+    private sealed record MaterialLinkStateRow(
+        string LinkId,
+        string AnalysisContractHash,
+        string Status);
+
+    private sealed class FixedBlueprintRevisionProposalProvider(
+        string Origin,
+        string RevisionReason,
+        IReadOnlyList<ReferenceBlueprintRevisionChangePayload> Changes) : IReferenceBlueprintRevisionProposalProvider
+    {
+        public long LastBlueprintId { get; private set; }
+
+        public string LastReviewId { get; private set; } = string.Empty;
+
+        public ValueTask<ReferenceOrchestrationBlueprintRevisionProposalPayload> ProposeRevisionAsync(
+            ReferenceChapterBlueprintPayload blueprint,
+            ReferenceChapterBlueprintReviewPayload review,
+            CancellationToken cancellationToken)
+        {
+            LastBlueprintId = blueprint.BlueprintId;
+            LastReviewId = review.ReviewId;
+            return ValueTask.FromResult(new ReferenceOrchestrationBlueprintRevisionProposalPayload(
+                BlueprintId: -1,
+                ReviewId: "provider-mismatched-review",
+                Origin,
+                RevisionReason,
+                Changes));
+        }
+    }
+
+    private sealed class RecordingChatCompletionClient(string response) : IChatCompletionClient
+    {
+        public int CallCount { get; private set; }
+
+        public ChatCompletionRequest? LastRequest { get; private set; }
+
+        public ValueTask<string> GenerateTextAsync(
+            ChatCompletionRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new NotSupportedException("Reference blueprint revision proposals use streaming chat output.");
+        }
+
+        public async IAsyncEnumerable<ChatCompletionStreamEvent> StreamChatAsync(
+            ChatCompletionRequest request,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            LastRequest = request;
+            await Task.CompletedTask;
+            yield return new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, response);
+        }
+    }
+
+    private sealed class FixedAppSettingsService(string selectedModelKey, string reasoningEffort) : IAppSettingsService
+    {
+        public ValueTask<AppSettingsPayload> GetSettingsAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(new AppSettingsPayload(
+                1,
+                0,
+                selectedModelKey,
+                reasoningEffort,
+                "manual",
+                360,
+                string.Empty,
+                string.Empty));
+        }
+
+        public ValueTask SaveSettingsAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public ValueTask SaveAvatarAsync(byte[] data, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public ValueTask SaveUserNameAsync(string name, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public ValueTask SetApprovalModeAsync(string mode, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public ValueTask SetChatPanelWidthAsync(int width, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public ValueTask SetLastNovelAsync(long novelId, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public ValueTask SetLastSessionAsync(string sessionId, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public ValueTask SetReasoningEffortAsync(string reasoningEffort, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public ValueTask SetSelectedModelAsync(
+            string selectedModelKey,
+            string reasoningEffort,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 
     private static async ValueTask MarkAnchorAsWorkspaceCorpusAsync(
@@ -4179,6 +4969,29 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         ];
     }
 
+    private static ReferenceMaterialPayload BuildFixedMaterial(string materialId, string text)
+    {
+        return new ReferenceMaterialPayload(
+            MaterialId: materialId,
+            AnchorId: 4242,
+            SourceSegmentId: "seg-" + materialId,
+            MaterialType: ReferenceMaterialTypes.Sentence,
+            FunctionTag: "interiority",
+            EmotionTag: "pressure",
+            SceneTag: "rain",
+            PovTag: "close",
+            TechniqueTag: "sensory",
+            FunctionConfidence: 1,
+            EmotionConfidence: 1,
+            PovConfidence: 1,
+            Text: text,
+            SourceHash: "hash-" + materialId,
+            ExtractorVersion: "test",
+            UserVerified: true,
+            ScoreComponents: null,
+            CreatedAt: DateTimeOffset.UtcNow);
+    }
+
     private static void AssertJsonArrayContains(JsonElement element, string expected)
     {
         Assert.Contains(
@@ -4204,6 +5017,8 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         private readonly IReadOnlyList<ReferenceMaterialPayload> _materials;
         private readonly bool _applySearchFilters;
         private readonly IReadOnlyDictionary<long, string> _licenseStatuses;
+        private readonly IReadOnlyDictionary<string, string> _adaptedTextByMaterialId;
+        private readonly IReadOnlyDictionary<string, string> _rewriteLevelByMaterialId;
         private readonly List<SearchReferenceMaterialsPayload> _searchInputs = [];
         private readonly List<AdaptReferenceMaterialPayload> _adaptInputs = [];
 
@@ -4212,21 +5027,29 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
 
         public FixedReferenceAnchorService(
             ReferenceMaterialPayload material,
-            bool applySearchFilters = false)
+            bool applySearchFilters = false,
+            IReadOnlyDictionary<string, string>? adaptedTextByMaterialId = null,
+            IReadOnlyDictionary<string, string>? rewriteLevelByMaterialId = null)
         {
             _materials = [material];
             _applySearchFilters = applySearchFilters;
             _licenseStatuses = new Dictionary<long, string>();
+            _adaptedTextByMaterialId = adaptedTextByMaterialId ?? new Dictionary<string, string>();
+            _rewriteLevelByMaterialId = rewriteLevelByMaterialId ?? new Dictionary<string, string>();
         }
 
         public FixedReferenceAnchorService(
             IReadOnlyList<ReferenceMaterialPayload> materials,
             bool applySearchFilters = false,
-            IReadOnlyDictionary<long, string>? licenseStatuses = null)
+            IReadOnlyDictionary<long, string>? licenseStatuses = null,
+            IReadOnlyDictionary<string, string>? adaptedTextByMaterialId = null,
+            IReadOnlyDictionary<string, string>? rewriteLevelByMaterialId = null)
         {
             _materials = materials;
             _applySearchFilters = applySearchFilters;
             _licenseStatuses = licenseStatuses ?? new Dictionary<long, string>();
+            _adaptedTextByMaterialId = adaptedTextByMaterialId ?? new Dictionary<string, string>();
+            _rewriteLevelByMaterialId = rewriteLevelByMaterialId ?? new Dictionary<string, string>();
         }
 
         public ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(
@@ -4331,17 +5154,23 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         {
             _adaptInputs.Add(input);
             var material = _materials.First(item => string.Equals(item.MaterialId, input.MaterialId, StringComparison.Ordinal));
+            var text = _adaptedTextByMaterialId.TryGetValue(input.MaterialId, out var adaptedText)
+                ? adaptedText
+                : material.Text;
+            var rewriteLevel = _rewriteLevelByMaterialId.TryGetValue(input.MaterialId, out var configuredRewriteLevel)
+                ? configuredRewriteLevel
+                : input.MaxRewriteLevel;
             return ValueTask.FromResult(new AdaptReferenceMaterialResultPayload(
                 "fixed-candidate-" + input.MaterialId,
                 input.MaterialId,
-                input.MaxRewriteLevel,
-                material.Text,
+                rewriteLevel,
+                text,
                 input.SlotValues,
                 NonSlotEdits: [],
                 new ReferenceReuseAuditPayload(
                     "fixed-audit-" + input.MaterialId,
                     "passed",
-                    input.MaxRewriteLevel,
+                    rewriteLevel,
                     ProvenanceErrors: [],
                     UnsupportedFactErrors: [],
                     AiProseRisks: [],

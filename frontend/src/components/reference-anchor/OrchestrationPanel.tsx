@@ -78,16 +78,17 @@ function payloadForDecision(run: reference.OrchestrationRun, decisionType: strin
 }
 
 function summaryItems(summary: reference.OrchestrationApprovalSummary): Array<[string, string | string[]]> {
-  const items: Array<[string, string | string[]]> = [
-    ['章节功能', summary.chapter_function],
-    ['POV', summary.pov],
-    ['情绪轨迹', summary.emotional_trajectory],
-    ['材料计划', summary.material_use_plan],
-    ['改写预算', summary.rewrite_budget],
-    ['事实边界', summary.fact_boundary_changes],
-    ['高风险', summary.high_risk_findings],
+  const textOrFallback = (value: string, fallback: string) => value.trim() || fallback
+  const listOrFallback = (value: string[], fallback: string) => value.length > 0 ? value : [fallback]
+  return [
+    ['章节功能', textOrFallback(summary.chapter_function, '未提供')],
+    ['POV', textOrFallback(summary.pov, '未选择')],
+    ['情绪轨迹', textOrFallback(summary.emotional_trajectory, '未提供')],
+    ['材料计划', textOrFallback(summary.material_use_plan, '未提供')],
+    ['改写预算', textOrFallback(summary.rewrite_budget, '未提供')],
+    ['事实边界', listOrFallback(summary.fact_boundary_changes, '无事实边界变更')],
+    ['高风险', listOrFallback(summary.high_risk_findings, '无高风险')],
   ]
-  return items.filter(([, value]) => Array.isArray(value) ? value.length > 0 : Boolean(value))
 }
 
 function canResumeDecision(run: reference.OrchestrationRun, decisionType: string): boolean {
@@ -145,6 +146,16 @@ export function OrchestrationPanel({
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             先确认来源和事实边界，再自动生成、评审、绑定材料并审计候选；最终正文仍需作者单独处理。
           </p>
+          <div className="mt-2 grid grid-cols-1 gap-2 text-[11px] text-muted-foreground md:grid-cols-2">
+            <div className="rounded-md border border-border bg-background px-2.5 py-2">
+              <span className="font-medium text-foreground">AI 自动阶段</span>
+              <span className="mt-1 block leading-relaxed">生成蓝图、确定性评审、绑定材料、生成候选、草稿审计</span>
+            </div>
+            <div className="rounded-md border border-border bg-background px-2.5 py-2">
+              <span className="font-medium text-foreground">作者决策</span>
+              <span className="mt-1 block leading-relaxed">来源/事实边界、蓝图批准或修订、高风险停止、最终正文插入</span>
+            </div>
+          </div>
         </div>
         <button type="button" onClick={onRefresh} disabled={loading} className={actionButtonClass}>
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}

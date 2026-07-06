@@ -8,6 +8,7 @@ import {
   Plus,
   RefreshCcw,
   Search,
+  SlidersHorizontal,
   Wand2,
 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
@@ -113,6 +114,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   const [materialFilters, setMaterialFilters] = useState<MaterialSearchFilters>(EMPTY_MATERIAL_FILTERS)
   const [materialQuery, setMaterialQuery] = useState('')
   const [orchestrationUseSelectedAnchors, setOrchestrationUseSelectedAnchors] = useState(false)
+  const [advancedMode, setAdvancedMode] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -684,128 +686,155 @@ export default function ReferenceAnchorView({ novelId }: Props) {
             />
 
             <div className="rounded-lg border border-border bg-card p-4">
-              <div className="flex flex-wrap items-end gap-3">
-                <div className="min-w-[220px] flex-1">
-                  <Field label="材料搜索">
-                    <input value={materialQuery} onChange={event => setMaterialQuery(event.target.value)} className={inputClass} placeholder="叙事功能、情绪或具体句子" />
-                  </Field>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
+                    <h3 className="text-xs font-semibold text-foreground">高级模式</h3>
+                  </div>
+                  <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+                    默认使用上方编排流程；打开后可手动搜索材料、生成/修订/评审/批准蓝图、绑定材料和生成候选。
+                  </p>
                 </div>
-                <button onClick={searchMaterials} disabled={loading} className="inline-flex items-center gap-1.5 rounded bg-secondary px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/80 disabled:opacity-50">
-                  <Search className="h-3.5 w-3.5" />搜索
+                <button
+                  type="button"
+                  onClick={() => setAdvancedMode(value => !value)}
+                  aria-pressed={advancedMode}
+                  className={`${advancedMode ? 'bg-primary text-primary-foreground hover:opacity-90' : 'bg-secondary text-foreground hover:bg-secondary/80'} inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium disabled:opacity-50`}
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  {advancedMode ? '关闭高级模式' : '打开高级模式'}
                 </button>
               </div>
-              <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
-                <Field label="叙事职责">
-                  <input value={materialFilters.narrativeDuties} onChange={event => setMaterialFilters(filters => ({ ...filters, narrativeDuties: event.target.value }))} className={inputClass} placeholder="external_evidence；transition" />
-                </Field>
-                <Field label="情绪转变">
-                  <input value={materialFilters.emotionTransitions} onChange={event => setMaterialFilters(filters => ({ ...filters, emotionTransitions: event.target.value }))} className={inputClass} placeholder="neutral->pressure" />
-                </Field>
-                <Field label="材料类型">
-                  <input value={materialFilters.materialTypes} onChange={event => setMaterialFilters(filters => ({ ...filters, materialTypes: event.target.value }))} className={inputClass} placeholder="sentence；passage" />
-                </Field>
-                <Field label="功能标签">
-                  <input value={materialFilters.functionTags} onChange={event => setMaterialFilters(filters => ({ ...filters, functionTags: event.target.value }))} className={inputClass} placeholder="emotion_evidence" />
-                </Field>
-                <Field label="情绪标签">
-                  <input value={materialFilters.emotionTags} onChange={event => setMaterialFilters(filters => ({ ...filters, emotionTags: event.target.value }))} className={inputClass} placeholder="restrained" />
-                </Field>
-                <Field label="POV 标签">
-                  <input value={materialFilters.povTags} onChange={event => setMaterialFilters(filters => ({ ...filters, povTags: event.target.value }))} className={inputClass} placeholder="limited；close" />
-                </Field>
-                <Field label="技法标签">
-                  <input value={materialFilters.techniqueTags} onChange={event => setMaterialFilters(filters => ({ ...filters, techniqueTags: event.target.value }))} className={inputClass} placeholder="afterbeat" />
-                </Field>
-              </div>
-              {materials.length > 0 && (
-                <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-2">
-                  {materials.map(material => (
-                    <div key={material.material_id} className="rounded-md border border-border bg-background p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-                          {material.material_type} · {material.function_tag || 'untagged'} · {material.emotion_tag || 'neutral'}
-                        </span>
-                        {material.user_verified && <span className="shrink-0 text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
+
+              {advancedMode && (
+                <div className="mt-4 space-y-4">
+                  <div className="rounded-md border border-border bg-background p-3">
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div className="min-w-[220px] flex-1">
+                        <Field label="材料搜索">
+                          <input value={materialQuery} onChange={event => setMaterialQuery(event.target.value)} className={inputClass} placeholder="叙事功能、情绪或具体句子" />
+                        </Field>
                       </div>
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {[material.pov_tag, material.technique_tag, material.scene_tag].filter(Boolean).map(tag => (
-                          <span key={tag} className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{tag}</span>
+                      <button onClick={searchMaterials} disabled={loading} className="inline-flex items-center gap-1.5 rounded bg-secondary px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/80 disabled:opacity-50">
+                        <Search className="h-3.5 w-3.5" />搜索
+                      </button>
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
+                      <Field label="叙事职责">
+                        <input value={materialFilters.narrativeDuties} onChange={event => setMaterialFilters(filters => ({ ...filters, narrativeDuties: event.target.value }))} className={inputClass} placeholder="external_evidence；transition" />
+                      </Field>
+                      <Field label="情绪转变">
+                        <input value={materialFilters.emotionTransitions} onChange={event => setMaterialFilters(filters => ({ ...filters, emotionTransitions: event.target.value }))} className={inputClass} placeholder="neutral->pressure" />
+                      </Field>
+                      <Field label="材料类型">
+                        <input value={materialFilters.materialTypes} onChange={event => setMaterialFilters(filters => ({ ...filters, materialTypes: event.target.value }))} className={inputClass} placeholder="sentence；passage" />
+                      </Field>
+                      <Field label="功能标签">
+                        <input value={materialFilters.functionTags} onChange={event => setMaterialFilters(filters => ({ ...filters, functionTags: event.target.value }))} className={inputClass} placeholder="emotion_evidence" />
+                      </Field>
+                      <Field label="情绪标签">
+                        <input value={materialFilters.emotionTags} onChange={event => setMaterialFilters(filters => ({ ...filters, emotionTags: event.target.value }))} className={inputClass} placeholder="restrained" />
+                      </Field>
+                      <Field label="POV 标签">
+                        <input value={materialFilters.povTags} onChange={event => setMaterialFilters(filters => ({ ...filters, povTags: event.target.value }))} className={inputClass} placeholder="limited；close" />
+                      </Field>
+                      <Field label="技法标签">
+                        <input value={materialFilters.techniqueTags} onChange={event => setMaterialFilters(filters => ({ ...filters, techniqueTags: event.target.value }))} className={inputClass} placeholder="afterbeat" />
+                      </Field>
+                    </div>
+                    {materials.length > 0 && (
+                      <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-2">
+                        {materials.map(material => (
+                          <div key={material.material_id} className="rounded-md border border-border bg-card p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                                {material.material_type} · {material.function_tag || 'untagged'} · {material.emotion_tag || 'neutral'}
+                              </span>
+                              {material.user_verified && <span className="shrink-0 text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {[material.pov_tag, material.technique_tag, material.scene_tag].filter(Boolean).map(tag => (
+                                <span key={tag} className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{tag}</span>
+                              ))}
+                            </div>
+                            <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-foreground">{material.text}</p>
+                            {materialScoreComponents(material).length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {materialScoreComponents(material).map(([name, value]) => (
+                                  <span key={name} className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                                    {name} {value.toFixed(2)}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         ))}
                       </div>
-                      <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-foreground">{material.text}</p>
-                      {materialScoreComponents(material).length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {materialScoreComponents(material).map(([name, value]) => (
-                            <span key={name} className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                              {name} {value.toFixed(2)}
-                            </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 2xl:grid-cols-[360px_minmax(0,1fr)] gap-4">
+                    <div className="rounded-md border border-border bg-background p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <FileSearch className="h-3.5 w-3.5 text-muted-foreground" />
+                        <h3 className="text-xs font-semibold text-foreground">章节蓝图</h3>
+                      </div>
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
+                          <Field label="章节号">
+                            <input value={blueprintForm.chapterNumber} onChange={event => setBlueprintForm(form => ({ ...form, chapterNumber: event.target.value }))} className={inputClass} inputMode="numeric" />
+                          </Field>
+                          <Field label="标题">
+                            <input value={blueprintForm.title} onChange={event => setBlueprintForm(form => ({ ...form, title: event.target.value }))} className={inputClass} placeholder="可选" />
+                          </Field>
+                        </div>
+                        <Field label="章节目标">
+                          <textarea value={blueprintForm.chapterGoal} onChange={event => setBlueprintForm(form => ({ ...form, chapterGoal: event.target.value }))} className={`${inputClass} min-h-16 resize-y`} placeholder="本章要完成的逻辑、情绪或钩子" />
+                        </Field>
+                        <Field label="已知事实">
+                          <textarea value={blueprintForm.knownFacts} onChange={event => setBlueprintForm(form => ({ ...form, knownFacts: event.target.value }))} className={`${inputClass} min-h-14 resize-y`} placeholder="一行一个" />
+                        </Field>
+                        <Field label="禁止事实">
+                          <textarea value={blueprintForm.forbiddenFacts} onChange={event => setBlueprintForm(form => ({ ...form, forbiddenFacts: event.target.value }))} className={`${inputClass} min-h-14 resize-y`} placeholder="一行一个" />
+                        </Field>
+                        <button onClick={generateBlueprint} disabled={loading} className="inline-flex w-full items-center justify-center gap-1.5 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
+                          <Wand2 className="h-3.5 w-3.5" />生成蓝图
+                        </button>
+                      </div>
+
+                      {blueprints.length > 0 && (
+                        <div className="mt-4 border-t border-border pt-3 space-y-2">
+                          {blueprints.slice(0, 8).map(blueprint => (
+                            <button
+                              key={blueprint.blueprint_id}
+                              onClick={() => selectBlueprint(blueprint.blueprint_id)}
+                              className={`w-full rounded-md border px-3 py-2 text-left transition-colors ${activeBlueprint?.blueprint_id === blueprint.blueprint_id ? 'border-primary bg-secondary' : 'border-border bg-card hover:bg-secondary/60'}`}
+                            >
+                              <span className="block truncate text-xs font-medium text-foreground">第{blueprint.chapter_number}章 · {blueprint.title}</span>
+                              <span className={`block text-[11px] ${statusTone(blueprint.status)}`}>{blueprint.status}</span>
+                            </button>
                           ))}
                         </div>
                       )}
                     </div>
-                  ))}
+
+                    <BlueprintDetail
+                      blueprint={activeBlueprint}
+                      binding={binding}
+                      draft={draft}
+                      loading={loading}
+                      onReview={reviewBlueprint}
+                      onApprove={approveBlueprint}
+                      onBind={bindMaterials}
+                      onGenerateDraft={generateDraft}
+                      revisionForm={revisionForm}
+                      onRevisionFormChange={setRevisionForm}
+                      onSaveEdits={saveBlueprintEdits}
+                    />
+                  </div>
                 </div>
               )}
-            </div>
-
-            <div className="grid grid-cols-1 2xl:grid-cols-[360px_minmax(0,1fr)] gap-4">
-              <div className="rounded-lg border border-border bg-card p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <FileSearch className="h-3.5 w-3.5 text-muted-foreground" />
-                  <h3 className="text-xs font-semibold text-foreground">章节蓝图</h3>
-                </div>
-                <div className="space-y-3">
-                  <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
-                    <Field label="章节号">
-                      <input value={blueprintForm.chapterNumber} onChange={event => setBlueprintForm(form => ({ ...form, chapterNumber: event.target.value }))} className={inputClass} inputMode="numeric" />
-                    </Field>
-                    <Field label="标题">
-                      <input value={blueprintForm.title} onChange={event => setBlueprintForm(form => ({ ...form, title: event.target.value }))} className={inputClass} placeholder="可选" />
-                    </Field>
-                  </div>
-                  <Field label="章节目标">
-                    <textarea value={blueprintForm.chapterGoal} onChange={event => setBlueprintForm(form => ({ ...form, chapterGoal: event.target.value }))} className={`${inputClass} min-h-16 resize-y`} placeholder="本章要完成的逻辑、情绪或钩子" />
-                  </Field>
-                  <Field label="已知事实">
-                    <textarea value={blueprintForm.knownFacts} onChange={event => setBlueprintForm(form => ({ ...form, knownFacts: event.target.value }))} className={`${inputClass} min-h-14 resize-y`} placeholder="一行一个" />
-                  </Field>
-                  <Field label="禁止事实">
-                    <textarea value={blueprintForm.forbiddenFacts} onChange={event => setBlueprintForm(form => ({ ...form, forbiddenFacts: event.target.value }))} className={`${inputClass} min-h-14 resize-y`} placeholder="一行一个" />
-                  </Field>
-                  <button onClick={generateBlueprint} disabled={loading} className="inline-flex w-full items-center justify-center gap-1.5 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
-                    <Wand2 className="h-3.5 w-3.5" />生成蓝图
-                  </button>
-                </div>
-
-                {blueprints.length > 0 && (
-                  <div className="mt-4 border-t border-border pt-3 space-y-2">
-                    {blueprints.slice(0, 8).map(blueprint => (
-                      <button
-                        key={blueprint.blueprint_id}
-                        onClick={() => selectBlueprint(blueprint.blueprint_id)}
-                        className={`w-full rounded-md border px-3 py-2 text-left transition-colors ${activeBlueprint?.blueprint_id === blueprint.blueprint_id ? 'border-primary bg-secondary' : 'border-border bg-background hover:bg-secondary/60'}`}
-                      >
-                        <span className="block truncate text-xs font-medium text-foreground">第{blueprint.chapter_number}章 · {blueprint.title}</span>
-                        <span className={`block text-[11px] ${statusTone(blueprint.status)}`}>{blueprint.status}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <BlueprintDetail
-                blueprint={activeBlueprint}
-                binding={binding}
-                draft={draft}
-                loading={loading}
-                onReview={reviewBlueprint}
-                onApprove={approveBlueprint}
-                onBind={bindMaterials}
-                onGenerateDraft={generateDraft}
-                revisionForm={revisionForm}
-                onRevisionFormChange={setRevisionForm}
-                onSaveEdits={saveBlueprintEdits}
-              />
             </div>
           </section>
         </div>

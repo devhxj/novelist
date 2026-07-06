@@ -71,9 +71,15 @@ async function main() {
     await verifyMetadataPanels(page)
     await page.screenshot({ path: path.join(outputDir, 'app-06-metadata.png'), fullPage: true })
 
+    logStep('checking metadata empty and action paths')
+    await verifyMetadataActionWorkflow(browser, url, consoleErrors, pageErrors)
+
     logStep('checking reference entry point')
     await verifyReferenceSmoke(page)
     await page.screenshot({ path: path.join(outputDir, 'app-07-reference.png'), fullPage: true })
+
+    logStep('checking compact viewport layout')
+    await verifyCompactViewportSmoke(browser, url, consoleErrors, pageErrors)
 
     logStep('checking bridge guardrails')
     await verifyBridgeCalls(page)
@@ -132,8 +138,8 @@ async function verifyBootstrapStates(browser, url, consoleErrors, pageErrors) {
   await bridgeUnavailablePage.close()
 }
 
-async function newAppPage(browser, consoleErrors, pageErrors, bridgeOptions) {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } })
+async function newAppPage(browser, consoleErrors, pageErrors, bridgeOptions, viewport = { width: 1440, height: 1100 }) {
+  const page = await browser.newPage({ viewport })
   page.setDefaultTimeout(12_000)
   page.on('console', (message) => {
     if (message.type() === 'error') {
@@ -564,6 +570,246 @@ async function verifyMetadataPanels(page) {
   await expectVisible(page.getByText('节奏控制').first(), 'skill fixture')
 }
 
+async function verifyCompactViewportSmoke(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(browser, consoleErrors, pageErrors, { initialized: true }, { width: 900, height: 720 })
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'compact workspace title')
+
+  await clickActivity(page, '章节')
+  await ensureChapterBlockExpanded(page)
+  await chapterButton(page, '雨夜线索').click()
+  await expectVisible(page.locator('.monaco-editor').first(), 'compact editor surface')
+  await expectVisible(page.getByPlaceholder('输入消息，按 / 调用技能...'), 'compact chat input')
+
+  await clickActivity(page, '角色')
+  await expectVisible(page.getByRole('heading', { name: /角色/ }), 'compact character surface')
+
+  await clickActivity(page, '参考锚定')
+  await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'compact reference surface')
+
+  await assertBridgeCallCount(page, 'SaveContent', 0)
+  await page.screenshot({ path: path.join(outputDir, 'app-08-compact.png'), fullPage: true })
+  await page.close()
+}
+
+async function verifyMetadataActionWorkflow(browser, url, consoleErrors, pageErrors) {
+  await verifyMetadataEmptyStates(browser, url, consoleErrors, pageErrors)
+
+  const page = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    confirmResult: true,
+  })
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'metadata action workspace')
+
+  await verifyCharacterActions(page)
+  await verifyLocationActions(page)
+  await verifyStoryArcActions(page)
+  await verifyTimelineActions(page)
+  await verifyReaderActions(page)
+  await verifyPreferenceActions(page)
+  await verifyProfileActions(page)
+  await verifySkillActions(page)
+
+  await assertBridgeCallCount(page, 'SaveContent', 0)
+  await assertBridgeCallCount(page, 'runtime.shell.openExternal', 0)
+  await page.close()
+}
+
+async function verifyMetadataEmptyStates(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    characters: [],
+    locations: [],
+    storyArcs: [],
+    arcNodes: [],
+    chapterPlans: [],
+    timelineEntries: [],
+    readerPerspectives: [],
+    preferences: { global: [], novel: [] },
+    writingActivity: [],
+    writingStats: {
+      total_words: 0,
+      total_days_active: 0,
+      current_streak: 0,
+      longest_streak: 0,
+      total_novels: 1,
+      total_chapters: 2,
+    },
+    skills: [],
+  })
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'metadata empty workspace')
+
+  await clickActivity(page, '角色')
+  await expectVisible(page.locator('main').getByText('暂无角色'), 'empty characters state')
+  await clickActivity(page, '地点')
+  await expectVisible(page.locator('main').getByText('暂无地点'), 'empty locations state')
+  await clickActivity(page, '弧线')
+  await expectVisible(page.locator('main').getByText('暂无叙事弧线'), 'empty story arc state')
+  await clickActivity(page, '时间线')
+  await expectVisible(page.locator('main').getByText('暂无伏笔或用户指令'), 'empty timeline state')
+  await clickActivity(page, '读者视角')
+  await expectVisible(page.locator('main').getByText('暂无读者认知数据'), 'empty reader state')
+  await clickActivity(page, '偏好')
+  await expectVisible(page.locator('main').getByText('暂无全局偏好'), 'empty global preference state')
+  await expectVisible(page.locator('main').getByText('暂无本书偏好'), 'empty novel preference state')
+  await clickActivity(page, '技能')
+  await expectVisible(page.locator('aside').getByText('暂无技能'), 'empty skill state')
+  await page.locator('header').getByRole('button', { name: '个人中心' }).click()
+  await expectVisible(page.getByText('还没有写作记录。开始写吧，每天的字数都会被记录下来。'), 'empty profile writing state')
+  await page.close()
+}
+
+async function verifyCharacterActions(page) {
+  await clickActivity(page, '角色')
+  await page.getByRole('button', { name: '新建角色' }).click()
+  await page.getByPlaceholder('角色名称').fill('沈望')
+  await page.getByPlaceholder('角色外貌、背景等自然语言描述').fill('在雨夜负责确认门外脚印。')
+  await page.locator('main').getByRole('button', { name: '保存' }).last().click()
+  await waitForBridgeCall(page, 'CreateCharacter')
+  await expectVisible(page.getByText('沈望').first(), 'created character')
+
+  await clickCardAction(page, '沈望', '编辑')
+  await page.getByPlaceholder('角色名称').fill('沈望-修订')
+  await page.locator('main').getByRole('button', { name: '保存' }).last().click()
+  await waitForBridgeCall(page, 'UpdateCharacter')
+  await expectVisible(page.getByText('沈望-修订').first(), 'updated character')
+
+  await clickCardAction(page, '沈望-修订', '删除')
+  await waitForBridgeCall(page, 'DeleteCharacter')
+  await expectHidden(page.locator('main').getByText('沈望-修订'), 'deleted character')
+}
+
+async function verifyLocationActions(page) {
+  await clickActivity(page, '地点')
+  await page.getByRole('button', { name: '新建地点' }).click()
+  await page.getByPlaceholder('地点名称').fill('旧钟楼')
+  await page.getByPlaceholder('如：森林、城市、洞穴').fill('建筑')
+  await page.getByPlaceholder('环境氛围、特色等自然语言描述').fill('能俯瞰旧城门雨线的钟楼。')
+  await page.locator('main').getByRole('button', { name: '保存' }).last().click()
+  await waitForBridgeCall(page, 'CreateLocation')
+  await expectVisible(page.getByText('旧钟楼').first(), 'created location')
+
+  await clickCardAction(page, '旧钟楼', '编辑')
+  await page.getByPlaceholder('地点名称').fill('旧钟楼-修订')
+  await page.locator('main').getByRole('button', { name: '保存' }).last().click()
+  await waitForBridgeCall(page, 'UpdateLocation')
+  await expectVisible(page.getByText('旧钟楼-修订').first(), 'updated location')
+
+  await clickCardAction(page, '旧钟楼-修订', '删除')
+  await waitForBridgeCall(page, 'DeleteLocation')
+  await expectHidden(page.locator('main').getByText('旧钟楼-修订'), 'deleted location')
+}
+
+async function verifyStoryArcActions(page) {
+  await clickActivity(page, '弧线')
+  await page.getByRole('button', { name: '新弧线' }).click()
+  await page.getByPlaceholder('弧线名称').fill('真相回收线')
+  await page.getByPlaceholder('弧线整体描述').fill('覆盖弧线创建流程。')
+  await page.locator('main').getByRole('button', { name: '保存' }).last().click()
+  await waitForBridgeCall(page, 'CreateStoryArc')
+  await expectVisible(page.getByText('真相回收线').first(), 'created story arc')
+
+  await page.getByRole('button', { name: '新建节点' }).click()
+  await page.getByPlaceholder('节点标题').fill('门外脚印')
+  await page.getByPlaceholder('节点详情').fill('脚印把旧钟楼和旧城门连起来。')
+  await page.locator('main').getByRole('button', { name: '保存' }).last().click()
+  await waitForBridgeCall(page, 'CreateArcNode')
+  await expectVisible(page.getByText('门外脚印').first(), 'created arc node')
+
+  await clickCardAction(page, '门外脚印', '标记完成')
+  await waitForBridgeCall(page, 'UpdateArcNode')
+  await expectVisible(page.getByText('已完成').first(), 'arc node quick status')
+
+  await clickCardAction(page, '门外脚印', '删除')
+  await waitForBridgeCall(page, 'DeleteArcNode')
+  await expectHidden(page.locator('main').getByText('门外脚印'), 'deleted arc node')
+}
+
+async function verifyTimelineActions(page) {
+  await clickActivity(page, '时间线')
+  await page.locator('section').filter({ hasText: '章节计划' }).getByTitle('编辑').click({ force: true })
+  await page.getByPlaceholder('下一章计划内容...').fill('下一章让钟楼线索与旧城门交叉。')
+  await page.locator('section').filter({ hasText: '章节计划' }).getByRole('button', { name: '保存' }).click()
+  await waitForBridgeCall(page, 'UpdateChapterPlan')
+  await expectVisible(page.getByText('下一章让钟楼线索与旧城门交叉。'), 'updated chapter plan')
+
+  await page.locator('main').getByRole('button', { name: '新建' }).click()
+  await page.getByPlaceholder('简短标题').fill('钥匙回收')
+  await page.getByPlaceholder('详细描述').fill('钥匙在第二章前被重新提及。')
+  await page.locator('main').getByRole('button', { name: '创建' }).last().click()
+  await waitForBridgeCall(page, 'CreateTimelineEntry')
+  await expectVisible(page.getByText('钥匙回收').first(), 'created timeline entry')
+
+  await clickCardAction(page, '钥匙回收', '标记已回收')
+  await waitForBridgeCall(page, 'UpdateTimelineEntry')
+  await expectVisible(page.getByText('已回收').first(), 'timeline quick status')
+}
+
+async function verifyReaderActions(page) {
+  await clickActivity(page, '读者视角')
+  await page.locator('main').getByRole('button', { name: '新建' }).click()
+  await page.getByPlaceholder('读者知道/想知道/误以为的事情').fill('读者误以为钟楼里的人已经离开。')
+  await page.getByPlaceholder('真实情况是什么').fill('钟楼里的人仍在观察旧城门。')
+  await page.locator('main').getByRole('button', { name: '创建' }).last().click()
+  await waitForBridgeCall(page, 'CreateReaderPerspective')
+  await expectVisible(page.getByText(/读者误以为钟楼里的人/).first(), 'created reader entry')
+
+  await expectVisible(page.getByText('作者视角真相'), 'reader inspect detail')
+  await clickCardAction(page, '读者误以为钟楼里的人', '标记已回收')
+  await waitForBridgeCall(page, 'UpdateReaderPerspective')
+  await expectVisible(page.getByText(/第1章回收/).first(), 'reader quick reveal')
+
+  await clickCardAction(page, '读者误以为钟楼里的人', '删除')
+  await waitForBridgeCall(page, 'DeleteReaderPerspective')
+  await expectHidden(page.locator('main').getByText(/读者误以为钟楼里的人/), 'deleted reader entry')
+}
+
+async function verifyPreferenceActions(page) {
+  await clickActivity(page, '偏好')
+  await page.locator('section').filter({ hasText: '全局偏好' }).getByRole('button', { name: '添加' }).click()
+  await page.getByPlaceholder('风格、对话、世界观...').fill('对白')
+  await page.getByPlaceholder('偏好内容').fill('对话保留半句停顿。')
+  await page.locator('main').getByRole('button', { name: '创建' }).last().click()
+  await waitForBridgeCall(page, 'CreatePreference')
+  await expectVisible(page.getByText('对话保留半句停顿。'), 'created preference')
+
+  await clickCardAction(page, '对话保留半句停顿。', '编辑')
+  await page.getByPlaceholder('偏好内容').fill('对话保留半句停顿，避免提前解释。')
+  await page.locator('main').getByRole('button', { name: '保存' }).last().click()
+  await waitForBridgeCall(page, 'UpdatePreference')
+  await expectVisible(page.getByText('对话保留半句停顿，避免提前解释。'), 'updated preference')
+
+  await clickCardAction(page, '对话保留半句停顿，避免提前解释。', '删除')
+  await waitForBridgeCall(page, 'DeletePreference')
+  await expectHidden(page.locator('main').getByText('对话保留半句停顿，避免提前解释。'), 'deleted preference')
+}
+
+async function verifyProfileActions(page) {
+  await page.locator('header').getByRole('button', { name: '个人中心' }).click()
+  await expectVisible(page.getByText('累计字数'), 'profile stats before edit')
+  await page.getByText('Mock User').click()
+  await page.locator('main').getByRole('textbox').fill('Metadata Tester')
+  await page.keyboard.press('Enter')
+  await waitForBridgeCall(page, 'SaveUserName')
+  await expectVisible(page.getByText('Metadata Tester'), 'updated profile name')
+}
+
+async function verifySkillActions(page) {
+  await clickActivity(page, '技能')
+  await page.getByPlaceholder('搜索...').fill('节奏')
+  await expectVisible(page.locator('aside').getByText('节奏控制'), 'filtered skill')
+  await page.locator('aside').getByRole('button', { name: /节奏控制/ }).click()
+  await waitForBridgeCallArg(page, 'GetContent', 1, 'skills/节奏控制.md')
+  await expectVisible(page.getByText('保持停顿和动作之间的张力。'), 'inspected skill content')
+
+  await clickCardAction(page.locator('aside'), '节奏控制', '删除技能')
+  await waitForBridgeCall(page, 'DeleteSkill')
+  await expectVisible(page.getByText('技能 (1)'), 'skill count after delete')
+  await expectHidden(page.locator('aside').getByText('节奏控制'), 'deleted skill hidden in side panel')
+}
+
 async function verifyReferenceSmoke(page) {
   await page.getByTitle('参考锚定').click()
   await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'reference heading')
@@ -745,6 +991,12 @@ async function expectSelectedValue(locator, expectedValue) {
   assert.equal(actual, expectedValue)
 }
 
+async function clickCardAction(root, cardText, actionTitle) {
+  const card = root.locator('.group').filter({ hasText: cardText }).first()
+  await expectVisible(card, `${cardText} card`)
+  await card.getByTitle(actionTitle).click({ force: true })
+}
+
 async function assertCreatedReferenceAnchor(page, expected) {
   const actual = await page.evaluate(() => window.__appMockState.createdReferenceAnchors.at(-1))
   assert.equal(actual?.title, expected.title)
@@ -896,11 +1148,171 @@ function installConfigurableAppMockBridge(options = {}) {
       updated_at: now,
     },
   ]
+  const defaultCharacters = [
+    {
+      id: 1,
+      novel_id: 42,
+      name: '林岚',
+      description: '旧城门案件的调查者。',
+      personality: '谨慎、克制',
+      abilities: JSON.stringify(['观察', '推理']),
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      id: 2,
+      novel_id: 42,
+      name: '周砚',
+      description: '掌握旧城暗号的线人。',
+      personality: '沉默',
+      abilities: JSON.stringify(['记忆']),
+      created_at: now,
+      updated_at: now,
+    },
+  ]
+  const defaultLocations = [
+    {
+      id: 1,
+      novel_id: 42,
+      name: '旧城门',
+      location_type: '城市',
+      description: '雨夜里暗号被冲淡的城门。',
+      detail_json: '{}',
+      parent_location_id: 0,
+      tags: JSON.stringify(['雨夜', '线索']),
+      created_at: now,
+      updated_at: now,
+    },
+  ]
+  const defaultStoryArcs = [
+    {
+      id: 1,
+      novel_id: 42,
+      name: '雨夜调查线',
+      description: '围绕桌面水痕推进。',
+      arc_type: 'main',
+      importance: 5,
+      status: 'active',
+      reactivate_at: '',
+      created_at: now,
+      updated_at: now,
+    },
+  ]
+  const defaultArcNodes = [
+    {
+      id: 1,
+      novel_id: 42,
+      story_arc_id: 1,
+      title: '桌面水痕触发调查',
+      description: '林岚发现水痕但没有立刻揭示判断。',
+      target_chapter: 1,
+      actual_chapter: 0,
+      status: 'pending',
+      created_at: now,
+      updated_at: now,
+    },
+  ]
+  const defaultChapterPlans = [
+    { novel_id: 42, scope: 'next', content: '下一章继续旧城门调查。' },
+    { novel_id: 42, scope: 'near', content: '近期回收桌面水痕。' },
+    { novel_id: 42, scope: 'far', content: '远期揭示暗号来源。' },
+  ]
+  const defaultTimelineEntries = [
+    {
+      id: 1,
+      novel_id: 42,
+      category: 'foreshadowing',
+      status: 'pending',
+      title: '桌面水痕',
+      content: '杯底留下半圈水痕，提示有人刚离开。',
+      detail_json: '{}',
+      target_chapter: 1,
+      importance: 4,
+      source_chapter_id: 1,
+      source: 'user',
+      resolved_chapter_id: 0,
+      created_at: now,
+      updated_at: now,
+    },
+  ]
+  const defaultReaderPerspectives = [
+    {
+      id: 1,
+      novel_id: 42,
+      type: 'known',
+      content: '读者知道林岚正在调查旧城门。',
+      related_truth: '旧城门暗号和桌面水痕相关。',
+      planted_chapter: 1,
+      revealed_chapter: 0,
+      created_at: now,
+    },
+  ]
+  const defaultPreferences = {
+    global: [
+      {
+        id: 1,
+        novel_id: 0,
+        is_global: true,
+        category: '叙事',
+        content: '保持受限视角，不提前暴露门外身份。',
+        created_at: now,
+      },
+    ],
+    novel: [
+      {
+        id: 2,
+        novel_id: 42,
+        is_global: false,
+        category: '节奏',
+        content: '雨夜场景多用动作间隔承压。',
+        created_at: now,
+      },
+    ],
+  }
+  const defaultWritingActivity = [
+    { date: '2026-07-01', words: 800 },
+    { date: '2026-07-02', words: 1200 },
+  ]
+  const defaultWritingStats = {
+    total_words: 2180,
+    total_days_active: 2,
+    current_streak: 2,
+    longest_streak: 2,
+    total_novels: 1,
+    total_chapters: 2,
+  }
+  const defaultSkills = [
+    {
+      name: '节奏控制',
+      description: '控制动作、停顿和信息释放。',
+      category: '写作技法',
+      mode: 'manual',
+      author: 'mock',
+      version: 1,
+      source: 'novel',
+    },
+    {
+      name: '对话潜台词',
+      description: '用潜台词替代解释。',
+      category: '写作技法',
+      mode: 'manual',
+      author: 'mock',
+      version: 1,
+      source: 'builtin',
+    },
+  ]
   const state = {
     calls: [],
     activeNovelId: options.settings?.last_novel_id ?? defaultSettings.last_novel_id,
     nextNovelId: 43,
     nextChapterId: 3,
+    nextCharacterId: 3,
+    nextLocationId: 2,
+    nextStoryArcId: 2,
+    nextArcNodeId: 2,
+    nextTimelineEntryId: 2,
+    nextReaderPerspectiveId: 2,
+    nextPreferenceId: 3,
     nextSessionId: 1,
     nextTurnId: 101,
     searchFailureRecovered: false,
@@ -916,17 +1328,29 @@ function installConfigurableAppMockBridge(options = {}) {
       'chapters/1.md': '林岚在雨夜旧宅门前停住。\n\n她看见桌上的水痕。',
       'chapters/2.md': '旧城门下，暗号被雨水冲淡。',
       'skills/rhythm.md': '---\nname: 节奏控制\n---\n保持停顿和动作之间的张力。',
+      'skills/节奏控制.md': '---\nname: 节奏控制\n---\n保持停顿和动作之间的张力。',
       '/builtin/skills/dialogue.md': '---\nname: 对话潜台词\n---\n用话外之意推动场景。',
     },
     initialized: options.initialized ?? true,
     novels: options.novels ?? [defaultNovel],
     chaptersByNovelId: options.chaptersByNovelId ?? { 42: defaultChapters },
     settings: options.settings ?? defaultSettings,
+    characters: options.characters ?? defaultCharacters,
+    locations: options.locations ?? defaultLocations,
+    storyArcs: options.storyArcs ?? defaultStoryArcs,
+    arcNodes: options.arcNodes ?? defaultArcNodes,
+    chapterPlans: options.chapterPlans ?? defaultChapterPlans,
+    timelineEntries: options.timelineEntries ?? defaultTimelineEntries,
+    readerPerspectives: options.readerPerspectives ?? defaultReaderPerspectives,
+    preferences: options.preferences ?? defaultPreferences,
+    writingActivity: options.writingActivity ?? defaultWritingActivity,
+    writingStats: options.writingStats ?? defaultWritingStats,
+    skills: options.skills ?? defaultSkills,
   }
 
   window.localStorage.removeItem('goink_tabs_all')
   window.localStorage.setItem('theme', 'light')
-  window.confirm = () => false
+  window.confirm = () => Boolean(options.confirmResult)
 
   Object.defineProperty(window, '__appMockState', {
     configurable: true,
@@ -1053,20 +1477,77 @@ function installConfigurableAppMockBridge(options = {}) {
       case 'Chat': return chat(args[0])
       case 'CompressContext': return { turn_id: state.nextTurnId++ }
       case 'SearchAll': return searchAll(args[1])
-      case 'GetCharacters': return characters()
+      case 'GetCharacters': return characters(args[0])
+      case 'CreateCharacter': return createCharacter(args[0], args[1])
+      case 'UpdateCharacter':
+        updateCharacter(args[0], args[1], args[2])
+        return null
+      case 'DeleteCharacter':
+        deleteCharacter(args[0], args[1])
+        return null
       case 'GetCharacterRelations': return []
-      case 'GetLocations': return locations()
+      case 'GetLocations': return locations(args[0])
+      case 'CreateLocation': return createLocation(args[0], args[1])
+      case 'UpdateLocation':
+        updateLocation(args[0], args[1], args[2])
+        return null
+      case 'DeleteLocation':
+        deleteLocation(args[0], args[1])
+        return null
       case 'GetLocationRelations': return []
-      case 'GetStoryArcs': return storyArcs()
-      case 'GetArcNodes': return arcNodes()
+      case 'GetStoryArcs': return storyArcs(args[0])
+      case 'CreateStoryArc': return createStoryArc(args[0], args[1])
+      case 'UpdateStoryArc':
+        updateStoryArc(args[0], args[1], args[2])
+        return null
+      case 'DeleteStoryArc':
+        deleteStoryArc(args[0], args[1])
+        return null
+      case 'GetArcNodes': return arcNodes(args[0])
+      case 'CreateArcNode': return createArcNode(args[0], args[1])
+      case 'UpdateArcNode':
+        updateArcNode(args[0], args[1], args[2])
+        return null
+      case 'DeleteArcNode':
+        deleteArcNode(args[0], args[1])
+        return null
       case 'GetMaxChapterNumber': return 2
-      case 'GetChapterPlans': return chapterPlans()
-      case 'GetTimelineEntries': return timelineEntries()
-      case 'GetReaderPerspectives': return readerPerspectives()
-      case 'GetPreferences': return preferences()
+      case 'GetChapterPlans': return chapterPlans(args[0])
+      case 'UpdateChapterPlan':
+        updateChapterPlan(args[0], args[1])
+        return null
+      case 'GetTimelineEntries': return timelineEntries(args[0])
+      case 'CreateTimelineEntry': return createTimelineEntry(args[0], args[1])
+      case 'UpdateTimelineEntry':
+        updateTimelineEntry(args[0], args[1], args[2])
+        return null
+      case 'DeleteTimelineEntry':
+        deleteTimelineEntry(args[0], args[1])
+        return null
+      case 'GetReaderPerspectives': return readerPerspectives(args[0])
+      case 'CreateReaderPerspective': return createReaderPerspective(args[0], args[1])
+      case 'UpdateReaderPerspective':
+        updateReaderPerspective(args[1], args[0], args[2])
+        return null
+      case 'DeleteReaderPerspective':
+        deleteReaderPerspective(args[1], args[0])
+        return null
+      case 'GetPreferences': return preferences(args[0])
+      case 'CreatePreference': return createPreference(args[0], args[1])
+      case 'UpdatePreference': return updatePreference(args[0], args[1])
+      case 'DeletePreference':
+        deletePreference(args[0])
+        return null
       case 'GetWritingActivity': return writingActivity()
       case 'GetWritingStats': return writingStats()
       case 'ListSkills': return skills()
+      case 'DeleteSkill':
+        deleteSkill(args[0])
+        return null
+      case 'ExtractStyle': return extractStyle(args[0])
+      case 'SaveUserName':
+        state.settings.user_name = String(args[0] ?? '')
+        return null
       case 'GetLLMConfig': return llmConfig()
       case 'GetEmbeddingConfig': return embeddingConfig()
       case 'GetSqliteVecStatus': return sqliteVecStatus()
@@ -1349,190 +1830,335 @@ function installConfigurableAppMockBridge(options = {}) {
     ]
   }
 
-  function characters() {
-    return [
-      {
-        id: 1,
-        novel_id: 42,
-        name: '林岚',
-        description: '旧城门案件的调查者。',
-        personality: '谨慎、克制',
-        abilities: JSON.stringify(['观察', '推理']),
-        created_at: now,
-        updated_at: now,
-      },
-      {
-        id: 2,
-        novel_id: 42,
-        name: '周砚',
-        description: '掌握旧城暗号的线人。',
-        personality: '沉默',
-        abilities: JSON.stringify(['记忆']),
-        created_at: now,
-        updated_at: now,
-      },
-    ]
+  function characters(novelId = state.activeNovelId) {
+    return state.characters.filter((item) => item.novel_id === novelId)
   }
 
-  function locations() {
-    return [
-      {
-        id: 1,
-        novel_id: 42,
-        name: '旧城门',
-        location_type: '城市',
-        description: '雨夜里暗号被冲淡的城门。',
-        detail_json: '{}',
-        parent_location_id: 0,
-        tags: JSON.stringify(['雨夜', '线索']),
-        created_at: now,
-        updated_at: now,
-      },
-    ]
-  }
-
-  function storyArcs() {
-    return [
-      {
-        id: 1,
-        novel_id: 42,
-        name: '雨夜调查线',
-        description: '围绕桌面水痕推进。',
-        arc_type: 'main',
-        importance: 5,
-        status: 'active',
-        reactivate_at: '',
-        created_at: now,
-        updated_at: now,
-      },
-    ]
-  }
-
-  function arcNodes() {
-    return [
-      {
-        id: 1,
-        novel_id: 42,
-        story_arc_id: 1,
-        title: '桌面水痕触发调查',
-        description: '林岚发现水痕但没有立刻揭示判断。',
-        target_chapter: 1,
-        actual_chapter: 0,
-        status: 'pending',
-        created_at: now,
-        updated_at: now,
-      },
-    ]
-  }
-
-  function chapterPlans() {
-    return [
-      { novel_id: 42, scope: 'next', content: '下一章继续旧城门调查。' },
-      { novel_id: 42, scope: 'near', content: '近期回收桌面水痕。' },
-      { novel_id: 42, scope: 'far', content: '远期揭示暗号来源。' },
-    ]
-  }
-
-  function timelineEntries() {
-    return [
-      {
-        id: 1,
-        novel_id: 42,
-        category: 'foreshadowing',
-        status: 'pending',
-        title: '桌面水痕',
-        content: '杯底留下半圈水痕，提示有人刚离开。',
-        detail_json: '{}',
-        target_chapter: 1,
-        importance: 4,
-        source_chapter_id: 1,
-        source: 'user',
-        resolved_chapter_id: 0,
-        created_at: now,
-        updated_at: now,
-      },
-    ]
-  }
-
-  function readerPerspectives() {
-    return [
-      {
-        id: 1,
-        novel_id: 42,
-        type: 'known',
-        content: '读者知道林岚正在调查旧城门。',
-        related_truth: '旧城门暗号和桌面水痕相关。',
-        planted_chapter: 1,
-        revealed_chapter: 0,
-        created_at: now,
-      },
-    ]
-  }
-
-  function preferences() {
-    return {
-      global: [
-        {
-          id: 1,
-          novel_id: 0,
-          is_global: true,
-          category: '叙事',
-          content: '保持受限视角，不提前暴露门外身份。',
-          created_at: now,
-        },
-      ],
-      novel: [
-        {
-          id: 2,
-          novel_id: 42,
-          is_global: false,
-          category: '节奏',
-          content: '雨夜场景多用动作间隔承压。',
-          created_at: now,
-        },
-      ],
+  function createCharacter(novelId, input) {
+    const character = {
+      id: state.nextCharacterId++,
+      novel_id: novelId,
+      name: String(input?.name ?? ''),
+      description: String(input?.description ?? ''),
+      personality: String(input?.personality ?? ''),
+      abilities: String(input?.abilities ?? '[]'),
+      created_at: now,
+      updated_at: now,
     }
+    state.characters = [...state.characters, character]
+    return character
+  }
+
+  function updateCharacter(novelId, characterId, input) {
+    state.characters = state.characters.map((item) =>
+      item.novel_id === novelId && item.id === characterId
+        ? {
+          ...item,
+          name: String(input?.name ?? item.name),
+          description: String(input?.description ?? item.description),
+          personality: String(input?.personality ?? item.personality),
+          abilities: String(input?.abilities ?? item.abilities),
+          updated_at: now,
+        }
+        : item,
+    )
+  }
+
+  function deleteCharacter(novelId, characterId) {
+    state.characters = state.characters.filter((item) => item.novel_id !== novelId || item.id !== characterId)
+  }
+
+  function locations(novelId = state.activeNovelId) {
+    return state.locations.filter((item) => item.novel_id === novelId)
+  }
+
+  function createLocation(novelId, input) {
+    const location = {
+      id: state.nextLocationId++,
+      novel_id: novelId,
+      name: String(input?.name ?? ''),
+      location_type: String(input?.location_type ?? ''),
+      description: String(input?.description ?? ''),
+      detail_json: String(input?.detail_json ?? '{}'),
+      parent_location_id: Number(input?.parent_location_id ?? 0),
+      tags: String(input?.tags ?? '[]'),
+      created_at: now,
+      updated_at: now,
+    }
+    state.locations = [...state.locations, location]
+    return location
+  }
+
+  function updateLocation(novelId, locationId, input) {
+    state.locations = state.locations.map((item) =>
+      item.novel_id === novelId && item.id === locationId
+        ? {
+          ...item,
+          name: String(input?.name ?? item.name),
+          location_type: String(input?.location_type ?? item.location_type),
+          description: String(input?.description ?? item.description),
+          detail_json: String(input?.detail_json ?? item.detail_json),
+          parent_location_id: input?.clear_parent ? 0 : Number(input?.parent_location_id ?? item.parent_location_id ?? 0),
+          tags: String(input?.tags ?? item.tags),
+          updated_at: now,
+        }
+        : item,
+    )
+  }
+
+  function deleteLocation(novelId, locationId) {
+    state.locations = state.locations.filter((item) => item.novel_id !== novelId || item.id !== locationId)
+    state.locations = state.locations.map((item) =>
+      item.parent_location_id === locationId ? { ...item, parent_location_id: 0, updated_at: now } : item,
+    )
+  }
+
+  function storyArcs(novelId = state.activeNovelId) {
+    return state.storyArcs.filter((item) => item.novel_id === novelId)
+  }
+
+  function createStoryArc(novelId, input) {
+    const arc = {
+      id: state.nextStoryArcId++,
+      novel_id: novelId,
+      name: String(input?.name ?? ''),
+      description: String(input?.description ?? ''),
+      arc_type: String(input?.arc_type ?? 'main'),
+      importance: Number(input?.importance ?? 3),
+      status: String(input?.status ?? 'active'),
+      reactivate_at: String(input?.reactivate_at ?? ''),
+      created_at: now,
+      updated_at: now,
+    }
+    state.storyArcs = [...state.storyArcs, arc]
+    return arc
+  }
+
+  function updateStoryArc(novelId, arcId, input) {
+    state.storyArcs = state.storyArcs.map((item) =>
+      item.novel_id === novelId && item.id === arcId
+        ? {
+          ...item,
+          name: String(input?.name ?? item.name),
+          description: String(input?.description ?? item.description),
+          arc_type: String(input?.arc_type ?? item.arc_type),
+          importance: Number(input?.importance ?? item.importance),
+          status: String(input?.status ?? item.status),
+          reactivate_at: String(input?.reactivate_at ?? item.reactivate_at),
+          updated_at: now,
+        }
+        : item,
+    )
+  }
+
+  function deleteStoryArc(novelId, arcId) {
+    state.storyArcs = state.storyArcs.filter((item) => item.novel_id !== novelId || item.id !== arcId)
+    state.arcNodes = state.arcNodes.filter((item) => item.novel_id !== novelId || item.story_arc_id !== arcId)
+  }
+
+  function arcNodes(novelId = state.activeNovelId) {
+    return state.arcNodes.filter((item) => item.novel_id === novelId)
+  }
+
+  function createArcNode(novelId, input) {
+    const node = {
+      id: state.nextArcNodeId++,
+      novel_id: novelId,
+      story_arc_id: Number(input?.story_arc_id ?? 0),
+      title: String(input?.title ?? ''),
+      description: String(input?.description ?? ''),
+      target_chapter: Number(input?.target_chapter ?? 1),
+      actual_chapter: Number(input?.actual_chapter ?? 0),
+      status: String(input?.status ?? 'pending'),
+      created_at: now,
+      updated_at: now,
+    }
+    state.arcNodes = [...state.arcNodes, node]
+    return node
+  }
+
+  function updateArcNode(novelId, nodeId, input) {
+    state.arcNodes = state.arcNodes.map((item) =>
+      item.novel_id === novelId && item.id === nodeId
+        ? {
+          ...item,
+          story_arc_id: Number(input?.story_arc_id ?? item.story_arc_id),
+          title: String(input?.title ?? item.title),
+          description: String(input?.description ?? item.description),
+          target_chapter: Number(input?.target_chapter ?? item.target_chapter),
+          actual_chapter: Number(input?.actual_chapter ?? item.actual_chapter),
+          status: String(input?.status ?? item.status),
+          updated_at: now,
+        }
+        : item,
+    )
+  }
+
+  function deleteArcNode(novelId, nodeId) {
+    state.arcNodes = state.arcNodes.filter((item) => item.novel_id !== novelId || item.id !== nodeId)
+  }
+
+  function chapterPlans(novelId = state.activeNovelId) {
+    return state.chapterPlans.filter((item) => item.novel_id === novelId)
+  }
+
+  function updateChapterPlan(novelId, input) {
+    const scope = String(input?.scope ?? '')
+    const content = String(input?.content ?? '')
+    const exists = state.chapterPlans.some((item) => item.novel_id === novelId && item.scope === scope)
+    state.chapterPlans = exists
+      ? state.chapterPlans.map((item) => item.novel_id === novelId && item.scope === scope ? { ...item, content } : item)
+      : [...state.chapterPlans, { novel_id: novelId, scope, content }]
+  }
+
+  function timelineEntries(novelId = state.activeNovelId) {
+    return state.timelineEntries.filter((item) => item.novel_id === novelId)
+  }
+
+  function createTimelineEntry(novelId, input) {
+    const entry = {
+      id: state.nextTimelineEntryId++,
+      novel_id: novelId,
+      category: String(input?.category ?? 'foreshadowing'),
+      status: String(input?.status ?? 'pending'),
+      title: String(input?.title ?? ''),
+      content: String(input?.content ?? ''),
+      detail_json: String(input?.detail_json ?? ''),
+      target_chapter: Number(input?.target_chapter ?? 1),
+      importance: Number(input?.importance ?? 3),
+      source_chapter_id: Number(input?.source_chapter_id ?? 0),
+      source: String(input?.source ?? 'user'),
+      resolved_chapter_id: Number(input?.resolved_chapter_id ?? 0),
+      created_at: now,
+      updated_at: now,
+    }
+    state.timelineEntries = [...state.timelineEntries, entry]
+    return entry
+  }
+
+  function updateTimelineEntry(novelId, entryId, input) {
+    state.timelineEntries = state.timelineEntries.map((item) =>
+      item.novel_id === novelId && item.id === entryId
+        ? {
+          ...item,
+          title: String(input?.title ?? item.title),
+          content: String(input?.content ?? item.content),
+          detail_json: String(input?.detail_json ?? item.detail_json),
+          target_chapter: Number(input?.target_chapter ?? item.target_chapter),
+          importance: Number(input?.importance ?? item.importance),
+          status: String(input?.status ?? item.status),
+          resolved_chapter_id: Number(input?.resolved_chapter_id ?? item.resolved_chapter_id),
+          updated_at: now,
+        }
+        : item,
+    )
+  }
+
+  function deleteTimelineEntry(novelId, entryId) {
+    state.timelineEntries = state.timelineEntries.filter((item) => item.novel_id !== novelId || item.id !== entryId)
+  }
+
+  function readerPerspectives(novelId = state.activeNovelId) {
+    return state.readerPerspectives.filter((item) => item.novel_id === novelId)
+  }
+
+  function createReaderPerspective(novelId, input) {
+    const entry = {
+      id: state.nextReaderPerspectiveId++,
+      novel_id: novelId,
+      type: String(input?.type ?? 'known'),
+      content: String(input?.content ?? ''),
+      related_truth: String(input?.related_truth ?? ''),
+      planted_chapter: Number(input?.planted_chapter ?? 1),
+      revealed_chapter: Number(input?.revealed_chapter ?? 0),
+      created_at: now,
+    }
+    state.readerPerspectives = [...state.readerPerspectives, entry]
+    return entry
+  }
+
+  function updateReaderPerspective(novelId, entryId, input) {
+    state.readerPerspectives = state.readerPerspectives.map((item) =>
+      item.novel_id === novelId && item.id === entryId
+        ? {
+          ...item,
+          type: String(input?.type ?? item.type),
+          content: String(input?.content ?? item.content),
+          related_truth: String(input?.related_truth ?? item.related_truth),
+          planted_chapter: Number(input?.planted_chapter ?? item.planted_chapter),
+          revealed_chapter: Number(input?.revealed_chapter ?? item.revealed_chapter),
+        }
+        : item,
+    )
+  }
+
+  function deleteReaderPerspective(novelId, entryId) {
+    state.readerPerspectives = state.readerPerspectives.filter((item) => item.novel_id !== novelId || item.id !== entryId)
+  }
+
+  function preferences(novelId = state.activeNovelId) {
+    return {
+      global: state.preferences.global.filter((item) => item.is_global),
+      novel: state.preferences.novel.filter((item) => item.novel_id === novelId),
+    }
+  }
+
+  function createPreference(novelId, input) {
+    const item = {
+      id: state.nextPreferenceId++,
+      novel_id: input?.is_global ? 0 : novelId,
+      is_global: Boolean(input?.is_global),
+      category: String(input?.category ?? '未分类'),
+      content: String(input?.content ?? ''),
+      created_at: now,
+    }
+    if (item.is_global) state.preferences.global = [...state.preferences.global, item]
+    else state.preferences.novel = [...state.preferences.novel, item]
+    return item
+  }
+
+  function updatePreference(preferenceId, input) {
+    const update = (item) => item.id === preferenceId
+      ? {
+        ...item,
+        category: String(input?.category ?? item.category),
+        content: String(input?.content ?? item.content),
+        is_global: input?.is_global ?? item.is_global,
+      }
+      : item
+    state.preferences.global = state.preferences.global.map(update)
+    state.preferences.novel = state.preferences.novel.map(update)
+    return [...state.preferences.global, ...state.preferences.novel].find((item) => item.id === preferenceId) ?? null
+  }
+
+  function deletePreference(preferenceId) {
+    state.preferences.global = state.preferences.global.filter((item) => item.id !== preferenceId)
+    state.preferences.novel = state.preferences.novel.filter((item) => item.id !== preferenceId)
   }
 
   function writingActivity() {
-    return [
-      { date: '2026-07-01', words: 800 },
-      { date: '2026-07-02', words: 1200 },
-    ]
+    return state.writingActivity
   }
 
   function writingStats() {
-    return {
-      total_words: 2180,
-      total_days_active: 2,
-      current_streak: 2,
-      longest_streak: 2,
-      total_novels: 1,
-      total_chapters: 2,
-    }
+    return state.writingStats
   }
 
   function skills() {
-    return [
-      {
-        name: '节奏控制',
-        description: '控制动作、停顿和信息释放。',
-        category: '写作技法',
-        mode: 'manual',
-        author: 'mock',
-        version: 1,
-        source: 'novel',
-      },
-      {
-        name: '对话潜台词',
-        description: '用潜台词替代解释。',
-        category: '写作技法',
-        mode: 'manual',
-        author: 'mock',
-        version: 1,
-        source: 'builtin',
-      },
-    ]
+    return state.skills
+  }
+
+  function deleteSkill(input) {
+    state.skills = state.skills.filter((item) => item.source !== input?.source || item.name !== input?.name)
+  }
+
+  function extractStyle() {
+    return {
+      name: '雨夜留白',
+      description: '以短句和停顿保留悬念。',
+      raw_content: '---\nname: 雨夜留白\ndescription: 以短句和停顿保留悬念。\ncategory: 写作技法\n---\n用动作间隔保留未说出口的信息。',
+      file_path: 'skills/雨夜留白.md',
+    }
   }
 
   function llmConfig() {

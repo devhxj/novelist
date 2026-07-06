@@ -81,6 +81,7 @@ Current main-panel workflow:
 - resume required source/fact, blueprint revision, blueprint approval, and high-risk-stop decisions from the reference panel
 - cancel orchestration runs
 - stop at final insertion with candidate ids visible; the final-insertion decision is not resumable from the panel, and no frontend path automatically inserts candidate prose into chapter content
+- keep manual material search plus blueprint generate/revise/review/approve/bind/draft controls behind `高级模式` so the default surface stays orchestration-first while debugging and strict editorial review workflows remain available
 
 Current frontend status:
 
@@ -88,8 +89,9 @@ Current frontend status:
 - `OrchestrationPanel.tsx` is mounted at the top of the reference-anchor main panel as the default Phase 11 workflow entry.
 - `ActivityBar.tsx` has a `reference` activity entry.
 - `WorkspaceView.tsx` renders `ReferenceAnchorView` for the active novel.
-- The first panel supports anchor create/rebuild/list, native reference source file selection with raw path fallback, material search with score-component explanations, default orchestration start/inspect/resume/cancel, blueprint generate/list/detail/review/approve, field-level beat editing through `ReviseReferenceChapterBlueprint`, typed `slot_plan` rows, material binding with score-component explanations, and draft candidate preview.
-- Remaining UI hardening belongs to Phase 10 and later: dedicated side-panel list/filter behavior, Playwright mock-bridge screenshot/DOM coverage for the full reference-anchor workflow, minimal real Photino runtime smoke, and copy-to-clipboard or insertion-confirmation affordances for final candidate handling.
+- The first panel supports anchor create/rebuild/list, native reference source file selection with raw path fallback, default orchestration start/inspect/resume/cancel, and advanced-mode material search with score-component explanations, blueprint generate/list/detail/review/approve, field-level beat editing through `ReviseReferenceChapterBlueprint`, typed `slot_plan` rows, material binding with score-component explanations, and draft candidate preview.
+- The Playwright mock-bridge workflow covers the default orchestration surface, asserts manual controls are hidden until advanced mode is opened, then exercises manual material search, blueprint revision/review/approval, binding, draft generation, and stale-blueprint disabled controls.
+- Remaining UI hardening belongs to later product work: dedicated side-panel list/filter behavior and copy-to-clipboard or insertion-confirmation affordances for final candidate handling.
 
 Stale blueprint behavior is resolved for the current UI: stale blueprints stay visible as read-only comparison artifacts, show a regeneration prompt, and cannot be reviewed, approved, revised, bound to materials, or used for draft candidates.
 

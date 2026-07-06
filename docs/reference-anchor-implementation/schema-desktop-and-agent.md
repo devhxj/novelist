@@ -14,12 +14,17 @@ var referenceAnchorService = new SqliteReferenceAnchorService(
     embeddingClient,
     sqliteVecProvider);
 
+var chatCompletionClient = new StandardChatCompletionClient(llmService);
+
 var referenceAnchoredDraftService = new SqliteReferenceAnchoredDraftService(
     appOptions,
     novelService,
     planningService,
-    referenceAnchorService);
+    referenceAnchorService,
+    new AiReferenceBlueprintRevisionProposalProvider(settingsService, chatCompletionClient));
 ```
+
+The AI-backed proposal provider is only used for failed blueprint review suggestions. It reads the currently selected chat model, treats model output as untrusted JSON, filters changes to supported fields referenced by current review defects, and falls back to the deterministic proposal provider when no model is selected or the model output is invalid. Suggested revisions remain persisted pending decisions and are not applied without the author/user approval path.
 
 It passes both services into `NovelistMafToolRegistry` so chat tools can access reference-anchor operations:
 

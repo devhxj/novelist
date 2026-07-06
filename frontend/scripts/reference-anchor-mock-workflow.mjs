@@ -47,6 +47,12 @@ async function main() {
     await expectVisible(page.getByRole('heading', { name: '参考锚定' }), 'reference panel heading')
     await page.screenshot({ path: path.join(outputDir, 'reference-anchor-01-initial.png'), fullPage: true })
 
+    logStep('checking advanced-mode boundary')
+    await expectHidden(page.getByText('材料搜索', { exact: true }), 'material search hidden by default')
+    await expectHidden(page.getByRole('button', { name: /生成蓝图/ }), 'manual blueprint generation hidden by default')
+    await expectHidden(page.getByText('当前节拍字段', { exact: true }), 'manual blueprint detail hidden by default')
+    await openAdvancedMode(page)
+
     logStep('create/rebuild/search')
     await createRebuildAndSearchReferenceMaterial(page)
     logStep('manual blueprint workflow')
@@ -127,6 +133,11 @@ async function generateReviseApproveBindAndDraft(page) {
 async function runDefaultOrchestrationToFinalInsertionStop(page) {
   const panel = orchestrationPanel(page)
 
+  await expectVisible(panel.getByText('AI 自动阶段'), 'orchestration automated stage copy')
+  await expectVisible(panel.getByText(/生成蓝图.*绑定材料.*草稿审计/), 'orchestration automated stage details')
+  await expectVisible(panel.getByText('作者决策'), 'orchestration author decision copy')
+  await expectVisible(panel.getByText(/来源\/事实边界.*蓝图批准.*最终正文插入/), 'orchestration author decision details')
+
   await panel.getByRole('button', { name: /启动候选编排/ }).click()
   await expectVisible(page.getByText('编排已启动，等待确认来源与事实边界'), 'orchestration started message')
   await expectVisible(panel.getByText('确认来源与事实边界', { exact: true }), 'source confirmation decision')
@@ -135,6 +146,18 @@ async function runDefaultOrchestrationToFinalInsertionStop(page) {
   await expectVisible(page.getByText('编排已继续'), 'orchestration resumed message')
   await expectVisible(panel.getByText('批准蓝图', { exact: true }).first(), 'blueprint approval decision')
   await expectVisible(panel.getByText('章节功能'), 'approval summary chapter function')
+  await expectVisible(panel.getByText('POV', { exact: true }), 'approval summary pov label')
+  await expectVisible(panel.getByText('事实边界', { exact: true }), 'approval summary fact boundary label')
+  await expectVisible(panel.getByText('情绪轨迹', { exact: true }), 'approval summary emotion label')
+  await expectVisible(panel.getByText('材料计划', { exact: true }), 'approval summary material plan label')
+  await expectVisible(panel.getByText('改写预算', { exact: true }), 'approval summary rewrite budget label')
+  await expectVisible(panel.getByText('高风险', { exact: true }), 'approval summary high risk label')
+  await expectVisible(panel.getByText('close / 主角'), 'approval summary pov value')
+  await expectVisible(panel.getByText('不新增门外身份'), 'approval summary fact boundary value')
+  await expectVisible(panel.getByText('警觉 -> 克制 -> 暂缓确认'), 'approval summary emotion value')
+  await expectVisible(panel.getByText('使用工作区参考材料中的克制动作证据。'), 'approval summary material plan value')
+  await expectVisible(panel.getByText('L1'), 'approval summary rewrite budget value')
+  await expectVisible(panel.getByText('无高风险'), 'approval summary empty high risk value')
   await panel.getByRole('button', { name: /^确认$/ }).click()
 
   await expectVisible(panel.getByText('候选已就绪'), 'final insertion stop badge')
@@ -186,7 +209,7 @@ async function verifyBridgeCalls(page) {
 }
 
 function blueprintDetail(page) {
-  return page.locator('.rounded-lg').filter({ hasText: '当前节拍字段' }).first()
+  return page.getByTestId('reference-blueprint-detail')
 }
 
 function orchestrationPanel(page) {
@@ -197,6 +220,21 @@ async function expectVisible(locator, description) {
   await locator.waitFor({ state: 'visible', timeout: 10_000 }).catch((error) => {
     throw new Error(`Expected visible: ${description}`, { cause: error })
   })
+}
+
+async function expectHidden(locator, description) {
+  await locator.waitFor({ state: 'hidden', timeout: 10_000 }).catch((error) => {
+    throw new Error(`Expected hidden: ${description}`, { cause: error })
+  })
+}
+
+async function openAdvancedMode(page) {
+  const button = page.getByRole('button', { name: '打开高级模式' })
+  await expectVisible(button, 'open advanced mode button')
+  await button.click()
+  await expectVisible(page.getByText('材料搜索', { exact: true }), 'material search visible in advanced mode')
+  await expectVisible(page.getByRole('button', { name: /生成蓝图/ }), 'manual blueprint generation visible in advanced mode')
+  await expectVisible(blueprintDetail(page), 'manual blueprint detail visible in advanced mode')
 }
 
 async function assertDisabled(locator, description) {

@@ -21,10 +21,10 @@
 
 **Verification:**
 
-- [ ] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj`
-- [ ] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj`
-- [ ] `cd frontend && npm run build`
-- [ ] `cd frontend && npm run lint`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj`
+- [x] `cd frontend && npm run build`
+- [x] `cd frontend && npm run lint`
 - [x] `cd frontend && npm run test:reference-anchor`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter PhotinoReferenceWorkflowSmokeTests -v minimal`
 
@@ -74,28 +74,28 @@ confirm source + chapter target + known/forbidden facts
 
 **Acceptance criteria:**
 
-- [ ] A single user command can start a reference-anchored candidate run for a chapter using chapter goal/plan, known facts, forbidden facts, and an optional corpus search policy; selected anchors are an advanced override, not a required default.
-- [ ] The orchestration run persists stage status, errors, generated artifacts, and the current required user decision so it can be resumed after app restart.
-- [ ] The orchestrator automatically performs safe stages: blueprint generation, deterministic blueprint review, material binding after approval, beat candidate generation, and draft audit.
+- [x] A single user command can start a reference-anchored candidate run for a chapter using chapter goal/plan, known facts, forbidden facts, and an optional corpus search policy; selected anchors are an advanced override, not a required default.
+- [x] The orchestration run persists stage status, errors, generated artifacts, and the current required user decision so it can be resumed after app restart.
+- [x] The orchestrator automatically performs safe stages: blueprint generation, deterministic blueprint review, material binding after approval, beat candidate generation, and draft audit.
 - [ ] The orchestrator stops for required human decisions: source/license confirmation, known/forbidden fact boundary changes, blueprint approval, AI-proposed blueprint revision application, and final chapter insertion.
-- [ ] A compact approval summary shows chapter function, POV, fact boundary changes, emotional trajectory, material-use plan, rewrite budget, and high-risk findings without forcing users to inspect every field.
-- [ ] Failed blueprint reviews can trigger AI-suggested field-level fixes, but suggested fixes are stored as proposed revisions and require user or explicit agent approval before application.
-- [ ] Low-risk passing blueprints can proceed from approval to material binding and candidate generation without additional manual clicks.
-- [ ] High-risk conditions require an explicit stop: stale blueprint, new facts outside approved boundary, forbidden fact pressure, missing material provenance, L3/L4 rewrite risk, POV leak risk, or audit failure.
-- [ ] Advanced mode still exposes manual generate/review/revise/approve/bind/draft/audit controls for debugging and strict editorial review.
+- [x] A compact approval summary shows chapter function, POV, fact boundary changes, emotional trajectory, material-use plan, rewrite budget, and high-risk findings without forcing users to inspect every field.
+- [x] Failed blueprint reviews can trigger AI-suggested field-level fixes, but suggested fixes are stored as proposed revisions and require user or explicit agent approval before application.
+- [x] Low-risk passing blueprints can proceed from approval to material binding and candidate generation without additional manual clicks.
+- [x] High-risk conditions require an explicit stop: stale blueprint, new facts outside approved boundary, forbidden fact pressure, missing material provenance, L3/L4 rewrite risk, POV leak risk, or audit failure.
+- [x] Advanced mode still exposes manual generate/review/revise/approve/bind/draft/audit controls for debugging and strict editorial review.
 - [x] The orchestration flow never calls `SaveContent` or inserts chapter prose automatically; insertion remains a separate user-confirmed action.
-- [ ] Agent tool descriptions and UI copy make clear which decisions AI may automate and which decisions require the author.
+- [x] Agent tool descriptions and UI copy make clear which decisions AI may automate and which decisions require the author.
 - [x] Telemetry or local run history records why the workflow stopped, what AI proposed, what the user approved/rejected, and which deterministic gate produced each block.
 
 **Verification:**
 
-- [ ] Unit tests for orchestration state transitions and resume behavior.
-- [ ] Integration tests for happy path: one command reaches audited candidates after user blueprint approval.
-- [ ] Integration tests for failed-review path: AI proposes revisions, user approves, re-review passes, then binding/draft continues.
-- [ ] Integration tests proving orchestration stops for stale blueprints, forbidden facts, unsupported facts, missing material links, and draft audit failure.
-- [ ] Bridge tests for starting, resuming, cancelling, and inspecting orchestration runs.
-- [ ] Agent tool tests proving the orchestrator cannot approve blueprint revisions, expand fact boundaries, or insert prose without explicit approval.
-- [ ] Frontend runtime test or manual smoke test proving the default flow requires only necessary confirmations while advanced controls remain available.
+- [x] Unit tests for orchestration state transitions and resume behavior.
+- [x] Integration tests for happy path: one command reaches audited candidates after user blueprint approval.
+- [x] Integration tests for failed-review path: AI proposes revisions, user approves, re-review passes, then binding/draft continues.
+- [x] Integration tests proving orchestration stops for stale blueprints, forbidden facts, unsupported facts, missing material links, and draft audit failure.
+- [x] Bridge tests for starting, resuming, cancelling, and inspecting orchestration runs.
+- [x] Agent tool tests proving the orchestrator cannot approve blueprint revisions, expand fact boundaries, or insert prose without explicit approval.
+- [x] Frontend runtime test or manual smoke test proving the default flow requires only necessary confirmations while advanced controls remain available.
 
 Targeted Phase 11 thin-slice checks completed:
 
@@ -104,30 +104,53 @@ Targeted Phase 11 thin-slice checks completed:
 - [x] After user blueprint approval, orchestration automatically binds materials, generates beat candidates, runs draft audit, persists candidate ids, and stops for final insertion confirmation without calling `SaveContent`.
 - [x] `ResumeReferenceOrchestrationRun` rejects `approve_final_insertion`, keeping the run parked at the final-insertion stop with candidate ids intact; final prose insertion must use a separate user-confirmed chapter edit/save path.
 - [x] Failed blueprint review can persist deterministic proposed field-level revisions in the required decision; approving that decision applies the revision, re-runs review, and stops for blueprint approval when the revision passes.
+- [x] Blueprint revision proposal generation now goes through an injectable `IReferenceBlueprintRevisionProposalProvider`; the default provider remains deterministic, and injected AI/agent-style proposals are rebound to the current blueprint/review, persisted as pending `proposed_blueprint_revision` data, applied only after user approval, re-reviewed, then allowed to continue through blueprint approval into binding/candidate generation/final-insertion stop.
+- [x] The desktop composition now wires an AI-backed `AiReferenceBlueprintRevisionProposalProvider` that uses the currently selected chat model to propose failed-review field fixes, validates model output as untrusted JSON, filters proposed changes to current error defects and supported blueprint fields, rebinds the proposal to the current blueprint/review, and falls back to the deterministic provider when no model is selected or model output is invalid.
+- [x] Applying a blueprint revision now uses the persisted pending proposal only: a client may submit the same proposal payload or an empty payload as approval, but cannot replace the pending proposal changes even when `blueprint_id` and `review_id` match.
 - [x] Agent orchestration tools can start, inspect, list, inspect run-event history, and cancel runs while deliberately withholding resume/approval/revision/final-insertion tools; start arguments cannot pre-confirm source/fact decisions, pass `anchor_ids`, decision payloads, or prose text.
 - [x] Draft audit failure now persists as a high-risk `resolve_high_risk_stop` decision with candidate ids and audit findings; resolving that stop marks the run failed instead of inserting prose.
 - [x] Material binding gaps now persist as a high-risk `resolve_high_risk_stop` decision with missing beat ids; resolving that stop marks the run failed instead of free-drafting.
 - [x] Stale blueprints now persist as a high-risk `resolve_high_risk_stop` decision when source-plan changes invalidate a pending approval or safe-stage continuation.
+- [x] Draft audit high-risk stops now cover unsupported new facts, forbidden-fact/POV leaks, and L3/L4 rewrite risk in addition to generic audit failure.
 - [x] Orchestration material binding now applies `corpus_search_policy` include/exclude anchor filters and license-status filters before selecting materials, so the default flow can retrieve by policy without a required manual anchor list.
 - [x] Local orchestration event history now records run starts, required decisions, user resumes/approvals, stop reasons, deterministic gate stages, failures, and cancellations; `GetReferenceOrchestrationRunEvents` exposes it through the desktop bridge and frontend adapter.
+- [x] Orchestration resume/safe-stage transitions are centralized in `ReferenceOrchestrationStateMachine` and covered by focused unit tests for approved decisions, high-risk resolution, and automatic-stage eligibility.
 - [x] The reference-anchor page now mounts a default orchestration panel that starts runs without requiring selected anchors, shows run history, required decisions, approval summaries, candidate ids, and event history, and allows safe resume/cancel actions while leaving final insertion manual.
+- [x] Agent orchestration tool descriptions and the default orchestration panel now distinguish AI-automated stages from author-only decisions; the reference-anchor Playwright workflow asserts this copy, the source/fact and blueprint confirmations, and the final-insertion stop that exposes no resume confirmation button.
+- [x] The reference-anchor page now hides manual material-search and blueprint generate/revise/review/approve/bind/draft controls by default behind `高级模式`; `npm --prefix frontend run test:reference-anchor` asserts the default hidden state, opens advanced mode, and completes the manual workflow plus stale-read-only checks.
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Reference -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationRun -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationRunStopsForHighRiskDecisionWhenMaterialBindingHasMissingLinks -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationRunStopsForHighRiskDecisionWhenBlueprintBecomesStaleBeforeApproval -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationRunRejectsFinalInsertionResumeAndKeepsManualInsertionBoundary -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter "FullyQualifiedName~ReferenceOrchestrationRunStopsForHighRiskDecisionWhenDraftCandidate" -v minimal`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter ReferenceOrchestrationStateMachineTests -v minimal`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'ReferenceOrchestration|ReferenceAnchorContractTests' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationRunPersistsInjectedBlueprintRevisionProposalUntilUserApprovesIt -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter AiReferenceBlueprintRevisionProposalProviderTests -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationRunPersistsAiBlueprintRevisionProposalUntilUserApprovesIt -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationRunRejectsClientModifiedBlueprintRevisionProposal -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'ReferenceOrchestrationRunRejectsClientModifiedBlueprintRevisionProposal|ReferenceOrchestrationRunRejectsMismatchedBlueprintRevisionProposal|ReferenceOrchestrationRunPersistsInjectedBlueprintRevisionProposalUntilUserApprovesIt|ReferenceOrchestrationRunAppliesProposedBlueprintRevisionThenContinuesAfterApproval' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'ReferenceOrchestrationRunRejectsClientModifiedBlueprintRevisionProposal|ReferenceOrchestrationRunRejectsMismatchedBlueprintRevisionProposal|ReferenceOrchestrationRunPersistsInjectedBlueprintRevisionProposalUntilUserApprovesIt|ReferenceOrchestrationRunPersistsAiBlueprintRevisionProposalUntilUserApprovesIt|ReferenceOrchestrationRunAppliesProposedBlueprintRevisionThenContinuesAfterApproval|AiReferenceBlueprintRevisionProposalProviderTests|PhotinoReferenceWorkflowSmokeTests' -v minimal`
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter MafToolRegistryTests -v minimal`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|MafToolRegistryTests' -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'ReferenceOrchestrationRunPersistsResumeAndCancelState|ReferenceAnchoredDraftServiceTests' -v minimal`
+- [x] `npm --prefix frontend run test:reference-anchor`
 - [x] `npm --prefix frontend run build`
 - [x] `npm --prefix frontend run lint`
 
-These thin slices do not complete the Phase 11 automatic workflow or Phase 12 shared-corpus model. Proposed revision generation is currently deterministic and narrow; broader high-risk stop coverage, agent approval escalation, full Photino runtime workflow coverage, and shared-corpus storage/migration remain pending.
+These thin slices do not complete all Phase 11 product decisions or the Phase 12 shared-corpus model. The proposal-provider boundary now supports a production AI-backed provider using the selected chat model while preserving explicit approval and deterministic fallback; remaining Phase 11 closure is about final stop-point/product policy, recovery UX, and authorization semantics beyond the current agent-read-only/user-approval boundary. Shared-corpus storage/migration remain pending.
 
 **Files likely touched:**
 
 - `src/Novelist.Contracts/App/ReferenceAnchoredDraftPayloads.cs`
 - `src/Novelist.Core/App/IReferenceAnchoredDraftService.cs`
+- `src/Novelist.Core/App/IReferenceBlueprintRevisionProposalProvider.cs`
+- `src/Novelist.Core/App/ReferenceOrchestrationStateMachine.cs`
+- `src/Novelist.Infrastructure/App/DeterministicReferenceBlueprintRevisionProposalProvider.cs`
+- `src/Novelist.Infrastructure/App/AiReferenceBlueprintRevisionProposalProvider.cs`
 - `src/Novelist.Infrastructure/App/SqliteReferenceAnchoredDraftService.cs`
+- `src/Novelist.App/Desktop/DesktopBridgeComposition.cs`
 - `src/Novelist.Core/Bridge/ReferenceAnchoredDraftBridgeHandlers.cs`
 - `src/Novelist.Agent/NovelistMafReferenceTools.cs`
 - `frontend/src/components/reference-anchor/*`
@@ -169,11 +192,11 @@ workspace/global reference corpus
 
 - [ ] Migration tests from per-novel `reference_anchors` to shared corpus records or compatibility reads.
 - [ ] Service tests proving global corpus materials can be searched from different novels without duplicating source import.
-- [ ] Tests proving per-novel forbidden facts and POV boundaries still reject globally sourced materials/candidates.
+- [x] Tests proving per-novel forbidden facts and POV boundaries still reject globally sourced materials/candidates.
 - [ ] Tests proving license/visibility policy filters corpus results before AI selection.
 - [ ] Retrieval-gap tests covering automatic query expansion, weak-match continuation, approved no-reuse continuation, and source-required stop states.
-- [ ] Binding/audit tests proving selected global material provenance is stored with blueprint hash and cannot be reused after blueprint edits.
-- [ ] Feedback tests proving global tag feedback and per-novel usage feedback have different scopes.
+- [x] Binding/audit tests proving selected global material provenance is stored with blueprint hash and cannot be reused after blueprint edits.
+- [x] Feedback tests proving global tag feedback and per-novel usage feedback have different scopes.
 - [ ] Bridge and agent tests proving `anchor_ids` are optional and AI-driven corpus retrieval is the default path.
 - [ ] Frontend smoke test for corpus management and default automatic material selection.
 
@@ -183,6 +206,11 @@ Targeted Phase 12 thin-slice checks completed:
 - [x] Reference material read paths now include `reference_anchors.novel_id = 0` workspace-corpus compatibility anchors for listing, search, adaptation, audit, tag correction, and per-novel feedback validation, while still excluding private anchors from other novels.
 - [x] A real SQLite orchestration run can omit explicit `anchor_ids`, resolve `novel_id = 0` workspace-corpus anchors through the default corpus policy, bind selected material links, generate audited candidates, and stop at final insertion without writing chapter prose.
 - [x] Real SQLite orchestration coverage proves workspace-corpus anchors are filtered by `corpus_search_policy.license_statuses` before binding selected materials.
+- [x] Workspace-corpus usage feedback remains per-novel: accepted material feedback boosts binding only for the novel that recorded it, while other novels can still retrieve the shared material without inheriting that usage approval.
+- [x] Workspace-corpus material links persist the current blueprint `analysis_contract_hash`; blueprint revisions mark old links stale and draft generation rejects stale/hash-mismatched links until materials are rebound.
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'WorkspaceCorpus|ReferenceOrchestrationRunUsesWorkspaceCorpus|ReferenceOrchestrationRunFiltersWorkspaceCorpus|ReferenceOrchestrationRunUsesCorpusSearchPolicy' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusFeedbackBoostsOnlyTheNovelThatRecordedUsage -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusMaterialLinksAreBoundToCurrentBlueprintAnalysisContract -v minimal`
 
 **Files likely touched:**
 
