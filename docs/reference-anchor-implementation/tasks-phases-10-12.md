@@ -177,7 +177,7 @@ workspace/global reference corpus
 
 - [ ] Reference source libraries and extracted materials can exist without `novel_id` ownership.
 - [ ] Existing per-novel anchors migrate or are readable through a compatibility layer without losing source hashes, segment ids, material ids, user-verified tags, feedback, or audit provenance.
-- [ ] Corpus records include visibility, license status, source trust, and optional user-defined tags, but no required per-novel binding gate.
+- [x] Corpus records include visibility, license status, source trust, and optional user-defined tags, but no required per-novel binding gate.
 - [ ] Material search accepts story-context inputs and returns globally sourced candidates that are filtered by license/status policy and scored by beat function, emotion, POV, prose duty, technique, lexical similarity, embeddings when available, and feedback boosts.
 - [ ] Retrieval gaps are explicit states, not silent free-drafting fallbacks: automatic query expansion may run first, weak matches must be marked low confidence, optional no-reuse beats require approved reasons, and source-required beats must stop for user action.
 - [ ] Blueprint generation no longer requires `anchor_ids`; it may accept an optional corpus search policy or explicit include/exclude anchors for advanced control.
@@ -193,7 +193,7 @@ workspace/global reference corpus
 - [ ] Migration tests from per-novel `reference_anchors` to shared corpus records or compatibility reads.
 - [ ] Service tests proving global corpus materials can be searched from different novels without duplicating source import.
 - [x] Tests proving per-novel forbidden facts and POV boundaries still reject globally sourced materials/candidates.
-- [ ] Tests proving license/visibility policy filters corpus results before AI selection.
+- [x] Tests proving license/visibility policy filters corpus results before AI selection.
 - [ ] Retrieval-gap tests covering automatic query expansion, weak-match continuation, approved no-reuse continuation, and source-required stop states.
 - [x] Binding/audit tests proving selected global material provenance is stored with blueprint hash and cannot be reused after blueprint edits.
 - [x] Feedback tests proving global tag feedback and per-novel usage feedback have different scopes.
@@ -204,6 +204,7 @@ Targeted Phase 12 thin-slice checks completed:
 
 - [x] Orchestration binding can use `corpus_search_policy` include/exclude anchor filters and license-status filters when `anchor_ids` are omitted, while keeping the existing per-novel reference-anchor storage model.
 - [x] Reference material read paths now include `reference_anchors.novel_id = 0` workspace-corpus compatibility anchors for listing, search, adaptation, audit, tag correction, and per-novel feedback validation, while still excluding private anchors from other novels.
+- [x] Workspace-corpus compatibility anchors now carry `corpus_visibility`, `source_trust`, and `user_tags_json`; read paths include only `novel_id = 0 AND corpus_visibility = 'workspace'`, explicit `anchor_ids` cannot bypass private/restricted workspace visibility, and legacy `novel_id = 0` rows are promoted to workspace-visible once during schema migration.
 - [x] A real SQLite orchestration run can omit explicit `anchor_ids`, resolve `novel_id = 0` workspace-corpus anchors through the default corpus policy, bind selected material links, generate audited candidates, and stop at final insertion without writing chapter prose.
 - [x] Real SQLite orchestration coverage proves workspace-corpus anchors are filtered by `corpus_search_policy.license_statuses` before binding selected materials.
 - [x] Workspace-corpus usage feedback remains per-novel: accepted material feedback boosts binding only for the novel that recorded it, while other novels can still retrieve the shared material without inheriting that usage approval.
@@ -211,6 +212,8 @@ Targeted Phase 12 thin-slice checks completed:
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'WorkspaceCorpus|ReferenceOrchestrationRunUsesWorkspaceCorpus|ReferenceOrchestrationRunFiltersWorkspaceCorpus|ReferenceOrchestrationRunUsesCorpusSearchPolicy' -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusFeedbackBoostsOnlyTheNovelThatRecordedUsage -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusMaterialLinksAreBoundToCurrentBlueprintAnalysisContract -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusVisibilityFiltersAnchorsBeforeSearchAdaptAuditTagAndFeedback -v minimal`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter ReferenceAnchorContractTests -v minimal`
 
 **Files likely touched:**
 

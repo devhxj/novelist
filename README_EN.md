@@ -1,9 +1,16 @@
+**English** | [中文](README.md)
+
+<div align="center">
+
+![Today's Verse](https://v2.jinrishici.com/one.svg?font-size=20&spacing=2&color=Chocolate)
+</div>
+
 <p align="center">
-  <img src="assets/logo-dark.svg#gh-dark-mode-only" alt="Novelist" />
-  <img src="assets/logo-light.svg#gh-light-mode-only" alt="Novelist" />
+  <img src="assets/logo-dark.svg#gh-dark-mode-only" alt="Novelist reference-anchored AI writing system" />
+  <img src="assets/logo-light.svg#gh-light-mode-only" alt="Novelist reference-anchored AI writing system" />
 </p>
 
-<h1 align="center">Desktop AI Novel-Writing System<br><sub>Agent Real-Time Decisions × Structured Memory × Post-Writing Self-Check</sub></h1>
+<h1 align="center">Novelist Reference-Anchored AI Long-Form Writing System<br><sub>Structured Memory × Skill Methodology × Blueprint Review × Draft Audit</sub></h1>
 
 <p align="center">
   <img src="https://img.shields.io/badge/.NET-10.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" alt=".NET 10" />
@@ -19,102 +26,100 @@
 
 ---
 
-<p align="center"><strong>Anyone who has tried to write a novel with a general-purpose AI knows the pain—by chapter five it forgets the protagonist's name. By chapter thirty you're manually flipping through earlier chapters hunting for that one foreshadowing line. After finishing a chapter you have to remind it yourself to "update character status" and "check arc progress." Novelist doesn't have these problems. It's a desktop AI writing system with structured memory—character profiles, foreshadowing states, arc progress, location relationships, reader knowledge—the system remembers, and the Agent looks it up, edits it, and maintains it on its own.</strong></p>
+Novelist is the desktop AI writing system evolved from GoInk. The original foundations remain: structured creative state, Agent tool use, Skill-based writing methodology, local semantic search, diff approval, and Git history.
 
-## What Makes It Different From General AI Chat
+The current direction adds a higher layer. **Skills teach the AI how to write, but long-form writing also needs to prove what may be written before generation and whether the result is usable after generation.** Novelist is turning reference sources, chapter blueprints, material bindings, draft candidates, and audit results into checkable contracts instead of relying only on prompts or Skills.
 
-| | General AI Chat | Novelist |
-|---|---|---|
-| Creative context | Re-explain everything in every conversation | Full structured tracking: characters, relationships, foreshadowing, arcs, locations, reader knowledge |
-| Editing | Outputs text directly; no idea what changed | Diff preview + line-by-line comparison + approve before writing |
-| Finding past content | Manual searching, flipping through chapters | Semantic search + local index—"that pendant" finds every relevant passage |
-| Post-writing maintenance | Doesn't care unless you remind it | Auto-triggers character updates, foreshadowing resolution, arc progression, reader knowledge refresh after writing |
-| Writing style | Prompt-based brute force | 8 built-in methodologies + custom Skill hot-reload, three-layer override |
-| Version history | None | Built-in Git, auto-commit every conversation, rollback anytime |
-| Dependencies | Often needs Python/GPU | Single installer, ready to go |
+## Current Positioning
 
-## The AI Looks It Up, Edits It, and Maintains It—Not a Pipeline, an Agent
+Novelist is not just a chat shell, and it is not only a pile of prompts or Skills. It is a local-first long-form fiction workbench:
 
-31 structured tools. The LLM autonomously decides which to call, what parameters to pass, and what to do next. Not a "finish a chapter, hand off to the next stage" pipeline—the Agent calls tools within the current conversation to check characters, check foreshadowing, read and write content, and update state, all the way to completion.
+| Layer | Responsibility |
+|---|---|
+| Structured creative state | Tracks characters, relationships, foreshadowing, arcs, locations, reader knowledge, preferences, and chapter plans |
+| Agent tools | Let the AI query, modify, and maintain project state during a conversation instead of only emitting text |
+| Skill methodology | Provides scene beats, dialogue subtext, pacing control, hooks, revision polish, de-AI flavoring, and other writing methods |
+| Reference anchor layer | Turns reference sources into traceable materials, requires reviewed blueprints, binds materials, generates candidates, and audits drafts |
+| Human confirmation boundary | Chapter insertion, fact-boundary expansion, high-risk revisions, and final saves require author confirmation |
 
-After a chapter is written, the system automatically injects maintenance reminders telling the Agent exactly what to check: have characters changed, has pending foreshadowing been resolved, do arc nodes need to advance, does reader knowledge need updating. The Agent won't "forget maintenance"—it's forced to self-check item by item.
+The repository name still keeps the historical `goink`, but the current code, docs, and product direction use `Novelist`.
 
-If that's still not enough, you can launch the Review Sub-Agent—an independent Agent that audits the chapter content against system state from scratch, flags any inconsistencies straight into the conversation, and lets the main Agent fix them on the spot.
+## Why Skills Are Not Enough
 
-## Finding One Sentence Across Hundreds Of Thousands Of Words: Local Semantic Search
+Skills improve method and style, but they cannot reliably enforce these questions:
 
-On chapter fifty, wondering "where exactly did the protagonist first see that pendant?"—no need to flip through every chapter. Tell the AI a sentence, and it finds the relevant passages across the entire book.
+- whether a reference source is usable, quotable, or adaptable;
+- whether generated content crosses known-fact or forbidden-fact boundaries;
+- whether the POV leaks knowledge the current viewpoint should not have;
+- whether a chapter blueprint only describes camera blocking instead of causality, emotion, narrative distance, and character-state change;
+- whether a draft candidate comes from an approved blueprint and bound materials;
+- whether the AI bypassed author confirmation and directly mutated chapter text.
 
-Not keyword matching—meaning-based search. Ask "clues about the pendant" and it finds paragraphs that never mention the word "pendant" but clearly allude to it. The Agent can also proactively search earlier content when writing new chapters to maintain consistency.
+The reference anchor layer handles these hard constraints. It turns "does it resemble the source", "can this be adapted", "is there factual risk", and "may this be inserted" into structured records and deterministic checks. The AI may propose; it cannot bypass the gates.
 
-The index and retrieval state live locally in sqlite-vec. Embeddings can be generated through a standard Embeddings API or a local ONNX model. Online Embeddings API mode stays provider/model agnostic; local ONNX mode uses the bundled fixed `bge-small-zh-v1.5` int8 model so sufficiently capable devices can generate embeddings on-device without sending manuscript text to an online embedding service. ONNX mode is strictly local and does not silently fall back to an online API. Chapter edits mark the index stale, and after rebuild the Agent can proactively search earlier content to maintain consistency.
+## Default Reference-Anchored Workflow
 
-## Not Just Memory—Structured Creative State
+```text
+author confirms source policy, chapter target, known facts, and forbidden facts
+  -> start orchestration run
+  -> generate chapter blueprint
+  -> run deterministic blueprint review
+  -> author approves the blueprint or approves AI-proposed field-level revisions
+  -> retrieve and bind reference materials
+  -> generate beat-level draft candidates
+  -> run draft audit
+  -> stop at final insertion confirmation
+```
 
-### Characters: Relationships Have History
+The workflow automates low-risk mechanical stages but stops for:
 
-Character profiles include personality, abilities, and background. Character relationships form a directed graph—"Zhang San towards Li Si: mentor but secretly wary," "Li Si towards Zhang San: respectful but withholding"—two independent records. Old relationship records are preserved when things change, so you can review the evolution.
+- source, license, or fact-boundary confirmation;
+- stale blueprints, missing materials, weak retrieval, or material hash mismatch;
+- failed blueprint review requiring revision;
+- high rewrite-level, POV, fact, or audit risk;
+- final chapter insertion.
 
-### Foreshadowing: No More Loose Threads
+This flow does not automatically call `SaveContent` or write chapter prose. The AI can propose candidates and revisions; final writing still goes through author-confirmed editing and saving.
 
-Every foreshadowing entry records a target resolution chapter and importance level. System alerts near resolution points; overdue unresolved items are flagged as anomalies. Chapter plans have three tiers—next chapter, near-term, far-term—to manage creative pacing.
+## Original Writing Capabilities Remain
 
-### Arcs: Cross-Chapter Narrative Threads
+### Structured Creative State
 
-Arcs consist of node chains, each node associated with a target chapter. Nodes auto-advance when a chapter is completed. A story typically tracks 3–5 parallel arcs simultaneously.
+Novelist tracks character profiles, relationships, foreshadowing, arcs, location graphs, reader knowledge, and writing preferences. Long projects do not need the same world and character state restated in every conversation; the Agent can read and maintain structured data through tools.
 
-### Worldbuilding: Locations Are a Graph, Not a List
+### Agent-Led Lookup, Editing, And Maintenance
 
-Track hierarchy (Kingdom → Palace → Great Hall) and spatial connections (A and B connected by a mountain path). The AI can query details, sub-locations, connections, or the full map.
+The system exposes structured tools to the Agent. During a conversation the AI can query characters, inspect chapters, search prior text, modify state, update preferences, and generate or revise content. After writing, maintenance prompts still ask the Agent to check character changes, foreshadowing status, arc progression, and reader knowledge.
 
-### Reader Knowledge: Control Information Release
+### Local Semantic Search
 
-Track what the reader knows, what answers they're waiting for, and what they've misunderstood. Precisely control suspense timing and reveal moments.
+RAG index and retrieval state live locally in SQLite/sqlite-vec. Embeddings can use an OpenAI-compatible online API or built-in ONNX mode. ONNX mode uses the bundled fixed `bge-small-zh-v1.5` int8 model and does not silently fall back to online APIs.
 
-### Writing Preferences: Say It Once
+### Diff Approval And Git History
 
-Two-tier management: global preferences and per-novel preferences. By chapter thirty-seven, "keep dialogue cold and restrained" still takes effect.
+The AI should not overwrite chapter text directly. Chapter edits go through diff approval and explicit save paths, and project changes have Git history for rollback.
 
-## Frontend Visualized State
-<p align="center">
-  <img src="assets/arc-demo.png" alt="Story Arcs" />
-</p>
-<p align="center">
-  <img src="assets/location-demo.png" alt="Location Graph" />
-</p>
-<p align="center">
-  <img src="assets/preferences-demo.png" alt="Writing Preferences" />
-</p>
+## Skill System
 
-## Skill System: 3 Layers × 3 Modes
-
-Skills are Novelist's creative methodology modules. Each Skill is defined by a single `.md` file with YAML frontmatter metadata and markdown body. **3 layers × 3 modes = 9 strategic dimensions** — precise control over what content, at what scope, with what activation model.
+Skills are writing methodology modules. Each Skill is a `.md` file with YAML frontmatter and markdown content, supporting three override layers and three activation modes.
 
 ### Three Layers
 
-Same-name Skills override by priority: **Novel > User > Built-in**. Changes hot-reload instantly — no restart needed.
+Same-name Skills override by **Novel > User > Built-in** priority and hot-reload after edits.
 
 | Layer | Storage | Scope | Editable |
 |---|---|---|---|
 | Built-in | Read-only bundled | All novels | No |
-| User | data-dir `skills/` (tool path remains compatible with `~/.goink/skills/`) | All novels | Yes |
+| User | data-dir `skills/`, with tool-path compatibility for `~/.goink/skills/` | All novels | Yes |
 | Novel | `{novel}/skills/` | Current novel | Yes |
 
 ### Three Modes
 
 | Mode | AI auto-invoke | User `/` trigger | Injected at session start | Listed in catalog |
 |---|---|---|---|---|
-| Smart `auto` | Yes | Yes | — | Yes |
-| Command `manual` | — | Yes | — | — |
-| Always-on `always` | Yes | Yes | Yes (full body) | — |
-
-### 3×3 Capability Matrix
-
-|  | Smart auto | Command manual | Always-on always |
-|---|---|---|---|
-| **Built-in** | Scene Beats, Dialogue Subtext, Pacing Control, Suspense Hooks, Character Design, Revision Polish, De-AI-ify, Co-Creation Brainstorm | review / memory / collect / next | — |
-| **User** | Reusable cross-novel workflows | Personal quick commands | Global style rules |
-| **Novel** | Novel-specific workflows | Novel quick commands | Novel always-on rules |
+| Smart `auto` | Yes | Yes | No | Yes |
+| Command `manual` | No | Yes | No | No |
+| Always-on `always` | Yes | Yes | Yes | No |
 
 Create a `.md` file and it becomes a new Skill:
 
@@ -125,59 +130,75 @@ description: Custom personal creative workflow
 category: Custom
 mode: auto
 ---
-# Content...
+
+# Markdown content
 ```
 
-Zero-code extensibility. Changes take effect instantly. Deletion works the same way.
+Skills solve method and style. The reference anchor layer solves evidence, boundaries, and auditability. They are stacked, not competing.
 
+## Visualized State
+
+<p align="center">
+  <img src="assets/arc-demo.png" alt="Story Arcs" />
+</p>
+<p align="center">
+  <img src="assets/location-demo.png" alt="Location Graph" />
+</p>
+<p align="center">
+  <img src="assets/preferences-demo.png" alt="Writing Preferences" />
+</p>
 <p align="center">
   <img src="assets/skill-demo.png" width="80%" alt="Skill System" />
 </p>
 
-## Style Distillation: One Sample → One Imitation Skill
+## Current Implementation Status
 
-Want to write like a certain author? Paste a sample text. The AI analyzes it across six dimensions — **sentence structure, word choice, rhetorical devices, pacing, narrative distance, tone & atmosphere** — and generates a complete imitation Skill. This is pattern extraction, not keyword substitution.
+- The desktop mainline has moved to `.NET 10 + Photino.NET + React/Vite`.
+- The Go/Wails path is retired and kept only as historical code; new work should not go under `app/`, `internal/`, or `frontend/src/lib/wailsjs/`.
+- Reference anchor implementation phases 0-10 and phase 13 are complete.
+- Phase 11 continues to refine low-intervention orchestration, revision authorization, stop/recovery semantics, and final insertion UX.
+- Phase 12 continues the workspace-level shared reference corpus and AI-driven material selection model.
 
-The generated Skill appears in your list instantly. Load it with `/stylename` and all subsequent output follows that style. Open the editor to fine-tune if needed.
+Detailed design:
 
-<p align="center">
-  <img src="assets/extract-demo.png" width="80%" alt="Style Distillation" />
-</p>
+- [Reference Anchor Technical Baseline](docs/reference-anchor-layer-plan.md)
+- [Reference Anchor Implementation Plan](docs/reference-anchor-implementation-plan.md)
+- [Photino Bridge Contract](docs/novelist-photino-bridge-contract.md)
+- [Release Notes](docs/releases/release-notes.md)
 
-## Triple Assurance: Maintenance Never Gets Missed
+## Project Structure
 
-**Layer 1—System Prompt** • Agent's core instructions hard-code the maintenance workflow. "Perform state maintenance immediately after creative completion. This is not optional."
+```text
+src/
+  Novelist.App             Photino desktop host and local frontend asset resolution
+  Novelist.Contracts       bridge DTOs and cross-layer contracts
+  Novelist.Core            app interfaces, bridge dispatch, and core boundaries
+  Novelist.Infrastructure  filesystem, SQLite, RAG, and reference-anchor implementations
+  Novelist.Agent           Microsoft Agent Framework tool adapters
 
-**Layer 2—Dynamic Injection** • After the AI writes a long piece, the system auto-injects check items—character changes, foreshadowing status, arc nodes, reader knowledge.
+frontend/
+  src/lib/novelist         owned Photino bridge adapter
+  src/components           React UI components
+  scripts                  Playwright mock-bridge workflows
 
-**Layer 3—Review Sub-Agent** • An independent sub-agent compares the chapter against system state and reports any issues immediately.
-
-## Your Approval, Every Time
-
-The AI doesn't modify the manuscript directly. Every edit generates a Diff first, then waits for your approval before writing. Approve, reject, or give feedback for the AI to revise on the spot. You can also switch to auto mode for continuous multi-round free-writing.
-
-Every change has Git history. Roll back to any state at any time.
-<p align="center">
-  <img src="assets/write-demo.png" alt="Writing & Diff Approval" />
-</p>
-<p align="center">
-  <img src="assets/outline-demo.png" alt="Outline & Chapter Plan" />
-</p>
-## The AI Can't Touch Files It Shouldn't
-
-Dual-layer sandbox security isolation—regex whitelist only allows legitimate paths like `chapters/`, `outlines/`, `goink.md`; SafePath prevents path traversal. Files are re-read and compared before writing to prevent overwriting your manual edits.
+tests/
+  Novelist.Tests
+  Novelist.IntegrationTests
+```
 
 ## Installation
 
 Download the installer for your platform from [Releases](https://github.com/devhxj/goink/releases):
 
-- **Windows** — Run the installer
-- **macOS** — Open DMG, drag to Applications
-- **Linux** — Run the AppImage
+- **Windows**: run the installer
+- **macOS**: open the DMG and drag to Applications
+- **Linux**: run the AppImage
 
-Requires an LLM API Key (built-in DeepSeek, GLM, MiMo templates; compatible with OpenAI format). Semantic search can use any compatible online Embeddings API or the bundled fixed ONNX model in settings. Installers include the desktop host, frontend assets, and Git runtime. No Python, Node.js, or external database is required. Windows SmartScreen may show a warning (unsigned)—click "More info" → "Run anyway."
+An LLM API key is required. Built-in provider templates include DeepSeek, GLM, and MiMo, and OpenAI-compatible endpoints are supported. Semantic search can use an online Embeddings API or the built-in ONNX mode. Installers include the desktop host, frontend assets, and Git runtime. No Python, Node.js, or external database is required.
 
-### Build From Source
+Windows SmartScreen may warn about an unsigned app; choose "More info" and continue if you trust the build.
+
+## Build From Source
 
 ```bash
 sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0 curl file unzip
@@ -186,24 +207,63 @@ cd goink
 dotnet restore Novelist.slnx
 npm --prefix frontend ci
 make deps
-make build   # production build
-make dev     # Photino desktop dev mode
+make build
+make dev
 ```
 
-`make dev` does not build frontend assets automatically. For local desktop mode, run `npm --prefix frontend run build` first so `frontend/dist` exists. For frontend-only debugging, run `make frontend-dev`, then launch the desktop host with `--start-url=http://localhost:5173/`.
+`make dev` does not build frontend assets. For desktop development, run:
+
+```bash
+npm --prefix frontend run build
+make dev
+```
+
+For frontend-only debugging:
+
+```bash
+make frontend-dev
+```
+
+This starts Vite only, so desktop bridge APIs are unavailable. To use the bridge against Vite, launch the Photino host with `--start-url=http://localhost:5173/`.
+
+## Verification
+
+Backend tests:
+
+```bash
+dotnet test Novelist.slnx --no-restore -v minimal
+```
+
+Frontend build, lint, and real-browser mock-bridge regression:
+
+```bash
+npm --prefix frontend run verify
+```
+
+Deep reference-anchor workflow:
+
+```bash
+npm --prefix frontend run test:reference-anchor
+```
+
+App-wide frontend smoke:
+
+```bash
+npm --prefix frontend run test:app
+```
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Agent Engine | Microsoft Agent Framework + OpenAI-compatible streaming + structured tools + nested sub-agents |
-| Desktop Framework | Photino.NET + .NET 10 |
-| Editor | Monaco Editor |
-| Database | Filesystem JSON stores + SQLite/sqlite-vec RAG index |
-| Vector Search | Standard Embeddings API / local ONNX + sqlite-vec |
-| Version Control | Built-in Git (auto commit / Diff / Revert) |
-| Security | Regex whitelist + SafePath dual sandbox + approval flow |
-| Frontend | React 19 + TypeScript + Tailwind CSS 4 + shadcn/ui |
+| Desktop | Photino.NET + .NET 10 |
+| Agent Engine | Microsoft Agent Framework + OpenAI-compatible streaming + structured tools |
+| Frontend | React 19 + TypeScript 6 + Tailwind CSS 4 + shadcn/ui |
+| Editor | Monaco Editor with locally bundled assets |
+| Storage | Filesystem JSON stores + SQLite |
+| Vector Search | sqlite-vec + online Embeddings API or local ONNX |
+| Version Control | Built-in Git |
+| Safety Boundary | SafePath, approval flow, SSRF checks, reference-anchor audit, and manual final insertion |
 
 ## License
 

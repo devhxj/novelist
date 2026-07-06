@@ -478,6 +478,175 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task WorkspaceCorpusVisibilityFiltersAnchorsBeforeSearchAdaptAuditTagAndFeedback()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var targetNovel = await novels.CreateNovelAsync(new CreateNovelPayload("共享语料可见性目标", "", ""), CancellationToken.None);
+        var visibleSourcePath = CreateSourceFile("workspace-visible.md", "他握住{{object}}，把话咽回去，只听雨声压住门外的街。");
+        var privateSourcePath = CreateSourceFile("workspace-private.md", "他握住{{object}}，提到了另一部小说的私有线索。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var visibleAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(targetNovel.Id, "工作区可见参考", null, visibleSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var privateAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(targetNovel.Id, "工作区私有参考", null, privateSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var privateMaterial = Assert.Single((await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                targetNovel.Id,
+                AnchorIds: [privateAnchor.AnchorId],
+                Query: "{{object}}",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None)).Items);
+        await MarkAnchorAsWorkspaceCorpusAsync(options, visibleAnchor.AnchorId, "workspace");
+        await MarkAnchorAsWorkspaceCorpusAsync(options, privateAnchor.AnchorId, "private");
+
+        var anchors = await service.GetAnchorsAsync(targetNovel.Id, CancellationToken.None);
+        Assert.Contains(anchors, item =>
+            item.AnchorId == visibleAnchor.AnchorId &&
+            item.NovelId == 0 &&
+            item.Visibility == ReferenceCorpusVisibilities.Workspace &&
+            item.SourceTrust == ReferenceSourceTrustLevels.UserVerified &&
+            item.UserTags.Count == 0);
+        Assert.DoesNotContain(anchors, item => item.AnchorId == privateAnchor.AnchorId);
+
+        var defaultSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                targetNovel.Id,
+                AnchorIds: [],
+                Query: "{{object}}",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        var visibleMaterial = Assert.Single(defaultSearch.Items);
+        Assert.Equal(visibleAnchor.AnchorId, visibleMaterial.AnchorId);
+
+        var explicitPrivateSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                targetNovel.Id,
+                AnchorIds: [privateAnchor.AnchorId],
+                Query: "{{object}}",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        Assert.Empty(explicitPrivateSearch.Items);
+
+        var adapted = await service.AdaptMaterialAsync(
+            new AdaptReferenceMaterialPayload(
+                targetNovel.Id,
+                visibleMaterial.MaterialId,
+                [new ReferenceSlotValuePayload("object", "门把手")],
+                ReferenceRewriteLevels.L1,
+                SceneFacts: ["门把手"]),
+            CancellationToken.None);
+        Assert.Equal("passed", adapted.Audit.Status);
+        var feedback = await service.RecordUserFeedbackAsync(
+            new RecordReferenceUserFeedbackPayload(
+                targetNovel.Id,
+                ReferenceFeedbackTargetTypes.ReuseCandidate,
+                adapted.CandidateId,
+                ReferenceFeedbackDecisions.Accepted,
+                visibleMaterial.MaterialId,
+                adapted.CandidateId,
+                BlueprintId: 0,
+                BeatId: string.Empty,
+                FeedbackTags: ["workspace_visible_usage"],
+                Note: "visible corpus material can be used by this novel",
+                EditedText: string.Empty,
+                Origin: "user"),
+            CancellationToken.None);
+        Assert.Equal(visibleMaterial.MaterialId, feedback.MaterialId);
+        var audit = await service.AuditCandidateAsync(
+            new AuditReferenceReusePayload(
+                targetNovel.Id,
+                visibleMaterial.MaterialId,
+                visibleMaterial.Text,
+                ReferenceRewriteLevels.L0,
+                SceneFacts: []),
+            CancellationToken.None);
+        Assert.Equal("passed", audit.Status);
+        var updated = await service.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(
+                targetNovel.Id,
+                visibleMaterial.MaterialId,
+                FunctionTag: "interiority",
+                EmotionTag: null,
+                SceneTag: null,
+                PovTag: null,
+                TechniqueTag: null,
+                Origin: "user",
+                Note: "visible corpus correction"),
+            CancellationToken.None);
+        Assert.True(updated.UserVerified);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.AdaptMaterialAsync(
+                new AdaptReferenceMaterialPayload(
+                    targetNovel.Id,
+                    privateMaterial.MaterialId,
+                    [new ReferenceSlotValuePayload("object", "门把手")],
+                    ReferenceRewriteLevels.L1,
+                    SceneFacts: ["门把手"]),
+                CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.AuditCandidateAsync(
+                new AuditReferenceReusePayload(
+                    targetNovel.Id,
+                    privateMaterial.MaterialId,
+                    "他握住门把手。",
+                    ReferenceRewriteLevels.L1,
+                    SceneFacts: ["门把手"]),
+                CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.UpdateMaterialTagsAsync(
+                new UpdateReferenceMaterialTagsPayload(
+                    targetNovel.Id,
+                    privateMaterial.MaterialId,
+                    FunctionTag: "interiority",
+                    EmotionTag: null,
+                    SceneTag: null,
+                    PovTag: null,
+                    TechniqueTag: null,
+                    Origin: "user",
+                    Note: "private corpus correction must be blocked"),
+                CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.RecordUserFeedbackAsync(
+                new RecordReferenceUserFeedbackPayload(
+                    targetNovel.Id,
+                    ReferenceFeedbackTargetTypes.Material,
+                    privateMaterial.MaterialId,
+                    ReferenceFeedbackDecisions.Accepted,
+                    privateMaterial.MaterialId,
+                    CandidateId: string.Empty,
+                    BlueprintId: 0,
+                    BeatId: string.Empty,
+                    FeedbackTags: ["blocked"],
+                    Note: "private corpus material must not accept feedback from another novel scope",
+                    EditedText: string.Empty,
+                    Origin: "user"),
+                CancellationToken.None));
+    }
+
+    [Fact]
     public async Task AdaptAndAuditCanUseWorkspaceCorpusMaterialsWithoutReadingOtherNovelPrivateMaterials()
     {
         var options = CreateOptions();
@@ -2290,7 +2459,8 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
 
     private static async ValueTask MarkAnchorAsWorkspaceCorpusAsync(
         AppInitializationOptions options,
-        long anchorId)
+        long anchorId,
+        string visibility = ReferenceCorpusVisibilities.Workspace)
     {
         var databasePath = Path.Combine(
             options.DefaultDataDirectory,
@@ -2302,10 +2472,12 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         await using var command = connection.CreateCommand();
         command.CommandText = """
             UPDATE reference_anchors
-            SET novel_id = 0
+            SET novel_id = 0,
+                corpus_visibility = $corpus_visibility
             WHERE anchor_id = $anchor_id;
             """;
         command.Parameters.AddWithValue("$anchor_id", anchorId);
+        command.Parameters.AddWithValue("$corpus_visibility", visibility);
         var updated = await command.ExecuteNonQueryAsync();
         Assert.Equal(1, updated);
     }

@@ -44,8 +44,11 @@ reference_anchors
 - status TEXT NOT NULL
 - created_at TEXT NOT NULL
 - updated_at TEXT NOT NULL
+- corpus_visibility TEXT NOT NULL DEFAULT 'private'
+- source_trust TEXT NOT NULL DEFAULT 'user_verified'
+- user_tags_json TEXT NOT NULL DEFAULT '[]'
 
-`reference_anchors.novel_id = 0` is reserved as the workspace-corpus compatibility owner. Public create/rebuild/delete APIs still require a positive novel id. Read paths for listing anchors, build status, material search, material adaptation, reuse audit, tag correction, and per-novel feedback validation include the active novel's private anchors plus `novel_id = 0` workspace anchors, while continuing to exclude private anchors owned by other novels. `reference_user_feedback.novel_id` remains the consuming novel id, so feedback about a shared material is still scoped to the novel that used it.
+`reference_anchors.novel_id = 0` is reserved as the workspace-corpus compatibility owner. Public create/rebuild/delete APIs still require a positive novel id. Read paths for listing anchors, build status, material search, material adaptation, reuse audit, tag correction, and per-novel feedback validation include the active novel's private anchors plus `novel_id = 0` anchors whose `corpus_visibility = 'workspace'`, while continuing to exclude private/restricted workspace rows and private anchors owned by other novels. Explicit `anchor_ids` do not bypass the visibility filter. Existing databases that already had `novel_id = 0` compatibility rows before these columns are added promote those legacy rows to `corpus_visibility = 'workspace'` once during migration; new per-novel anchors default to `private`. `reference_user_feedback.novel_id` remains the consuming novel id, so feedback about a shared material is still scoped to the novel that used it.
 
 reference_source_segments
 - segment_id TEXT PRIMARY KEY
@@ -294,6 +297,7 @@ Current indexes:
 
 ```text
 idx_reference_anchors_novel
+idx_reference_anchors_corpus_visibility
 idx_reference_segments_anchor_type
 idx_reference_materials_anchor_type
 idx_reference_materials_tags

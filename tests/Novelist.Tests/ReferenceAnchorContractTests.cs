@@ -28,6 +28,30 @@ public sealed class ReferenceAnchorContractTests
         Assert.Equal("markdown", root.GetProperty("source_kind").GetString());
         Assert.Equal("user_provided", root.GetProperty("license_status").GetString());
         Assert.False(root.TryGetProperty("NovelId", out _));
+
+        var anchor = new ReferenceAnchorPayload(
+            AnchorId: 7,
+            NovelId: 0,
+            Title: "Shared Anchor",
+            Author: "",
+            SourcePath: @"D:\books\shared.md",
+            SourceKind: "markdown",
+            LicenseStatus: "licensed",
+            SourceFileHash: "hash",
+            BuildVersion: "reference-anchor-v1",
+            Status: ReferenceAnchorBuildStates.Ready,
+            CreatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
+            UpdatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
+            Visibility: ReferenceCorpusVisibilities.Workspace,
+            SourceTrust: ReferenceSourceTrustLevels.UserVerified,
+            UserTags: ["rain", "threshold"]);
+
+        using var anchorJson = JsonDocument.Parse(JsonSerializer.Serialize(anchor, BridgeJson.SerializerOptions));
+        var anchorRoot = anchorJson.RootElement;
+        Assert.Equal("workspace", anchorRoot.GetProperty("visibility").GetString());
+        Assert.Equal("user_verified", anchorRoot.GetProperty("source_trust").GetString());
+        Assert.Equal("rain", anchorRoot.GetProperty("user_tags")[0].GetString());
+        Assert.False(anchorRoot.TryGetProperty("SourceTrust", out _));
     }
 
     [Fact]

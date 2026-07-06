@@ -14,6 +14,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
 {
     private const string BuildVersion = "reference-anchor-v1";
     private const long WorkspaceCorpusNovelId = 0;
+    private const string NovelOrVisibleWorkspaceCorpusPredicate =
+        "(novel_id = $novel_id OR (novel_id = $workspace_corpus_novel_id AND corpus_visibility = $workspace_corpus_visibility))";
+    private const string AnchorAliasNovelOrVisibleWorkspaceCorpusPredicate =
+        "(a.novel_id = $novel_id OR (a.novel_id = $workspace_corpus_novel_id AND a.corpus_visibility = $workspace_corpus_visibility))";
     private const long MaxSourceBytes = 20L * 1024L * 1024L;
     private const int EmbeddingBatchSize = 64;
     private const int UnknownLicensePreviewMaxChars = 48;
@@ -52,6 +56,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         "unknown"
     };
 
+    private static readonly HashSet<string> AllowedCorpusVisibilities = new(ReferenceCorpusVisibilities.All, StringComparer.Ordinal);
+    private static readonly HashSet<string> AllowedSourceTrustLevels = new(ReferenceSourceTrustLevels.All, StringComparer.Ordinal);
     private static readonly HashSet<string> AllowedFeedbackDecisions = new(ReferenceFeedbackDecisions.All, StringComparer.Ordinal);
     private static readonly HashSet<string> AllowedFeedbackTargetTypes = new(ReferenceFeedbackTargetTypes.All, StringComparer.Ordinal);
 
@@ -92,6 +98,13 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         var sourcePath = ValidateSourcePath(input.SourcePath);
         var sourceKind = ValidateAllowedText(input.SourceKind, nameof(input.SourceKind), AllowedSourceKinds);
         var licenseStatus = ValidateAllowedText(input.LicenseStatus, nameof(input.LicenseStatus), AllowedLicenseStatuses);
+        var visibility = string.IsNullOrWhiteSpace(input.Visibility)
+            ? ReferenceCorpusVisibilities.Private
+            : ValidateAllowedText(input.Visibility, nameof(input.Visibility), AllowedCorpusVisibilities);
+        var sourceTrust = string.IsNullOrWhiteSpace(input.SourceTrust)
+            ? ReferenceSourceTrustLevels.UserVerified
+            : ValidateAllowedText(input.SourceTrust, nameof(input.SourceTrust), AllowedSourceTrustLevels);
+        var userTags = NormalizeUserTags(input.UserTags);
         var source = await ReadSourceFileAsync(sourcePath, cancellationToken);
         var embeddingOptions = await _embeddingConfiguration.GetActiveEmbeddingOptionsAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
@@ -118,6 +131,9 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 sourcePath,
                 sourceKind,
                 licenseStatus,
+                visibility,
+                sourceTrust,
+                userTags,
                 source.Hash,
                 now,
                 cancellationToken);
@@ -192,16 +208,18 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             await EnsureSchemaAsync(databasePath, cancellationToken);
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
             await using var command = connection.CreateCommand();
-            command.CommandText = """
+            command.CommandText = $$"""
                 SELECT anchor_id, novel_id, title, author, source_path, source_kind, license_status,
-                       source_file_hash, build_version, status, created_at, updated_at
+                       source_file_hash, build_version, status, created_at, updated_at,
+                       corpus_visibility, source_trust, user_tags_json
                 FROM reference_anchors
-                WHERE novel_id = $novel_id OR novel_id = $workspace_corpus_novel_id
+                WHERE {{NovelOrVisibleWorkspaceCorpusPredicate}}
                 ORDER BY CASE WHEN novel_id = $novel_id THEN 0 ELSE 1 END,
                          created_at ASC, anchor_id ASC;
                 """;
             command.Parameters.AddWithValue("$novel_id", novelId);
             command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+            command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
             var anchors = new List<ReferenceAnchorPayload>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
@@ -361,11 +379,13 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                        s.material_count, s.slot_count, s.vector_count, s.last_error, s.updated_at
                 FROM reference_anchor_build_state s
                 INNER JOIN reference_anchors a ON a.anchor_id = s.anchor_id
-                WHERE (a.novel_id = $novel_id OR a.novel_id = $workspace_corpus_novel_id)
+                WHERE (a.novel_id = $novel_id OR
+                       (a.novel_id = $workspace_corpus_novel_id AND a.corpus_visibility = $workspace_corpus_visibility))
                   AND s.anchor_id = $anchor_id;
                 """;
             command.Parameters.AddWithValue("$novel_id", novelId);
             command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+            command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
             command.Parameters.AddWithValue("$anchor_id", anchorId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             return await reader.ReadAsync(cancellationToken) ? ReadBuildStatus(reader) : null;
@@ -744,6 +764,9 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         string sourcePath,
         string sourceKind,
         string licenseStatus,
+        string visibility,
+        string sourceTrust,
+        IReadOnlyList<string> userTags,
         string sourceFileHash,
         DateTimeOffset now,
         CancellationToken cancellationToken)
@@ -753,10 +776,12 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         command.CommandText = """
             INSERT INTO reference_anchors
               (novel_id, title, author, source_path, source_kind, license_status,
-               source_file_hash, build_version, status, created_at, updated_at)
+               source_file_hash, build_version, status, created_at, updated_at,
+               corpus_visibility, source_trust, user_tags_json)
             VALUES
               ($novel_id, $title, $author, $source_path, $source_kind, $license_status,
-               $source_file_hash, $build_version, $status, $created_at, $updated_at)
+               $source_file_hash, $build_version, $status, $created_at, $updated_at,
+               $corpus_visibility, $source_trust, $user_tags_json)
             RETURNING anchor_id;
             """;
         command.Parameters.AddWithValue("$novel_id", novelId);
@@ -770,6 +795,9 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         command.Parameters.AddWithValue("$status", ReferenceAnchorBuildStates.Importing);
         command.Parameters.AddWithValue("$created_at", FormatTimestamp(now));
         command.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
+        command.Parameters.AddWithValue("$corpus_visibility", visibility);
+        command.Parameters.AddWithValue("$source_trust", sourceTrust);
+        command.Parameters.AddWithValue("$user_tags_json", JsonSerializer.Serialize(userTags, JsonOptions));
         var anchorId = (long)(await command.ExecuteScalarAsync(cancellationToken)
             ?? throw new InvalidOperationException("SQLite did not return a reference anchor id."));
         return new ReferenceAnchorPayload(
@@ -784,7 +812,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             BuildVersion,
             ReferenceAnchorBuildStates.Importing,
             now,
-            now);
+            now,
+            visibility,
+            sourceTrust,
+            userTags);
     }
 
     private static async ValueTask ReplaceSegmentsAsync(
@@ -1154,15 +1185,16 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $$"""
             SELECT anchor_id
             FROM reference_anchors
-            WHERE novel_id = $novel_id OR novel_id = $workspace_corpus_novel_id
+            WHERE {{NovelOrVisibleWorkspaceCorpusPredicate}}
             ORDER BY CASE WHEN novel_id = $novel_id THEN 0 ELSE 1 END,
                      anchor_id ASC;
             """;
         command.Parameters.AddWithValue("$novel_id", novelId);
         command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+        command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
         var anchorIds = new List<long>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -1200,13 +1232,14 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                    m.text, m.source_hash, m.extractor_version, m.user_verified, m.created_at
             FROM reference_materials m
             INNER JOIN reference_anchors a ON a.anchor_id = m.anchor_id
-            WHERE (a.novel_id = $novel_id OR a.novel_id = $workspace_corpus_novel_id)
+            WHERE {{AnchorAliasNovelOrVisibleWorkspaceCorpusPredicate}}
               AND m.anchor_id IN ({{string.Join(", ", parameterNames)}})
             ORDER BY CASE WHEN a.novel_id = $novel_id THEN 0 ELSE 1 END,
                      m.anchor_id ASC, m.material_id ASC;
             """;
         command.Parameters.AddWithValue("$novel_id", novelId);
         command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+        command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
         var materials = new List<ReferenceMaterialPayload>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -1240,13 +1273,14 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         command.CommandText = $$"""
             SELECT anchor_id
             FROM reference_anchors
-            WHERE (novel_id = $novel_id OR novel_id = $workspace_corpus_novel_id)
+            WHERE {{NovelOrVisibleWorkspaceCorpusPredicate}}
               AND license_status = $license_status
               AND anchor_id IN ({{string.Join(", ", parameterNames)}})
             ORDER BY anchor_id ASC;
             """;
         command.Parameters.AddWithValue("$novel_id", novelId);
         command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+        command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
         command.Parameters.AddWithValue("$license_status", "unknown");
         var result = new HashSet<long>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1369,18 +1403,19 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $$"""
             SELECT m.material_id, m.anchor_id, m.source_segment_id, m.material_type,
                    m.function_tag, m.emotion_tag, m.scene_tag, m.pov_tag, m.technique_tag,
                    m.function_confidence, m.emotion_confidence, m.pov_confidence,
                    m.text, m.source_hash, m.extractor_version, m.user_verified, m.created_at
             FROM reference_materials m
             INNER JOIN reference_anchors a ON a.anchor_id = m.anchor_id
-            WHERE (a.novel_id = $novel_id OR a.novel_id = $workspace_corpus_novel_id)
+            WHERE {{AnchorAliasNovelOrVisibleWorkspaceCorpusPredicate}}
               AND m.material_id = $material_id;
             """;
         command.Parameters.AddWithValue("$novel_id", novelId);
         command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+        command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
         command.Parameters.AddWithValue("$material_id", materialId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken) ? ReadMaterial(reader) : null;
@@ -1467,7 +1502,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $$"""
             UPDATE reference_materials
             SET function_tag = $function_tag,
                 emotion_tag = $emotion_tag,
@@ -1482,7 +1517,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
               AND anchor_id IN (
                 SELECT anchor_id
                 FROM reference_anchors
-                WHERE novel_id = $novel_id OR novel_id = $workspace_corpus_novel_id
+                WHERE {{NovelOrVisibleWorkspaceCorpusPredicate}}
               );
             """;
         command.Parameters.AddWithValue("$function_tag", material.FunctionTag);
@@ -1496,6 +1531,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         command.Parameters.AddWithValue("$material_id", material.MaterialId);
         command.Parameters.AddWithValue("$novel_id", novelId);
         command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+        command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
         var affected = await command.ExecuteNonQueryAsync(cancellationToken);
         if (affected == 0)
         {
@@ -1693,17 +1729,18 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $$"""
             SELECT 1
             FROM reference_reuse_candidates c
             INNER JOIN reference_materials m ON m.material_id = c.material_id
             INNER JOIN reference_anchors a ON a.anchor_id = m.anchor_id
-            WHERE (a.novel_id = $novel_id OR a.novel_id = $workspace_corpus_novel_id)
+            WHERE {{AnchorAliasNovelOrVisibleWorkspaceCorpusPredicate}}
               AND c.candidate_id = $candidate_id
             LIMIT 1;
             """;
         command.Parameters.AddWithValue("$novel_id", novelId);
         command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+        command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
         command.Parameters.AddWithValue("$candidate_id", candidateId);
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is not null;
@@ -1718,7 +1755,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT anchor_id, novel_id, title, author, source_path, source_kind, license_status,
-                   source_file_hash, build_version, status, created_at, updated_at
+                   source_file_hash, build_version, status, created_at, updated_at,
+                   corpus_visibility, source_trust, user_tags_json
             FROM reference_anchors
             WHERE novel_id = $novel_id AND anchor_id = $anchor_id;
             """;
@@ -1751,7 +1789,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
               build_version TEXT NOT NULL,
               status TEXT NOT NULL,
               created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL
+              updated_at TEXT NOT NULL,
+              corpus_visibility TEXT NOT NULL DEFAULT 'private',
+              source_trust TEXT NOT NULL DEFAULT 'user_verified',
+              user_tags_json TEXT NOT NULL DEFAULT '[]'
             );
 
             CREATE TABLE IF NOT EXISTS reference_anchor_build_state (
@@ -1882,6 +1923,78 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             CREATE INDEX IF NOT EXISTS idx_reference_feedback_material
               ON reference_user_feedback(material_id, created_at);
             """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        var addedCorpusVisibilityColumn = await EnsureColumnAsync(
+            connection,
+            "reference_anchors",
+            "corpus_visibility",
+            "ALTER TABLE reference_anchors ADD COLUMN corpus_visibility TEXT NOT NULL DEFAULT 'private';",
+            cancellationToken);
+        if (addedCorpusVisibilityColumn)
+        {
+            await PromoteLegacyWorkspaceCorpusVisibilityAsync(connection, cancellationToken);
+        }
+
+        await EnsureColumnAsync(
+            connection,
+            "reference_anchors",
+            "source_trust",
+            "ALTER TABLE reference_anchors ADD COLUMN source_trust TEXT NOT NULL DEFAULT 'user_verified';",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_anchors",
+            "user_tags_json",
+            "ALTER TABLE reference_anchors ADD COLUMN user_tags_json TEXT NOT NULL DEFAULT '[]';",
+            cancellationToken);
+        await using var indexCommand = connection.CreateCommand();
+        indexCommand.CommandText = """
+            CREATE INDEX IF NOT EXISTS idx_reference_anchors_corpus_visibility
+              ON reference_anchors(novel_id, corpus_visibility);
+            """;
+        await indexCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask<bool> EnsureColumnAsync(
+        SqliteConnection connection,
+        string tableName,
+        string columnName,
+        string alterSql,
+        CancellationToken cancellationToken)
+    {
+        await using (var info = connection.CreateCommand())
+        {
+            info.CommandText = "PRAGMA table_info(" + tableName + ");";
+            await using var reader = await info.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+        }
+
+        await using var alter = connection.CreateCommand();
+        alter.CommandText = alterSql;
+        await alter.ExecuteNonQueryAsync(cancellationToken);
+        return true;
+    }
+
+    private static async ValueTask PromoteLegacyWorkspaceCorpusVisibilityAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_anchors
+            SET corpus_visibility = $workspace_visibility
+            WHERE novel_id = $workspace_corpus_novel_id
+              AND corpus_visibility = $private_visibility;
+            """;
+        command.Parameters.AddWithValue("$workspace_visibility", ReferenceCorpusVisibilities.Workspace);
+        command.Parameters.AddWithValue("$private_visibility", ReferenceCorpusVisibilities.Private);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -2790,7 +2903,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             reader.GetString(8),
             reader.GetString(9),
             ParseTimestamp(reader.GetString(10)),
-            ParseTimestamp(reader.GetString(11)));
+            ParseTimestamp(reader.GetString(11)),
+            reader.GetString(12),
+            reader.GetString(13),
+            ReadStringList(reader.GetString(14)));
     }
 
     private static ReferenceAnchorBuildStatusPayload ReadBuildStatus(SqliteDataReader reader)
@@ -2874,6 +2990,11 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     }
 
     private static IReadOnlyList<string> NormalizeFeedbackTags(IReadOnlyList<string>? tags)
+    {
+        return NormalizeUserTags(tags);
+    }
+
+    private static IReadOnlyList<string> NormalizeUserTags(IReadOnlyList<string>? tags)
     {
         if (tags is null || tags.Count == 0)
         {

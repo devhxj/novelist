@@ -1,9 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="100%" height="100%">
-  <rect width="1000" height="1000" rx="180" fill="#FFFFFF" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="100%" height="100%" role="img" aria-label="Novelist">
+  <defs>
+    <linearGradient id="novelist-icon-bg-dark" x1="160" y1="120" x2="860" y2="900" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f8fafc" />
+      <stop offset="0.56" stop-color="#e2e8f0" />
+      <stop offset="1" stop-color="#99f6e4" />
+    </linearGradient>
+    <linearGradient id="novelist-icon-page-dark" x1="238" y1="286" x2="760" y2="746" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f172a" />
+      <stop offset="1" stop-color="#164e63" />
+    </linearGradient>
+    <linearGradient id="novelist-icon-accent-dark" x1="498" y1="214" x2="498" y2="806" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0891b2" />
+      <stop offset="1" stop-color="#ca8a04" />
+    </linearGradient>
+  </defs>
 
-  <g fill="#000000" transform="translate(-184, -132) scale(1.35)">
-    <path d="M 736.0 490.4 L 733.7 485.6 L 732.9 481.7 L 727.3 470.5 L 721.7 462.5 L 715.3 456.1 L 708.1 450.6 L 693.8 443.4 L 680.2 439.4 L 669.9 437.8 L 649.9 437.8 L 632.4 441.0 L 616.4 446.6 L 598.9 455.3 L 587.7 462.5 L 571.8 475.3 L 555.0 492.0 L 545.5 503.2 L 527.1 527.1 L 504.0 559.8 L 488.8 578.1 L 467.3 599.7 L 452.2 611.6 L 442.6 618.0 L 424.2 627.6 L 405.9 634.0 L 390.7 637.2 L 378.0 638.8 L 357.3 638.8 L 343.7 637.2 L 327.8 633.2 L 317.4 628.4 L 334.9 645.1 L 356.5 660.3 L 370.0 667.5 L 371.6 669.1 L 394.7 680.2 L 396.3 680.2 L 400.3 682.6 L 404.3 683.4 L 410.7 686.6 L 434.6 694.6 L 452.2 699.4 L 484.1 705.7 L 519.9 709.7 L 566.2 709.7 L 597.3 705.7 L 623.6 699.4 L 641.1 693.0 L 656.3 685.8 L 657.9 684.2 L 665.9 680.2 L 682.6 668.3 L 689.0 662.7 L 702.6 648.3 L 708.1 641.1 L 720.1 622.0 L 726.5 608.5 L 733.7 588.5 L 737.6 573.4 L 740.8 554.2 L 741.6 524.7 L 740.0 508.8 Z" />
+  <rect width="1000" height="1000" rx="210" fill="url(#novelist-icon-bg-dark)" />
+  <path d="M192 764c88-54 193-61 306-19V313c-109-61-217-63-306-6v457Z" fill="url(#novelist-icon-page-dark)" opacity="0.96" />
+  <path d="M808 764c-88-54-193-61-306-19V313c109-61 217-63 306-6v457Z" fill="url(#novelist-icon-page-dark)" opacity="0.88" />
+  <path d="M500 313v432" fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" opacity="0.22" />
+  <path d="M252 372c63-27 127-27 193 0M252 452c63-27 127-27 193 0M252 532c63-27 127-27 193 0" fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round" opacity="0.2" />
+  <path d="M555 372c63-27 127-27 193 0M555 452c63-27 127-27 193 0M555 532c63-27 127-27 193 0" fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round" opacity="0.18" />
 
-    <path d="M 661.1 269.5 L 651.5 260.0 L 638.8 249.6 L 614.8 236.0 L 602.1 231.3 L 585.3 227.3 L 571.8 225.7 L 552.6 225.7 L 535.1 228.1 L 521.5 231.3 L 496.8 240.0 L 472.9 252.0 L 458.5 260.8 L 430.6 280.7 L 412.3 295.9 L 369.2 338.1 L 334.9 379.6 L 308.6 418.7 L 289.5 456.1 L 279.1 484.8 L 275.1 500.0 L 272.7 514.4 L 271.9 536.7 L 274.3 553.4 L 278.3 567.0 L 282.3 575.8 L 290.3 587.7 L 301.4 598.9 L 309.4 604.5 L 326.2 612.4 L 340.5 616.4 L 363.6 618.8 L 378.8 618.0 L 393.1 615.6 L 406.7 611.6 L 433.0 598.9 L 456.1 581.3 L 481.7 554.2 L 519.9 501.6 L 544.7 472.1 L 566.2 452.2 L 589.3 436.2 L 610.8 425.8 L 623.6 421.9 L 644.3 417.9 L 664.3 417.1 L 679.4 418.7 L 697.8 423.4 L 711.3 429.8 L 719.3 435.4 L 724.1 440.2 L 722.5 421.1 L 716.1 384.4 L 711.3 366.0 L 703.3 342.1 L 697.0 326.2 L 684.2 301.4 L 672.2 283.1 Z" />
-  </g>
+  <path d="M500 206v598" fill="none" stroke="url(#novelist-icon-accent-dark)" stroke-width="42" stroke-linecap="round" />
+  <circle cx="500" cy="280" r="58" fill="#f8fafc" stroke="#0891b2" stroke-width="34" />
+  <path d="M403 620c30 76 89 120 97 120s67-44 97-120" fill="none" stroke="#ca8a04" stroke-width="44" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M378 620h244" fill="none" stroke="#ca8a04" stroke-width="44" stroke-linecap="round" />
+  <path d="M500 395 608 612 500 746 392 612 500 395Z" fill="#f8fafc" stroke="#0f172a" stroke-width="32" stroke-linejoin="round" />
+  <path d="M500 474v164" fill="none" stroke="#0891b2" stroke-width="30" stroke-linecap="round" />
+  <circle cx="500" cy="638" r="22" fill="#ca8a04" />
 </svg>

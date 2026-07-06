@@ -1,9 +1,16 @@
+**中文** | [English](README_EN.md)
+
+<div align="center">
+
+![Today's Verse](https://v2.jinrishici.com/one.svg?font-size=20&spacing=2&color=Chocolate)
+</div>
+
 <p align="center">
-  <img src="assets/logo-dark.svg#gh-dark-mode-only" alt="Novelist" />
-  <img src="assets/logo-light.svg#gh-light-mode-only" alt="Novelist" />
+  <img src="assets/logo-dark.svg#gh-dark-mode-only" alt="Novelist 参考锚定 AI 写作系统" />
+  <img src="assets/logo-light.svg#gh-light-mode-only" alt="Novelist 参考锚定 AI 写作系统" />
 </p>
 
-<h1 align="center">桌面 AI 写作系统<br><sub>Agent 实时决策 × 结构化记忆 × 写完自检状态</sub></h1>
+<h1 align="center">Novelist 参考锚定 AI 长篇写作系统<br><sub>结构化记忆 × Skill 方法论 × 蓝图审查 × 草稿审计</sub></h1>
 
 <p align="center">
   <img src="https://img.shields.io/badge/.NET-10.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" alt=".NET 10" />
@@ -19,117 +26,100 @@
 
 ---
 
-<p align="center"><strong>用过通用 AI 写长篇小说的人都知道——写到第五章它就忘了主角叫什么。到第三十章还要手动翻前文找那句伏笔。写完一章还得自己提醒它"更新角色状态""检查弧线进度"。Novelist 不会。它是一个有结构化记忆的桌面 AI 写作系统——角色档案、伏笔状态、弧线进度、地点关系、读者认知，系统记着，Agent 自己查、自己改、自己维护。</strong></p>
+Novelist 是从 GoInk 演进来的桌面 AI 写作系统。原有能力仍然是基础：结构化创作状态、Agent 工具调用、Skill 写作方法论、本地语义搜索、Diff 审批和 Git 历史。
 
-## 最新更新
+现在的方向提高了一层：**Skill 负责教 AI 怎么写，但长篇创作还需要在写之前确认“什么能写”、在写之后证明“写出来的内容能不能用”。** 因此 Novelist 正在把参考资料、章节蓝图、材料绑定、候选草稿和审计结果做成可检查的契约，而不是只靠提示词或 Skill 约束模型。
 
-### 2026-07-06
+## 当前定位
 
-更多更新记录见 [Release Notes](docs/releases/release-notes.md)。
+Novelist 不是单纯的聊天壳，也不是只堆 Prompt/Skill 的写作助手。它的目标是一个本地优先的长篇创作工作台：
 
-- 启动检查失败时会显示明确的恢复界面和重试按钮；若不是通过 Novelist 桌面应用打开，也会提示桌面桥接不可用，而不是误进入初始化流程。
-- `npm --prefix frontend run test:app` 现在覆盖首次初始化、初始化后的空书架、已初始化但无作品、启动检查失败和桌面桥接不可用等 bootstrap 状态。
-- 正文编辑器现在使用本地打包的 Monaco 资源，桌面或 CI 离线环境不再卡在编辑器 Loading；保存失败会在编辑区显示明确提示并保留未保存状态。
-- `npm --prefix frontend run test:app` 现在覆盖章节正文编辑、显式保存、保存失败提示、脏状态切换，以及干净状态切换面板不会额外写入正文。
-- `npm --prefix frontend run test:app` 现在覆盖模型与 Embeddings 设置的必填校验、mock 桥接保存和内置 ONNX 向量配置路径，全程不需要真实 API Key、本地模型文件或网络访问。
-- `npm --prefix frontend run test:app` 现在会显式遍历书架、章节/编辑器、聊天面板、搜索、参考锚定、角色、地点、弧线、时间线、偏好、读者视角、技能、个人中心、帮助和设置入口。
-- `npm --prefix frontend run test:app` 现在覆盖小说创建/编辑/选择、章节创建/重命名、多章节标签切换和侧栏选中同步；切换已打开的章节标签时，章节侧栏会跟随当前正文。
-- `npm --prefix frontend run test:app` 现在覆盖导出、封面/头像上传、参考源文件选择和参考锚点创建的 mocked 文件路径；重复打开导出对话时不再沿用上次成功状态。
+| 层级 | 职责 |
+|---|---|
+| 结构化创作状态 | 管理角色、关系、伏笔、弧线、地点、读者认知、偏好和章节计划 |
+| Agent 工具层 | 让 AI 在对话中主动查询、修改、维护项目状态，而不是只输出一段文本 |
+| Skill 方法论层 | 提供场景节拍、对白潜台词、节奏控制、悬念钩子、修改打磨、去 AI 味等写作方法 |
+| 参考锚定层 | 把参考资料转成可追溯材料，要求蓝图先过审，再绑定材料、生成候选、执行草稿审计 |
+| 人工确认边界 | 正文插入、事实边界扩张、高风险修订和最终保存必须由作者确认 |
 
-## 跟通用 AI 聊天有什么不同
+仓库名仍保留 `goink` 历史，但当前代码、文档和产品主线使用 `Novelist`。
 
-| | 通用 AI 聊天 | Novelist |
-|---|---|---|
-| 创作信息 | 每次对话重新交代 | 角色/关系/伏笔/弧线/地点/读者认知 全链路结构化追踪 |
-| 改正文 | 直接输出文本，改了什么不知道 | Diff 预览 + 逐行对比 + 点确认才写入 |
-| 翻前文 | 手动搜索、逐章翻 | 语义搜索 + 本地索引，一句"那个吊坠"找到所有段落 |
-| 写完维护 | 不管，除非你再提醒 | 写完自动触发角色更新、伏笔回收、弧线推进、读者认知刷新 |
-| 写作风格 | 靠 prompt 硬写 | 8 个内置方法论 + 自定义 Skill 热重载，三层覆盖 |
-| 版本历史 | 无 | 内置 Git，每次对话自动 commit，随时回退 |
-| 环境依赖 | 往往要 Python/GPU | 一个安装包，打开即用 |
+## 为什么不只靠 Skill
 
-## AI 自己查、自己改、自己维护——不是流水线，是 Agent
+Skill 能改善表达方式和写作流程，但它不能稳定解决这些问题：
 
-31 个结构化工具，LLM 自主决策调用哪个、传什么参数、下一步干什么。不是"写完一章传给下一棒"的 pipeline——Agent 在当前对话中调工具查角色、查伏笔、读写正文、更新状态，直到任务完成。
+- 参考资料是否可用、可引用、可改写；
+- 生成内容是否越过已知事实和禁止事实边界；
+- POV 是否泄漏了当前视角不该知道的信息；
+- 章节蓝图是否只有镜头调度，没有因果、情绪、叙述距离和角色状态变化；
+- 候选草稿是否来自已批准蓝图和已绑定材料；
+- AI 是否绕过作者确认直接改正文。
 
-写完一章正文后，系统自动注入维护提醒，告诉 Agent 具体检查什么：角色有没有变化、该回收的伏笔回收了没有、弧线节点需要推进吗、读者认知需要更新吗。Agent 不会"忘了维护"——它被迫逐项自查。
+参考锚定层补的是这部分硬约束。它把“写得像不像”“能不能借鉴”“有没有事实风险”“能不能插入正文”拆成结构化记录和确定性检查，让 AI 可以提议，但不能绕过门禁。
 
-如果还不放心，可以启动审稿子 Agent——一个独立 Agent 从头审读章节内容与系统状态的一致性，发现问题直接写进对话，主 Agent 当场修正。
+## 默认参考锚定工作流
 
-## 几十万字里找一句话：本地语义搜索
+```text
+作者确认来源策略、章节目标、已知事实和禁止事实
+  -> 启动 orchestration run
+  -> 生成章节蓝图
+  -> 执行确定性蓝图审查
+  -> 作者批准蓝图，或批准 AI 提议的字段级修订
+  -> 自动检索并绑定参考材料
+  -> 生成 beat 级候选草稿
+  -> 执行草稿审计
+  -> 停在最终插入确认点
+```
 
-写到第五十章，要找"主角第一次见到那个吊坠是在哪一章来着？"——不用逐章翻。告诉 AI 一句话，它能在整本书里找到相关段落。
+工作流会自动执行低风险的机械步骤，但会在这些位置停下：
 
-不是关键词匹配，是按意思搜索。你问"关于吊坠的线索"，它能找到那些没写"吊坠"两个字但确实在暗示吊坠存在的段落。Agent 写新章节时也可主动搜索前文，确保持续一致。
+- 来源、授权、事实边界需要确认；
+- 蓝图过期、缺材料、弱检索或材料哈希不匹配；
+- 蓝图审查失败，需要修订；
+- 参考改写级别、POV、事实或审计结果有高风险；
+- 最终正文插入。
 
-索引和检索状态保存在本机 sqlite-vec 中，向量可由标准 Embeddings API 或本地 ONNX 模型生成。在线 Embeddings API 不限制供应商和模型；本地 ONNX 使用内置固定的 `bge-small-zh-v1.5` int8 模型，在硬件足够的设备上可完全本机生成 embedding，不需要把正文发到在线向量服务；ONNX 模式严格本地执行，失败时不会悄悄回退到线上 API。写完章节会标记索引过期，重建后 Agent 可主动搜索前文，确保持续一致。
+这个流程不会自动调用 `SaveContent` 写章节正文。AI 可以提出候选和修订，最终写入仍走作者确认后的编辑/保存路径。
 
-## 不只是记忆——是结构化创作状态
+## 原有写作能力仍然保留
 
-### 角色：关系有历史
+### 结构化创作状态
 
-角色档案包含性格、能力、背景。角色关系是有向图——"张三对李四是师徒但暗中提防"，"李四对张三是敬重但有所隐瞒"，两条独立记录。关系变化时旧记录保留，可回顾演变过程。
+Novelist 追踪角色档案、角色关系、伏笔、弧线、地点图谱、读者认知和创作偏好。长篇项目不需要每轮对话重新解释世界观和人物状态，Agent 可以通过工具读取和维护这些结构化数据。
 
-### 伏笔：不会石沉大海
+### Agent 主动查、主动改、主动维护
 
-每条伏笔记录目标回收章节和重要程度。快到回收点系统提醒，超时未回收标记异常。章节计划分三档——下一章、近期、远期——管理创作节奏。
+系统提供结构化工具给 Agent 使用。AI 在当前对话里可以查角色、查章节、搜索前文、修改状态、更新偏好、生成或修订内容。写作完成后，系统仍会通过维护提醒要求 Agent 检查角色变化、伏笔状态、弧线推进和读者认知。
 
-### 弧线：跨章节叙事线索
+### 本地语义搜索
 
-弧线由节点链组成，每个节点关联目标章节。写完一章自动推进节点。一个故事通常 3–5 条并行弧线同时追踪。
+RAG 索引和检索状态保存在本机 SQLite/sqlite-vec 中。Embeddings 可以使用兼容 OpenAI 格式的在线 API，也可以使用内置 ONNX 模式。ONNX 模式固定使用随包的 `bge-small-zh-v1.5` int8 模型，不会悄悄回退到线上 API。
 
-### 世界观：地点是图，不是列表
+### Diff 审批和版本历史
 
-追踪层级包含（王国 → 王宫 → 大殿）和空间连通（A 和 B 由山路连通）。AI 可查详情、子地点、连通关系或完整地图。
+AI 不应直接覆盖正文。正文编辑走 Diff/审批和显式保存路径，项目修改有 Git 历史，可以回退。
 
-### 读者认知：控制信息释放
+## Skill 系统
 
-追踪读者已知什么、在等什么答案、误认了什么。精确控制悬念和反转时机。
-
-### 创作偏好：说一次就够
-
-全局偏好和单书偏好两层管理。写到第三十七章，"对话保持冷峻风格"依然生效。
-
-## 前端可视化状态
-<p align="center">
-  <img src="assets/arc-demo.png" alt="故事弧线" />
-</p>
-<p align="center">
-  <img src="assets/location-demo.png" alt="地点图谱" />
-</p>
-<p align="center">
-  <img src="assets/preferences-demo.png" alt="创作偏好" />
-</p>
-
-## Skill 系统：3 层覆盖 × 3 种模式
-
-Skill 是 Novelist 的创作方法论模块。每个 Skill 由一个 `.md` 文件定义，包含 YAML frontmatter 元数据和 markdown 正文。**三层覆盖 + 三种模式 = 9 种策略维度**，精确控制"什么内容、在什么范围、以什么方式生效"。
+Skill 是写作方法论模块。每个 Skill 是一个带 YAML frontmatter 的 `.md` 文件，支持三层覆盖和三种触发模式。
 
 ### 三层覆盖
 
-同名 Skill 按 **小说 > 用户 > 内置** 优先级覆盖。修改即时热重载，无需重启。
+同名 Skill 按 **小说 > 用户 > 内置** 优先级覆盖，修改后热重载。
 
 | 层级 | 存储路径 | 可见范围 | 可编辑 |
 |---|---|---|---|
 | 内置 Builtin | 打包只读 | 所有小说 | 否 |
-| 用户 User | 数据目录 `skills/`（工具路径兼容 `~/.goink/skills/`） | 所有小说 | 是 |
+| 用户 User | 数据目录 `skills/`，工具路径兼容 `~/.goink/skills/` | 所有小说 | 是 |
 | 小说 Novel | `{novel}/skills/` | 当前小说 | 是 |
 
 ### 三种触发模式
 
 | 模式 | AI 自主调用 | 用户 `/` 触发 | 会话开头注入 | 出现在目录 |
 |---|---|---|---|---|
-| 智能 `auto` | 是 | 是 | — | 是 |
-| 指令 `manual` | — | 是 | — | — |
-| 常驻 `always` | 是 | 是 | 是（注入全文） | — |
-
-### 3×3 能力矩阵
-
-|  | 智能 auto | 指令 manual | 常驻 always |
-|---|---|---|---|
-| **内置** | 场景节拍、对白潜台词、节奏控制、悬念钩子、角色设计、修改打磨、去AI味、共创构思 | review / memory / collect / next | — |
-| **用户** | 跨小说可复用的创作工作流 | 个人快捷命令 | 全局生效的风格规则 |
-| **小说** | 单书专属工作流 | 单书快捷命令 | 单书常驻规则 |
+| 智能 `auto` | 是 | 是 | 否 | 是 |
+| 指令 `manual` | 否 | 是 | 否 | 否 |
+| 常驻 `always` | 是 | 是 | 是 | 否 |
 
 新建一个 `.md` 文件就是新 Skill：
 
@@ -140,59 +130,75 @@ description: 个人定制创作流程
 category: 自定义
 mode: auto
 ---
+
 # 正文 markdown 内容
 ```
 
-零代码扩展。修改即时生效。删除同理。
+Skill 解决“方法”和“风格”，参考锚定层解决“证据”“边界”和“审计”。两者是叠加关系，不是替代关系。
 
+## 前端可视化状态
+
+<p align="center">
+  <img src="assets/arc-demo.png" alt="故事弧线" />
+</p>
+<p align="center">
+  <img src="assets/location-demo.png" alt="地点图谱" />
+</p>
+<p align="center">
+  <img src="assets/preferences-demo.png" alt="创作偏好" />
+</p>
 <p align="center">
   <img src="assets/skill-demo.png" width="80%" alt="Skill 技能系统" />
 </p>
 
-## 风格蒸馏：一段文字 → 一个仿写 Skill
+## 当前实现状态
 
-想写出某个作家的笔法？贴一段样文，AI 从六个维度拆解——**句式结构、用词习惯、修辞手法、节奏控制、叙事距离、氛围语调**——自动生成一个完整的仿写 Skill。不是关键词替换，是提炼风格模式。
+- 桌面主线已迁移到 `.NET 10 + Photino.NET + React/Vite`。
+- Go/Wails 路径已退役，只作为历史代码保留；新功能不要写入 `app/`、`internal/` 或 `frontend/src/lib/wailsjs/`。
+- 参考锚定实现计划中 Phase 0-10 和 Phase 13 已完成。
+- Phase 11 继续收敛低干预编排、修订授权、停点恢复和最终插入 UX。
+- Phase 12 继续推进 workspace 级共享参考语料和 AI 驱动材料选择。
 
-生成的 Skill 立刻出现在列表中，`/风格名` 一键加载，后续所有对话都按此风格输出。也可以打开编辑继续微调。
+详细设计见：
 
-<p align="center">
-  <img src="assets/extract-demo.png" width="80%" alt="风格蒸馏" />
-</p>
+- [Reference Anchor Technical Baseline](docs/reference-anchor-layer-plan.md)
+- [Reference Anchor Implementation Plan](docs/reference-anchor-implementation-plan.md)
+- [Photino Bridge Contract](docs/novelist-photino-bridge-contract.md)
+- [Release Notes](docs/releases/release-notes.md)
 
-## 三重保障，维护不会遗漏
+## 项目结构
 
-**第一层—系统提示词** • Agent 核心指令写死维护流程。"创作完成后立即进行状态维护。不是可选步骤。"
+```text
+src/
+  Novelist.App             Photino 桌面宿主和本地前端资源解析
+  Novelist.Contracts       桥接 DTO 和跨层契约
+  Novelist.Core            应用接口、桥接分发和核心边界
+  Novelist.Infrastructure  文件系统、SQLite、RAG、参考锚定实现
+  Novelist.Agent           Microsoft Agent Framework 工具适配
 
-**第二层—动态注入** • AI 写完长文后系统自动注入检查项——角色变化、伏笔状态、弧线节点、读者认知。
+frontend/
+  src/lib/novelist         自有 Photino bridge adapter
+  src/components           React UI 组件
+  scripts                  Playwright mock-bridge 工作流
 
-**第三层—审稿 Agent** • 独立子 Agent 对比章节与系统状态，发现问题立即反馈。
-
-## 你的每一次确认
-
-AI 不会直接改正文。每次编辑系统先生成 Diff，等你批准再写入。可以当场批准、拒绝，或者给反馈让 AI 修正。也可以切换到自动模式，连续多轮自由写作。
-
-所有修改都有 Git 历史，任何时候都可以回退到任意状态。
-<p align="center">
-  <img src="assets/write-demo.png" alt="写作与 Diff 审批" />
-</p>
-<p align="center">
-  <img src="assets/outline-demo.png" alt="大纲与章节计划" />
-</p>
-## AI 碰不到不该碰的文件
-
-双层沙箱安全隔离——正则白名单只允许 `chapters/`、`outlines/`、`goink.md` 等合法路径，SafePath 杜绝路径穿越。文件编辑写入前重读对比，防止覆盖你的手动修改。
+tests/
+  Novelist.Tests
+  Novelist.IntegrationTests
+```
 
 ## 安装
 
 从 [Releases](https://github.com/devhxj/goink/releases) 下载对应平台安装包：
 
-- **Windows** — 运行安装程序
-- **macOS** — 打开 DMG，拖入 Applications
-- **Linux** — 运行 AppImage
+- **Windows**：运行安装程序
+- **macOS**：打开 DMG，拖入 Applications
+- **Linux**：运行 AppImage
 
-需要 LLM API Key（内置 DeepSeek、GLM、MiMo 模板，兼容 OpenAI 格式）。语义检索可使用任意兼容的在线 Embeddings API，也可在设置中切换到内置 ONNX；本地模式固定使用随包 `bge-small-zh-v1.5` int8 模型。安装包自带桌面宿主、前端资源和 Git 运行时，不需要 Python、Node.js 或外部数据库。Windows SmartScreen 可能弹出提示（未签名），点击"更多信息"→"仍要运行"即可。
+需要配置 LLM API Key。内置 DeepSeek、GLM、MiMo 模板，并兼容 OpenAI 格式接口。语义检索可使用在线 Embeddings API，也可在设置中切换到内置 ONNX。安装包自带桌面宿主、前端资源和 Git 运行时，不需要 Python、Node.js 或外部数据库。
 
-### 从源码构建
+Windows SmartScreen 可能提示未签名程序，可通过“更多信息”选择继续运行。
+
+## 从源码构建
 
 ```bash
 sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0 curl file unzip
@@ -201,24 +207,63 @@ cd goink
 dotnet restore Novelist.slnx
 npm --prefix frontend ci
 make deps
-make build   # 生产构建
-make dev     # Photino 桌面开发模式
+make build
+make dev
 ```
 
-`make dev` 不会自动构建前端；本地桌面模式需要先运行 `npm --prefix frontend run build` 生成 `frontend/dist`。调试纯前端时可用 `make frontend-dev` 启动 Vite，再用 `--start-url=http://localhost:5173/` 的桌面启动配置加载 Vite 页面。
+`make dev` 不会自动构建前端。桌面开发模式需要先运行：
+
+```bash
+npm --prefix frontend run build
+make dev
+```
+
+只调试前端时可以运行：
+
+```bash
+make frontend-dev
+```
+
+这只启动 Vite，桌面桥接 API 不可用；如需桥接能力，需要让 Photino 宿主用 `--start-url=http://localhost:5173/` 加载 Vite 页面。
+
+## 验证命令
+
+后端测试：
+
+```bash
+dotnet test Novelist.slnx --no-restore -v minimal
+```
+
+前端构建、lint 和真实浏览器 mock-bridge 回归：
+
+```bash
+npm --prefix frontend run verify
+```
+
+单独运行参考锚定深度流程：
+
+```bash
+npm --prefix frontend run test:reference-anchor
+```
+
+单独运行 app-wide 前端烟测：
+
+```bash
+npm --prefix frontend run test:app
+```
 
 ## 技术栈
 
 | 层 | 选型 |
 |---|---|
-| Agent 引擎 | Microsoft Agent Framework + OpenAI-compatible streaming + 结构化工具 + 子 Agent 嵌套 |
 | 桌面框架 | Photino.NET + .NET 10 |
-| 编辑器 | Monaco Editor |
-| 数据库 | 文件系统 JSON 存储 + SQLite/sqlite-vec RAG 索引 |
-| 向量搜索 | 标准 Embeddings API / 本地 ONNX + sqlite-vec |
-| 版本控制 | 内置 Git（自动 commit / Diff / Revert） |
-| 安全 | 正则白名单 + SafePath 双层沙箱 + 审批流 |
-| 前端 | React 19 + TypeScript + Tailwind CSS 4 + shadcn/ui |
+| Agent 引擎 | Microsoft Agent Framework + OpenAI-compatible streaming + 结构化工具 |
+| 前端 | React 19 + TypeScript 6 + Tailwind CSS 4 + shadcn/ui |
+| 编辑器 | Monaco Editor，本地打包资源 |
+| 存储 | 文件系统 JSON 存储 + SQLite |
+| 向量搜索 | sqlite-vec + 在线 Embeddings API 或本地 ONNX |
+| 版本控制 | 内置 Git |
+| 安全边界 | SafePath、审批流、SSRF 检查、参考锚定审计和最终插入人工确认 |
 
 ## License
 

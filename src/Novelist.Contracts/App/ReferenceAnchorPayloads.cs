@@ -96,13 +96,40 @@ public static class ReferenceFeedbackTargetTypes
     ];
 }
 
+public static class ReferenceCorpusVisibilities
+{
+    public const string Private = "private";
+    public const string Workspace = "workspace";
+    public const string Restricted = "restricted";
+
+    public static IReadOnlyList<string> All { get; } = [Private, Workspace, Restricted];
+}
+
+public static class ReferenceSourceTrustLevels
+{
+    public const string UserVerified = "user_verified";
+    public const string Imported = "imported";
+    public const string Unverified = "unverified";
+
+    public static IReadOnlyList<string> All { get; } = [UserVerified, Imported, Unverified];
+}
+
 public sealed record CreateReferenceAnchorPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("title")] string Title,
     [property: JsonPropertyName("author")] string? Author,
     [property: JsonPropertyName("source_path")] string SourcePath,
     [property: JsonPropertyName("source_kind")] string SourceKind,
-    [property: JsonPropertyName("license_status")] string LicenseStatus);
+    [property: JsonPropertyName("license_status")] string LicenseStatus,
+    [property: JsonPropertyName("visibility")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Visibility = null,
+    [property: JsonPropertyName("source_trust")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? SourceTrust = null,
+    [property: JsonPropertyName("user_tags")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? UserTags = null);
 
 public sealed record ReferenceAnchorPayload(
     [property: JsonPropertyName("anchor_id")] long AnchorId,
@@ -116,7 +143,43 @@ public sealed record ReferenceAnchorPayload(
     [property: JsonPropertyName("build_version")] string BuildVersion,
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
-    [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt);
+    [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt,
+    [property: JsonPropertyName("visibility")] string Visibility,
+    [property: JsonPropertyName("source_trust")] string SourceTrust,
+    [property: JsonPropertyName("user_tags")] IReadOnlyList<string> UserTags)
+{
+    public ReferenceAnchorPayload(
+        long anchorId,
+        long novelId,
+        string title,
+        string author,
+        string sourcePath,
+        string sourceKind,
+        string licenseStatus,
+        string sourceFileHash,
+        string buildVersion,
+        string status,
+        DateTimeOffset createdAt,
+        DateTimeOffset updatedAt)
+        : this(
+            anchorId,
+            novelId,
+            title,
+            author,
+            sourcePath,
+            sourceKind,
+            licenseStatus,
+            sourceFileHash,
+            buildVersion,
+            status,
+            createdAt,
+            updatedAt,
+            ReferenceCorpusVisibilities.Private,
+            ReferenceSourceTrustLevels.UserVerified,
+            [])
+    {
+    }
+}
 
 public sealed record ReferenceAnchorBuildStatusPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,

@@ -4799,7 +4799,8 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
 
     private static async ValueTask MarkAnchorAsWorkspaceCorpusAsync(
         AppInitializationOptions options,
-        long anchorId)
+        long anchorId,
+        string visibility = ReferenceCorpusVisibilities.Workspace)
     {
         var databasePath = Path.Combine(
             options.DefaultDataDirectory,
@@ -4811,10 +4812,12 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         await using var command = connection.CreateCommand();
         command.CommandText = """
             UPDATE reference_anchors
-            SET novel_id = 0
+            SET novel_id = 0,
+                corpus_visibility = $corpus_visibility
             WHERE anchor_id = $anchor_id;
             """;
         command.Parameters.AddWithValue("$anchor_id", anchorId);
+        command.Parameters.AddWithValue("$corpus_visibility", visibility);
         var updated = await command.ExecuteNonQueryAsync();
         Assert.Equal(1, updated);
     }

@@ -428,6 +428,9 @@ export namespace reference {
     status: string
     created_at: Timestamp
     updated_at: Timestamp
+    visibility: string
+    source_trust: string
+    user_tags: string[]
   }
 
   export interface CreateAnchorInput {
@@ -437,6 +440,9 @@ export namespace reference {
     source_path: string
     source_kind: string
     license_status: string
+    visibility?: string | null
+    source_trust?: string | null
+    user_tags?: string[] | null
   }
 
   export interface BuildStatus {
