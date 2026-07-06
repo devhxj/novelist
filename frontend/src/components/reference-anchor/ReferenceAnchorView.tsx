@@ -48,6 +48,7 @@ type AnchorForm = {
 
 type CreateAnchorForm = AnchorForm & {
   sourcePath: string
+  bulkSourcePaths: string
   sourceKind: string
 }
 
@@ -104,6 +105,7 @@ const EMPTY_ANCHOR_FORM: CreateAnchorForm = {
   title: '',
   author: '',
   sourcePath: '',
+  bulkSourcePaths: '',
   sourceKind: 'markdown',
   licenseStatus: 'user_provided',
   visibility: 'private',
@@ -161,6 +163,19 @@ function sourceKindFromPath(path: string, fallback: string): string {
   if (lowerPath.endsWith('.txt')) return 'text'
   if (lowerPath.endsWith('.md') || lowerPath.endsWith('.markdown')) return 'markdown'
   return fallback
+}
+
+function sourceTitleFromPath(sourcePath: string, index: number): string {
+  const normalizedPath = sourcePath.trim().replace(/[\\/]+$/, '')
+  const fileName = normalizedPath.split(/[\\/]/).pop()?.trim() || `参考 ${index + 1}`
+  const title = fileName.replace(/\.[^.]+$/, '').trim()
+  return title || `参考 ${index + 1}`
+}
+
+function bulkAnchorTitle(formTitle: string, sourcePath: string, index: number, count: number): string {
+  const title = formTitle.trim()
+  if (!title) return sourceTitleFromPath(sourcePath, index)
+  return count === 1 ? title : `${title} ${index + 1}`
 }
 
 function materialScoreComponents(material: reference.Material): Array<[string, number]> {
@@ -463,6 +478,38 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       source_trust: anchorForm.sourceTrust,
       user_tags: lines(anchorForm.userTags),
     }), '参考锚点已创建')
+    if (created) {
+      setAnchorForm(EMPTY_ANCHOR_FORM)
+      await loadAnchors()
+    }
+  }
+
+  async function createAnchors() {
+    const sourcePaths = lines(anchorForm.bulkSourcePaths)
+    if (sourcePaths.length === 0) {
+      setError('请输入批量导入路径')
+      return
+    }
+
+    if (sourcePaths.length > 50) {
+      setError('一次最多批量导入 50 个语料来源')
+      return
+    }
+
+    const userTags = lines(anchorForm.userTags)
+    const created = await run(() => app.CreateReferenceAnchors({
+      anchors: sourcePaths.map((sourcePath, index) => ({
+        novel_id: novelId,
+        title: bulkAnchorTitle(anchorForm.title, sourcePath, index, sourcePaths.length),
+        author: anchorForm.author.trim() || undefined,
+        source_path: sourcePath,
+        source_kind: sourceKindFromPath(sourcePath, anchorForm.sourceKind),
+        license_status: anchorForm.licenseStatus,
+        visibility: anchorForm.visibility,
+        source_trust: anchorForm.sourceTrust,
+        user_tags: userTags,
+      })),
+    }), `已批量导入 ${sourcePaths.length} 个语料来源`)
     if (created) {
       setAnchorForm(EMPTY_ANCHOR_FORM)
       await loadAnchors()
@@ -1285,6 +1332,18 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                 </Field>
                 <button onClick={createAnchor} disabled={loading} className="inline-flex w-full items-center justify-center gap-1.5 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
                   <Plus className="h-3.5 w-3.5" />创建
+                </button>
+                <Field label="批量路径">
+                  <textarea
+                    value={anchorForm.bulkSourcePaths}
+                    onChange={event => setAnchorForm(form => ({ ...form, bulkSourcePaths: event.target.value }))}
+                    className={`${inputClass} min-h-20 resize-y`}
+                    placeholder={'D:\\books\\reference-a.md\nD:\\books\\reference-b.txt'}
+                    aria-label="批量路径"
+                  />
+                </Field>
+                <button onClick={createAnchors} disabled={loading} className="inline-flex w-full items-center justify-center gap-1.5 rounded border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-50">
+                  <Plus className="h-3.5 w-3.5" />批量导入
                 </button>
               </div>
             </div>

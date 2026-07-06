@@ -84,12 +84,14 @@ async function main() {
 }
 
 async function createRebuildAndSearchReferenceMaterial(page) {
-  await page.getByPlaceholder('参考书名').fill('雨夜动作参考')
-  await page.getByPlaceholder('可选').first().fill('Mock Author')
-  await page.getByLabel('本地路径').fill('D:\\books\\rain-reference.md')
-  await page.getByLabel('来源可信度').selectOption('imported')
-  await page.getByLabel('用户标签').fill('雨夜;动作克制')
-  await page.getByRole('button', { name: /^创建$/ }).click()
+  const importPanel = page.locator('.rounded-lg').filter({ hasText: '导入语料来源' }).first()
+
+  await importPanel.getByPlaceholder('参考书名').fill('雨夜动作参考')
+  await importPanel.getByPlaceholder('可选').fill('Mock Author')
+  await importPanel.getByLabel('本地路径').fill('D:\\books\\rain-reference.md')
+  await importPanel.getByLabel('来源可信度').selectOption('imported')
+  await importPanel.getByLabel('用户标签').fill('雨夜;动作克制')
+  await importPanel.getByRole('button', { name: /^创建$/ }).click()
   await expectVisible(page.getByText('参考锚点已创建'), 'anchor created message')
   await expectVisible(page.getByText('雨夜动作参考'), 'created anchor title')
   await expectVisible(page.getByText('private · imported · novel'), 'created private anchor metadata')
@@ -254,12 +256,12 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectHidden(libraryMaterialPanel.getByText('mat-001'), 'restored corpus material hidden from archived page')
   await libraryMaterialPanel.getByLabel('材料状态').selectOption('active')
 
-  await page.getByPlaceholder('参考书名').fill('批量动作参考')
-  await page.getByPlaceholder('可选').first().fill('Batch Curator')
-  await page.getByLabel('本地路径').fill('D:\\books\\batch-reference.md')
-  await page.getByLabel('来源可信度').selectOption('imported')
-  await page.getByLabel('用户标签').fill('批量;候选')
-  await page.getByRole('button', { name: /^创建$/ }).click()
+  await importPanel.getByPlaceholder('参考书名').fill('批量动作参考')
+  await importPanel.getByPlaceholder('可选').fill('Batch Curator')
+  await importPanel.getByLabel('本地路径').fill('D:\\books\\batch-reference.md')
+  await importPanel.getByLabel('来源可信度').selectOption('imported')
+  await importPanel.getByLabel('用户标签').fill('批量;候选')
+  await importPanel.getByRole('button', { name: /^创建$/ }).click()
   await expectVisible(page.getByText('参考锚点已创建'), 'batch anchor created message')
   await expectVisible(page.getByText('批量动作参考'), 'batch anchor title')
 
@@ -276,6 +278,19 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await page.getByRole('button', { name: '批量归档选中工作区' }).click()
   await expectVisible(page.getByText('已批量归档 2 个工作区语料'), 'bulk archive selected workspace corpus rows message')
   await expectVisible(page.getByText('暂无参考锚点'), 'bulk archived workspace corpus hidden from library list')
+
+  await importPanel.getByPlaceholder('参考书名').fill('批量导入语料')
+  await importPanel.getByPlaceholder('可选').fill('Bulk Author')
+  await importPanel.getByLabel('可见性').selectOption('workspace')
+  await importPanel.getByLabel('来源可信度').selectOption('imported')
+  await importPanel.getByLabel('用户标签').fill('批量导入;共享')
+  await importPanel.getByLabel('批量路径').fill('D:\\books\\bulk-one.md\nD:\\books\\bulk-two.txt')
+  await importPanel.getByRole('button', { name: /^批量导入$/ }).click()
+  await expectVisible(page.getByText('已批量导入 2 个语料来源'), 'bulk source import message')
+  await expectVisible(page.getByText('批量导入语料 1'), 'first bulk imported anchor title')
+  await expectVisible(page.getByText('批量导入语料 2'), 'second bulk imported anchor title')
+  const firstBulkImportRow = page.locator('.rounded-md').filter({ hasText: '批量导入语料 1' }).first()
+  await expectVisible(firstBulkImportRow.getByText('workspace · imported · workspace_corpus'), 'bulk imported workspace corpus metadata')
 }
 
 async function generateReviseApproveBindAndDraft(page) {
@@ -373,6 +388,7 @@ async function verifyBridgeCalls(page) {
   const methods = calls.map((call) => call.method)
   const requiredMethods = [
     'CreateReferenceAnchor',
+    'CreateReferenceAnchors',
     'PromoteReferenceAnchorToWorkspaceCorpus',
     'PromoteReferenceAnchorsToWorkspaceCorpus',
     'UpdateReferenceAnchorMetadata',
@@ -404,6 +420,28 @@ async function verifyBridgeCalls(page) {
   assert.equal(createCall.args[0].visibility, 'private', 'anchor create payload must start as per-novel private visibility')
   assert.equal(createCall.args[0].source_trust, 'imported', 'anchor create payload must include source trust')
   assert.deepEqual(createCall.args[0].user_tags, ['雨夜', '动作克制'], 'anchor create payload must include user tags')
+
+  const createAnchorsCall = calls.find((call) => call.method === 'CreateReferenceAnchors')
+  assert(createAnchorsCall, 'missing CreateReferenceAnchors call')
+  assert.equal(createAnchorsCall.args[0].anchors.length, 2, 'bulk source import payload must include both source paths')
+  assert.deepEqual(
+    createAnchorsCall.args[0].anchors.map((anchor) => anchor.title),
+    ['批量导入语料 1', '批量导入语料 2'],
+    'bulk source import should derive ordered titles from the shared title',
+  )
+  assert.deepEqual(
+    createAnchorsCall.args[0].anchors.map((anchor) => anchor.source_path),
+    ['D:\\books\\bulk-one.md', 'D:\\books\\bulk-two.txt'],
+    'bulk source import payload must preserve source paths',
+  )
+  assert.deepEqual(
+    createAnchorsCall.args[0].anchors.map((anchor) => anchor.source_kind),
+    ['markdown', 'text'],
+    'bulk source import payload should infer source kind per path',
+  )
+  assert(createAnchorsCall.args[0].anchors.every((anchor) => anchor.visibility === 'workspace'), 'bulk source import should preserve selected workspace visibility')
+  assert(createAnchorsCall.args[0].anchors.every((anchor) => anchor.source_trust === 'imported'), 'bulk source import should preserve selected source trust')
+  assert.deepEqual(createAnchorsCall.args[0].anchors[0].user_tags, ['批量导入', '共享'], 'bulk source import payload must include shared user tags')
 
   const promoteCalls = calls.filter((call) => call.method === 'PromoteReferenceAnchorToWorkspaceCorpus')
   assert.equal(promoteCalls.length, 1, 'single promote should call PromoteReferenceAnchorToWorkspaceCorpus once')
@@ -740,6 +778,7 @@ function installReferenceAnchorMockBridge() {
       case 'ListSlashCommands': return []
       case 'GetReferenceAnchors': return state.anchors
       case 'CreateReferenceAnchor': return createReferenceAnchor(args[0])
+      case 'CreateReferenceAnchors': return createReferenceAnchors(args[0])
       case 'PromoteReferenceAnchorToWorkspaceCorpus': return promoteReferenceAnchor(args[0])
       case 'PromoteReferenceAnchorsToWorkspaceCorpus': return promoteReferenceAnchors(args[0])
       case 'UpdateReferenceAnchorMetadata': return updateReferenceAnchorMetadata(args[0])
@@ -849,6 +888,10 @@ function installReferenceAnchorMockBridge() {
     }
     state.anchors = [...state.anchors, anchor]
     return anchor
+  }
+
+  function createReferenceAnchors(input) {
+    return input.anchors.map((anchor) => createReferenceAnchor(anchor))
   }
 
   function promoteReferenceAnchor(input) {
