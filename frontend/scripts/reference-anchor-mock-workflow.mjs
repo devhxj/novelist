@@ -189,11 +189,24 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await libraryMaterialPanel.getByLabel('材料库搜索').fill('把杯子推远')
   await libraryMaterialPanel.getByLabel('材料库文体职责').fill('source_backed_detail')
   await libraryMaterialPanel.getByRole('button', { name: /^检索材料库$/ }).click()
-  await expectVisible(libraryMaterialPanel.getByText('1 条材料'), 'corpus material library result count')
+  await expectVisible(libraryMaterialPanel.getByText('4 条材料'), 'corpus material library result count')
   await expectVisible(libraryMaterialPanel.getByText('mat-001'), 'corpus material library id')
   await expectVisible(libraryMaterialPanel.getByText('把杯子推远，杯底在木桌上留下半圈水痕。'), 'corpus material library text')
-  await expectVisible(libraryMaterialPanel.getByText('prose_duty 0.75'), 'corpus material library prose-duty score')
-  await libraryMaterialPanel.getByRole('checkbox', { name: /选择材料库材料 mat-001/ }).check()
+  const libraryFirstMaterial = libraryMaterialPanel.locator('[aria-label="材料库结果"] > .rounded').filter({ hasText: 'mat-001' }).first()
+  await expectVisible(libraryFirstMaterial.getByText('prose_duty 0.75'), 'corpus material library prose-duty score')
+  await libraryMaterialPanel.getByLabel('材料库页内筛选').fill('杯子')
+  await expectVisible(libraryMaterialPanel.getByText('mat-001'), 'filtered corpus material library id')
+  await expectHidden(libraryMaterialPanel.getByText('mat-002'), 'filtered corpus material library hides non-matching row')
+  await libraryMaterialPanel.getByLabel('材料库页内筛选').fill('不存在材料')
+  await expectVisible(libraryMaterialPanel.getByText('没有匹配材料'), 'corpus material library filtered empty state')
+  await libraryMaterialPanel.getByLabel('材料库页内筛选').fill('')
+  await libraryMaterialPanel.getByLabel('材料库排序').selectOption('score_desc')
+  await expectVisible(libraryMaterialPanel.locator('[aria-label="材料库结果"] > .rounded').first().getByText('mat-004'), 'corpus material library score sort first row')
+  await libraryMaterialPanel.getByLabel('材料库排序').selectOption('material_id_asc')
+  await expectVisible(libraryMaterialPanel.locator('[aria-label="材料库结果"] > .rounded').first().getByText('mat-001'), 'corpus material library id sort first row')
+  await libraryMaterialPanel.getByLabel('材料库页内筛选').fill('杯子')
+  await libraryMaterialPanel.getByRole('button', { name: /^选择当前材料$/ }).click()
+  await expectVisible(libraryMaterialPanel.getByText('已选 1 条材料'), 'corpus material library selected filtered count')
   await libraryMaterialPanel.getByLabel('材料库批量功能标签').fill('library_object_signal')
   await libraryMaterialPanel.getByLabel('材料库批量 POV 标签').fill('library_close')
   await libraryMaterialPanel.getByRole('button', { name: /^批量校正材料库$/ }).click()
@@ -209,8 +222,9 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await materialPanel.getByLabel('文体职责').fill('source_backed_detail')
   await materialPanel.getByRole('button', { name: /搜索/ }).click()
   await expectVisible(materialPanel.getByText('把杯子推远，杯底在木桌上留下半圈水痕。'), 'material search hit')
-  await expectVisible(materialPanel.getByText('lexical 0.92'), 'material score component')
-  await expectVisible(materialPanel.getByText('prose_duty 0.75'), 'material prose-duty score component')
+  const manualFirstMaterial = materialPanel.locator('.bg-card').filter({ hasText: '把杯子推远，杯底在木桌上留下半圈水痕。' }).first()
+  await expectVisible(manualFirstMaterial.getByText('lexical 0.92'), 'material score component')
+  await expectVisible(manualFirstMaterial.getByText('prose_duty 0.75'), 'material prose-duty score component')
 
   await page.getByPlaceholder('参考书名').fill('批量动作参考')
   await page.getByPlaceholder('可选').first().fill('Batch Curator')
@@ -872,7 +886,10 @@ function installReferenceAnchorMockBridge() {
   function searchReferenceMaterials(input) {
     const isAnchorScopedPreview = Array.isArray(input.anchor_ids) && input.anchor_ids.length === 1 && input.query === '' && input.size === 5
     if (!isAnchorScopedPreview) {
-      return pagedResult([material(1)], input.page ?? 1, input.size ?? 10, 1)
+      const items = Array.isArray(input.anchor_ids) && input.anchor_ids.length === 0
+        ? [1, 2, 3, 4].map(material)
+        : [material(1)]
+      return pagedResult(items, input.page ?? 1, input.size ?? 10, items.length)
     }
 
     const page = input.page ?? 1
