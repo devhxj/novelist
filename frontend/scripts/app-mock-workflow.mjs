@@ -11,7 +11,7 @@ const frontendRoot = path.resolve(__dirname, '..')
 const repoRoot = path.resolve(frontendRoot, '..')
 const phaseOutputRoot = path.join(repoRoot, 'output', 'playwright', 'phase13')
 const runConfig = parseRunConfig(process.argv.slice(2))
-const outputDir = path.join(phaseOutputRoot, `${runConfig.suite}-${runConfig.target}`)
+const outputDir = path.join(phaseOutputRoot, artifactRunName(runConfig))
 const diagnostics = {
   consoleErrors: [],
   consoleWarnings: [],
@@ -93,12 +93,17 @@ async function runSmokeSuite(browser, url) {
 
 async function runFullSuite(browser, url) {
   const { consoleErrors, pageErrors } = diagnostics
+  const shouldRun = makeTagFilter(runConfig.grep)
 
-  logStep('checking bootstrap states')
-  await verifyBootstrapStates(browser, url, consoleErrors, pageErrors)
+  if (shouldRun('@startup')) {
+    logStep('checking bootstrap states')
+    await verifyBootstrapStates(browser, url, consoleErrors, pageErrors)
+  }
 
-  logStep('checking fixture fault modes')
-  await verifyFixtureFaultModes(browser, url, consoleErrors, pageErrors)
+  if (shouldRun('@diagnostics')) {
+    logStep('checking fixture fault modes')
+    await verifyFixtureFaultModes(browser, url, consoleErrors, pageErrors)
+  }
 
   logStep('loading workspace')
   const page = await newAppPage(browser, consoleErrors, pageErrors, { initialized: true }, undefined, 'full-shell')
@@ -107,53 +112,85 @@ async function runFullSuite(browser, url) {
   await expectVisible(page.getByText('AI 对话'), 'chat panel')
   await page.screenshot({ path: path.join(outputDir, 'app-01-shell.png'), fullPage: true })
 
-  logStep('checking shell navigation')
-  await verifyShellNavigation(page)
+  if (shouldRun('@surface')) {
+    logStep('checking shell navigation')
+    await verifyShellNavigation(page)
+  }
 
-  logStep('checking chapter/editor path')
-  await verifyChapterWorkflow(page)
-  await page.screenshot({ path: path.join(outputDir, 'app-02-editor.png'), fullPage: true })
+  if (shouldRun('@surface') || shouldRun('@writing')) {
+    logStep('checking chapter/editor path')
+    await verifyChapterWorkflow(page)
+    await page.screenshot({ path: path.join(outputDir, 'app-02-editor.png'), fullPage: true })
+  }
 
-  logStep('checking explicit editor save path')
-  await verifyEditorSaveWorkflow(browser, url, consoleErrors, pageErrors)
+  if (shouldRun('@writing')) {
+    logStep('checking explicit editor save path')
+    await verifyEditorSaveWorkflow(browser, url, consoleErrors, pageErrors)
+  }
 
-  logStep('checking novel and chapter workflow')
-  await verifyNovelChapterWorkflow(browser, url, consoleErrors, pageErrors)
+  if (shouldRun('@surface')) {
+    logStep('checking novel and chapter workflow')
+    await verifyNovelChapterWorkflow(browser, url, consoleErrors, pageErrors)
+  }
 
-  logStep('checking import export and file-picker paths')
-  await verifyImportExportFilePickerWorkflow(browser, url, consoleErrors, pageErrors)
+  if (shouldRun('@surface')) {
+    logStep('checking import export and file-picker paths')
+    await verifyImportExportFilePickerWorkflow(browser, url, consoleErrors, pageErrors)
+  }
 
-  logStep('checking search path')
-  await verifySearchWorkflow(page)
-  await page.screenshot({ path: path.join(outputDir, 'app-03-search.png'), fullPage: true })
+  if (shouldRun('@surface')) {
+    logStep('checking search path')
+    await verifySearchWorkflow(page)
+    await page.screenshot({ path: path.join(outputDir, 'app-03-search.png'), fullPage: true })
+  }
 
-  logStep('checking chat path')
-  await verifyChatWorkflow(page)
-  await page.screenshot({ path: path.join(outputDir, 'app-04-chat.png'), fullPage: true })
+  if (shouldRun('@surface')) {
+    logStep('checking chat path')
+    await verifyChatWorkflow(page)
+    await page.screenshot({ path: path.join(outputDir, 'app-04-chat.png'), fullPage: true })
+  }
 
-  logStep('checking settings path')
-  await verifySettingsWorkflow(page)
-  await page.screenshot({ path: path.join(outputDir, 'app-05-settings.png'), fullPage: true })
+  if (shouldRun('@surface')) {
+    logStep('checking settings path')
+    await verifySettingsWorkflow(page)
+    await page.screenshot({ path: path.join(outputDir, 'app-05-settings.png'), fullPage: true })
+  }
 
-  logStep('checking settings persistence path')
-  await verifySettingsPersistenceWorkflow(browser, url, consoleErrors, pageErrors)
+  if (shouldRun('@surface')) {
+    logStep('checking settings persistence path')
+    await verifySettingsPersistenceWorkflow(browser, url, consoleErrors, pageErrors)
+  }
 
-  logStep('checking metadata panels')
-  await verifyMetadataPanels(page)
-  await page.screenshot({ path: path.join(outputDir, 'app-06-metadata.png'), fullPage: true })
+  if (shouldRun('@surface')) {
+    logStep('checking metadata panels')
+    await verifyMetadataPanels(page)
+    await page.screenshot({ path: path.join(outputDir, 'app-06-metadata.png'), fullPage: true })
+  }
 
-  logStep('checking metadata empty and action paths')
-  await verifyMetadataActionWorkflow(browser, url, consoleErrors, pageErrors)
+  if (shouldRun('@surface')) {
+    logStep('checking metadata empty and action paths')
+    await verifyMetadataActionWorkflow(browser, url, consoleErrors, pageErrors)
+  }
 
-  logStep('checking reference entry point')
-  await verifyReferenceSmoke(page)
-  await page.screenshot({ path: path.join(outputDir, 'app-07-reference.png'), fullPage: true })
+  if (shouldRun('@surface') || shouldRun('@reference-anchor')) {
+    logStep('checking reference entry point')
+    await verifyReferenceSmoke(page)
+    await page.screenshot({ path: path.join(outputDir, 'app-07-reference.png'), fullPage: true })
+  }
 
-  logStep('checking compact viewport layout')
-  await verifyCompactViewportSmoke(browser, url, consoleErrors, pageErrors)
+  if (shouldRun('@surface')) {
+    logStep('checking compact viewport layout')
+    await verifyCompactViewportSmoke(browser, url, consoleErrors, pageErrors)
+  }
 
   logStep('checking bridge guardrails')
-  await verifyBridgeCalls(page)
+  if (runConfig.grep === '@writing') {
+    await verifyWritingBridgeCalls(page)
+  } else if (runConfig.grep === '@reference-anchor') {
+    await verifyReferenceBridgeCalls(page)
+  } else {
+    await verifyBridgeCalls(page)
+  }
   await page.close()
 }
 
@@ -1149,6 +1186,31 @@ async function verifyBridgeCalls(page) {
   assert.deepEqual(saveCandidates, [], `Unexpected mutating bridge calls:\n${saveCandidates.join('\n')}`)
 }
 
+async function verifyWritingBridgeCalls(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const methods = calls.map((call) => call.method)
+  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetContent']
+
+  for (const method of requiredMethods) {
+    assert(methods.includes(method), `Expected writing bridge method ${method} to be called.`)
+  }
+
+  assert(!methods.includes('runtime.shell.openExternal'), 'writing workflow must not open external URLs')
+}
+
+async function verifyReferenceBridgeCalls(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const methods = calls.map((call) => call.method)
+  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetReferenceAnchors']
+
+  for (const method of requiredMethods) {
+    assert(methods.includes(method), `Expected reference bridge method ${method} to be called.`)
+  }
+
+  assert(!methods.includes('SaveContent'), 'reference entry workflow must not save chapter content implicitly')
+  assert(!methods.includes('runtime.shell.openExternal'), 'reference entry workflow must not open external URLs')
+}
+
 async function verifySmokeBridgeCalls(page) {
   const calls = await page.evaluate(() => window.__appMockState.calls)
   const methods = calls.map((call) => call.method)
@@ -1518,15 +1580,22 @@ function parseRunConfig(args) {
   const config = {
     suite: 'full',
     target: 'vite',
+    grep: '',
     stressSizeBytes: 10 * 1024 * 1024,
     stressChapterCount: 250,
   }
 
-  for (const arg of args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]
     if (arg.startsWith('--suite=')) {
       config.suite = arg.slice('--suite='.length)
     } else if (arg.startsWith('--target=')) {
       config.target = arg.slice('--target='.length)
+    } else if (arg.startsWith('--grep=')) {
+      config.grep = arg.slice('--grep='.length)
+    } else if (arg === '--grep') {
+      config.grep = args[index + 1] ?? ''
+      index += 1
     } else if (arg.startsWith('--stress-size-mb=')) {
       config.stressSizeBytes = Math.max(1, Number.parseInt(arg.slice('--stress-size-mb='.length), 10)) * 1024 * 1024
     } else if (arg.startsWith('--stress-chapters=')) {
@@ -1540,6 +1609,10 @@ function parseRunConfig(args) {
   if (!['vite', 'dist'].includes(config.target)) {
     throw new Error(`Unsupported app mock target: ${config.target}`)
   }
+  config.grep = normalizeGrepTag(config.grep)
+  if (config.grep && !['@startup', '@diagnostics', '@surface', '@writing', '@reference-anchor'].includes(config.grep)) {
+    throw new Error(`Unsupported app mock grep: ${config.grep}`)
+  }
   if (!Number.isFinite(config.stressSizeBytes) || config.stressSizeBytes <= 0) {
     throw new Error('Stress size must be a positive number of megabytes.')
   }
@@ -1550,12 +1623,28 @@ function parseRunConfig(args) {
   return config
 }
 
+function makeTagFilter(grep) {
+  return (tag) => !grep || grep === tag
+}
+
+function normalizeGrepTag(value) {
+  const tag = String(value ?? '').trim()
+  if (!tag) return ''
+  return tag.startsWith('@') ? tag : `@${tag}`
+}
+
+function artifactRunName(config) {
+  const grepSuffix = config.grep ? `-${sanitizeArtifactName(config.grep.replace(/^@/, ''))}` : ''
+  return `${config.suite}-${config.target}${grepSuffix}`
+}
+
 async function writeRunDiagnostics() {
   await fs.writeFile(
     path.join(outputDir, 'diagnostics.json'),
     `${JSON.stringify({
       suite: runConfig.suite,
       target: runConfig.target,
+      grep: runConfig.grep,
       artifactDirectory: path.relative(repoRoot, outputDir),
       consoleErrors: diagnostics.consoleErrors,
       consoleWarnings: diagnostics.consoleWarnings,

@@ -6,7 +6,7 @@
 
 **Status:** Reopened and expanded on 2026-07-06. The earlier app-wide Playwright thin slice remains useful baseline coverage, but it is not sufficient for Phase 13 completion under the current quality bar.
 
-**Progress 2026-07-06:** Added CI-friendly app QA command layers and Phase 13 diagnostics under `output/playwright/phase13/`. The app harness now supports Vite and production `dist` smoke targets, per-page bridge-call logs, screenshots, traces, console diagnostics, failed-request diagnostics, a generated usability report baseline, a generated 10MB Chinese stress fixture, and page-scoped fixture fault injection for slow, timeout, validation, storage, and malformed bridge responses. Full per-surface workflow depth and automatic corpus-generation coverage remain open.
+**Progress 2026-07-06:** Added CI-friendly app QA command layers and Phase 13 diagnostics under `output/playwright/phase13/`. The app harness now supports Vite and production `dist` smoke targets, per-page bridge-call logs, screenshots, traces, console diagnostics, failed-request diagnostics, a generated usability report baseline, a generated 10MB Chinese stress fixture, page-scoped fixture fault injection for slow, timeout, validation, storage, and malformed bridge responses, and grep-style app slices for `@surface`, `@writing`, and `@reference-anchor`. Full per-surface workflow depth and automatic corpus-generation coverage remain open.
 
 **Description:** Phase 13 is the full-product quality gate for Novelist. It must exercise the whole desktop frontend in a real browser, validate bridge behavior with deterministic fixtures, evaluate usability and writing ergonomics, and prove robustness under extreme input sizes and failure modes. This phase must not be reduced to a smoke test or a narrow reference-anchor regression.
 
@@ -69,7 +69,7 @@ This is a product requirement, not just a backend detail. Tests must prove that 
 
 **Acceptance criteria:**
 
-- [ ] Tests can run independently by surface and as a full suite.
+- [x] Tests can run independently by surface and as a full suite.
 - [x] Console errors, page errors, failed requests, unhandled promise rejections, bridge-call logs, screenshots, and traces are collected under `output/playwright/phase13/`.
 - [x] Fixture state is reset per test and can simulate success, slow response, timeout, validation error, storage error, and malformed payload.
 
@@ -90,7 +90,7 @@ This is a product requirement, not just a backend detail. Tests must prove that 
 
 **Verification:**
 
-- [ ] `npm --prefix frontend run test:app:full -- --grep "@surface"`
+- [x] `npm --prefix frontend run test:app:full -- --grep '@surface'`
 
 ### 3. Writing Ergonomics and Editor Reliability
 
@@ -104,7 +104,7 @@ This is a product requirement, not just a backend detail. Tests must prove that 
 
 **Verification:**
 
-- [ ] `npm --prefix frontend run test:app:full -- --grep "@writing"`
+- [x] `npm --prefix frontend run test:app:full -- --grep '@writing'`
 
 ### 4. Reference Anchor and Corpus Robustness
 
@@ -119,7 +119,7 @@ This is a product requirement, not just a backend detail. Tests must prove that 
 **Verification:**
 
 - [ ] `npm --prefix frontend run test:reference-anchor`
-- [ ] `npm --prefix frontend run test:app:full -- --grep "@reference-anchor"`
+- [x] `npm --prefix frontend run test:app:full -- --grep '@reference-anchor'`
 
 ### 5. 10MB Large-Novel Stress Path
 
