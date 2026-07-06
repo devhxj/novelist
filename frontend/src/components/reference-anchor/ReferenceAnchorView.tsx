@@ -80,6 +80,8 @@ type MaterialPreviewState = {
   totalPages: number
 }
 
+type MaterialLibraryState = MaterialPreviewState
+
 type MaterialTagForm = {
   functionTag: string
   emotionTag: string
@@ -130,6 +132,14 @@ const EMPTY_MATERIAL_PREVIEW: MaterialPreviewState = {
   items: [],
   page: 1,
   size: 5,
+  total: 0,
+  totalPages: 1,
+}
+
+const EMPTY_MATERIAL_LIBRARY: MaterialLibraryState = {
+  items: [],
+  page: 1,
+  size: 10,
   total: 0,
   totalPages: 1,
 }
@@ -234,6 +244,11 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   const [materialTagForm, setMaterialTagForm] = useState<MaterialTagForm | null>(null)
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([])
   const [bulkMaterialTagForm, setBulkMaterialTagForm] = useState<MaterialTagForm>(EMPTY_MATERIAL_TAG_FORM)
+  const [materialLibraryQuery, setMaterialLibraryQuery] = useState('')
+  const [materialLibraryFilters, setMaterialLibraryFilters] = useState<MaterialSearchFilters>(EMPTY_MATERIAL_FILTERS)
+  const [materialLibrary, setMaterialLibrary] = useState<MaterialLibraryState>(EMPTY_MATERIAL_LIBRARY)
+  const [selectedLibraryMaterialIds, setSelectedLibraryMaterialIds] = useState<string[]>([])
+  const [bulkLibraryMaterialTagForm, setBulkLibraryMaterialTagForm] = useState<MaterialTagForm>(EMPTY_MATERIAL_TAG_FORM)
   const [blueprintForm, setBlueprintForm] = useState<BlueprintForm>(EMPTY_BLUEPRINT_FORM)
   const [revisionForm, setRevisionForm] = useState<BlueprintRevisionForm>(EMPTY_REVISION_FORM)
   const [materialFilters, setMaterialFilters] = useState<MaterialSearchFilters>(EMPTY_MATERIAL_FILTERS)
@@ -304,6 +319,19 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     [bulkMaterialTagForm],
   )
   const hasAnchorMaterialQuery = anchorMaterialQuery.trim().length > 0
+  const selectedLibraryMaterialSet = useMemo(() => new Set(selectedLibraryMaterialIds), [selectedLibraryMaterialIds])
+  const materialLibraryIds = useMemo(
+    () => materialLibrary.items.map(material => material.material_id),
+    [materialLibrary.items],
+  )
+  const selectedVisibleLibraryMaterialCount = useMemo(
+    () => materialLibraryIds.filter(id => selectedLibraryMaterialSet.has(id)).length,
+    [materialLibraryIds, selectedLibraryMaterialSet],
+  )
+  const hasBulkLibraryMaterialTagOverride = useMemo(
+    () => Object.values(bulkLibraryMaterialTagForm).some(value => value.trim().length > 0),
+    [bulkLibraryMaterialTagForm],
+  )
 
   const loadAnchors = useCallback(async () => {
     if (!novelId) {
@@ -693,6 +721,70 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       setSelectedMaterialIds([])
       setBulkMaterialTagForm(EMPTY_MATERIAL_TAG_FORM)
       cancelEditMaterialTags()
+    }
+  }
+
+  function toggleLibraryMaterialSelection(materialId: string, checked: boolean) {
+    setSelectedLibraryMaterialIds(ids => {
+      if (checked) {
+        return ids.includes(materialId) ? ids : [...ids, materialId]
+      }
+
+      return ids.filter(id => id !== materialId)
+    })
+  }
+
+  async function searchMaterialLibrary(page = 1) {
+    const result = await run(() => app.SearchReferenceMaterials({
+      novel_id: novelId,
+      anchor_ids: [],
+      query: materialLibraryQuery.trim(),
+      material_types: lines(materialLibraryFilters.materialTypes),
+      emotion_tags: lines(materialLibraryFilters.emotionTags),
+      function_tags: lines(materialLibraryFilters.functionTags),
+      pov_tags: lines(materialLibraryFilters.povTags),
+      technique_tags: lines(materialLibraryFilters.techniqueTags),
+      page,
+      size: 10,
+      narrative_duties: lines(materialLibraryFilters.narrativeDuties),
+      emotion_transitions: lines(materialLibraryFilters.emotionTransitions),
+      prose_duties: lines(materialLibraryFilters.proseDuties),
+    }))
+    if (result) {
+      setMaterialLibrary({
+        items: result.items ?? [],
+        page: result.page,
+        size: result.size,
+        total: result.total,
+        totalPages: result.total_pages,
+      })
+      setSelectedLibraryMaterialIds([])
+      setBulkLibraryMaterialTagForm(EMPTY_MATERIAL_TAG_FORM)
+    }
+  }
+
+  async function saveBulkLibraryMaterialTags() {
+    if (selectedLibraryMaterialIds.length === 0 || !hasBulkLibraryMaterialTagOverride) return
+    const updated = await run(() => app.UpdateReferenceMaterialsTags({
+      novel_id: novelId,
+      material_ids: selectedLibraryMaterialIds,
+      function_tag: bulkLibraryMaterialTagForm.functionTag.trim() || null,
+      emotion_tag: bulkLibraryMaterialTagForm.emotionTag.trim() || null,
+      scene_tag: bulkLibraryMaterialTagForm.sceneTag.trim() || null,
+      pov_tag: bulkLibraryMaterialTagForm.povTag.trim() || null,
+      technique_tag: bulkLibraryMaterialTagForm.techniqueTag.trim() || null,
+      origin: 'ui',
+      note: 'corpus material library bulk correction',
+    }), `材料库已批量校正 ${selectedLibraryMaterialIds.length} 条材料标签`)
+
+    if (updated) {
+      const updatedById = new Map(updated.map(material => [material.material_id, material]))
+      setMaterialLibrary(current => ({
+        ...current,
+        items: current.items.map(item => updatedById.get(item.material_id) ?? item),
+      }))
+      setSelectedLibraryMaterialIds([])
+      setBulkLibraryMaterialTagForm(EMPTY_MATERIAL_TAG_FORM)
     }
   }
 
@@ -1604,6 +1696,184 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                     </div>
                   ))}
                 </div>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-border bg-card p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Tags className="h-3.5 w-3.5 text-muted-foreground" />
+                  <h3 className="text-xs font-semibold text-foreground">材料库</h3>
+                </div>
+                {materialLibrary.total > 0 && (
+                  <span className="text-[11px] text-muted-foreground">
+                    第 {materialLibrary.page} / {materialLibrary.totalPages} 页 · {materialLibrary.total} 条材料
+                  </span>
+                )}
+              </div>
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="min-w-[180px] flex-1">
+                    <Field label="材料库搜索">
+                      <input
+                        value={materialLibraryQuery}
+                        onChange={event => setMaterialLibraryQuery(event.target.value)}
+                        className={inputClass}
+                        placeholder="ID、文本、标签或写作需求"
+                        aria-label="材料库搜索"
+                      />
+                    </Field>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void searchMaterialLibrary(1)
+                    }}
+                    disabled={loading}
+                    className="inline-flex items-center gap-1.5 rounded bg-secondary px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/80 disabled:opacity-50"
+                  >
+                    <Search className="h-3.5 w-3.5" />检索材料库
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <Field label="材料库文体职责">
+                    <input value={materialLibraryFilters.proseDuties} onChange={event => setMaterialLibraryFilters(filters => ({ ...filters, proseDuties: event.target.value }))} className={inputClass} placeholder="source_backed_detail；subtext" aria-label="材料库文体职责" />
+                  </Field>
+                  <Field label="材料库功能">
+                    <input value={materialLibraryFilters.functionTags} onChange={event => setMaterialLibraryFilters(filters => ({ ...filters, functionTags: event.target.value }))} className={inputClass} placeholder="environment；emotion_evidence" aria-label="材料库功能标签" />
+                  </Field>
+                  <Field label="材料库情绪">
+                    <input value={materialLibraryFilters.emotionTags} onChange={event => setMaterialLibraryFilters(filters => ({ ...filters, emotionTags: event.target.value }))} className={inputClass} placeholder="restrained" aria-label="材料库情绪标签" />
+                  </Field>
+                  <Field label="材料库 POV">
+                    <input value={materialLibraryFilters.povTags} onChange={event => setMaterialLibraryFilters(filters => ({ ...filters, povTags: event.target.value }))} className={inputClass} placeholder="close" aria-label="材料库 POV 标签" />
+                  </Field>
+                </div>
+              </div>
+
+              {materialLibrary.items.length > 0 ? (
+                <div className="mt-3 space-y-3">
+                  <div className="space-y-2 rounded border border-border bg-background p-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] font-medium text-foreground">
+                        已选 {selectedLibraryMaterialIds.length} 条材料
+                        {selectedVisibleLibraryMaterialCount !== selectedLibraryMaterialIds.length && selectedLibraryMaterialIds.length > 0
+                          ? ` · 当前页 ${selectedVisibleLibraryMaterialCount} 条`
+                          : ''}
+                      </span>
+                      <span className="flex flex-wrap items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedLibraryMaterialIds(materialLibraryIds)}
+                          disabled={loading || materialLibraryIds.length === 0}
+                          className="rounded bg-secondary px-2 py-1 text-[11px] leading-none text-foreground hover:bg-secondary/80 disabled:opacity-50"
+                        >
+                          选择当前材料
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedLibraryMaterialIds([])}
+                          disabled={loading || selectedLibraryMaterialIds.length === 0}
+                          className="rounded bg-secondary px-2 py-1 text-[11px] leading-none text-foreground hover:bg-secondary/80 disabled:opacity-50"
+                        >
+                          清除材料选择
+                        </button>
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <Field label="材料库批量功能">
+                        <input value={bulkLibraryMaterialTagForm.functionTag} onChange={event => setBulkLibraryMaterialTagForm(form => ({ ...form, functionTag: event.target.value }))} className={inputClass} aria-label="材料库批量功能标签" />
+                      </Field>
+                      <Field label="材料库批量情绪">
+                        <input value={bulkLibraryMaterialTagForm.emotionTag} onChange={event => setBulkLibraryMaterialTagForm(form => ({ ...form, emotionTag: event.target.value }))} className={inputClass} aria-label="材料库批量情绪标签" />
+                      </Field>
+                      <Field label="材料库批量场景">
+                        <input value={bulkLibraryMaterialTagForm.sceneTag} onChange={event => setBulkLibraryMaterialTagForm(form => ({ ...form, sceneTag: event.target.value }))} className={inputClass} aria-label="材料库批量场景标签" />
+                      </Field>
+                      <Field label="材料库批量 POV">
+                        <input value={bulkLibraryMaterialTagForm.povTag} onChange={event => setBulkLibraryMaterialTagForm(form => ({ ...form, povTag: event.target.value }))} className={inputClass} aria-label="材料库批量 POV 标签" />
+                      </Field>
+                      <Field label="材料库批量技法">
+                        <input value={bulkLibraryMaterialTagForm.techniqueTag} onChange={event => setBulkLibraryMaterialTagForm(form => ({ ...form, techniqueTag: event.target.value }))} className={inputClass} aria-label="材料库批量技法标签" />
+                      </Field>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void saveBulkLibraryMaterialTags()
+                        }}
+                        disabled={loading || selectedLibraryMaterialIds.length === 0 || !hasBulkLibraryMaterialTagOverride}
+                        className="inline-flex items-center gap-1.5 rounded bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                      >
+                        <Check className="h-3.5 w-3.5" />批量校正材料库
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBulkLibraryMaterialTagForm(EMPTY_MATERIAL_TAG_FORM)}
+                        disabled={loading || !hasBulkLibraryMaterialTagOverride}
+                        className="inline-flex items-center gap-1.5 rounded bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/80 disabled:opacity-50"
+                      >
+                        <X className="h-3.5 w-3.5" />清空批量标签
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2" aria-label="材料库结果">
+                    {materialLibrary.items.map(material => (
+                      <div key={material.material_id} className="rounded border border-border bg-background px-2.5 py-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <label className="flex min-w-0 flex-1 items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedLibraryMaterialSet.has(material.material_id)}
+                              onChange={event => toggleLibraryMaterialSelection(material.material_id, event.target.checked)}
+                              className="shrink-0"
+                              aria-label={`选择材料库材料 ${material.material_id} 做批量标签校正`}
+                            />
+                            <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                              {material.material_id} · {material.material_type} · {material.function_tag || 'untagged'} · {material.pov_tag || 'unknown'}
+                            </span>
+                          </label>
+                          {material.user_verified && <span className="text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
+                        </div>
+                        <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-foreground">{material.text}</p>
+                        {materialScoreComponents(material).length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {materialScoreComponents(material).slice(0, 4).map(([name, value]) => (
+                              <span key={name} className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                                {name} {value.toFixed(2)}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void searchMaterialLibrary(Math.max(1, materialLibrary.page - 1))
+                      }}
+                      disabled={loading || materialLibrary.page <= 1}
+                      className="rounded bg-secondary px-2 py-1 text-[11px] leading-none text-foreground hover:bg-secondary/80 disabled:opacity-50"
+                    >
+                      上一页
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void searchMaterialLibrary(Math.min(materialLibrary.totalPages, materialLibrary.page + 1))
+                      }}
+                      disabled={loading || materialLibrary.page >= materialLibrary.totalPages}
+                      className="rounded bg-secondary px-2 py-1 text-[11px] leading-none text-foreground hover:bg-secondary/80 disabled:opacity-50"
+                    >
+                      下一页
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-3 text-[11px] text-muted-foreground">输入检索条件后查看可访问材料；默认不需要先选择库条目。</p>
               )}
             </div>
           </section>

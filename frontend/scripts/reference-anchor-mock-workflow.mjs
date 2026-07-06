@@ -184,6 +184,23 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectVisible(page.getByText('mat-006'), 'anchor material preview second page id')
   await expectVisible(page.getByText('雨水从伞沿断续落下，像有人在门外迟疑。'), 'anchor material preview second page text')
 
+  const libraryMaterialPanel = page.locator('.rounded-lg').filter({ hasText: '材料库' }).first()
+  await expectVisible(libraryMaterialPanel.getByRole('heading', { name: '材料库' }), 'corpus material library heading')
+  await libraryMaterialPanel.getByLabel('材料库搜索').fill('把杯子推远')
+  await libraryMaterialPanel.getByLabel('材料库文体职责').fill('source_backed_detail')
+  await libraryMaterialPanel.getByRole('button', { name: /^检索材料库$/ }).click()
+  await expectVisible(libraryMaterialPanel.getByText('1 条材料'), 'corpus material library result count')
+  await expectVisible(libraryMaterialPanel.getByText('mat-001'), 'corpus material library id')
+  await expectVisible(libraryMaterialPanel.getByText('把杯子推远，杯底在木桌上留下半圈水痕。'), 'corpus material library text')
+  await expectVisible(libraryMaterialPanel.getByText('prose_duty 0.75'), 'corpus material library prose-duty score')
+  await libraryMaterialPanel.getByRole('checkbox', { name: /选择材料库材料 mat-001/ }).check()
+  await libraryMaterialPanel.getByLabel('材料库批量功能标签').fill('library_object_signal')
+  await libraryMaterialPanel.getByLabel('材料库批量 POV 标签').fill('library_close')
+  await libraryMaterialPanel.getByRole('button', { name: /^批量校正材料库$/ }).click()
+  await expectVisible(page.getByText('材料库已批量校正 1 条材料标签'), 'corpus material library bulk update message')
+  await expectVisible(libraryMaterialPanel.getByText('library_object_signal'), 'corpus material library corrected function tag')
+  await expectVisible(libraryMaterialPanel.getByText('library_close'), 'corpus material library corrected pov tag')
+
   await page.locator('button[title="重建"]').first().click()
   await expectVisible(page.getByText('锚点已重建'), 'anchor rebuilt message')
 
@@ -392,6 +409,27 @@ async function verifyBridgeCalls(page) {
   assert.equal(bulkMaterialTagCall.args[0].technique_tag, 'object_afterbeat', 'bulk material tag update payload must include technique tag')
   assert.equal(bulkMaterialTagCall.args[0].origin, 'ui', 'bulk material tag update payload must mark UI origin')
   assert.equal(bulkMaterialTagCall.args[0].note, 'corpus material browser bulk correction', 'bulk material tag update payload must include correction note')
+
+  const libraryMaterialSearchCall = calls.find((call) =>
+    call.method === 'SearchReferenceMaterials' &&
+    Array.isArray(call.args[0]?.anchor_ids) &&
+    call.args[0].anchor_ids.length === 0 &&
+    call.args[0].query === '把杯子推远' &&
+    Array.isArray(call.args[0]?.prose_duties) &&
+    call.args[0].prose_duties.includes('source_backed_detail'))
+  assert(libraryMaterialSearchCall, 'missing corpus material library SearchReferenceMaterials call')
+  assert.equal(libraryMaterialSearchCall.args[0].novel_id, 42, 'corpus material library search payload must include novel id')
+  assert.deepEqual(libraryMaterialSearchCall.args[0].anchor_ids, [], 'corpus material library search must not require selected anchor ids')
+
+  const libraryBulkMaterialTagCall = calls.find((call) =>
+    call.method === 'UpdateReferenceMaterialsTags' &&
+    call.args[0]?.note === 'corpus material library bulk correction')
+  assert(libraryBulkMaterialTagCall, 'missing corpus material library UpdateReferenceMaterialsTags call')
+  assert.equal(libraryBulkMaterialTagCall.args[0].novel_id, 42, 'corpus material library bulk correction payload must include novel id')
+  assert.deepEqual(libraryBulkMaterialTagCall.args[0].material_ids, ['mat-001'], 'corpus material library bulk correction payload must include selected material ids')
+  assert.equal(libraryBulkMaterialTagCall.args[0].function_tag, 'library_object_signal', 'corpus material library bulk correction payload must include function tag')
+  assert.equal(libraryBulkMaterialTagCall.args[0].pov_tag, 'library_close', 'corpus material library bulk correction payload must include pov tag')
+  assert.equal(libraryBulkMaterialTagCall.args[0].origin, 'ui', 'corpus material library bulk correction payload must mark UI origin')
 
   const startCall = calls.find((call) => call.method === 'StartReferenceOrchestrationRun')
   assert(startCall, 'missing StartReferenceOrchestrationRun call')
