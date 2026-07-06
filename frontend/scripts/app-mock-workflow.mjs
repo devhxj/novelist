@@ -18,6 +18,7 @@ const diagnostics = {
   pageErrors: [],
   failedRequests: [],
 }
+const openPages = new Set()
 let pageSequence = 0
 
 async function main() {
@@ -50,6 +51,12 @@ async function main() {
     assert.deepEqual(diagnostics.consoleErrors, [], `Unexpected console errors:\n${diagnostics.consoleErrors.join('\n')}`)
     assert.deepEqual(diagnostics.failedRequests, [], `Unexpected failed requests:\n${diagnostics.failedRequests.join('\n')}`)
     console.log(`App ${runConfig.suite} mock workflow passed. Artifacts: ${path.relative(repoRoot, outputDir)}`)
+  } catch (error) {
+    await closeOpenPages()
+    await writeRunDiagnostics().catch((diagnosticError) => {
+      console.error('Failed to write diagnostics after app mock failure:', diagnosticError)
+    })
+    throw error
   } finally {
     await browser?.close()
     stopProcess(server)
@@ -230,6 +237,8 @@ async function runUsabilitySuite(browser, url) {
   await clickActivity(page, '章节')
   await expectVisible(page.getByText('章节 (2)'), 'usability chapter panel')
   await expectVisible(page.getByRole('button', { name: /故事状态/ }), 'usability story state control')
+  await page.getByRole('button', { name: /故事状态/ }).click()
+  await waitForBridgeCallArg(page, 'GetContent', 1, 'novelist.md')
   observations.push(usabilityObservation('Chapters', 'low', 'Chapter access is one activity-bar click away; grouped chapters remain visible for the small fixture.'))
 
   await clickActivity(page, '搜索')
@@ -308,6 +317,7 @@ async function newAppPage(
 
   const page = await context.newPage()
   const artifactLabel = `${String(++pageSequence).padStart(2, '0')}-${sanitizeArtifactName(pageLabel)}`
+  openPages.add(page)
   page.setDefaultTimeout(runConfig.suite === 'stress' ? 60_000 : 12_000)
   page.on('console', (message) => {
     if (message.type() === 'error') {
@@ -331,11 +341,18 @@ async function newAppPage(
 
   const originalClose = page.close.bind(page)
   page.close = async (options) => {
-    if (page.isClosed()) return
-    await writePageDiagnostics(page, artifactLabel)
-    await context.tracing.stop({ path: path.join(outputDir, 'traces', `${artifactLabel}.zip`) })
-    await originalClose(options)
-    await context.close()
+    if (page.isClosed()) {
+      openPages.delete(page)
+      return
+    }
+    try {
+      await writePageDiagnostics(page, artifactLabel)
+      await context.tracing.stop({ path: path.join(outputDir, 'traces', `${artifactLabel}.zip`) })
+      await originalClose(options)
+      await context.close()
+    } finally {
+      openPages.delete(page)
+    }
   }
 
   return page
@@ -1456,6 +1473,15 @@ async function writeRunDiagnostics() {
     }, null, 2)}\n`,
     'utf8',
   )
+}
+
+async function closeOpenPages() {
+  const pages = [...openPages]
+  for (const page of pages) {
+    await page.close().catch((error) => {
+      diagnostics.pageErrors.push(`Failed to close diagnostic page: ${error instanceof Error ? error.message : String(error)}`)
+    })
+  }
 }
 
 function sanitizeArtifactName(value) {
