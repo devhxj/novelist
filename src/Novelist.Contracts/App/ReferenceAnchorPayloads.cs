@@ -157,6 +157,10 @@ public sealed record PromoteReferenceAnchorsToWorkspaceCorpusPayload(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<string>? UserTags = null);
 
+public sealed record DeleteReferenceAnchorsPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_ids")] IReadOnlyList<long> AnchorIds);
+
 public sealed record UpdateReferenceAnchorMetadataPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_id")] long AnchorId,

@@ -51,6 +51,10 @@ public interface IReferenceAnchorService
         long anchorId,
         CancellationToken cancellationToken);
 
+    ValueTask DeleteAnchorsAsync(
+        DeleteReferenceAnchorsPayload input,
+        CancellationToken cancellationToken);
+
     ValueTask<ReferenceAnchorPayload> PromoteAnchorToWorkspaceCorpusAsync(
         PromoteReferenceAnchorToWorkspaceCorpusPayload input,
         CancellationToken cancellationToken);

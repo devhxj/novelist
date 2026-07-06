@@ -488,9 +488,10 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     setError(null)
     setMessage(null)
     try {
-      for (const anchor of selectedWorkspaceAnchors) {
-        await app.DeleteReferenceAnchor(novelId, anchor.anchor_id)
-      }
+      await app.DeleteReferenceAnchors({
+        novel_id: novelId,
+        anchor_ids: anchorIds,
+      })
       setMessage(`已批量归档 ${anchorIds.length} 个工作区语料`)
     } catch (err) {
       setError(err instanceof Error ? err.message : '操作失败')

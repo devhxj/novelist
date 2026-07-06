@@ -1165,6 +1165,13 @@ public sealed class MafToolRegistryTests
         {
             return ValueTask.CompletedTask;
         }
+
+        public ValueTask DeleteAnchorsAsync(
+            DeleteReferenceAnchorsPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class RecordingReferenceAnchoredDraftService : IReferenceAnchoredDraftService

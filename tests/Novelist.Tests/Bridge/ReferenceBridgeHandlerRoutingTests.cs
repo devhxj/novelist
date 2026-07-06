@@ -26,6 +26,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             UserTags: ["rain", "threshold"]));
         await AssertOkAsync(dispatcher, "GetReferenceAnchors", 42L);
         await AssertOkAsync(dispatcher, "DeleteReferenceAnchor", 42L, 99L);
+        await AssertOkAsync(dispatcher, "DeleteReferenceAnchors", new DeleteReferenceAnchorsPayload(42, [100, 101]));
         await AssertOkAsync(dispatcher, "PromoteReferenceAnchorToWorkspaceCorpus", new PromoteReferenceAnchorToWorkspaceCorpusPayload(
             42,
             99,
@@ -105,6 +106,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 @"CreateAnchor:42:Anchor:Author:D:\reference.md:markdown:user_provided:workspace:imported:rain,threshold",
                 "GetAnchors:42",
                 "DeleteAnchor:42:99",
+                "DeleteAnchors:42:100,101",
                 "PromoteAnchorToWorkspaceCorpus:42:99:imported:migrated,shared",
                 "PromoteAnchorsToWorkspaceCorpus:42:100,101:imported:bulk,shared",
                 "UpdateAnchorMetadata:42:99:Updated Anchor:Updated Author:licensed:workspace:user_verified:curated,rain",
@@ -305,6 +307,15 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"DeleteAnchor:{novelId}:{anchorId}");
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask DeleteAnchorsAsync(
+            DeleteReferenceAnchorsPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"DeleteAnchors:{input.NovelId}:{string.Join(",", input.AnchorIds)}");
             return ValueTask.CompletedTask;
         }
 

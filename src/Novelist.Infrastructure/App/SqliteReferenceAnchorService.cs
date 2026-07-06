@@ -748,43 +748,107 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             var databasePath = await DatabasePathAsync(cancellationToken);
             await EnsureSchemaAsync(databasePath, cancellationToken);
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             var now = DateTimeOffset.UtcNow;
-            await using (var archive = connection.CreateCommand())
-            {
-                archive.CommandText = """
-                    UPDATE reference_anchors
-                    SET corpus_visibility = $restricted_visibility,
-                        updated_at = $updated_at
-                    WHERE anchor_id = $anchor_id
-                      AND (novel_id IS NULL OR novel_id = $workspace_corpus_novel_id)
-                      AND corpus_visibility = $workspace_visibility;
-                    """;
-                archive.Parameters.AddWithValue("$anchor_id", anchorId);
-                archive.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
-                archive.Parameters.AddWithValue("$workspace_visibility", ReferenceCorpusVisibilities.Workspace);
-                archive.Parameters.AddWithValue("$restricted_visibility", ReferenceCorpusVisibilities.Restricted);
-                archive.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
-                var archived = await archive.ExecuteNonQueryAsync(cancellationToken);
-                if (archived > 0)
-                {
-                    return;
-                }
-            }
-
-            await using (var delete = connection.CreateCommand())
-            {
-                delete.CommandText = """
-                    DELETE FROM reference_anchors
-                    WHERE novel_id = $novel_id AND anchor_id = $anchor_id;
-                    """;
-                delete.Parameters.AddWithValue("$novel_id", novelId);
-                delete.Parameters.AddWithValue("$anchor_id", anchorId);
-                await delete.ExecuteNonQueryAsync(cancellationToken);
-            }
+            await DeleteOrArchiveAnchorAsync(connection, transaction, novelId, anchorId, now, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         finally
         {
             _mutex.Release();
+        }
+    }
+
+    public async ValueTask DeleteAnchorsAsync(
+        DeleteReferenceAnchorsPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        if (input.AnchorIds.Count == 0)
+        {
+            throw new ArgumentException("At least one reference anchor must be selected.", nameof(input));
+        }
+
+        var anchorIds = input.AnchorIds.Distinct().ToArray();
+        foreach (var anchorId in anchorIds)
+        {
+            ValidateAnchorId(anchorId);
+        }
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            var now = DateTimeOffset.UtcNow;
+
+            foreach (var anchorId in anchorIds)
+            {
+                var affected = await DeleteOrArchiveAnchorAsync(
+                    connection,
+                    transaction,
+                    input.NovelId,
+                    anchorId,
+                    now,
+                    cancellationToken);
+                if (!affected)
+                {
+                    throw new ArgumentException("Reference anchor does not exist for this novel or visible workspace corpus.", nameof(input));
+                }
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private static async ValueTask<bool> DeleteOrArchiveAnchorAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long novelId,
+        long anchorId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        await using (var archive = connection.CreateCommand())
+        {
+            archive.Transaction = transaction;
+            archive.CommandText = """
+                UPDATE reference_anchors
+                SET corpus_visibility = $restricted_visibility,
+                    updated_at = $updated_at
+                WHERE anchor_id = $anchor_id
+                  AND (novel_id IS NULL OR novel_id = $workspace_corpus_novel_id)
+                  AND corpus_visibility = $workspace_visibility;
+                """;
+            archive.Parameters.AddWithValue("$anchor_id", anchorId);
+            archive.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+            archive.Parameters.AddWithValue("$workspace_visibility", ReferenceCorpusVisibilities.Workspace);
+            archive.Parameters.AddWithValue("$restricted_visibility", ReferenceCorpusVisibilities.Restricted);
+            archive.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
+            var archived = await archive.ExecuteNonQueryAsync(cancellationToken);
+            if (archived > 0)
+            {
+                return true;
+            }
+        }
+
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = """
+                DELETE FROM reference_anchors
+                WHERE novel_id = $novel_id AND anchor_id = $anchor_id;
+                """;
+            delete.Parameters.AddWithValue("$novel_id", novelId);
+            delete.Parameters.AddWithValue("$anchor_id", anchorId);
+            return await delete.ExecuteNonQueryAsync(cancellationToken) > 0;
         }
     }
 

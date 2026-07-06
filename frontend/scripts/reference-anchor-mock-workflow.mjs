@@ -305,7 +305,7 @@ async function verifyBridgeCalls(page) {
     'PromoteReferenceAnchorsToWorkspaceCorpus',
     'UpdateReferenceAnchorMetadata',
     'UpdateReferenceMaterialTags',
-    'DeleteReferenceAnchor',
+    'DeleteReferenceAnchors',
     'RebuildReferenceAnchor',
     'SearchReferenceMaterials',
     'GenerateReferenceChapterBlueprint',
@@ -350,10 +350,10 @@ async function verifyBridgeCalls(page) {
   assert.equal(metadataCall.args[0].source_trust, 'user_verified', 'anchor metadata update payload must include source trust')
   assert.deepEqual(metadataCall.args[0].user_tags, ['雨夜', '动作克制', '精选'], 'anchor metadata update payload must include user tags')
 
-  const deleteCalls = calls.filter((call) => call.method === 'DeleteReferenceAnchor')
-  assert.equal(deleteCalls.length, 2, 'bulk archive should call DeleteReferenceAnchor for each selected workspace row')
-  assert.deepEqual(deleteCalls.map((call) => call.args[1]), [101, 102], 'bulk archive calls must include selected workspace anchor ids')
-  assert(deleteCalls.every((call) => call.args[0] === 42), 'anchor delete/archive calls must include novel id')
+  const bulkDeleteCall = calls.find((call) => call.method === 'DeleteReferenceAnchors')
+  assert(bulkDeleteCall, 'missing DeleteReferenceAnchors call')
+  assert.equal(bulkDeleteCall.args[0].novel_id, 42, 'bulk archive payload must include novel id')
+  assert.deepEqual(bulkDeleteCall.args[0].anchor_ids, [101, 102], 'bulk archive payload must include selected workspace anchor ids')
 
   const materialTagCall = calls.find((call) => call.method === 'UpdateReferenceMaterialTags')
   assert(materialTagCall, 'missing UpdateReferenceMaterialTags call')
@@ -624,6 +624,7 @@ function installReferenceAnchorMockBridge() {
       case 'PromoteReferenceAnchorsToWorkspaceCorpus': return promoteReferenceAnchors(args[0])
       case 'UpdateReferenceAnchorMetadata': return updateReferenceAnchorMetadata(args[0])
       case 'DeleteReferenceAnchor': return deleteReferenceAnchor(args[0], args[1])
+      case 'DeleteReferenceAnchors': return deleteReferenceAnchors(args[0])
       case 'UpdateReferenceMaterialTags': return updateReferenceMaterialTags(args[0])
       case 'RebuildReferenceAnchor': return rebuildReferenceAnchor(args[1])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
@@ -773,6 +774,13 @@ function installReferenceAnchorMockBridge() {
 
   function deleteReferenceAnchor(_novelId, anchorId) {
     state.anchors = state.anchors.filter((item) => item.anchor_id !== anchorId)
+    return null
+  }
+
+  function deleteReferenceAnchors(input) {
+    for (const anchorId of input.anchor_ids) {
+      deleteReferenceAnchor(input.novel_id, anchorId)
+    }
     return null
   }
 

@@ -5565,5 +5565,10 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             long anchorId,
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public ValueTask DeleteAnchorsAsync(
+            DeleteReferenceAnchorsPayload input,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

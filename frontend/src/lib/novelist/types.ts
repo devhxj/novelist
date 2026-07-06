@@ -461,6 +461,11 @@ export namespace reference {
     user_tags?: string[] | null
   }
 
+  export interface DeleteAnchorsInput {
+    novel_id: number
+    anchor_ids: number[]
+  }
+
   export interface UpdateAnchorMetadataInput {
     novel_id: number
     anchor_id: number

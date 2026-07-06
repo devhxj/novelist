@@ -109,6 +109,22 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void DeleteReferenceAnchorsPayloadUsesStableSnakeCaseJsonNames()
+    {
+        var input = new DeleteReferenceAnchorsPayload(
+            NovelId: 42,
+            AnchorIds: [7, 8]);
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(input, BridgeJson.SerializerOptions));
+        var root = json.RootElement;
+
+        Assert.Equal(42, root.GetProperty("novel_id").GetInt64());
+        Assert.Equal([7, 8], root.GetProperty("anchor_ids").EnumerateArray().Select(item => item.GetInt64()).ToArray());
+        Assert.False(root.TryGetProperty("NovelId", out _));
+        Assert.False(root.TryGetProperty("AnchorIds", out _));
+    }
+
+    [Fact]
     public void UpdateReferenceAnchorMetadataPayloadUsesStableSnakeCaseJsonNames()
     {
         var input = new UpdateReferenceAnchorMetadataPayload(
@@ -787,6 +803,7 @@ public sealed class ReferenceAnchorContractTests
             "CreateReferenceAnchor",
             "GetReferenceAnchors",
             "DeleteReferenceAnchor",
+            "DeleteReferenceAnchors",
             "PromoteReferenceAnchorsToWorkspaceCorpus",
             "PromoteReferenceAnchorToWorkspaceCorpus",
             "UpdateReferenceAnchorMetadata",

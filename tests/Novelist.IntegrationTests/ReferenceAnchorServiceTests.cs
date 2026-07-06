@@ -2952,6 +2952,85 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task DeleteAnchorsBulkDeletesPrivateAnchorsAndArchivesWorkspaceCorpusRows()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var ownerNovel = await novels.CreateNovelAsync(new CreateNovelPayload("批量归档来源", "", ""), CancellationToken.None);
+        var consumingNovel = await novels.CreateNovelAsync(new CreateNovelPayload("批量归档使用方", "", ""), CancellationToken.None);
+        var privateSourcePath = CreateSourceFile("bulk-delete-private.md", "私有参考只属于当前小说。");
+        var workspaceSourcePath = CreateSourceFile("bulk-delete-workspace.md", "共享雨声压住门外的街，钥匙没有立刻转动。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var privateAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(ownerNovel.Id, "私有待删除参考", null, privateSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var workspaceAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(
+                ownerNovel.Id,
+                "共享待归档参考",
+                null,
+                workspaceSourcePath,
+                "markdown",
+                "user_provided",
+                ReferenceCorpusVisibilities.Workspace),
+            CancellationToken.None);
+        var workspaceMaterialsBefore = await ReadMaterialRowsAsync(options, workspaceAnchor.AnchorId);
+        var workspaceSegmentsBefore = await ReadSourceSegmentsAsync(options, workspaceAnchor.AnchorId);
+        Assert.NotEmpty(workspaceMaterialsBefore);
+        Assert.NotEmpty(workspaceSegmentsBefore);
+
+        await service.DeleteAnchorsAsync(
+            new DeleteReferenceAnchorsPayload(ownerNovel.Id, [privateAnchor.AnchorId, workspaceAnchor.AnchorId]),
+            CancellationToken.None);
+
+        Assert.DoesNotContain(
+            await service.GetAnchorsAsync(ownerNovel.Id, CancellationToken.None),
+            item => item.AnchorId == privateAnchor.AnchorId);
+        Assert.Null(await service.GetBuildStatusAsync(ownerNovel.Id, privateAnchor.AnchorId, CancellationToken.None));
+        Assert.Empty(await ReadMaterialRowsAsync(options, privateAnchor.AnchorId));
+        Assert.DoesNotContain(
+            await service.GetAnchorsAsync(consumingNovel.Id, CancellationToken.None),
+            item => item.AnchorId == workspaceAnchor.AnchorId);
+        Assert.Null(await service.GetBuildStatusAsync(consumingNovel.Id, workspaceAnchor.AnchorId, CancellationToken.None));
+        Assert.Equal(ReferenceCorpusVisibilities.Restricted, await ReadAnchorVisibilityAsync(options, workspaceAnchor.AnchorId));
+        Assert.Equal(workspaceMaterialsBefore.Select(item => item.MaterialId), (await ReadMaterialRowsAsync(options, workspaceAnchor.AnchorId)).Select(item => item.MaterialId));
+        Assert.Equal(workspaceSegmentsBefore.Select(item => item.SegmentId), (await ReadSourceSegmentsAsync(options, workspaceAnchor.AnchorId)).Select(item => item.SegmentId));
+    }
+
+    [Fact]
+    public async Task DeleteAnchorsBulkRollsBackWhenAnyAnchorCannotBeProcessed()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var ownerNovel = await novels.CreateNovelAsync(new CreateNovelPayload("批量回滚来源", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("bulk-delete-rollback.md", "共享语料在失败回滚后仍应可见。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var workspaceAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(
+                ownerNovel.Id,
+                "回滚共享参考",
+                null,
+                sourcePath,
+                "markdown",
+                "user_provided",
+                ReferenceCorpusVisibilities.Workspace),
+            CancellationToken.None);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.DeleteAnchorsAsync(
+                new DeleteReferenceAnchorsPayload(ownerNovel.Id, [workspaceAnchor.AnchorId, 999_999]),
+                CancellationToken.None));
+
+        Assert.Contains(
+            await service.GetAnchorsAsync(ownerNovel.Id, CancellationToken.None),
+            item => item.AnchorId == workspaceAnchor.AnchorId);
+        Assert.NotNull(await service.GetBuildStatusAsync(ownerNovel.Id, workspaceAnchor.AnchorId, CancellationToken.None));
+        Assert.Equal(ReferenceCorpusVisibilities.Workspace, await ReadAnchorVisibilityAsync(options, workspaceAnchor.AnchorId));
+    }
+
+    [Fact]
     public async Task BridgeReferenceAnchorHandlersCreateAndListAnchors()
     {
         var options = CreateOptions();
