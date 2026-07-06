@@ -67,9 +67,13 @@ async function main() {
     await runDefaultOrchestrationToFinalInsertionStop(page)
     await page.screenshot({ path: path.join(outputDir, 'reference-anchor-03-final-insertion-stop.png'), fullPage: true })
 
+    logStep('failure and recovery workflow')
+    await verifyReviewAndAuditFailureRecovery(page)
+    await page.screenshot({ path: path.join(outputDir, 'reference-anchor-04-failure-recovery.png'), fullPage: true })
+
     logStep('stale blueprint workflow')
     await verifyStaleBlueprintIsReadOnly(page)
-    await page.screenshot({ path: path.join(outputDir, 'reference-anchor-04-stale-blueprint.png'), fullPage: true })
+    await page.screenshot({ path: path.join(outputDir, 'reference-anchor-05-stale-blueprint.png'), fullPage: true })
 
     logStep('checking bridge calls')
     await verifyBridgeCalls(page)
@@ -399,6 +403,51 @@ async function runDefaultOrchestrationToFinalInsertionStop(page) {
 
   const finalConfirmCount = await panel.getByRole('button', { name: /^确认$/ }).count()
   assert.equal(finalConfirmCount, 0, 'final insertion decision must not expose a resume confirmation button')
+}
+
+async function verifyReviewAndAuditFailureRecovery(page) {
+  const blueprintPanel = page.locator('.rounded-md').filter({ hasText: '章节蓝图' }).first()
+  await blueprintPanel.getByLabel('章节号').fill('6')
+  await blueprintPanel.getByLabel('标题').fill('缺陷蓝图')
+  await blueprintPanel.getByLabel('章节目标').fill('先暴露检索缺口，再用作者修订恢复。')
+  await blueprintPanel.getByLabel('已知事实').fill('主角只看见桌面\n雨声很大')
+  await blueprintPanel.getByLabel('禁止事实').fill('门外身份')
+  await blueprintPanel.getByRole('button', { name: /生成蓝图/ }).click()
+  await expectVisible(page.getByText('章节蓝图已生成'), 'failure-recovery blueprint generated')
+
+  const detail = blueprintDetail(page)
+  await detail.getByRole('button', { name: /^评审$/ }).click()
+  await expectVisible(page.getByText('蓝图评审已完成'), 'failed review completed')
+  await expectVisible(detail.getByText('failed · 0.42'), 'failed review score')
+  await expectVisible(detail.getByText('检索缺口和弱匹配会让候选缺少可审计来源。'), 'retrieval gap and weak match review defect')
+  await expectVisible(detail.getByText('补充可访问材料或放宽授权策略。'), 'review defect required fix')
+  await assertDisabled(detail.getByRole('button', { name: /^批准$/ }), 'failed review approve button')
+
+  await detail.locator('label').filter({ hasText: '段落意图' }).locator('textarea').fill('修复检索缺口：限制为 user_provided 材料并明确弱匹配回退。')
+  await detail.getByRole('button', { name: /保存修订/ }).click()
+  await expectVisible(page.getByText('蓝图已修订，需要重新评审和批准'), 'review failure revision saved')
+  await detail.getByRole('button', { name: /^评审$/ }).click()
+  await expectVisible(detail.getByText('passed · 0.96'), 'review recovered score')
+  await detail.getByRole('button', { name: /^批准$/ }).click()
+  await expectVisible(page.getByText('蓝图已批准'), 'review recovered approval')
+  await detail.getByRole('button', { name: /^绑定$/ }).click()
+  await expectVisible(page.getByText('材料已绑定到蓝图'), 'review recovered binding')
+
+  await detail.getByRole('button', { name: /^候选$/ }).click()
+  await expectVisible(page.getByText('候选段落已生成'), 'failed audit draft generated')
+  await expectVisible(detail.getByText('审计 failed · L3'), 'failed draft audit status')
+  await expectVisible(detail.getByText('候选引用了未绑定的门外身份。'), 'failed audit provenance issue')
+  await expectVisible(detail.getByText('回到蓝图修订，移除未支持事实并降低改写级别。'), 'failed audit required fix')
+
+  await detail.locator('label').filter({ hasText: '段落意图' }).locator('textarea').fill('审计修复：只保留桌面和雨声信息，不揭示门外身份。')
+  await detail.getByRole('button', { name: /保存修订/ }).click()
+  await expectVisible(page.getByText('蓝图已修订，需要重新评审和批准'), 'audit failure revision saved')
+  await detail.getByRole('button', { name: /^评审$/ }).click()
+  await expectVisible(detail.getByText('passed · 0.96'), 'audit recovery review passed')
+  await detail.getByRole('button', { name: /^批准$/ }).click()
+  await detail.getByRole('button', { name: /^绑定$/ }).click()
+  await detail.getByRole('button', { name: /^候选$/ }).click()
+  await expectVisible(detail.getByText('审计 passed · L1'), 'audit recovered status')
 }
 
 async function verifyStaleBlueprintIsReadOnly(page) {
@@ -1156,8 +1205,26 @@ function installReferenceAnchorMockBridge() {
 
   function reviewBlueprint(input) {
     const blueprint = cloneBlueprint(input.blueprint_id)
-    blueprint.status = 'reviewed'
-    blueprint.latest_review = makeReview(blueprint.blueprint_id, `review-${blueprint.blueprint_id}`)
+    const hasRecoveredReview = blueprint.beats.some((beat) => beat.paragraph_intention.includes('修复检索缺口') || beat.paragraph_intention.includes('审计修复'))
+    const shouldFailReview = blueprint.title.includes('缺陷') && !hasRecoveredReview
+    blueprint.status = shouldFailReview ? 'review_failed' : 'reviewed'
+    blueprint.latest_review = shouldFailReview
+      ? makeReview(blueprint.blueprint_id, `review-${blueprint.blueprint_id}`, {
+          status: 'failed',
+          score: 0.42,
+          reference_binding_errors: ['检索缺口：unknown/restricted 授权过滤后没有合格材料。'],
+          material_fit_errors: ['弱匹配：最高候选材料分低于阈值。'],
+          required_fixes: ['补充可访问材料或放宽授权策略。'],
+          defects: [{
+            field_path: 'beat:beat-001:reference_query',
+            category: 'material_binding',
+            severity: 'high',
+            reason: '检索缺口和弱匹配会让候选缺少可审计来源。',
+            required_fix: '补充可访问材料或放宽授权策略。',
+            beat_id: 'beat-001',
+          }],
+        })
+      : makeReview(blueprint.blueprint_id, `review-${blueprint.blueprint_id}`)
     blueprint.updated_at = now
     state.blueprints[String(blueprint.blueprint_id)] = blueprint
     return blueprint.latest_review
@@ -1184,6 +1251,10 @@ function installReferenceAnchorMockBridge() {
 
   function generateDraft(input) {
     const blueprint = state.blueprints[String(input.blueprint_id)]
+    const recoveredAudit = blueprint.beats.some((beat) => beat.paragraph_intention.includes('审计修复'))
+    const shouldFailAudit = blueprint.title.includes('缺陷') && !recoveredAudit
+    const auditStatus = shouldFailAudit ? 'failed' : 'passed'
+    const rewriteLevel = shouldFailAudit ? 'L3' : 'L1'
     return {
       blueprint_id: input.blueprint_id,
       candidates: [
@@ -1192,25 +1263,27 @@ function installReferenceAnchorMockBridge() {
           blueprint_id: input.blueprint_id,
           beat_id: blueprint.beats[0].beat_id,
           material_id: 'mat-001',
-          rewrite_level: 'L1',
-          text: '雨声压过门缝里的动静，她把杯子推远，指尖停在那半圈水痕旁，没有立刻抬头。',
+          rewrite_level: rewriteLevel,
+          text: shouldFailAudit
+            ? '雨声压过门缝里的动静，她突然确认了门外身份，把杯子推远。'
+            : '雨声压过门缝里的动静，她把杯子推远，指尖停在那半圈水痕旁，没有立刻抬头。',
           changed_slots: [{ slot_name: 'object', value: '杯子' }],
           non_slot_edits: ['调整为当前 POV 的感官证据。'],
-          audit_status: 'passed',
+          audit_status: auditStatus,
           created_at: now,
         },
       ],
       audit: {
         audit_id: 'audit-001',
         blueprint_id: input.blueprint_id,
-        status: 'passed',
-        rewrite_level: 'L1',
-        provenance_errors: [],
-        blueprint_errors: [],
-        unsupported_fact_errors: [],
-        pov_errors: [],
-        ai_prose_risks: [],
-        required_fixes: [],
+        status: auditStatus,
+        rewrite_level: rewriteLevel,
+        provenance_errors: shouldFailAudit ? ['候选引用了未绑定的门外身份。'] : [],
+        blueprint_errors: shouldFailAudit ? ['候选越过禁止事实边界。'] : [],
+        unsupported_fact_errors: shouldFailAudit ? ['门外身份没有来源材料支持。'] : [],
+        pov_errors: shouldFailAudit ? ['POV 获知了当前节拍不可知信息。'] : [],
+        ai_prose_risks: shouldFailAudit ? ['突然确认了门外身份过于解释化。'] : [],
+        required_fixes: shouldFailAudit ? ['回到蓝图修订，移除未支持事实并降低改写级别。'] : [],
         audited_at: now,
       },
     }
@@ -1453,7 +1526,7 @@ function installReferenceAnchorMockBridge() {
     }
   }
 
-  function makeReview(blueprintId, reviewId) {
+  function makeReview(blueprintId, reviewId, overrides = {}) {
     return {
       review_id: reviewId,
       blueprint_id: blueprintId,
@@ -1461,25 +1534,25 @@ function installReferenceAnchorMockBridge() {
       source_plan_hash: `plan-${blueprintId}`,
       analysis_contract_hash: `contract-${blueprintId}`,
       review_version: 1,
-      status: 'passed',
-      score: 0.96,
-      logic_errors: [],
-      causality_errors: [],
-      emotion_errors: [],
-      narration_errors: [],
-      execution_errors: [],
-      character_state_errors: [],
-      pov_errors: [],
-      continuity_errors: [],
-      transition_errors: [],
-      forbidden_fact_errors: [],
-      reference_binding_errors: [],
-      material_fit_errors: [],
-      screenplay_drift_risks: [],
-      ai_prose_risks: [],
-      novelistic_narration_errors: [],
-      required_fixes: [],
-      defects: [],
+      status: overrides.status ?? 'passed',
+      score: overrides.score ?? 0.96,
+      logic_errors: overrides.logic_errors ?? [],
+      causality_errors: overrides.causality_errors ?? [],
+      emotion_errors: overrides.emotion_errors ?? [],
+      narration_errors: overrides.narration_errors ?? [],
+      execution_errors: overrides.execution_errors ?? [],
+      character_state_errors: overrides.character_state_errors ?? [],
+      pov_errors: overrides.pov_errors ?? [],
+      continuity_errors: overrides.continuity_errors ?? [],
+      transition_errors: overrides.transition_errors ?? [],
+      forbidden_fact_errors: overrides.forbidden_fact_errors ?? [],
+      reference_binding_errors: overrides.reference_binding_errors ?? [],
+      material_fit_errors: overrides.material_fit_errors ?? [],
+      screenplay_drift_risks: overrides.screenplay_drift_risks ?? [],
+      ai_prose_risks: overrides.ai_prose_risks ?? [],
+      novelistic_narration_errors: overrides.novelistic_narration_errors ?? [],
+      required_fixes: overrides.required_fixes ?? [],
+      defects: overrides.defects ?? [],
       reviewed_at: now,
     }
   }
