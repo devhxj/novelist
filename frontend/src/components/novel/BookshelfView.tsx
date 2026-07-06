@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react'
-import { Plus, Pencil, Trash2, BookOpen, Camera, Download } from 'lucide-react'
+import { useMemo, useState, useRef } from 'react'
+import { Plus, Pencil, Trash2, BookOpen, Camera, Download, Search } from 'lucide-react'
 import BookCover from '@/components/sidebar/BookCover'
 import type { novel } from '@/hooks/useApp'
 
@@ -20,8 +20,19 @@ export default function BookshelfView({
   onSaveCover, onExportNovel,
 }: Props) {
   const [coverKeys, setCoverKeys] = useState<Record<number, number>>({})
+  const [searchQuery, setSearchQuery] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadingRef = useRef<number | null>(null)
+  const filteredNovels = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return novels
+
+    return novels.filter(novel =>
+      novel.title.toLowerCase().includes(query) ||
+      (novel.genre ?? '').toLowerCase().includes(query) ||
+      (novel.description ?? '').toLowerCase().includes(query),
+    )
+  }, [novels, searchQuery])
 
   function handleCoverClick(novelID: number, e: React.MouseEvent) {
     e.stopPropagation()
@@ -51,13 +62,27 @@ export default function BookshelfView({
       />
 
       {/* 顶部工具栏 */}
-      <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
-        <span className="text-sm text-muted-foreground">
-          共 <b className="text-foreground">{novels.length}</b> 部作品
-        </span>
+      <div className="flex items-center justify-between gap-3 px-6 py-4 border-b shrink-0">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <span className="shrink-0 text-sm text-muted-foreground">
+            共 <b className="text-foreground">{novels.length}</b> 部作品
+          </span>
+          {novels.length > 0 && (
+            <div className="relative w-full max-w-xs">
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={event => setSearchQuery(event.target.value)}
+                placeholder="搜索作品、分类或简介..."
+                className="h-8 w-full rounded-md border bg-background pl-8 pr-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+          )}
+        </div>
         <button
           onClick={onCreateNovel}
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-sm text-primary-foreground transition-opacity hover:opacity-90"
         >
           <Plus className="w-4 h-4" />
           新建作品
@@ -70,13 +95,20 @@ export default function BookshelfView({
           <BookOpen className="w-12 h-12 opacity-30" />
           <p className="text-sm">还没有作品，创建第一部吧</p>
         </div>
+      ) : filteredNovels.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-3">
+          <BookOpen className="w-12 h-12 opacity-30" />
+          <p className="text-sm">没有匹配的作品</p>
+        </div>
       ) : (
         /* 书架网格 */
         <div className="flex-1 overflow-y-auto overscroll-contain p-6">
           <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-5">
-            {novels.map(n => (
+            {filteredNovels.map(n => (
               <div
                 key={n.id}
+                role="article"
+                aria-label={`作品卡片 ${n.title}`}
                 className={`group relative flex flex-col rounded-lg border bg-card hover:shadow-md transition-shadow cursor-pointer select-none
                   ${n.id === activeNovelId ? 'ring-2 ring-primary' : ''}`}
               >

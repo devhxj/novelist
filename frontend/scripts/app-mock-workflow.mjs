@@ -514,6 +514,10 @@ function activityButton(page, label) {
   return page.locator('nav').first().getByRole('button', { name: label })
 }
 
+function novelCard(page, title) {
+  return page.getByRole('article', { name: `作品卡片 ${title}`, exact: true })
+}
+
 async function getActivityStates(page) {
   return await page.locator('nav').first().getByRole('button').evaluateAll((buttons) =>
     buttons.map((button) => {
@@ -727,31 +731,73 @@ async function verifyNovelChapterWorkflow(browser, url, consoleErrors, pageError
   await expectVisible(page.getByText('全局回归小说'), 'novel workflow workspace')
 
   await clickActivity(page, '书架')
+  const bookshelfSearch = page.getByPlaceholder('搜索作品、分类或简介...')
+  await expectVisible(bookshelfSearch, 'bookshelf search input')
+  await expectVisible(novelCard(page, '全局回归小说'), 'original novel card')
+
   await page.getByRole('button', { name: '新建作品' }).last().click()
-  await page.getByPlaceholder('输入书名').fill('回归新书')
+  await page.getByPlaceholder('输入书名').fill('全局回归小说 副本')
   await page.getByPlaceholder('如：玄幻、科幻、都市...').fill('科幻')
-  await page.getByPlaceholder('简单介绍一下这部作品（可选）').fill('覆盖小说创建与选择流程')
+  await page.getByPlaceholder('简单介绍一下这部作品（可选）').fill('覆盖小说创建、重名和选择流程')
   await page.locator('.fixed').getByRole('button', { name: '保存' }).click()
   await waitForBridgeCall(page, 'CreateNovel')
-  await expectVisible(page.getByText('回归新书').first(), 'created novel visible')
+  await expectVisible(page.getByText('全局回归小说 副本').first(), 'duplicate-like novel visible')
   await expectVisible(page.getByText('章节 (0)'), 'created novel empty chapter count')
   await expectVisible(page.getByText('暂无章节'), 'created novel empty chapter state')
   await assertActiveNovelId(page, 43)
 
   await clickActivity(page, '书架')
-  await page.locator('aside').getByRole('button', { name: /全局回归小说/ }).click()
+  await bookshelfSearch.fill('副本')
+  await expectVisible(novelCard(page, '全局回归小说 副本'), 'filtered duplicate-like novel card')
+  await expectHidden(novelCard(page, '全局回归小说'), 'filtered out original novel card')
+  await bookshelfSearch.fill('没有这部作品')
+  await expectVisible(page.getByText('没有匹配的作品'), 'bookshelf empty search state')
+  await bookshelfSearch.fill('')
+
+  await page.locator('aside').getByRole('button', { name: '全局回归小说', exact: true }).click()
   await waitForBridgeCallArg(page, 'SetActiveNovel', 0, { novel_id: 42 })
   await expectVisible(page.getByText('章节 (2)'), 'original novel chapter count restored')
   await assertActiveNovelId(page, 42)
 
   await clickActivity(page, '书架')
-  await page.getByRole('button', { name: '编辑作品 全局回归小说' }).click({ force: true })
+  await page.getByRole('button', { name: '编辑作品 全局回归小说', exact: true }).click({ force: true })
   await page.getByPlaceholder('输入书名').fill('全局回归小说-修订')
   await page.getByPlaceholder('如：玄幻、科幻、都市...').fill('悬疑')
   await page.getByPlaceholder('简单介绍一下这部作品（可选）').fill('已通过回归流程编辑作品')
   await page.locator('.fixed').getByRole('button', { name: '保存' }).click()
   await waitForBridgeCall(page, 'UpdateNovel')
   await expectVisible(page.getByText('全局回归小说-修订').first(), 'updated novel visible')
+  await assertActiveNovelId(page, 42)
+
+  await bookshelfSearch.fill('修订')
+  await expectVisible(novelCard(page, '全局回归小说-修订'), 'filtered renamed novel card')
+  await expectHidden(novelCard(page, '全局回归小说 副本'), 'filtered out duplicate-like novel card')
+  await bookshelfSearch.fill('')
+
+  await page.getByRole('button', { name: '更换封面 全局回归小说-修订' }).click({ force: true })
+  const coverInput = page.locator('input[type="file"][accept="image/*"]').first()
+  await coverInput.setInputFiles({
+    name: 'novel-workflow-cover.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4]),
+  })
+  await waitForBridgeCall(page, 'SaveCover')
+  await assertLastBinaryCall(page, 'SaveCover', 12)
+
+  await page.getByRole('button', { name: '删除作品 全局回归小说 副本' }).click({ force: true })
+  await expectVisible(page.getByRole('heading', { name: '删除作品' }), 'delete duplicate-like novel dialog')
+  await assertBridgeCallCount(page, 'DeleteNovel', 0)
+  await page.locator('.fixed').getByRole('button', { name: '取消' }).click()
+  await expectHidden(page.getByRole('heading', { name: '删除作品' }), 'delete duplicate-like novel dialog cancelled')
+  await expectVisible(novelCard(page, '全局回归小说 副本'), 'duplicate-like novel retained after delete cancel')
+
+  await page.getByRole('button', { name: '删除作品 全局回归小说 副本' }).click({ force: true })
+  await page.getByPlaceholder('输入书名确认').fill('全局回归小说 副本')
+  await page.locator('.fixed').getByRole('button', { name: '确认删除' }).click()
+  await waitForBridgeCall(page, 'DeleteNovel')
+  await expectHidden(novelCard(page, '全局回归小说 副本'), 'duplicate-like novel removed after delete')
+  await assertNovelDeleted(page, 43)
+  await assertActiveNovelId(page, 42)
 
   await clickActivity(page, '章节')
   await expectVisible(page.getByText('章节 (2)'), 'updated novel chapter count')
@@ -785,8 +831,8 @@ async function verifyNovelChapterWorkflow(browser, url, consoleErrors, pageError
   await assertSelectedChapterPath(page, 'chapters/3.md')
   await assertChapterTitle(page, 42, 3, '新章验收-改名')
 
-  await assertBridgeCallCount(page, 'DeleteNovel', 0)
-  await assertBridgeCallCount(page, 'SaveCover', 0)
+  await assertBridgeCallCount(page, 'DeleteNovel', 1)
+  await assertBridgeCallCount(page, 'SaveCover', 1)
   await assertBridgeCallCount(page, 'ExportNovel', 0)
   await page.close()
 }
@@ -1559,6 +1605,13 @@ async function assertActiveNovelId(page, expectedNovelId) {
   assert.equal(actual, expectedNovelId)
 }
 
+async function assertNovelDeleted(page, novelId) {
+  const exists = await page.evaluate((novelId) =>
+    window.__appMockState.novels.some((novel) => novel.id === novelId),
+  novelId)
+  assert.equal(exists, false, `Expected novel ${novelId} to be deleted.`)
+}
+
 async function assertSelectedChapterPath(page, expectedPath) {
   const expectedTitle = expectedPath.endsWith('3.md')
     ? '新章验收-改名'
@@ -2301,6 +2354,9 @@ function installConfigurableAppMockBridge(options = {}) {
       case 'GetNovels': return state.novels
       case 'CreateNovel': return createNovel(args[0])
       case 'UpdateNovel': return updateNovel(args[0], args[1])
+      case 'DeleteNovel':
+        deleteNovel(args[0])
+        return null
       case 'GetCover': return null
       case 'SaveCover':
         state.savedCovers.push({ novel_id: args[0], byte_count: Array.isArray(args[1]) ? args[1].length : 0 })
@@ -2437,6 +2493,15 @@ function installConfigurableAppMockBridge(options = {}) {
     }
     state.novels = state.novels.map((novel) => novel.id === novelId ? updated : novel)
     return updated
+  }
+
+  function deleteNovel(novelId) {
+    state.novels = state.novels.filter((novel) => novel.id !== novelId)
+    delete state.chaptersByNovelId[String(novelId)]
+    if (state.activeNovelId === novelId) {
+      state.activeNovelId = state.novels[0]?.id ?? 0
+      state.settings.last_novel_id = state.activeNovelId
+    }
   }
 
   function chapters(novelId = state.activeNovelId) {
