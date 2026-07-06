@@ -56,10 +56,17 @@ public sealed class PhotinoReferenceWorkflowSmokeTests : IDisposable
             license_status = "user_provided"
         });
         var anchorId = anchor.GetProperty("anchor_id").GetInt64();
+        Assert.False(string.IsNullOrWhiteSpace(anchor.GetProperty("source_file_hash").GetString()));
+
+        var buildStatus = await SendAsync(bridge, window, "GetReferenceAnchorBuildStatus", novelId, anchorId);
+        Assert.Equal("ready", buildStatus.GetProperty("status").GetString());
+        Assert.True(buildStatus.GetProperty("source_segment_count").GetInt32() >= 3);
+        Assert.True(buildStatus.GetProperty("material_count").GetInt32() >= 2);
+
         var materials = await SendAsync(bridge, window, "SearchReferenceMaterials", new
         {
             novel_id = novelId,
-            anchor_ids = new[] { anchorId },
+            anchor_ids = Array.Empty<long>(),
             query = "雨声",
             material_types = new[] { "sentence" },
             emotion_tags = Array.Empty<string>(),
@@ -70,6 +77,11 @@ public sealed class PhotinoReferenceWorkflowSmokeTests : IDisposable
             size = 10
         });
         Assert.True(materials.GetProperty("items").GetArrayLength() > 0);
+        var material = materials.GetProperty("items").EnumerateArray().First();
+        var materialId = material.GetProperty("material_id").GetString() ?? throw new InvalidOperationException("Material id is missing.");
+        Assert.Equal(anchorId, material.GetProperty("anchor_id").GetInt64());
+        Assert.False(string.IsNullOrWhiteSpace(material.GetProperty("source_segment_id").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(material.GetProperty("source_hash").GetString()));
 
         var blueprint = await SendAsync(bridge, window, "GenerateReferenceChapterBlueprint", new
         {
@@ -105,6 +117,9 @@ public sealed class PhotinoReferenceWorkflowSmokeTests : IDisposable
             select_top_candidate = true
         });
         Assert.Contains(binding.GetProperty("links").EnumerateArray(), link => link.GetProperty("selected").GetBoolean());
+        Assert.Contains(
+            binding.GetProperty("links").EnumerateArray(),
+            link => string.Equals(link.GetProperty("material_id").GetString(), materialId, StringComparison.Ordinal));
 
         var draft = await SendAsync(bridge, window, "GenerateReferenceAnchoredDraft", new
         {
