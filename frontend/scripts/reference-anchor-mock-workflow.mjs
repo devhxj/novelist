@@ -327,7 +327,7 @@ async function runDefaultOrchestrationToFinalInsertionStop(page) {
   await expectVisible(panel.getByText('story_context'), 'story context search policy')
   await expectVisible(panel.getByText('可访问工作区语料', { exact: true }), 'workspace corpus search scope')
   await expectVisible(panel.getByText('每节拍最多 3'), 'max results policy')
-  await expectVisible(panel.getByText('授权 user_provided, unknown'), 'license status policy')
+  await expectVisible(panel.getByText('授权 user_provided'), 'license status policy')
   await expectVisible(panel.getByText('未限制到已选锚点'), 'unrestricted anchor policy')
   await panel.getByRole('button', { name: /^确认$/ }).click()
 
@@ -491,6 +491,7 @@ async function verifyBridgeCalls(page) {
   assert.deepEqual(startCall.args[0].corpus_search_policy.include_anchor_ids, [], 'default orchestration must not pin include anchors')
   assert.deepEqual(startCall.args[0].corpus_search_policy.exclude_anchor_ids, [], 'default orchestration must not pin exclude anchors')
   assert.equal(startCall.args[0].corpus_search_policy.mode, 'story_context', 'default orchestration must use story-context corpus search')
+  assert.deepEqual(startCall.args[0].corpus_search_policy.license_statuses, ['user_provided'], 'default orchestration must use safe license policy')
 
   const materialPreviewCall = calls.find((call) =>
     call.method === 'SearchReferenceMaterials' &&

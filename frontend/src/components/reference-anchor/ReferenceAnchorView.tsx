@@ -958,7 +958,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       corpus_search_policy: {
         mode: 'story_context',
         max_results_per_beat: 3,
-        license_statuses: ['user_provided', 'unknown'],
+        license_statuses: ['user_provided'],
         include_anchor_ids: orchestrationUseSelectedAnchors ? selectedAnchorIds : [],
         exclude_anchor_ids: [],
       },
