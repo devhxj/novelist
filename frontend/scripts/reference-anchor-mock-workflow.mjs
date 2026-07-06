@@ -302,6 +302,7 @@ async function verifyBridgeCalls(page) {
   const requiredMethods = [
     'CreateReferenceAnchor',
     'PromoteReferenceAnchorToWorkspaceCorpus',
+    'PromoteReferenceAnchorsToWorkspaceCorpus',
     'UpdateReferenceAnchorMetadata',
     'UpdateReferenceMaterialTags',
     'DeleteReferenceAnchor',
@@ -330,9 +331,13 @@ async function verifyBridgeCalls(page) {
   assert.deepEqual(createCall.args[0].user_tags, ['雨夜', '动作克制'], 'anchor create payload must include user tags')
 
   const promoteCalls = calls.filter((call) => call.method === 'PromoteReferenceAnchorToWorkspaceCorpus')
-  assert.equal(promoteCalls.length, 2, 'single and bulk promote should call PromoteReferenceAnchorToWorkspaceCorpus twice')
-  assert.deepEqual(promoteCalls.map((call) => call.args[0].anchor_id), [101, 102], 'promote calls must include single and bulk anchor ids')
+  assert.equal(promoteCalls.length, 1, 'single promote should call PromoteReferenceAnchorToWorkspaceCorpus once')
+  assert.deepEqual(promoteCalls.map((call) => call.args[0].anchor_id), [101], 'single promote call must include the first anchor id')
   assert(promoteCalls.every((call) => call.args[0].novel_id === 42), 'anchor promote payloads must include novel id')
+  const bulkPromoteCall = calls.find((call) => call.method === 'PromoteReferenceAnchorsToWorkspaceCorpus')
+  assert(bulkPromoteCall, 'missing PromoteReferenceAnchorsToWorkspaceCorpus call')
+  assert.equal(bulkPromoteCall.args[0].novel_id, 42, 'bulk promote payload must include novel id')
+  assert.deepEqual(bulkPromoteCall.args[0].anchor_ids, [102], 'bulk promote payload must include selected anchor ids')
 
   const metadataCall = calls.find((call) => call.method === 'UpdateReferenceAnchorMetadata')
   assert(metadataCall, 'missing UpdateReferenceAnchorMetadata call')
@@ -616,6 +621,7 @@ function installReferenceAnchorMockBridge() {
       case 'GetReferenceAnchors': return state.anchors
       case 'CreateReferenceAnchor': return createReferenceAnchor(args[0])
       case 'PromoteReferenceAnchorToWorkspaceCorpus': return promoteReferenceAnchor(args[0])
+      case 'PromoteReferenceAnchorsToWorkspaceCorpus': return promoteReferenceAnchors(args[0])
       case 'UpdateReferenceAnchorMetadata': return updateReferenceAnchorMetadata(args[0])
       case 'DeleteReferenceAnchor': return deleteReferenceAnchor(args[0], args[1])
       case 'UpdateReferenceMaterialTags': return updateReferenceMaterialTags(args[0])
@@ -735,6 +741,15 @@ function installReferenceAnchorMockBridge() {
     anchor.owner_novel_id = null
     anchor.updated_at = now
     return anchor
+  }
+
+  function promoteReferenceAnchors(input) {
+    return input.anchor_ids.map((anchorId) => promoteReferenceAnchor({
+      novel_id: input.novel_id,
+      anchor_id: anchorId,
+      source_trust: input.source_trust,
+      user_tags: input.user_tags,
+    }))
   }
 
   function updateReferenceAnchorMetadata(input) {

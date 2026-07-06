@@ -950,6 +950,31 @@ public sealed class MafToolRegistryTests
                 input.UserTags ?? []));
         }
 
+        public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> PromoteAnchorsToWorkspaceCorpusAsync(
+            PromoteReferenceAnchorsToWorkspaceCorpusPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IReadOnlyList<ReferenceAnchorPayload>>(
+                input.AnchorIds
+                    .Select(anchorId => new ReferenceAnchorPayload(
+                        anchorId,
+                        0,
+                        "参考书",
+                        "作者",
+                        string.Empty,
+                        "markdown",
+                        "user_provided",
+                        "hash",
+                        "test",
+                        ReferenceAnchorBuildStates.Ready,
+                        DateTimeOffset.UtcNow,
+                        DateTimeOffset.UtcNow,
+                        ReferenceCorpusVisibilities.Workspace,
+                        input.SourceTrust ?? ReferenceSourceTrustLevels.UserVerified,
+                        input.UserTags ?? []))
+                    .ToArray());
+        }
+
         public ValueTask<ReferenceAnchorPayload> UpdateAnchorMetadataAsync(
             UpdateReferenceAnchorMetadataPayload input,
             CancellationToken cancellationToken)

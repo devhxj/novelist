@@ -849,6 +849,83 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
     }
 
+    public async ValueTask<IReadOnlyList<ReferenceAnchorPayload>> PromoteAnchorsToWorkspaceCorpusAsync(
+        PromoteReferenceAnchorsToWorkspaceCorpusPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        if (input.AnchorIds.Count == 0)
+        {
+            throw new ArgumentException("At least one reference anchor must be selected.", nameof(input));
+        }
+
+        var anchorIds = input.AnchorIds.Distinct().ToArray();
+        foreach (var anchorId in anchorIds)
+        {
+            ValidateAnchorId(anchorId);
+        }
+
+        await EnsureNovelExistsAsync(input.NovelId, cancellationToken);
+
+        var sourceTrust = string.IsNullOrWhiteSpace(input.SourceTrust)
+            ? null
+            : ValidateAllowedText(input.SourceTrust, nameof(input.SourceTrust), AllowedSourceTrustLevels);
+        var userTagsJson = input.UserTags is null
+            ? null
+            : JsonSerializer.Serialize(NormalizeUserTags(input.UserTags), JsonOptions);
+        var now = DateTimeOffset.UtcNow;
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+            foreach (var anchorId in anchorIds)
+            {
+                await using var update = connection.CreateCommand();
+                update.Transaction = transaction;
+                update.CommandText = """
+                    UPDATE reference_anchors
+                    SET novel_id = NULL,
+                        corpus_visibility = $corpus_visibility,
+                        source_trust = COALESCE($source_trust, source_trust),
+                        user_tags_json = COALESCE($user_tags_json, user_tags_json),
+                        updated_at = $updated_at
+                    WHERE anchor_id = $anchor_id
+                      AND novel_id = $novel_id;
+                    """;
+                update.Parameters.AddWithValue("$anchor_id", anchorId);
+                update.Parameters.AddWithValue("$novel_id", input.NovelId);
+                update.Parameters.AddWithValue("$corpus_visibility", ReferenceCorpusVisibilities.Workspace);
+                update.Parameters.AddWithValue("$source_trust", sourceTrust is null ? DBNull.Value : sourceTrust);
+                update.Parameters.AddWithValue("$user_tags_json", userTagsJson is null ? DBNull.Value : userTagsJson);
+                update.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
+                var affected = await update.ExecuteNonQueryAsync(cancellationToken);
+                if (affected == 0)
+                {
+                    throw new ArgumentException("Reference anchor does not exist for this novel.", nameof(input));
+                }
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+            var promoted = new List<ReferenceAnchorPayload>(anchorIds.Length);
+            foreach (var anchorId in anchorIds)
+            {
+                promoted.Add(await ReadAnchorAsync(connection, input.NovelId, anchorId, cancellationToken));
+            }
+
+            return promoted;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
     public async ValueTask<ReferenceAnchorPayload> UpdateAnchorMetadataAsync(
         UpdateReferenceAnchorMetadataPayload input,
         CancellationToken cancellationToken)

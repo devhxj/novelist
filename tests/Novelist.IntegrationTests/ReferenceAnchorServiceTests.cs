@@ -797,6 +797,76 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task PromoteAnchorsToWorkspaceCorpusPromotesOwnedRowsAtomically()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var ownerNovel = await novels.CreateNovelAsync(new CreateNovelPayload("批量提升来源", "", ""), CancellationToken.None);
+        var consumingNovel = await novels.CreateNovelAsync(new CreateNovelPayload("批量提升消费", "", ""), CancellationToken.None);
+        var firstPath = CreateSourceFile("bulk-promote-first.md", "雨声压低街道，主角在门口停住。");
+        var secondPath = CreateSourceFile("bulk-promote-second.md", "杯沿碰到木桌，声音很轻。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var first = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(ownerNovel.Id, "批量参考一", null, firstPath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var second = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(ownerNovel.Id, "批量参考二", null, secondPath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var firstMaterials = await ReadMaterialRowsAsync(options, first.AnchorId);
+        var secondMaterials = await ReadMaterialRowsAsync(options, second.AnchorId);
+
+        var promoted = await service.PromoteAnchorsToWorkspaceCorpusAsync(
+            new PromoteReferenceAnchorsToWorkspaceCorpusPayload(
+                ownerNovel.Id,
+                [first.AnchorId, second.AnchorId],
+                SourceTrust: ReferenceSourceTrustLevels.Imported,
+                UserTags: ["bulk", "workspace"]),
+            CancellationToken.None);
+
+        Assert.Equal([first.AnchorId, second.AnchorId], promoted.Select(anchor => anchor.AnchorId).ToArray());
+        Assert.All(promoted, anchor =>
+        {
+            Assert.Equal(0, anchor.NovelId);
+            Assert.Equal(ReferenceAnchorOwnerScopes.WorkspaceCorpus, anchor.OwnerScope);
+            Assert.Equal(ReferenceCorpusVisibilities.Workspace, anchor.Visibility);
+            Assert.Equal(ReferenceSourceTrustLevels.Imported, anchor.SourceTrust);
+            Assert.Equal(["bulk", "workspace"], anchor.UserTags);
+        });
+        Assert.Equal(firstMaterials.Select(item => item.MaterialId), (await ReadMaterialRowsAsync(options, first.AnchorId)).Select(item => item.MaterialId));
+        Assert.Equal(secondMaterials.Select(item => item.MaterialId), (await ReadMaterialRowsAsync(options, second.AnchorId)).Select(item => item.MaterialId));
+
+        var firstConsumingSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                consumingNovel.Id,
+                AnchorIds: [],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        var secondConsumingSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                consumingNovel.Id,
+                AnchorIds: [],
+                Query: "杯沿",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        Assert.Contains(firstConsumingSearch.Items, item => item.AnchorId == first.AnchorId);
+        Assert.Contains(secondConsumingSearch.Items, item => item.AnchorId == second.AnchorId);
+    }
+
+    [Fact]
     public async Task UpdateAnchorMetadataCanPromoteToWorkspaceCorpusWithoutChangingMaterialIdentity()
     {
         var options = CreateOptions();

@@ -454,6 +454,13 @@ export namespace reference {
     user_tags?: string[] | null
   }
 
+  export interface PromoteAnchorsToWorkspaceCorpusInput {
+    novel_id: number
+    anchor_ids: number[]
+    source_trust?: string | null
+    user_tags?: string[] | null
+  }
+
   export interface UpdateAnchorMetadataInput {
     novel_id: number
     anchor_id: number

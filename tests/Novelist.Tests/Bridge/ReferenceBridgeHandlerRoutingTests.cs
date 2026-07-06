@@ -31,6 +31,11 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             99,
             SourceTrust: ReferenceSourceTrustLevels.Imported,
             UserTags: ["migrated", "shared"]));
+        await AssertOkAsync(dispatcher, "PromoteReferenceAnchorsToWorkspaceCorpus", new PromoteReferenceAnchorsToWorkspaceCorpusPayload(
+            42,
+            [100, 101],
+            SourceTrust: ReferenceSourceTrustLevels.Imported,
+            UserTags: ["bulk", "shared"]));
         await AssertOkAsync(dispatcher, "UpdateReferenceAnchorMetadata", new UpdateReferenceAnchorMetadataPayload(
             42,
             99,
@@ -101,6 +106,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "GetAnchors:42",
                 "DeleteAnchor:42:99",
                 "PromoteAnchorToWorkspaceCorpus:42:99:imported:migrated,shared",
+                "PromoteAnchorsToWorkspaceCorpus:42:100,101:imported:bulk,shared",
                 "UpdateAnchorMetadata:42:99:Updated Anchor:Updated Author:licensed:workspace:user_verified:curated,rain",
                 "RebuildAnchor:42:99",
                 "GetBuildStatus:42:99",
@@ -309,6 +315,15 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"PromoteAnchorToWorkspaceCorpus:{input.NovelId}:{input.AnchorId}:{input.SourceTrust}:{string.Join(",", input.UserTags ?? [])}");
             return ValueTask.FromResult<ReferenceAnchorPayload>(null!);
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> PromoteAnchorsToWorkspaceCorpusAsync(
+            PromoteReferenceAnchorsToWorkspaceCorpusPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"PromoteAnchorsToWorkspaceCorpus:{input.NovelId}:{string.Join(",", input.AnchorIds)}:{input.SourceTrust}:{string.Join(",", input.UserTags ?? [])}");
+            return ValueTask.FromResult<IReadOnlyList<ReferenceAnchorPayload>>([]);
         }
 
         public ValueTask<ReferenceAnchorPayload> UpdateAnchorMetadataAsync(

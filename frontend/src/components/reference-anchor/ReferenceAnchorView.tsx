@@ -431,12 +431,10 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     setError(null)
     setMessage(null)
     try {
-      for (const anchor of selectedNovelAnchors) {
-        await app.PromoteReferenceAnchorToWorkspaceCorpus({
-          novel_id: novelId,
-          anchor_id: anchor.anchor_id,
-        })
-      }
+      await app.PromoteReferenceAnchorsToWorkspaceCorpus({
+        novel_id: novelId,
+        anchor_ids: anchorIds,
+      })
       setMessage(`已批量提升 ${anchorIds.length} 个参考锚点为工作区语料`)
     } catch (err) {
       setError(err instanceof Error ? err.message : '操作失败')

@@ -148,6 +148,7 @@ export interface NovelistAppApi {
   ListSkills: AppMethod<[app.ListSkillsInput], skill.SkillMeta[]>
   ListSlashCommands: AppMethod<[app.ListSlashCommandsInput], app.SlashCommand[]>
   PickReferenceSourceFile: AppMethod<[], string | null>
+  PromoteReferenceAnchorsToWorkspaceCorpus: AppMethod<[reference.PromoteAnchorsToWorkspaceCorpusInput], reference.Anchor[]>
   PromoteReferenceAnchorToWorkspaceCorpus: AppMethod<[reference.PromoteAnchorToWorkspaceCorpusInput], reference.Anchor>
   RebuildReferenceAnchor: AppMethod<[number, number], reference.BuildStatus>
   RebuildNovelIndex: AppMethod<[number], void>
@@ -292,6 +293,7 @@ export const appApi: NovelistAppApi = {
   ListSkills: appMethod<NovelistAppApi['ListSkills']>('ListSkills'),
   ListSlashCommands: appMethod<NovelistAppApi['ListSlashCommands']>('ListSlashCommands'),
   PickReferenceSourceFile: appMethod<NovelistAppApi['PickReferenceSourceFile']>('PickReferenceSourceFile'),
+  PromoteReferenceAnchorsToWorkspaceCorpus: appMethod<NovelistAppApi['PromoteReferenceAnchorsToWorkspaceCorpus']>('PromoteReferenceAnchorsToWorkspaceCorpus'),
   PromoteReferenceAnchorToWorkspaceCorpus: appMethod<NovelistAppApi['PromoteReferenceAnchorToWorkspaceCorpus']>('PromoteReferenceAnchorToWorkspaceCorpus'),
   RebuildReferenceAnchor: appMethod<NovelistAppApi['RebuildReferenceAnchor']>('RebuildReferenceAnchor'),
   RebuildNovelIndex: appMethod<NovelistAppApi['RebuildNovelIndex']>('RebuildNovelIndex'),

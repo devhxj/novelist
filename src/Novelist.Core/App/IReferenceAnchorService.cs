@@ -55,6 +55,10 @@ public interface IReferenceAnchorService
         PromoteReferenceAnchorToWorkspaceCorpusPayload input,
         CancellationToken cancellationToken);
 
+    ValueTask<IReadOnlyList<ReferenceAnchorPayload>> PromoteAnchorsToWorkspaceCorpusAsync(
+        PromoteReferenceAnchorsToWorkspaceCorpusPayload input,
+        CancellationToken cancellationToken);
+
     ValueTask<ReferenceAnchorPayload> UpdateAnchorMetadataAsync(
         UpdateReferenceAnchorMetadataPayload input,
         CancellationToken cancellationToken);
