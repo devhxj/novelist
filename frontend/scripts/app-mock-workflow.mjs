@@ -518,6 +518,10 @@ function novelCard(page, title) {
   return page.getByRole('article', { name: `作品卡片 ${title}`, exact: true })
 }
 
+function tabLabel(page, title) {
+  return page.locator('main').locator('> div').first().getByText(title, { exact: true })
+}
+
 async function getActivityStates(page) {
   return await page.locator('nav').first().getByRole('button').evaluateAll((buttons) =>
     buttons.map((button) => {
@@ -671,10 +675,32 @@ async function verifyChapterWorkflow(page) {
   await expectVisible(chapterButton(page, '雨夜线索'), 'first chapter in side panel')
   await chapterButton(page, '雨夜线索').click()
   await expectVisible(page.getByText('第1章 雨夜线索').first(), 'chapter tab title')
+  await assertSelectedChapterPath(page, 'chapters/1.md')
+  await assertActiveTabTitle(page, '第1章 雨夜线索')
   await waitForBridgeCallArg(page, 'GetContent', 1, 'chapters/1.md')
+
+  await chapterButton(page, '旧城门').click()
+  await expectVisible(page.getByText('第2章 旧城门').first(), 'second chapter tab title')
+  await assertSelectedChapterPath(page, 'chapters/2.md')
+  await assertActiveTabTitle(page, '第2章 旧城门')
+  await waitForBridgeCallArg(page, 'GetContent', 1, 'chapters/2.md')
+
+  await page.getByText('第1章 雨夜线索').first().click()
+  await assertActiveTabTitle(page, '第1章 雨夜线索')
+  await assertSelectedChapterPath(page, 'chapters/1.md')
+
+  await page.getByRole('button', { name: '关闭标签 第2章 旧城门' }).click({ force: true })
+  await expectHidden(tabLabel(page, '第2章 旧城门'), 'closed second chapter tab')
+  await expectVisible(tabLabel(page, '第1章 雨夜线索'), 'first chapter tab remains after closing second')
+  await assertActiveTabTitle(page, '第1章 雨夜线索')
 
   await page.getByRole('button', { name: /故事状态/ }).click()
   await expectVisible(page.getByText('故事状态').first(), 'story state tab')
+  await assertActiveTabTitle(page, '故事状态')
+  await page.getByRole('button', { name: '关闭标签 故事状态' }).click({ force: true })
+  await expectHidden(tabLabel(page, '故事状态'), 'story state tab closed')
+  await expectVisible(tabLabel(page, '第1章 雨夜线索'), 'chapter tab restored after closing story state')
+  await assertActiveTabTitle(page, '第1章 雨夜线索')
 }
 
 async function verifyEditorSaveWorkflow(browser, url, consoleErrors, pageErrors) {
@@ -706,22 +732,46 @@ async function verifyEditorSaveWorkflow(browser, url, consoleErrors, pageErrors)
   await page.getByTitle('搜索').click()
   await page.getByTitle('章节').click()
   await ensureChapterBlockExpanded(page)
+  await assertSelectedChapterPath(page, 'chapters/1.md')
+  await assertActiveTabTitle(page, '第1章 雨夜线索')
+  await assertEditorContains(page, '显式保存片段')
   await assertBridgeCallCount(page, 'SaveContent', saveCountAfterSuccess)
 
   await chapterButton(page, '旧城门').click()
   await expectVisible(page.getByText('第2章 旧城门').first(), 'second chapter tab')
   await page.evaluate(() => { window.__appMockState.failNextSaveContent = true })
-  await replaceEditorText(page, '旧城门下，保存失败片段仍留在编辑器。')
+  const retryText = '旧城门下，保存失败片段仍留在编辑器。\n\n她第二次按下保存，确认失败可以恢复。'
+  await replaceEditorText(page, retryText)
   await expectVisible(page.getByText('未保存'), 'dirty status after failed edit')
   await page.keyboard.press(shortcutKey('S'))
   await expectVisible(page.getByText('保存失败：模拟保存失败，请重试'), 'save failure alert')
   await expectVisible(page.getByText('未保存'), 'dirty status retained after failed save')
   const saveCountAfterFailure = await bridgeCallCount(page, 'SaveContent')
   assert(saveCountAfterFailure > saveCountAfterSuccess, 'Expected failed explicit save to call SaveContent.')
+  await assertStoredContent(page, 'chapters/2.md', '旧城门下，暗号被雨水冲淡。')
+
+  await page.getByRole('button', { name: '重试保存' }).click()
+  await waitForSaveContentAfter(page, 'chapters/2.md', '第二次按下保存', saveCountAfterFailure)
+  await assertStoredContent(page, 'chapters/2.md', retryText)
+  await expectVisible(page.getByText('已保存'), 'saved status after retry save')
+  const saveCountAfterRetry = await bridgeCallCount(page, 'SaveContent')
+  assert(saveCountAfterRetry > saveCountAfterFailure, 'Expected retry explicit save to call SaveContent.')
+
+  await page.getByText('第1章 雨夜线索').first().click()
+  await assertActiveTabTitle(page, '第1章 雨夜线索')
+  await assertEditorContains(page, '显式保存片段')
+  await page.getByText('第2章 旧城门').first().click()
+  await assertActiveTabTitle(page, '第2章 旧城门')
+  await assertEditorContains(page, '第二次按下保存')
 
   await page.getByTitle('搜索').click()
   await delay(700)
-  await assertBridgeCallCount(page, 'SaveContent', saveCountAfterFailure)
+  await page.getByTitle('章节').click()
+  await ensureChapterBlockExpanded(page)
+  await assertBridgeCallCount(page, 'SaveContent', saveCountAfterRetry)
+  await assertActiveTabTitle(page, '第2章 旧城门')
+  await assertSelectedChapterPath(page, 'chapters/2.md')
+  await assertEditorContains(page, '第二次按下保存')
   await page.close()
 }
 
@@ -1521,6 +1571,16 @@ async function replaceEditorText(page, content) {
   await page.evaluate((content) => window.__novelistEditor.setValue(content), content)
 }
 
+async function assertEditorContains(page, expectedText) {
+  await page.waitForFunction(
+    (expectedText) => window.__novelistEditor?.getValue?.().includes(expectedText),
+    expectedText,
+    { timeout: 12_000 },
+  ).catch((error) => {
+    throw new Error(`Expected editor to contain: ${expectedText}`, { cause: error })
+  })
+}
+
 function shortcutKey(key) {
   return `${process.platform === 'darwin' ? 'Meta' : 'Control'}+${key}`
 }
@@ -1534,6 +1594,19 @@ async function waitForSaveContent(page, path, expectedText) {
         String(call.args[0]?.content ?? '').includes(expectedText))
     },
     { path, expectedText },
+    { timeout: 12_000 },
+  )
+}
+
+async function waitForSaveContentAfter(page, path, expectedText, previousCount) {
+  await page.waitForFunction(
+    ({ path, expectedText, previousCount }) => {
+      const saveCalls = window.__appMockState.calls.filter((call) => call.method === 'SaveContent')
+      return saveCalls.length > previousCount &&
+        window.__appMockState.contentByPath[path] === saveCalls.at(-1)?.args[0]?.content &&
+        String(window.__appMockState.contentByPath[path] ?? '').includes(expectedText)
+    },
+    { path, expectedText, previousCount },
     { timeout: 12_000 },
   )
 }

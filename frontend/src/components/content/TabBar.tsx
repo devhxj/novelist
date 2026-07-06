@@ -24,6 +24,7 @@ export default function TabBar({ tabs, activeTabId, onSelect, onClose }: Props) 
         >
           <span className="truncate max-w-[160px]">{tab.title}</span>
           <button
+            aria-label={`关闭标签 ${tab.title}`}
             className="ml-0.5 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-muted transition-opacity cursor-pointer"
             onClick={e => { e.stopPropagation(); onClose(tab.id) }}
           >

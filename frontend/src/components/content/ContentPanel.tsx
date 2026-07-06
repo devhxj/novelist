@@ -591,9 +591,18 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
         <div
           role="alert"
           aria-live="assertive"
-          className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs leading-relaxed text-destructive"
+          className="flex items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs leading-relaxed text-destructive"
         >
-          {saveErrorText(saveError.message)}
+          <span>{saveErrorText(saveError.message)}</span>
+          <button
+            type="button"
+            onClick={() => {
+              void doSave(activeTab.id, activeTab.path, activeTab.content ?? '').catch(() => undefined)
+            }}
+            className="shrink-0 rounded border border-destructive/30 px-2 py-1 text-xs font-medium hover:bg-destructive/10"
+          >
+            重试保存
+          </button>
         </div>
       )}
 
