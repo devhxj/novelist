@@ -40,7 +40,7 @@ export default function ContentEditor({ value, onChange, onMount, editorTheme }:
     <Editor
       height="100%"
       language="plaintext"
-      theme={editorTheme ?? 'light'}
+      theme={editorTheme ?? 'novelist-light'}
       value={value}
       onChange={onChange}
       onMount={handleMount}

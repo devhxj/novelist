@@ -16,7 +16,7 @@ import { outlinePath, isContentPath, isOutlinePath, isSkillPath, skillNameFromPa
 import type { EditorTab } from './types'
 import './ContentPanel.css'
 
-const MONACO_THEME: Record<Theme, string> = { light: 'light', dark: 'vs-dark' }
+const MONACO_THEME: Record<Theme, string> = { light: 'novelist-light', dark: 'vs-dark' }
 
 type MonacoEditor = Parameters<OnMount>[0]
 type MonacoApi = Parameters<OnMount>[1]

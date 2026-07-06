@@ -12,11 +12,11 @@ const THEME_OPTIONS: { key: Theme; icon: React.ReactNode; label: string }[] = [
 
 function ThemePreview({ theme }: { theme: Theme }) {
   const isLight = theme === 'light'
-  const mockupBg = isLight ? '#ffffff' : '#1b1f2b'
-  const sidebarBg = isLight ? '#f3f4f6' : '#111827'
-  const line1 = isLight ? '#e5e7eb' : '#374151'
-  const line2 = isLight ? '#d1d5db' : '#4b5563'
-  const accent = isLight ? '#7c3aed' : '#a78bfa'
+  const mockupBg = isLight ? '#f2f8ef' : '#1b1f2b'
+  const sidebarBg = isLight ? '#e3efdf' : '#111827'
+  const line1 = isLight ? '#cbdcc8' : '#374151'
+  const line2 = isLight ? '#aebfae' : '#4b5563'
+  const accent = isLight ? '#2f7d4c' : '#a78bfa'
 
   return (
     <div className="rounded-lg p-2 mb-3 border border-border" style={{ backgroundColor: mockupBg }}>

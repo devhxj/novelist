@@ -75,7 +75,7 @@
   overflow-y: auto;
   border: 1px solid oklch(0.85 0.01 0);
   border-radius: var(--radius-sm);
-  background: white;
+  background: var(--card);
 }
 
 .web-card-source {
