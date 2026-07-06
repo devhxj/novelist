@@ -914,9 +914,18 @@ async function verifyNovelChapterWorkflow(browser, url, consoleErrors, pageError
 }
 
 async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors, pageErrors) {
+  const fixtureDir = path.join(outputDir, 'fixtures', 'import-export')
+  await fs.mkdir(fixtureDir, { recursive: true })
+  const pickedReferenceSourceFile = path.join(fixtureDir, 'reference-source.md')
+  await fs.writeFile(
+    pickedReferenceSourceFile,
+    '# Phase 13 import/export fixture\n\n雨夜参考源只用于文件选择 mock，不读取真实用户项目。\n',
+    'utf8',
+  )
+
   const page = await newAppPage(browser, consoleErrors, pageErrors, {
     initialized: true,
-    pickedReferenceSourceFile: 'D:\\NovelistTestFixtures\\reference-source.md',
+    pickedReferenceSourceFile,
   })
   await page.goto(url, { waitUntil: 'domcontentloaded' })
   await expectVisible(page.getByText('全局回归小说'), 'file-picker workflow workspace')
@@ -929,6 +938,7 @@ async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors,
   await expectVisible(page.getByText('✓ 导出成功'), 'chapter export success')
   await waitForBridgeCallArg(page, 'ExportNovel', 1, 'markdown')
   await page.locator('.fixed').getByRole('button', { name: '完成' }).click()
+  await assertExportedNovels(page, [{ novel_id: 42, format: 'markdown' }])
 
   await clickActivity(page, '书架')
   await page.getByRole('button', { name: '导出作品 全局回归小说' }).click({ force: true })
@@ -938,6 +948,10 @@ async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors,
   await expectVisible(page.getByText('✓ 导出成功'), 'bookshelf export success')
   await waitForBridgeCallArg(page, 'ExportNovel', 1, 'txt')
   await page.locator('.fixed').getByRole('button', { name: '完成' }).click()
+  await assertExportedNovels(page, [
+    { novel_id: 42, format: 'markdown' },
+    { novel_id: 42, format: 'txt' },
+  ])
 
   await page.getByRole('button', { name: '更换封面 全局回归小说' }).click({ force: true })
   const coverInput = page.locator('input[type="file"][accept="image/*"]').first()
@@ -948,6 +962,7 @@ async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors,
   })
   await waitForBridgeCall(page, 'SaveCover')
   await assertLastBinaryCall(page, 'SaveCover', 8)
+  await assertSavedCover(page, { novel_id: 42, byte_count: 8 })
 
   await page.locator('header').getByRole('button', { name: '个人中心' }).click()
   await expectVisible(page.getByText('Mock User'), 'profile before avatar upload')
@@ -959,11 +974,12 @@ async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors,
   })
   await waitForBridgeCall(page, 'SaveAvatar')
   await assertLastBinaryCall(page, 'SaveAvatar', 4)
+  await assertSavedAvatar(page, { byte_count: 4 })
 
   await clickActivity(page, '参考锚定')
   await page.getByRole('button', { name: '选择参考源文件' }).click()
   await waitForBridgeCall(page, 'PickReferenceSourceFile')
-  await expectVisible(page.locator('input[value="D:\\\\NovelistTestFixtures\\\\reference-source.md"]'), 'picked reference source path')
+  await expectInputValue(page.getByLabel('本地路径'), pickedReferenceSourceFile)
   await expectSelectedValue(page.locator('select').first(), 'markdown')
   await page.getByPlaceholder('参考书名').fill('文件选择参考')
   await page.getByRole('button', { name: /^创建$/ }).click()
@@ -971,12 +987,14 @@ async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors,
   await expectVisible(page.getByText('参考锚点已创建'), 'reference anchor created from picked file')
   await assertCreatedReferenceAnchor(page, {
     title: '文件选择参考',
-    sourcePath: 'D:\\NovelistTestFixtures\\reference-source.md',
+    sourcePath: pickedReferenceSourceFile,
     sourceKind: 'markdown',
   })
 
+  await assertBridgeCallCount(page, 'PickReferenceSourceFile', 1)
   await assertBridgeCallCount(page, 'SaveContent', 0)
   await assertBridgeCallCount(page, 'runtime.shell.openExternal', 0)
+  await assertOnlyTemporaryFixturePaths(page, fixtureDir)
   await page.close()
 }
 
@@ -2042,6 +2060,26 @@ async function assertLastBinaryCall(page, method, expectedByteCount) {
   assert.equal(actual, expectedByteCount, `Expected ${method} to receive ${expectedByteCount} bytes, got ${actual}.`)
 }
 
+async function assertExportedNovels(page, expected) {
+  const actual = await page.evaluate(() => window.__appMockState.exportedNovels)
+  assert.deepEqual(actual, expected)
+}
+
+async function assertSavedCover(page, expected) {
+  const actual = await page.evaluate(() => window.__appMockState.savedCovers.at(-1))
+  assert.deepEqual(actual, expected)
+}
+
+async function assertSavedAvatar(page, expected) {
+  const actual = await page.evaluate(() => window.__appMockState.savedAvatars.at(-1))
+  assert.deepEqual(actual, expected)
+}
+
+async function expectInputValue(locator, expectedValue) {
+  const actual = await locator.inputValue()
+  assert.equal(actual, expectedValue)
+}
+
 async function expectSelectedValue(locator, expectedValue) {
   const actual = await locator.inputValue()
   assert.equal(actual, expectedValue)
@@ -2058,6 +2096,45 @@ async function assertCreatedReferenceAnchor(page, expected) {
   assert.equal(actual?.title, expected.title)
   assert.equal(actual?.source_path, expected.sourcePath)
   assert.equal(actual?.source_kind, expected.sourceKind)
+}
+
+async function assertOnlyTemporaryFixturePaths(page, allowedFixtureRoot) {
+  const unexpectedAbsolutePaths = await page.evaluate((allowedFixtureRoot) => {
+    const normalize = (value) => String(value).replaceAll('\\', '/')
+    const allowedRoot = normalize(allowedFixtureRoot).replace(/\/+$/, '')
+    const isAbsolutePath = (value) => /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('/')
+    const strings = []
+
+    const collectStrings = (value) => {
+      if (typeof value === 'string') {
+        strings.push(value)
+        return
+      }
+      if (Array.isArray(value)) {
+        for (const item of value) collectStrings(item)
+        return
+      }
+      if (value && typeof value === 'object') {
+        for (const item of Object.values(value)) collectStrings(item)
+      }
+    }
+
+    for (const call of window.__appMockState.calls) {
+      collectStrings(call.args)
+    }
+
+    return strings.filter((value) => {
+      if (!isAbsolutePath(value)) return false
+      const normalized = normalize(value)
+      return normalized !== allowedRoot && !normalized.startsWith(`${allowedRoot}/`)
+    })
+  }, allowedFixtureRoot)
+
+  assert.deepEqual(
+    unexpectedAbsolutePaths,
+    [],
+    `Expected absolute file path bridge arguments to stay under ${allowedFixtureRoot}.`,
+  )
 }
 
 function startServer(port, target) {
