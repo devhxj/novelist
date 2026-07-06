@@ -101,6 +101,7 @@ export interface NovelistAppApi {
   DeleteReaderPerspective: AppMethod<[number, number], void>
   DeleteReferenceAnchor: AppMethod<[number, number], void>
   DeleteReferenceAnchors: AppMethod<[reference.DeleteAnchorsInput], void>
+  DeleteReferenceMaterials: AppMethod<[reference.DeleteMaterialsInput], void>
   DeleteSkill: AppMethod<[app.DeleteSkillInput], void>
   DeleteStoryArc: AppMethod<[number, number], void>
   DeleteTimelineEntry: AppMethod<[number, number], void>
@@ -248,6 +249,7 @@ export const appApi: NovelistAppApi = {
   DeleteReaderPerspective: appMethod<NovelistAppApi['DeleteReaderPerspective']>('DeleteReaderPerspective'),
   DeleteReferenceAnchor: appMethod<NovelistAppApi['DeleteReferenceAnchor']>('DeleteReferenceAnchor'),
   DeleteReferenceAnchors: appMethod<NovelistAppApi['DeleteReferenceAnchors']>('DeleteReferenceAnchors'),
+  DeleteReferenceMaterials: appMethod<NovelistAppApi['DeleteReferenceMaterials']>('DeleteReferenceMaterials'),
   DeleteSkill: appMethod<NovelistAppApi['DeleteSkill']>('DeleteSkill'),
   DeleteStoryArc: appMethod<NovelistAppApi['DeleteStoryArc']>('DeleteStoryArc'),
   DeleteTimelineEntry: appMethod<NovelistAppApi['DeleteTimelineEntry']>('DeleteTimelineEntry'),

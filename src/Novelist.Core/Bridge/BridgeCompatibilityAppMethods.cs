@@ -33,6 +33,7 @@ public static class BridgeCompatibilityAppMethods
         "DeleteReaderPerspective",
         "DeleteReferenceAnchor",
         "DeleteReferenceAnchors",
+        "DeleteReferenceMaterials",
         "DeleteSkill",
         "DeleteStoryArc",
         "DeleteTimelineEntry",

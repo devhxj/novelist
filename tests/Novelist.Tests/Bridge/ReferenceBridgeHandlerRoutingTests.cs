@@ -27,6 +27,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         await AssertOkAsync(dispatcher, "GetReferenceAnchors", 42L);
         await AssertOkAsync(dispatcher, "DeleteReferenceAnchor", 42L, 99L);
         await AssertOkAsync(dispatcher, "DeleteReferenceAnchors", new DeleteReferenceAnchorsPayload(42, [100, 101]));
+        await AssertOkAsync(dispatcher, "DeleteReferenceMaterials", new DeleteReferenceMaterialsPayload(42, ["material-4", "material-5"]));
         await AssertOkAsync(dispatcher, "PromoteReferenceAnchorToWorkspaceCorpus", new PromoteReferenceAnchorToWorkspaceCorpusPayload(
             42,
             99,
@@ -117,6 +118,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "GetAnchors:42",
                 "DeleteAnchor:42:99",
                 "DeleteAnchors:42:100,101",
+                "DeleteMaterials:42:material-4,material-5",
                 "PromoteAnchorToWorkspaceCorpus:42:99:imported:migrated,shared",
                 "PromoteAnchorsToWorkspaceCorpus:42:100,101:imported:bulk,shared",
                 "UpdateAnchorMetadata:42:99:Updated Anchor:Updated Author:licensed:workspace:user_verified:curated,rain",
@@ -327,6 +329,15 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"DeleteAnchors:{input.NovelId}:{string.Join(",", input.AnchorIds)}");
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask DeleteMaterialsAsync(
+            DeleteReferenceMaterialsPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"DeleteMaterials:{input.NovelId}:{string.Join(",", input.MaterialIds)}");
             return ValueTask.CompletedTask;
         }
 

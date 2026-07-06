@@ -535,6 +535,11 @@ export namespace reference {
     note?: string | null
   }
 
+  export interface DeleteMaterialsInput {
+    novel_id: number
+    material_ids: string[]
+  }
+
   export interface MaterialQuery {
     query: string
     material_types: string[]

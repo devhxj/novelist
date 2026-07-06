@@ -267,15 +267,20 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 var source = await ReadSourceFileAsync(anchor.SourcePath, cancellationToken);
                 var segments = BuildSegments(anchor.AnchorId, source.Text);
                 var userVerifiedMaterials = await ReadUserVerifiedMaterialsAsync(connection, anchor.AnchorId, cancellationToken);
+                var archivedMaterialMarkers = await ReadArchivedMaterialMarkersAsync(connection, anchor.AnchorId, cancellationToken);
                 var materials = ApplyUserVerifiedTagOverrides(
                     BuildMaterials(anchor.AnchorId, segments, now),
                     userVerifiedMaterials);
+                var archivedMaterialTimestamps = BuildArchivedMaterialTimestamps(materials, archivedMaterialMarkers);
+                var activeMaterials = materials
+                    .Where(material => !archivedMaterialTimestamps.ContainsKey(material.MaterialId))
+                    .ToArray();
                 var embeddingOptions = await _embeddingConfiguration.GetActiveEmbeddingOptionsAsync(cancellationToken);
                 await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-                var initialStatus = embeddingOptions is not null && materials.Count > 0
+                var initialStatus = embeddingOptions is not null && activeMaterials.Length > 0
                     ? ReferenceAnchorBuildStates.Embedding
                     : ReferenceAnchorBuildStates.Ready;
-                var initialStage = embeddingOptions is not null && materials.Count > 0
+                var initialStage = embeddingOptions is not null && activeMaterials.Length > 0
                     ? ReferenceAnchorBuildStates.Embedding
                     : "ready";
                 var readyAnchor = anchor with
@@ -286,7 +291,13 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 };
                 await ReplaceSegmentsAsync(connection, transaction, anchor.AnchorId, segments, cancellationToken);
                 var slotCount = CountMaterialSlots(materials);
-                await ReplaceMaterialsAsync(connection, transaction, anchor.AnchorId, materials, cancellationToken);
+                await ReplaceMaterialsAsync(
+                    connection,
+                    transaction,
+                    anchor.AnchorId,
+                    materials,
+                    cancellationToken,
+                    archivedMaterialTimestamps);
                 await UpdateAnchorBuildResultAsync(
                     connection,
                     transaction,
@@ -300,13 +311,13 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                     now,
                     cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
-                if (embeddingOptions is null || materials.Count == 0)
+                if (embeddingOptions is null || activeMaterials.Length == 0)
                 {
                     return BuildStatus(readyAnchor, ReferenceAnchorBuildStates.Ready, "ready", segments.Count, materials.Count, slotCount, string.Empty, now);
                 }
 
                 stagedAnchor = readyAnchor;
-                stagedMaterials = materials;
+                stagedMaterials = activeMaterials;
                 stagedEmbeddingOptions = embeddingOptions;
                 stagedSegmentCount = segments.Count;
                 stagedMaterialCount = materials.Count;
@@ -843,6 +854,74 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 if (!affected)
                 {
                     throw new ArgumentException("Reference anchor does not exist for this novel or visible workspace corpus.", nameof(input));
+                }
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public ValueTask DeleteMaterialsAsync(
+        DeleteReferenceMaterialsPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        if (input.MaterialIds.Count == 0)
+        {
+            throw new ArgumentException("At least one reference material must be selected.", nameof(input));
+        }
+
+        var materialIds = input.MaterialIds
+            .Select(materialId => NormalizeRequiredText(materialId, nameof(input.MaterialIds), maxLength: 256))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        return DeleteMaterialsCoreAsync(input.NovelId, materialIds, cancellationToken);
+    }
+
+    private async ValueTask DeleteMaterialsCoreAsync(
+        long novelId,
+        IReadOnlyList<string> materialIds,
+        CancellationToken cancellationToken)
+    {
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            var now = FormatTimestamp(DateTimeOffset.UtcNow);
+
+            foreach (var materialId in materialIds)
+            {
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = $$"""
+                    UPDATE reference_materials
+                    SET archived_at = $archived_at
+                    WHERE material_id = $material_id
+                      AND archived_at IS NULL
+                      AND anchor_id IN (
+                        SELECT anchor_id
+                        FROM reference_anchors
+                        WHERE {{NovelOrVisibleWorkspaceCorpusPredicate}}
+                      );
+                    """;
+                command.Parameters.AddWithValue("$archived_at", now);
+                command.Parameters.AddWithValue("$material_id", materialId);
+                command.Parameters.AddWithValue("$novel_id", novelId);
+                command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+                command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
+                var affected = await command.ExecuteNonQueryAsync(cancellationToken);
+                if (affected == 0)
+                {
+                    throw new ArgumentException("Reference material does not exist for this novel or visible workspace corpus.", nameof(materialIds));
                 }
             }
 
@@ -1466,7 +1545,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         SqliteTransaction transaction,
         long anchorId,
         IReadOnlyList<ReferenceMaterialPayload> materials,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? archivedMaterialTimestamps = null)
     {
         await using (var delete = connection.CreateCommand())
         {
@@ -1478,6 +1558,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
 
         foreach (var material in materials)
         {
+            var archivedAt = archivedMaterialTimestamps is not null &&
+                archivedMaterialTimestamps.TryGetValue(material.MaterialId, out var timestamp)
+                ? timestamp
+                : null;
             await using var insert = connection.CreateCommand();
             insert.Transaction = transaction;
             insert.CommandText = """
@@ -1485,12 +1569,12 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                   (material_id, anchor_id, source_segment_id, material_type, function_tag,
                    emotion_tag, scene_tag, pov_tag, technique_tag, function_confidence,
                    emotion_confidence, pov_confidence, text, source_hash, extractor_version,
-                   user_verified, created_at)
+                   user_verified, created_at, archived_at)
                 VALUES
                   ($material_id, $anchor_id, $source_segment_id, $material_type, $function_tag,
                    $emotion_tag, $scene_tag, $pov_tag, $technique_tag, $function_confidence,
                    $emotion_confidence, $pov_confidence, $text, $source_hash, $extractor_version,
-                   $user_verified, $created_at);
+                   $user_verified, $created_at, $archived_at);
                 """;
             insert.Parameters.AddWithValue("$material_id", material.MaterialId);
             insert.Parameters.AddWithValue("$anchor_id", anchorId);
@@ -1509,6 +1593,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             insert.Parameters.AddWithValue("$extractor_version", material.ExtractorVersion);
             insert.Parameters.AddWithValue("$user_verified", material.UserVerified ? 1 : 0);
             insert.Parameters.AddWithValue("$created_at", FormatTimestamp(material.CreatedAt));
+            insert.Parameters.AddWithValue("$archived_at", archivedAt is null ? DBNull.Value : archivedAt);
             await insert.ExecuteNonQueryAsync(cancellationToken);
 
             foreach (var slot in ReferenceMaterialSlotDetector.Detect(material))
@@ -1587,6 +1672,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             FROM reference_materials m
             INNER JOIN reference_anchors a ON a.anchor_id = m.anchor_id
             WHERE {{AnchorAliasNovelOrVisibleWorkspaceCorpusPredicate}}
+              AND m.archived_at IS NULL
               AND m.anchor_id IN ({{string.Join(", ", parameterNames)}})
             ORDER BY CASE WHEN a.novel_id = $novel_id THEN 0 ELSE 1 END,
                      m.anchor_id ASC, m.material_id ASC;
@@ -1656,7 +1742,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         command.CommandText = """
             SELECT rowid, material_id
             FROM reference_materials
-            WHERE anchor_id = $anchor_id;
+            WHERE anchor_id = $anchor_id
+              AND archived_at IS NULL;
             """;
         command.Parameters.AddWithValue("$anchor_id", anchorId);
         var rowIds = new Dictionary<string, long>(StringComparer.Ordinal);
@@ -1729,7 +1816,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         command.CommandText = $$"""
             SELECT anchor_id, rowid, material_id
             FROM reference_materials
-            WHERE anchor_id IN ({{string.Join(", ", parameterNames)}});
+            WHERE archived_at IS NULL
+              AND anchor_id IN ({{string.Join(", ", parameterNames)}});
             """;
         var byAnchor = new Dictionary<long, Dictionary<long, string>>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1765,6 +1853,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             FROM reference_materials m
             INNER JOIN reference_anchors a ON a.anchor_id = m.anchor_id
             WHERE {{AnchorAliasNovelOrVisibleWorkspaceCorpusPredicate}}
+              AND m.archived_at IS NULL
               AND m.material_id = $material_id;
             """;
         command.Parameters.AddWithValue("$novel_id", novelId);
@@ -1787,7 +1876,9 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                    function_confidence, emotion_confidence, pov_confidence,
                    text, source_hash, extractor_version, user_verified, created_at
             FROM reference_materials
-            WHERE anchor_id = $anchor_id AND user_verified != 0
+            WHERE anchor_id = $anchor_id
+              AND user_verified != 0
+              AND archived_at IS NULL
             ORDER BY material_id ASC;
             """;
         command.Parameters.AddWithValue("$anchor_id", anchorId);
@@ -1799,6 +1890,63 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
 
         return materials;
+    }
+
+    private static async ValueTask<IReadOnlyList<ArchivedReferenceMaterialMarker>> ReadArchivedMaterialMarkersAsync(
+        SqliteConnection connection,
+        long anchorId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT material_id, material_type, source_hash, archived_at
+            FROM reference_materials
+            WHERE anchor_id = $anchor_id
+              AND archived_at IS NOT NULL
+            ORDER BY material_id ASC;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        var markers = new List<ArchivedReferenceMaterialMarker>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            markers.Add(new ArchivedReferenceMaterialMarker(
+                reader.GetString(0),
+                new ReferenceMaterialHashKey(reader.GetString(1), reader.GetString(2)),
+                reader.GetString(3)));
+        }
+
+        return markers;
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildArchivedMaterialTimestamps(
+        IReadOnlyList<ReferenceMaterialPayload> materials,
+        IReadOnlyList<ArchivedReferenceMaterialMarker> archivedMarkers)
+    {
+        if (materials.Count == 0 || archivedMarkers.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        var byMaterialId = archivedMarkers
+            .GroupBy(marker => marker.MaterialId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().ArchivedAt, StringComparer.Ordinal);
+        var byHash = archivedMarkers
+            .GroupBy(marker => marker.HashKey)
+            .Where(group => group.Count() == 1)
+            .ToDictionary(group => group.Key, group => group.Single().ArchivedAt);
+
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var material in materials)
+        {
+            if (byMaterialId.TryGetValue(material.MaterialId, out var archivedAt) ||
+                byHash.TryGetValue(new ReferenceMaterialHashKey(material.MaterialType, material.SourceHash), out archivedAt))
+            {
+                result[material.MaterialId] = archivedAt;
+            }
+        }
+
+        return result;
     }
 
     private static IReadOnlyList<ReferenceMaterialPayload> ApplyUserVerifiedTagOverrides(
@@ -2266,6 +2414,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
               extractor_version TEXT NOT NULL,
               user_verified INTEGER NOT NULL,
               created_at TEXT NOT NULL,
+              archived_at TEXT,
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
               FOREIGN KEY(source_segment_id) REFERENCES reference_source_segments(segment_id) ON DELETE CASCADE
             );
@@ -2372,11 +2521,20 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             "user_tags_json",
             "ALTER TABLE reference_anchors ADD COLUMN user_tags_json TEXT NOT NULL DEFAULT '[]';",
             cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_materials",
+            "archived_at",
+            "ALTER TABLE reference_materials ADD COLUMN archived_at TEXT;",
+            cancellationToken);
         await EnsureNullableAnchorNovelIdAsync(connection, cancellationToken);
         await using var indexCommand = connection.CreateCommand();
         indexCommand.CommandText = """
             CREATE INDEX IF NOT EXISTS idx_reference_anchors_corpus_visibility
               ON reference_anchors(novel_id, corpus_visibility);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_materials_archived
+              ON reference_materials(anchor_id, archived_at);
             """;
         await indexCommand.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -3630,6 +3788,11 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private sealed record Heading(string Title, int LineStart, int LineEnd);
 
     private sealed record TextSpan(string Title, string Text, int StartOffset, int EndOffset);
+
+    private sealed record ArchivedReferenceMaterialMarker(
+        string MaterialId,
+        ReferenceMaterialHashKey HashKey,
+        string ArchivedAt);
 
     private sealed record ReferenceSourceSegment(
         string SegmentId,

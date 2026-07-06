@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
+  Archive,
   BookMarked,
   Check,
   Edit3,
@@ -810,6 +811,36 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       setSelectedLibraryMaterialIds([])
       setBulkLibraryMaterialTagForm(EMPTY_MATERIAL_TAG_FORM)
     }
+  }
+
+  async function archiveSelectedLibraryMaterials() {
+    if (selectedLibraryMaterialIds.length === 0) return
+    const archivedIds = [...selectedLibraryMaterialIds]
+    setLoading(true)
+    setError(null)
+    setMessage(null)
+    try {
+      await app.DeleteReferenceMaterials({
+        novel_id: novelId,
+        material_ids: archivedIds,
+      })
+      setMessage(`材料库已归档 ${archivedIds.length} 条材料`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '操作失败')
+      setLoading(false)
+      return
+    } finally {
+      setLoading(false)
+    }
+
+    const archivedSet = new Set(archivedIds)
+    setMaterialLibrary(current => ({
+      ...current,
+      items: current.items.filter(item => !archivedSet.has(item.material_id)),
+      total: Math.max(0, current.total - archivedSet.size),
+    }))
+    setSelectedLibraryMaterialIds(ids => ids.filter(id => !archivedSet.has(id)))
+    setBulkLibraryMaterialTagForm(EMPTY_MATERIAL_TAG_FORM)
   }
 
   async function searchMaterials() {
@@ -1866,6 +1897,16 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                           className="inline-flex items-center gap-1.5 rounded bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/80 disabled:opacity-50"
                         >
                           <X className="h-3.5 w-3.5" />清空批量标签
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void archiveSelectedLibraryMaterials()
+                          }}
+                          disabled={loading || selectedLibraryMaterialIds.length === 0}
+                          className="inline-flex items-center gap-1.5 rounded bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/80 disabled:opacity-50"
+                        >
+                          <Archive className="h-3.5 w-3.5" />归档所选材料
                         </button>
                       </div>
                     </div>

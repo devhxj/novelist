@@ -161,6 +161,10 @@ public sealed record DeleteReferenceAnchorsPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_ids")] IReadOnlyList<long> AnchorIds);
 
+public sealed record DeleteReferenceMaterialsPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("material_ids")] IReadOnlyList<string> MaterialIds);
+
 public sealed record UpdateReferenceAnchorMetadataPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_id")] long AnchorId,

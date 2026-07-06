@@ -5575,5 +5575,10 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             DeleteReferenceAnchorsPayload input,
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
+
+        public ValueTask DeleteMaterialsAsync(
+            DeleteReferenceMaterialsPayload input,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

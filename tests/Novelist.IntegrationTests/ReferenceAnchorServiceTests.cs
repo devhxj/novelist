@@ -3182,6 +3182,197 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task DeleteMaterialsArchivesSelectedMaterialsWithoutDeletingProvenance()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var ownerNovel = await novels.CreateNovelAsync(new CreateNovelPayload("材料归档来源", "", ""), CancellationToken.None);
+        var consumingNovel = await novels.CreateNovelAsync(new CreateNovelPayload("材料归档使用方", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "material-archive.md",
+            """
+            雨声压住门外的街。
+
+            林岚握住钥匙，没有立刻说话。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(
+                ownerNovel.Id,
+                "共享材料待归档参考",
+                null,
+                sourcePath,
+                "markdown",
+                "user_provided",
+                ReferenceCorpusVisibilities.Workspace),
+            CancellationToken.None);
+        var beforeRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        var beforeSegments = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
+        Assert.True(beforeRows.Count >= 2);
+        var beforeSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                consumingNovel.Id,
+                AnchorIds: [anchor.AnchorId],
+                Query: "",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        Assert.True(beforeSearch.Items.Count >= 2);
+        var archivedMaterialId = beforeSearch.Items[0].MaterialId;
+
+        await service.DeleteMaterialsAsync(
+            new DeleteReferenceMaterialsPayload(consumingNovel.Id, [archivedMaterialId]),
+            CancellationToken.None);
+
+        var search = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                consumingNovel.Id,
+                AnchorIds: [anchor.AnchorId],
+                Query: "",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        Assert.DoesNotContain(search.Items, material => material.MaterialId == archivedMaterialId);
+        Assert.Contains(search.Items, material => material.MaterialId != archivedMaterialId);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.UpdateMaterialTagsAsync(
+                new UpdateReferenceMaterialTagsPayload(
+                    consumingNovel.Id,
+                    archivedMaterialId,
+                    FunctionTag: "environment",
+                    EmotionTag: null,
+                    SceneTag: null,
+                    PovTag: null,
+                    TechniqueTag: null,
+                    Origin: "user",
+                    Note: "should not update archived material"),
+                CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.AdaptMaterialAsync(
+                new AdaptReferenceMaterialPayload(
+                    consumingNovel.Id,
+                    archivedMaterialId,
+                    SlotValues: [],
+                    MaxRewriteLevel: ReferenceRewriteLevels.L2,
+                    SceneFacts: []),
+                CancellationToken.None));
+
+        var afterRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        var afterSegments = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
+        Assert.Equal(beforeRows.Select(item => item.MaterialId), afterRows.Select(item => item.MaterialId));
+        Assert.Equal(beforeSegments.Select(item => item.SegmentId), afterSegments.Select(item => item.SegmentId));
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, archivedMaterialId));
+        foreach (var row in afterRows.Where(item => item.MaterialId != archivedMaterialId))
+        {
+            Assert.Null(await ReadMaterialArchivedAtAsync(options, row.MaterialId));
+        }
+
+        await service.RebuildAnchorAsync(ownerNovel.Id, anchor.AnchorId, CancellationToken.None);
+        var rebuiltSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                consumingNovel.Id,
+                AnchorIds: [anchor.AnchorId],
+                Query: "",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        Assert.DoesNotContain(rebuiltSearch.Items, material => material.MaterialId == archivedMaterialId);
+        Assert.Equal(afterRows.Select(item => item.MaterialId), (await ReadMaterialRowsAsync(options, anchor.AnchorId)).Select(item => item.MaterialId));
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, archivedMaterialId));
+    }
+
+    [Fact]
+    public async Task DeleteMaterialsRollsBackWhenAnyMaterialIsNotAccessible()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var targetNovel = await novels.CreateNovelAsync(new CreateNovelPayload("材料归档目标", "", ""), CancellationToken.None);
+        var otherNovel = await novels.CreateNovelAsync(new CreateNovelPayload("材料归档其他", "", ""), CancellationToken.None);
+        var targetPath = CreateSourceFile("material-archive-target.md", "目标共享材料。");
+        var privatePath = CreateSourceFile("material-archive-private.md", "其他小说私有材料。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var targetAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(
+                targetNovel.Id,
+                "目标共享参考",
+                null,
+                targetPath,
+                "markdown",
+                "user_provided",
+                ReferenceCorpusVisibilities.Workspace),
+            CancellationToken.None);
+        var privateAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(otherNovel.Id, "其他私有参考", null, privatePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var targetMaterial = Assert.Single((await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                targetNovel.Id,
+                [targetAnchor.AnchorId],
+                "",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None)).Items);
+        var privateMaterial = Assert.Single((await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                otherNovel.Id,
+                [privateAnchor.AnchorId],
+                "",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None)).Items);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.DeleteMaterialsAsync(
+                new DeleteReferenceMaterialsPayload(targetNovel.Id, [targetMaterial.MaterialId, privateMaterial.MaterialId]),
+                CancellationToken.None));
+
+        Assert.Null(await ReadMaterialArchivedAtAsync(options, targetMaterial.MaterialId));
+        Assert.Contains(
+            (await service.SearchMaterialsAsync(
+                new SearchReferenceMaterialsPayload(
+                    targetNovel.Id,
+                    [targetAnchor.AnchorId],
+                    "",
+                    [ReferenceMaterialTypes.Sentence],
+                    [],
+                    [],
+                    [],
+                    [],
+                    1,
+                    10),
+                CancellationToken.None)).Items,
+            material => material.MaterialId == targetMaterial.MaterialId);
+    }
+
+    [Fact]
     public async Task BridgeReferenceAnchorHandlersCreateAndListAnchors()
     {
         var options = CreateOptions();
@@ -3620,6 +3811,33 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         command.Parameters.AddWithValue("$anchor_id", anchorId);
         var visibility = await command.ExecuteScalarAsync();
         return Assert.IsType<string>(visibility);
+    }
+
+    private static async ValueTask<string?> ReadMaterialArchivedAtAsync(
+        AppInitializationOptions options,
+        string materialId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT archived_at
+            FROM reference_materials
+            WHERE material_id = $material_id;
+            """;
+        command.Parameters.AddWithValue("$material_id", materialId);
+        var archivedAt = await command.ExecuteScalarAsync();
+        if (archivedAt is null || archivedAt == DBNull.Value)
+        {
+            return null;
+        }
+
+        return Assert.IsType<string>(archivedAt);
     }
 
     private static async ValueTask MarkAnchorAsWorkspaceCorpusAsync(
