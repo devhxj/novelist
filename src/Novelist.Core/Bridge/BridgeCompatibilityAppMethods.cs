@@ -22,6 +22,7 @@ public static class BridgeCompatibilityAppMethods
         "CreatePreference",
         "CreateReaderPerspective",
         "CreateReferenceAnchor",
+        "CreateReferenceAnchors",
         "CreateStoryArc",
         "CreateTimelineEntry",
         "DeleteArcNode",

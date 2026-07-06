@@ -607,6 +607,129 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateAnchorsImportsWorkspaceCorpusSourcesWithoutLosingMaterialIdentity()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var sourceNovel = await novels.CreateNovelAsync(new CreateNovelPayload("批量导入共享语料来源", "", ""), CancellationToken.None);
+        var consumingNovel = await novels.CreateNovelAsync(new CreateNovelPayload("批量导入共享语料消费", "", ""), CancellationToken.None);
+        var firstPath = CreateSourceFile(
+            "bulk-import-rain.md",
+            """
+            # 第一章
+
+            雨声压低街道，主角在门口停住。
+            """);
+        var secondPath = CreateSourceFile(
+            "bulk-import-cup.md",
+            """
+            # 第一章
+
+            杯沿碰到木桌，声音很轻。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+
+        var anchors = await service.CreateAnchorsAsync(
+            new CreateReferenceAnchorsPayload(
+                [
+                    new CreateReferenceAnchorPayload(
+                        sourceNovel.Id,
+                        "批量共享参考一",
+                        null,
+                        firstPath,
+                        "markdown",
+                        "user_provided",
+                        Visibility: ReferenceCorpusVisibilities.Workspace,
+                        SourceTrust: ReferenceSourceTrustLevels.Imported,
+                        UserTags: ["bulk", "rain"]),
+                    new CreateReferenceAnchorPayload(
+                        sourceNovel.Id,
+                        "批量共享参考二",
+                        "参考作者",
+                        secondPath,
+                        "markdown",
+                        "user_provided",
+                        Visibility: ReferenceCorpusVisibilities.Workspace,
+                        SourceTrust: ReferenceSourceTrustLevels.Imported,
+                        UserTags: ["bulk", "cup"])
+                ]),
+            CancellationToken.None);
+
+        Assert.Equal(["批量共享参考一", "批量共享参考二"], anchors.Select(anchor => anchor.Title).ToArray());
+        Assert.Equal(2, anchors.Select(anchor => anchor.AnchorId).Distinct().Count());
+        Assert.All(anchors, anchor =>
+        {
+            Assert.Equal(0, anchor.NovelId);
+            Assert.Equal(ReferenceAnchorOwnerScopes.WorkspaceCorpus, anchor.OwnerScope);
+            Assert.Null(anchor.OwnerNovelId);
+            Assert.Equal(ReferenceCorpusVisibilities.Workspace, anchor.Visibility);
+            Assert.Equal(ReferenceSourceTrustLevels.Imported, anchor.SourceTrust);
+        });
+
+        var firstMaterials = await ReadMaterialRowsAsync(options, anchors[0].AnchorId);
+        var secondMaterials = await ReadMaterialRowsAsync(options, anchors[1].AnchorId);
+        Assert.NotEmpty(firstMaterials);
+        Assert.NotEmpty(secondMaterials);
+        Assert.All(firstMaterials, item => Assert.StartsWith(anchors[0].AnchorId + ":material:", item.MaterialId, StringComparison.Ordinal));
+        Assert.All(secondMaterials, item => Assert.StartsWith(anchors[1].AnchorId + ":material:", item.MaterialId, StringComparison.Ordinal));
+        Assert.Empty(firstMaterials.Select(item => item.MaterialId).Intersect(secondMaterials.Select(item => item.MaterialId), StringComparer.Ordinal));
+
+        var consumingAnchors = await service.GetAnchorsAsync(consumingNovel.Id, CancellationToken.None);
+        Assert.Contains(consumingAnchors, item => item.AnchorId == anchors[0].AnchorId && item.OwnerScope == ReferenceAnchorOwnerScopes.WorkspaceCorpus);
+        Assert.Contains(consumingAnchors, item => item.AnchorId == anchors[1].AnchorId && item.OwnerScope == ReferenceAnchorOwnerScopes.WorkspaceCorpus);
+
+        var rainSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                consumingNovel.Id,
+                AnchorIds: [],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        var cupSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                consumingNovel.Id,
+                AnchorIds: [],
+                Query: "杯沿",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        Assert.Contains(rainSearch.Items, item => item.AnchorId == anchors[0].AnchorId);
+        Assert.Contains(cupSearch.Items, item => item.AnchorId == anchors[1].AnchorId);
+    }
+
+    [Fact]
+    public async Task CreateAnchorsValidatesBatchSize()
+    {
+        var options = CreateOptions();
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var service = new SqliteReferenceAnchorService(options, novels);
+
+        var empty = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.CreateAnchorsAsync(new CreateReferenceAnchorsPayload([]), CancellationToken.None));
+        Assert.Contains("At least one reference anchor", empty.Message, StringComparison.Ordinal);
+
+        var tooManyInputs = Enumerable.Range(0, 51)
+            .Select(index => new CreateReferenceAnchorPayload(1, $"参考 {index}", null, "missing.md", "markdown", "user_provided"))
+            .ToArray();
+        var tooMany = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.CreateAnchorsAsync(new CreateReferenceAnchorsPayload(tooManyInputs), CancellationToken.None));
+        Assert.Contains("At most 50 reference anchors", tooMany.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task PromotePerNovelAnchorToWorkspaceCorpusPreservesMaterialIdentityAndFeedbackScope()
     {
         var options = CreateOptions();

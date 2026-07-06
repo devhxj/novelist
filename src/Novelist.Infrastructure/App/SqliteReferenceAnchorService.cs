@@ -200,6 +200,30 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         return completed.Anchor;
     }
 
+    public async ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync(
+        CreateReferenceAnchorsPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        if (input.Anchors is null || input.Anchors.Count == 0)
+        {
+            throw new ArgumentException("At least one reference anchor is required.", nameof(input));
+        }
+
+        if (input.Anchors.Count > 50)
+        {
+            throw new ArgumentException("At most 50 reference anchors can be imported at once.", nameof(input));
+        }
+
+        var anchors = new List<ReferenceAnchorPayload>(input.Anchors.Count);
+        foreach (var anchor in input.Anchors)
+        {
+            anchors.Add(await CreateAnchorAsync(anchor, cancellationToken));
+        }
+
+        return anchors;
+    }
+
     public async ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(
         long novelId,
         CancellationToken cancellationToken)

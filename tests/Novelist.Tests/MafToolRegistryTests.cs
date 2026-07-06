@@ -908,6 +908,19 @@ public sealed class MafToolRegistryTests
                 DateTimeOffset.UtcNow));
         }
 
+        public async ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync(
+            CreateReferenceAnchorsPayload input,
+            CancellationToken cancellationToken)
+        {
+            var anchors = new List<ReferenceAnchorPayload>(input.Anchors.Count);
+            foreach (var anchor in input.Anchors)
+            {
+                anchors.Add(await CreateAnchorAsync(anchor, cancellationToken));
+            }
+
+            return anchors;
+        }
+
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(long novelId, CancellationToken cancellationToken)
         {
             return ValueTask.FromResult<IReadOnlyList<ReferenceAnchorPayload>>(

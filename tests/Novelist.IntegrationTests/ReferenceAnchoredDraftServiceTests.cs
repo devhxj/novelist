@@ -5471,6 +5471,11 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
+        public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync(
+            CreateReferenceAnchorsPayload input,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
         public ValueTask<ReferenceAnchorPayload> PromoteAnchorToWorkspaceCorpusAsync(
             PromoteReferenceAnchorToWorkspaceCorpusPayload input,
             CancellationToken cancellationToken) =>

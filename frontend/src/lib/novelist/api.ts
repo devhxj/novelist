@@ -90,6 +90,7 @@ export interface NovelistAppApi {
   CreatePreference: AppMethod<[number, app.CreatePreferenceInput], novel.PreferenceItem>
   CreateReaderPerspective: AppMethod<[number, app.CreateReaderPerspectiveInput], reader.ReaderPerspective>
   CreateReferenceAnchor: AppMethod<[reference.CreateAnchorInput], reference.Anchor>
+  CreateReferenceAnchors: AppMethod<[reference.CreateAnchorsInput], reference.Anchor[]>
   CreateStoryArc: AppMethod<[number, app.CreateStoryArcInput], storyarc.StoryArc>
   CreateTimelineEntry: AppMethod<[number, app.CreateTimelineEntryInput], timeline.TimelineEntry>
   DeleteArcNode: AppMethod<[number, number], void>
@@ -239,6 +240,7 @@ export const appApi: NovelistAppApi = {
   CreatePreference: appMethod<NovelistAppApi['CreatePreference']>('CreatePreference'),
   CreateReaderPerspective: appMethod<NovelistAppApi['CreateReaderPerspective']>('CreateReaderPerspective'),
   CreateReferenceAnchor: appMethod<NovelistAppApi['CreateReferenceAnchor']>('CreateReferenceAnchor'),
+  CreateReferenceAnchors: appMethod<NovelistAppApi['CreateReferenceAnchors']>('CreateReferenceAnchors'),
   CreateStoryArc: appMethod<NovelistAppApi['CreateStoryArc']>('CreateStoryArc'),
   CreateTimelineEntry: appMethod<NovelistAppApi['CreateTimelineEntry']>('CreateTimelineEntry'),
   DeleteArcNode: appMethod<NovelistAppApi['DeleteArcNode']>('DeleteArcNode'),

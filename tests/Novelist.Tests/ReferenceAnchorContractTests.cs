@@ -89,6 +89,37 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void CreateReferenceAnchorsPayloadUsesStableSnakeCaseJsonNames()
+    {
+        var input = new CreateReferenceAnchorsPayload(
+            [
+                new CreateReferenceAnchorPayload(
+                    NovelId: 42,
+                    Title: "Bulk Anchor",
+                    Author: "Reference Author",
+                    SourcePath: @"D:\books\bulk.md",
+                    SourceKind: "markdown",
+                    LicenseStatus: "user_provided",
+                    Visibility: ReferenceCorpusVisibilities.Workspace,
+                    SourceTrust: ReferenceSourceTrustLevels.Imported,
+                    UserTags: ["library", "bulk"])
+            ]);
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(input, BridgeJson.SerializerOptions));
+        var root = json.RootElement;
+        var anchor = root.GetProperty("anchors")[0];
+
+        Assert.Equal(42, anchor.GetProperty("novel_id").GetInt64());
+        Assert.Equal("Bulk Anchor", anchor.GetProperty("title").GetString());
+        Assert.Equal(@"D:\books\bulk.md", anchor.GetProperty("source_path").GetString());
+        Assert.Equal("workspace", anchor.GetProperty("visibility").GetString());
+        Assert.Equal("imported", anchor.GetProperty("source_trust").GetString());
+        Assert.Equal("library", anchor.GetProperty("user_tags")[0].GetString());
+        Assert.False(root.TryGetProperty("Anchors", out _));
+        Assert.False(anchor.TryGetProperty("NovelId", out _));
+    }
+
+    [Fact]
     public void PromoteReferenceAnchorsToWorkspaceCorpusPayloadUsesStableSnakeCaseJsonNames()
     {
         var input = new PromoteReferenceAnchorsToWorkspaceCorpusPayload(
@@ -866,6 +897,7 @@ public sealed class ReferenceAnchorContractTests
         string[] expected =
         [
             "CreateReferenceAnchor",
+            "CreateReferenceAnchors",
             "GetReferenceAnchors",
             "DeleteReferenceAnchor",
             "DeleteReferenceAnchors",

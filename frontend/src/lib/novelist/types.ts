@@ -447,6 +447,10 @@ export namespace reference {
     user_tags?: string[] | null
   }
 
+  export interface CreateAnchorsInput {
+    anchors: CreateAnchorInput[]
+  }
+
   export interface PromoteAnchorToWorkspaceCorpusInput {
     novel_id: number
     anchor_id: number

@@ -146,6 +146,9 @@ public sealed record CreateReferenceAnchorPayload(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<string>? UserTags = null);
 
+public sealed record CreateReferenceAnchorsPayload(
+    [property: JsonPropertyName("anchors")] IReadOnlyList<CreateReferenceAnchorPayload> Anchors);
+
 public sealed record PromoteReferenceAnchorToWorkspaceCorpusPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_id")] long AnchorId,

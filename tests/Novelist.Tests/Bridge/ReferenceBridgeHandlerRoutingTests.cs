@@ -24,6 +24,18 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             Visibility: ReferenceCorpusVisibilities.Workspace,
             SourceTrust: ReferenceSourceTrustLevels.Imported,
             UserTags: ["rain", "threshold"]));
+        await AssertOkAsync(dispatcher, "CreateReferenceAnchors", new CreateReferenceAnchorsPayload(
+            [
+                new CreateReferenceAnchorPayload(42, "Bulk Anchor One", null, @"D:\bulk-one.md", "markdown", "user_provided"),
+                new CreateReferenceAnchorPayload(
+                    42,
+                    "Bulk Anchor Two",
+                    "Author",
+                    @"D:\bulk-two.md",
+                    "markdown",
+                    "user_provided",
+                    Visibility: ReferenceCorpusVisibilities.Workspace)
+            ]));
         await AssertOkAsync(dispatcher, "GetReferenceAnchors", 42L);
         await AssertOkAsync(dispatcher, "DeleteReferenceAnchor", 42L, 99L);
         await AssertOkAsync(dispatcher, "DeleteReferenceAnchors", new DeleteReferenceAnchorsPayload(42, [100, 101]));
@@ -117,6 +129,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         Assert.Equal(
             [
                 @"CreateAnchor:42:Anchor:Author:D:\reference.md:markdown:user_provided:workspace:imported:rain,threshold",
+                @"CreateAnchors:Bulk Anchor One,Bulk Anchor Two",
                 "GetAnchors:42",
                 "DeleteAnchor:42:99",
                 "DeleteAnchors:42:100,101",
@@ -304,6 +317,15 @@ public sealed class ReferenceBridgeHandlerRoutingTests
 
             Calls.Add($"CreateAnchor:{input.NovelId}:{input.Title}:{input.Author}:{input.SourcePath}:{input.SourceKind}:{input.LicenseStatus}:{input.Visibility}:{input.SourceTrust}:{string.Join(",", input.UserTags ?? [])}");
             return ValueTask.FromResult<ReferenceAnchorPayload>(null!);
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync(
+            CreateReferenceAnchorsPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"CreateAnchors:{string.Join(",", input.Anchors.Select(anchor => anchor.Title))}");
+            return ValueTask.FromResult<IReadOnlyList<ReferenceAnchorPayload>>([]);
         }
 
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(

@@ -19,6 +19,11 @@ public static class ReferenceAnchorBridgeHandlers
                 ReadObjectArg<CreateReferenceAnchorPayload>(context.Payload, 0, "input"),
                 cancellationToken));
 
+        dispatcher.Register("CreateReferenceAnchors", async (context, cancellationToken) =>
+            await service.CreateAnchorsAsync(
+                ReadObjectArg<CreateReferenceAnchorsPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
         dispatcher.Register("GetReferenceAnchors", async (context, cancellationToken) =>
             await service.GetAnchorsAsync(
                 ReadLongArg(context.Payload, 0, "novelId"),
