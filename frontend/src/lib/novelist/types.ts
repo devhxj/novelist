@@ -431,6 +431,8 @@ export namespace reference {
     visibility: string
     source_trust: string
     user_tags: string[]
+    owner_scope: string
+    owner_novel_id?: number | null
   }
 
   export interface CreateAnchorInput {
@@ -441,6 +443,13 @@ export namespace reference {
     source_kind: string
     license_status: string
     visibility?: string | null
+    source_trust?: string | null
+    user_tags?: string[] | null
+  }
+
+  export interface PromoteAnchorToWorkspaceCorpusInput {
+    novel_id: number
+    anchor_id: number
     source_trust?: string | null
     user_tags?: string[] | null
   }
@@ -514,6 +523,7 @@ export namespace reference {
     size: number
     narrative_duties?: string[] | null
     emotion_transitions?: string[] | null
+    prose_duties?: string[] | null
   }
 
   export interface SlotValue {

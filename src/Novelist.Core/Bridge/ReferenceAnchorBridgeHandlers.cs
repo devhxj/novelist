@@ -33,6 +33,11 @@ public static class ReferenceAnchorBridgeHandlers
             return null;
         });
 
+        dispatcher.Register("PromoteReferenceAnchorToWorkspaceCorpus", async (context, cancellationToken) =>
+            await service.PromoteAnchorToWorkspaceCorpusAsync(
+                ReadObjectArg<PromoteReferenceAnchorToWorkspaceCorpusPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
         dispatcher.Register("RebuildReferenceAnchor", async (context, cancellationToken) =>
             await service.RebuildAnchorAsync(
                 ReadLongArg(context.Payload, 0, "novelId"),

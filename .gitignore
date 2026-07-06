@@ -18,8 +18,8 @@ models/
 /build/dist/
 /build/*.AppDir/
 /frontend/dist/
-goink
-goink.exe
+novelist
+novelist.exe
 
 # .NET
 /.dotnet/

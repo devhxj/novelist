@@ -8,12 +8,12 @@ using Novelist.Infrastructure.App;
 
 namespace Novelist.IntegrationTests;
 
-public sealed class LegacyGoinkDataMigrationTests : IDisposable
+public sealed class LegacyDataMigrationTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "novelist-tests", Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public async Task InitializeCopiesLegacyGoinkDataImportsSqliteStoresAndWritesManifest()
+    public async Task InitializeCopiesLegacyDataImportsSqliteStoresAndWritesManifest()
     {
         var oldConfig = Path.Combine(_root, "old-config");
         var oldData = Path.Combine(_root, "old-data");
@@ -34,9 +34,9 @@ public sealed class LegacyGoinkDataMigrationTests : IDisposable
         {
             ConfigDirectory = newConfig,
             DefaultDataDirectory = newData,
-            EnableLegacyGoinkMigration = true,
-            LegacyGoinkConfigDirectory = oldConfig,
-            LegacyGoinkDataDirectory = oldData
+            EnableLegacyMigration = true,
+            LegacyConfigDirectory = oldConfig,
+            LegacyDataDirectory = oldData
         };
 
         await new FileSystemAppInitializationService(options).InitializeAsync(newData, CancellationToken.None);
@@ -54,6 +54,8 @@ public sealed class LegacyGoinkDataMigrationTests : IDisposable
         Assert.Equal(sourceHashBefore, await HashFileAsync(Path.Combine(oldData, "novels", "1", "chapters", "001.md")));
         Assert.Equal(skillHashBefore, await HashFileAsync(Path.Combine(oldConfig, "skills", "legacy-style.md")));
         Assert.True(File.Exists(Path.Combine(newData, "novels", "1", "chapters", "001.md")));
+        Assert.Equal("旧故事状态", await File.ReadAllTextAsync(Path.Combine(newData, "novels", "1", "novelist.md")));
+        Assert.False(File.Exists(Path.Combine(newData, "novels", "1", "story-state.md")));
         Assert.True(File.Exists(Path.Combine(newData, "skills", "legacy-style.md")));
 
         var settings = new FileSystemAppSettingsService(options);
@@ -133,7 +135,7 @@ public sealed class LegacyGoinkDataMigrationTests : IDisposable
         var novel = Path.Combine(oldData, "novels", "1");
         Directory.CreateDirectory(Path.Combine(novel, "chapters"));
         Directory.CreateDirectory(Path.Combine(novel, "plans"));
-        await File.WriteAllTextAsync(Path.Combine(novel, "goink.md"), "旧故事状态");
+        await File.WriteAllTextAsync(Path.Combine(novel, "story-state.md"), "旧故事状态");
         await File.WriteAllTextAsync(Path.Combine(novel, "chapters", "001.md"), "旧章节正文");
         await File.WriteAllTextAsync(Path.Combine(novel, "plans", "next.md"), "下一章旧计划");
 

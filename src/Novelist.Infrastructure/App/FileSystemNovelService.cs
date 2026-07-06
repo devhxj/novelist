@@ -340,10 +340,10 @@ public sealed class FileSystemNovelService : INovelService
         var workspace = await NovelWorkspacePathAsync(novelId, cancellationToken);
         Directory.CreateDirectory(workspace);
 
-        var goinkPath = SafeChildPath(workspace, "goink.md");
-        if (!File.Exists(goinkPath))
+        var novelistPath = SafeChildPath(workspace, "novelist.md");
+        if (!File.Exists(novelistPath))
         {
-            await File.WriteAllTextAsync(goinkPath, string.Empty, cancellationToken);
+            await File.WriteAllTextAsync(novelistPath, string.Empty, cancellationToken);
         }
 
         return workspace;

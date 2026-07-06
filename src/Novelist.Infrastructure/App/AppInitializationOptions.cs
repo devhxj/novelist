@@ -6,11 +6,11 @@ public sealed record AppInitializationOptions
 
     public string DefaultDataDirectory { get; init; } = DefaultDataDirectoryPath();
 
-    public bool EnableLegacyGoinkMigration { get; init; }
+    public bool EnableLegacyMigration { get; init; }
 
-    public string? LegacyGoinkConfigDirectory { get; init; }
+    public string? LegacyConfigDirectory { get; init; }
 
-    public string? LegacyGoinkDataDirectory { get; init; }
+    public string? LegacyDataDirectory { get; init; }
 
     private static string DefaultConfigDirectory()
     {

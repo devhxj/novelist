@@ -14,7 +14,7 @@ public static class DesktopBridgeComposition
     {
         ArgumentNullException.ThrowIfNull(window);
 
-        var options = appOptions ?? new AppInitializationOptions { EnableLegacyGoinkMigration = true };
+        var options = appOptions ?? new AppInitializationOptions { EnableLegacyMigration = true };
         var settingsService = new FileSystemAppSettingsService(options);
         var versionControl = new GitVersionControlService(options);
         var novelService = new FileSystemNovelService(options, settingsService, versionControl);

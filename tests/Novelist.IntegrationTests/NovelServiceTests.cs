@@ -26,7 +26,7 @@ public sealed class NovelServiceTests : IDisposable
         Assert.Equal(1, created.Id);
         Assert.Equal("长夜档案", created.Title);
         Assert.Equal("悬疑", created.Genre);
-        Assert.True(File.Exists(Path.Combine(options.DefaultDataDirectory, "novels", "1", "goink.md")));
+        Assert.True(File.Exists(Path.Combine(options.DefaultDataDirectory, "novels", "1", "novelist.md")));
 
         var updated = await service.UpdateNovelAsync(
             created.Id,
@@ -136,7 +136,7 @@ public sealed class NovelServiceTests : IDisposable
 
         var workspace = Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
         Assert.True(Directory.Exists(Path.Combine(workspace, ".git")) || File.Exists(Path.Combine(workspace, ".git")));
-        Assert.True(File.Exists(Path.Combine(workspace, "goink.md")));
+        Assert.True(File.Exists(Path.Combine(workspace, "novelist.md")));
         var log = await versionControl.GetLogAsync(novel.Id, null, 10, CancellationToken.None);
         Assert.Contains(log, commit => commit.Message == "initial commit");
     }

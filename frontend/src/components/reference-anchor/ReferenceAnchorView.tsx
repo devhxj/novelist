@@ -36,6 +36,9 @@ type AnchorForm = {
   sourcePath: string
   sourceKind: string
   licenseStatus: string
+  visibility: string
+  sourceTrust: string
+  userTags: string
 }
 
 type BlueprintForm = {
@@ -54,6 +57,7 @@ type MaterialSearchFilters = {
   techniqueTags: string
   narrativeDuties: string
   emotionTransitions: string
+  proseDuties: string
 }
 
 const EMPTY_ANCHOR_FORM: AnchorForm = {
@@ -62,6 +66,9 @@ const EMPTY_ANCHOR_FORM: AnchorForm = {
   sourcePath: '',
   sourceKind: 'markdown',
   licenseStatus: 'user_provided',
+  visibility: 'private',
+  sourceTrust: 'user_verified',
+  userTags: '',
 }
 
 const EMPTY_BLUEPRINT_FORM: BlueprintForm = {
@@ -80,6 +87,7 @@ const EMPTY_MATERIAL_FILTERS: MaterialSearchFilters = {
   techniqueTags: '',
   narrativeDuties: '',
   emotionTransitions: '',
+  proseDuties: '',
 }
 
 function sourceKindFromPath(path: string, fallback: string): string {
@@ -225,6 +233,9 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       source_path: anchorForm.sourcePath.trim(),
       source_kind: anchorForm.sourceKind,
       license_status: anchorForm.licenseStatus,
+      visibility: anchorForm.visibility,
+      source_trust: anchorForm.sourceTrust,
+      user_tags: lines(anchorForm.userTags),
     }), '参考锚点已创建')
     if (created) {
       setAnchorForm(EMPTY_ANCHOR_FORM)
@@ -264,6 +275,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       size: 10,
       narrative_duties: lines(materialFilters.narrativeDuties),
       emotion_transitions: lines(materialFilters.emotionTransitions),
+      prose_duties: lines(materialFilters.proseDuties),
     }))
     if (result) setMaterials(result.items ?? [])
   }
@@ -618,6 +630,25 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                     </select>
                   </Field>
                 </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="可见性">
+                    <select value={anchorForm.visibility} onChange={event => setAnchorForm(form => ({ ...form, visibility: event.target.value }))} className={inputClass}>
+                      <option value="private">private</option>
+                      <option value="workspace">workspace</option>
+                      <option value="restricted">restricted</option>
+                    </select>
+                  </Field>
+                  <Field label="来源可信度">
+                    <select value={anchorForm.sourceTrust} onChange={event => setAnchorForm(form => ({ ...form, sourceTrust: event.target.value }))} className={inputClass}>
+                      <option value="user_verified">user_verified</option>
+                      <option value="imported">imported</option>
+                      <option value="unverified">unverified</option>
+                    </select>
+                  </Field>
+                </div>
+                <Field label="用户标签">
+                  <input value={anchorForm.userTags} onChange={event => setAnchorForm(form => ({ ...form, userTags: event.target.value }))} className={inputClass} placeholder="分号分隔" />
+                </Field>
                 <button onClick={createAnchor} disabled={loading} className="inline-flex w-full items-center justify-center gap-1.5 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
                   <Plus className="h-3.5 w-3.5" />创建
                 </button>
@@ -649,6 +680,14 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-xs font-medium text-foreground">{anchor.title}</span>
                           <span className={`block text-[11px] ${statusTone(anchor.status)}`}>{anchor.status}</span>
+                          <span className="block truncate text-[11px] text-muted-foreground">{anchor.visibility} · {anchor.source_trust} · {anchor.owner_scope}</span>
+                          {anchor.user_tags.length > 0 && (
+                            <span className="mt-1 flex flex-wrap gap-1">
+                              {anchor.user_tags.slice(0, 3).map(tag => (
+                                <span key={tag} className="rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">{tag}</span>
+                              ))}
+                            </span>
+                          )}
                         </span>
                         <button onClick={() => rebuildAnchor(anchor.anchor_id)} className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-secondary" title="重建">
                           <RefreshCcw className="h-3.5 w-3.5" />
@@ -726,6 +765,9 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                       </Field>
                       <Field label="情绪转变">
                         <input value={materialFilters.emotionTransitions} onChange={event => setMaterialFilters(filters => ({ ...filters, emotionTransitions: event.target.value }))} className={inputClass} placeholder="neutral->pressure" />
+                      </Field>
+                      <Field label="文体职责">
+                        <input value={materialFilters.proseDuties} onChange={event => setMaterialFilters(filters => ({ ...filters, proseDuties: event.target.value }))} className={inputClass} placeholder="source_backed_detail；subtext" />
                       </Field>
                       <Field label="材料类型">
                         <input value={materialFilters.materialTypes} onChange={event => setMaterialFilters(filters => ({ ...filters, materialTypes: event.target.value }))} className={inputClass} placeholder="sentence；passage" />

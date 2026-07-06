@@ -193,7 +193,7 @@ workspace/global reference corpus
 
 **Verification:**
 
-- [ ] Migration tests from per-novel `reference_anchors` to shared corpus records or compatibility reads.
+- [ ] Migration tests from per-novel `reference_anchors` to shared corpus records or compatibility reads. Current coverage includes legacy schema rebuild to nullable workspace-corpus ownership plus an explicit owned-anchor promotion API; full automatic or bulk per-novel-to-shared corpus migration remains pending.
 - [x] Service tests proving workspace-corpus compatibility materials can be searched from different novels without duplicating source import.
 - [x] Tests proving per-novel forbidden facts and POV boundaries still reject globally sourced materials/candidates.
 - [x] Tests proving license/visibility policy filters corpus results before AI selection.
@@ -201,13 +201,18 @@ workspace/global reference corpus
 - [x] Binding/audit tests proving selected global material provenance is stored with blueprint hash and cannot be reused after blueprint edits.
 - [x] Feedback tests proving global tag feedback and per-novel usage feedback have different scopes.
 - [x] Bridge and agent tests proving `anchor_ids` are optional and policy-driven corpus retrieval is the default orchestration path.
-- [ ] Frontend smoke test for corpus management and default automatic material selection.
+- [ ] Frontend smoke test for corpus management and default automatic material selection. Current coverage asserts default automatic material selection and the create/list corpus-metadata thin slice; full corpus library management UI smoke remains pending.
 
 Targeted Phase 12 thin-slice checks completed:
 
 - [x] Orchestration binding can use `corpus_search_policy` include/exclude anchor filters and license-status filters when `anchor_ids` are omitted, while keeping the existing per-novel reference-anchor storage model.
 - [x] Reference material read paths now include `reference_anchors.novel_id = 0` workspace-corpus compatibility anchors for listing, search, adaptation, audit, tag correction, and per-novel feedback validation, while still excluding private anchors from other novels.
 - [x] Workspace-corpus compatibility anchors now carry `corpus_visibility`, `source_trust`, and `user_tags_json`; read paths include only `novel_id = 0 AND corpus_visibility = 'workspace'`, explicit `anchor_ids` cannot bypass private/restricted workspace visibility, and legacy `novel_id = 0` rows are promoted to workspace-visible once during schema migration.
+- [x] SQLite storage now allows `reference_anchors.novel_id IS NULL` for workspace-corpus ownership while retaining `novel_id = 0` compatibility reads and bridge output; migration rebuilds legacy `reference_anchors` tables when needed so nullable ownership can be used without losing source hashes, segment ids, material ids, feedback, or audit provenance.
+- [x] `ReferenceAnchorPayload` now exposes `owner_scope` and optional `owner_novel_id` so clients can distinguish per-novel anchors from workspace-corpus rows without relying on the legacy `novel_id = 0` sentinel.
+- [x] Creating an anchor with `visibility = "workspace"` now stores it directly as a nullable workspace-corpus record; another novel can search the same material ids immediately without a manual reparenting helper.
+- [x] `PromoteReferenceAnchorToWorkspaceCorpus` now provides an explicit bridge/service migration path from an owned per-novel anchor to nullable workspace-corpus ownership while preserving source hashes, source segment ids, material ids, build state, existing metadata when omitted, and per-novel feedback scope.
+- [x] Nullable workspace-corpus anchors can be searched from multiple novels without duplicating `reference_source_segments` or `reference_materials`, and private/restricted nullable corpus rows remain hidden even when clients pass explicit `anchor_ids`.
 - [x] A single workspace-corpus import can be searched from multiple novels without duplicating `reference_source_segments` or `reference_materials`; both novels see the same `material_id`, `source_segment_id`, and `source_hash` through the compatibility layer.
 - [x] A real SQLite orchestration run can omit explicit `anchor_ids`, resolve `novel_id = 0` workspace-corpus anchors through the default corpus policy, bind selected material links, generate audited candidates, and stop at final insertion without writing chapter prose.
 - [x] Desktop bridge JSON dispatch can omit the `anchor_ids` property entirely on `StartReferenceOrchestrationRun`; the persisted run normalizes to an empty anchor list, uses `corpus_search_policy` to select workspace-corpus material after blueprint approval, and stops at final insertion with selected material provenance.
@@ -220,10 +225,20 @@ Targeted Phase 12 thin-slice checks completed:
 - [x] Material binding now runs deterministic query-expansion fallback when the exact beat query returns no candidates, marks selected fallback links with a negative `low_confidence` score component, and explains the expanded-query weak match in `fit_explanation`.
 - [x] Draft generation and persisted draft re-audit now read selected material-link score components; candidates backed by `low_confidence` weak-match links fail draft audit with provenance risk and required fixes, which also routes orchestration through the existing high-risk draft-audit stop.
 - [x] Approved no-reuse continuation is limited to beats without `source_backed_detail_target`; source-backed beats still require material-fit review, selected current material links, and non-`no-reuse` provenance before draft generation, even if `no_reuse_reason` is present.
+- [x] The default orchestration UI now states that material retrieval uses story context against accessible workspace corpus materials, shows the active run's corpus search policy, and keeps selected-anchor restriction as an advanced override.
+- [x] The reference-anchor Playwright workflow now asserts default automatic material selection UI state and bridge payload behavior: `anchor_ids` is `null`, include/exclude anchor filters are empty, `corpus_search_policy.mode` is `story_context`, and no `SaveContent` call occurs.
+- [x] `SearchReferenceMaterials` now accepts `prose_duties` as a story-context input alongside `narrative_duties` and `emotion_transitions`; service, bridge, MAF, and frontend paths pass it through, search can filter and score by prose-duty fit, and returned material `score_components` expose `prose_duty`.
+- [x] The reference-anchor create/list UI now exposes corpus metadata fields for `visibility`, `source_trust`, and `user_tags`; the Playwright workflow asserts the `CreateReferenceAnchor` payload and list-row display for this metadata without treating it as the complete corpus library management UI.
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'WorkspaceCorpus|ReferenceOrchestrationRunUsesWorkspaceCorpus|ReferenceOrchestrationRunFiltersWorkspaceCorpus|ReferenceOrchestrationRunUsesCorpusSearchPolicy' -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'BridgeReferenceOrchestrationRunUsesWorkspaceCorpusWhenAnchorIdsAreOmitted|ReferenceOrchestrationRunUsesWorkspaceCorpusAnchorsWithoutExplicitAnchorIds' -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationAgentToolDefaultsToWorkspaceCorpusWithoutAnchorIds -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusMaterialsCanBeSearchedFromDifferentNovelsWithoutDuplicatingImport -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'WorkspaceCorpusMaterialsCanBeSearchedFromDifferentNovelsWithoutDuplicatingImport|NullableWorkspaceCorpusMaterialsCanBeSearchedFromDifferentNovelsWithoutDuplicatingImport|NullableWorkspaceCorpusVisibilityCannotBeBypassedWithExplicitAnchorIds|LegacyReferenceAnchorSchemaAllowsMigratingWorkspaceCorpusRowsToNullableOwnership|LegacyWorkspaceCorpusRowsMigrateToWorkspaceVisibleWithoutLosingMaterialIdentity|WorkspaceCorpusVisibilityFiltersAnchorsBeforeSearchAdaptAuditTagAndFeedback|AdaptAndAuditCanUseWorkspaceCorpusMaterialsWithoutReadingOtherNovelPrivateMaterials' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceAnchorServiceTests -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter CreateWorkspaceVisibleAnchorStoresAsSharedCorpusWithoutManualReparenting -v minimal`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'ReferenceAnchorContractTests|ReferenceAnchorHandlersRouteEveryMethodToServiceOperations|MafToolRegistryTests' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'PromotePerNovelAnchorToWorkspaceCorpusPreservesMaterialIdentityAndFeedbackScope|PromoteAnchorRequiresCurrentNovelOwnership|PromoteAnchorPreservesExistingCorpusMetadataWhenOptionalFieldsAreOmitted' -v minimal`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'PromoteReferenceAnchorToWorkspaceCorpusPayloadUsesStableSnakeCaseJsonNames|ReferenceAnchorHandlersRouteEveryMethodToServiceOperations|CompatibilityRegistryIncludesReferenceAnchorMethods' -v minimal`
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'ReferenceOrchestrationAgentToolStartsRunWithoutApprovingHumanDecisions|ReferenceAnchorContractTests|MafToolRegistryTests' -v minimal`
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'CreateToolsIncludesReferenceToolsOnlyWhenServicesAreConfigured|ReferenceMaterialToolInjectsNovelContext' -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter SearchMaterialsBoostsAcceptedMaterialFeedbackOnlyForCurrentNovel -v minimal`
@@ -237,6 +252,11 @@ Targeted Phase 12 thin-slice checks completed:
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusVisibilityFiltersAnchorsBeforeSearchAdaptAuditTagAndFeedback -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceMaterialToolCannotBypassWorkspaceCorpusVisibilityWithExplicitAnchorIds -v minimal`
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter ReferenceAnchorContractTests -v minimal`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'SearchReferenceMaterialsPayloadUsesStableNarrativeFilterJsonNames|MafToolRegistryTests|ReferenceAnchorHandlersRouteEveryMethodToServiceOperations' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'SearchMaterialsFiltersAndScoresByProseDutyStoryContext|SearchMaterialsFiltersByNarrativeDutyEmotionTransitionPovTechniqueAndType|SearchMaterialsMatchesSubtextDutyForObjectBasedExternalEvidence|SearchMaterialsMatchesSubtextDutyForRestrainedObjectActionEvidence|BindBlueprintMaterialsPreservesLexicalScoreForUnknownLicenseTruncatedPreviews|WorkspaceCorpusMaterialLinksAreBoundToCurrentBlueprintAnalysisContract' -v minimal`
+- [x] `npm --prefix frontend run test:reference-anchor`
+- [x] `npm --prefix frontend run build`
+- [x] `npm --prefix frontend run lint`
 
 **Files likely touched:**
 

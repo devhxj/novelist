@@ -50,4 +50,8 @@ public interface IReferenceAnchorService
         long novelId,
         long anchorId,
         CancellationToken cancellationToken);
+
+    ValueTask<ReferenceAnchorPayload> PromoteAnchorToWorkspaceCorpusAsync(
+        PromoteReferenceAnchorToWorkspaceCorpusPayload input,
+        CancellationToken cancellationToken);
 }

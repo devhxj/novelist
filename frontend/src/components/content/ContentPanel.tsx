@@ -134,7 +134,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'V') {
         const tab = tabs.find(t => t.id === activeTabId)
-        if (tab?.type === 'file' && (isSkillPath(tab.path) || tab.path === 'goink.md')) {
+        if (tab?.type === 'file' && (isSkillPath(tab.path) || tab.path === 'novelist.md')) {
           e.preventDefault()
           const newMode = tab.viewMode === 'preview' ? 'content' : 'preview'
           updateTab(tab.id, { viewMode: newMode })
@@ -155,7 +155,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
 
     // 切换到大纲时，如果未加载（或上次加载时文件不存在）则重新加载
     if (mode === 'outline' && tab.type === 'file' && !tab.outlineContent) {
-      const derivedOutline = isContentPath(tab.path) && tab.path !== 'goink.md'
+      const derivedOutline = isContentPath(tab.path) && tab.path !== 'novelist.md'
         ? outlinePath(parseInt(tab.path.replace(/.*\//, '').replace('.md', '')))
         : null
       if (derivedOutline) {
@@ -295,7 +295,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
           needRefresh = true
           refreshKey = 'content'
         } else {
-          const derivedOutline: string | null = isContentPath(tab.path) && tab.path !== 'goink.md'
+          const derivedOutline: string | null = isContentPath(tab.path) && tab.path !== 'novelist.md'
             ? outlinePath(parseInt(tab.path.replace(/.*\//, '').replace('.md', '')))
             : null
           if (derivedOutline && derivedOutline === eventPath) {
@@ -324,7 +324,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       const num = parseInt(p.replace('chapters/', '').replace('.md', ''))
       return `第${num}章`
     }
-    if (p === 'goink.md') return '故事状态'
+    if (p === 'novelist.md') return '故事状态'
     if (isSkillPath(p)) return `技能: ${skillNameFromPath(p)}`
     return p
   }
@@ -550,7 +550,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       <div className="flex items-center justify-between px-4 py-2 border-b shrink-0 select-none">
         <span className="text-sm font-medium truncate">{activeTab.title}</span>
         <div className="flex items-center gap-0.5 shrink-0">
-          {activeTab.path === 'goink.md' ? (
+          {activeTab.path === 'novelist.md' ? (
             <button
               onClick={() => updateTab(activeTab.id, { viewMode: viewMode === 'preview' ? 'content' : 'preview' })}
               className={tabBtnClass(viewMode === 'preview')}

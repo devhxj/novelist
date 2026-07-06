@@ -114,6 +114,12 @@ public static class ReferenceSourceTrustLevels
     public static IReadOnlyList<string> All { get; } = [UserVerified, Imported, Unverified];
 }
 
+public static class ReferenceAnchorOwnerScopes
+{
+    public const string Novel = "novel";
+    public const string WorkspaceCorpus = "workspace_corpus";
+}
+
 public sealed record CreateReferenceAnchorPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("title")] string Title,
@@ -124,6 +130,16 @@ public sealed record CreateReferenceAnchorPayload(
     [property: JsonPropertyName("visibility")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? Visibility = null,
+    [property: JsonPropertyName("source_trust")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? SourceTrust = null,
+    [property: JsonPropertyName("user_tags")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? UserTags = null);
+
+public sealed record PromoteReferenceAnchorToWorkspaceCorpusPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
     [property: JsonPropertyName("source_trust")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? SourceTrust = null,
@@ -148,6 +164,15 @@ public sealed record ReferenceAnchorPayload(
     [property: JsonPropertyName("source_trust")] string SourceTrust,
     [property: JsonPropertyName("user_tags")] IReadOnlyList<string> UserTags)
 {
+    [JsonPropertyName("owner_scope")]
+    public string OwnerScope { get; init; } = NovelId == 0
+        ? ReferenceAnchorOwnerScopes.WorkspaceCorpus
+        : ReferenceAnchorOwnerScopes.Novel;
+
+    [JsonPropertyName("owner_novel_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? OwnerNovelId { get; init; } = NovelId == 0 ? null : NovelId;
+
     public ReferenceAnchorPayload(
         long anchorId,
         long novelId,
@@ -251,7 +276,10 @@ public sealed record SearchReferenceMaterialsPayload(
     IReadOnlyList<string>? NarrativeDuties = null,
     [property: JsonPropertyName("emotion_transitions")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<string>? EmotionTransitions = null);
+    IReadOnlyList<string>? EmotionTransitions = null,
+    [property: JsonPropertyName("prose_duties")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? ProseDuties = null);
 
 public sealed record ReferenceSlotValuePayload(
     [property: JsonPropertyName("slot_name")] string SlotName,

@@ -41,6 +41,8 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
             CancellationToken.None);
 
         Assert.Equal(novel.Id, anchor.NovelId);
+        Assert.Equal(ReferenceAnchorOwnerScopes.Novel, anchor.OwnerScope);
+        Assert.Equal(novel.Id, anchor.OwnerNovelId);
         Assert.Equal("雨夜参考", anchor.Title);
         Assert.Equal("作者", anchor.Author);
         Assert.Equal(Path.GetFullPath(sourcePath), anchor.SourcePath);
@@ -531,15 +533,384 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.Equal(firstMaterial.MaterialId, secondMaterial.MaterialId);
         Assert.Equal(firstMaterial.SourceSegmentId, secondMaterial.SourceSegmentId);
         Assert.Equal(firstMaterial.SourceHash, secondMaterial.SourceHash);
-        Assert.Equal(0, (await service.GetAnchorsAsync(firstNovel.Id, CancellationToken.None))
-            .Single(item => item.AnchorId == anchor.AnchorId).NovelId);
-        Assert.Equal(0, (await service.GetAnchorsAsync(secondNovel.Id, CancellationToken.None))
-            .Single(item => item.AnchorId == anchor.AnchorId).NovelId);
+        var firstAnchorView = (await service.GetAnchorsAsync(firstNovel.Id, CancellationToken.None))
+            .Single(item => item.AnchorId == anchor.AnchorId);
+        var secondAnchorView = (await service.GetAnchorsAsync(secondNovel.Id, CancellationToken.None))
+            .Single(item => item.AnchorId == anchor.AnchorId);
+        Assert.Equal(0, firstAnchorView.NovelId);
+        Assert.Equal(ReferenceAnchorOwnerScopes.WorkspaceCorpus, firstAnchorView.OwnerScope);
+        Assert.Null(firstAnchorView.OwnerNovelId);
+        Assert.Equal(0, secondAnchorView.NovelId);
+        Assert.Equal(ReferenceAnchorOwnerScopes.WorkspaceCorpus, secondAnchorView.OwnerScope);
+        Assert.Null(secondAnchorView.OwnerNovelId);
 
         var currentMaterials = await ReadMaterialRowsAsync(options, anchor.AnchorId);
         var currentSegments = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
         Assert.Equal(importedMaterials.Select(item => item.MaterialId), currentMaterials.Select(item => item.MaterialId));
         Assert.Equal(importedSegments.Select(item => item.SegmentId), currentSegments.Select(item => item.SegmentId));
+    }
+
+    [Fact]
+    public async Task CreateWorkspaceVisibleAnchorStoresAsSharedCorpusWithoutManualReparenting()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var sourceNovel = await novels.CreateNovelAsync(new CreateNovelPayload("创建共享语料来源", "", ""), CancellationToken.None);
+        var consumingNovel = await novels.CreateNovelAsync(new CreateNovelPayload("创建共享语料消费", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "create-workspace-corpus.md",
+            """
+            # 第一章
+
+            雨声压低街道，主角在门口停住。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(
+                sourceNovel.Id,
+                "直接创建共享参考",
+                null,
+                sourcePath,
+                "markdown",
+                "user_provided",
+                Visibility: ReferenceCorpusVisibilities.Workspace,
+                SourceTrust: ReferenceSourceTrustLevels.UserVerified,
+                UserTags: ["shared"]),
+            CancellationToken.None);
+        var sourceView = Assert.Single(await service.GetAnchorsAsync(sourceNovel.Id, CancellationToken.None), item => item.AnchorId == anchor.AnchorId);
+        var consumingView = Assert.Single(await service.GetAnchorsAsync(consumingNovel.Id, CancellationToken.None), item => item.AnchorId == anchor.AnchorId);
+
+        Assert.Equal(0, anchor.NovelId);
+        Assert.Equal(ReferenceAnchorOwnerScopes.WorkspaceCorpus, anchor.OwnerScope);
+        Assert.Null(anchor.OwnerNovelId);
+        Assert.Equal(ReferenceAnchorOwnerScopes.WorkspaceCorpus, sourceView.OwnerScope);
+        Assert.Equal(ReferenceAnchorOwnerScopes.WorkspaceCorpus, consumingView.OwnerScope);
+        Assert.Equal(["shared"], anchor.UserTags);
+
+        var search = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                consumingNovel.Id,
+                AnchorIds: [],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        var material = Assert.Single(search.Items, item => item.AnchorId == anchor.AnchorId);
+        Assert.Equal(anchor.AnchorId, material.AnchorId);
+    }
+
+    [Fact]
+    public async Task PromotePerNovelAnchorToWorkspaceCorpusPreservesMaterialIdentityAndFeedbackScope()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var sourceNovel = await novels.CreateNovelAsync(new CreateNovelPayload("提升共享语料来源", "", ""), CancellationToken.None);
+        var consumingNovel = await novels.CreateNovelAsync(new CreateNovelPayload("提升共享语料消费", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "promote-workspace-corpus.md",
+            """
+            # 第一章
+
+            雨声压低街道，主角在门口停住。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(sourceNovel.Id, "待提升共享参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var importedMaterials = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        var importedSegments = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
+        var sourceMaterial = Assert.Single((await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                sourceNovel.Id,
+                AnchorIds: [anchor.AnchorId],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None)).Items);
+        await service.RecordUserFeedbackAsync(
+            new RecordReferenceUserFeedbackPayload(
+                sourceNovel.Id,
+                ReferenceFeedbackTargetTypes.Material,
+                sourceMaterial.MaterialId,
+                ReferenceFeedbackDecisions.Accepted,
+                sourceMaterial.MaterialId,
+                CandidateId: string.Empty,
+                BlueprintId: 0,
+                BeatId: string.Empty,
+                FeedbackTags: ["source_novel_usage"],
+                Note: "source novel accepted the material before promotion",
+                EditedText: string.Empty,
+                Origin: "user"),
+            CancellationToken.None);
+
+        var hiddenBeforePromotion = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                consumingNovel.Id,
+                AnchorIds: [anchor.AnchorId],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        Assert.Empty(hiddenBeforePromotion.Items);
+
+        var promoted = await service.PromoteAnchorToWorkspaceCorpusAsync(
+            new PromoteReferenceAnchorToWorkspaceCorpusPayload(
+                sourceNovel.Id,
+                anchor.AnchorId,
+                SourceTrust: ReferenceSourceTrustLevels.Imported,
+                UserTags: ["migrated", "shared"]),
+            CancellationToken.None);
+
+        Assert.Equal(0, promoted.NovelId);
+        Assert.Equal(ReferenceCorpusVisibilities.Workspace, promoted.Visibility);
+        Assert.Equal(ReferenceSourceTrustLevels.Imported, promoted.SourceTrust);
+        Assert.Equal(["migrated", "shared"], promoted.UserTags);
+        Assert.Equal(ReferenceAnchorOwnerScopes.WorkspaceCorpus, promoted.OwnerScope);
+        Assert.Null(promoted.OwnerNovelId);
+
+        var consumingSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                consumingNovel.Id,
+                AnchorIds: [anchor.AnchorId],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        var consumingMaterial = Assert.Single(consumingSearch.Items, item => item.AnchorId == anchor.AnchorId);
+        Assert.Equal(sourceMaterial.MaterialId, consumingMaterial.MaterialId);
+        Assert.Equal(sourceMaterial.SourceSegmentId, consumingMaterial.SourceSegmentId);
+        Assert.Equal(sourceMaterial.SourceHash, consumingMaterial.SourceHash);
+
+        var currentMaterials = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        var currentSegments = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
+        Assert.Equal(importedMaterials.Select(item => item.MaterialId), currentMaterials.Select(item => item.MaterialId));
+        Assert.Equal(importedSegments.Select(item => item.SegmentId), currentSegments.Select(item => item.SegmentId));
+
+        var sourceFeedback = await service.GetUserFeedbackAsync(
+            new GetReferenceUserFeedbackPayload(
+                sourceNovel.Id,
+                ReferenceFeedbackTargetTypes.Material,
+                sourceMaterial.MaterialId,
+                10),
+            CancellationToken.None);
+        var feedback = Assert.Single(sourceFeedback);
+        Assert.Equal(sourceNovel.Id, feedback.NovelId);
+        Assert.Equal(sourceMaterial.MaterialId, feedback.MaterialId);
+
+        var consumingFeedback = await service.GetUserFeedbackAsync(
+            new GetReferenceUserFeedbackPayload(
+                consumingNovel.Id,
+                ReferenceFeedbackTargetTypes.Material,
+                sourceMaterial.MaterialId,
+                10),
+            CancellationToken.None);
+        Assert.Empty(consumingFeedback);
+    }
+
+    [Fact]
+    public async Task PromoteAnchorRequiresCurrentNovelOwnership()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var ownerNovel = await novels.CreateNovelAsync(new CreateNovelPayload("提升所有者", "", ""), CancellationToken.None);
+        var otherNovel = await novels.CreateNovelAsync(new CreateNovelPayload("提升非所有者", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("private-promote-boundary.md", "只有所有者可以提升。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(ownerNovel.Id, "私有边界参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.PromoteAnchorToWorkspaceCorpusAsync(
+                new PromoteReferenceAnchorToWorkspaceCorpusPayload(otherNovel.Id, anchor.AnchorId),
+                CancellationToken.None));
+
+        var otherSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                otherNovel.Id,
+                AnchorIds: [anchor.AnchorId],
+                Query: "所有者",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        Assert.Empty(otherSearch.Items);
+    }
+
+    [Fact]
+    public async Task PromoteAnchorPreservesExistingCorpusMetadataWhenOptionalFieldsAreOmitted()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("提升保留元数据", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("promote-preserve-metadata.md", "雨声压住门外的街。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(
+                novel.Id,
+                "保留元数据参考",
+                null,
+                sourcePath,
+                "markdown",
+                "user_provided",
+                Visibility: ReferenceCorpusVisibilities.Private,
+                SourceTrust: ReferenceSourceTrustLevels.Imported,
+                UserTags: ["seed", "verified"]),
+            CancellationToken.None);
+
+        var promoted = await service.PromoteAnchorToWorkspaceCorpusAsync(
+            new PromoteReferenceAnchorToWorkspaceCorpusPayload(novel.Id, anchor.AnchorId),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorOwnerScopes.WorkspaceCorpus, promoted.OwnerScope);
+        Assert.Equal(ReferenceSourceTrustLevels.Imported, promoted.SourceTrust);
+        Assert.Equal(["seed", "verified"], promoted.UserTags);
+    }
+
+    [Fact]
+    public async Task NullableWorkspaceCorpusMaterialsCanBeSearchedFromDifferentNovelsWithoutDuplicatingImport()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var firstNovel = await novels.CreateNovelAsync(new CreateNovelPayload("空所有者共享语料小说甲", "", ""), CancellationToken.None);
+        var secondNovel = await novels.CreateNovelAsync(new CreateNovelPayload("空所有者共享语料小说乙", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "nullable-workspace-corpus.md",
+            """
+            # 第一章
+
+            雨声压低街道，主角在门口停住。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(firstNovel.Id, "空所有者共享参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        await MarkAnchorAsNullableWorkspaceCorpusAsync(options, anchor.AnchorId);
+        var importedMaterials = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        var importedSegments = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
+
+        var firstSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                firstNovel.Id,
+                AnchorIds: [],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        var secondSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                secondNovel.Id,
+                AnchorIds: [],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        var firstMaterial = Assert.Single(firstSearch.Items, item => item.AnchorId == anchor.AnchorId);
+        var secondMaterial = Assert.Single(secondSearch.Items, item => item.AnchorId == anchor.AnchorId);
+        Assert.Equal(firstMaterial.MaterialId, secondMaterial.MaterialId);
+        Assert.Equal(firstMaterial.SourceSegmentId, secondMaterial.SourceSegmentId);
+        Assert.Equal(firstMaterial.SourceHash, secondMaterial.SourceHash);
+        var firstAnchorView = (await service.GetAnchorsAsync(firstNovel.Id, CancellationToken.None))
+            .Single(item => item.AnchorId == anchor.AnchorId);
+        var secondAnchorView = (await service.GetAnchorsAsync(secondNovel.Id, CancellationToken.None))
+            .Single(item => item.AnchorId == anchor.AnchorId);
+        Assert.Equal(0, firstAnchorView.NovelId);
+        Assert.Equal(ReferenceAnchorOwnerScopes.WorkspaceCorpus, firstAnchorView.OwnerScope);
+        Assert.Null(firstAnchorView.OwnerNovelId);
+        Assert.Equal(0, secondAnchorView.NovelId);
+        Assert.Equal(ReferenceAnchorOwnerScopes.WorkspaceCorpus, secondAnchorView.OwnerScope);
+        Assert.Null(secondAnchorView.OwnerNovelId);
+
+        var status = await service.GetBuildStatusAsync(secondNovel.Id, anchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal(0, status.NovelId);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, status.Status);
+        var currentMaterials = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        var currentSegments = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
+        Assert.Equal(importedMaterials.Select(item => item.MaterialId), currentMaterials.Select(item => item.MaterialId));
+        Assert.Equal(importedSegments.Select(item => item.SegmentId), currentSegments.Select(item => item.SegmentId));
+    }
+
+    [Fact]
+    public async Task NullableWorkspaceCorpusVisibilityCannotBeBypassedWithExplicitAnchorIds()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var targetNovel = await novels.CreateNovelAsync(new CreateNovelPayload("空所有者可见性目标", "", ""), CancellationToken.None);
+        var visibleSourcePath = CreateSourceFile("nullable-workspace-visible.md", "他握住{{object}}，把话咽回去，只听雨声压住门外的街。");
+        var privateSourcePath = CreateSourceFile("nullable-workspace-private.md", "他握住{{object}}，提到了不应泄露的私有线索。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var visibleAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(targetNovel.Id, "空所有者可见参考", null, visibleSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var privateAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(targetNovel.Id, "空所有者私有参考", null, privateSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        await MarkAnchorAsNullableWorkspaceCorpusAsync(options, visibleAnchor.AnchorId, ReferenceCorpusVisibilities.Workspace);
+        await MarkAnchorAsNullableWorkspaceCorpusAsync(options, privateAnchor.AnchorId, ReferenceCorpusVisibilities.Private);
+
+        var anchors = await service.GetAnchorsAsync(targetNovel.Id, CancellationToken.None);
+        Assert.Contains(anchors, item => item.AnchorId == visibleAnchor.AnchorId && item.NovelId == 0);
+        Assert.DoesNotContain(anchors, item => item.AnchorId == privateAnchor.AnchorId);
+
+        var explicitPrivateSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                targetNovel.Id,
+                AnchorIds: [privateAnchor.AnchorId],
+                Query: "{{object}}",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        Assert.Empty(explicitPrivateSearch.Items);
+        Assert.Null(await service.GetBuildStatusAsync(targetNovel.Id, privateAnchor.AnchorId, CancellationToken.None));
     }
 
     [Fact]
@@ -725,6 +1096,8 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
 
         var anchor = Assert.Single(anchors, item => item.AnchorId == 7001);
         Assert.Equal(0, anchor.NovelId);
+        Assert.Equal(ReferenceAnchorOwnerScopes.WorkspaceCorpus, anchor.OwnerScope);
+        Assert.Null(anchor.OwnerNovelId);
         Assert.Equal("legacy-source-hash", anchor.SourceFileHash);
         Assert.Equal(ReferenceCorpusVisibilities.Workspace, anchor.Visibility);
         Assert.Equal(ReferenceSourceTrustLevels.UserVerified, anchor.SourceTrust);
@@ -751,6 +1124,44 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         var material = Assert.Single(materials.Items);
         Assert.Equal("7001:material:sentence:0:legacy", material.MaterialId);
         Assert.Equal(7001, material.AnchorId);
+        Assert.Equal("7001:0:sentence:0:legacy", material.SourceSegmentId);
+        Assert.Equal("legacy-material-hash", material.SourceHash);
+    }
+
+    [Fact]
+    public async Task LegacyReferenceAnchorSchemaAllowsMigratingWorkspaceCorpusRowsToNullableOwnership()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var targetNovel = await novels.CreateNovelAsync(new CreateNovelPayload("旧 schema 空所有者迁移目标", "", ""), CancellationToken.None);
+        await CreateLegacyWorkspaceCorpusAnchorAsync(options);
+        var service = new SqliteReferenceAnchorService(options, novels);
+
+        _ = await service.GetAnchorsAsync(targetNovel.Id, CancellationToken.None);
+        await MarkAnchorAsNullableWorkspaceCorpusAsync(options, 7001);
+        var anchors = await service.GetAnchorsAsync(targetNovel.Id, CancellationToken.None);
+
+        var anchor = Assert.Single(anchors, item => item.AnchorId == 7001);
+        Assert.Equal(0, anchor.NovelId);
+        Assert.Equal(ReferenceAnchorOwnerScopes.WorkspaceCorpus, anchor.OwnerScope);
+        Assert.Null(anchor.OwnerNovelId);
+        Assert.Equal(ReferenceCorpusVisibilities.Workspace, anchor.Visibility);
+        var materials = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                targetNovel.Id,
+                AnchorIds: [],
+                Query: "旧共享语料",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        var material = Assert.Single(materials.Items);
+        Assert.Equal("7001:material:sentence:0:legacy", material.MaterialId);
         Assert.Equal("7001:0:sentence:0:legacy", material.SourceSegmentId);
         Assert.Equal("legacy-material-hash", material.SourceHash);
     }
@@ -1245,6 +1656,52 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.NotNull(material.ScoreComponents);
         Assert.True(material.ScoreComponents["narrative_duty"] > 0);
         Assert.True(material.ScoreComponents["emotion_transition"] > 0);
+    }
+
+    [Fact]
+    public async Task SearchMaterialsFiltersAndScoresByProseDutyStoryContext()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("文体职责搜索测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "search-prose-duty.md",
+            """
+            # 第一章
+
+            雨声压低了街面。
+
+            她只把杯子推远。
+
+            她说：不用。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "文体职责参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        var result = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                Page: 1,
+                Size: 10,
+                ProseDuties: ["source_backed_detail"]),
+            CancellationToken.None);
+
+        var material = Assert.Single(result.Items);
+        Assert.Equal("雨声压低了街面。", material.Text);
+        Assert.Equal("environment", material.FunctionTag);
+        Assert.Equal("sensory_detail", material.TechniqueTag);
+        Assert.NotNull(material.ScoreComponents);
+        Assert.True(material.ScoreComponents["prose_duty"] > 0);
     }
 
     [Fact]
@@ -2673,6 +3130,31 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         command.CommandText = """
             UPDATE reference_anchors
             SET novel_id = 0,
+                corpus_visibility = $corpus_visibility
+            WHERE anchor_id = $anchor_id;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        command.Parameters.AddWithValue("$corpus_visibility", visibility);
+        var updated = await command.ExecuteNonQueryAsync();
+        Assert.Equal(1, updated);
+    }
+
+    private static async ValueTask MarkAnchorAsNullableWorkspaceCorpusAsync(
+        AppInitializationOptions options,
+        long anchorId,
+        string visibility = ReferenceCorpusVisibilities.Workspace)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_anchors
+            SET novel_id = NULL,
                 corpus_visibility = $corpus_visibility
             WHERE anchor_id = $anchor_id;
             """;

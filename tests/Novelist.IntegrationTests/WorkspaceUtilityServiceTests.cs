@@ -68,7 +68,7 @@ public sealed class WorkspaceUtilityServiceTests : IDisposable
             SkillDocument("voice", "用户级声线", "auto"),
             CancellationToken.None);
 
-        var userSkill = await content.GetContentAsync(novel.Id, "~/.goink/skills/voice.md", CancellationToken.None);
+        var userSkill = await content.GetContentAsync(novel.Id, "~/.novelist/skills/voice.md", CancellationToken.None);
         Assert.Contains("用户级声线", userSkill);
 
         var builtinSkill = await content.GetContentAsync(novel.Id, "/builtin/skills/next.md", CancellationToken.None);

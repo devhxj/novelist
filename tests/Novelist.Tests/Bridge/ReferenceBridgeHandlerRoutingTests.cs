@@ -20,9 +20,17 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             "Author",
             @"D:\reference.md",
             "markdown",
-            "user_provided"));
+            "user_provided",
+            Visibility: ReferenceCorpusVisibilities.Workspace,
+            SourceTrust: ReferenceSourceTrustLevels.Imported,
+            UserTags: ["rain", "threshold"]));
         await AssertOkAsync(dispatcher, "GetReferenceAnchors", 42L);
         await AssertOkAsync(dispatcher, "DeleteReferenceAnchor", 42L, 99L);
+        await AssertOkAsync(dispatcher, "PromoteReferenceAnchorToWorkspaceCorpus", new PromoteReferenceAnchorToWorkspaceCorpusPayload(
+            42,
+            99,
+            SourceTrust: ReferenceSourceTrustLevels.Imported,
+            UserTags: ["migrated", "shared"]));
         await AssertOkAsync(dispatcher, "RebuildReferenceAnchor", 42L, 99L);
         await AssertOkAsync(dispatcher, "GetReferenceAnchorBuildStatus", 42L, 99L);
         await AssertOkAsync(dispatcher, "SearchReferenceMaterials", new SearchReferenceMaterialsPayload(
@@ -35,7 +43,8 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             ["close"],
             ["afterbeat"],
             2,
-            10));
+            10,
+            ProseDuties: ["source_backed_detail"]));
         await AssertOkAsync(dispatcher, "UpdateReferenceMaterialTags", new UpdateReferenceMaterialTagsPayload(
             42,
             "material-1",
@@ -79,12 +88,13 @@ public sealed class ReferenceBridgeHandlerRoutingTests
 
         Assert.Equal(
             [
-                @"CreateAnchor:42:Anchor:Author:D:\reference.md:markdown:user_provided",
+                @"CreateAnchor:42:Anchor:Author:D:\reference.md:markdown:user_provided:workspace:imported:rain,threshold",
                 "GetAnchors:42",
                 "DeleteAnchor:42:99",
+                "PromoteAnchorToWorkspaceCorpus:42:99:imported:migrated,shared",
                 "RebuildAnchor:42:99",
                 "GetBuildStatus:42:99",
-                "SearchMaterials:42:99:fog:passage:unease:interiority:close:afterbeat:2:10",
+                "SearchMaterials:42:99:fog:passage:unease:interiority:close:afterbeat:2:10:source_backed_detail",
                 "UpdateMaterialTags:42:material-1:interiority:unease:threshold:close:afterbeat:user:verified",
                 "AdaptMaterial:42:material-1:object=door:L2:door exists",
                 "AuditCandidate:42:material-1:candidate text:L2:door exists",
@@ -258,7 +268,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 throw exception;
             }
 
-            Calls.Add($"CreateAnchor:{input.NovelId}:{input.Title}:{input.Author}:{input.SourcePath}:{input.SourceKind}:{input.LicenseStatus}");
+            Calls.Add($"CreateAnchor:{input.NovelId}:{input.Title}:{input.Author}:{input.SourcePath}:{input.SourceKind}:{input.LicenseStatus}:{input.Visibility}:{input.SourceTrust}:{string.Join(",", input.UserTags ?? [])}");
             return ValueTask.FromResult<ReferenceAnchorPayload>(null!);
         }
 
@@ -280,6 +290,15 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"DeleteAnchor:{novelId}:{anchorId}");
             return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<ReferenceAnchorPayload> PromoteAnchorToWorkspaceCorpusAsync(
+            PromoteReferenceAnchorToWorkspaceCorpusPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"PromoteAnchorToWorkspaceCorpus:{input.NovelId}:{input.AnchorId}:{input.SourceTrust}:{string.Join(",", input.UserTags ?? [])}");
+            return ValueTask.FromResult<ReferenceAnchorPayload>(null!);
         }
 
         public ValueTask<ReferenceAnchorBuildStatusPayload> RebuildAnchorAsync(
@@ -308,7 +327,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add(
-                $"SearchMaterials:{input.NovelId}:{string.Join(',', input.AnchorIds)}:{input.Query}:{string.Join(',', input.MaterialTypes)}:{string.Join(',', input.EmotionTags)}:{string.Join(',', input.FunctionTags)}:{string.Join(',', input.PovTags)}:{string.Join(',', input.TechniqueTags)}:{input.Page}:{input.Size}");
+                $"SearchMaterials:{input.NovelId}:{string.Join(',', input.AnchorIds)}:{input.Query}:{string.Join(',', input.MaterialTypes)}:{string.Join(',', input.EmotionTags)}:{string.Join(',', input.FunctionTags)}:{string.Join(',', input.PovTags)}:{string.Join(',', input.TechniqueTags)}:{input.Page}:{input.Size}:{string.Join(',', input.ProseDuties ?? [])}");
             return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialPayload>([], 0, input.Page, input.Size, 0));
         }
 

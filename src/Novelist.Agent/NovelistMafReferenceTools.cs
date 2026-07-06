@@ -94,6 +94,8 @@ public sealed partial class NovelistMafToolRegistry
             string[]? narrative_duties = null,
             [Description("情绪转变过滤，例如 controlled->heightened；匹配材料 emotion_tag")]
             string[]? emotion_transitions = null,
+            [Description("文体/执行职责过滤，例如 source_backed_detail / external_evidence / subtext / delayed_reaction")]
+            string[]? prose_duties = null,
             [Description("页码，默认 1")]
             int page = 0,
             [Description("每页数量，默认 10，最大 20")]
@@ -113,7 +115,8 @@ public sealed partial class NovelistMafToolRegistry
                     page <= 0 ? 1 : page,
                     Math.Clamp(size <= 0 ? 10 : size, 1, 20),
                     narrative_duties,
-                    emotion_transitions),
+                    emotion_transitions,
+                    prose_duties),
                 cancellationToken);
         }
 

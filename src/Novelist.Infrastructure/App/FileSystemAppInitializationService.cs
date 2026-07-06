@@ -13,15 +13,15 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
     };
 
     private readonly AppInitializationOptions _options;
-    private readonly ILegacyGoinkDataMigrationService? _legacyMigration;
+    private readonly ILegacyDataMigrationService? _legacyMigration;
 
     public FileSystemAppInitializationService(
         AppInitializationOptions? options = null,
-        ILegacyGoinkDataMigrationService? legacyMigration = null)
+        ILegacyDataMigrationService? legacyMigration = null)
     {
         _options = options ?? new AppInitializationOptions();
         _legacyMigration = legacyMigration ??
-            (_options.EnableLegacyGoinkMigration ? new LegacyGoinkDataMigrationService(_options) : null);
+            (_options.EnableLegacyMigration ? new LegacyDataMigrationService(_options) : null);
     }
 
     public async ValueTask<bool> IsInitializedAsync(CancellationToken cancellationToken)

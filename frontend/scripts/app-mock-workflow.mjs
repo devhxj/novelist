@@ -167,7 +167,7 @@ async function verifyShellNavigation(page) {
 
   await clickActivity(page, '章节')
   await expectVisible(page.getByText('章节 (2)'), 'chapter count')
-  await expectVisible(page.getByRole('button', { name: /故事状态/ }), 'goink entry')
+  await expectVisible(page.getByRole('button', { name: /故事状态/ }), 'novelist entry')
   await ensureChapterBlockExpanded(page)
   await chapterButton(page, '雨夜线索').click()
   await expectVisible(page.getByText('第1章 雨夜线索').first(), 'editor tab from shell navigation')
@@ -1324,7 +1324,7 @@ function installConfigurableAppMockBridge(options = {}) {
     savedAvatars: [],
     createdReferenceAnchors: [],
     contentByPath: {
-      'goink.md': '## 当前状态\n林岚正在调查旧城门。',
+      'novelist.md': '## 当前状态\n林岚正在调查旧城门。',
       'chapters/1.md': '林岚在雨夜旧宅门前停住。\n\n她看见桌上的水痕。',
       'chapters/2.md': '旧城门下，暗号被雨水冲淡。',
       'skills/rhythm.md': '---\nname: 节奏控制\n---\n保持停顿和动作之间的张力。',
@@ -1348,7 +1348,7 @@ function installConfigurableAppMockBridge(options = {}) {
     skills: options.skills ?? defaultSkills,
   }
 
-  window.localStorage.removeItem('goink_tabs_all')
+  window.localStorage.removeItem('novelist_tabs_all')
   window.localStorage.setItem('theme', 'light')
   window.confirm = () => Boolean(options.confirmResult)
 

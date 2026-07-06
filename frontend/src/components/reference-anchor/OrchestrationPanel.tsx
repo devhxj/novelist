@@ -99,6 +99,24 @@ function canResumeDecision(run: reference.OrchestrationRun, decisionType: string
   return true
 }
 
+function formatLicensePolicy(policy: reference.CorpusSearchPolicy): string {
+  return policy.license_statuses.length > 0 ? policy.license_statuses.join(', ') : '不限授权'
+}
+
+function formatAnchorPolicy(run: reference.OrchestrationRun): string {
+  const includeCount = run.corpus_search_policy.include_anchor_ids.length
+  const excludeCount = run.corpus_search_policy.exclude_anchor_ids.length
+  if (run.anchor_ids.length === 0 && includeCount === 0 && excludeCount === 0) {
+    return '未限制到已选锚点'
+  }
+
+  const parts = []
+  if (run.anchor_ids.length > 0) parts.push(`显式锚点 ${run.anchor_ids.length}`)
+  if (includeCount > 0) parts.push(`包含 ${includeCount}`)
+  if (excludeCount > 0) parts.push(`排除 ${excludeCount}`)
+  return parts.join('；') || '未限制到已选锚点'
+}
+
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
@@ -145,6 +163,9 @@ export function OrchestrationPanel({
           </div>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             先确认来源和事实边界，再自动生成、评审、绑定材料并审计候选；最终正文仍需作者单独处理。
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            默认按故事上下文从可访问工作区语料检索材料，已选锚点只作为高级限制。
           </p>
           <div className="mt-2 grid grid-cols-1 gap-2 text-[11px] text-muted-foreground md:grid-cols-2">
             <div className="rounded-md border border-border bg-background px-2.5 py-2">
@@ -239,6 +260,17 @@ export function OrchestrationPanel({
                   <CircleStop className="h-3.5 w-3.5" />
                   取消
                 </button>
+              </div>
+
+              <div className="rounded-md border border-border bg-card px-3 py-2">
+                <h4 className="text-xs font-semibold text-foreground">检索策略</h4>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{activeRun.corpus_search_policy.mode || 'story_context'}</span>
+                  <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">可访问工作区语料</span>
+                  <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">每节拍最多 {activeRun.corpus_search_policy.max_results_per_beat}</span>
+                  <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">授权 {formatLicensePolicy(activeRun.corpus_search_policy)}</span>
+                  <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{formatAnchorPolicy(activeRun)}</span>
+                </div>
               </div>
 
               {decision ? (

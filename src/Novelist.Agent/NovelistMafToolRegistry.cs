@@ -228,9 +228,9 @@ public sealed partial class NovelistMafToolRegistry
             路径格式：
             - chapters/001.md ~ chapters/999999.md（章节文件）
             - outlines/001.md ~ outlines/999999.md（章节大纲）
-            - goink.md（故事状态文档）
+            - novelist.md（故事状态文档）
             - skills/<name>.md（小说级技能）
-            - ~/.goink/skills/<name>.md（用户级技能）
+            - ~/.novelist/skills/<name>.md（用户级技能）
             - /builtin/skills/<name>.md（内置技能，只读）
 
             默认添加行号前缀（123|），方便后续 edit 工具进行 line_range_replace 和 search_replace。
@@ -275,7 +275,7 @@ public sealed partial class NovelistMafToolRegistry
 
         [Description(ToolDescription)]
         private async ValueTask<ReadFileToolResult> ReadFileAsync(
-            [Description("要读取的文件路径。章节文件格式为 chapters/001.md，大纲为 outlines/001.md，故事状态为 goink.md")]
+            [Description("要读取的文件路径。章节文件格式为 chapters/001.md，大纲为 outlines/001.md，故事状态为 novelist.md")]
             string path,
             [Description("是否包含行号前缀（如 123|）。默认 true")]
             bool include_lines = true,
@@ -327,7 +327,7 @@ public sealed partial class NovelistMafToolRegistry
     {
         private const string ToolName = "edit";
         private const string ToolDescription = """
-            编辑小说文件（章节正文、章节大纲、故事状态 goink.md 或技能文件）。支持三种编辑模式：
+            编辑小说文件（章节正文、章节大纲、故事状态 novelist.md 或技能文件）。支持三种编辑模式：
 
             1. full_replace：全文替换整个文件，new_content 为完整替换后内容。
             2. search_replace：查找并替换指定文本。search_text 必须从文件中精确复制，replace_all=false 默认仅替换第一个匹配项。
@@ -336,9 +336,9 @@ public sealed partial class NovelistMafToolRegistry
             路径格式：
             - chapters/001.md ~ chapters/999999.md
             - outlines/001.md ~ outlines/999999.md
-            - goink.md
+            - novelist.md
             - skills/<name>.md
-            - ~/.goink/skills/<name>.md
+            - ~/.novelist/skills/<name>.md
 
             所有修改都会先提交用户审批，审批通过后才写入文件；被拒绝时会返回用户反馈，可根据反馈修正后重试。
             """;
@@ -386,7 +386,7 @@ public sealed partial class NovelistMafToolRegistry
 
         [Description(ToolDescription)]
         private async ValueTask<EditFileToolResult> EditFileAsync(
-            [Description("要编辑的文件路径。章节文件格式为 chapters/001.md，大纲为 outlines/001.md，故事状态为 goink.md")]
+            [Description("要编辑的文件路径。章节文件格式为 chapters/001.md，大纲为 outlines/001.md，故事状态为 novelist.md")]
             string path,
             [Description("编辑方式：full_replace / search_replace / line_range_replace")]
             string change_type,
@@ -1048,13 +1048,13 @@ public sealed partial class NovelistMafToolRegistry
             return $"第{outlineNumber.ToString(CultureInfo.InvariantCulture)}章大纲";
         }
 
-        if (path == "goink.md")
+        if (path == "novelist.md")
         {
             return "故事状态";
         }
 
         if (path.StartsWith("skills/", StringComparison.Ordinal) ||
-            path.StartsWith("~/.goink/skills/", StringComparison.Ordinal) ||
+            path.StartsWith("~/.novelist/skills/", StringComparison.Ordinal) ||
             IsBuiltinSkillPath(path))
         {
             var name = Path.GetFileNameWithoutExtension(path);

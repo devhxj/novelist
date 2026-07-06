@@ -51,7 +51,41 @@ public sealed class ReferenceAnchorContractTests
         Assert.Equal("workspace", anchorRoot.GetProperty("visibility").GetString());
         Assert.Equal("user_verified", anchorRoot.GetProperty("source_trust").GetString());
         Assert.Equal("rain", anchorRoot.GetProperty("user_tags")[0].GetString());
+        Assert.Equal("workspace_corpus", anchorRoot.GetProperty("owner_scope").GetString());
+        Assert.False(anchorRoot.TryGetProperty("owner_novel_id", out _));
         Assert.False(anchorRoot.TryGetProperty("SourceTrust", out _));
+
+        var novelAnchor = anchor with
+        {
+            NovelId = 42,
+            OwnerScope = ReferenceAnchorOwnerScopes.Novel,
+            OwnerNovelId = 42
+        };
+        using var novelAnchorJson = JsonDocument.Parse(JsonSerializer.Serialize(novelAnchor, BridgeJson.SerializerOptions));
+        var novelAnchorRoot = novelAnchorJson.RootElement;
+        Assert.Equal(42, novelAnchorRoot.GetProperty("novel_id").GetInt64());
+        Assert.Equal("novel", novelAnchorRoot.GetProperty("owner_scope").GetString());
+        Assert.Equal(42, novelAnchorRoot.GetProperty("owner_novel_id").GetInt64());
+    }
+
+    [Fact]
+    public void PromoteReferenceAnchorToWorkspaceCorpusPayloadUsesStableSnakeCaseJsonNames()
+    {
+        var input = new PromoteReferenceAnchorToWorkspaceCorpusPayload(
+            NovelId: 42,
+            AnchorId: 7,
+            SourceTrust: ReferenceSourceTrustLevels.Imported,
+            UserTags: ["migrated", "shared"]);
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(input, BridgeJson.SerializerOptions));
+        var root = json.RootElement;
+
+        Assert.Equal(42, root.GetProperty("novel_id").GetInt64());
+        Assert.Equal(7, root.GetProperty("anchor_id").GetInt64());
+        Assert.Equal("imported", root.GetProperty("source_trust").GetString());
+        Assert.Equal("migrated", root.GetProperty("user_tags")[0].GetString());
+        Assert.False(root.TryGetProperty("NovelId", out _));
+        Assert.False(root.TryGetProperty("AnchorId", out _));
     }
 
     [Fact]
@@ -107,15 +141,18 @@ public sealed class ReferenceAnchorContractTests
             Page: 1,
             Size: 10,
             NarrativeDuties: ["external_evidence"],
-            EmotionTransitions: ["neutral->heightened"]);
+            EmotionTransitions: ["neutral->heightened"],
+            ProseDuties: ["source_backed_detail"]);
 
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(payload, BridgeJson.SerializerOptions));
         var root = json.RootElement;
 
         Assert.Equal("external_evidence", root.GetProperty("narrative_duties")[0].GetString());
         Assert.Equal("neutral->heightened", root.GetProperty("emotion_transitions")[0].GetString());
+        Assert.Equal("source_backed_detail", root.GetProperty("prose_duties")[0].GetString());
         Assert.False(root.TryGetProperty("NarrativeDuties", out _));
         Assert.False(root.TryGetProperty("EmotionTransitions", out _));
+        Assert.False(root.TryGetProperty("ProseDuties", out _));
     }
 
     [Fact]
@@ -701,6 +738,7 @@ public sealed class ReferenceAnchorContractTests
             "CreateReferenceAnchor",
             "GetReferenceAnchors",
             "DeleteReferenceAnchor",
+            "PromoteReferenceAnchorToWorkspaceCorpus",
             "RebuildReferenceAnchor",
             "GetReferenceAnchorBuildStatus",
             "SearchReferenceMaterials",

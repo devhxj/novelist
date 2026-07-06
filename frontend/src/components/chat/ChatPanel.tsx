@@ -592,7 +592,7 @@ export default function ChatPanel({ novelId, onApprove, onReject, onApprovalFile
             if (path.startsWith('chapters/')) {
               const num = path.replace('chapters/', '').replace('.md', '')
               title = `diff: 第${parseInt(num)}章`
-            } else if (path === 'goink.md') {
+            } else if (path === 'novelist.md') {
               title = 'diff: 故事状态'
             } else if (path.startsWith('outlines/')) {
               const num = path.replace('outlines/', '').replace('.md', '')

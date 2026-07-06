@@ -62,7 +62,7 @@ Current main-panel workflow:
 - create anchor from local `.txt`/`.md` path
 - rebuild anchor
 - show build state and counts
-- search material bank with filters
+- search material bank with filters, including story-context `narrative_duties`, `emotion_transitions`, and `prose_duties`
 - preview source/adapted/diff/audit
 - generate a chapter blueprint for a selected `chapter_number`
 - show the five blueprint analysis tracks: logic, emotion, narration, character, and reference use
@@ -76,6 +76,7 @@ Current main-panel workflow:
 - show draft text alongside source material, blueprint beat, rewrite level, and audit result
 - preview candidates; no automatic insertion in phase 1
 - start the default low-intervention orchestration run from chapter goal, known facts, and forbidden facts without requiring selected anchors
+- show that default orchestration retrieves materials by `story_context` from accessible workspace corpus materials, including max-results, license-status, and include/exclude anchor policy for the active run
 - optionally constrain an orchestration run to selected anchors as an advanced override
 - list orchestration runs, inspect the active run, view required decisions, approval summary, candidate ids, and local event history
 - resume required source/fact, blueprint revision, blueprint approval, and high-risk-stop decisions from the reference panel
@@ -89,8 +90,8 @@ Current frontend status:
 - `OrchestrationPanel.tsx` is mounted at the top of the reference-anchor main panel as the default Phase 11 workflow entry.
 - `ActivityBar.tsx` has a `reference` activity entry.
 - `WorkspaceView.tsx` renders `ReferenceAnchorView` for the active novel.
-- The first panel supports anchor create/rebuild/list, native reference source file selection with raw path fallback, default orchestration start/inspect/resume/cancel, and advanced-mode material search with score-component explanations, blueprint generate/list/detail/review/approve, field-level beat editing through `ReviseReferenceChapterBlueprint`, typed `slot_plan` rows, material binding with score-component explanations, and draft candidate preview.
-- The Playwright mock-bridge workflow covers the default orchestration surface, asserts manual controls are hidden until advanced mode is opened, then exercises manual material search, blueprint revision/review/approval, binding, draft generation, and stale-blueprint disabled controls.
+- The first panel supports anchor create/rebuild/list, native reference source file selection with raw path fallback, corpus metadata entry for `visibility`, `source_trust`, and `user_tags` at creation time with list-row display including `owner_scope`, default orchestration start/inspect/resume/cancel, and advanced-mode material search with score-component explanations, story-context prose-duty filters, blueprint generate/list/detail/review/approve, field-level beat editing through `ReviseReferenceChapterBlueprint`, typed `slot_plan` rows, material binding with score-component explanations, and draft candidate preview. The owned frontend bridge adapter exposes `PromoteReferenceAnchorToWorkspaceCorpus` for the explicit per-anchor migration API, but the current panel has not yet become the full corpus library management UI.
+- The Playwright mock-bridge workflow covers the default orchestration surface, asserts story-context workspace-corpus retrieval without selected `anchor_ids`, asserts create-anchor corpus metadata and `owner_scope` payload/list display, asserts manual controls are hidden until advanced mode is opened, then exercises manual material search with `prose_duties`, blueprint revision/review/approval, binding, draft generation, and stale-blueprint disabled controls.
 - Remaining UI hardening belongs to later product work: dedicated side-panel list/filter behavior and copy-to-clipboard or insertion-confirmation affordances for final candidate handling.
 
 Stale blueprint behavior is resolved for the current UI: stale blueprints stay visible as read-only comparison artifacts, show a regeneration prompt, and cannot be reviewed, approved, revised, bound to materials, or used for draft candidates.

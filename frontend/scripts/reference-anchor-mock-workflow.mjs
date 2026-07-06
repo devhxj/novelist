@@ -83,18 +83,26 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await page.getByPlaceholder('参考书名').fill('雨夜动作参考')
   await page.getByPlaceholder('可选').first().fill('Mock Author')
   await page.getByLabel('本地路径').fill('D:\\books\\rain-reference.md')
+  await page.getByLabel('可见性').selectOption('workspace')
+  await page.getByLabel('来源可信度').selectOption('imported')
+  await page.getByLabel('用户标签').fill('雨夜;动作克制')
   await page.getByRole('button', { name: /^创建$/ }).click()
   await expectVisible(page.getByText('参考锚点已创建'), 'anchor created message')
   await expectVisible(page.getByText('雨夜动作参考'), 'created anchor title')
+  await expectVisible(page.getByText('workspace · imported · workspace_corpus'), 'created anchor corpus metadata')
+  await expectVisible(page.getByText('雨夜', { exact: true }), 'created anchor first user tag')
+  await expectVisible(page.getByText('动作克制', { exact: true }), 'created anchor second user tag')
 
   await page.locator('button[title="重建"]').first().click()
   await expectVisible(page.getByText('锚点已重建'), 'anchor rebuilt message')
 
   const materialPanel = page.locator('.rounded-lg').filter({ hasText: '材料搜索' }).first()
   await materialPanel.getByPlaceholder('叙事功能、情绪或具体句子').fill('把杯子推远')
+  await materialPanel.getByLabel('文体职责').fill('source_backed_detail')
   await materialPanel.getByRole('button', { name: /搜索/ }).click()
   await expectVisible(page.getByText('把杯子推远，杯底在木桌上留下半圈水痕。'), 'material search hit')
   await expectVisible(page.getByText('lexical 0.92'), 'material score component')
+  await expectVisible(page.getByText('prose_duty 0.75'), 'material prose-duty score component')
 }
 
 async function generateReviseApproveBindAndDraft(page) {
@@ -137,10 +145,17 @@ async function runDefaultOrchestrationToFinalInsertionStop(page) {
   await expectVisible(panel.getByText(/生成蓝图.*绑定材料.*草稿审计/), 'orchestration automated stage details')
   await expectVisible(panel.getByText('作者决策'), 'orchestration author decision copy')
   await expectVisible(panel.getByText(/来源\/事实边界.*蓝图批准.*最终正文插入/), 'orchestration author decision details')
+  await expectVisible(panel.getByText(/默认按故事上下文从可访问工作区语料检索材料/), 'default workspace corpus retrieval copy')
 
   await panel.getByRole('button', { name: /启动候选编排/ }).click()
   await expectVisible(page.getByText('编排已启动，等待确认来源与事实边界'), 'orchestration started message')
   await expectVisible(panel.getByText('确认来源与事实边界', { exact: true }), 'source confirmation decision')
+  await expectVisible(panel.getByText('检索策略'), 'corpus search policy heading')
+  await expectVisible(panel.getByText('story_context'), 'story context search policy')
+  await expectVisible(panel.getByText('可访问工作区语料', { exact: true }), 'workspace corpus search scope')
+  await expectVisible(panel.getByText('每节拍最多 3'), 'max results policy')
+  await expectVisible(panel.getByText('授权 user_provided, unknown'), 'license status policy')
+  await expectVisible(panel.getByText('未限制到已选锚点'), 'unrestricted anchor policy')
   await panel.getByRole('button', { name: /^确认$/ }).click()
 
   await expectVisible(page.getByText('编排已继续'), 'orchestration resumed message')
@@ -203,9 +218,22 @@ async function verifyBridgeCalls(page) {
 
   assert(!methods.includes('SaveContent'), 'reference-anchor workflow must not call SaveContent')
 
+  const createCall = calls.find((call) => call.method === 'CreateReferenceAnchor')
+  assert(createCall, 'missing CreateReferenceAnchor call')
+  assert.equal(createCall.args[0].visibility, 'workspace', 'anchor create payload must include corpus visibility')
+  assert.equal(createCall.args[0].source_trust, 'imported', 'anchor create payload must include source trust')
+  assert.deepEqual(createCall.args[0].user_tags, ['雨夜', '动作克制'], 'anchor create payload must include user tags')
+
   const startCall = calls.find((call) => call.method === 'StartReferenceOrchestrationRun')
   assert(startCall, 'missing StartReferenceOrchestrationRun call')
   assert.equal(startCall.args[0].anchor_ids, null, 'default orchestration must not require selected anchor ids')
+  assert.deepEqual(startCall.args[0].corpus_search_policy.include_anchor_ids, [], 'default orchestration must not pin include anchors')
+  assert.deepEqual(startCall.args[0].corpus_search_policy.exclude_anchor_ids, [], 'default orchestration must not pin exclude anchors')
+  assert.equal(startCall.args[0].corpus_search_policy.mode, 'story_context', 'default orchestration must use story-context corpus search')
+
+  const searchCall = calls.find((call) => call.method === 'SearchReferenceMaterials')
+  assert(searchCall, 'missing SearchReferenceMaterials call')
+  assert.deepEqual(searchCall.args[0].prose_duties, ['source_backed_detail'], 'manual story-context material search must pass prose duties')
 }
 
 function blueprintDetail(page) {
@@ -510,6 +538,11 @@ function installReferenceAnchorMockBridge() {
       status: 'ready',
       created_at: now,
       updated_at: now,
+      visibility: input.visibility ?? 'private',
+      source_trust: input.source_trust ?? 'user_verified',
+      user_tags: Array.isArray(input.user_tags) ? input.user_tags : [],
+      owner_scope: input.visibility === 'workspace' ? 'workspace_corpus' : 'novel',
+      owner_novel_id: input.visibility === 'workspace' ? null : input.novel_id,
     }
     state.anchors = [anchor]
     return anchor
@@ -557,6 +590,7 @@ function installReferenceAnchorMockBridge() {
       score_components: {
         lexical: 0.92,
         function: 0.83,
+        prose_duty: 0.75,
         feedback_boost: 0.18,
       },
     }

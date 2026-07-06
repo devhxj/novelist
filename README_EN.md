@@ -26,7 +26,7 @@
 
 ---
 
-Novelist is the desktop AI writing system evolved from and rebuilt on top of the MIT-licensed GoInk line. The original foundations remain: structured creative state, Agent tool use, Skill-based writing methodology, local semantic search, diff approval, and Git history.
+Novelist is a desktop AI writing system built around structured creative state, Agent tool use, Skill-based writing methodology, local semantic search, diff approval, and Git history.
 
 The current direction adds a higher layer. **Skills teach the AI how to write, but long-form writing also needs to prove what may be written before generation and whether the result is usable after generation.** Novelist is turning reference sources, chapter blueprints, material bindings, draft candidates, and audit results into checkable contracts instead of relying only on prompts or Skills.
 
@@ -42,7 +42,7 @@ Novelist is not just a chat shell, and it is not only a pile of prompts or Skill
 | Reference anchor layer | Turns reference sources into traceable materials, requires reviewed blueprints, binds materials, generates candidates, and audits drafts |
 | Human confirmation boundary | Chapter insertion, fact-boundary expansion, high-risk revisions, and final saves require author confirmation |
 
-The current project name, product name, and active implementation use `Novelist`. Names such as `goink.md` and `~/.goink` remain only as compatibility paths for existing user data and Skills.
+The current project name, product name, and active implementation use `Novelist`. The story-state file is `novelist.md`, and the user Skill tool path is `~/.novelist/skills/`.
 
 ## Why Skills Are Not Enough
 
@@ -110,7 +110,7 @@ Same-name Skills override by **Novel > User > Built-in** priority and hot-reload
 | Layer | Storage | Scope | Editable |
 |---|---|---|---|
 | Built-in | Read-only bundled | All novels | No |
-| User | data-dir `skills/`, with tool-path compatibility for `~/.goink/skills/` | All novels | Yes |
+| User | data-dir `skills/`, with tool path `~/.novelist/skills/` | All novels | Yes |
 | Novel | `{novel}/skills/` | Current novel | Yes |
 
 ### Three Modes

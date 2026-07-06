@@ -9,7 +9,7 @@ interface Props {
   novelId: number
   target: { path: string; title: string } | null
   onSelectChapter: (ch: chapter.Chapter) => void
-  onSelectGoink: () => void
+  onSelectNovelist: () => void
   onExportNovel: () => void
 }
 
@@ -20,7 +20,7 @@ interface FileChangedEvent {
   path?: string
 }
 
-export default function ChapterList({ novelId, target, onSelectChapter, onSelectGoink, onExportNovel }: Props) {
+export default function ChapterList({ novelId, target, onSelectChapter, onSelectNovelist, onExportNovel }: Props) {
   const app = useApp()
 
   const [chapters, setChapters] = useState<chapter.Chapter[]>([])
@@ -54,7 +54,7 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
   useEffect(() => {
     const unsub = EventsOn('file:changed', (data: FileChangedEvent) => {
       if (data.novel_id !== novelId) return
-      if (data.path && (data.path.startsWith('chapters/') || data.path.startsWith('outlines/') || data.path === 'goink.md')) {
+      if (data.path && (data.path.startsWith('chapters/') || data.path.startsWith('outlines/') || data.path === 'novelist.md')) {
         loadChapters()
       }
     })
@@ -159,11 +159,11 @@ export default function ChapterList({ novelId, target, onSelectChapter, onSelect
       )}
 
       <button
-        onClick={onSelectGoink}
+        onClick={onSelectNovelist}
         className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left hover:bg-muted/50 transition-colors relative border-b border-border/50
-          ${target?.path === 'goink.md' ? 'bg-primary/10 font-medium' : ''}`}
+          ${target?.path === 'novelist.md' ? 'bg-primary/10 font-medium' : ''}`}
       >
-        {target?.path === 'goink.md' && (
+        {target?.path === 'novelist.md' && (
           <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
         )}
         <FileText className="w-3.5 h-3.5 text-muted-foreground shrink-0" />

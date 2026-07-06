@@ -19,7 +19,7 @@ export function useEditorTabs(novelId: number) {
   useEffect(() => {
     if (initRef.current) return
     try {
-      const raw = localStorage.getItem('goink_tabs_all')
+      const raw = localStorage.getItem('novelist_tabs_all')
       if (raw) allMetasRef.current = JSON.parse(raw)
     } catch {
       allMetasRef.current = {}
@@ -41,7 +41,7 @@ export function useEditorTabs(novelId: number) {
   useEffect(() => {
     function save() {
       try {
-        localStorage.setItem('goink_tabs_all', JSON.stringify(allMetasRef.current))
+        localStorage.setItem('novelist_tabs_all', JSON.stringify(allMetasRef.current))
       } catch {
         return
       }

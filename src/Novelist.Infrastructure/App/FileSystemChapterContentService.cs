@@ -14,7 +14,7 @@ public sealed class FileSystemChapterContentService : IChapterContentService
     private const int MaxChapterNumber = 999_999;
 
     private static readonly Regex AllowedContentPathPattern = new(
-        @"^(goink\.md|chapters/\d{3,6}\.md|outlines/\d{3,6}\.md|skills/[^/\\]+\.md)$",
+        @"^(novelist\.md|chapters/\d{3,6}\.md|outlines/\d{3,6}\.md|skills/[^/\\]+\.md)$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex ChapterPathPattern = new(
@@ -22,7 +22,7 @@ public sealed class FileSystemChapterContentService : IChapterContentService
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex UserSkillPathPattern = new(
-        @"^~/\.goink/skills/([^/\\:]+)\.md$",
+        @"^~/\.novelist/skills/([^/\\:]+)\.md$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex BuiltinSkillPathPattern = new(
@@ -482,7 +482,7 @@ public sealed class FileSystemChapterContentService : IChapterContentService
         {
             throw new InvalidContentPathException(
                 path,
-                "Allowed paths are goink.md, chapters/001.md..chapters/999999.md, outlines/001.md..outlines/999999.md, and skills/<name>.md.");
+                "Allowed paths are novelist.md, chapters/001.md..chapters/999999.md, outlines/001.md..outlines/999999.md, and skills/<name>.md.");
         }
 
         return normalized;

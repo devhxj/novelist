@@ -71,18 +71,18 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
         当前对话可见的 tools 才是你实际能够调用的工具。不要调用未出现在 tools 列表中的旧工具名。
 
         已迁移的核心工具语义：
-        - read：读取 chapters/NNN.md、outlines/NNN.md、goink.md、小说级/user/builtin skills。
-        - edit：经用户审批后写入章节、大纲、goink.md 或可编辑 skill。
+        - read：读取 chapters/NNN.md、outlines/NNN.md、novelist.md、小说级/user/builtin skills。
+        - edit：经用户审批后写入章节、大纲、novelist.md 或可编辑 skill。
         - search_story_memory：在已构建的 RAG 记忆中检索章节片段。
         - run_subagent：启动 memory/review 子 Agent，获取专项检索报告或审稿报告。
 
         【创作流程】
 
         1. 判断意图：用户是在讨论、检索、审稿、规划，还是要求直接创作。
-        2. 搜集上下文：优先读取 goink.md、相关章节/大纲，必要时用 search_story_memory 检索相关片段。
+        2. 搜集上下文：优先读取 novelist.md、相关章节/大纲，必要时用 search_story_memory 检索相关片段。
         3. 大纲先行：用户要求创作新章节时，先写大纲到 outlines/NNN.md 并等待审批。大纲应覆盖章节标题、基调与字数、场景设计、关键事件、重点角色、伏笔操作、章末钩子。
         4. 执行创作：审批通过后再写 chapters/NNN.md。正文 edit 的 new_content 只包含正文，不写章节号、章节标题或“本章完”。
-        5. 状态维护：重要创作后必须同步维护 goink.md，记录当前进展、角色动态、未回收悬念和后续需要注意的信息。
+        5. 状态维护：重要创作后必须同步维护 novelist.md，记录当前进展、角色动态、未回收悬念和后续需要注意的信息。
         6. 审稿校验：较大改动或新章节完成后，可启动 review 子 Agent 审读一致性、逻辑、伏笔和节奏风险。
         7. 整合汇报：向用户简洁汇报已完成事项、重要决策和下一步。
 
@@ -90,9 +90,9 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
 
         - chapters/001.md：章节正文。
         - outlines/001.md：章节大纲。
-        - goink.md：故事状态文档，用于快速恢复创作状态。
+        - novelist.md：故事状态文档，用于快速恢复创作状态。
         - skills/<name>.md：小说级技能。
-        - ~/.goink/skills/<name>.md：用户级技能。
+        - ~/.novelist/skills/<name>.md：用户级技能。
         - /builtin/skills/<name>.md：内置技能，只读。
 
         【技能系统】
@@ -998,12 +998,12 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
                     }
                 }
 
-                var goink = await _chapterContent.GetContentAsync(novelId, "goink.md", cancellationToken);
-                if (!string.IsNullOrWhiteSpace(goink))
+                var storyState = await _chapterContent.GetContentAsync(novelId, "novelist.md", cancellationToken);
+                if (!string.IsNullOrWhiteSpace(storyState))
                 {
                     builder.AppendLine();
-                    builder.AppendLine("故事状态 goink.md：");
-                    builder.AppendLine(TrimLongState(goink));
+                    builder.AppendLine("故事状态 novelist.md：");
+                    builder.AppendLine(TrimLongState(storyState));
                 }
             }
 
@@ -1070,7 +1070,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
 
         if (_chapterContent is not null)
         {
-            var state = await _chapterContent.GetContentAsync(novelId, "goink.md", cancellationToken);
+            var state = await _chapterContent.GetContentAsync(novelId, "novelist.md", cancellationToken);
             if (!string.IsNullOrWhiteSpace(state))
             {
                 builder.AppendLine();
@@ -1239,7 +1239,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
         builder.AppendLine("---");
         builder.AppendLine("使用 read 工具加载技能完整内容：");
         builder.AppendLine("- skills/<name>.md（小说技能）");
-        builder.AppendLine("- ~/.goink/skills/<name>.md（用户技能）");
+        builder.AppendLine("- ~/.novelist/skills/<name>.md（用户技能）");
         builder.AppendLine("- /builtin/skills/<name>.md（内置技能，只读）");
         builder.AppendLine("使用 edit 工具创建或修改技能。内置技能不可编辑。");
         builder.Append("</available_skills>");
@@ -2589,7 +2589,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
         var normalized = content.Trim();
         return normalized.Length <= maxStateChars
             ? normalized
-            : normalized[..maxStateChars] + "\n\n[goink.md 内容过长，已截断。可用 read 工具读取完整内容。]";
+            : normalized[..maxStateChars] + "\n\n[novelist.md 内容过长，已截断。可用 read 工具读取完整内容。]";
     }
 
     private static string NormalizeSessionId(string? value, bool allowEmpty)
@@ -2964,7 +2964,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
             var path = ReadString(args, "path");
             return path switch
             {
-                "goink.md" => "查看 故事状态",
+                "novelist.md" => "查看 故事状态",
                 _ when path.StartsWith("chapters/", StringComparison.Ordinal) =>
                     $"查看 第{ParsePathNumber(path, "chapters/").ToString(CultureInfo.InvariantCulture)}章",
                 _ when path.StartsWith("outlines/", StringComparison.Ordinal) =>
@@ -2978,7 +2978,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
             var path = ReadString(args, "path");
             return path switch
             {
-                "goink.md" => "编辑 故事状态",
+                "novelist.md" => "编辑 故事状态",
                 _ when path.StartsWith("chapters/", StringComparison.Ordinal) =>
                     $"编辑 第{ParsePathNumber(path, "chapters/").ToString(CultureInfo.InvariantCulture)}章",
                 _ when path.StartsWith("outlines/", StringComparison.Ordinal) =>

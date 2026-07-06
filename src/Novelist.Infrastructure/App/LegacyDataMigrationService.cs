@@ -8,12 +8,12 @@ using Novelist.Core.App;
 
 namespace Novelist.Infrastructure.App;
 
-public interface ILegacyGoinkDataMigrationService
+public interface ILegacyDataMigrationService
 {
     ValueTask MigrateAsync(string targetDataDirectory, CancellationToken cancellationToken);
 }
 
-public sealed class LegacyGoinkDataMigrationService : ILegacyGoinkDataMigrationService
+public sealed class LegacyDataMigrationService : ILegacyDataMigrationService
 {
     private const int LlmNonceSize = 12;
     private const int LlmTagSize = 16;
@@ -41,7 +41,7 @@ public sealed class LegacyGoinkDataMigrationService : ILegacyGoinkDataMigrationS
     private readonly AppInitializationOptions _options;
     private readonly IVersionControlService _versionControl;
 
-    public LegacyGoinkDataMigrationService(
+    public LegacyDataMigrationService(
         AppInitializationOptions? options = null,
         IVersionControlService? versionControl = null)
     {
@@ -102,6 +102,7 @@ public sealed class LegacyGoinkDataMigrationService : ILegacyGoinkDataMigrationS
                 "copy_novel_workspaces",
                 manifest,
                 cancellationToken);
+            await NormalizeStoryStateFileNamesAsync(target, manifest, cancellationToken);
 
             await CopyDirectoryIfPresentAsync(
                 source.SkillsDirectory,
@@ -130,7 +131,7 @@ public sealed class LegacyGoinkDataMigrationService : ILegacyGoinkDataMigrationS
     }
 
     private async ValueTask<MigrationImportState> ImportSqliteMetadataAsync(
-        LegacyGoinkSource source,
+        LegacySource source,
         string target,
         MigrationManifest manifest,
         CancellationToken cancellationToken)
@@ -208,10 +209,10 @@ public sealed class LegacyGoinkDataMigrationService : ILegacyGoinkDataMigrationS
             state.NovelIds.Add(id);
             var workspace = Path.Combine(target, "novels", id.ToString(CultureInfo.InvariantCulture));
             Directory.CreateDirectory(workspace);
-            var goink = Path.Combine(workspace, "goink.md");
-            if (!File.Exists(goink))
+            var novelist = Path.Combine(workspace, "novelist.md");
+            if (!File.Exists(novelist))
             {
-                await File.WriteAllTextAsync(goink, string.Empty, cancellationToken);
+                await File.WriteAllTextAsync(novelist, string.Empty, cancellationToken);
             }
         }
 
@@ -913,7 +914,7 @@ public sealed class LegacyGoinkDataMigrationService : ILegacyGoinkDataMigrationS
         foreach (var novelId in novelIds.OrderBy(id => id))
         {
             await _versionControl.EnsureRepositoryAsync(novelId, cancellationToken);
-            var commit = await _versionControl.CommitIfChangedAsync(novelId, "migrate legacy Goink data", cancellationToken);
+            var commit = await _versionControl.CommitIfChangedAsync(novelId, "migrate legacy data", cancellationToken);
             if (commit.Committed)
             {
                 repaired++;
@@ -924,7 +925,7 @@ public sealed class LegacyGoinkDataMigrationService : ILegacyGoinkDataMigrationS
     }
 
     private async ValueTask ConvertLegacyLlmConfigAsync(
-        LegacyGoinkSource source,
+        LegacySource source,
         string target,
         MigrationManifest manifest,
         CancellationToken cancellationToken)
@@ -1077,14 +1078,99 @@ public sealed class LegacyGoinkDataMigrationService : ILegacyGoinkDataMigrationS
         }
     }
 
-    private LegacyGoinkSource? ResolveSource()
+    private static async ValueTask NormalizeStoryStateFileNamesAsync(
+        string target,
+        MigrationManifest manifest,
+        CancellationToken cancellationToken)
     {
-        var legacyConfigDirectory = Path.GetFullPath(_options.LegacyGoinkConfigDirectory ?? DefaultLegacyConfigDirectory());
+        var novelsDirectory = Path.Combine(target, "novels");
+        if (!Directory.Exists(novelsDirectory))
+        {
+            AddOperation(manifest, "normalize_story_state_files", "file_rename", target: novelsDirectory, status: "skipped");
+            return;
+        }
+
+        var renamed = 0;
+        var skipped = 0;
+        var warnings = new List<string>();
+        foreach (var workspace in Directory.EnumerateDirectories(novelsDirectory, "*", SearchOption.TopDirectoryOnly))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var currentPath = Path.Combine(workspace, "novelist.md");
+            var rootMarkdownFiles = Directory
+                .EnumerateFiles(workspace, "*.md", SearchOption.TopDirectoryOnly)
+                .Where(path => !string.Equals(Path.GetFileName(path), "novelist.md", PathComparison()) &&
+                    !Path.GetFileName(path).StartsWith("retired-story-state", PathComparison()))
+                .OrderBy(Path.GetFileName, StringComparer.Ordinal)
+                .ToArray();
+
+            if (rootMarkdownFiles.Length == 0)
+            {
+                continue;
+            }
+
+            if (!File.Exists(currentPath) && rootMarkdownFiles.Length == 1)
+            {
+                File.Move(rootMarkdownFiles[0], currentPath);
+                renamed++;
+                continue;
+            }
+
+            foreach (var retiredPath in rootMarkdownFiles)
+            {
+                if (File.Exists(currentPath) && await FilesEqualAsync(retiredPath, currentPath, cancellationToken))
+                {
+                    File.Delete(retiredPath);
+                    skipped++;
+                    continue;
+                }
+
+                var preservedPath = AllocateRetiredStoryStatePreservationPath(workspace);
+                File.Move(retiredPath, preservedPath);
+                skipped++;
+                warnings.Add($"Preserved conflicting retired story-state file: {preservedPath}");
+            }
+        }
+
+        AddOperation(
+            manifest,
+            "normalize_story_state_files",
+            "file_rename",
+            target: novelsDirectory,
+            imported: renamed,
+            skipped: skipped,
+            status: warnings.Count == 0 ? "completed" : "completed_with_warnings",
+            warning: warnings.Count == 0 ? null : string.Join(" ", warnings.Take(3)));
+    }
+
+    private static string AllocateRetiredStoryStatePreservationPath(string workspace)
+    {
+        var candidate = Path.Combine(workspace, "retired-story-state.md");
+        if (!File.Exists(candidate))
+        {
+            return candidate;
+        }
+
+        for (var i = 2; i < 1_000; i++)
+        {
+            candidate = Path.Combine(workspace, $"retired-story-state-{i.ToString(CultureInfo.InvariantCulture)}.md");
+            if (!File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new InvalidOperationException("Too many retired story-state files in the same workspace.");
+    }
+
+    private LegacySource? ResolveSource()
+    {
+        var legacyConfigDirectory = Path.GetFullPath(_options.LegacyConfigDirectory ?? DefaultLegacyConfigDirectory());
         var configPath = Path.Combine(legacyConfigDirectory, "config.json");
         var configuredDataDirectory = TryReadLegacyConfiguredDataDirectory(configPath);
         var dataCandidates = new List<string>();
 
-        AddCandidate(_options.LegacyGoinkDataDirectory);
+        AddCandidate(_options.LegacyDataDirectory);
         AddCandidate(configuredDataDirectory);
         AddCandidate(AppContext.BaseDirectory);
         AddCandidate(DefaultLegacyDataDirectory());
@@ -1095,7 +1181,7 @@ public sealed class LegacyGoinkDataMigrationService : ILegacyGoinkDataMigrationS
             var novels = Path.Combine(candidate, "novels");
             if (File.Exists(db) || Directory.Exists(novels))
             {
-                return new LegacyGoinkSource(
+                return new LegacySource(
                     legacyConfigDirectory,
                     candidate,
                     File.Exists(db) ? db : null,
@@ -1110,7 +1196,7 @@ public sealed class LegacyGoinkDataMigrationService : ILegacyGoinkDataMigrationS
         if (File.Exists(configPath) || Directory.Exists(skills) || File.Exists(llm))
         {
             var dataDirectory = dataCandidates.FirstOrDefault() ?? DefaultLegacyDataDirectory();
-            return new LegacyGoinkSource(
+            return new LegacySource(
                 legacyConfigDirectory,
                 dataDirectory,
                 File.Exists(Path.Combine(dataDirectory, "novel-agent.db")) ? Path.Combine(dataDirectory, "novel-agent.db") : null,
@@ -1388,14 +1474,14 @@ public sealed class LegacyGoinkDataMigrationService : ILegacyGoinkDataMigrationS
         }
     }
 
-    private static void EnsureCopyFirstTarget(LegacyGoinkSource source, string target)
+    private static void EnsureCopyFirstTarget(LegacySource source, string target)
     {
         var targetFull = Path.GetFullPath(target);
         foreach (var sourceDirectory in new[] { source.DataDirectory, source.ConfigDirectory }.Where(item => !string.IsNullOrWhiteSpace(item)))
         {
             if (IsSameOrChildPath(targetFull, sourceDirectory!))
             {
-                throw new InvalidOperationException("Legacy Goink source and Novelist target directories must be different for copy-first migration.");
+                throw new InvalidOperationException("Legacy source and Novelist target directories must be different for copy-first migration.");
             }
         }
     }
@@ -1446,17 +1532,22 @@ public sealed class LegacyGoinkDataMigrationService : ILegacyGoinkDataMigrationS
 
     private static string DefaultLegacyConfigDirectory()
     {
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".goink");
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".novelist");
     }
 
     private static string DefaultLegacyDataDirectory()
     {
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Goink");
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Novelist");
     }
 
     private static IEqualityComparer<string> PathComparer()
     {
         return OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    }
+
+    private static StringComparison PathComparison()
+    {
+        return OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
     }
 
     private static string QuoteIdentifier(string tableName)
@@ -1736,7 +1827,7 @@ public sealed class LegacyGoinkDataMigrationService : ILegacyGoinkDataMigrationS
         return sanitized.Length <= 2_000 ? sanitized : sanitized[..2_000];
     }
 
-    private sealed record LegacyGoinkSource(
+    private sealed record LegacySource(
         string ConfigDirectory,
         string DataDirectory,
         string? DatabasePath,
@@ -1780,7 +1871,7 @@ public sealed class LegacyGoinkDataMigrationService : ILegacyGoinkDataMigrationS
         public int SchemaVersion { get; set; } = 1;
 
         [JsonPropertyName("migration")]
-        public string Migration { get; set; } = "goink-to-novelist";
+        public string Migration { get; set; } = "legacy-to-novelist";
 
         [JsonPropertyName("status")]
         public string Status { get; set; } = string.Empty;

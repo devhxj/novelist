@@ -80,6 +80,7 @@ public static class BridgeCompatibilityAppMethods
         "ListSkills",
         "ListSlashCommands",
         "PickReferenceSourceFile",
+        "PromoteReferenceAnchorToWorkspaceCorpus",
         "RebuildReferenceAnchor",
         "RebuildNovelIndex",
         "RecordReferenceUserFeedback",

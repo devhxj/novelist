@@ -27,12 +27,12 @@ export function outlinePath(num: number): string {
   return `outlines/${String(num).padStart(3, '0')}.md`
 }
 
-export function goinkPath(): string {
-  return 'goink.md'
+export function novelistPath(): string {
+  return 'novelist.md'
 }
 
 export function isContentPath(p: string): boolean {
-  return p.startsWith('chapters/') || p === 'goink.md'
+  return p.startsWith('chapters/') || p === 'novelist.md'
 }
 
 export function isOutlinePath(p: string): boolean {
@@ -40,7 +40,7 @@ export function isOutlinePath(p: string): boolean {
 }
 
 export function isSkillPath(p: string): boolean {
-  return p.startsWith('skills/') || p.startsWith('~/.goink/skills/') || p.startsWith('/builtin/skills/')
+  return p.startsWith('skills/') || p.startsWith('~/.novelist/skills/') || p.startsWith('/builtin/skills/')
 }
 
 export function skillNameFromPath(p: string): string {

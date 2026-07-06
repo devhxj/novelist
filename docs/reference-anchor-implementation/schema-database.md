@@ -33,7 +33,7 @@ Core columns:
 ```text
 reference_anchors
 - anchor_id INTEGER PRIMARY KEY
-- novel_id INTEGER NOT NULL
+- novel_id INTEGER
 - title TEXT NOT NULL
 - author TEXT NOT NULL
 - source_path TEXT NOT NULL
@@ -48,7 +48,7 @@ reference_anchors
 - source_trust TEXT NOT NULL DEFAULT 'user_verified'
 - user_tags_json TEXT NOT NULL DEFAULT '[]'
 
-`reference_anchors.novel_id = 0` is reserved as the workspace-corpus compatibility owner. Public create/rebuild/delete APIs still require a positive novel id. Read paths for listing anchors, build status, material search, material adaptation, reuse audit, tag correction, and per-novel feedback validation include the active novel's private anchors plus `novel_id = 0` anchors whose `corpus_visibility = 'workspace'`, while continuing to exclude private/restricted workspace rows and private anchors owned by other novels. Explicit `anchor_ids` do not bypass the visibility filter. Existing databases that already had `novel_id = 0` compatibility rows before these columns are added promote those legacy rows to `corpus_visibility = 'workspace'` once during migration; new per-novel anchors default to `private`. `reference_user_feedback.novel_id` remains the consuming novel id, so feedback about a shared material is still scoped to the novel that used it.
+`reference_anchors.novel_id IS NULL` is the storage-level workspace-corpus owner for sources and extracted materials that are not owned by a single novel. `reference_anchors.novel_id = 0` remains a compatibility owner for older workspace-corpus rows and bridge output. Public create/rebuild/delete APIs still require a positive novel id as the initiating context, but `CreateReferenceAnchor` stores `visibility = 'workspace'` imports with nullable ownership so other novels can retrieve the same extracted materials immediately; `private` and `restricted` imports remain owned by the initiating novel. `PromoteReferenceAnchorToWorkspaceCorpus` is the explicit compatibility migration path for an existing per-novel anchor: it changes the owned `reference_anchors` row to `novel_id = NULL` and `corpus_visibility = 'workspace'`, optionally replacing source trust and user tags, without touching `reference_source_segments`, `reference_materials`, source hashes, material ids, build state, audits, or feedback rows. Read paths for listing anchors, build status, material search, material adaptation, reuse audit, tag correction, and per-novel feedback validation include the active novel's private anchors plus `novel_id IS NULL OR novel_id = 0` anchors whose `corpus_visibility = 'workspace'`, while continuing to exclude private/restricted workspace rows and private anchors owned by other novels. Explicit `anchor_ids` do not bypass the visibility filter. Existing databases that already had `novel_id = 0` compatibility rows before these columns are added promote those legacy rows to `corpus_visibility = 'workspace'` once during migration, and the `reference_anchors` table is rebuilt if needed so `novel_id` can become nullable without losing source hashes, source segment ids, material ids, user tags, feedback, or audit provenance. New per-novel anchors default to `private`. `reference_user_feedback.novel_id` remains the consuming novel id, so feedback about a shared material is still scoped to the novel that used it.
 
 reference_source_segments
 - segment_id TEXT PRIMARY KEY
@@ -230,7 +230,7 @@ reference_blueprint_material_links
 - status TEXT NOT NULL
 - created_at TEXT NOT NULL
 
-`score_components_json` currently records material type, function, emotion, POV, prose-duty, lexical, embedding similarity, confidence, `user_verified`, current-novel accepted-feedback boosts, and negative `low_confidence` markers for expanded-query weak matches when applicable. Draft generation and persisted draft re-audit read the selected link for the current `analysis_contract_hash`; a low-confidence selected link turns into draft-audit provenance risk until the material is rebound, the blueprint query is revised, or the retrieval gap is explicitly resolved.
+`score_components_json` on persisted material links currently records material type, function, emotion, POV, prose-duty, lexical, embedding similarity, confidence, `user_verified`, current-novel accepted-feedback boosts, and negative `low_confidence` markers for expanded-query weak matches when applicable. `SearchReferenceMaterials` also returns transient score components for lexical/tag fit, story-context narrative duty, emotion transition, prose duty, embedding similarity when available, confidence, current-novel accepted feedback, and length. Draft generation and persisted draft re-audit read the selected link for the current `analysis_contract_hash`; a low-confidence selected link turns into draft-audit provenance risk until the material is rebound, the blueprint query is revised, or the retrieval gap is explicitly resolved.
 
 reference_draft_paragraph_candidates
 - candidate_id TEXT PRIMARY KEY

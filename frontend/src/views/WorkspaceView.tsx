@@ -116,9 +116,9 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
     contentRef.current?.openFile(ch.file_path, `第${ch.chapter_number}章 ${ch.title}`)
   }
 
-  function handleSelectGoink() {
-    setTabTarget({ path: 'goink.md', title: '故事状态' })
-    contentRef.current?.openFile('goink.md', '故事状态')
+  function handleSelectNovelist() {
+    setTabTarget({ path: 'novelist.md', title: '故事状态' })
+    contentRef.current?.openFile('novelist.md', '故事状态')
   }
 
   // ── Approval ────────────────────────────────────────────
@@ -336,7 +336,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
           novelId={activeNovelId}
           onSelectNovel={handleSelectNovel}
           onSelectChapter={handleSelectChapter}
-          onSelectGoink={handleSelectGoink}
+          onSelectNovelist={handleSelectNovelist}
           onExportNovel={(id) => setExportNovelId(id)}
           target={tabTarget}
           showCreate={showCreate}

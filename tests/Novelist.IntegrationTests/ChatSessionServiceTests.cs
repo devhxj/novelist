@@ -114,9 +114,9 @@ public sealed class ChatSessionServiceTests : IDisposable
         var novelService = new FileSystemNovelService(options, settings, versionControl);
         var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("版本对话", "", ""), CancellationToken.None);
         var workspace = Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        await File.WriteAllTextAsync(Path.Combine(workspace, "goink.md"), "user changed before chat");
+        await File.WriteAllTextAsync(Path.Combine(workspace, "novelist.md"), "user changed before chat");
         var completion = new WorkspaceMutatingCompletionClient(
-            Path.Combine(workspace, "goink.md"),
+            Path.Combine(workspace, "novelist.md"),
             "ai changed during chat");
         var service = CreateService(
             options,
@@ -146,7 +146,7 @@ public sealed class ChatSessionServiceTests : IDisposable
         var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "旧城疑案", "悬疑"), CancellationToken.None);
         var content = new FileSystemChapterContentService(options, novelService);
         await content.SaveContentAsync(
-            new SaveContentPayload(novel.Id, "goink.md", "## 当前进展\n林岚正在调查旧城门。"),
+            new SaveContentPayload(novel.Id, "novelist.md", "## 当前进展\n林岚正在调查旧城门。"),
             CancellationToken.None);
         Directory.CreateDirectory(Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString(), "skills"));
         await File.WriteAllTextAsync(
@@ -708,7 +708,7 @@ public sealed class ChatSessionServiceTests : IDisposable
             new SaveContentPayload(novel.Id, chapter.FilePath, "林岚在旧城门听见暗号。"),
             CancellationToken.None);
         await content.SaveContentAsync(
-            new SaveContentPayload(novel.Id, "goink.md", "## 当前进展\n林岚正在调查旧城门。"),
+            new SaveContentPayload(novel.Id, "novelist.md", "## 当前进展\n林岚正在调查旧城门。"),
             CancellationToken.None);
 
         var completion = new ToolLoopChatCompletionClient(

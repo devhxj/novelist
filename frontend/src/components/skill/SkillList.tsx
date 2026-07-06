@@ -15,7 +15,7 @@ interface Props {
 function skillPath(name: string, source: string): string {
   switch (source) {
     case 'novel': return `skills/${name}.md`
-    case 'user': return `~/.goink/skills/${name}.md`
+    case 'user': return `~/.novelist/skills/${name}.md`
     case 'builtin': return `/builtin/skills/${name}.md`
     default: return `skills/${name}.md`
   }

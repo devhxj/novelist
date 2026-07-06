@@ -270,6 +270,7 @@ public sealed class MafToolRegistryTests
         Assert.True(searchMaterials.JsonSchema.TryGetProperty("properties", out var searchMaterialsProperties));
         Assert.True(searchMaterialsProperties.TryGetProperty("narrative_duties", out _));
         Assert.True(searchMaterialsProperties.TryGetProperty("emotion_transitions", out _));
+        Assert.True(searchMaterialsProperties.TryGetProperty("prose_duties", out _));
 
         var startOrchestration = tools.Single(tool => tool.Name == "start_reference_orchestration_run");
         AssertToolDescriptionContains(
@@ -386,7 +387,7 @@ public sealed class MafToolRegistryTests
             new ChatToolCall(
                 "call_reference_search",
                 "search_reference_materials",
-                """{"query":"雨夜压迫感","anchor_ids":[7],"material_types":["sentence"],"narrative_duties":["external_evidence"],"emotion_transitions":["neutral->pressure"],"page":1,"size":5}"""),
+                """{"query":"雨夜压迫感","anchor_ids":[7],"material_types":["sentence"],"narrative_duties":["external_evidence"],"emotion_transitions":["neutral->pressure"],"prose_duties":["source_backed_detail"],"page":1,"size":5}"""),
             CancellationToken.None);
 
         Assert.True(result.Success, result.Error);
@@ -397,6 +398,7 @@ public sealed class MafToolRegistryTests
         Assert.Equal(["sentence"], anchors.LastSearch.MaterialTypes);
         Assert.Equal(["external_evidence"], anchors.LastSearch.NarrativeDuties);
         Assert.Equal(["neutral->pressure"], anchors.LastSearch.EmotionTransitions);
+        Assert.Equal(["source_backed_detail"], anchors.LastSearch.ProseDuties);
         var material = result.Data!.Value.GetProperty("items")[0];
         Assert.Equal("mat-1", material.GetProperty("material_id").GetString());
         var components = material.GetProperty("score_components");
@@ -863,6 +865,28 @@ public sealed class MafToolRegistryTests
                     DateTimeOffset.UtcNow,
                     DateTimeOffset.UtcNow)
             ]);
+        }
+
+        public ValueTask<ReferenceAnchorPayload> PromoteAnchorToWorkspaceCorpusAsync(
+            PromoteReferenceAnchorToWorkspaceCorpusPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new ReferenceAnchorPayload(
+                input.AnchorId,
+                0,
+                "参考书",
+                "作者",
+                string.Empty,
+                "markdown",
+                "user_provided",
+                "hash",
+                "test",
+                ReferenceAnchorBuildStates.Ready,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                ReferenceCorpusVisibilities.Workspace,
+                input.SourceTrust ?? ReferenceSourceTrustLevels.UserVerified,
+                input.UserTags ?? []));
         }
 
         public ValueTask<ReferenceAnchorBuildStatusPayload> RebuildAnchorAsync(
