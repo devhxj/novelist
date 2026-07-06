@@ -1362,6 +1362,8 @@ async function verifyCompactViewportSmoke(browser, url, consoleErrors, pageError
 
 async function verifyMetadataActionWorkflow(browser, url, consoleErrors, pageErrors) {
   await verifyMetadataEmptyStates(browser, url, consoleErrors, pageErrors)
+  await verifyMetadataValidationWorkflow(browser, url, consoleErrors, pageErrors)
+  await verifyMetadataBridgeFailureRecoveryWorkflow(browser, url, consoleErrors, pageErrors)
 
   const page = await newAppPage(browser, consoleErrors, pageErrors, {
     initialized: true,
@@ -1426,6 +1428,84 @@ async function verifyMetadataEmptyStates(browser, url, consoleErrors, pageErrors
   await expectVisible(page.locator('aside').getByText('暂无技能'), 'empty skill state')
   await page.locator('header').getByRole('button', { name: '个人中心' }).click()
   await expectVisible(page.getByText('还没有写作记录。开始写吧，每天的字数都会被记录下来。'), 'empty profile writing state')
+  await page.close()
+}
+
+async function verifyMetadataValidationWorkflow(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(browser, consoleErrors, pageErrors, { initialized: true })
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'metadata validation workspace')
+
+  await clickActivity(page, '角色')
+  await page.getByRole('button', { name: '新建角色' }).click()
+  await page.locator('main').getByRole('button', { name: '保存' }).last().click()
+  await expectVisible(page.locator('main').getByText('请输入角色名称'), 'character validation message')
+  await assertBridgeCallCount(page, 'CreateCharacter', 0)
+
+  await clickActivity(page, '地点')
+  await page.getByRole('button', { name: '新建地点' }).click()
+  await page.locator('main').getByRole('button', { name: '保存' }).last().click()
+  await expectVisible(page.locator('main').getByText('请输入地点名称'), 'location validation message')
+  await assertBridgeCallCount(page, 'CreateLocation', 0)
+
+  await clickActivity(page, '弧线')
+  await page.getByRole('button', { name: '新弧线' }).click()
+  await page.locator('main').getByRole('button', { name: '保存' }).last().click()
+  await expectVisible(page.locator('main').getByText('请输入弧线名称'), 'story arc validation message')
+  await assertBridgeCallCount(page, 'CreateStoryArc', 0)
+
+  await clickActivity(page, '时间线')
+  await page.locator('main').getByRole('button', { name: '新建' }).click()
+  await assertButtonDisabled(page.locator('main').getByRole('button', { name: '创建' }).last(), 'timeline create before title')
+  await assertBridgeCallCount(page, 'CreateTimelineEntry', 0)
+
+  await clickActivity(page, '读者视角')
+  await page.locator('main').getByRole('button', { name: '新建' }).click()
+  await assertButtonDisabled(page.locator('main').getByRole('button', { name: '创建' }).last(), 'reader create before content')
+  await assertBridgeCallCount(page, 'CreateReaderPerspective', 0)
+
+  await clickActivity(page, '偏好')
+  await page.locator('section').filter({ hasText: '全局偏好' }).getByRole('button', { name: '添加' }).click()
+  await assertButtonDisabled(page.locator('main').getByRole('button', { name: '创建' }).last(), 'preference create before content')
+  await assertBridgeCallCount(page, 'CreatePreference', 0)
+
+  await assertBridgeCallCount(page, 'SaveContent', 0)
+  await assertBridgeCallCount(page, 'runtime.shell.openExternal', 0)
+  await page.close()
+}
+
+async function verifyMetadataBridgeFailureRecoveryWorkflow(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    faults: {
+      CreateCharacter: { mode: 'storage', message: '模拟角色保存失败' },
+    },
+  })
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'metadata bridge failure workspace')
+
+  await clickActivity(page, '角色')
+  await page.getByRole('button', { name: '新建角色' }).click()
+  await page.getByPlaceholder('角色名称').fill('故障恢复角色')
+  await page.getByPlaceholder('角色外貌、背景等自然语言描述').fill('第一次保存会失败，切换回来后重试成功。')
+  await page.locator('main').getByRole('button', { name: '保存' }).last().click()
+  await waitForBridgeCall(page, 'CreateCharacter')
+  await expectVisible(page.locator('main').getByText('模拟角色保存失败'), 'character create failure message')
+
+  const failedCreateCount = await bridgeCallCount(page, 'CreateCharacter')
+  await clickActivity(page, '地点')
+  await expectVisible(page.getByRole('heading', { name: /地点/ }), 'metadata recovery navigation target')
+  await clickActivity(page, '角色')
+  await expectVisible(page.getByText('林岚').first(), 'characters recovered after failed create')
+  await page.getByRole('button', { name: '新建角色' }).click()
+  await page.getByPlaceholder('角色名称').fill('故障恢复角色')
+  await page.getByPlaceholder('角色外貌、背景等自然语言描述').fill('第二次保存成功，证明桥失败后可恢复。')
+  await page.locator('main').getByRole('button', { name: '保存' }).last().click()
+  await waitForBridgeCallCountAfter(page, 'CreateCharacter', failedCreateCount)
+  await expectVisible(page.getByText('故障恢复角色').first(), 'character recovered after failed create retry')
+
+  await assertBridgeCallCount(page, 'SaveContent', 0)
+  await assertBridgeCallCount(page, 'runtime.shell.openExternal', 0)
   await page.close()
 }
 
