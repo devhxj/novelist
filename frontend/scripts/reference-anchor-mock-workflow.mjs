@@ -291,6 +291,31 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectVisible(page.getByText('批量导入语料 2'), 'second bulk imported anchor title')
   const firstBulkImportRow = page.locator('.rounded-md').filter({ hasText: '批量导入语料 1' }).first()
   await expectVisible(firstBulkImportRow.getByText('workspace · imported · workspace_corpus'), 'bulk imported workspace corpus metadata')
+
+  await importPanel.getByPlaceholder('参考书名').fill('库包默认标题')
+  await importPanel.getByPlaceholder('可选').fill('Pack Default Author')
+  await importPanel.getByLabel('可见性').selectOption('workspace')
+  await importPanel.getByLabel('来源可信度').selectOption('imported')
+  await importPanel.getByLabel('用户标签').fill('库包;默认')
+  await importPanel.getByLabel('库包清单').fill(JSON.stringify({
+    sources: [
+      {
+        source_path: 'D:\\books\\pack-one.md',
+        title: '库包显式标题',
+        license_status: 'licensed',
+        source_trust: 'user_verified',
+        user_tags: ['库包', '显式'],
+      },
+      {
+        path: 'D:\\books\\pack-two.txt',
+        author: 'Pack Writer',
+      },
+    ],
+  }))
+  await importPanel.getByRole('button', { name: /^导入库包$/ }).click()
+  await expectVisible(page.getByText('已导入库包 2 个语料来源'), 'library pack import message')
+  await expectVisible(page.getByText('库包显式标题'), 'library pack explicit title')
+  await expectVisible(page.getByText('库包默认标题 2'), 'library pack derived title')
 }
 
 async function generateReviseApproveBindAndDraft(page) {
@@ -442,6 +467,22 @@ async function verifyBridgeCalls(page) {
   assert(createAnchorsCall.args[0].anchors.every((anchor) => anchor.visibility === 'workspace'), 'bulk source import should preserve selected workspace visibility')
   assert(createAnchorsCall.args[0].anchors.every((anchor) => anchor.source_trust === 'imported'), 'bulk source import should preserve selected source trust')
   assert.deepEqual(createAnchorsCall.args[0].anchors[0].user_tags, ['批量导入', '共享'], 'bulk source import payload must include shared user tags')
+
+  const libraryPackCall = calls.find((call) =>
+    call.method === 'CreateReferenceAnchors' &&
+    call.args[0]?.anchors?.some((anchor) => anchor.source_path === 'D:\\books\\pack-one.md'))
+  assert(libraryPackCall, 'missing library pack CreateReferenceAnchors call')
+  assert.equal(libraryPackCall.args[0].anchors.length, 2, 'library pack import payload must include manifest sources')
+  assert.equal(libraryPackCall.args[0].anchors[0].title, '库包显式标题', 'library pack should keep explicit title')
+  assert.equal(libraryPackCall.args[0].anchors[0].license_status, 'licensed', 'library pack should keep per-source license status')
+  assert.equal(libraryPackCall.args[0].anchors[0].source_trust, 'user_verified', 'library pack should keep per-source source trust')
+  assert.deepEqual(libraryPackCall.args[0].anchors[0].user_tags, ['库包', '显式'], 'library pack should keep per-source user tags')
+  assert.equal(libraryPackCall.args[0].anchors[1].title, '库包默认标题 2', 'library pack should derive missing title from shared title')
+  assert.equal(libraryPackCall.args[0].anchors[1].author, 'Pack Writer', 'library pack should keep per-source author')
+  assert.equal(libraryPackCall.args[0].anchors[1].source_kind, 'text', 'library pack should infer text source kind from txt path')
+  assert.equal(libraryPackCall.args[0].anchors[1].visibility, 'workspace', 'library pack should inherit selected workspace visibility')
+  assert.equal(libraryPackCall.args[0].anchors[1].source_trust, 'imported', 'library pack should inherit selected source trust')
+  assert.deepEqual(libraryPackCall.args[0].anchors[1].user_tags, ['库包', '默认'], 'library pack should inherit shared user tags')
 
   const promoteCalls = calls.filter((call) => call.method === 'PromoteReferenceAnchorToWorkspaceCorpus')
   assert.equal(promoteCalls.length, 1, 'single promote should call PromoteReferenceAnchorToWorkspaceCorpus once')

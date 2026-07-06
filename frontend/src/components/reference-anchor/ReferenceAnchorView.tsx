@@ -49,6 +49,7 @@ type AnchorForm = {
 type CreateAnchorForm = AnchorForm & {
   sourcePath: string
   bulkSourcePaths: string
+  libraryPackManifest: string
   sourceKind: string
 }
 
@@ -106,6 +107,7 @@ const EMPTY_ANCHOR_FORM: CreateAnchorForm = {
   author: '',
   sourcePath: '',
   bulkSourcePaths: '',
+  libraryPackManifest: '',
   sourceKind: 'markdown',
   licenseStatus: 'user_provided',
   visibility: 'private',
@@ -176,6 +178,96 @@ function bulkAnchorTitle(formTitle: string, sourcePath: string, index: number, c
   const title = formTitle.trim()
   if (!title) return sourceTitleFromPath(sourcePath, index)
   return count === 1 ? title : `${title} ${index + 1}`
+}
+
+function optionalManifestText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function optionalManifestList(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    const items = value
+      .map(item => typeof item === 'string' ? item.trim() : '')
+      .filter(Boolean)
+    return items.length > 0 ? items : undefined
+  }
+
+  if (typeof value === 'string') {
+    const items = lines(value)
+    return items.length > 0 ? items : undefined
+  }
+
+  return undefined
+}
+
+function parseLibraryPackManifest(
+  manifest: string,
+  form: CreateAnchorForm,
+  novelId: number,
+): reference.CreateAnchorInput[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(manifest)
+  } catch {
+    throw new Error('库包清单必须是 JSON')
+  }
+
+  const sources = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object' && Array.isArray((parsed as { sources?: unknown }).sources)
+      ? (parsed as { sources: unknown[] }).sources
+      : null
+
+  if (!sources || sources.length === 0) {
+    throw new Error('库包清单至少需要 1 个 sources 条目')
+  }
+
+  if (sources.length > 50) {
+    throw new Error('一次最多导入 50 个库包来源')
+  }
+
+  const fallbackTags = lines(form.userTags)
+  return sources.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error(`库包第 ${index + 1} 项必须是对象`)
+    }
+
+    const entry = item as Record<string, unknown>
+    const sourcePath = optionalManifestText(entry.source_path) ??
+      optionalManifestText(entry.sourcePath) ??
+      optionalManifestText(entry.path)
+    if (!sourcePath) {
+      throw new Error(`库包第 ${index + 1} 项缺少 source_path`)
+    }
+
+    const title = optionalManifestText(entry.title) ?? bulkAnchorTitle(form.title, sourcePath, index, sources.length)
+    const author = optionalManifestText(entry.author) ?? (form.author.trim() || undefined)
+    const sourceKind = optionalManifestText(entry.source_kind) ??
+      optionalManifestText(entry.sourceKind) ??
+      sourceKindFromPath(sourcePath, form.sourceKind)
+    const licenseStatus = optionalManifestText(entry.license_status) ??
+      optionalManifestText(entry.licenseStatus) ??
+      form.licenseStatus
+    const visibility = optionalManifestText(entry.visibility) ?? form.visibility
+    const sourceTrust = optionalManifestText(entry.source_trust) ??
+      optionalManifestText(entry.sourceTrust) ??
+      form.sourceTrust
+    const userTags = optionalManifestList(entry.user_tags) ??
+      optionalManifestList(entry.userTags) ??
+      fallbackTags
+
+    return {
+      novel_id: novelId,
+      title,
+      author,
+      source_path: sourcePath,
+      source_kind: sourceKind,
+      license_status: licenseStatus,
+      visibility,
+      source_trust: sourceTrust,
+      user_tags: userTags,
+    }
+  })
 }
 
 function materialScoreComponents(material: reference.Material): Array<[string, number]> {
@@ -510,6 +602,27 @@ export default function ReferenceAnchorView({ novelId }: Props) {
         user_tags: userTags,
       })),
     }), `已批量导入 ${sourcePaths.length} 个语料来源`)
+    if (created) {
+      setAnchorForm(EMPTY_ANCHOR_FORM)
+      await loadAnchors()
+    }
+  }
+
+  async function importLibraryPack() {
+    if (!anchorForm.libraryPackManifest.trim()) {
+      setError('请输入库包清单 JSON')
+      return
+    }
+
+    let anchors: reference.CreateAnchorInput[]
+    try {
+      anchors = parseLibraryPackManifest(anchorForm.libraryPackManifest, anchorForm, novelId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '库包清单无法解析')
+      return
+    }
+
+    const created = await run(() => app.CreateReferenceAnchors({ anchors }), `已导入库包 ${anchors.length} 个语料来源`)
     if (created) {
       setAnchorForm(EMPTY_ANCHOR_FORM)
       await loadAnchors()
@@ -1344,6 +1457,18 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                 </Field>
                 <button onClick={createAnchors} disabled={loading} className="inline-flex w-full items-center justify-center gap-1.5 rounded border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-50">
                   <Plus className="h-3.5 w-3.5" />批量导入
+                </button>
+                <Field label="库包清单">
+                  <textarea
+                    value={anchorForm.libraryPackManifest}
+                    onChange={event => setAnchorForm(form => ({ ...form, libraryPackManifest: event.target.value }))}
+                    className={`${inputClass} min-h-24 resize-y font-mono text-[11px]`}
+                    placeholder={'{"sources":[{"source_path":"D:\\\\books\\\\pack-a.md","title":"库包参考"}]}'}
+                    aria-label="库包清单"
+                  />
+                </Field>
+                <button onClick={importLibraryPack} disabled={loading} className="inline-flex w-full items-center justify-center gap-1.5 rounded border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-50">
+                  <BookMarked className="h-3.5 w-3.5" />导入库包
                 </button>
               </div>
             </div>
