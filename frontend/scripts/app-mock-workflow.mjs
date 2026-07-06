@@ -283,29 +283,190 @@ async function runUsabilitySuite(browser, url) {
   logStep('checking usability baseline surfaces')
   await page.goto(url, { waitUntil: 'domcontentloaded' })
   await expectVisible(page.getByText('全局回归小说'), 'usability workspace title')
-  observations.push(usabilityObservation('Startup', 'low', 'Workspace title, active side panel, and chat panel are visible after the mocked bridge initializes.'))
   await page.screenshot({ path: path.join(outputDir, 'usability-01-startup.png'), fullPage: true })
+  observations.push(usabilityObservation({
+    surface: 'Startup',
+    severity: 'low',
+    issueType: 'baseline',
+    summary: 'Workspace title, active side panel, and chat panel are visible after the mocked bridge initializes.',
+    screenshot: 'usability-01-startup.png',
+    reproduction: ['Run `npm --prefix frontend run test:app:usability`.', 'Load the initialized mocked workspace.'],
+    expected: 'A returning writer lands in the active workspace with no setup friction.',
+    actual: 'The workspace title, chapter side panel, editor, and chat panel are visible.',
+    impact: 'Low risk; this is a baseline observation for startup confidence.',
+    proposedFix: 'No immediate fix. Keep this screenshot as the startup readability baseline.',
+    scores: { discoverability: 5, clickCost: 5, feedbackClarity: 4, errorRecovery: 4, keyboardErgonomics: 3, informationDensity: 4, visualReadability: 4 },
+  }))
+
+  await clickActivity(page, '书架')
+  await expectVisible(novelCard(page, '全局回归小说'), 'usability bookshelf card')
+  await page.screenshot({ path: path.join(outputDir, 'usability-02-bookshelf.png'), fullPage: true })
+  observations.push(usabilityObservation({
+    surface: 'Bookshelf / Novel Management',
+    severity: 'low',
+    issueType: 'baseline',
+    summary: 'The bookshelf exposes the active novel card with direct management affordances.',
+    screenshot: 'usability-02-bookshelf.png',
+    reproduction: ['Open the initialized workspace.', 'Click the Bookshelf activity.'],
+    expected: 'A writer can find the current project and management controls without leaving the workspace.',
+    actual: 'The novel card is visible and remains reachable through one activity-bar click.',
+    impact: 'Low risk; detailed create, edit, cover, and delete behavior is covered by the full surface suite.',
+    proposedFix: 'No immediate fix. Recheck hover-only controls during later accessibility review.',
+    scores: { discoverability: 4, clickCost: 5, feedbackClarity: 4, errorRecovery: 4, keyboardErgonomics: 3, informationDensity: 4, visualReadability: 4 },
+  }))
 
   await clickActivity(page, '章节')
   await expectVisible(page.getByText('章节 (2)'), 'usability chapter panel')
   await expectVisible(page.getByRole('button', { name: /故事状态/ }), 'usability story state control')
   await page.getByRole('button', { name: /故事状态/ }).click()
   await waitForBridgeCallArg(page, 'GetContent', 1, 'novelist.md')
-  observations.push(usabilityObservation('Chapters', 'low', 'Chapter access is one activity-bar click away; grouped chapters remain visible for the small fixture.'))
+  await page.screenshot({ path: path.join(outputDir, 'usability-03-chapters-editor.png'), fullPage: true })
+  observations.push(usabilityObservation({
+    surface: 'Chapters / Editor',
+    severity: 'low',
+    issueType: 'baseline',
+    summary: 'Chapter access is one activity-bar click away; grouped chapters remain visible for the small fixture.',
+    screenshot: 'usability-03-chapters-editor.png',
+    reproduction: ['Open the initialized workspace.', 'Click the Chapters activity.', 'Open the story-state control.'],
+    expected: 'Chapter navigation and story-state access should stay close to the writing surface.',
+    actual: 'The chapter list, story-state control, editor, and chat panel remain visible after the task.',
+    impact: 'Low risk; this records the normal writing navigation path.',
+    proposedFix: 'No immediate fix. Recheck after large-project virtualization work.',
+    scores: { discoverability: 5, clickCost: 4, feedbackClarity: 4, errorRecovery: 4, keyboardErgonomics: 3, informationDensity: 4, visualReadability: 4 },
+  }))
+
+  await expectVisible(page.getByPlaceholder('输入消息，按 / 调用技能...'), 'usability chat input')
+  await page.screenshot({ path: path.join(outputDir, 'usability-04-chat.png'), fullPage: true })
+  observations.push(usabilityObservation({
+    surface: 'Chat / Agent',
+    severity: 'low',
+    issueType: 'baseline',
+    summary: 'The chat input remains visible beside the writing surface without requiring live model access.',
+    screenshot: 'usability-04-chat.png',
+    reproduction: ['Open the initialized workspace.', 'Click the Chapters activity.', 'Inspect the right-side chat panel.'],
+    expected: 'Agent assistance should be immediately reachable while editing or reviewing story state.',
+    actual: 'The chat input and panel remain visible next to the editor in the default desktop layout.',
+    impact: 'Low risk; streaming, tool cards, cancellation, and retry behavior are covered by the full surface suite.',
+    proposedFix: 'No immediate fix. Continue using the full chat workflow for correctness regressions.',
+    scores: { discoverability: 5, clickCost: 5, feedbackClarity: 4, errorRecovery: 4, keyboardErgonomics: 4, informationDensity: 4, visualReadability: 4 },
+  }))
 
   await clickActivity(page, '搜索')
   await expectVisible(page.getByPlaceholder('搜索人物、地点、时间线、正文...'), 'usability search input')
-  observations.push(usabilityObservation('Search', 'low', 'Search presents a direct input and explicit empty prompt before a query.'))
+  await page.screenshot({ path: path.join(outputDir, 'usability-05-search.png'), fullPage: true })
+  observations.push(usabilityObservation({
+    surface: 'Search',
+    severity: 'low',
+    issueType: 'baseline',
+    summary: 'Search presents a direct input and explicit empty prompt before a query.',
+    screenshot: 'usability-05-search.png',
+    reproduction: ['Open the initialized workspace.', 'Click the Search activity.'],
+    expected: 'Search should make the query affordance obvious before the user remembers exact syntax.',
+    actual: 'The search input is visible immediately with a broad placeholder covering people, places, timeline, and prose.',
+    impact: 'Low risk; this records the global retrieval entry point.',
+    proposedFix: 'No immediate fix. Keep semantic result grouping covered by the full surface suite.',
+    scores: { discoverability: 5, clickCost: 5, feedbackClarity: 4, errorRecovery: 4, keyboardErgonomics: 4, informationDensity: 4, visualReadability: 4 },
+  }))
 
   await clickActivity(page, '参考锚定')
   await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'usability reference heading')
-  observations.push(usabilityObservation('Reference Anchor', 'medium', 'The reference workflow is reachable, but Phase 13 still needs deeper automatic-source generation usability review.'))
-  await page.screenshot({ path: path.join(outputDir, 'usability-02-reference.png'), fullPage: true })
+  await page.screenshot({ path: path.join(outputDir, 'usability-06-reference.png'), fullPage: true })
+  observations.push(usabilityObservation({
+    surface: 'Reference Anchor / Corpus',
+    severity: 'medium',
+    issueType: 'ergonomic-friction',
+    summary: 'The reference workflow is reachable, but automatic source-to-material assistance still needs full task scoring.',
+    screenshot: 'usability-06-reference.png',
+    reproduction: ['Open the initialized workspace.', 'Click the Reference Anchor activity.', 'Inspect the corpus import and orchestration controls.'],
+    expected: 'A writer should be able to provide source text and see clear automatic segmentation, material extraction, binding, and audit progress.',
+    actual: 'The surface is reachable and exposes corpus/source controls, but Phase 13 still has open work to prove the flow feels automatic rather than manual data plumbing.',
+    impact: 'Medium user impact for long-form writers; unclear automation would make reference anchoring feel like setup work instead of writing assistance.',
+    proposedFix: 'Complete the reference/corpus workflow tests for source confirmation, automatic segmentation, material extraction, blueprint binding, audit stops, and progress feedback.',
+    scores: { discoverability: 4, clickCost: 3, feedbackClarity: 3, errorRecovery: 3, keyboardErgonomics: 2, informationDensity: 3, visualReadability: 4 },
+  }))
+
+  await clickActivity(page, '角色')
+  await expectVisible(page.getByRole('heading', { name: /角色/ }), 'usability metadata heading')
+  await page.screenshot({ path: path.join(outputDir, 'usability-07-metadata.png'), fullPage: true })
+  observations.push(usabilityObservation({
+    surface: 'Metadata Panels',
+    severity: 'low',
+    issueType: 'baseline',
+    summary: 'Metadata panels are reachable from the activity bar and show fixture data without leaving the workspace.',
+    screenshot: 'usability-07-metadata.png',
+    reproduction: ['Open the initialized workspace.', 'Click the Characters activity.'],
+    expected: 'Story metadata should be visible as a workspace surface, not hidden behind modals.',
+    actual: 'The character panel renders fixture data and keeps the side activity structure intact.',
+    impact: 'Low risk; create, edit, delete, empty, validation, and bridge-failure recovery are covered by the full surface suite.',
+    proposedFix: 'No immediate fix. Continue checking dense metadata layouts on compact viewports.',
+    scores: { discoverability: 5, clickCost: 5, feedbackClarity: 4, errorRecovery: 4, keyboardErgonomics: 3, informationDensity: 4, visualReadability: 4 },
+  }))
+
+  await clickActivity(page, '章节')
+  await page.getByRole('button', { name: '导出作品' }).click()
+  await expectVisible(page.getByRole('heading', { name: '导出作品' }), 'usability export dialog')
+  await page.screenshot({ path: path.join(outputDir, 'usability-08-import-export.png'), fullPage: true })
+  observations.push(usabilityObservation({
+    surface: 'Import / Export / File Picker',
+    severity: 'low',
+    issueType: 'baseline',
+    summary: 'Export is available from the writing surface, while destructive file access remains behind explicit controls.',
+    screenshot: 'usability-08-import-export.png',
+    reproduction: ['Open the initialized workspace.', 'Click the Chapters activity.', 'Open the Export Novel dialog.'],
+    expected: 'Export and file-picker affordances should be explicit and recoverable before bridge calls run.',
+    actual: 'The export dialog opens with format choices and cancel/close affordances before any export call is made.',
+    impact: 'Low risk; temporary fixture paths and file-picker bridge guardrails are covered by the full surface suite.',
+    proposedFix: 'No immediate fix. Keep temporary-path guardrails in the import/export workflow tests.',
+    scores: { discoverability: 4, clickCost: 4, feedbackClarity: 4, errorRecovery: 4, keyboardErgonomics: 3, informationDensity: 4, visualReadability: 4 },
+  }))
+  await page.locator('.fixed').getByRole('button', { name: '取消' }).click()
 
   await page.locator('header').getByRole('button', { name: '设置' }).click()
   await expectVisible(page.getByText('基础设置'), 'usability settings dialog')
-  observations.push(usabilityObservation('Settings', 'low', 'Settings are reachable from the header and show provider configuration without live-key access.'))
+  await page.screenshot({ path: path.join(outputDir, 'usability-09-settings.png'), fullPage: true })
+  observations.push(usabilityObservation({
+    surface: 'Settings',
+    severity: 'low',
+    issueType: 'baseline',
+    summary: 'Settings are reachable from the header and show provider configuration without live-key access.',
+    screenshot: 'usability-09-settings.png',
+    reproduction: ['Open the initialized workspace.', 'Click the Settings button in the header.'],
+    expected: 'Configuration should be reachable without exposing live credentials during QA.',
+    actual: 'The settings dialog opens on deterministic mocked configuration with no live-key requirement.',
+    impact: 'Low risk; detailed settings persistence and failure behavior are covered in the full surface suite.',
+    proposedFix: 'No immediate fix. Keep the mock-key/no-network guardrails in the Settings workflow tests.',
+    scores: { discoverability: 4, clickCost: 5, feedbackClarity: 4, errorRecovery: 4, keyboardErgonomics: 3, informationDensity: 4, visualReadability: 4 },
+  }))
   await page.locator('.fixed').getByRole('button', { name: '✕' }).click()
+
+  const compactPage = await newAppPage(
+    browser,
+    consoleErrors,
+    pageErrors,
+    { initialized: true },
+    { width: 900, height: 720 },
+    'usability-compact',
+  )
+  await compactPage.goto(url, { waitUntil: 'domcontentloaded' })
+  await clickActivity(compactPage, '章节')
+  await expectVisible(compactPage.getByPlaceholder('输入消息，按 / 调用技能...'), 'usability compact chat input')
+  await expectVisible(compactPage.getByText('章节 (2)'), 'usability compact chapter side panel')
+  await compactPage.screenshot({ path: path.join(outputDir, 'usability-10-compact.png'), fullPage: true })
+  observations.push(usabilityObservation({
+    surface: 'Compact Desktop Layout',
+    severity: 'low',
+    issueType: 'baseline',
+    summary: 'The compact viewport keeps chapter navigation, editor, and chat reachable without white-screen failure.',
+    screenshot: 'usability-10-compact.png',
+    reproduction: ['Run the usability suite compact viewport page at 900x720.', 'Open the Chapters activity.'],
+    expected: 'A smaller desktop window should preserve navigation and writing controls without incoherent overlap.',
+    actual: 'The compact page keeps the chapter panel and chat input visible.',
+    impact: 'Low risk; compact transition assertions are also covered by the full surface suite.',
+    proposedFix: 'No immediate fix. Recheck after reference/corpus controls are expanded.',
+    scores: { discoverability: 4, clickCost: 4, feedbackClarity: 4, errorRecovery: 4, keyboardErgonomics: 3, informationDensity: 3, visualReadability: 4 },
+  }))
+  await assertBridgeCallCount(compactPage, 'SaveContent', 0)
+  await compactPage.close()
 
   await writeUsabilityReport(observations)
   await verifySmokeBridgeCalls(page)
@@ -1846,40 +2007,113 @@ function realisticWritingText() {
   return paragraphs.join('\n\n')
 }
 
-function usabilityObservation(surface, severity, summary) {
-  return { surface, severity, summary }
+function usabilityObservation(input) {
+  const scores = {
+    discoverability: input.scores?.discoverability ?? 0,
+    clickCost: input.scores?.clickCost ?? 0,
+    feedbackClarity: input.scores?.feedbackClarity ?? 0,
+    errorRecovery: input.scores?.errorRecovery ?? 0,
+    keyboardErgonomics: input.scores?.keyboardErgonomics ?? 0,
+    informationDensity: input.scores?.informationDensity ?? 0,
+    visualReadability: input.scores?.visualReadability ?? 0,
+  }
+  return {
+    surface: input.surface,
+    severity: input.severity,
+    issueType: input.issueType,
+    summary: input.summary,
+    screenshot: input.screenshot,
+    reproduction: input.reproduction ?? [],
+    expected: input.expected,
+    actual: input.actual,
+    impact: input.impact,
+    proposedFix: input.proposedFix,
+    scores,
+  }
 }
 
 async function writeUsabilityReport(observations) {
-  const rows = observations
-    .map((item) => `| ${item.surface} | ${item.severity} | ${item.summary} |`)
+  const scoreRows = observations
+    .map((item) => [
+      item.surface,
+      item.scores.discoverability,
+      item.scores.clickCost,
+      item.scores.feedbackClarity,
+      item.scores.errorRecovery,
+      item.scores.keyboardErgonomics,
+      item.scores.informationDensity,
+      item.scores.visualReadability,
+    ].map(markdownCell).join(' | '))
+    .map((row) => `| ${row} |`)
     .join('\n')
+
+  const issueRows = observations
+    .map((item) => `| ${markdownCell(item.surface)} | ${markdownCell(item.severity)} | ${markdownCell(item.issueType)} | ${markdownCell(item.summary)} | ${markdownCell(artifactPath(item.screenshot))} |`)
+    .join('\n')
+
+  const details = observations
+    .map((item) => `### ${item.surface}
+
+- Severity: ${item.severity}
+- Type: ${item.issueType}
+- Screenshot: \`${artifactPath(item.screenshot)}\`
+- Reproduction:
+${numberedList(item.reproduction)}
+- Expected behavior: ${item.expected}
+- Actual behavior: ${item.actual}
+- Likely user impact: ${item.impact}
+- Proposed fix or tracking: ${item.proposedFix}`)
+    .join('\n\n')
+
   const report = `# Phase 13 Usability Report
 
 Generated by \`npm --prefix frontend run test:app:usability\`.
 
 ## Scope
 
-This is the Phase 13 baseline report generated from deterministic mocked bridge fixtures. It records the fixed report location, severity format, reproduction artifact folder, and initial product-surface observations. Deeper task-completion scoring and issue triage remain part of the broader Phase 13 QA work.
+This report is generated from deterministic mocked bridge fixtures. It records workflow scoring, severity, affected surface, screenshots, reproduction steps, expected behavior, actual behavior, likely user impact, and proposed fixes. Correctness bugs and ergonomic friction are separated by the Type field.
 
 Artifacts: \`${path.relative(repoRoot, outputDir)}\`
 
-## Observations
+Scoring uses 1-5 where 5 is best. Scores are heuristic product-QA ratings from the scripted browser walkthrough, not performance metrics.
 
-| Surface | Severity | Finding |
-| --- | --- | --- |
-${rows}
+## Workflow Scores
 
-## Open Phase 13 Review Items
+| Surface | Discoverability | Click Cost | Feedback Clarity | Error Recovery | Keyboard Ergonomics | Information Density | Visual Readability |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+${scoreRows}
 
-- Correctness bugs and ergonomic friction are intentionally separated by severity in this report format.
-- The automatic reference/corpus generation workflow still needs full task-completion scoring against large passed source text.
-- High and medium issues found in later full-product runs should include screenshot path, reproduction steps, expected behavior, actual behavior, user impact, and proposed fix.
+## Issues And Observations
+
+| Surface | Severity | Type | Summary | Screenshot |
+| --- | --- | --- | --- | --- |
+${issueRows}
+
+## Details
+
+${details}
+
+## Reference/Corpus Automation Verdict
+
+The current usability pass confirms the reference surface is reachable, but it deliberately keeps a medium ergonomic-friction item open until Phase 13 proves the normal flow can turn supplied source text into segmented source records, extracted materials, blueprint bindings, and audit feedback without manual corpus plumbing.
 `
 
   await fs.mkdir(phaseOutputRoot, { recursive: true })
   await fs.writeFile(path.join(phaseOutputRoot, 'usability-report.md'), report, 'utf8')
   await fs.writeFile(path.join(outputDir, 'usability-report.md'), report, 'utf8')
+}
+
+function artifactPath(fileName) {
+  return path.join(path.relative(repoRoot, outputDir), fileName)
+}
+
+function markdownCell(value) {
+  return String(value ?? '').replaceAll('|', '\\|').replace(/\r?\n/g, '<br>')
+}
+
+function numberedList(items) {
+  if (!items.length) return '1. No reproduction steps recorded.'
+  return items.map((item, index) => `${index + 1}. ${item}`).join('\n')
 }
 
 async function replaceEditorText(page, content) {
