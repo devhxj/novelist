@@ -1382,7 +1382,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
               </p>
             </div>
 
-            <div className="rounded-lg border border-border bg-card p-4">
+            <div data-testid="reference-import-panel" className="rounded-lg border border-border bg-card p-4">
               <div className="flex items-center gap-2 mb-3">
                 <Plus className="h-3.5 w-3.5 text-muted-foreground" />
                 <h3 className="text-xs font-semibold text-foreground">导入语料来源</h3>
@@ -1613,7 +1613,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
               ) : (
                 <div className="space-y-2">
                   {visibleAnchors.map(anchor => (
-                    <div key={anchor.anchor_id} className="rounded-md border border-border bg-background px-3 py-2">
+                    <div key={anchor.anchor_id} data-testid="reference-anchor-row" className="rounded-md border border-border bg-background px-3 py-2">
                       {editingAnchorId === anchor.anchor_id && anchorEditForm ? (
                         <div className="space-y-2">
                           <Field label="标题">
@@ -1888,7 +1888,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                                   </div>
                                   <div className="space-y-2" aria-label={`${anchor.title} 材料预览`}>
                                     {visibleAnchorMaterialItems.map(material => (
-                                      <div key={material.material_id} className="rounded border border-border bg-card px-2.5 py-2">
+                                      <div key={material.material_id} data-testid="reference-anchor-material-card" className="rounded border border-border bg-card px-2.5 py-2">
                                         <div className="flex flex-wrap items-center justify-between gap-2">
                                           <label className="flex min-w-0 flex-1 items-center gap-2">
                                             <input
@@ -1983,7 +1983,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
               )}
             </div>
 
-            <div className="rounded-lg border border-border bg-card p-4">
+            <div data-testid="reference-material-library" className="rounded-lg border border-border bg-card p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <Tags className="h-3.5 w-3.5 text-muted-foreground" />
@@ -2169,7 +2169,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                   {visibleMaterialLibraryItems.length > 0 && (
                     <div className="space-y-2" aria-label="材料库结果">
                       {visibleMaterialLibraryItems.map(material => (
-                        <div key={material.material_id} className="rounded border border-border bg-background px-2.5 py-2">
+                        <div key={material.material_id} data-testid="reference-material-library-card" className="rounded border border-border bg-background px-2.5 py-2">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <label className="flex min-w-0 flex-1 items-center gap-2">
                               <input
@@ -2289,7 +2289,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
 
               {advancedMode && (
                 <div className="mt-4 space-y-4">
-                  <div className="rounded-md border border-border bg-background p-3">
+                  <div data-testid="reference-manual-material-search" className="rounded-md border border-border bg-background p-3">
                     <div className="flex flex-wrap items-end gap-3">
                       <div className="min-w-[220px] flex-1">
                         <Field label="材料搜索">
@@ -2329,7 +2329,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                     {materials.length > 0 && (
                       <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-2">
                         {materials.map(material => (
-                          <div key={material.material_id} className="rounded-md border border-border bg-card p-3">
+                          <div key={material.material_id} data-testid="reference-manual-material-card" className="rounded-md border border-border bg-card p-3">
                             <div className="flex items-center justify-between gap-2">
                               <span className="min-w-0 truncate text-[11px] text-muted-foreground">
                                 {material.material_type} · {material.function_tag || 'untagged'} · {material.emotion_tag || 'neutral'}
@@ -2358,7 +2358,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                   </div>
 
                   <div className="grid grid-cols-1 2xl:grid-cols-[360px_minmax(0,1fr)] gap-4">
-                    <div className="rounded-md border border-border bg-background p-4">
+                    <div data-testid="reference-blueprint-panel" className="rounded-md border border-border bg-background p-4">
                       <div className="flex items-center gap-2 mb-3">
                         <FileSearch className="h-3.5 w-3.5 text-muted-foreground" />
                         <h3 className="text-xs font-semibold text-foreground">章节蓝图</h3>

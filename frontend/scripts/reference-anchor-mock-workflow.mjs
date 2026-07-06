@@ -88,7 +88,7 @@ async function main() {
 }
 
 async function createRebuildAndSearchReferenceMaterial(page) {
-  const importPanel = page.locator('.rounded-lg').filter({ hasText: '导入语料来源' }).first()
+  const importPanel = page.getByTestId('reference-import-panel')
 
   await importPanel.getByPlaceholder('参考书名').fill('雨夜动作参考')
   await importPanel.getByPlaceholder('可选').fill('Mock Author')
@@ -103,7 +103,7 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await page.getByRole('button', { name: /提升 雨夜动作参考 为工作区语料/ }).click()
   await expectVisible(page.getByText('已提升为工作区语料'), 'anchor promoted message')
   await expectVisible(page.getByText('workspace · imported · workspace_corpus'), 'created anchor corpus metadata')
-  const createdAnchorRow = page.locator('.rounded-md').filter({ hasText: '雨夜动作参考' }).first()
+  const createdAnchorRow = page.getByTestId('reference-anchor-row').filter({ hasText: '雨夜动作参考' }).first()
   assert.equal(await createdAnchorRow.getByRole('checkbox').isChecked(), false, 'promote action must not toggle anchor selection')
   await expectVisible(page.getByText('雨夜', { exact: true }), 'created anchor first user tag')
   await expectVisible(page.getByText('动作克制', { exact: true }), 'created anchor second user tag')
@@ -146,7 +146,7 @@ async function createRebuildAndSearchReferenceMaterial(page) {
 
   await page.getByRole('button', { name: /浏览 雨夜动作语料库 的材料/ }).click()
   const materialPreview = page.locator('[aria-label="雨夜动作语料库 材料预览"]')
-  const firstMaterial = materialPreview.locator('.rounded').filter({ hasText: 'mat-001' }).first()
+  const firstMaterial = materialPreview.getByTestId('reference-anchor-material-card').filter({ hasText: 'mat-001' }).first()
   await expectVisible(firstMaterial.getByText('mat-001'), 'anchor material preview id')
   await expectVisible(firstMaterial.getByText('把杯子推远，杯底在木桌上留下半圈水痕。'), 'anchor material preview text')
   await expectVisible(firstMaterial.getByText('seg-001'), 'anchor material preview source segment provenance')
@@ -184,15 +184,15 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectVisible(page.getByText('没有匹配材料'), 'anchor material filtered empty state')
   await page.getByLabel('材料筛选').fill('')
   await page.getByLabel('材料排序').selectOption('score_desc')
-  await expectVisible(materialPreview.locator('.rounded').first().getByText('mat-004'), 'anchor material score sort first row')
+  await expectVisible(materialPreview.getByTestId('reference-anchor-material-card').first().getByText('mat-004'), 'anchor material score sort first row')
   await page.getByLabel('材料排序').selectOption('material_id_asc')
-  await expectVisible(materialPreview.locator('.rounded').first().getByText('mat-001'), 'anchor material id sort first row')
+  await expectVisible(materialPreview.getByTestId('reference-anchor-material-card').first().getByText('mat-001'), 'anchor material id sort first row')
 
   await page.getByRole('button', { name: /下一页材料/ }).click()
   await expectVisible(page.getByText('mat-006'), 'anchor material preview second page id')
   await expectVisible(page.getByText('雨水从伞沿断续落下，像有人在门外迟疑。'), 'anchor material preview second page text')
 
-  const libraryMaterialPanel = page.locator('.rounded-lg').filter({ hasText: '材料库' }).first()
+  const libraryMaterialPanel = page.getByTestId('reference-material-library')
   await expectVisible(libraryMaterialPanel.getByRole('heading', { name: '材料库' }), 'corpus material library heading')
   await libraryMaterialPanel.getByLabel('材料库搜索').fill('把杯子推远')
   await libraryMaterialPanel.getByLabel('材料库文体职责').fill('source_backed_detail')
@@ -200,7 +200,7 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectVisible(libraryMaterialPanel.getByText('第 1 / 2 页 · 11 条材料'), 'corpus material library result count')
   await expectVisible(libraryMaterialPanel.getByText('mat-001'), 'corpus material library id')
   await expectVisible(libraryMaterialPanel.getByText('把杯子推远，杯底在木桌上留下半圈水痕。'), 'corpus material library text')
-  const libraryFirstMaterial = libraryMaterialPanel.locator('[aria-label="材料库结果"] > .rounded').filter({ hasText: 'mat-001' }).first()
+  const libraryFirstMaterial = libraryMaterialPanel.getByTestId('reference-material-library-card').filter({ hasText: 'mat-001' }).first()
   await expectVisible(libraryFirstMaterial.getByText('seg-001'), 'corpus material library source segment provenance')
   await expectVisible(libraryFirstMaterial.getByText('hash-material-001'), 'corpus material library source hash provenance')
   await expectVisible(libraryFirstMaterial.getByText('prose_duty 0.75'), 'corpus material library prose-duty score')
@@ -234,12 +234,12 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await page.locator('button[title="重建"]').first().click()
   await expectVisible(page.getByText('锚点已重建'), 'anchor rebuilt message')
 
-  const materialPanel = page.locator('.rounded-lg').filter({ hasText: '材料搜索' }).first()
+  const materialPanel = page.getByTestId('reference-manual-material-search')
   await materialPanel.getByPlaceholder('叙事功能、情绪或具体句子').fill('把杯子推远')
   await materialPanel.getByLabel('文体职责').fill('source_backed_detail')
   await materialPanel.getByRole('button', { name: /搜索/ }).click()
   await expectVisible(materialPanel.getByText('把杯子推远，杯底在木桌上留下半圈水痕。'), 'material search hit')
-  const manualFirstMaterial = materialPanel.locator('.bg-card').filter({ hasText: '把杯子推远，杯底在木桌上留下半圈水痕。' }).first()
+  const manualFirstMaterial = materialPanel.getByTestId('reference-manual-material-card').filter({ hasText: '把杯子推远，杯底在木桌上留下半圈水痕。' }).first()
   await expectVisible(manualFirstMaterial.getByText('lexical 0.92'), 'material score component')
   await expectVisible(manualFirstMaterial.getByText('prose_duty 0.75'), 'material prose-duty score component')
   await libraryMaterialPanel.getByRole('button', { name: /^选择当前材料$/ }).click()
@@ -255,7 +255,7 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await libraryMaterialPanel.getByRole('button', { name: /^检索材料库$/ }).click()
   await expectVisible(libraryMaterialPanel.getByText('第 1 / 1 页 · 2 条材料'), 'archived corpus material library result count')
   await expectVisible(libraryMaterialPanel.getByText('mat-001'), 'archived corpus material visible in archived filter')
-  const archivedFirstMaterial = libraryMaterialPanel.locator('[aria-label="材料库结果"] > .rounded').filter({ hasText: 'mat-001' }).first()
+  const archivedFirstMaterial = libraryMaterialPanel.getByTestId('reference-material-library-card').filter({ hasText: 'mat-001' }).first()
   await archivedFirstMaterial.getByRole('checkbox').check()
   await expectVisible(libraryMaterialPanel.getByText('已选 1 条材料'), 'archived corpus material selected for restore')
   await assertDisabled(libraryMaterialPanel.getByRole('button', { name: /^批量校正材料库$/ }), 'archived material bulk correction disabled')
@@ -273,7 +273,7 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectVisible(page.getByText('参考锚点已创建'), 'batch anchor created message')
   await expectVisible(page.getByText('批量动作参考'), 'batch anchor title')
 
-  const batchAnchorRow = page.locator('.rounded-md').filter({ hasText: '批量动作参考' }).first()
+  const batchAnchorRow = page.getByTestId('reference-anchor-row').filter({ hasText: '批量动作参考' }).first()
   await batchAnchorRow.getByRole('checkbox').check()
   await expectVisible(page.getByText('已选 1 项'), 'single selected corpus row count')
   await page.getByRole('button', { name: '批量提升选中项' }).click()
@@ -297,7 +297,7 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectVisible(page.getByText('已批量导入 2 个语料来源'), 'bulk source import message')
   await expectVisible(page.getByText('批量导入语料 1'), 'first bulk imported anchor title')
   await expectVisible(page.getByText('批量导入语料 2'), 'second bulk imported anchor title')
-  const firstBulkImportRow = page.locator('.rounded-md').filter({ hasText: '批量导入语料 1' }).first()
+  const firstBulkImportRow = page.getByTestId('reference-anchor-row').filter({ hasText: '批量导入语料 1' }).first()
   await expectVisible(firstBulkImportRow.getByText('workspace · imported · workspace_corpus'), 'bulk imported workspace corpus metadata')
 
   await importPanel.getByPlaceholder('参考书名').fill('库包默认标题')
@@ -337,7 +337,7 @@ async function generateReviseApproveBindAndDraft(page) {
   await expectVisible(page.getByRole('heading', { name: '第3章 · 雨夜线索' }), 'active blueprint title')
 
   const detail = blueprintDetail(page)
-  await detail.locator('label').filter({ hasText: '段落意图' }).locator('textarea').fill('用手部动作和雨声停顿表现压住反应。')
+  await detail.getByLabel('段落意图').fill('用手部动作和雨声停顿表现压住反应。')
   await detail.getByRole('button', { name: /保存修订/ }).click()
   await expectVisible(page.getByText('蓝图已修订，需要重新评审和批准'), 'blueprint revised message')
 
@@ -406,7 +406,7 @@ async function runDefaultOrchestrationToFinalInsertionStop(page) {
 }
 
 async function verifyReviewAndAuditFailureRecovery(page) {
-  const blueprintPanel = page.locator('.rounded-md').filter({ hasText: '章节蓝图' }).first()
+  const blueprintPanel = page.getByTestId('reference-blueprint-panel')
   await blueprintPanel.getByLabel('章节号').fill('6')
   await blueprintPanel.getByLabel('标题').fill('缺陷蓝图')
   await blueprintPanel.getByLabel('章节目标').fill('先暴露检索缺口，再用作者修订恢复。')
@@ -423,7 +423,7 @@ async function verifyReviewAndAuditFailureRecovery(page) {
   await expectVisible(detail.getByText('补充可访问材料或放宽授权策略。'), 'review defect required fix')
   await assertDisabled(detail.getByRole('button', { name: /^批准$/ }), 'failed review approve button')
 
-  await detail.locator('label').filter({ hasText: '段落意图' }).locator('textarea').fill('修复检索缺口：限制为 user_provided 材料并明确弱匹配回退。')
+  await detail.getByLabel('段落意图').fill('修复检索缺口：限制为 user_provided 材料并明确弱匹配回退。')
   await detail.getByRole('button', { name: /保存修订/ }).click()
   await expectVisible(page.getByText('蓝图已修订，需要重新评审和批准'), 'review failure revision saved')
   await detail.getByRole('button', { name: /^评审$/ }).click()
@@ -439,7 +439,7 @@ async function verifyReviewAndAuditFailureRecovery(page) {
   await expectVisible(detail.getByText('候选引用了未绑定的门外身份。'), 'failed audit provenance issue')
   await expectVisible(detail.getByText('回到蓝图修订，移除未支持事实并降低改写级别。'), 'failed audit required fix')
 
-  await detail.locator('label').filter({ hasText: '段落意图' }).locator('textarea').fill('审计修复：只保留桌面和雨声信息，不揭示门外身份。')
+  await detail.getByLabel('段落意图').fill('审计修复：只保留桌面和雨声信息，不揭示门外身份。')
   await detail.getByRole('button', { name: /保存修订/ }).click()
   await expectVisible(page.getByText('蓝图已修订，需要重新评审和批准'), 'audit failure revision saved')
   await detail.getByRole('button', { name: /^评审$/ }).click()
@@ -678,7 +678,7 @@ function blueprintDetail(page) {
 }
 
 function orchestrationPanel(page) {
-  return page.locator('.rounded-lg').filter({ hasText: '默认编排' }).first()
+  return page.getByTestId('reference-orchestration-panel')
 }
 
 async function expectVisible(locator, description) {

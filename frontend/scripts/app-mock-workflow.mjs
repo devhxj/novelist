@@ -2008,7 +2008,7 @@ async function verifyStressReferenceMaterialPath(page, referenceStress) {
   await page.getByRole('button', { name: new RegExp(`浏览 ${anchorTitlePattern} 的下一页材料`) }).click()
   await expectVisible(page.getByText('stress-mat-0006'), 'stress anchor material next page id')
 
-  const libraryPanel = page.locator('.rounded-lg').filter({ hasText: '材料库' }).first()
+  const libraryPanel = page.getByTestId('reference-material-library')
   const searchStartedAt = Date.now()
   await libraryPanel.getByLabel('材料库搜索').fill('10MB 水痕')
   await libraryPanel.getByRole('button', { name: /^检索材料库$/ }).click()
@@ -2023,7 +2023,7 @@ async function verifyStressReferenceMaterialPath(page, referenceStress) {
 
   await page.getByRole('button', { name: /打开高级模式/ }).click()
   await expectVisible(page.getByRole('button', { name: /生成蓝图/ }), 'stress manual blueprint generation visible')
-  const blueprintPanel = page.locator('.rounded-md').filter({ hasText: '章节蓝图' }).first()
+  const blueprintPanel = page.getByTestId('reference-blueprint-panel')
   await blueprintPanel.getByLabel('章节号').fill(String(referenceStress.chapterNumber))
   await blueprintPanel.getByLabel('标题').fill('10MB 材料绑定验收')
   await blueprintPanel.getByLabel('章节目标').fill('验证大体量参考源自动分段后可检索、分页浏览并绑定蓝图。')
