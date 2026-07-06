@@ -189,7 +189,7 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await libraryMaterialPanel.getByLabel('材料库搜索').fill('把杯子推远')
   await libraryMaterialPanel.getByLabel('材料库文体职责').fill('source_backed_detail')
   await libraryMaterialPanel.getByRole('button', { name: /^检索材料库$/ }).click()
-  await expectVisible(libraryMaterialPanel.getByText('4 条材料'), 'corpus material library result count')
+  await expectVisible(libraryMaterialPanel.getByText('第 1 / 2 页 · 11 条材料'), 'corpus material library result count')
   await expectVisible(libraryMaterialPanel.getByText('mat-001'), 'corpus material library id')
   await expectVisible(libraryMaterialPanel.getByText('把杯子推远，杯底在木桌上留下半圈水痕。'), 'corpus material library text')
   const libraryFirstMaterial = libraryMaterialPanel.locator('[aria-label="材料库结果"] > .rounded').filter({ hasText: 'mat-001' }).first()
@@ -207,10 +207,17 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await libraryMaterialPanel.getByLabel('材料库页内筛选').fill('杯子')
   await libraryMaterialPanel.getByRole('button', { name: /^选择当前材料$/ }).click()
   await expectVisible(libraryMaterialPanel.getByText('已选 1 条材料'), 'corpus material library selected filtered count')
+  await libraryMaterialPanel.getByRole('button', { name: /^下一页$/ }).click()
+  await expectVisible(libraryMaterialPanel.getByText('第 2 / 2 页 · 11 条材料'), 'corpus material library second page summary')
+  await expectVisible(libraryMaterialPanel.getByText('已选 1 条材料 · 当前结果 0 条'), 'corpus material library cross-page selection count')
+  await libraryMaterialPanel.getByLabel('材料库页内筛选').fill('')
+  await expectVisible(libraryMaterialPanel.getByText('mat-006'), 'corpus material library second page material')
+  await libraryMaterialPanel.getByRole('button', { name: /^选择当前材料$/ }).click()
+  await expectVisible(libraryMaterialPanel.getByText('已选 2 条材料'), 'corpus material library selected cross-page count')
   await libraryMaterialPanel.getByLabel('材料库批量功能标签').fill('library_object_signal')
   await libraryMaterialPanel.getByLabel('材料库批量 POV 标签').fill('library_close')
   await libraryMaterialPanel.getByRole('button', { name: /^批量校正材料库$/ }).click()
-  await expectVisible(page.getByText('材料库已批量校正 1 条材料标签'), 'corpus material library bulk update message')
+  await expectVisible(page.getByText('材料库已批量校正 2 条材料标签'), 'corpus material library bulk update message')
   await expectVisible(libraryMaterialPanel.getByText('library_object_signal'), 'corpus material library corrected function tag')
   await expectVisible(libraryMaterialPanel.getByText('library_close'), 'corpus material library corrected pov tag')
 
@@ -440,7 +447,7 @@ async function verifyBridgeCalls(page) {
     call.args[0]?.note === 'corpus material library bulk correction')
   assert(libraryBulkMaterialTagCall, 'missing corpus material library UpdateReferenceMaterialsTags call')
   assert.equal(libraryBulkMaterialTagCall.args[0].novel_id, 42, 'corpus material library bulk correction payload must include novel id')
-  assert.deepEqual(libraryBulkMaterialTagCall.args[0].material_ids, ['mat-001'], 'corpus material library bulk correction payload must include selected material ids')
+  assert.deepEqual(libraryBulkMaterialTagCall.args[0].material_ids, ['mat-001', 'mat-006'], 'corpus material library bulk correction payload must include selected cross-page material ids')
   assert.equal(libraryBulkMaterialTagCall.args[0].function_tag, 'library_object_signal', 'corpus material library bulk correction payload must include function tag')
   assert.equal(libraryBulkMaterialTagCall.args[0].pov_tag, 'library_close', 'corpus material library bulk correction payload must include pov tag')
   assert.equal(libraryBulkMaterialTagCall.args[0].origin, 'ui', 'corpus material library bulk correction payload must mark UI origin')
@@ -886,10 +893,15 @@ function installReferenceAnchorMockBridge() {
   function searchReferenceMaterials(input) {
     const isAnchorScopedPreview = Array.isArray(input.anchor_ids) && input.anchor_ids.length === 1 && input.query === '' && input.size === 5
     if (!isAnchorScopedPreview) {
-      const items = Array.isArray(input.anchor_ids) && input.anchor_ids.length === 0
-        ? [1, 2, 3, 4].map(material)
-        : [material(1)]
-      return pagedResult(items, input.page ?? 1, input.size ?? 10, items.length)
+      const isMaterialLibrarySearch = Array.isArray(input.anchor_ids) && input.anchor_ids.length === 0
+      if (isMaterialLibrarySearch) {
+        const page = input.page ?? 1
+        const size = input.size ?? 10
+        const items = page === 2 ? [material(6)] : [1, 2, 3, 4].map(material)
+        return pagedResult(items, page, size, 11)
+      }
+
+      return pagedResult([material(1)], input.page ?? 1, input.size ?? 10, 1)
     }
 
     const page = input.page ?? 1
