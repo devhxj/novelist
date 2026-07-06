@@ -184,7 +184,11 @@ async function runFullSuite(browser, url) {
   }
 
   logStep('checking bridge guardrails')
-  if (runConfig.grep === '@writing') {
+  if (runConfig.grep === '@startup') {
+    await verifyStartupBridgeCalls(page)
+  } else if (runConfig.grep === '@diagnostics') {
+    await verifyDiagnosticsBridgeCalls(page)
+  } else if (runConfig.grep === '@writing') {
     await verifyWritingBridgeCalls(page)
   } else if (runConfig.grep === '@reference-anchor') {
     await verifyReferenceBridgeCalls(page)
@@ -338,6 +342,24 @@ async function verifyBootstrapStates(browser, url, consoleErrors, pageErrors) {
   await expectVisible(startupErrorPage.getByRole('heading', { name: '启动检查失败' }), 'startup retry failure')
   await waitForBridgeCall(startupErrorPage, 'IsInitialized')
   await startupErrorPage.close()
+
+  const corruptRecoveryPage = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    faults: {
+      IsInitialized: [{ mode: 'malformed-response' }, { mode: 'malformed-response' }],
+    },
+  }, undefined, 'bootstrap-corrupt-recovery')
+  await corruptRecoveryPage.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(corruptRecoveryPage.getByRole('heading', { name: '启动检查失败' }), 'corrupt startup failure heading')
+  await expectVisible(corruptRecoveryPage.getByText(/Bridge response is missing an ok flag/), 'corrupt startup failure detail')
+  await corruptRecoveryPage.screenshot({ path: path.join(outputDir, 'app-00-corrupt-startup.png'), fullPage: true })
+  await corruptRecoveryPage.getByRole('button', { name: '重试' }).click()
+  await expectVisible(corruptRecoveryPage.getByText('全局回归小说'), 'workspace after corrupt startup retry')
+  await expectVisible(corruptRecoveryPage.getByText('AI 对话'), 'chat panel after corrupt startup retry')
+  const corruptCalls = await corruptRecoveryPage.evaluate(() =>
+    window.__appMockState.calls.filter((call) => call.method === 'IsInitialized').length)
+  assert(corruptCalls >= 2, `Expected corrupt startup retry to call IsInitialized at least twice, got ${corruptCalls}.`)
+  await corruptRecoveryPage.close()
 
   const bridgeUnavailablePage = await newAppPage(browser, consoleErrors, pageErrors)
   await bridgeUnavailablePage.goto(url, { waitUntil: 'domcontentloaded' })
@@ -1184,6 +1206,25 @@ async function verifyBridgeCalls(page) {
 
   const saveCandidates = methods.filter(method => method.startsWith('Save') || method.startsWith('Update') || method.startsWith('Delete'))
   assert.deepEqual(saveCandidates, [], `Unexpected mutating bridge calls:\n${saveCandidates.join('\n')}`)
+}
+
+async function verifyStartupBridgeCalls(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const methods = calls.map((call) => call.method)
+
+  assert(methods.includes('IsInitialized'), 'startup workflow must check initialization state')
+  assert(methods.includes('GetSettings'), 'startup workflow must load settings after successful initialization')
+  assert(!methods.includes('SaveContent'), 'startup workflow must not save chapter content implicitly')
+  assert(!methods.includes('runtime.shell.openExternal'), 'startup workflow must not open external URLs')
+}
+
+async function verifyDiagnosticsBridgeCalls(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const methods = calls.map((call) => call.method)
+
+  assert(methods.includes('IsInitialized'), 'diagnostics workflow must load the app before probing fixtures')
+  assert(!methods.includes('SaveContent'), 'diagnostics workflow must not save chapter content implicitly')
+  assert(!methods.includes('runtime.shell.openExternal'), 'diagnostics workflow must not open external URLs')
 }
 
 async function verifyWritingBridgeCalls(page) {
