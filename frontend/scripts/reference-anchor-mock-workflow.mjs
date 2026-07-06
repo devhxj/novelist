@@ -492,6 +492,20 @@ async function verifyBridgeCalls(page) {
   }
 
   assert(!methods.includes('SaveContent'), 'reference-anchor workflow must not call SaveContent')
+  assert(!methods.includes('runtime.shell.openExternal'), 'reference-anchor workflow must not open external URLs')
+  assertBridgeCallOrder(calls, 'ReviewReferenceChapterBlueprint', 'ApproveReferenceChapterBlueprint')
+  assertBridgeCallOrder(calls, 'ApproveReferenceChapterBlueprint', 'BindReferenceBlueprintMaterials')
+  assertBridgeCallOrder(calls, 'BindReferenceBlueprintMaterials', 'GenerateReferenceAnchoredDraft')
+
+  const resumeDecisions = calls
+    .filter((call) => call.method === 'ResumeReferenceOrchestrationRun')
+    .map((call) => call.args[0]?.decision_type)
+  assert.deepEqual(
+    resumeDecisions,
+    ['confirm_source_and_facts', 'approve_blueprint'],
+    'default orchestration must stop before final insertion and only resume explicit author gates',
+  )
+  assert(!resumeDecisions.includes('approve_final_insertion'), 'final insertion must not be auto-approved through orchestration')
 
   const createCall = calls.find((call) => call.method === 'CreateReferenceAnchor')
   assert(createCall, 'missing CreateReferenceAnchor call')
@@ -649,6 +663,14 @@ async function verifyBridgeCalls(page) {
     call.args[0].prose_duties.includes('source_backed_detail'))
   assert(searchCall, 'missing manual SearchReferenceMaterials call')
   assert.deepEqual(searchCall.args[0].prose_duties, ['source_backed_detail'], 'manual story-context material search must pass prose duties')
+}
+
+function assertBridgeCallOrder(calls, beforeMethod, afterMethod) {
+  const beforeIndex = calls.findIndex((call) => call.method === beforeMethod)
+  const afterIndex = calls.findIndex((call) => call.method === afterMethod)
+  assert(beforeIndex >= 0, `Missing bridge call ${beforeMethod}`)
+  assert(afterIndex >= 0, `Missing bridge call ${afterMethod}`)
+  assert(beforeIndex < afterIndex, `${beforeMethod} must happen before ${afterMethod}`)
 }
 
 function blueprintDetail(page) {
