@@ -9,89 +9,246 @@ import { chromium } from 'playwright'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const frontendRoot = path.resolve(__dirname, '..')
 const repoRoot = path.resolve(frontendRoot, '..')
-const outputDir = path.join(repoRoot, 'output', 'playwright')
+const phaseOutputRoot = path.join(repoRoot, 'output', 'playwright', 'phase13')
+const runConfig = parseRunConfig(process.argv.slice(2))
+const outputDir = path.join(phaseOutputRoot, `${runConfig.suite}-${runConfig.target}`)
+const diagnostics = {
+  consoleErrors: [],
+  consoleWarnings: [],
+  pageErrors: [],
+  failedRequests: [],
+}
+let pageSequence = 0
 
 async function main() {
   await fs.mkdir(outputDir, { recursive: true })
+  await fs.mkdir(path.join(outputDir, 'bridge-calls'), { recursive: true })
+  await fs.mkdir(path.join(outputDir, 'traces'), { recursive: true })
 
   const port = await getFreePort()
-  const server = startVite(port)
+  const server = startServer(port, runConfig.target)
   const url = `http://127.0.0.1:${port}/`
-  const consoleErrors = []
-  const pageErrors = []
   let browser
 
   try {
-    logStep('waiting for Vite')
+    logStep(`waiting for ${runConfig.target} server`)
     await waitForServer(url, server)
     browser = await launchBrowser()
 
-    logStep('checking bootstrap states')
-    await verifyBootstrapStates(browser, url, consoleErrors, pageErrors)
+    if (runConfig.suite === 'smoke') {
+      await runSmokeSuite(browser, url)
+    } else if (runConfig.suite === 'stress') {
+      await runStressSuite(browser, url)
+    } else if (runConfig.suite === 'usability') {
+      await runUsabilitySuite(browser, url)
+    } else {
+      await runFullSuite(browser, url)
+    }
 
-    logStep('loading workspace')
-    const page = await newAppPage(browser, consoleErrors, pageErrors, { initialized: true })
-    await page.goto(url, { waitUntil: 'domcontentloaded' })
-    await expectVisible(page.getByText('全局回归小说'), 'workspace title')
-    await expectVisible(page.getByText('AI 对话'), 'chat panel')
-    await page.screenshot({ path: path.join(outputDir, 'app-01-shell.png'), fullPage: true })
-
-    logStep('checking shell navigation')
-    await verifyShellNavigation(page)
-
-    logStep('checking chapter/editor path')
-    await verifyChapterWorkflow(page)
-    await page.screenshot({ path: path.join(outputDir, 'app-02-editor.png'), fullPage: true })
-
-    logStep('checking explicit editor save path')
-    await verifyEditorSaveWorkflow(browser, url, consoleErrors, pageErrors)
-
-    logStep('checking novel and chapter workflow')
-    await verifyNovelChapterWorkflow(browser, url, consoleErrors, pageErrors)
-
-    logStep('checking import export and file-picker paths')
-    await verifyImportExportFilePickerWorkflow(browser, url, consoleErrors, pageErrors)
-
-    logStep('checking search path')
-    await verifySearchWorkflow(page)
-    await page.screenshot({ path: path.join(outputDir, 'app-03-search.png'), fullPage: true })
-
-    logStep('checking chat path')
-    await verifyChatWorkflow(page)
-    await page.screenshot({ path: path.join(outputDir, 'app-04-chat.png'), fullPage: true })
-
-    logStep('checking settings path')
-    await verifySettingsWorkflow(page)
-    await page.screenshot({ path: path.join(outputDir, 'app-05-settings.png'), fullPage: true })
-
-    logStep('checking settings persistence path')
-    await verifySettingsPersistenceWorkflow(browser, url, consoleErrors, pageErrors)
-
-    logStep('checking metadata panels')
-    await verifyMetadataPanels(page)
-    await page.screenshot({ path: path.join(outputDir, 'app-06-metadata.png'), fullPage: true })
-
-    logStep('checking metadata empty and action paths')
-    await verifyMetadataActionWorkflow(browser, url, consoleErrors, pageErrors)
-
-    logStep('checking reference entry point')
-    await verifyReferenceSmoke(page)
-    await page.screenshot({ path: path.join(outputDir, 'app-07-reference.png'), fullPage: true })
-
-    logStep('checking compact viewport layout')
-    await verifyCompactViewportSmoke(browser, url, consoleErrors, pageErrors)
-
-    logStep('checking bridge guardrails')
-    await verifyBridgeCalls(page)
-    await page.close()
-
-    assert.deepEqual(pageErrors, [], `Unexpected page errors:\n${pageErrors.join('\n')}`)
-    assert.deepEqual(consoleErrors, [], `Unexpected console errors:\n${consoleErrors.join('\n')}`)
-    console.log(`App-wide mock workflow passed. Screenshots: ${path.relative(repoRoot, outputDir)}`)
+    await writeRunDiagnostics()
+    assert.deepEqual(diagnostics.pageErrors, [], `Unexpected page errors:\n${diagnostics.pageErrors.join('\n')}`)
+    assert.deepEqual(diagnostics.consoleErrors, [], `Unexpected console errors:\n${diagnostics.consoleErrors.join('\n')}`)
+    assert.deepEqual(diagnostics.failedRequests, [], `Unexpected failed requests:\n${diagnostics.failedRequests.join('\n')}`)
+    console.log(`App ${runConfig.suite} mock workflow passed. Artifacts: ${path.relative(repoRoot, outputDir)}`)
   } finally {
     await browser?.close()
     stopProcess(server)
   }
+}
+
+async function runSmokeSuite(browser, url) {
+  const { consoleErrors, pageErrors } = diagnostics
+
+  logStep('checking bootstrap states')
+  await verifyBootstrapStates(browser, url, consoleErrors, pageErrors)
+
+  logStep('loading workspace')
+  const page = await newAppPage(browser, consoleErrors, pageErrors, { initialized: true }, undefined, 'smoke-shell')
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'workspace title')
+  await expectVisible(page.getByText('AI 对话'), 'chat panel')
+  await page.screenshot({ path: path.join(outputDir, 'app-smoke-01-shell.png'), fullPage: true })
+
+  logStep('checking shell navigation')
+  await verifyShellNavigation(page)
+
+  logStep('checking chapter/editor path')
+  await verifyChapterWorkflow(page)
+  await page.screenshot({ path: path.join(outputDir, 'app-smoke-02-editor.png'), fullPage: true })
+
+  logStep('checking smoke guardrails')
+  await verifySmokeBridgeCalls(page)
+  await page.close()
+}
+
+async function runFullSuite(browser, url) {
+  const { consoleErrors, pageErrors } = diagnostics
+
+  logStep('checking bootstrap states')
+  await verifyBootstrapStates(browser, url, consoleErrors, pageErrors)
+
+  logStep('loading workspace')
+  const page = await newAppPage(browser, consoleErrors, pageErrors, { initialized: true }, undefined, 'full-shell')
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'workspace title')
+  await expectVisible(page.getByText('AI 对话'), 'chat panel')
+  await page.screenshot({ path: path.join(outputDir, 'app-01-shell.png'), fullPage: true })
+
+  logStep('checking shell navigation')
+  await verifyShellNavigation(page)
+
+  logStep('checking chapter/editor path')
+  await verifyChapterWorkflow(page)
+  await page.screenshot({ path: path.join(outputDir, 'app-02-editor.png'), fullPage: true })
+
+  logStep('checking explicit editor save path')
+  await verifyEditorSaveWorkflow(browser, url, consoleErrors, pageErrors)
+
+  logStep('checking novel and chapter workflow')
+  await verifyNovelChapterWorkflow(browser, url, consoleErrors, pageErrors)
+
+  logStep('checking import export and file-picker paths')
+  await verifyImportExportFilePickerWorkflow(browser, url, consoleErrors, pageErrors)
+
+  logStep('checking search path')
+  await verifySearchWorkflow(page)
+  await page.screenshot({ path: path.join(outputDir, 'app-03-search.png'), fullPage: true })
+
+  logStep('checking chat path')
+  await verifyChatWorkflow(page)
+  await page.screenshot({ path: path.join(outputDir, 'app-04-chat.png'), fullPage: true })
+
+  logStep('checking settings path')
+  await verifySettingsWorkflow(page)
+  await page.screenshot({ path: path.join(outputDir, 'app-05-settings.png'), fullPage: true })
+
+  logStep('checking settings persistence path')
+  await verifySettingsPersistenceWorkflow(browser, url, consoleErrors, pageErrors)
+
+  logStep('checking metadata panels')
+  await verifyMetadataPanels(page)
+  await page.screenshot({ path: path.join(outputDir, 'app-06-metadata.png'), fullPage: true })
+
+  logStep('checking metadata empty and action paths')
+  await verifyMetadataActionWorkflow(browser, url, consoleErrors, pageErrors)
+
+  logStep('checking reference entry point')
+  await verifyReferenceSmoke(page)
+  await page.screenshot({ path: path.join(outputDir, 'app-07-reference.png'), fullPage: true })
+
+  logStep('checking compact viewport layout')
+  await verifyCompactViewportSmoke(browser, url, consoleErrors, pageErrors)
+
+  logStep('checking bridge guardrails')
+  await verifyBridgeCalls(page)
+  await page.close()
+}
+
+async function runStressSuite(browser, url) {
+  const { consoleErrors, pageErrors } = diagnostics
+  const startedAt = Date.now()
+  const chapterCount = runConfig.stressChapterCount
+  const stressChapterNumber = chapterCount
+  const stressTitle = `长篇压力章 ${String(stressChapterNumber).padStart(3, '0')}`
+  const stressPath = `chapters/${stressChapterNumber}.md`
+  const largeText = makeLargeChineseFixture(runConfig.stressSizeBytes)
+  const chapters = makeStressChapters(chapterCount, stressTitle)
+  const page = await newAppPage(
+    browser,
+    consoleErrors,
+    pageErrors,
+    {
+      initialized: true,
+      settings: settingsFixture(42),
+      chaptersByNovelId: { 42: chapters },
+      contentByPath: {
+        'novelist.md': '## 压力测试故事状态\n用于验证大体量中文正文不会造成白屏。',
+        [stressPath]: largeText,
+      },
+      writingStats: {
+        total_words: largeText.length,
+        total_days_active: 1,
+        current_streak: 1,
+        longest_streak: 1,
+        total_novels: 1,
+        total_chapters: chapterCount,
+      },
+    },
+    { width: 1440, height: 1100 },
+    'stress-large-novel',
+  )
+
+  logStep(`loading ${Math.round(Buffer.byteLength(largeText, 'utf8') / 1024 / 1024)}MB stress fixture`)
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'stress workspace title')
+  await clickActivity(page, '章节')
+  await expectVisible(page.getByText(`章节 (${chapterCount})`), 'stress chapter count')
+
+  const stressBlockStart = Math.max(1, chapterCount - 99)
+  await page.getByRole('button', { name: new RegExp(`第 ${stressBlockStart} - ${chapterCount} 章`) }).click()
+  await chapterButton(page, stressTitle).click()
+  await expectVisible(page.getByText(`第${stressChapterNumber}章 ${stressTitle}`).first(), 'stress chapter tab')
+  await expectVisible(page.locator('.monaco-editor').first(), 'stress monaco editor')
+  await waitForBridgeCallArg(page, 'GetContent', 1, stressPath)
+  await page.waitForFunction(
+    (minLength) => typeof window.__novelistEditor?.getValue === 'function' && window.__novelistEditor.getValue().length >= minLength,
+    largeText.length,
+    { timeout: 60_000 },
+  )
+  await page.screenshot({ path: path.join(outputDir, 'app-stress-10mb-editor.png'), fullPage: true })
+
+  const callCount = await page.evaluate(() => window.__appMockState.calls.length)
+  await fs.writeFile(
+    path.join(outputDir, 'stress-metrics.json'),
+    `${JSON.stringify({
+      targetBytes: runConfig.stressSizeBytes,
+      actualBytes: Buffer.byteLength(largeText, 'utf8'),
+      characterCount: largeText.length,
+      chapterCount,
+      selectedPath: stressPath,
+      bridgeCallCount: callCount,
+      elapsedMs: Date.now() - startedAt,
+    }, null, 2)}\n`,
+    'utf8',
+  )
+
+  await verifyStressGuardrails(page)
+  await page.close()
+}
+
+async function runUsabilitySuite(browser, url) {
+  const { consoleErrors, pageErrors } = diagnostics
+  const page = await newAppPage(browser, consoleErrors, pageErrors, { initialized: true }, undefined, 'usability-baseline')
+  const observations = []
+
+  logStep('checking usability baseline surfaces')
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'usability workspace title')
+  observations.push(usabilityObservation('Startup', 'low', 'Workspace title, active side panel, and chat panel are visible after the mocked bridge initializes.'))
+  await page.screenshot({ path: path.join(outputDir, 'usability-01-startup.png'), fullPage: true })
+
+  await clickActivity(page, '章节')
+  await expectVisible(page.getByText('章节 (2)'), 'usability chapter panel')
+  await expectVisible(page.getByRole('button', { name: /故事状态/ }), 'usability story state control')
+  observations.push(usabilityObservation('Chapters', 'low', 'Chapter access is one activity-bar click away; grouped chapters remain visible for the small fixture.'))
+
+  await clickActivity(page, '搜索')
+  await expectVisible(page.getByPlaceholder('搜索人物、地点、时间线、正文...'), 'usability search input')
+  observations.push(usabilityObservation('Search', 'low', 'Search presents a direct input and explicit empty prompt before a query.'))
+
+  await clickActivity(page, '参考锚定')
+  await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'usability reference heading')
+  observations.push(usabilityObservation('Reference Anchor', 'medium', 'The reference workflow is reachable, but Phase 13 still needs deeper automatic-source generation usability review.'))
+  await page.screenshot({ path: path.join(outputDir, 'usability-02-reference.png'), fullPage: true })
+
+  await page.locator('header').getByRole('button', { name: '设置' }).click()
+  await expectVisible(page.getByText('基础设置'), 'usability settings dialog')
+  observations.push(usabilityObservation('Settings', 'low', 'Settings are reachable from the header and show provider configuration without live-key access.'))
+  await page.locator('.fixed').getByRole('button', { name: '✕' }).click()
+
+  await writeUsabilityReport(observations)
+  await verifySmokeBridgeCalls(page)
+  await page.close()
 }
 
 async function verifyBootstrapStates(browser, url, consoleErrors, pageErrors) {
@@ -138,26 +295,77 @@ async function verifyBootstrapStates(browser, url, consoleErrors, pageErrors) {
   await bridgeUnavailablePage.close()
 }
 
-async function newAppPage(browser, consoleErrors, pageErrors, bridgeOptions, viewport = { width: 1440, height: 1100 }) {
-  const page = await browser.newPage({ viewport })
-  page.setDefaultTimeout(12_000)
+async function newAppPage(
+  browser,
+  consoleErrors,
+  pageErrors,
+  bridgeOptions,
+  viewport = { width: 1440, height: 1100 },
+  pageLabel = 'page',
+) {
+  const context = await browser.newContext({ viewport })
+  await context.tracing.start({ screenshots: true, snapshots: true, sources: true })
+
+  const page = await context.newPage()
+  const artifactLabel = `${String(++pageSequence).padStart(2, '0')}-${sanitizeArtifactName(pageLabel)}`
+  page.setDefaultTimeout(runConfig.suite === 'stress' ? 60_000 : 12_000)
   page.on('console', (message) => {
     if (message.type() === 'error') {
       const text = message.text()
       if (!isIgnorableDevServerConsoleError(text)) {
         consoleErrors.push(text)
       }
+    } else if (message.type() === 'warning') {
+      diagnostics.consoleWarnings.push(message.text())
     }
   })
   page.on('pageerror', (error) => pageErrors.push(error.message))
+  page.on('requestfailed', (request) => {
+    if (!isIgnorableRequestFailure(request)) {
+      diagnostics.failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText ?? 'request failed'}`)
+    }
+  })
   if (bridgeOptions) {
     await page.addInitScript(installConfigurableAppMockBridge, bridgeOptions)
   }
+
+  const originalClose = page.close.bind(page)
+  page.close = async (options) => {
+    if (page.isClosed()) return
+    await writePageDiagnostics(page, artifactLabel)
+    await context.tracing.stop({ path: path.join(outputDir, 'traces', `${artifactLabel}.zip`) })
+    await originalClose(options)
+    await context.close()
+  }
+
   return page
 }
 
 function isIgnorableDevServerConsoleError(text) {
   return /^WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/\?token=[^']+' failed: Error in connection establishment: net::ERR_NO_BUFFER_SPACE$/.test(text)
+}
+
+function isIgnorableRequestFailure(request) {
+  const url = request.url()
+  return url.startsWith('ws://127.0.0.1:') || url.includes('/@vite/client')
+}
+
+async function writePageDiagnostics(page, artifactLabel) {
+  const bridgeStates = await page.evaluate(() => {
+    const states = []
+    if (window.__appMockState?.calls) {
+      states.push({ name: 'app', calls: window.__appMockState.calls })
+    }
+    return states
+  }).catch(() => [])
+
+  for (const state of bridgeStates) {
+    await fs.writeFile(
+      path.join(outputDir, 'bridge-calls', `${artifactLabel}-${state.name}.json`),
+      `${JSON.stringify(state.calls, null, 2)}\n`,
+      'utf8',
+    )
+  }
 }
 
 async function verifyShellNavigation(page) {
@@ -859,6 +1067,95 @@ async function verifyBridgeCalls(page) {
   assert.deepEqual(saveCandidates, [], `Unexpected mutating bridge calls:\n${saveCandidates.join('\n')}`)
 }
 
+async function verifySmokeBridgeCalls(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const methods = calls.map((call) => call.method)
+  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetContent']
+
+  for (const method of requiredMethods) {
+    assert(methods.includes(method), `Expected smoke bridge method ${method} to be called.`)
+  }
+
+  assert(!methods.includes('SaveContent'), 'smoke workflow must not save chapter content implicitly')
+  assert(!methods.includes('runtime.shell.openExternal'), 'smoke workflow must not open external URLs')
+}
+
+async function verifyStressGuardrails(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const methods = calls.map((call) => call.method)
+  assert(methods.includes('GetContent'), 'stress workflow must load the large chapter through the bridge')
+  assert(!methods.includes('SaveContent'), 'stress workflow must not save large chapter content implicitly')
+  assert(!methods.includes('runtime.shell.openExternal'), 'stress workflow must not open external URLs')
+}
+
+function makeStressChapters(count, stressTitle) {
+  return Array.from({ length: count }, (_, index) => {
+    const chapterNumber = index + 1
+    return {
+      id: chapterNumber,
+      novel_id: 42,
+      chapter_number: chapterNumber,
+      title: chapterNumber === count ? stressTitle : `压力章 ${String(chapterNumber).padStart(3, '0')}`,
+      summary: chapterNumber === count ? '10MB 中文正文压力章节。' : '压力测试占位章节。',
+      word_count: chapterNumber === count ? 3_500_000 : 1200,
+      file_path: `chapters/${chapterNumber}.md`,
+      created_at: '2026-07-05T12:00:00.000Z',
+      updated_at: '2026-07-05T12:00:00.000Z',
+    }
+  })
+}
+
+function makeLargeChineseFixture(targetBytes) {
+  const chunks = []
+  let bytes = 0
+  let paragraph = 1
+
+  while (bytes < targetBytes) {
+    const line = `第${paragraph}段，雨声沿着旧城门往下落，林岚把杯子推远，仍然只记录自己能看见的水痕、灯影和门缝里的停顿。她不替门外的人下结论，也不把未经确认的身份写进正文。\n`
+    chunks.push(line)
+    bytes += Buffer.byteLength(line, 'utf8')
+    paragraph += 1
+  }
+
+  return chunks.join('')
+}
+
+function usabilityObservation(surface, severity, summary) {
+  return { surface, severity, summary }
+}
+
+async function writeUsabilityReport(observations) {
+  const rows = observations
+    .map((item) => `| ${item.surface} | ${item.severity} | ${item.summary} |`)
+    .join('\n')
+  const report = `# Phase 13 Usability Report
+
+Generated by \`npm --prefix frontend run test:app:usability\`.
+
+## Scope
+
+This is the Phase 13 baseline report generated from deterministic mocked bridge fixtures. It records the fixed report location, severity format, reproduction artifact folder, and initial product-surface observations. Deeper task-completion scoring and issue triage remain part of the broader Phase 13 QA work.
+
+Artifacts: \`${path.relative(repoRoot, outputDir)}\`
+
+## Observations
+
+| Surface | Severity | Finding |
+| --- | --- | --- |
+${rows}
+
+## Open Phase 13 Review Items
+
+- Correctness bugs and ergonomic friction are intentionally separated by severity in this report format.
+- The automatic reference/corpus generation workflow still needs full task-completion scoring against large passed source text.
+- High and medium issues found in later full-product runs should include screenshot path, reproduction steps, expected behavior, actual behavior, user impact, and proposed fix.
+`
+
+  await fs.mkdir(phaseOutputRoot, { recursive: true })
+  await fs.writeFile(path.join(phaseOutputRoot, 'usability-report.md'), report, 'utf8')
+  await fs.writeFile(path.join(outputDir, 'usability-report.md'), report, 'utf8')
+}
+
 async function replaceEditorText(page, content) {
   const editor = page.locator('.monaco-editor').first()
   await expectVisible(editor, 'content editor')
@@ -1004,6 +1301,11 @@ async function assertCreatedReferenceAnchor(page, expected) {
   assert.equal(actual?.source_kind, expected.sourceKind)
 }
 
+function startServer(port, target) {
+  if (target === 'dist') return startVitePreview(port)
+  return startVite(port)
+}
+
 function startVite(port) {
   const viteBin = path.join(frontendRoot, 'node_modules', 'vite', 'bin', 'vite.js')
 
@@ -1013,6 +1315,20 @@ function startVite(port) {
       ...process.env,
       BROWSER: 'none',
       NODE_ENV: 'development',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+}
+
+function startVitePreview(port) {
+  const viteBin = path.join(frontendRoot, 'node_modules', 'vite', 'bin', 'vite.js')
+
+  return spawn(process.execPath, [viteBin, 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+    cwd: frontendRoot,
+    env: {
+      ...process.env,
+      BROWSER: 'none',
+      NODE_ENV: 'production',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -1087,7 +1403,66 @@ function delay(ms) {
 }
 
 function logStep(message) {
-  console.log(`[app mock] ${message}`)
+  console.log(`[app mock:${runConfig.suite}:${runConfig.target}] ${message}`)
+}
+
+function parseRunConfig(args) {
+  const config = {
+    suite: 'full',
+    target: 'vite',
+    stressSizeBytes: 10 * 1024 * 1024,
+    stressChapterCount: 250,
+  }
+
+  for (const arg of args) {
+    if (arg.startsWith('--suite=')) {
+      config.suite = arg.slice('--suite='.length)
+    } else if (arg.startsWith('--target=')) {
+      config.target = arg.slice('--target='.length)
+    } else if (arg.startsWith('--stress-size-mb=')) {
+      config.stressSizeBytes = Math.max(1, Number.parseInt(arg.slice('--stress-size-mb='.length), 10)) * 1024 * 1024
+    } else if (arg.startsWith('--stress-chapters=')) {
+      config.stressChapterCount = Math.max(1, Number.parseInt(arg.slice('--stress-chapters='.length), 10))
+    }
+  }
+
+  if (!['smoke', 'full', 'stress', 'usability'].includes(config.suite)) {
+    throw new Error(`Unsupported app mock suite: ${config.suite}`)
+  }
+  if (!['vite', 'dist'].includes(config.target)) {
+    throw new Error(`Unsupported app mock target: ${config.target}`)
+  }
+  if (!Number.isFinite(config.stressSizeBytes) || config.stressSizeBytes <= 0) {
+    throw new Error('Stress size must be a positive number of megabytes.')
+  }
+  if (!Number.isFinite(config.stressChapterCount) || config.stressChapterCount <= 0) {
+    throw new Error('Stress chapter count must be a positive number.')
+  }
+
+  return config
+}
+
+async function writeRunDiagnostics() {
+  await fs.writeFile(
+    path.join(outputDir, 'diagnostics.json'),
+    `${JSON.stringify({
+      suite: runConfig.suite,
+      target: runConfig.target,
+      artifactDirectory: path.relative(repoRoot, outputDir),
+      consoleErrors: diagnostics.consoleErrors,
+      consoleWarnings: diagnostics.consoleWarnings,
+      pageErrors: diagnostics.pageErrors,
+      failedRequests: diagnostics.failedRequests,
+    }, null, 2)}\n`,
+    'utf8',
+  )
+}
+
+function sanitizeArtifactName(value) {
+  return String(value)
+    .replace(/[^a-z0-9._-]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'page'
 }
 
 function settingsFixture(lastNovelId) {
@@ -1301,6 +1676,14 @@ function installConfigurableAppMockBridge(options = {}) {
       source: 'builtin',
     },
   ]
+  const defaultContentByPath = {
+    'novelist.md': '## 当前状态\n林岚正在调查旧城门。',
+    'chapters/1.md': '林岚在雨夜旧宅门前停住。\n\n她看见桌上的水痕。',
+    'chapters/2.md': '旧城门下，暗号被雨水冲淡。',
+    'skills/rhythm.md': '---\nname: 节奏控制\n---\n保持停顿和动作之间的张力。',
+    'skills/节奏控制.md': '---\nname: 节奏控制\n---\n保持停顿和动作之间的张力。',
+    '/builtin/skills/dialogue.md': '---\nname: 对话潜台词\n---\n用话外之意推动场景。',
+  }
   const state = {
     calls: [],
     activeNovelId: options.settings?.last_novel_id ?? defaultSettings.last_novel_id,
@@ -1323,14 +1706,7 @@ function installConfigurableAppMockBridge(options = {}) {
     savedCovers: [],
     savedAvatars: [],
     createdReferenceAnchors: [],
-    contentByPath: {
-      'novelist.md': '## 当前状态\n林岚正在调查旧城门。',
-      'chapters/1.md': '林岚在雨夜旧宅门前停住。\n\n她看见桌上的水痕。',
-      'chapters/2.md': '旧城门下，暗号被雨水冲淡。',
-      'skills/rhythm.md': '---\nname: 节奏控制\n---\n保持停顿和动作之间的张力。',
-      'skills/节奏控制.md': '---\nname: 节奏控制\n---\n保持停顿和动作之间的张力。',
-      '/builtin/skills/dialogue.md': '---\nname: 对话潜台词\n---\n用话外之意推动场景。',
-    },
+    contentByPath: options.contentByPath ?? defaultContentByPath,
     initialized: options.initialized ?? true,
     novels: options.novels ?? [defaultNovel],
     chaptersByNovelId: options.chaptersByNovelId ?? { 42: defaultChapters },
@@ -2228,6 +2604,11 @@ function installConfigurableAppMockBridge(options = {}) {
         source_path: 'D:\\books\\rain-reference.md',
         source_kind: 'markdown',
         license_status: 'user_provided',
+        visibility: 'workspace',
+        source_trust: 'user_verified',
+        owner_scope: 'workspace_corpus',
+        owner_novel_id: null,
+        user_tags: ['雨夜', '全局语料'],
         source_file_hash: 'hash-anchor-app-001',
         build_version: 'mock-reference-v1',
         status: 'ready',
@@ -2247,6 +2628,11 @@ function installConfigurableAppMockBridge(options = {}) {
       source_path: String(input?.source_path ?? ''),
       source_kind: String(input?.source_kind ?? ''),
       license_status: String(input?.license_status ?? ''),
+      visibility: String(input?.visibility ?? 'private'),
+      source_trust: String(input?.source_trust ?? 'imported'),
+      owner_scope: input?.visibility === 'workspace' ? 'workspace_corpus' : 'novel',
+      owner_novel_id: input?.visibility === 'workspace' ? null : input?.novel_id ?? state.activeNovelId,
+      user_tags: Array.isArray(input?.user_tags) ? input.user_tags : [],
       source_file_hash: `hash-created-${state.createdReferenceAnchors.length}`,
       build_version: 'mock-reference-v1',
       status: 'ready',

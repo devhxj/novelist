@@ -4,7 +4,7 @@ This implementation plan has been split into focused companion documents so each
 
 ## Status
 
-Core implementation phases 0-11 are complete in the task tracker. Phase 12 still tracks the shared reference corpus model where AI chooses relevant materials from global libraries by story context instead of requiring per-novel binding. Phase 13 has been reopened and expanded into a full-product Playwright QA, usability, and robustness gate, including 10MB source stress coverage and automatic material generation from passed novel/reference text.
+Core implementation phases 0-12 are complete at the current implementation boundary. Phase 13 has been reopened and expanded into a full-product Playwright QA, usability, and robustness gate, including 10MB source stress coverage and automatic material generation from passed novel/reference text.
 
 ## Date
 
@@ -15,7 +15,7 @@ Core implementation phases 0-11 are complete in the task tracker. Phase 12 still
 - [Overview and architecture](reference-anchor-implementation/overview.md): stable overview index for status/scope, planning updates, and architecture map.
 - [Implementation decisions](reference-anchor-implementation/decisions.md): stable decisions index for foundation, pipeline, quality, material, and audit decisions.
 - [Schema and integration plan](reference-anchor-implementation/schema-and-integration.md): stable integration index for database, bridge, desktop/agent, and frontend surfaces.
-- [Tasks, tests, and guardrails](reference-anchor-implementation/tasks-and-verification.md): stable task index for phase breakdowns, test matrix, guardrails, and open Phase 12 work.
+- [Tasks, tests, and guardrails](reference-anchor-implementation/tasks-and-verification.md): stable task index for phase breakdowns, test matrix, guardrails, and the open Phase 13 quality gate.
 
 ## Topic Documents
 

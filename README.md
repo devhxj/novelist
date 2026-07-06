@@ -100,7 +100,7 @@ mode: auto
 | 范围 | 状态 |
 |---|---|
 | 桌面主线 | 已迁移到 `.NET 10 + Photino.NET + React/Vite` |
-| 参考锚定 | Phase 0-11 已完成；Phase 12 继续推进 workspace 级共享参考语料和 AI 驱动材料选择；Phase 13 已重新打开为全软件 Playwright 深测、易用性评估和 10MB 大小说鲁棒性验收，要求语料从传入小说/参考源自动切分生成 |
+| 参考锚定 | Phase 0-12 已按当前实现边界完成；Phase 13 已重新打开为全软件 Playwright 深测、易用性评估和 10MB 大小说鲁棒性验收，要求语料从传入小说/参考源自动切分生成 |
 | 前端构建 | Vite 8/Rolldown 已拆分主入口、工作区、Monaco、Markdown、Mermaid 和图谱依赖 |
 | 旧实现 | Go/Wails 与旧 Python 实现已退役；新功能不要写入 `app/`、`internal/`、`python-master/` 或 `frontend/src/lib/wailsjs/` |
 

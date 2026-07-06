@@ -6,9 +6,9 @@ This file is the stable overview entry point. The detailed content is split into
 
 ## Status
 
-Phases 0-11 are complete in the task tracker. Remaining work is tracked explicitly in [tasks phases 10-12](tasks-phases-10-12.md) and [Phase 13](tasks-phase-13.md): Phase 12 covers the shared reference corpus and AI-driven material selection model across novels, and Phase 13 is reopened as the full-product Playwright QA, usability, and robustness gate.
+Phases 0-12 are complete at the current implementation boundary. Remaining work is tracked explicitly in [Phase 13](tasks-phase-13.md): the reopened full-product Playwright QA, usability, and robustness gate.
 
-This plan remains the source of truth for the target design. Treat Phase 12 and the expanded Phase 13 quality gate as open implementation-plan phases unless contracts, storage, bridge, agent, or frontend behavior regresses.
+This plan remains the source of truth for the target design. Treat the expanded Phase 13 quality gate as the open implementation-plan phase unless contracts, storage, bridge, agent, or frontend behavior regresses.
 
 ## Detailed Documents
 

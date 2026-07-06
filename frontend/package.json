@@ -9,7 +9,11 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:reference-anchor": "node scripts/reference-anchor-mock-workflow.mjs",
-    "test:app": "node scripts/app-mock-workflow.mjs",
+    "test:app": "node scripts/app-mock-workflow.mjs --suite=smoke --target=vite",
+    "test:app:full": "node scripts/app-mock-workflow.mjs --suite=full --target=vite",
+    "test:app:stress": "node scripts/app-mock-workflow.mjs --suite=stress --target=vite",
+    "test:app:usability": "node scripts/app-mock-workflow.mjs --suite=usability --target=vite",
+    "test:app:dist": "node scripts/app-mock-workflow.mjs --suite=smoke --target=dist",
     "verify": "npm run build && npm run lint && npm run test:reference-anchor && npm run test:app"
   },
   "dependencies": {

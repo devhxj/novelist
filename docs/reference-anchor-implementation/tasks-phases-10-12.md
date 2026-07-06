@@ -142,7 +142,7 @@ Targeted Phase 11 thin-slice checks completed:
 - [x] `npm --prefix frontend run build`
 - [x] `npm --prefix frontend run lint`
 
-Phase 11 is complete at the current implementation boundary: the proposal-provider path supports a production AI-backed provider using the selected chat model while preserving explicit approval and deterministic fallback, source/license/fact confirmation is explicit, high-risk recovery stops fail closed, and final insertion remains a separate user-confirmed edit/save path. Phase 12 shared-corpus storage, migration, global-vs-usage feedback, AI explanation, and corpus-management UI remain pending.
+Phase 11 is complete at the current implementation boundary: the proposal-provider path supports a production AI-backed provider using the selected chat model while preserving explicit approval and deterministic fallback, source/license/fact confirmation is explicit, high-risk recovery stops fail closed, and final insertion remains a separate user-confirmed edit/save path. Phase 12 then closes the shared-corpus storage, migration, scoped feedback, AI-assisted retrieval, and corpus-management UI boundary.
 
 **Files likely touched:**
 
