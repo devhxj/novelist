@@ -1916,6 +1916,9 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                                           </span>
                                         </div>
                                         <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-foreground">{material.text}</p>
+                                        <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">
+                                          来源 {material.source_segment_id} · {material.source_hash}
+                                        </p>
                                         {editingMaterialId === material.material_id && materialTagForm && (
                                           <div className="mt-2 space-y-2 rounded border border-border bg-background p-2">
                                             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -2183,6 +2186,9 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                             {material.user_verified && <span className="text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
                           </div>
                           <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-foreground">{material.text}</p>
+                          <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">
+                            来源 {material.source_segment_id} · {material.source_hash}
+                          </p>
                           {materialScoreComponents(material).length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-1">
                               {materialScoreComponents(material).slice(0, 4).map(([name, value]) => (
