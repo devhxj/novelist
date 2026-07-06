@@ -1,7 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { Suspense, lazy, useState, useEffect, useCallback } from 'react'
 import { useApp } from '@/hooks/useApp'
 import InitView from '@/views/InitView'
-import WorkspaceView from '@/views/WorkspaceView'
 import { Button } from '@/components/ui/button'
 import { AlertTriangle } from 'lucide-react'
 
@@ -12,6 +11,8 @@ interface StartupError {
   message: string
   detail?: string
 }
+
+const WorkspaceView = lazy(() => import('@/views/WorkspaceView'))
 
 export default function App() {
   const [view, setView] = useState<View>('loading')
@@ -105,8 +106,18 @@ export default function App() {
         }} />
       )}
       {view === 'workspace' && (
-        <WorkspaceView initialNovelId={initialNovelId} initialShowHelp={fromInit} />
+        <Suspense fallback={<LoadingScreen />}>
+          <WorkspaceView initialNovelId={initialNovelId} initialShowHelp={fromInit} />
+        </Suspense>
       )}
+    </div>
+  )
+}
+
+function LoadingScreen() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <p className="text-muted-foreground">加载中...</p>
     </div>
   )
 }

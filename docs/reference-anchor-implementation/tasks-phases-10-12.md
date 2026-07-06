@@ -201,7 +201,7 @@ workspace/global reference corpus
 - [x] Binding/audit tests proving selected global material provenance is stored with blueprint hash and cannot be reused after blueprint edits.
 - [x] Feedback tests proving global tag feedback and per-novel usage feedback have different scopes.
 - [x] Bridge and agent tests proving `anchor_ids` are optional and policy-driven corpus retrieval is the default orchestration path.
-- [ ] Frontend smoke test for corpus management and default automatic material selection. Current coverage asserts default automatic material selection and the create/list corpus-metadata thin slice; full corpus library management UI smoke remains pending.
+- [ ] Frontend smoke test for corpus management and default automatic material selection. Current coverage asserts default automatic material selection, create/list corpus metadata, owner-scope filtering/counts, local list query/license/source-trust filters, and a single-anchor promotion action; full corpus library management UI smoke remains pending.
 
 Targeted Phase 12 thin-slice checks completed:
 
@@ -229,6 +229,9 @@ Targeted Phase 12 thin-slice checks completed:
 - [x] The reference-anchor Playwright workflow now asserts default automatic material selection UI state and bridge payload behavior: `anchor_ids` is `null`, include/exclude anchor filters are empty, `corpus_search_policy.mode` is `story_context`, and no `SaveContent` call occurs.
 - [x] `SearchReferenceMaterials` now accepts `prose_duties` as a story-context input alongside `narrative_duties` and `emotion_transitions`; service, bridge, MAF, and frontend paths pass it through, search can filter and score by prose-duty fit, and returned material `score_components` expose `prose_duty`.
 - [x] The reference-anchor create/list UI now exposes corpus metadata fields for `visibility`, `source_trust`, and `user_tags`; the Playwright workflow asserts the `CreateReferenceAnchor` payload and list-row display for this metadata without treating it as the complete corpus library management UI.
+- [x] The reference-anchor list UI now exposes a single-anchor promote action for per-novel anchors; the Playwright workflow asserts `PromoteReferenceAnchorToWorkspaceCorpus` payload behavior and the promoted row's workspace-corpus owner display without treating it as the complete corpus library management UI.
+- [x] The reference-anchor list UI now exposes owner-scope segmented filtering and counts for all, current-novel, and workspace-corpus anchors; the Playwright workflow asserts the promoted workspace-corpus row appears under the workspace filter and disappears under the current-novel filter.
+- [x] The reference-anchor list UI now supports local corpus-list query filtering across title, author, path, tags, and metadata plus license, visibility, and source-trust filters; the Playwright workflow asserts matching and empty states without treating this as the complete corpus library management UI.
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'WorkspaceCorpus|ReferenceOrchestrationRunUsesWorkspaceCorpus|ReferenceOrchestrationRunFiltersWorkspaceCorpus|ReferenceOrchestrationRunUsesCorpusSearchPolicy' -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'BridgeReferenceOrchestrationRunUsesWorkspaceCorpusWhenAnchorIdsAreOmitted|ReferenceOrchestrationRunUsesWorkspaceCorpusAnchorsWithoutExplicitAnchorIds' -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationAgentToolDefaultsToWorkspaceCorpusWithoutAnchorIds -v minimal`

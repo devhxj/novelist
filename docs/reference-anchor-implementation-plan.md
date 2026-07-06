@@ -4,7 +4,7 @@ This implementation plan has been split into focused companion documents so each
 
 ## Status
 
-Core implementation phases 0-10 and Phase 13 are complete in the task tracker. Phase 11 still tracks the remaining AI-orchestrated low-intervention workflow gaps. Phase 12 still tracks the shared reference corpus model where AI chooses relevant materials from global libraries by story context instead of requiring per-novel binding.
+Core implementation phases 0-11 and Phase 13 are complete in the task tracker. Phase 12 still tracks the shared reference corpus model where AI chooses relevant materials from global libraries by story context instead of requiring per-novel binding.
 
 ## Date
 
@@ -15,7 +15,7 @@ Core implementation phases 0-10 and Phase 13 are complete in the task tracker. P
 - [Overview and architecture](reference-anchor-implementation/overview.md): stable overview index for status/scope, planning updates, and architecture map.
 - [Implementation decisions](reference-anchor-implementation/decisions.md): stable decisions index for foundation, pipeline, quality, material, and audit decisions.
 - [Schema and integration plan](reference-anchor-implementation/schema-and-integration.md): stable integration index for database, bridge, desktop/agent, and frontend surfaces.
-- [Tasks, tests, and guardrails](reference-anchor-implementation/tasks-and-verification.md): stable task index for phase breakdowns, test matrix, guardrails, and open Phase 11-12 work.
+- [Tasks, tests, and guardrails](reference-anchor-implementation/tasks-and-verification.md): stable task index for phase breakdowns, test matrix, guardrails, and open Phase 12 work.
 
 ## Topic Documents
 

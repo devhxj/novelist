@@ -889,6 +889,28 @@ public sealed class MafToolRegistryTests
                 input.UserTags ?? []));
         }
 
+        public ValueTask<ReferenceAnchorPayload> UpdateAnchorMetadataAsync(
+            UpdateReferenceAnchorMetadataPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult(new ReferenceAnchorPayload(
+                input.AnchorId,
+                input.Visibility == ReferenceCorpusVisibilities.Workspace ? 0 : input.NovelId,
+                input.Title,
+                input.Author ?? string.Empty,
+                string.Empty,
+                "markdown",
+                input.LicenseStatus,
+                "hash",
+                "test",
+                ReferenceAnchorBuildStates.Ready,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                input.Visibility,
+                input.SourceTrust,
+                input.UserTags));
+        }
+
         public ValueTask<ReferenceAnchorBuildStatusPayload> RebuildAnchorAsync(
             long novelId,
             long anchorId,

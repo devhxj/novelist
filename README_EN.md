@@ -155,8 +155,8 @@ Skills solve method and style. The reference anchor layer solves evidence, bound
 
 - The desktop mainline has moved to `.NET 10 + Photino.NET + React/Vite`.
 - The Go/Wails path and old Python implementation are retired from the current tree; new work should not go under `app/`, `internal/`, `python-master/`, or `frontend/src/lib/wailsjs/`.
-- Reference anchor implementation phases 0-10 and phase 13 are complete.
-- Phase 11 continues to refine low-intervention orchestration, revision authorization, stop/recovery semantics, and final insertion UX.
+- Reference anchor implementation phases 0-11 and phase 13 are complete.
+- Phase 11 low-intervention orchestration, revision authorization, high-risk stops, and final-insertion boundaries are closed at the current implementation boundary.
 - Phase 12 continues the workspace-level shared reference corpus and AI-driven material selection model.
 
 Detailed design:

@@ -454,6 +454,17 @@ export namespace reference {
     user_tags?: string[] | null
   }
 
+  export interface UpdateAnchorMetadataInput {
+    novel_id: number
+    anchor_id: number
+    title: string
+    author?: string | null
+    license_status: string
+    visibility: string
+    source_trust: string
+    user_tags: string[]
+  }
+
   export interface BuildStatus {
     novel_id: number
     anchor_id: number

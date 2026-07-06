@@ -2,14 +2,18 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   BookMarked,
+  Check,
+  Edit3,
   FileSearch,
   FolderOpen,
   Loader2,
   Plus,
   RefreshCcw,
   Search,
+  Share2,
   SlidersHorizontal,
   Wand2,
+  X,
 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { reference } from '@/lib/novelist/types'
@@ -33,12 +37,15 @@ interface Props {
 type AnchorForm = {
   title: string
   author: string
-  sourcePath: string
-  sourceKind: string
   licenseStatus: string
   visibility: string
   sourceTrust: string
   userTags: string
+}
+
+type CreateAnchorForm = AnchorForm & {
+  sourcePath: string
+  sourceKind: string
 }
 
 type BlueprintForm = {
@@ -60,7 +67,9 @@ type MaterialSearchFilters = {
   proseDuties: string
 }
 
-const EMPTY_ANCHOR_FORM: AnchorForm = {
+type AnchorScopeFilter = 'all' | 'novel' | 'workspace_corpus'
+
+const EMPTY_ANCHOR_FORM: CreateAnchorForm = {
   title: '',
   author: '',
   sourcePath: '',
@@ -103,6 +112,38 @@ function materialScoreComponents(material: reference.Material): Array<[string, n
     .sort(([, left], [, right]) => right - left)
 }
 
+function formFromAnchor(anchor: reference.Anchor): AnchorForm {
+  return {
+    title: anchor.title,
+    author: anchor.author,
+    licenseStatus: anchor.license_status,
+    visibility: anchor.visibility,
+    sourceTrust: anchor.source_trust,
+    userTags: anchor.user_tags.join(';'),
+  }
+}
+
+function normalized(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase()
+}
+
+function anchorMatchesQuery(anchor: reference.Anchor, query: string): boolean {
+  const needle = normalized(query)
+  if (!needle) return true
+
+  return [
+    anchor.title,
+    anchor.author,
+    anchor.source_path,
+    anchor.source_kind,
+    anchor.license_status,
+    anchor.visibility,
+    anchor.source_trust,
+    anchor.owner_scope,
+    ...anchor.user_tags,
+  ].some(value => normalized(value).includes(needle))
+}
+
 export default function ReferenceAnchorView({ novelId }: Props) {
   const app = useApp()
 
@@ -116,18 +157,44 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   const [orchestrationEvents, setOrchestrationEvents] = useState<reference.OrchestrationRunEvent[]>([])
   const [binding, setBinding] = useState<reference.BlueprintMaterialBindingResult | null>(null)
   const [draft, setDraft] = useState<reference.AnchoredDraft | null>(null)
-  const [anchorForm, setAnchorForm] = useState<AnchorForm>(EMPTY_ANCHOR_FORM)
+  const [anchorForm, setAnchorForm] = useState<CreateAnchorForm>(EMPTY_ANCHOR_FORM)
+  const [editingAnchorId, setEditingAnchorId] = useState<number | null>(null)
+  const [anchorEditForm, setAnchorEditForm] = useState<AnchorForm | null>(null)
   const [blueprintForm, setBlueprintForm] = useState<BlueprintForm>(EMPTY_BLUEPRINT_FORM)
   const [revisionForm, setRevisionForm] = useState<BlueprintRevisionForm>(EMPTY_REVISION_FORM)
   const [materialFilters, setMaterialFilters] = useState<MaterialSearchFilters>(EMPTY_MATERIAL_FILTERS)
   const [materialQuery, setMaterialQuery] = useState('')
   const [orchestrationUseSelectedAnchors, setOrchestrationUseSelectedAnchors] = useState(false)
   const [advancedMode, setAdvancedMode] = useState(false)
+  const [anchorScopeFilter, setAnchorScopeFilter] = useState<AnchorScopeFilter>('all')
+  const [anchorQuery, setAnchorQuery] = useState('')
+  const [anchorLicenseFilter, setAnchorLicenseFilter] = useState('all')
+  const [anchorVisibilityFilter, setAnchorVisibilityFilter] = useState('all')
+  const [anchorSourceTrustFilter, setAnchorSourceTrustFilter] = useState('all')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
   const selectedAnchorSet = useMemo(() => new Set(selectedAnchorIds), [selectedAnchorIds])
+  const anchorScopeCounts = useMemo(() => ({
+    all: anchors.length,
+    novel: anchors.filter(anchor => anchor.owner_scope === 'novel').length,
+    workspace_corpus: anchors.filter(anchor => anchor.owner_scope === 'workspace_corpus').length,
+  }), [anchors])
+  const visibleAnchors = useMemo(() => {
+    return anchors.filter(anchor => {
+      if (anchorScopeFilter !== 'all' && anchor.owner_scope !== anchorScopeFilter) return false
+      if (anchorLicenseFilter !== 'all' && anchor.license_status !== anchorLicenseFilter) return false
+      if (anchorVisibilityFilter !== 'all' && anchor.visibility !== anchorVisibilityFilter) return false
+      if (anchorSourceTrustFilter !== 'all' && anchor.source_trust !== anchorSourceTrustFilter) return false
+      return anchorMatchesQuery(anchor, anchorQuery)
+    })
+  }, [anchors, anchorScopeFilter, anchorLicenseFilter, anchorVisibilityFilter, anchorSourceTrustFilter, anchorQuery])
+  const hasAnchorListFilters = anchorQuery.trim().length > 0
+    || anchorLicenseFilter !== 'all'
+    || anchorVisibilityFilter !== 'all'
+    || anchorSourceTrustFilter !== 'all'
+  const canClearAnchorFilters = hasAnchorListFilters || anchorScopeFilter !== 'all'
 
   const loadAnchors = useCallback(async () => {
     if (!novelId) {
@@ -140,8 +207,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     setAnchors(list ?? [])
     setSelectedAnchorIds(current => {
       const valid = new Set((list ?? []).map(anchor => anchor.anchor_id))
-      const next = current.filter(id => valid.has(id))
-      return next.length > 0 ? next : (list?.[0] ? [list[0].anchor_id] : [])
+      return current.filter(id => valid.has(id))
     })
   }, [app, novelId])
 
@@ -259,6 +325,49 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   async function rebuildAnchor(anchorId: number) {
     await run(() => app.RebuildReferenceAnchor(novelId, anchorId), '锚点已重建')
     await loadAnchors()
+  }
+
+  async function promoteAnchorToWorkspaceCorpus(anchor: reference.Anchor) {
+    const promoted = await run(() => app.PromoteReferenceAnchorToWorkspaceCorpus({
+      novel_id: novelId,
+      anchor_id: anchor.anchor_id,
+    }), '已提升为工作区语料')
+    if (promoted) {
+      await loadAnchors()
+    }
+  }
+
+  function beginEditAnchor(anchor: reference.Anchor) {
+    setEditingAnchorId(anchor.anchor_id)
+    setAnchorEditForm(formFromAnchor(anchor))
+  }
+
+  function cancelEditAnchor() {
+    setEditingAnchorId(null)
+    setAnchorEditForm(null)
+  }
+
+  async function saveAnchorMetadata(anchor: reference.Anchor) {
+    if (!anchorEditForm) return
+    if (!anchorEditForm.title.trim()) {
+      setError('请输入参考书标题')
+      return
+    }
+
+    const updated = await run(() => app.UpdateReferenceAnchorMetadata({
+      novel_id: novelId,
+      anchor_id: anchor.anchor_id,
+      title: anchorEditForm.title.trim(),
+      author: anchorEditForm.author.trim() || undefined,
+      license_status: anchorEditForm.licenseStatus,
+      visibility: anchorEditForm.visibility,
+      source_trust: anchorEditForm.sourceTrust,
+      user_tags: lines(anchorEditForm.userTags),
+    }), '参考元数据已更新')
+    if (updated) {
+      cancelEditAnchor()
+      await loadAnchors()
+    }
   }
 
   async function searchMaterials() {
@@ -656,43 +765,221 @@ export default function ReferenceAnchorView({ novelId }: Props) {
             </div>
 
             <div className="rounded-lg border border-border bg-card p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <BookMarked className="h-3.5 w-3.5 text-muted-foreground" />
-                <h3 className="text-xs font-semibold text-foreground">锚点</h3>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <BookMarked className="h-3.5 w-3.5 text-muted-foreground" />
+                  <h3 className="text-xs font-semibold text-foreground">锚点</h3>
+                </div>
+                <div className="inline-flex rounded-md border border-border bg-background p-0.5" aria-label="锚点范围筛选">
+                  {[
+                    ['all', `全部 ${anchorScopeCounts.all}`],
+                    ['novel', `本小说 ${anchorScopeCounts.novel}`],
+                    ['workspace_corpus', `工作区 ${anchorScopeCounts.workspace_corpus}`],
+                  ].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setAnchorScopeFilter(value as AnchorScopeFilter)}
+                      className={`rounded px-2 py-1 text-[11px] leading-none transition-colors ${anchorScopeFilter === value ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              {anchors.length === 0 ? (
-                <p className="text-xs text-muted-foreground">暂无参考锚点</p>
+              <div className="mb-3 space-y-2">
+                <Field label="锚点搜索">
+                  <input
+                    value={anchorQuery}
+                    onChange={event => setAnchorQuery(event.target.value)}
+                    className={inputClass}
+                    placeholder="标题、作者、标签、路径或元数据"
+                    aria-label="锚点搜索"
+                  />
+                </Field>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <Field label="授权">
+                    <select
+                      value={anchorLicenseFilter}
+                      onChange={event => setAnchorLicenseFilter(event.target.value)}
+                      className={inputClass}
+                      aria-label="锚点授权筛选"
+                    >
+                      <option value="all">全部授权</option>
+                      <option value="user_provided">user_provided</option>
+                      <option value="licensed">licensed</option>
+                      <option value="public_domain">public_domain</option>
+                      <option value="unknown">unknown</option>
+                    </select>
+                  </Field>
+                  <Field label="可见性">
+                    <select
+                      value={anchorVisibilityFilter}
+                      onChange={event => setAnchorVisibilityFilter(event.target.value)}
+                      className={inputClass}
+                      aria-label="锚点可见性筛选"
+                    >
+                      <option value="all">全部可见性</option>
+                      <option value="private">private</option>
+                      <option value="workspace">workspace</option>
+                      <option value="restricted">restricted</option>
+                    </select>
+                  </Field>
+                  <Field label="可信度">
+                    <select
+                      value={anchorSourceTrustFilter}
+                      onChange={event => setAnchorSourceTrustFilter(event.target.value)}
+                      className={inputClass}
+                      aria-label="锚点可信度筛选"
+                    >
+                      <option value="all">全部可信度</option>
+                      <option value="user_verified">user_verified</option>
+                      <option value="imported">imported</option>
+                      <option value="unverified">unverified</option>
+                    </select>
+                  </Field>
+                </div>
+                {canClearAnchorFilters && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAnchorScopeFilter('all')
+                      setAnchorQuery('')
+                      setAnchorLicenseFilter('all')
+                      setAnchorVisibilityFilter('all')
+                      setAnchorSourceTrustFilter('all')
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/80"
+                  >
+                    清除筛选
+                  </button>
+                )}
+              </div>
+              {visibleAnchors.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{hasAnchorListFilters ? '没有匹配的参考锚点' : '暂无参考锚点'}</p>
               ) : (
                 <div className="space-y-2">
-                  {anchors.map(anchor => (
+                  {visibleAnchors.map(anchor => (
                     <div key={anchor.anchor_id} className="rounded-md border border-border bg-background px-3 py-2">
-                      <label className="flex items-start gap-2">
-                        <input
-                          type="checkbox"
-                          checked={selectedAnchorSet.has(anchor.anchor_id)}
-                          onChange={event => {
-                            setSelectedAnchorIds(ids => event.target.checked
-                              ? [...ids, anchor.anchor_id]
-                              : ids.filter(id => id !== anchor.anchor_id))
-                          }}
-                          className="mt-0.5"
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-xs font-medium text-foreground">{anchor.title}</span>
-                          <span className={`block text-[11px] ${statusTone(anchor.status)}`}>{anchor.status}</span>
-                          <span className="block truncate text-[11px] text-muted-foreground">{anchor.visibility} · {anchor.source_trust} · {anchor.owner_scope}</span>
-                          {anchor.user_tags.length > 0 && (
-                            <span className="mt-1 flex flex-wrap gap-1">
-                              {anchor.user_tags.slice(0, 3).map(tag => (
-                                <span key={tag} className="rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">{tag}</span>
-                              ))}
+                      {editingAnchorId === anchor.anchor_id && anchorEditForm ? (
+                        <div className="space-y-2">
+                          <Field label="标题">
+                            <input value={anchorEditForm.title} onChange={event => setAnchorEditForm(form => form ? ({ ...form, title: event.target.value }) : form)} className={inputClass} aria-label="编辑锚点标题" />
+                          </Field>
+                          <Field label="作者">
+                            <input value={anchorEditForm.author} onChange={event => setAnchorEditForm(form => form ? ({ ...form, author: event.target.value }) : form)} className={inputClass} aria-label="编辑锚点作者" />
+                          </Field>
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                            <Field label="授权">
+                              <select value={anchorEditForm.licenseStatus} onChange={event => setAnchorEditForm(form => form ? ({ ...form, licenseStatus: event.target.value }) : form)} className={inputClass} aria-label="编辑锚点授权">
+                                <option value="user_provided">user_provided</option>
+                                <option value="licensed">licensed</option>
+                                <option value="public_domain">public_domain</option>
+                                <option value="unknown">unknown</option>
+                              </select>
+                            </Field>
+                            <Field label="可见性">
+                              <select value={anchorEditForm.visibility} onChange={event => setAnchorEditForm(form => form ? ({ ...form, visibility: event.target.value }) : form)} className={inputClass} aria-label="编辑锚点可见性">
+                                <option value="private">private</option>
+                                <option value="workspace">workspace</option>
+                                <option value="restricted">restricted</option>
+                              </select>
+                            </Field>
+                            <Field label="可信度">
+                              <select value={anchorEditForm.sourceTrust} onChange={event => setAnchorEditForm(form => form ? ({ ...form, sourceTrust: event.target.value }) : form)} className={inputClass} aria-label="编辑锚点可信度">
+                                <option value="user_verified">user_verified</option>
+                                <option value="imported">imported</option>
+                                <option value="unverified">unverified</option>
+                              </select>
+                            </Field>
+                          </div>
+                          <Field label="用户标签">
+                            <input value={anchorEditForm.userTags} onChange={event => setAnchorEditForm(form => form ? ({ ...form, userTags: event.target.value }) : form)} className={inputClass} placeholder="分号分隔" aria-label="编辑锚点用户标签" />
+                          </Field>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void saveAnchorMetadata(anchor)
+                              }}
+                              disabled={loading}
+                              className="inline-flex items-center gap-1.5 rounded bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                            >
+                              <Check className="h-3.5 w-3.5" />保存
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelEditAnchor}
+                              className="inline-flex items-center gap-1.5 rounded bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/80"
+                            >
+                              <X className="h-3.5 w-3.5" />取消
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-2">
+                          <label className="flex min-w-0 flex-1 items-start gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedAnchorSet.has(anchor.anchor_id)}
+                              onChange={event => {
+                                setSelectedAnchorIds(ids => event.target.checked
+                                  ? [...ids, anchor.anchor_id]
+                                  : ids.filter(id => id !== anchor.anchor_id))
+                              }}
+                              className="mt-0.5"
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-xs font-medium text-foreground">{anchor.title}</span>
+                              <span className={`block text-[11px] ${statusTone(anchor.status)}`}>{anchor.status}</span>
+                              <span className="block truncate text-[11px] text-muted-foreground">{anchor.visibility} · {anchor.source_trust} · {anchor.owner_scope}</span>
+                              {anchor.user_tags.length > 0 && (
+                                <span className="mt-1 flex flex-wrap gap-1">
+                                  {anchor.user_tags.slice(0, 3).map(tag => (
+                                    <span key={tag} className="rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">{tag}</span>
+                                  ))}
+                                </span>
+                              )}
                             </span>
-                          )}
-                        </span>
-                        <button onClick={() => rebuildAnchor(anchor.anchor_id)} className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-secondary" title="重建">
-                          <RefreshCcw className="h-3.5 w-3.5" />
-                        </button>
-                      </label>
+                          </label>
+                          <span className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => beginEditAnchor(anchor)}
+                              disabled={loading}
+                              className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-50"
+                              title="编辑元数据"
+                              aria-label={`编辑 ${anchor.title} 元数据`}
+                            >
+                              <Edit3 className="h-3.5 w-3.5" />
+                            </button>
+                            {anchor.owner_scope === 'novel' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void promoteAnchorToWorkspaceCorpus(anchor)
+                                }}
+                                disabled={loading}
+                                className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-50"
+                                title="提升为工作区语料"
+                                aria-label={`提升 ${anchor.title} 为工作区语料`}
+                              >
+                                <Share2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void rebuildAnchor(anchor.anchor_id)
+                              }}
+                              className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-secondary"
+                              title="重建"
+                            >
+                              <RefreshCcw className="h-3.5 w-3.5" />
+                            </button>
+                          </span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

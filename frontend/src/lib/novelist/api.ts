@@ -184,6 +184,7 @@ export interface NovelistAppApi {
   UpdateNovel: AppMethod<[number, app.UpdateNovelInput], novel.Novel>
   UpdatePreference: AppMethod<[number, app.UpdatePreferenceInput], novel.PreferenceItem>
   UpdateReaderPerspective: AppMethod<[number, number, app.UpdateReaderPerspectiveInput], void>
+  UpdateReferenceAnchorMetadata: AppMethod<[reference.UpdateAnchorMetadataInput], reference.Anchor>
   UpdateReferenceMaterialTags: AppMethod<[reference.UpdateMaterialTagsInput], reference.Material>
   UpdateStoryArc: AppMethod<[number, number, app.UpdateStoryArcInput], void>
   UpdateTimelineEntry: AppMethod<[number, number, app.UpdateTimelineEntryInput], void>
@@ -327,6 +328,7 @@ export const appApi: NovelistAppApi = {
   UpdateNovel: appMethod<NovelistAppApi['UpdateNovel']>('UpdateNovel'),
   UpdatePreference: appMethod<NovelistAppApi['UpdatePreference']>('UpdatePreference'),
   UpdateReaderPerspective: appMethod<NovelistAppApi['UpdateReaderPerspective']>('UpdateReaderPerspective'),
+  UpdateReferenceAnchorMetadata: appMethod<NovelistAppApi['UpdateReferenceAnchorMetadata']>('UpdateReferenceAnchorMetadata'),
   UpdateReferenceMaterialTags: appMethod<NovelistAppApi['UpdateReferenceMaterialTags']>('UpdateReferenceMaterialTags'),
   UpdateStoryArc: appMethod<NovelistAppApi['UpdateStoryArc']>('UpdateStoryArc'),
   UpdateTimelineEntry: appMethod<NovelistAppApi['UpdateTimelineEntry']>('UpdateTimelineEntry'),

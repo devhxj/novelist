@@ -824,6 +824,78 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
     }
 
+    public async ValueTask<ReferenceAnchorPayload> UpdateAnchorMetadataAsync(
+        UpdateReferenceAnchorMetadataPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        ValidateAnchorId(input.AnchorId);
+        await EnsureNovelExistsAsync(input.NovelId, cancellationToken);
+
+        var title = NormalizeRequiredText(input.Title, nameof(input.Title), maxLength: 200);
+        var author = NormalizeOptionalText(input.Author, nameof(input.Author), maxLength: 200);
+        var licenseStatus = ValidateAllowedText(input.LicenseStatus, nameof(input.LicenseStatus), AllowedLicenseStatuses);
+        var visibility = ValidateAllowedText(input.Visibility, nameof(input.Visibility), AllowedCorpusVisibilities);
+        var sourceTrust = ValidateAllowedText(input.SourceTrust, nameof(input.SourceTrust), AllowedSourceTrustLevels);
+        var userTags = NormalizeUserTags(input.UserTags);
+        var now = DateTimeOffset.UtcNow;
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var current = await ReadAnchorAsync(connection, input.NovelId, input.AnchorId, cancellationToken);
+            if (current.OwnerScope == ReferenceAnchorOwnerScopes.WorkspaceCorpus &&
+                visibility != ReferenceCorpusVisibilities.Workspace)
+            {
+                throw new ArgumentException(
+                    "Workspace corpus anchors must stay workspace-visible until archive/delete policy is implemented.",
+                    nameof(input));
+            }
+
+            var storedNovelId = visibility == ReferenceCorpusVisibilities.Workspace
+                ? (long?)null
+                : input.NovelId;
+
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE reference_anchors
+                SET novel_id = $novel_id,
+                    title = $title,
+                    author = $author,
+                    license_status = $license_status,
+                    corpus_visibility = $corpus_visibility,
+                    source_trust = $source_trust,
+                    user_tags_json = $user_tags_json,
+                    updated_at = $updated_at
+                WHERE anchor_id = $anchor_id;
+                """;
+            command.Parameters.AddWithValue("$anchor_id", input.AnchorId);
+            command.Parameters.AddWithValue("$novel_id", storedNovelId.HasValue ? storedNovelId.Value : DBNull.Value);
+            command.Parameters.AddWithValue("$title", title);
+            command.Parameters.AddWithValue("$author", author);
+            command.Parameters.AddWithValue("$license_status", licenseStatus);
+            command.Parameters.AddWithValue("$corpus_visibility", visibility);
+            command.Parameters.AddWithValue("$source_trust", sourceTrust);
+            command.Parameters.AddWithValue("$user_tags_json", JsonSerializer.Serialize(userTags, JsonOptions));
+            command.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
+            var affected = await command.ExecuteNonQueryAsync(cancellationToken);
+            if (affected == 0)
+            {
+                throw new ArgumentException("Reference anchor does not exist for this novel.", nameof(input));
+            }
+
+            return await ReadAnchorAsync(connection, input.NovelId, input.AnchorId, cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
     private async ValueTask<ReferenceAnchorPayload> InsertAnchorAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,

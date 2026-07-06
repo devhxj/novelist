@@ -31,6 +31,15 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             99,
             SourceTrust: ReferenceSourceTrustLevels.Imported,
             UserTags: ["migrated", "shared"]));
+        await AssertOkAsync(dispatcher, "UpdateReferenceAnchorMetadata", new UpdateReferenceAnchorMetadataPayload(
+            42,
+            99,
+            "Updated Anchor",
+            "Updated Author",
+            "licensed",
+            ReferenceCorpusVisibilities.Workspace,
+            ReferenceSourceTrustLevels.UserVerified,
+            ["curated", "rain"]));
         await AssertOkAsync(dispatcher, "RebuildReferenceAnchor", 42L, 99L);
         await AssertOkAsync(dispatcher, "GetReferenceAnchorBuildStatus", 42L, 99L);
         await AssertOkAsync(dispatcher, "SearchReferenceMaterials", new SearchReferenceMaterialsPayload(
@@ -92,6 +101,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "GetAnchors:42",
                 "DeleteAnchor:42:99",
                 "PromoteAnchorToWorkspaceCorpus:42:99:imported:migrated,shared",
+                "UpdateAnchorMetadata:42:99:Updated Anchor:Updated Author:licensed:workspace:user_verified:curated,rain",
                 "RebuildAnchor:42:99",
                 "GetBuildStatus:42:99",
                 "SearchMaterials:42:99:fog:passage:unease:interiority:close:afterbeat:2:10:source_backed_detail",
@@ -298,6 +308,15 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"PromoteAnchorToWorkspaceCorpus:{input.NovelId}:{input.AnchorId}:{input.SourceTrust}:{string.Join(",", input.UserTags ?? [])}");
+            return ValueTask.FromResult<ReferenceAnchorPayload>(null!);
+        }
+
+        public ValueTask<ReferenceAnchorPayload> UpdateAnchorMetadataAsync(
+            UpdateReferenceAnchorMetadataPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"UpdateAnchorMetadata:{input.NovelId}:{input.AnchorId}:{input.Title}:{input.Author}:{input.LicenseStatus}:{input.Visibility}:{input.SourceTrust}:{string.Join(",", input.UserTags)}");
             return ValueTask.FromResult<ReferenceAnchorPayload>(null!);
         }
 

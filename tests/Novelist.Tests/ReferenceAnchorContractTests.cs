@@ -89,6 +89,35 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void UpdateReferenceAnchorMetadataPayloadUsesStableSnakeCaseJsonNames()
+    {
+        var input = new UpdateReferenceAnchorMetadataPayload(
+            NovelId: 42,
+            AnchorId: 7,
+            Title: "Updated Anchor",
+            Author: "Reference Author",
+            LicenseStatus: "user_provided",
+            Visibility: ReferenceCorpusVisibilities.Workspace,
+            SourceTrust: ReferenceSourceTrustLevels.Imported,
+            UserTags: ["curated", "rain"]);
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(input, BridgeJson.SerializerOptions));
+        var root = json.RootElement;
+
+        Assert.Equal(42, root.GetProperty("novel_id").GetInt64());
+        Assert.Equal(7, root.GetProperty("anchor_id").GetInt64());
+        Assert.Equal("Updated Anchor", root.GetProperty("title").GetString());
+        Assert.Equal("Reference Author", root.GetProperty("author").GetString());
+        Assert.Equal("user_provided", root.GetProperty("license_status").GetString());
+        Assert.Equal("workspace", root.GetProperty("visibility").GetString());
+        Assert.Equal("imported", root.GetProperty("source_trust").GetString());
+        Assert.Equal("curated", root.GetProperty("user_tags")[0].GetString());
+        Assert.False(root.TryGetProperty("NovelId", out _));
+        Assert.False(root.TryGetProperty("AnchorId", out _));
+        Assert.False(root.TryGetProperty("SourceTrust", out _));
+    }
+
+    [Fact]
     public void ReferenceMaterialPayloadSearchScoresUseStableSnakeCaseJsonNames()
     {
         var material = new ReferenceMaterialPayload(
@@ -739,6 +768,7 @@ public sealed class ReferenceAnchorContractTests
             "GetReferenceAnchors",
             "DeleteReferenceAnchor",
             "PromoteReferenceAnchorToWorkspaceCorpus",
+            "UpdateReferenceAnchorMetadata",
             "RebuildReferenceAnchor",
             "GetReferenceAnchorBuildStatus",
             "SearchReferenceMaterials",

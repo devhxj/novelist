@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle } from 'react'
 import { type OnMount, DiffEditor } from '@monaco-editor/react'
+import '@/monacoSetup'
 import { FileText, Loader2 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import { useEditorTabs } from '@/hooks/useEditorTabs'

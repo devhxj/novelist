@@ -1,4 +1,5 @@
 import Editor, { type OnMount } from '@monaco-editor/react'
+import '@/monacoSetup'
 
 type MountedEditor = Parameters<OnMount>[0]
 

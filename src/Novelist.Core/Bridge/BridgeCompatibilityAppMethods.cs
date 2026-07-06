@@ -115,6 +115,7 @@ public static class BridgeCompatibilityAppMethods
         "UpdateNovel",
         "UpdatePreference",
         "UpdateReaderPerspective",
+        "UpdateReferenceAnchorMetadata",
         "UpdateReferenceMaterialTags",
         "UpdateStoryArc",
         "UpdateTimelineEntry"

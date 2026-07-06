@@ -147,6 +147,16 @@ public sealed record PromoteReferenceAnchorToWorkspaceCorpusPayload(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<string>? UserTags = null);
 
+public sealed record UpdateReferenceAnchorMetadataPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("author")] string? Author,
+    [property: JsonPropertyName("license_status")] string LicenseStatus,
+    [property: JsonPropertyName("visibility")] string Visibility,
+    [property: JsonPropertyName("source_trust")] string SourceTrust,
+    [property: JsonPropertyName("user_tags")] IReadOnlyList<string> UserTags);
+
 public sealed record ReferenceAnchorPayload(
     [property: JsonPropertyName("anchor_id")] long AnchorId,
     [property: JsonPropertyName("novel_id")] long NovelId,

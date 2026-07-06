@@ -83,15 +83,56 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await page.getByPlaceholder('参考书名').fill('雨夜动作参考')
   await page.getByPlaceholder('可选').first().fill('Mock Author')
   await page.getByLabel('本地路径').fill('D:\\books\\rain-reference.md')
-  await page.getByLabel('可见性').selectOption('workspace')
   await page.getByLabel('来源可信度').selectOption('imported')
   await page.getByLabel('用户标签').fill('雨夜;动作克制')
   await page.getByRole('button', { name: /^创建$/ }).click()
   await expectVisible(page.getByText('参考锚点已创建'), 'anchor created message')
   await expectVisible(page.getByText('雨夜动作参考'), 'created anchor title')
+  await expectVisible(page.getByText('private · imported · novel'), 'created private anchor metadata')
+
+  await page.getByRole('button', { name: /提升 雨夜动作参考 为工作区语料/ }).click()
+  await expectVisible(page.getByText('已提升为工作区语料'), 'anchor promoted message')
   await expectVisible(page.getByText('workspace · imported · workspace_corpus'), 'created anchor corpus metadata')
+  const createdAnchorRow = page.locator('.rounded-md').filter({ hasText: '雨夜动作参考' }).first()
+  assert.equal(await createdAnchorRow.getByRole('checkbox').isChecked(), false, 'promote action must not toggle anchor selection')
   await expectVisible(page.getByText('雨夜', { exact: true }), 'created anchor first user tag')
   await expectVisible(page.getByText('动作克制', { exact: true }), 'created anchor second user tag')
+
+  await page.getByRole('button', { name: '工作区 1' }).click()
+  await expectVisible(page.getByText('workspace · imported · workspace_corpus'), 'workspace corpus filter row')
+  await page.getByRole('button', { name: '本小说 0' }).click()
+  await expectVisible(page.getByText('暂无参考锚点'), 'empty novel-owned anchor filter')
+  await page.getByRole('button', { name: '全部 1' }).click()
+
+  await page.getByRole('button', { name: /编辑 雨夜动作参考 元数据/ }).click()
+  await page.getByLabel('编辑锚点标题').fill('雨夜动作语料库')
+  await page.getByLabel('编辑锚点作者').fill('Metadata Curator')
+  await page.getByLabel('编辑锚点授权').selectOption('licensed')
+  await page.getByLabel('编辑锚点可信度').selectOption('user_verified')
+  await page.getByLabel('编辑锚点用户标签').fill('雨夜;动作克制;精选')
+  await page.getByRole('button', { name: /^保存$/ }).click()
+  await expectVisible(page.getByText('参考元数据已更新'), 'anchor metadata updated message')
+  await expectVisible(page.getByText('雨夜动作语料库'), 'updated anchor title')
+  await expectVisible(page.getByText('workspace · user_verified · workspace_corpus'), 'updated anchor metadata')
+  await expectVisible(page.getByText('精选', { exact: true }), 'updated anchor user tag')
+
+  await page.getByLabel('锚点搜索').fill('Mock Author')
+  await expectVisible(page.getByText('没有匹配的参考锚点'), 'anchor list query excludes old author')
+  await page.getByLabel('锚点搜索').fill('Metadata Curator')
+  await expectVisible(page.getByText('雨夜动作语料库'), 'anchor list query matches updated author')
+  await page.getByLabel('锚点搜索').fill('不存在的语料')
+  await expectVisible(page.getByText('没有匹配的参考锚点'), 'anchor list query empty state')
+  await page.getByLabel('锚点搜索').fill('精选')
+  await expectVisible(page.getByText('雨夜动作语料库'), 'anchor list query matches updated user tag')
+  await page.getByLabel('锚点可信度筛选').selectOption('unverified')
+  await expectVisible(page.getByText('没有匹配的参考锚点'), 'anchor list source trust filter empty state')
+  await page.getByLabel('锚点可信度筛选').selectOption('user_verified')
+  await expectVisible(page.getByText('雨夜动作语料库'), 'anchor list source trust filter match')
+  await page.getByLabel('锚点授权筛选').selectOption('unknown')
+  await expectVisible(page.getByText('没有匹配的参考锚点'), 'anchor list license filter empty state')
+  await page.getByLabel('锚点授权筛选').selectOption('licensed')
+  await expectVisible(page.getByText('雨夜动作语料库'), 'anchor list license filter match')
+  await page.getByRole('button', { name: '清除筛选' }).click()
 
   await page.locator('button[title="重建"]').first().click()
   await expectVisible(page.getByText('锚点已重建'), 'anchor rebuilt message')
@@ -200,6 +241,8 @@ async function verifyBridgeCalls(page) {
   const methods = calls.map((call) => call.method)
   const requiredMethods = [
     'CreateReferenceAnchor',
+    'PromoteReferenceAnchorToWorkspaceCorpus',
+    'UpdateReferenceAnchorMetadata',
     'RebuildReferenceAnchor',
     'SearchReferenceMaterials',
     'GenerateReferenceChapterBlueprint',
@@ -220,9 +263,25 @@ async function verifyBridgeCalls(page) {
 
   const createCall = calls.find((call) => call.method === 'CreateReferenceAnchor')
   assert(createCall, 'missing CreateReferenceAnchor call')
-  assert.equal(createCall.args[0].visibility, 'workspace', 'anchor create payload must include corpus visibility')
+  assert.equal(createCall.args[0].visibility, 'private', 'anchor create payload must start as per-novel private visibility')
   assert.equal(createCall.args[0].source_trust, 'imported', 'anchor create payload must include source trust')
   assert.deepEqual(createCall.args[0].user_tags, ['雨夜', '动作克制'], 'anchor create payload must include user tags')
+
+  const promoteCall = calls.find((call) => call.method === 'PromoteReferenceAnchorToWorkspaceCorpus')
+  assert(promoteCall, 'missing PromoteReferenceAnchorToWorkspaceCorpus call')
+  assert.equal(promoteCall.args[0].novel_id, 42, 'anchor promote payload must include novel id')
+  assert.equal(promoteCall.args[0].anchor_id, 101, 'anchor promote payload must include anchor id')
+
+  const metadataCall = calls.find((call) => call.method === 'UpdateReferenceAnchorMetadata')
+  assert(metadataCall, 'missing UpdateReferenceAnchorMetadata call')
+  assert.equal(metadataCall.args[0].novel_id, 42, 'anchor metadata update payload must include novel id')
+  assert.equal(metadataCall.args[0].anchor_id, 101, 'anchor metadata update payload must include anchor id')
+  assert.equal(metadataCall.args[0].title, '雨夜动作语料库', 'anchor metadata update payload must include title')
+  assert.equal(metadataCall.args[0].author, 'Metadata Curator', 'anchor metadata update payload must include author')
+  assert.equal(metadataCall.args[0].license_status, 'licensed', 'anchor metadata update payload must include license status')
+  assert.equal(metadataCall.args[0].visibility, 'workspace', 'anchor metadata update payload must preserve workspace visibility')
+  assert.equal(metadataCall.args[0].source_trust, 'user_verified', 'anchor metadata update payload must include source trust')
+  assert.deepEqual(metadataCall.args[0].user_tags, ['雨夜', '动作克制', '精选'], 'anchor metadata update payload must include user tags')
 
   const startCall = calls.find((call) => call.method === 'StartReferenceOrchestrationRun')
   assert(startCall, 'missing StartReferenceOrchestrationRun call')
@@ -456,6 +515,8 @@ function installReferenceAnchorMockBridge() {
       case 'ListSlashCommands': return []
       case 'GetReferenceAnchors': return state.anchors
       case 'CreateReferenceAnchor': return createReferenceAnchor(args[0])
+      case 'PromoteReferenceAnchorToWorkspaceCorpus': return promoteReferenceAnchor(args[0])
+      case 'UpdateReferenceAnchorMetadata': return updateReferenceAnchorMetadata(args[0])
       case 'RebuildReferenceAnchor': return rebuildReferenceAnchor(args[1])
       case 'SearchReferenceMaterials': return pageResult([material()])
       case 'GetReferenceChapterBlueprints': return Object.values(state.blueprints).map(toBlueprintSummary)
@@ -545,6 +606,41 @@ function installReferenceAnchorMockBridge() {
       owner_novel_id: input.visibility === 'workspace' ? null : input.novel_id,
     }
     state.anchors = [anchor]
+    return anchor
+  }
+
+  function promoteReferenceAnchor(input) {
+    const anchor = state.anchors.find((item) => item.anchor_id === input.anchor_id)
+    if (!anchor) {
+      throw new Error('Reference anchor does not exist for this novel.')
+    }
+
+    anchor.novel_id = 0
+    anchor.visibility = 'workspace'
+    anchor.source_trust = input.source_trust ?? anchor.source_trust
+    anchor.user_tags = Array.isArray(input.user_tags) ? input.user_tags : anchor.user_tags
+    anchor.owner_scope = 'workspace_corpus'
+    anchor.owner_novel_id = null
+    anchor.updated_at = now
+    return anchor
+  }
+
+  function updateReferenceAnchorMetadata(input) {
+    const anchor = state.anchors.find((item) => item.anchor_id === input.anchor_id)
+    if (!anchor) {
+      throw new Error('Reference anchor does not exist for this novel.')
+    }
+
+    anchor.title = input.title
+    anchor.author = input.author ?? ''
+    anchor.license_status = input.license_status
+    anchor.visibility = input.visibility
+    anchor.source_trust = input.source_trust
+    anchor.user_tags = Array.isArray(input.user_tags) ? input.user_tags : []
+    anchor.owner_scope = input.visibility === 'workspace' ? 'workspace_corpus' : 'novel'
+    anchor.owner_novel_id = input.visibility === 'workspace' ? null : input.novel_id
+    anchor.novel_id = input.visibility === 'workspace' ? 0 : input.novel_id
+    anchor.updated_at = now
     return anchor
   }
 
