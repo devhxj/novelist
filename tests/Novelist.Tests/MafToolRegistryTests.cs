@@ -1273,7 +1273,7 @@ public sealed class MafToolRegistryTests
                     ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts,
                     ReferenceOrchestrationStopReasons.SourceConfirmationRequired,
                     "confirm source",
-                    ["confirm_source"],
+                    ["confirm_source", "confirm_license_status", "confirm_known_facts", "confirm_forbidden_facts"],
                     new ReferenceOrchestrationApprovalSummaryPayload("function", "pov", [], "emotion", "materials", "L2", [])),
                 ReferenceOrchestrationStopReasons.SourceConfirmationRequired,
                 string.Empty,

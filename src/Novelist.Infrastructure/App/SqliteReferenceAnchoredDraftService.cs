@@ -3364,7 +3364,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts,
             ReferenceOrchestrationStopReasons.SourceConfirmationRequired,
             summary,
-            ["confirm_source", "confirm_known_facts", "confirm_forbidden_facts"],
+            ["confirm_source", "confirm_license_status", "confirm_known_facts", "confirm_forbidden_facts"],
             new ReferenceOrchestrationApprovalSummaryPayload(
                 string.IsNullOrWhiteSpace(chapterGoal) ? "chapter goal not provided" : chapterGoal,
                 "not selected",

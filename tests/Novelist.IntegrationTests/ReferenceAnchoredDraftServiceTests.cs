@@ -3148,7 +3148,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             """
             # 第一章
 
-            雨声压低了街道，他在门口停住，心里意识到压力仍然压着呼吸。
+            雨声压低街道，主角在门口停住，心里意识到压力仍然压着呼吸。
             """);
         var referenceAnchors = new SqliteReferenceAnchorService(options, novels);
         var workspaceAnchor = await referenceAnchors.CreateAnchorAsync(
@@ -3263,6 +3263,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.Equal(ReferenceOrchestrationStopReasons.SourceConfirmationRequired, started.LastStopReason);
         Assert.NotNull(started.CurrentDecision);
         Assert.Contains("confirm_source", started.CurrentDecision.RequiredActions);
+        Assert.Contains("confirm_license_status", started.CurrentDecision.RequiredActions);
         Assert.Empty(started.AnchorIds);
         Assert.Equal(4, started.CorpusSearchPolicy.MaxResultsPerBeat);
 
@@ -4122,7 +4123,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             """
             # 第一章
 
-            雨声压低了街道，他在门口停住，心里意识到压力仍然压着呼吸。
+            雨声压低街道，主角在门口停住，心里意识到压力仍然压着呼吸。
             """);
         var referenceAnchors = new SqliteReferenceAnchorService(options, novels);
         var workspaceAnchor = await referenceAnchors.CreateAnchorAsync(

@@ -84,7 +84,7 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 - Optional model assistance: resolved for the current implementation. Extraction, material tagging, slot adaptation, rewrite-level classification, and reuse audit stay deterministic-only. Future LLM-assisted tagging/adaptation requires an explicit opt-in interface or feature flag and must feed deterministic review/binding/audit instead of bypassing those gates.
 - Search scope: resolved for the current implementation. Keep reference-anchor results isolated in `SearchReferenceMaterials` and the dedicated reference panel; do not merge them into global `SearchAll` until a staged opt-in design defines result taxonomy, ranking, and preview policy.
 - Revision lineage: current behavior keeps in-place blueprint revision rows, invalidates review/material links after contract changes, and leaves fuller lineage expansion to a future migration.
-- Failed review assistance: current behavior can persist field-level proposed revisions from an injectable proposal provider while keeping them separate from approval; proposals are rebound to the current blueprint/review before persistence. The default provider is deterministic, and the desktop composition wires an AI-backed provider that uses the selected chat model, validates model JSON as untrusted, filters changes to current review defects/supported fields, and falls back deterministically when no model is selected or output is invalid. Broader agent/user authorization policy remains Phase 11 product work.
+- Failed review assistance: current behavior can persist field-level proposed revisions from an injectable proposal provider while keeping them separate from approval; proposals are rebound to the current blueprint/review before persistence. The default provider is deterministic, and the desktop composition wires an AI-backed provider that uses the selected chat model, validates model JSON as untrusted, filters changes to current review defects/supported fields, and falls back deterministically when no model is selected or output is invalid. Agent/user authorization stays explicit: model proposals are never applied without the user approval path.
 - Pending revision authorization: applying an orchestration blueprint revision uses the persisted pending proposal as the source of truth. A client may approve with an empty payload or echo the same proposal, but may not replace proposal changes even if `blueprint_id` and `review_id` match.
 - Transition/no-reuse policy: approved no-reuse transition beats are allowed only when the blueprint carries an explicit no-reuse reason; source-backed beats still require selected material links.
 - Candidate assembly: resolved for current implementation as beat-level candidates only; full-chapter candidate assembly remains deferred.
@@ -93,14 +93,14 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 - Phase 10 runtime verification: resolved as layered coverage. Playwright mock-bridge tests own the full frontend workflow and screenshot/DOM state matrix. .NET integration tests own bridge/service behavior and production composition. Real Photino verification is a minimal runtime smoke, not a manual full-workflow requirement.
 - Advanced mode boundary: resolved for the current frontend surface. The reference panel defaults to the orchestration-first flow; manual material search and manual blueprint generate/revise/review/approve/bind/draft controls are hidden until `高级模式` is opened, and the Playwright reference workflow asserts both the hidden default and the advanced manual path.
 
-## Phase 11 Automation Decisions To Close
+## Phase 11 Automation Decisions Closed
 
-- Default stop points: which risks always require human confirmation, and which low-risk stages can continue automatically.
-- Approval granularity: whether approving a compact blueprint summary approves the entire current analysis contract or only selected beats.
-- AI revision authority: whether AI may apply its own proposed revision in agent mode, or whether every proposed blueprint change requires user approval.
-- Run persistence: whether orchestration runs live only in SQLite reference-anchor storage or also appear in chat/session history.
-- Candidate insertion UX: whether final insertion is copy-only, diff-preview insertion, or a separate approved chapter-edit operation.
-- Failure recovery: whether users should resume from the failed stage, regenerate from scratch, or branch a new blueprint revision.
+- Default stop points: source/license/fact confirmation, blueprint approval, AI-proposed blueprint revision approval, material-binding gaps, stale blueprints, draft-audit failures, and final insertion remain explicit stops; low-risk blueprint generation, deterministic review, binding after approval, candidate generation, and draft audit can run automatically.
+- Approval granularity: approving the compact blueprint summary approves the current blueprint analysis contract, guarded by context/source-plan/analysis-contract hashes and invalidated by reviewed-field edits.
+- AI revision authority: AI can propose failed-review field fixes through the proposal provider, but application always uses the persisted pending proposal and requires user approval.
+- Run persistence: orchestration runs and events live in the reference-anchor SQLite store and are exposed through bridge/frontend/agent read APIs; chat/session mirroring is not part of the current implementation.
+- Candidate insertion UX: final insertion is a separate user-confirmed chapter edit/save path. `ResumeReferenceOrchestrationRun` rejects `approve_final_insertion`.
+- Failure recovery: high-risk stops preserve run state and findings for inspection; resolving a high-risk stop marks the run failed so users regenerate, revise, or start a new run instead of free-drafting through the block.
 
 ## Phase 12 Shared Corpus Decisions To Close
 
@@ -124,7 +124,9 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 
 ## Recommended Next Coding Sessions
 
-Start with the remaining Phase 11/12 gaps. Do not restart from Phase 0 unless contracts have regressed.
+Start with the remaining Phase 12 shared-corpus gaps. Do not restart from Phase 0 unless contracts have regressed.
+
+Latest verified scope: `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'ReferenceOrchestrationRunPersistsResumeAndCancelState|BridgeReferenceOrchestrationRunUsesWorkspaceCorpusWhenAnchorIdsAreOmitted|ReferenceOrchestrationRunUsesWorkspaceCorpusAnchorsWithoutExplicitAnchorIds|BuildDraftAuditFailsWhenSelectedMaterialLinkIsLowConfidenceWeakMatch|BindBlueprintMaterialsMarksExpandedQueryFallbackAsLowConfidenceWeakMatch' -v minimal` passed 5/5 after source confirmation decisions gained an explicit `confirm_license_status` action and workspace-corpus happy-path fixtures were adjusted to avoid weak-match fallback. `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'ReferenceAnchorContractTests|MafToolRegistryTests' -v minimal` passed 30/30.
 
 Latest verified scope: `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationRun -v minimal` passed 21/21 after adding the selected-model AI-backed blueprint revision proposal provider and its orchestration path. The focused AI/provider and proposal-authorization filter `ReferenceOrchestrationRunRejectsClientModifiedBlueprintRevisionProposal|ReferenceOrchestrationRunRejectsMismatchedBlueprintRevisionProposal|ReferenceOrchestrationRunPersistsInjectedBlueprintRevisionProposalUntilUserApprovesIt|ReferenceOrchestrationRunPersistsAiBlueprintRevisionProposalUntilUserApprovesIt|ReferenceOrchestrationRunAppliesProposedBlueprintRevisionThenContinuesAfterApproval|AiReferenceBlueprintRevisionProposalProviderTests|PhotinoReferenceWorkflowSmokeTests` passed 9/9.
 
@@ -132,15 +134,14 @@ Latest verified scope: `dotnet test tests/Novelist.IntegrationTests/Novelist.Int
 
 Recommended next session:
 
-1. Close Phase 11's remaining authorization, stop-point, recovery, and insertion UX policy without weakening deterministic review or final-insertion stops.
-2. Continue Phase 12 shared-corpus modeling with storage/migration design before replacing the current `novel_id = 0` compatibility layer.
+1. Continue Phase 12 shared-corpus modeling with storage/migration design before replacing the current `novel_id = 0` compatibility layer.
+2. Keep the Phase 11 orchestration gates intact while broadening Phase 12 corpus retrieval, migration, and UI coverage.
 
 Recommended following session:
 
 1. Keep broadening deterministic Chinese narration, emotion, POV, and unsupported-fact fixtures; any optional model-assisted tagging or adaptation should be designed later as an explicit opt-in path that feeds the deterministic gates.
-2. Design Phase 11 orchestration contracts before changing UI, so frontend, bridge, service, and agent tools share the same run-state model.
-3. Design Phase 12 shared-corpus contracts before migrating storage, so global materials can be reused without weakening per-novel safety gates.
-4. Keep Phase 13 app-wide Playwright coverage green while implementing remaining Phase 11/12 work.
+2. Design Phase 12 shared-corpus contracts before migrating storage, so global materials can be reused without weakening per-novel safety gates.
+3. Keep Phase 13 app-wide Playwright coverage green while implementing remaining Phase 12 work.
 
 Do not broaden frontend workflow beyond the review-first path until source corpus, material binding, blueprint review, and draft audit are reliable. The system's quality depends on immutable provenance, hard blueprint gates, and candidate audit before any manual insertion.
 

@@ -14,4 +14,4 @@ This file is the stable task and verification entry point. Detailed task breakdo
 
 ## Current Open Phases
 
-Phase 11 and Phase 12 are the remaining open implementation-plan phases. Phase 10 and Phase 13 are complete at their planned verification boundaries; Phases 0-9 remain recorded for traceability and regression checks.
+Phase 12 is the remaining open implementation-plan phase. Phases 10, 11, and 13 are complete at their planned verification boundaries; Phases 0-9 remain recorded for traceability and regression checks.

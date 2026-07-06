@@ -77,7 +77,7 @@ confirm source + chapter target + known/forbidden facts
 - [x] A single user command can start a reference-anchored candidate run for a chapter using chapter goal/plan, known facts, forbidden facts, and an optional corpus search policy; selected anchors are an advanced override, not a required default.
 - [x] The orchestration run persists stage status, errors, generated artifacts, and the current required user decision so it can be resumed after app restart.
 - [x] The orchestrator automatically performs safe stages: blueprint generation, deterministic blueprint review, material binding after approval, beat candidate generation, and draft audit.
-- [ ] The orchestrator stops for required human decisions: source/license confirmation, known/forbidden fact boundary changes, blueprint approval, AI-proposed blueprint revision application, and final chapter insertion.
+- [x] The orchestrator stops for required human decisions: source/license confirmation, known/forbidden fact boundary changes, blueprint approval, AI-proposed blueprint revision application, and final chapter insertion.
 - [x] A compact approval summary shows chapter function, POV, fact boundary changes, emotional trajectory, material-use plan, rewrite budget, and high-risk findings without forcing users to inspect every field.
 - [x] Failed blueprint reviews can trigger AI-suggested field-level fixes, but suggested fixes are stored as proposed revisions and require user or explicit agent approval before application.
 - [x] Low-risk passing blueprints can proceed from approval to material binding and candidate generation without additional manual clicks.
@@ -102,6 +102,7 @@ Targeted Phase 11 thin-slice checks completed:
 - [x] Contract, bridge, SQLite state persistence shell, and frontend adapter types now exist for starting, listing, inspecting, resuming, and cancelling orchestration runs.
 - [x] After source/fact confirmation, orchestration automatically generates a deterministic blueprint, runs deterministic blueprint review, persists `blueprint_id`/`review_id`, and stops for either blueprint approval or blueprint revision.
 - [x] After user blueprint approval, orchestration automatically binds materials, generates beat candidates, runs draft audit, persists candidate ids, and stops for final insertion confirmation without calling `SaveContent`.
+- [x] Source confirmation decisions now explicitly require source trust, license-status, known-fact, and forbidden-fact confirmation before safe automation can start.
 - [x] `ResumeReferenceOrchestrationRun` rejects `approve_final_insertion`, keeping the run parked at the final-insertion stop with candidate ids intact; final prose insertion must use a separate user-confirmed chapter edit/save path.
 - [x] Failed blueprint review can persist deterministic proposed field-level revisions in the required decision; approving that decision applies the revision, re-runs review, and stops for blueprint approval when the revision passes.
 - [x] Blueprint revision proposal generation now goes through an injectable `IReferenceBlueprintRevisionProposalProvider`; the default provider remains deterministic, and injected AI/agent-style proposals are rebound to the current blueprint/review, persisted as pending `proposed_blueprint_revision` data, applied only after user approval, re-reviewed, then allowed to continue through blueprint approval into binding/candidate generation/final-insertion stop.
@@ -135,11 +136,13 @@ Targeted Phase 11 thin-slice checks completed:
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter MafToolRegistryTests -v minimal`
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Reference|MafToolRegistryTests' -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'ReferenceOrchestrationRunPersistsResumeAndCancelState|ReferenceAnchoredDraftServiceTests' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationRunPersistsResumeAndCancelState -v minimal`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'ReferenceAnchorContractTests|MafToolRegistryTests' -v minimal`
 - [x] `npm --prefix frontend run test:reference-anchor`
 - [x] `npm --prefix frontend run build`
 - [x] `npm --prefix frontend run lint`
 
-These thin slices do not complete all Phase 11 product decisions or the Phase 12 shared-corpus model. The proposal-provider boundary now supports a production AI-backed provider using the selected chat model while preserving explicit approval and deterministic fallback; remaining Phase 11 closure is about final stop-point/product policy, recovery UX, and authorization semantics beyond the current agent-read-only/user-approval boundary. Shared-corpus storage/migration remain pending.
+Phase 11 is complete at the current implementation boundary: the proposal-provider path supports a production AI-backed provider using the selected chat model while preserving explicit approval and deterministic fallback, source/license/fact confirmation is explicit, high-risk recovery stops fail closed, and final insertion remains a separate user-confirmed edit/save path. Phase 12 shared-corpus storage, migration, global-vs-usage feedback, AI explanation, and corpus-management UI remain pending.
 
 **Files likely touched:**
 
@@ -194,10 +197,10 @@ workspace/global reference corpus
 - [x] Service tests proving workspace-corpus compatibility materials can be searched from different novels without duplicating source import.
 - [x] Tests proving per-novel forbidden facts and POV boundaries still reject globally sourced materials/candidates.
 - [x] Tests proving license/visibility policy filters corpus results before AI selection.
-- [ ] Retrieval-gap tests covering automatic query expansion, weak-match audit risk, approved no-reuse continuation, and source-required stop states.
+- [x] Retrieval-gap tests covering automatic query expansion, weak-match audit risk, approved no-reuse continuation, and source-required stop states.
 - [x] Binding/audit tests proving selected global material provenance is stored with blueprint hash and cannot be reused after blueprint edits.
 - [x] Feedback tests proving global tag feedback and per-novel usage feedback have different scopes.
-- [ ] Bridge and agent tests proving `anchor_ids` are optional and AI-driven corpus retrieval is the default path.
+- [x] Bridge and agent tests proving `anchor_ids` are optional and policy-driven corpus retrieval is the default orchestration path.
 - [ ] Frontend smoke test for corpus management and default automatic material selection.
 
 Targeted Phase 12 thin-slice checks completed:
@@ -207,6 +210,7 @@ Targeted Phase 12 thin-slice checks completed:
 - [x] Workspace-corpus compatibility anchors now carry `corpus_visibility`, `source_trust`, and `user_tags_json`; read paths include only `novel_id = 0 AND corpus_visibility = 'workspace'`, explicit `anchor_ids` cannot bypass private/restricted workspace visibility, and legacy `novel_id = 0` rows are promoted to workspace-visible once during schema migration.
 - [x] A single workspace-corpus import can be searched from multiple novels without duplicating `reference_source_segments` or `reference_materials`; both novels see the same `material_id`, `source_segment_id`, and `source_hash` through the compatibility layer.
 - [x] A real SQLite orchestration run can omit explicit `anchor_ids`, resolve `novel_id = 0` workspace-corpus anchors through the default corpus policy, bind selected material links, generate audited candidates, and stop at final insertion without writing chapter prose.
+- [x] Desktop bridge JSON dispatch can omit the `anchor_ids` property entirely on `StartReferenceOrchestrationRun`; the persisted run normalizes to an empty anchor list, uses `corpus_search_policy` to select workspace-corpus material after blueprint approval, and stops at final insertion with selected material provenance.
 - [x] A real MAF executor can start the default orchestration tool without exposing or passing `anchor_ids`; after user source/fact confirmation the persisted run uses workspace-corpus material through `corpus_search_policy` and stops at final insertion.
 - [x] Real SQLite orchestration coverage proves workspace-corpus anchors are filtered by `corpus_search_policy.license_statuses` before binding selected materials.
 - [x] Workspace-corpus usage feedback remains per-novel: accepted material feedback boosts binding only for the novel that recorded it, while other novels can still retrieve the shared material without inheriting that usage approval.
@@ -217,6 +221,7 @@ Targeted Phase 12 thin-slice checks completed:
 - [x] Draft generation and persisted draft re-audit now read selected material-link score components; candidates backed by `low_confidence` weak-match links fail draft audit with provenance risk and required fixes, which also routes orchestration through the existing high-risk draft-audit stop.
 - [x] Approved no-reuse continuation is limited to beats without `source_backed_detail_target`; source-backed beats still require material-fit review, selected current material links, and non-`no-reuse` provenance before draft generation, even if `no_reuse_reason` is present.
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'WorkspaceCorpus|ReferenceOrchestrationRunUsesWorkspaceCorpus|ReferenceOrchestrationRunFiltersWorkspaceCorpus|ReferenceOrchestrationRunUsesCorpusSearchPolicy' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'BridgeReferenceOrchestrationRunUsesWorkspaceCorpusWhenAnchorIdsAreOmitted|ReferenceOrchestrationRunUsesWorkspaceCorpusAnchorsWithoutExplicitAnchorIds' -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationAgentToolDefaultsToWorkspaceCorpusWithoutAnchorIds -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusMaterialsCanBeSearchedFromDifferentNovelsWithoutDuplicatingImport -v minimal`
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'ReferenceOrchestrationAgentToolStartsRunWithoutApprovingHumanDecisions|ReferenceAnchorContractTests|MafToolRegistryTests' -v minimal`
@@ -227,6 +232,7 @@ Targeted Phase 12 thin-slice checks completed:
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter BindBlueprintMaterialsMarksExpandedQueryFallbackAsLowConfidenceWeakMatch -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'BuildDraftAuditFailsWhenSelectedMaterialLinkIsLowConfidenceWeakMatch|BindBlueprintMaterialsMarksExpandedQueryFallbackAsLowConfidenceWeakMatch' -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'SourceBackedNoReuseBeatStillRequiresSelectedMaterialBeforeDraftGeneration|ApprovedNoReuseBeatGeneratesDraftWithoutSelectedMaterialLink|RequiredMaterialBeatIdsStillRequiresSourceBackedNoReuseBeats|EnsureCandidateProvenanceRejectsNoReuseForSourceBackedBeat|ReviewDoesNotSkipMaterialFitForSourceBackedBeatWithNoReuseReason|BuildDraftAuditFailsWhenSourceBackedBeatUsesNoReuseProvenance' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'BuildDraftAuditFailsWhenSelectedMaterialLinkIsLowConfidenceWeakMatch|BindBlueprintMaterialsMarksExpandedQueryFallbackAsLowConfidenceWeakMatch|ApprovedNoReuseBeatGeneratesDraftWithoutSelectedMaterialLink|SourceBackedNoReuseBeatStillRequiresSelectedMaterialBeforeDraftGeneration|ReferenceOrchestrationRunStopsForHighRiskDecisionWhenMaterialBindingHasMissingLinks|ReviewDoesNotSkipMaterialFitForSourceBackedBeatWithNoReuseReason|RequiredMaterialBeatIdsStillRequiresSourceBackedNoReuseBeats' -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter LegacyWorkspaceCorpusRowsMigrateToWorkspaceVisibleWithoutLosingMaterialIdentity -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusVisibilityFiltersAnchorsBeforeSearchAdaptAuditTagAndFeedback -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceMaterialToolCannotBypassWorkspaceCorpusVisibilityWithExplicitAnchorIds -v minimal`

@@ -4,9 +4,9 @@
 
 ## Status
 
-Phases 0-10 and Phase 13 are complete in the task tracker. Remaining work is tracked explicitly in `tasks-and-verification.md`: Phase 11 covers the remaining AI-orchestrated low-intervention workflow policy gaps, especially revision-approval authorization, stop-point/recovery semantics, and final insertion UX; Phase 12 covers shared reference corpus and AI-driven material selection across novels.
+Phases 0-11 and Phase 13 are complete in the task tracker. Remaining work is tracked explicitly in `tasks-and-verification.md`: Phase 12 covers shared reference corpus and AI-driven material selection across novels.
 
-This plan is still the source of truth for the target design. Treat Phase 11 and Phase 12 as the only open implementation-plan phases unless contracts, storage, bridge, agent, or frontend behavior regresses.
+This plan is still the source of truth for the target design. Treat Phase 12 as the only open implementation-plan phase unless contracts, storage, bridge, agent, or frontend behavior regresses.
 
 ## Date
 

@@ -459,7 +459,7 @@ public sealed class ReferenceAnchorContractTests
                 DecisionType: ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts,
                 StopReason: ReferenceOrchestrationStopReasons.SourceConfirmationRequired,
                 Summary: "Confirm sources and fact boundaries before automation.",
-                RequiredActions: ["confirm_source", "confirm_facts"],
+                RequiredActions: ["confirm_source", "confirm_license_status", "confirm_known_facts", "confirm_forbidden_facts"],
                 ApprovalSummary: new ReferenceOrchestrationApprovalSummaryPayload(
                     ChapterFunction: "turn hesitation into action",
                     Pov: "林岚 close",
@@ -491,6 +491,7 @@ public sealed class ReferenceAnchorContractTests
         var decision = runRoot.GetProperty("current_decision");
         Assert.Equal("confirm_source_and_facts", decision.GetProperty("decision_type").GetString());
         Assert.Equal("confirm_source", decision.GetProperty("required_actions")[0].GetString());
+        Assert.Equal("confirm_license_status", decision.GetProperty("required_actions")[1].GetString());
         Assert.Equal("turn hesitation into action", decision.GetProperty("approval_summary").GetProperty("chapter_function").GetString());
         var proposal = decision.GetProperty("proposed_blueprint_revision");
         Assert.Equal(501, proposal.GetProperty("blueprint_id").GetInt64());
