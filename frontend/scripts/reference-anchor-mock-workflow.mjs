@@ -134,6 +134,11 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectVisible(page.getByText('雨夜动作语料库'), 'anchor list license filter match')
   await page.getByRole('button', { name: '清除筛选' }).click()
 
+  await page.getByRole('button', { name: /浏览 雨夜动作语料库 的材料/ }).click()
+  await expectVisible(page.getByText('mat-001'), 'anchor material preview id')
+  await expectVisible(page.getByText('把杯子推远，杯底在木桌上留下半圈水痕。'), 'anchor material preview text')
+  await expectVisible(page.getByText('lexical 0.92'), 'anchor material preview score component')
+
   await page.locator('button[title="重建"]').first().click()
   await expectVisible(page.getByText('锚点已重建'), 'anchor rebuilt message')
 
@@ -141,9 +146,9 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await materialPanel.getByPlaceholder('叙事功能、情绪或具体句子').fill('把杯子推远')
   await materialPanel.getByLabel('文体职责').fill('source_backed_detail')
   await materialPanel.getByRole('button', { name: /搜索/ }).click()
-  await expectVisible(page.getByText('把杯子推远，杯底在木桌上留下半圈水痕。'), 'material search hit')
-  await expectVisible(page.getByText('lexical 0.92'), 'material score component')
-  await expectVisible(page.getByText('prose_duty 0.75'), 'material prose-duty score component')
+  await expectVisible(materialPanel.getByText('把杯子推远，杯底在木桌上留下半圈水痕。'), 'material search hit')
+  await expectVisible(materialPanel.getByText('lexical 0.92'), 'material score component')
+  await expectVisible(materialPanel.getByText('prose_duty 0.75'), 'material prose-duty score component')
 }
 
 async function generateReviseApproveBindAndDraft(page) {
@@ -290,8 +295,19 @@ async function verifyBridgeCalls(page) {
   assert.deepEqual(startCall.args[0].corpus_search_policy.exclude_anchor_ids, [], 'default orchestration must not pin exclude anchors')
   assert.equal(startCall.args[0].corpus_search_policy.mode, 'story_context', 'default orchestration must use story-context corpus search')
 
-  const searchCall = calls.find((call) => call.method === 'SearchReferenceMaterials')
-  assert(searchCall, 'missing SearchReferenceMaterials call')
+  const materialPreviewCall = calls.find((call) =>
+    call.method === 'SearchReferenceMaterials' &&
+    Array.isArray(call.args[0]?.anchor_ids) &&
+    call.args[0].anchor_ids.length === 1 &&
+    call.args[0].anchor_ids[0] === 101 &&
+    call.args[0].size === 5)
+  assert(materialPreviewCall, 'missing anchor material preview search call')
+
+  const searchCall = calls.find((call) =>
+    call.method === 'SearchReferenceMaterials' &&
+    Array.isArray(call.args[0]?.prose_duties) &&
+    call.args[0].prose_duties.includes('source_backed_detail'))
+  assert(searchCall, 'missing manual SearchReferenceMaterials call')
   assert.deepEqual(searchCall.args[0].prose_duties, ['source_backed_detail'], 'manual story-context material search must pass prose duties')
 }
 

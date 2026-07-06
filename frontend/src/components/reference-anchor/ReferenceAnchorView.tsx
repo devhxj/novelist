@@ -160,6 +160,8 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   const [anchorForm, setAnchorForm] = useState<CreateAnchorForm>(EMPTY_ANCHOR_FORM)
   const [editingAnchorId, setEditingAnchorId] = useState<number | null>(null)
   const [anchorEditForm, setAnchorEditForm] = useState<AnchorForm | null>(null)
+  const [expandedAnchorMaterialId, setExpandedAnchorMaterialId] = useState<number | null>(null)
+  const [anchorMaterialPreview, setAnchorMaterialPreview] = useState<reference.Material[]>([])
   const [blueprintForm, setBlueprintForm] = useState<BlueprintForm>(EMPTY_BLUEPRINT_FORM)
   const [revisionForm, setRevisionForm] = useState<BlueprintRevisionForm>(EMPTY_REVISION_FORM)
   const [materialFilters, setMaterialFilters] = useState<MaterialSearchFilters>(EMPTY_MATERIAL_FILTERS)
@@ -367,6 +369,34 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     if (updated) {
       cancelEditAnchor()
       await loadAnchors()
+    }
+  }
+
+  async function toggleAnchorMaterialPreview(anchor: reference.Anchor) {
+    if (expandedAnchorMaterialId === anchor.anchor_id) {
+      setExpandedAnchorMaterialId(null)
+      setAnchorMaterialPreview([])
+      return
+    }
+
+    const result = await run(() => app.SearchReferenceMaterials({
+      novel_id: novelId,
+      anchor_ids: [anchor.anchor_id],
+      query: '',
+      material_types: [],
+      emotion_tags: [],
+      function_tags: [],
+      pov_tags: [],
+      technique_tags: [],
+      page: 1,
+      size: 5,
+      narrative_duties: [],
+      emotion_transitions: [],
+      prose_duties: [],
+    }))
+    if (result) {
+      setExpandedAnchorMaterialId(anchor.anchor_id)
+      setAnchorMaterialPreview(result.items ?? [])
     }
   }
 
@@ -945,6 +975,18 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                           <span className="flex shrink-0 items-center gap-1">
                             <button
                               type="button"
+                              onClick={() => {
+                                void toggleAnchorMaterialPreview(anchor)
+                              }}
+                              disabled={loading}
+                              className="rounded px-1.5 py-1 text-[11px] leading-none text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-50"
+                              title="浏览材料"
+                              aria-label={`浏览 ${anchor.title} 的材料`}
+                            >
+                              材料
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => beginEditAnchor(anchor)}
                               disabled={loading}
                               className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-50"
@@ -978,6 +1020,36 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                               <RefreshCcw className="h-3.5 w-3.5" />
                             </button>
                           </span>
+                        </div>
+                      )}
+                      {expandedAnchorMaterialId === anchor.anchor_id && (
+                        <div className="mt-3 border-t border-border pt-2">
+                          {anchorMaterialPreview.length === 0 ? (
+                            <p className="text-[11px] text-muted-foreground">暂无可浏览材料</p>
+                          ) : (
+                            <div className="space-y-2" aria-label={`${anchor.title} 材料预览`}>
+                              {anchorMaterialPreview.map(material => (
+                                <div key={material.material_id} className="rounded border border-border bg-card px-2.5 py-2">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                                      {material.material_id} · {material.material_type} · {material.function_tag || 'untagged'} · {material.pov_tag || 'unknown'}
+                                    </span>
+                                    {material.user_verified && <span className="shrink-0 text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
+                                  </div>
+                                  <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-foreground">{material.text}</p>
+                                  {materialScoreComponents(material).length > 0 && (
+                                    <div className="mt-2 flex flex-wrap gap-1">
+                                      {materialScoreComponents(material).slice(0, 4).map(([name, value]) => (
+                                        <span key={name} className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                                          {name} {value.toFixed(2)}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
