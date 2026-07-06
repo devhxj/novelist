@@ -763,13 +763,34 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
                 Page: 1,
                 Size: 10),
             CancellationToken.None)).Items);
+        var correctedMaterial = await service.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(
+                sourceNovel.Id,
+                sourceMaterial.MaterialId,
+                FunctionTag: "interiority",
+                EmotionTag: "restrained",
+                SceneTag: "threshold",
+                PovTag: "close",
+                TechniqueTag: "afterbeat",
+                Origin: "user",
+                Note: "user verified before promotion"),
+            CancellationToken.None);
+        var adapted = await service.AdaptMaterialAsync(
+            new AdaptReferenceMaterialPayload(
+                sourceNovel.Id,
+                correctedMaterial.MaterialId,
+                [],
+                ReferenceRewriteLevels.L1,
+                SceneFacts: ["门口"]),
+            CancellationToken.None);
+        Assert.Equal("passed", adapted.Audit.Status);
         await service.RecordUserFeedbackAsync(
             new RecordReferenceUserFeedbackPayload(
                 sourceNovel.Id,
                 ReferenceFeedbackTargetTypes.Material,
-                sourceMaterial.MaterialId,
+                correctedMaterial.MaterialId,
                 ReferenceFeedbackDecisions.Accepted,
-                sourceMaterial.MaterialId,
+                correctedMaterial.MaterialId,
                 CandidateId: string.Empty,
                 BlueprintId: 0,
                 BeatId: string.Empty,
@@ -826,28 +847,43 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.Equal(sourceMaterial.MaterialId, consumingMaterial.MaterialId);
         Assert.Equal(sourceMaterial.SourceSegmentId, consumingMaterial.SourceSegmentId);
         Assert.Equal(sourceMaterial.SourceHash, consumingMaterial.SourceHash);
+        Assert.True(consumingMaterial.UserVerified);
+        Assert.Equal("interiority", consumingMaterial.FunctionTag);
+        Assert.Equal("restrained", consumingMaterial.EmotionTag);
+        Assert.Equal("close", consumingMaterial.PovTag);
+        Assert.Equal("afterbeat", consumingMaterial.TechniqueTag);
 
         var currentMaterials = await ReadMaterialRowsAsync(options, anchor.AnchorId);
         var currentSegments = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
         Assert.Equal(importedMaterials.Select(item => item.MaterialId), currentMaterials.Select(item => item.MaterialId));
         Assert.Equal(importedSegments.Select(item => item.SegmentId), currentSegments.Select(item => item.SegmentId));
+        var currentMaterial = Assert.Single(currentMaterials, item => item.MaterialId == correctedMaterial.MaterialId);
+        Assert.Equal(sourceMaterial.SourceHash, currentMaterial.SourceHash);
+        Assert.True(currentMaterial.UserVerified);
+
+        var reuseProvenance = await ReadReuseProvenanceAsync(options, adapted.CandidateId);
+        Assert.Equal(correctedMaterial.MaterialId, reuseProvenance.CandidateMaterialId);
+        var audit = Assert.Single(reuseProvenance.AuditRows);
+        Assert.Equal(adapted.Audit.AuditId, audit.AuditId);
+        Assert.Equal(correctedMaterial.MaterialId, audit.MaterialId);
+        Assert.Equal("passed", audit.Status);
 
         var sourceFeedback = await service.GetUserFeedbackAsync(
             new GetReferenceUserFeedbackPayload(
                 sourceNovel.Id,
                 ReferenceFeedbackTargetTypes.Material,
-                sourceMaterial.MaterialId,
+                correctedMaterial.MaterialId,
                 10),
             CancellationToken.None);
         var feedback = Assert.Single(sourceFeedback);
         Assert.Equal(sourceNovel.Id, feedback.NovelId);
-        Assert.Equal(sourceMaterial.MaterialId, feedback.MaterialId);
+        Assert.Equal(correctedMaterial.MaterialId, feedback.MaterialId);
 
         var consumingFeedback = await service.GetUserFeedbackAsync(
             new GetReferenceUserFeedbackPayload(
                 consumingNovel.Id,
                 ReferenceFeedbackTargetTypes.Material,
-                sourceMaterial.MaterialId,
+                correctedMaterial.MaterialId,
                 10),
             CancellationToken.None);
         Assert.Empty(consumingFeedback);
@@ -4129,14 +4165,16 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         command.CommandText = """
             SELECT m.material_id, m.source_segment_id, m.material_type, m.function_tag,
                    m.emotion_tag, m.pov_tag, m.technique_tag, m.function_confidence,
-                   m.emotion_confidence, m.pov_confidence, m.text, s.segment_id, COUNT(sl.slot_id)
+                   m.emotion_confidence, m.pov_confidence, m.text, s.segment_id, COUNT(sl.slot_id),
+                   m.source_hash, m.user_verified
             FROM reference_materials m
             INNER JOIN reference_source_segments s ON s.segment_id = m.source_segment_id
             LEFT JOIN reference_material_slots sl ON sl.material_id = m.material_id
             WHERE m.anchor_id = $anchor_id
             GROUP BY m.material_id, m.source_segment_id, m.material_type, m.function_tag,
                      m.emotion_tag, m.pov_tag, m.technique_tag, m.function_confidence,
-                     m.emotion_confidence, m.pov_confidence, m.text, s.segment_id
+                     m.emotion_confidence, m.pov_confidence, m.text, s.segment_id,
+                     m.source_hash, m.user_verified
             ORDER BY m.material_id ASC;
             """;
         command.Parameters.AddWithValue("$anchor_id", anchorId);
@@ -4157,10 +4195,54 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
                 reader.GetDouble(9),
                 reader.GetString(10),
                 reader.GetString(11),
-                reader.GetInt64(12)));
+                reader.GetInt64(12),
+                reader.GetString(13),
+                reader.GetInt64(14) != 0));
         }
 
         return rows;
+    }
+
+    private static async ValueTask<ReferenceReuseProvenanceRow> ReadReuseProvenanceAsync(
+        AppInitializationOptions options,
+        string candidateId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+
+        await using var candidateCommand = connection.CreateCommand();
+        candidateCommand.CommandText = """
+            SELECT material_id
+            FROM reference_reuse_candidates
+            WHERE candidate_id = $candidate_id;
+            """;
+        candidateCommand.Parameters.AddWithValue("$candidate_id", candidateId);
+        var candidateMaterialId = Assert.IsType<string>(await candidateCommand.ExecuteScalarAsync());
+
+        await using var auditCommand = connection.CreateCommand();
+        auditCommand.CommandText = """
+            SELECT audit_id, material_id, status
+            FROM reference_reuse_audits
+            WHERE candidate_id = $candidate_id
+            ORDER BY audit_id ASC;
+            """;
+        auditCommand.Parameters.AddWithValue("$candidate_id", candidateId);
+        var audits = new List<ReferenceReuseAuditRow>();
+        await using var reader = await auditCommand.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            audits.Add(new ReferenceReuseAuditRow(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2)));
+        }
+
+        return new ReferenceReuseProvenanceRow(candidateMaterialId, audits);
     }
 
     private static async ValueTask<string> ReadAnchorVisibilityAsync(
@@ -4481,7 +4563,18 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         double PovConfidence,
         string Text,
         string JoinedSegmentId,
-        long SlotCount);
+        long SlotCount,
+        string SourceHash,
+        bool UserVerified);
+
+    private sealed record ReferenceReuseProvenanceRow(
+        string CandidateMaterialId,
+        IReadOnlyList<ReferenceReuseAuditRow> AuditRows);
+
+    private sealed record ReferenceReuseAuditRow(
+        string AuditId,
+        string MaterialId,
+        string Status);
 
     private sealed class StaticEmbeddingConfigurationService : IEmbeddingConfigurationService
     {
