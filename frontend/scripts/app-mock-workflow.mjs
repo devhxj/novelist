@@ -162,6 +162,11 @@ async function runFullSuite(browser, url) {
   }
 
   if (shouldRun('@surface')) {
+    logStep('checking settings failure path')
+    await verifySettingsFailureWorkflow(browser, url, consoleErrors, pageErrors)
+  }
+
+  if (shouldRun('@surface')) {
     logStep('checking metadata panels')
     await verifyMetadataPanels(page)
     await page.screenshot({ path: path.join(outputDir, 'app-06-metadata.png'), fullPage: true })
@@ -1116,7 +1121,12 @@ async function verifySettingsWorkflow(page) {
   await expectVisible(page.locator('input[value="D:\\\\NovelistData"]'), 'data directory')
 
   await page.getByRole('button', { name: /模型配置/ }).click()
+  const dialog = settingsDialog(page)
   await expectVisible(page.getByText('内置服务商'), 'builtin model config')
+  await expectVisible(dialog.getByText('Mock Provider'), 'builtin provider name')
+  await expectVisible(dialog.getByText('Mock GPT'), 'builtin model name')
+  await expectVisible(dialog.getByRole('button', { name: 'Chat' }), 'safe default chat endpoint')
+  await assertButtonDisabled(dialog.getByRole('button', { name: '测试' }).first(), 'LLM test before API key')
   await expectVisible(page.getByText('Embeddings'), 'embedding settings tab')
   await page.locator('.fixed').getByRole('button', { name: '✕' }).click()
 }
@@ -1138,11 +1148,22 @@ async function verifySettingsPersistenceWorkflow(browser, url, consoleErrors, pa
   await assertBridgeCallCount(page, 'TestConnection', 0)
 
   await dialog.getByPlaceholder('输入 API Key').first().fill('mock-settings-key')
+  await dialog.getByRole('button', { name: 'Responses' }).click()
   await dialog.getByRole('button', { name: '保存配置' }).click()
   await expectVisible(dialog.getByText('配置已保存'), 'model settings saved')
   await waitForBridgeCall(page, 'TestConnection')
   await waitForBridgeCall(page, 'SaveLLMConfig')
-  await assertSavedProviderKey(page, 'mock')
+  await assertSavedLLMConfig(page, {
+    providerKey: 'mock',
+    apiKey: 'mock-settings-key',
+    endpointType: 'responses',
+  })
+  await assertLastBridgeCallInput(page, 'TestConnection', {
+    provider_name: 'mock',
+    api_key: 'mock-settings-key',
+    endpoint_type: 'responses',
+    model_id: 'gpt',
+  })
 
   await dialog.getByRole('button', { name: 'Embeddings' }).click()
   await expectVisible(dialog.getByText('sqlite-vec 已就绪'), 'sqlite vec ready')
@@ -1153,11 +1174,107 @@ async function verifySettingsPersistenceWorkflow(browser, url, consoleErrors, pa
   await expectVisible(dialog.getByText('配置已保存'), 'embedding settings saved')
   await waitForBridgeCall(page, 'TestEmbeddingConnection')
   await waitForBridgeCall(page, 'SaveEmbeddingConfig')
-  await assertSavedEmbeddingProvider(page, 'onnx')
+  await assertSavedEmbeddingConfig(page, {
+    provider_type: 'onnx',
+    provider_key: 'onnx',
+    model_id: 'bge-small-zh-v1.5',
+    dimensions: 512,
+    max_sequence_length: 512,
+    normalize_embeddings: true,
+  })
+
+  const onnxSaveCount = await bridgeCallCount(page, 'SaveEmbeddingConfig')
+  await dialog.getByText('高级路径').click()
+  await dialog.locator('#embedding-onnx-model').fill('D:\\mock\\models\\bge-small.onnx')
+  await dialog.locator('#embedding-onnx-vocab').fill('D:\\mock\\models\\vocab.txt')
+  await dialog.getByRole('button', { name: '保存配置' }).click()
+  await waitForBridgeCallCountAfter(page, 'SaveEmbeddingConfig', onnxSaveCount)
+  await expectVisible(dialog.getByText('配置已保存'), 'onnx embedding paths saved')
+  await assertSavedEmbeddingConfig(page, {
+    provider_type: 'onnx',
+    provider_key: 'onnx',
+    onnx_model_path: 'D:\\mock\\models\\bge-small.onnx',
+    onnx_vocab_path: 'D:\\mock\\models\\vocab.txt',
+  })
+
+  await dialog.getByRole('button', { name: 'API' }).click()
+  await assertButtonDisabled(dialog.getByRole('button', { name: '测试' }), 'embedding API test before credentials')
+  await dialog.locator('#embedding-provider').fill('mock-api-embedding')
+  await dialog.locator('#embedding-url').fill('https://embeddings.invalid/v1')
+  await dialog.locator('#embedding-api-key').fill('mock-embedding-key')
+  await dialog.locator('#embedding-model').fill('mock-embedding-v2')
+  await dialog.locator('#embedding-dimensions').fill('1536')
+  await dialog.locator('#embedding-user').fill('phase13-settings')
+  const embeddingTestCount = await bridgeCallCount(page, 'TestEmbeddingConnection')
+  const embeddingSaveCount = await bridgeCallCount(page, 'SaveEmbeddingConfig')
+  await dialog.getByRole('button', { name: '测试' }).click()
+  await waitForBridgeCallCountAfter(page, 'TestEmbeddingConnection', embeddingTestCount)
+  await expectVisible(dialog.getByText('✓ 连通成功'), 'embedding API test success')
+  await dialog.getByRole('button', { name: '保存配置' }).click()
+  await waitForBridgeCallCountAfter(page, 'SaveEmbeddingConfig', embeddingSaveCount)
+  await expectVisible(dialog.getByText('配置已保存'), 'embedding API settings saved')
+  await assertLastBridgeCallInput(page, 'TestEmbeddingConnection', {
+    provider_type: 'api',
+    provider_key: 'mock-api-embedding',
+    endpoint_url: 'https://embeddings.invalid/v1',
+    api_key: 'mock-embedding-key',
+    model_id: 'mock-embedding-v2',
+    dimensions: 1536,
+    user: 'phase13-settings',
+  })
+  await assertSavedEmbeddingConfig(page, {
+    provider_type: 'api',
+    provider_key: 'mock-api-embedding',
+    endpoint_url: 'https://embeddings.invalid/v1',
+    api_key: 'mock-embedding-key',
+    model_id: 'mock-embedding-v2',
+    dimensions: 1536,
+    user: 'phase13-settings',
+    normalize_embeddings: true,
+  })
 
   await assertBridgeCallCount(page, 'DiscoverModels', 0)
   await assertBridgeCallCount(page, 'PickReferenceSourceFile', 0)
   await assertBridgeCallCount(page, 'runtime.shell.openExternal', 0)
+  await assertBridgeCallCount(page, 'SaveContent', 0)
+  await assertSettingsCallsUseMockCredentials(page)
+  await page.close()
+}
+
+async function verifySettingsFailureWorkflow(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    faults: {
+      TestConnection: { mode: 'validation', message: '模拟模型连通失败' },
+      SaveEmbeddingConfig: { mode: 'storage', message: '模拟 Embedding 保存失败' },
+    },
+  }, undefined, 'settings-failures')
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'settings failure workspace')
+
+  await page.locator('header').getByTitle('设置').click()
+  const dialog = settingsDialog(page)
+  await expectVisible(dialog.getByText('基础设置'), 'settings failure dialog')
+  await dialog.getByRole('button', { name: /模型配置/ }).click()
+
+  await dialog.getByPlaceholder('输入 API Key').first().fill('mock-settings-key')
+  await dialog.getByRole('button', { name: '保存配置' }).click()
+  await waitForBridgeCall(page, 'TestConnection')
+  await expectVisible(dialog.getByText(/Mock Provider 连通性测试失败:.*模拟模型连通失败/), 'LLM connection failure message')
+  await assertBridgeCallCount(page, 'SaveLLMConfig', 0)
+
+  await dialog.getByRole('button', { name: 'Embeddings' }).click()
+  await dialog.getByRole('button', { name: '保存配置' }).click()
+  await waitForBridgeCall(page, 'SaveEmbeddingConfig')
+  await expectVisible(dialog.getByText(/保存失败:/), 'embedding save failure message')
+  await expectVisible(dialog.getByText(/模拟 Embedding 保存失败/), 'embedding save failure detail')
+  await assertNoSavedEmbeddingConfig(page)
+
+  await assertBridgeCallCount(page, 'DiscoverModels', 0)
+  await assertBridgeCallCount(page, 'PickReferenceSourceFile', 0)
+  await assertBridgeCallCount(page, 'runtime.shell.openExternal', 0)
+  await assertBridgeCallCount(page, 'SaveContent', 0)
+  await assertSettingsCallsUseMockCredentials(page)
   await page.close()
 }
 
@@ -1752,14 +1869,63 @@ function settingsDialog(page) {
   return page.locator('.fixed').filter({ hasText: '设置' }).last()
 }
 
-async function assertSavedProviderKey(page, expectedKey) {
-  const actual = await page.evaluate(() => window.__appMockState.savedLLMConfig?.providers?.[0]?.key ?? '')
-  assert.equal(actual, expectedKey)
+async function assertSavedLLMConfig(page, expected) {
+  const actual = await page.evaluate(() => window.__appMockState.savedLLMConfig?.providers?.[0] ?? null)
+  assert(actual, 'Expected LLM config to be saved.')
+  assert.equal(actual.key, expected.providerKey)
+  assert.equal(actual.api_key, expected.apiKey)
+  assert.equal(actual.endpoint_type, expected.endpointType)
 }
 
-async function assertSavedEmbeddingProvider(page, expectedProvider) {
-  const actual = await page.evaluate(() => window.__appMockState.savedEmbeddingConfig?.provider_key ?? '')
-  assert.equal(actual, expectedProvider)
+async function assertSavedEmbeddingConfig(page, expected) {
+  const actual = await page.evaluate(() => window.__appMockState.savedEmbeddingConfig ?? null)
+  assert(actual, 'Expected embedding config to be saved.')
+  for (const [key, expectedValue] of Object.entries(expected)) {
+    assert.deepEqual(actual[key], expectedValue, `Expected saved embedding ${key} to equal ${JSON.stringify(expectedValue)}.`)
+  }
+}
+
+async function assertNoSavedEmbeddingConfig(page) {
+  const actual = await page.evaluate(() => window.__appMockState.savedEmbeddingConfig)
+  assert.equal(actual, null, 'Expected embedding config not to be saved.')
+}
+
+async function assertLastBridgeCallInput(page, method, expected) {
+  const actual = await page.evaluate((method) => {
+    const call = window.__appMockState.calls.filter((item) => item.method === method).at(-1)
+    return call?.args?.[0] ?? null
+  }, method)
+  assert(actual, `Expected ${method} to be called.`)
+  for (const [key, expectedValue] of Object.entries(expected)) {
+    assert.deepEqual(actual[key], expectedValue, `Expected ${method}.${key} to equal ${JSON.stringify(expectedValue)}.`)
+  }
+}
+
+async function assertButtonDisabled(locator, description) {
+  await locator.waitFor({ state: 'visible', timeout: 12_000 }).catch((error) => {
+    throw new Error(`Expected visible button before disabled check: ${description}`, { cause: error })
+  })
+  const disabled = await locator.isDisabled()
+  assert.equal(disabled, true, `Expected disabled button: ${description}.`)
+}
+
+async function assertSettingsCallsUseMockCredentials(page) {
+  const leakedLiveCredentialOrEndpoint = await page.evaluate(() => {
+    const liveCredentialPatterns = [
+      /sk-[A-Za-z0-9_-]{12,}/,
+      /sk-proj-[A-Za-z0-9_-]{12,}/,
+      /AIza[0-9A-Za-z_-]{12,}/,
+      /xox[baprs]-[0-9A-Za-z-]{12,}/,
+      /api\.openai\.com/i,
+      /api\.anthropic\.com/i,
+      /generativelanguage\.googleapis\.com/i,
+      /dashscope\.aliyuncs\.com/i,
+      /api\.siliconflow\.cn/i,
+    ]
+    return window.__appMockState.calls.some((call) =>
+      liveCredentialPatterns.some((pattern) => pattern.test(JSON.stringify(call.args ?? []))))
+  })
+  assert.equal(leakedLiveCredentialOrEndpoint, false, 'Settings workflow must use mock credentials and non-live endpoints only.')
 }
 
 async function assertSearchResultContainsRestrictedSourcePath(page) {
