@@ -2829,6 +2829,59 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task DeleteWorkspaceCorpusAnchorArchivesWithoutDeletingMaterialProvenance()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var ownerNovel = await novels.CreateNovelAsync(new CreateNovelPayload("归档来源", "", ""), CancellationToken.None);
+        var consumingNovel = await novels.CreateNovelAsync(new CreateNovelPayload("归档使用方", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("workspace-archive.md", "雨声压住门外的街，林岚握住钥匙，没有立刻说话。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(
+                ownerNovel.Id,
+                "待归档共享参考",
+                null,
+                sourcePath,
+                "markdown",
+                "user_provided",
+                ReferenceCorpusVisibilities.Workspace),
+            CancellationToken.None);
+        var beforeMaterials = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        var beforeSegments = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
+        Assert.NotEmpty(beforeMaterials);
+        Assert.NotEmpty(beforeSegments);
+
+        await service.DeleteAnchorAsync(consumingNovel.Id, anchor.AnchorId, CancellationToken.None);
+
+        Assert.DoesNotContain(
+            await service.GetAnchorsAsync(consumingNovel.Id, CancellationToken.None),
+            item => item.AnchorId == anchor.AnchorId);
+        var search = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                consumingNovel.Id,
+                AnchorIds: [anchor.AnchorId],
+                Query: "雨声 钥匙",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        Assert.Empty(search.Items);
+        Assert.Null(await service.GetBuildStatusAsync(consumingNovel.Id, anchor.AnchorId, CancellationToken.None));
+
+        var afterMaterials = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        var afterSegments = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
+        Assert.Equal(beforeMaterials.Select(item => item.MaterialId), afterMaterials.Select(item => item.MaterialId));
+        Assert.Equal(beforeSegments.Select(item => item.SegmentId), afterSegments.Select(item => item.SegmentId));
+        Assert.Equal(ReferenceCorpusVisibilities.Restricted, await ReadAnchorVisibilityAsync(options, anchor.AnchorId));
+    }
+
+    [Fact]
     public async Task BridgeReferenceAnchorHandlersCreateAndListAnchors()
     {
         var options = CreateOptions();
@@ -3245,6 +3298,28 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         }
 
         return rows;
+    }
+
+    private static async ValueTask<string> ReadAnchorVisibilityAsync(
+        AppInitializationOptions options,
+        long anchorId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT corpus_visibility
+            FROM reference_anchors
+            WHERE anchor_id = $anchor_id;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        var visibility = await command.ExecuteScalarAsync();
+        return Assert.IsType<string>(visibility);
     }
 
     private static async ValueTask MarkAnchorAsWorkspaceCorpusAsync(

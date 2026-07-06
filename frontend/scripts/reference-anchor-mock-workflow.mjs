@@ -169,6 +169,10 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectVisible(materialPanel.getByText('把杯子推远，杯底在木桌上留下半圈水痕。'), 'material search hit')
   await expectVisible(materialPanel.getByText('lexical 0.92'), 'material score component')
   await expectVisible(materialPanel.getByText('prose_duty 0.75'), 'material prose-duty score component')
+
+  await page.getByRole('button', { name: /归档 雨夜动作语料库 为受限语料/ }).click()
+  await expectVisible(page.getByText('工作区语料已归档为受限'), 'workspace corpus archived message')
+  await expectVisible(page.getByText('暂无参考锚点'), 'archived workspace corpus hidden from library list')
 }
 
 async function generateReviseApproveBindAndDraft(page) {
@@ -269,6 +273,7 @@ async function verifyBridgeCalls(page) {
     'PromoteReferenceAnchorToWorkspaceCorpus',
     'UpdateReferenceAnchorMetadata',
     'UpdateReferenceMaterialTags',
+    'DeleteReferenceAnchor',
     'RebuildReferenceAnchor',
     'SearchReferenceMaterials',
     'GenerateReferenceChapterBlueprint',
@@ -308,6 +313,11 @@ async function verifyBridgeCalls(page) {
   assert.equal(metadataCall.args[0].visibility, 'workspace', 'anchor metadata update payload must preserve workspace visibility')
   assert.equal(metadataCall.args[0].source_trust, 'user_verified', 'anchor metadata update payload must include source trust')
   assert.deepEqual(metadataCall.args[0].user_tags, ['雨夜', '动作克制', '精选'], 'anchor metadata update payload must include user tags')
+
+  const deleteCall = calls.find((call) => call.method === 'DeleteReferenceAnchor')
+  assert(deleteCall, 'missing DeleteReferenceAnchor call')
+  assert.equal(deleteCall.args[0], 42, 'anchor delete/archive call must include novel id')
+  assert.equal(deleteCall.args[1], 101, 'anchor delete/archive call must include anchor id')
 
   const materialTagCall = calls.find((call) => call.method === 'UpdateReferenceMaterialTags')
   assert(materialTagCall, 'missing UpdateReferenceMaterialTags call')
@@ -576,6 +586,7 @@ function installReferenceAnchorMockBridge() {
       case 'CreateReferenceAnchor': return createReferenceAnchor(args[0])
       case 'PromoteReferenceAnchorToWorkspaceCorpus': return promoteReferenceAnchor(args[0])
       case 'UpdateReferenceAnchorMetadata': return updateReferenceAnchorMetadata(args[0])
+      case 'DeleteReferenceAnchor': return deleteReferenceAnchor(args[0], args[1])
       case 'UpdateReferenceMaterialTags': return updateReferenceMaterialTags(args[0])
       case 'RebuildReferenceAnchor': return rebuildReferenceAnchor(args[1])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
@@ -712,6 +723,11 @@ function installReferenceAnchorMockBridge() {
     anchor.novel_id = input.visibility === 'workspace' ? 0 : input.novel_id
     anchor.updated_at = now
     return anchor
+  }
+
+  function deleteReferenceAnchor(_novelId, anchorId) {
+    state.anchors = state.anchors.filter((item) => item.anchor_id !== anchorId)
+    return null
   }
 
   function rebuildReferenceAnchor(anchorId) {

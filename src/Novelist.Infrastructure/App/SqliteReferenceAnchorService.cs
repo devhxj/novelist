@@ -748,14 +748,39 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             var databasePath = await DatabasePathAsync(cancellationToken);
             await EnsureSchemaAsync(databasePath, cancellationToken);
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
-            await using var command = connection.CreateCommand();
-            command.CommandText = """
-                DELETE FROM reference_anchors
-                WHERE novel_id = $novel_id AND anchor_id = $anchor_id;
-                """;
-            command.Parameters.AddWithValue("$novel_id", novelId);
-            command.Parameters.AddWithValue("$anchor_id", anchorId);
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            var now = DateTimeOffset.UtcNow;
+            await using (var archive = connection.CreateCommand())
+            {
+                archive.CommandText = """
+                    UPDATE reference_anchors
+                    SET corpus_visibility = $restricted_visibility,
+                        updated_at = $updated_at
+                    WHERE anchor_id = $anchor_id
+                      AND (novel_id IS NULL OR novel_id = $workspace_corpus_novel_id)
+                      AND corpus_visibility = $workspace_visibility;
+                    """;
+                archive.Parameters.AddWithValue("$anchor_id", anchorId);
+                archive.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+                archive.Parameters.AddWithValue("$workspace_visibility", ReferenceCorpusVisibilities.Workspace);
+                archive.Parameters.AddWithValue("$restricted_visibility", ReferenceCorpusVisibilities.Restricted);
+                archive.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
+                var archived = await archive.ExecuteNonQueryAsync(cancellationToken);
+                if (archived > 0)
+                {
+                    return;
+                }
+            }
+
+            await using (var delete = connection.CreateCommand())
+            {
+                delete.CommandText = """
+                    DELETE FROM reference_anchors
+                    WHERE novel_id = $novel_id AND anchor_id = $anchor_id;
+                    """;
+                delete.Parameters.AddWithValue("$novel_id", novelId);
+                delete.Parameters.AddWithValue("$anchor_id", anchorId);
+                await delete.ExecuteNonQueryAsync(cancellationToken);
+            }
         }
         finally
         {

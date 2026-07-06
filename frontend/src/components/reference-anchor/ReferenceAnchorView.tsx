@@ -12,6 +12,7 @@ import {
   Search,
   Share2,
   SlidersHorizontal,
+  Trash2,
   Wand2,
   X,
 } from 'lucide-react'
@@ -373,6 +374,35 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     if (promoted) {
       await loadAnchors()
     }
+  }
+
+  async function deleteOrArchiveAnchor(anchor: reference.Anchor) {
+    const isWorkspaceCorpus = anchor.owner_scope === 'workspace_corpus'
+    setLoading(true)
+    setError(null)
+    setMessage(null)
+    try {
+      await app.DeleteReferenceAnchor(novelId, anchor.anchor_id)
+      setMessage(isWorkspaceCorpus ? '工作区语料已归档为受限' : '参考锚点已删除')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '操作失败')
+      setLoading(false)
+      return
+    } finally {
+      setLoading(false)
+    }
+
+    setSelectedAnchorIds(ids => ids.filter(id => id !== anchor.anchor_id))
+    if (expandedAnchorMaterialId === anchor.anchor_id) {
+      setExpandedAnchorMaterialId(null)
+      setAnchorMaterialPreview(EMPTY_MATERIAL_PREVIEW)
+      setEditingMaterialId(null)
+      setMaterialTagForm(null)
+    }
+    if (editingAnchorId === anchor.anchor_id) {
+      cancelEditAnchor()
+    }
+    await loadAnchors()
   }
 
   function beginEditAnchor(anchor: reference.Anchor) {
@@ -1102,6 +1132,18 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                                 <Share2 className="h-3.5 w-3.5" />
                               </button>
                             )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void deleteOrArchiveAnchor(anchor)
+                              }}
+                              disabled={loading}
+                              className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                              title={anchor.owner_scope === 'workspace_corpus' ? '归档为受限' : '删除'}
+                              aria-label={anchor.owner_scope === 'workspace_corpus' ? `归档 ${anchor.title} 为受限语料` : `删除 ${anchor.title}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
                             <button
                               type="button"
                               onClick={() => {

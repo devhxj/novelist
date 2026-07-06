@@ -189,7 +189,7 @@ workspace/global reference corpus
 - [ ] AI can explain why it selected each material and which story need it satisfies, without requiring the user to manually choose libraries first.
 - [ ] User feedback is split into global corpus feedback and per-novel usage feedback; accepting a material for one novel must not silently make it safe for another novel with different facts or POV.
 - [x] Agent tools search the shared corpus by injected novel context but do not expose arbitrary file reads or allow the model to bypass source/license filters.
-- [ ] UI provides corpus management as a library feature and reference-anchored drafting as an automatic retrieval feature, not as a per-novel setup checklist. Current coverage names and separates `语料库管理` from `参考写作检索`; full library management IA, bulk flows, and import/archive/delete policy remain pending.
+- [ ] UI provides corpus management as a library feature and reference-anchored drafting as an automatic retrieval feature, not as a per-novel setup checklist. Current coverage names and separates `语料库管理` from `参考写作检索`; full library management IA and bulk flows remain pending.
 
 **Verification:**
 
@@ -201,7 +201,7 @@ workspace/global reference corpus
 - [x] Binding/audit tests proving selected global material provenance is stored with blueprint hash and cannot be reused after blueprint edits.
 - [x] Feedback tests proving global tag feedback and per-novel usage feedback have different scopes.
 - [x] Bridge and agent tests proving `anchor_ids` are optional and policy-driven corpus retrieval is the default orchestration path.
-- [ ] Frontend smoke test for corpus management and default automatic material selection. Current coverage asserts default automatic material selection, separated corpus-library/reference-writing section headings, create/list/edit corpus metadata, owner-scope filtering/counts, local list query/license/source-trust filters, paginated row-level material browsing, single-material tag correction, and a single-anchor promotion action; full corpus library management UI smoke remains pending.
+- [ ] Frontend smoke test for corpus management and default automatic material selection. Current coverage asserts default automatic material selection, separated corpus-library/reference-writing section headings, create/list/edit corpus metadata, owner-scope filtering/counts, local list query/license/source-trust filters, paginated row-level material browsing, single-material tag correction, single-anchor promotion, and workspace-corpus archive actions; full corpus library management UI smoke remains pending.
 
 Targeted Phase 12 thin-slice checks completed:
 
@@ -237,6 +237,7 @@ Targeted Phase 12 thin-slice checks completed:
 - [x] The row-level material browser now supports single-material tag correction for function, emotion, scene, POV, and technique tags through `UpdateReferenceMaterialTags`; the Playwright workflow asserts the corrected row display and bridge payload without treating it as bulk material editing or full library management.
 - [x] The reference-anchor page now separates current UI surfaces into `语料库管理` (`导入语料来源` and `库条目`) and `参考写作检索`; the Playwright workflow asserts these headings without treating the page as the complete corpus library IA.
 - [x] Reference MAF tools now make the current agent authority boundary explicit: agents can list/search/adapt/audit already imported reference materials and start orchestration with injected novel context, but no reference tool exposes source import, file picking, metadata promotion/update/delete, arbitrary path/source parameters, or source/license filter bypass.
+- [x] `DeleteReferenceAnchor` now keeps existing per-novel anchor deletion behavior while treating workspace-corpus deletion as archival: visible workspace corpus rows are marked `restricted`, disappear from normal list/search/build-status reads, and retain source segments/material provenance. The corpus list UI exposes this as a row-level archive action.
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'ReferenceAnchorContractTests|ReferenceAnchorHandlersRouteEveryMethodToServiceOperations|CompatibilityRegistryIncludesReferenceAnchorMethods' -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'UpdateAnchorMetadataCanPromoteToWorkspaceCorpusWithoutChangingMaterialIdentity|UpdateAnchorMetadataCannotBypassOtherNovelPrivateOrWorkspaceRestrictedVisibility' -v minimal -p:UseSharedCompilation=false`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'WorkspaceCorpus|ReferenceOrchestrationRunUsesWorkspaceCorpus|ReferenceOrchestrationRunFiltersWorkspaceCorpus|ReferenceOrchestrationRunUsesCorpusSearchPolicy' -v minimal`
@@ -252,6 +253,7 @@ Targeted Phase 12 thin-slice checks completed:
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'ReferenceOrchestrationAgentToolStartsRunWithoutApprovingHumanDecisions|ReferenceAnchorContractTests|MafToolRegistryTests' -v minimal`
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'CreateToolsIncludesReferenceToolsOnlyWhenServicesAreConfigured|ReferenceMaterialToolInjectsNovelContext' -v minimal`
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'ReferenceAgentToolsCannotImportCorpusSourcesOrReadArbitraryFiles|CreateToolsIncludesReferenceToolsOnlyWhenServicesAreConfigured|ReferenceMaterialToolInjectsNovelContext|ReferenceOrchestrationAgentToolStartsRunWithoutApprovingHumanDecisions|MafToolRegistryTests' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'DeleteWorkspaceCorpusAnchorArchivesWithoutDeletingMaterialProvenance|DeleteAnchorRemovesAnchorAndStatus' -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter SearchMaterialsBoostsAcceptedMaterialFeedbackOnlyForCurrentNovel -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusFeedbackBoostsOnlyTheNovelThatRecordedUsage -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusMaterialLinksAreBoundToCurrentBlueprintAnalysisContract -v minimal`
