@@ -478,6 +478,71 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task WorkspaceCorpusMaterialsCanBeSearchedFromDifferentNovelsWithoutDuplicatingImport()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var firstNovel = await novels.CreateNovelAsync(new CreateNovelPayload("共享语料小说甲", "", ""), CancellationToken.None);
+        var secondNovel = await novels.CreateNovelAsync(new CreateNovelPayload("共享语料小说乙", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "workspace-corpus-single-import.md",
+            """
+            # 第一章
+
+            雨声压低街道，主角在门口停住。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(firstNovel.Id, "一次导入共享参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        await MarkAnchorAsWorkspaceCorpusAsync(options, anchor.AnchorId);
+        var importedMaterials = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        var importedSegments = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
+        var firstSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                firstNovel.Id,
+                AnchorIds: [],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        var secondSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                secondNovel.Id,
+                AnchorIds: [],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        var firstMaterial = Assert.Single(firstSearch.Items, item => item.AnchorId == anchor.AnchorId);
+        var secondMaterial = Assert.Single(secondSearch.Items, item => item.AnchorId == anchor.AnchorId);
+        Assert.Equal(firstMaterial.MaterialId, secondMaterial.MaterialId);
+        Assert.Equal(firstMaterial.SourceSegmentId, secondMaterial.SourceSegmentId);
+        Assert.Equal(firstMaterial.SourceHash, secondMaterial.SourceHash);
+        Assert.Equal(0, (await service.GetAnchorsAsync(firstNovel.Id, CancellationToken.None))
+            .Single(item => item.AnchorId == anchor.AnchorId).NovelId);
+        Assert.Equal(0, (await service.GetAnchorsAsync(secondNovel.Id, CancellationToken.None))
+            .Single(item => item.AnchorId == anchor.AnchorId).NovelId);
+
+        var currentMaterials = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        var currentSegments = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
+        Assert.Equal(importedMaterials.Select(item => item.MaterialId), currentMaterials.Select(item => item.MaterialId));
+        Assert.Equal(importedSegments.Select(item => item.SegmentId), currentSegments.Select(item => item.SegmentId));
+    }
+
+    [Fact]
     public async Task WorkspaceCorpusVisibilityFiltersAnchorsBeforeSearchAdaptAuditTagAndFeedback()
     {
         var options = CreateOptions();
@@ -644,6 +709,50 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
                     EditedText: string.Empty,
                     Origin: "user"),
                 CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task LegacyWorkspaceCorpusRowsMigrateToWorkspaceVisibleWithoutLosingMaterialIdentity()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var targetNovel = await novels.CreateNovelAsync(new CreateNovelPayload("旧共享语料目标", "", ""), CancellationToken.None);
+        await CreateLegacyWorkspaceCorpusAnchorAsync(options);
+        var service = new SqliteReferenceAnchorService(options, novels);
+
+        var anchors = await service.GetAnchorsAsync(targetNovel.Id, CancellationToken.None);
+
+        var anchor = Assert.Single(anchors, item => item.AnchorId == 7001);
+        Assert.Equal(0, anchor.NovelId);
+        Assert.Equal("legacy-source-hash", anchor.SourceFileHash);
+        Assert.Equal(ReferenceCorpusVisibilities.Workspace, anchor.Visibility);
+        Assert.Equal(ReferenceSourceTrustLevels.UserVerified, anchor.SourceTrust);
+        Assert.Empty(anchor.UserTags);
+        var status = await service.GetBuildStatusAsync(targetNovel.Id, 7001, CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal(0, status.NovelId);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, status.Status);
+
+        var materials = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                targetNovel.Id,
+                AnchorIds: [],
+                Query: "旧共享语料",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        var material = Assert.Single(materials.Items);
+        Assert.Equal("7001:material:sentence:0:legacy", material.MaterialId);
+        Assert.Equal(7001, material.AnchorId);
+        Assert.Equal("7001:0:sentence:0:legacy", material.SourceSegmentId);
+        Assert.Equal("legacy-material-hash", material.SourceHash);
     }
 
     [Fact]
@@ -1136,6 +1245,97 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.NotNull(material.ScoreComponents);
         Assert.True(material.ScoreComponents["narrative_duty"] > 0);
         Assert.True(material.ScoreComponents["emotion_transition"] > 0);
+    }
+
+    [Fact]
+    public async Task SearchMaterialsBoostsAcceptedMaterialFeedbackOnlyForCurrentNovel()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var firstNovel = await novels.CreateNovelAsync(new CreateNovelPayload("材料搜索反馈目标", "", ""), CancellationToken.None);
+        var otherNovel = await novels.CreateNovelAsync(new CreateNovelPayload("材料搜索反馈隔离", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "search-feedback-boost.md",
+            """
+            # 第一章
+
+            雨声压低街道，主角站在门口。
+
+            主角在门口停住。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(firstNovel.Id, "搜索反馈参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        await MarkAnchorAsWorkspaceCorpusAsync(options, anchor.AnchorId);
+
+        var baseline = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                firstNovel.Id,
+                AnchorIds: [anchor.AnchorId],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        Assert.Equal(2L, baseline.Total);
+        var boostedTarget = Assert.Single(baseline.Items, item => item.Text == "雨声压低街道，主角站在门口。");
+        Assert.DoesNotContain("accepted_feedback", boostedTarget.ScoreComponents?.Keys ?? []);
+
+        await service.RecordUserFeedbackAsync(
+            new RecordReferenceUserFeedbackPayload(
+                firstNovel.Id,
+                ReferenceFeedbackTargetTypes.Material,
+                boostedTarget.MaterialId,
+                ReferenceFeedbackDecisions.Accepted,
+                boostedTarget.MaterialId,
+                CandidateId: "",
+                BlueprintId: 0,
+                BeatId: "",
+                FeedbackTags: ["useful_reference"],
+                Note: "prefer this scene pressure material",
+                EditedText: "",
+                Origin: "user"),
+            CancellationToken.None);
+
+        var boosted = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                firstNovel.Id,
+                AnchorIds: [anchor.AnchorId],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        Assert.Equal(boostedTarget.MaterialId, boosted.Items[0].MaterialId);
+        var boostedComponents = boosted.Items[0].ScoreComponents ?? throw new InvalidOperationException("Expected score components.");
+        Assert.True(boostedComponents["accepted_feedback"] > 0);
+
+        var isolated = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                otherNovel.Id,
+                AnchorIds: [anchor.AnchorId],
+                Query: "门口",
+                MaterialTypes: [ReferenceMaterialTypes.Sentence],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        var isolatedTarget = Assert.Single(isolated.Items, item => item.MaterialId == boostedTarget.MaterialId);
+        Assert.DoesNotContain("accepted_feedback", isolatedTarget.ScoreComponents?.Keys ?? []);
     }
 
     [Fact]
@@ -2480,6 +2680,144 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         command.Parameters.AddWithValue("$corpus_visibility", visibility);
         var updated = await command.ExecuteNonQueryAsync();
         Assert.Equal(1, updated);
+    }
+
+    private static async ValueTask CreateLegacyWorkspaceCorpusAnchorAsync(AppInitializationOptions options)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using (var schema = connection.CreateCommand())
+        {
+            schema.CommandText = """
+                CREATE TABLE reference_anchors (
+                  anchor_id INTEGER PRIMARY KEY,
+                  novel_id INTEGER NOT NULL,
+                  title TEXT NOT NULL,
+                  author TEXT NOT NULL,
+                  source_path TEXT NOT NULL,
+                  source_kind TEXT NOT NULL,
+                  license_status TEXT NOT NULL,
+                  source_file_hash TEXT NOT NULL,
+                  build_version TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE reference_anchor_build_state (
+                  anchor_id INTEGER PRIMARY KEY,
+                  status TEXT NOT NULL,
+                  stage TEXT NOT NULL,
+                  source_segment_count INTEGER NOT NULL,
+                  material_count INTEGER NOT NULL,
+                  slot_count INTEGER NOT NULL,
+                  vector_count INTEGER NOT NULL,
+                  last_error TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE reference_source_segments (
+                  segment_id TEXT PRIMARY KEY,
+                  anchor_id INTEGER NOT NULL,
+                  chapter_index INTEGER NOT NULL,
+                  chapter_title TEXT NOT NULL,
+                  segment_type TEXT NOT NULL,
+                  segment_index INTEGER NOT NULL,
+                  parent_segment_id TEXT NOT NULL,
+                  start_offset INTEGER NOT NULL,
+                  end_offset INTEGER NOT NULL,
+                  text TEXT NOT NULL,
+                  text_hash TEXT NOT NULL
+                );
+
+                CREATE TABLE reference_materials (
+                  material_id TEXT PRIMARY KEY,
+                  anchor_id INTEGER NOT NULL,
+                  source_segment_id TEXT NOT NULL,
+                  material_type TEXT NOT NULL,
+                  function_tag TEXT NOT NULL,
+                  emotion_tag TEXT NOT NULL,
+                  scene_tag TEXT NOT NULL,
+                  pov_tag TEXT NOT NULL,
+                  technique_tag TEXT NOT NULL,
+                  function_confidence REAL NOT NULL,
+                  emotion_confidence REAL NOT NULL,
+                  pov_confidence REAL NOT NULL,
+                  text TEXT NOT NULL,
+                  source_hash TEXT NOT NULL,
+                  extractor_version TEXT NOT NULL,
+                  user_verified INTEGER NOT NULL,
+                  created_at TEXT NOT NULL
+                );
+                """;
+            await schema.ExecuteNonQueryAsync();
+        }
+
+        const string timestamp = "2026-07-04T00:00:00.0000000+00:00";
+        await using (var insertAnchor = connection.CreateCommand())
+        {
+            insertAnchor.CommandText = """
+                INSERT INTO reference_anchors
+                  (anchor_id, novel_id, title, author, source_path, source_kind, license_status,
+                   source_file_hash, build_version, status, created_at, updated_at)
+                VALUES
+                  (7001, 0, '旧工作区共享参考', '', 'legacy.md', 'markdown', 'user_provided',
+                   'legacy-source-hash', 'reference-anchor-v1', 'ready', $created_at, $updated_at);
+                """;
+            insertAnchor.Parameters.AddWithValue("$created_at", timestamp);
+            insertAnchor.Parameters.AddWithValue("$updated_at", timestamp);
+            await insertAnchor.ExecuteNonQueryAsync();
+        }
+
+        await using (var insertStatus = connection.CreateCommand())
+        {
+            insertStatus.CommandText = """
+                INSERT INTO reference_anchor_build_state
+                  (anchor_id, status, stage, source_segment_count, material_count, slot_count,
+                   vector_count, last_error, updated_at)
+                VALUES
+                  (7001, 'ready', 'ready', 1, 1, 0, 0, '', $updated_at);
+                """;
+            insertStatus.Parameters.AddWithValue("$updated_at", timestamp);
+            await insertStatus.ExecuteNonQueryAsync();
+        }
+
+        await using (var insertSegment = connection.CreateCommand())
+        {
+            insertSegment.CommandText = """
+                INSERT INTO reference_source_segments
+                  (segment_id, anchor_id, chapter_index, chapter_title, segment_type,
+                   segment_index, parent_segment_id, start_offset, end_offset, text, text_hash)
+                VALUES
+                  ('7001:0:sentence:0:legacy', 7001, 0, '', 'sentence',
+                   0, '', 0, 15, '旧共享语料仍然可见。', 'legacy-segment-hash');
+                """;
+            await insertSegment.ExecuteNonQueryAsync();
+        }
+
+        await using (var insertMaterial = connection.CreateCommand())
+        {
+            insertMaterial.CommandText = """
+                INSERT INTO reference_materials
+                  (material_id, anchor_id, source_segment_id, material_type, function_tag,
+                   emotion_tag, scene_tag, pov_tag, technique_tag, function_confidence,
+                   emotion_confidence, pov_confidence, text, source_hash, extractor_version,
+                   user_verified, created_at)
+                VALUES
+                  ('7001:material:sentence:0:legacy', 7001, '7001:0:sentence:0:legacy', 'sentence',
+                   'interiority', 'restrained', 'workspace', 'close', 'afterbeat', 1.0,
+                   1.0, 1.0, '旧共享语料仍然可见。', 'legacy-material-hash',
+                   'legacy-extractor', 1, $created_at);
+                """;
+            insertMaterial.Parameters.AddWithValue("$created_at", timestamp);
+            await insertMaterial.ExecuteNonQueryAsync();
+        }
     }
 
     private static JsonDocument ParseOutbound(BridgeDispatchResult result)

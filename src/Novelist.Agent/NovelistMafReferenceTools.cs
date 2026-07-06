@@ -27,7 +27,7 @@ public sealed partial class NovelistMafToolRegistry
     private sealed class ReferenceMafTools
     {
         private const string GetAnchorsDescription = "列出当前小说已导入的参考锚定书籍。novel_id 由运行时注入，不需要也不能传入。";
-        private const string SearchMaterialsDescription = "搜索参考锚定材料库。返回材料 id、标签、来源、文本和 score_components；用于给蓝图 beat 绑定材料，不直接写章节。";
+        private const string SearchMaterialsDescription = "按 story context 搜索受 license/visibility 过滤的参考语料库。返回材料 id、标签、来源、文本和 score_components；用于给蓝图 beat 绑定材料，不直接写章节。";
         private const string AdaptMaterialDescription = "预览参考材料改写。只允许基于 material_id、slot_values、scene_facts 和 max_rewrite_level 生成候选，不直接写章节。";
         private const string AuditReuseDescription = "审计参考材料复用候选。纯检查工具，不写章节，不保存正文。";
 

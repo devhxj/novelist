@@ -90,7 +90,7 @@ public sealed class FileSystemChatSessionService : IChatSessionService, ISubagen
 
         - chapters/001.md：章节正文。
         - outlines/001.md：章节大纲。
-        - goink.md：故事状态文档，类似 CLAUDE.md，用于快速恢复创作状态。
+        - goink.md：故事状态文档，用于快速恢复创作状态。
         - skills/<name>.md：小说级技能。
         - ~/.goink/skills/<name>.md：用户级技能。
         - /builtin/skills/<name>.md：内置技能，只读。

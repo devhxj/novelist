@@ -1,0 +1,23 @@
+Novelist
+========
+
+Novelist is released under the MIT License. See LICENSE.
+
+Origin and attribution
+----------------------
+
+This repository began as a fork of the MIT-licensed GoInk project and has
+since been renamed and substantially rebuilt as Novelist, a .NET 10 +
+Photino.NET desktop app with a React/Vite frontend.
+
+The active Novelist implementation lives under src/, frontend/src/, and tests/.
+The retired Go/Wails product path is not part of the active implementation.
+Legacy GoInk names such as goink.md and ~/.goink may still appear in source
+code as user-data compatibility and migration paths.
+
+The upstream GoInk project later changed its license. Novelist does not merge
+post-relicense upstream code and remains distributed under the MIT License for
+the code in this repository.
+
+The MIT copyright and permission notice in LICENSE must be preserved in copies
+or substantial portions of this software.

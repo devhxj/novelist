@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Novelist.Agent;
 using Novelist.Contracts.App;
 using Novelist.Contracts.Bridge;
@@ -295,6 +296,148 @@ public sealed class MafStructuredToolIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task ReferenceMaterialToolCannotBypassWorkspaceCorpusVisibilityWithExplicitAnchorIds()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("MAF 共享语料可见性", "", ""), CancellationToken.None);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novelService);
+        var visibleSourcePath = CreateSourceFile("maf-visible-workspace.md", "雨声压低街道，主角在门口停住。");
+        var privateSourcePath = CreateSourceFile("maf-private-workspace.md", "私有共享语料不应被 agent 显式 id 读到。");
+        var visibleAnchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "MAF 可见共享参考", null, visibleSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var privateAnchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "MAF 私有共享参考", null, privateSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        await MarkAnchorAsWorkspaceCorpusAsync(options, visibleAnchor.AnchorId, ReferenceCorpusVisibilities.Workspace);
+        await MarkAnchorAsWorkspaceCorpusAsync(options, privateAnchor.AnchorId, ReferenceCorpusVisibilities.Private);
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new EmptyStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors));
+
+        var defaultSearch = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "search_reference_materials",
+            """{"query":"门口","material_types":["sentence"],"page":1,"size":10}""");
+        var defaultItems = defaultSearch.GetProperty("items").EnumerateArray().ToArray();
+        var defaultItem = Assert.Single(defaultItems);
+        Assert.Equal(visibleAnchor.AnchorId, defaultItem.GetProperty("anchor_id").GetInt64());
+
+        var explicitPrivateSearch = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "search_reference_materials",
+            $$"""{"anchor_ids":[{{privateAnchor.AnchorId}}],"query":"私有共享语料","material_types":["sentence"],"page":1,"size":10}""");
+        Assert.Empty(explicitPrivateSearch.GetProperty("items").EnumerateArray());
+
+        var explicitVisibleSearch = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "search_reference_materials",
+            $$"""{"anchor_ids":[{{visibleAnchor.AnchorId}}],"query":"门口","material_types":["sentence"],"page":1,"size":10}""");
+        var visibleItem = Assert.Single(explicitVisibleSearch.GetProperty("items").EnumerateArray());
+        Assert.Equal(visibleAnchor.AnchorId, visibleItem.GetProperty("anchor_id").GetInt64());
+    }
+
+    [Fact]
+    public async Task ReferenceOrchestrationAgentToolDefaultsToWorkspaceCorpusWithoutAnchorIds()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("MAF 默认共享语料编排", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novelService);
+        await planning.UpdateChapterPlanAsync(
+            novel.Id,
+            new UpdateChapterPlanPayload("next", "雨声压低街道，主角在门口停住。"),
+            CancellationToken.None);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novelService);
+        var sourcePath = CreateSourceFile(
+            "maf-orchestration-workspace.md",
+            """
+            # 第一章
+
+            雨声压低街道，主角在门口停住，心里意识到压力仍然压着呼吸。
+            """);
+        var workspaceAnchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "MAF 编排共享参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        await MarkAnchorAsWorkspaceCorpusAsync(options, workspaceAnchor.AnchorId, ReferenceCorpusVisibilities.Workspace);
+        var referenceDrafts = new SqliteReferenceAnchoredDraftService(options, novelService, planning, referenceAnchors);
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new EmptyStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors,
+            referenceDrafts));
+        var startTool = executor.GetToolDefinitions(novel.Id).Single(tool => tool.Name == "start_reference_orchestration_run");
+        var startProperties = startTool.ParametersSchema.GetProperty("properties");
+        Assert.False(startProperties.TryGetProperty("anchor_ids", out _));
+        Assert.True(startProperties.TryGetProperty("include_anchor_ids", out _));
+        Assert.True(startProperties.TryGetProperty("exclude_anchor_ids", out _));
+
+        var started = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "start_reference_orchestration_run",
+            """
+            {"chapter_number":7,"chapter_goal":"雨声压低街道，主角在门口停住","known_facts":["雨声压低街道","主角在门口停住"],"forbidden_facts":["凶手身份"],"license_statuses":["user_provided"],"max_results_per_beat":3}
+            """);
+
+        Assert.Empty(started.GetProperty("anchor_ids").EnumerateArray());
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, started.GetProperty("status").GetString());
+        Assert.Equal(ReferenceOrchestrationStages.SourceConfirmation, started.GetProperty("stage").GetString());
+        Assert.Equal(ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts, started.GetProperty("current_decision").GetProperty("decision_type").GetString());
+        Assert.Equal("story_context", started.GetProperty("corpus_search_policy").GetProperty("mode").GetString());
+
+        var runId = started.GetProperty("run_id").GetString() ?? throw new InvalidOperationException("Expected run id.");
+        var completedSafeStages = await referenceDrafts.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                runId,
+                ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts,
+                "user confirmed source and fact boundary"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, completedSafeStages.Status);
+        Assert.Equal(ReferenceOrchestrationStages.BlueprintApproval, completedSafeStages.Stage);
+        Assert.Empty(completedSafeStages.AnchorIds);
+
+        var finished = await referenceDrafts.ResumeOrchestrationRunAsync(
+            new ResumeReferenceOrchestrationRunPayload(
+                novel.Id,
+                runId,
+                ReferenceOrchestrationDecisionTypes.ApproveBlueprint,
+                completedSafeStages.ReviewId),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, finished.Status);
+        Assert.Equal(ReferenceOrchestrationStages.FinalInsertion, finished.Stage);
+        Assert.NotEmpty(finished.CandidateIds);
+    }
+
+    [Fact]
     public async Task ReferenceDraftAuditReportsForbiddenFactThroughMafExecutor()
     {
         var options = CreateOptions();
@@ -526,6 +669,31 @@ public sealed class MafStructuredToolIntegrationTests : IDisposable
         var path = Path.Combine(sourceDirectory, fileName);
         File.WriteAllText(path, content);
         return path;
+    }
+
+    private static async ValueTask MarkAnchorAsWorkspaceCorpusAsync(
+        AppInitializationOptions options,
+        long anchorId,
+        string visibility)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_anchors
+            SET novel_id = 0,
+                corpus_visibility = $corpus_visibility
+            WHERE anchor_id = $anchor_id;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        command.Parameters.AddWithValue("$corpus_visibility", visibility);
+        var updated = await command.ExecuteNonQueryAsync();
+        Assert.Equal(1, updated);
     }
 
     private static async ValueTask InitializeAsync(AppInitializationOptions options)

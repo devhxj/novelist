@@ -265,6 +265,12 @@ public sealed class MafToolRegistryTests
         Assert.True(bindMaterialsProperties.TryGetProperty("max_results_per_beat", out _));
         Assert.True(bindMaterialsProperties.TryGetProperty("select_top_candidate", out _));
 
+        var searchMaterials = tools.Single(tool => tool.Name == "search_reference_materials");
+        AssertToolDescriptionContains(searchMaterials, "story context", "license", "score_components", "不直接写章节");
+        Assert.True(searchMaterials.JsonSchema.TryGetProperty("properties", out var searchMaterialsProperties));
+        Assert.True(searchMaterialsProperties.TryGetProperty("narrative_duties", out _));
+        Assert.True(searchMaterialsProperties.TryGetProperty("emotion_transitions", out _));
+
         var startOrchestration = tools.Single(tool => tool.Name == "start_reference_orchestration_run");
         AssertToolDescriptionContains(
             startOrchestration,
@@ -391,7 +397,11 @@ public sealed class MafToolRegistryTests
         Assert.Equal(["sentence"], anchors.LastSearch.MaterialTypes);
         Assert.Equal(["external_evidence"], anchors.LastSearch.NarrativeDuties);
         Assert.Equal(["neutral->pressure"], anchors.LastSearch.EmotionTransitions);
-        Assert.Equal("mat-1", result.Data!.Value.GetProperty("items")[0].GetProperty("material_id").GetString());
+        var material = result.Data!.Value.GetProperty("items")[0];
+        Assert.Equal("mat-1", material.GetProperty("material_id").GetString());
+        var components = material.GetProperty("score_components");
+        Assert.Equal(2.5, components.GetProperty("story_context").GetDouble());
+        Assert.Equal(1.25, components.GetProperty("prose_duty").GetDouble());
     }
 
     [Fact]
@@ -915,7 +925,12 @@ public sealed class MafToolRegistryTests
                         "hash",
                         "test",
                         false,
-                        DateTimeOffset.UtcNow)
+                        DateTimeOffset.UtcNow,
+                        new Dictionary<string, double>(StringComparer.Ordinal)
+                        {
+                            ["story_context"] = 2.5,
+                            ["prose_duty"] = 1.25
+                        })
                 ],
                 Total: 1,
                 Page: input.Page,

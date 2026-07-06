@@ -8,7 +8,8 @@ internal static class ReferenceAnchoredDraftAuditor
     public static ReferenceAnchoredDraftAuditPayload BuildDraftAudit(
         ReferenceChapterBlueprintPayload blueprint,
         IReadOnlyList<ReferenceDraftParagraphCandidatePayload> candidates,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload>? selectedMaterialLinksByBeatId = null)
     {
         ArgumentNullException.ThrowIfNull(blueprint);
         ArgumentNullException.ThrowIfNull(candidates);
@@ -34,9 +35,17 @@ internal static class ReferenceAnchoredDraftAuditor
                 provenanceErrors.Add($"Candidate {candidate.CandidateId} is missing material provenance.");
             }
             else if (ReferenceDraftProvenanceIds.IsNoReuseMaterialId(candidate.MaterialId) &&
-                string.IsNullOrWhiteSpace(beat.NoReuseReason))
+                !ReferenceAnchoredDraftPreflight.AllowsNoReuseProvenance(beat))
             {
-                provenanceErrors.Add($"Candidate {candidate.CandidateId} uses no-reuse provenance but the blueprint beat has no approved no-reuse reason.");
+                var reason = string.IsNullOrWhiteSpace(beat.SourceBackedDetailTarget)
+                    ? "the blueprint beat has no approved no-reuse reason"
+                    : "the source-backed blueprint beat requires selected reference material";
+                provenanceErrors.Add($"Candidate {candidate.CandidateId} uses no-reuse provenance but {reason}.");
+            }
+            else if (HasLowConfidenceWeakMatch(candidate, selectedMaterialLinksByBeatId))
+            {
+                provenanceErrors.Add($"Candidate {candidate.CandidateId} uses low-confidence weak match material provenance.");
+                requiredFixes.Add($"Bind stronger reference material for candidate {candidate.CandidateId}, revise the blueprint query, or resolve the retrieval gap before insertion.");
             }
 
             if (string.IsNullOrWhiteSpace(candidate.Text))
@@ -187,6 +196,22 @@ internal static class ReferenceAnchoredDraftAuditor
             aiRisks,
             requiredFixes,
             now);
+    }
+
+    private static bool HasLowConfidenceWeakMatch(
+        ReferenceDraftParagraphCandidatePayload candidate,
+        IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload>? selectedMaterialLinksByBeatId)
+    {
+        if (selectedMaterialLinksByBeatId is null ||
+            !selectedMaterialLinksByBeatId.TryGetValue(candidate.BeatId, out var link) ||
+            !string.Equals(link.MaterialId, candidate.MaterialId, StringComparison.Ordinal) ||
+            link.ScoreComponents is null ||
+            !link.ScoreComponents.TryGetValue("low_confidence", out var lowConfidence))
+        {
+            return false;
+        }
+
+        return lowConfidence < 0;
     }
 
     internal static IReadOnlyList<string> ExtractRequiredProsePhrases(ReferenceChapterBlueprintBeatPayload beat)

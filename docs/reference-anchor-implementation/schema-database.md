@@ -230,7 +230,7 @@ reference_blueprint_material_links
 - status TEXT NOT NULL
 - created_at TEXT NOT NULL
 
-`score_components_json` currently records material type, function, emotion, POV, prose-duty, lexical, embedding similarity, confidence, `user_verified`, and accepted-feedback boosts when applicable.
+`score_components_json` currently records material type, function, emotion, POV, prose-duty, lexical, embedding similarity, confidence, `user_verified`, current-novel accepted-feedback boosts, and negative `low_confidence` markers for expanded-query weak matches when applicable. Draft generation and persisted draft re-audit read the selected link for the current `analysis_contract_hash`; a low-confidence selected link turns into draft-audit provenance risk until the material is rebound, the blueprint query is revised, or the retrieval gap is explicitly resolved.
 
 reference_draft_paragraph_candidates
 - candidate_id TEXT PRIMARY KEY

@@ -426,20 +426,27 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         var boundLinks = new List<ScoredMaterialLink>();
         foreach (var beat in blueprint.Beats.OrderBy(item => item.BeatIndex))
         {
-            if (!string.IsNullOrWhiteSpace(beat.NoReuseReason))
+            if (ReferenceAnchoredDraftPreflight.AllowsNoReuseProvenance(beat))
             {
                 continue;
             }
 
-            var materials = await SearchMaterialsForBeatAsync(
+            var search = await SearchMaterialsForBeatAsync(
                 referenceAnchors,
                 novelId,
                 searchAnchorIds,
                 beat,
                 maxResultsPerBeat,
                 cancellationToken);
-            var scored = materials
-                .Select(material => ScoreMaterialForBeat(blueprint.BlueprintId, blueprint.AnalysisContractHash, beat, material, acceptedFeedbackMaterialIds, now))
+            var scored = search.Materials
+                .Select(material => ScoreMaterialForBeat(
+                    blueprint.BlueprintId,
+                    blueprint.AnalysisContractHash,
+                    beat,
+                    material,
+                    acceptedFeedbackMaterialIds,
+                    search.ExpandedQueryFallback,
+                    now))
                 .Where(item => item.Score > 0 && item.HasFunctionalFit)
                 .OrderByDescending(item => item.Score)
                 .ThenBy(item => item.Link.MaterialId, StringComparer.Ordinal)
@@ -501,7 +508,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             selectedLinks,
             cancellationToken);
         ReferenceAnchoredDraftPreflight.EnsureCandidateProvenance(targetBeats, selectedLinks, candidates);
-        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(blueprint, candidates, DateTimeOffset.UtcNow);
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(blueprint, candidates, DateTimeOffset.UtcNow, selectedLinks);
         await PersistDraftCandidatesAsync(blueprint.BlueprintId, candidates, cancellationToken);
 
         return new ReferenceAnchoredDraftPayload(blueprint.BlueprintId, candidates, audit);
@@ -551,7 +558,18 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 };
             }
 
-            return ReferenceAnchoredDraftAuditor.BuildDraftAudit(blueprint, candidates, DateTimeOffset.UtcNow);
+            var candidateBeatIds = candidates
+                .Select(candidate => candidate.BeatId)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            var selectedLinks = await ReadSelectedMaterialLinksAsync(
+                connection,
+                input.NovelId,
+                blueprint.BlueprintId,
+                blueprint.AnalysisContractHash,
+                candidateBeatIds,
+                cancellationToken);
+            return ReferenceAnchoredDraftAuditor.BuildDraftAudit(blueprint, candidates, DateTimeOffset.UtcNow, selectedLinks);
         }
         finally
         {
@@ -1004,7 +1022,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         {
             if (!selectedLinks.TryGetValue(beat.BeatId, out var link))
             {
-                if (!string.IsNullOrWhiteSpace(beat.NoReuseReason))
+                if (ReferenceAnchoredDraftPreflight.AllowsNoReuseProvenance(beat))
                 {
                     candidates.Add(BuildNoReuseDraftCandidate(blueprint, beat));
                 }
@@ -1139,7 +1157,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         }
     }
 
-    private static async ValueTask<IReadOnlyList<ReferenceMaterialPayload>> SearchMaterialsForBeatAsync(
+    private static async ValueTask<MaterialSearchResult> SearchMaterialsForBeatAsync(
         IReferenceAnchorService referenceAnchors,
         long novelId,
         IReadOnlyList<long> anchorIds,
@@ -1166,7 +1184,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 
         if (result.Items.Count > 0 || string.IsNullOrWhiteSpace(query.Query))
         {
-            return result.Items;
+            return new MaterialSearchResult(result.Items, ExpandedQueryFallback: false);
         }
 
         var fallback = await referenceAnchors.SearchMaterialsAsync(
@@ -1182,7 +1200,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 Page: 1,
                 Size: size),
             cancellationToken);
-        return fallback.Items;
+        return new MaterialSearchResult(fallback.Items, ExpandedQueryFallback: fallback.Items.Count > 0);
     }
 
     private static async ValueTask<IReadOnlyList<long>> ResolveOrchestrationSearchAnchorIdsAsync(
@@ -1253,6 +1271,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         ReferenceChapterBlueprintBeatPayload beat,
         ReferenceMaterialPayload material,
         IReadOnlySet<string> acceptedFeedbackMaterialIds,
+        bool expandedQueryFallback,
         DateTimeOffset now)
     {
         var components = new Dictionary<string, double>(StringComparer.Ordinal);
@@ -1274,6 +1293,10 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         AddScore(components, "accepted_feedback", acceptedFeedbackMaterialIds.Contains(material.MaterialId) ? 2.0 : 0);
         var embeddingFit = TryGetScoreComponent(material, "embedding", out var embeddingScore);
         AddScore(components, "embedding", embeddingScore);
+        if (expandedQueryFallback)
+        {
+            components["low_confidence"] = -1.0;
+        }
 
         var hasFunctionalFit = functionFit || emotionFit || povFit || proseDutyFit;
         var score = components.Values.Sum();
@@ -1302,7 +1325,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 proseDutyFit,
                 materialTypeFit,
                 acceptedFeedbackMaterialIds.Contains(material.MaterialId),
-                embeddingFit),
+                embeddingFit,
+                expandedQueryFallback),
             now);
         return new ScoredMaterialLink(link, analysisContractHash, components, hasFunctionalFit);
     }
@@ -1316,7 +1340,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         bool proseDutyFit,
         bool materialTypeFit,
         bool acceptedFeedbackFit,
-        bool embeddingFit)
+        bool embeddingFit,
+        bool expandedQueryFallback)
     {
         var matches = new List<string>();
         if (materialTypeFit)
@@ -1352,6 +1377,11 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         if (embeddingFit)
         {
             matches.Add("embedding rank");
+        }
+
+        if (expandedQueryFallback)
+        {
+            matches.Add("expanded query fallback weak match");
         }
 
         var fit = matches.Count == 0 ? "lexical and confidence only" : string.Join(", ", matches);
@@ -4494,6 +4524,10 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
     private sealed record BlueprintSummaryRow(
         ReferenceChapterBlueprintSummaryPayload Summary,
         string SourcePlanScope);
+
+    private sealed record MaterialSearchResult(
+        IReadOnlyList<ReferenceMaterialPayload> Materials,
+        bool ExpandedQueryFallback);
 
     private sealed record ScoredMaterialLink(
         ReferenceBlueprintMaterialLinkPayload Link,

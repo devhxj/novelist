@@ -71,9 +71,16 @@ internal static class ReferenceAnchoredDraftPreflight
     {
         ArgumentNullException.ThrowIfNull(targetBeats);
         return targetBeats
-            .Where(beat => string.IsNullOrWhiteSpace(beat.NoReuseReason))
+            .Where(beat => !AllowsNoReuseProvenance(beat))
             .Select(beat => beat.BeatId)
             .ToArray();
+    }
+
+    public static bool AllowsNoReuseProvenance(ReferenceChapterBlueprintBeatPayload beat)
+    {
+        ArgumentNullException.ThrowIfNull(beat);
+        return !string.IsNullOrWhiteSpace(beat.NoReuseReason) &&
+            string.IsNullOrWhiteSpace(beat.SourceBackedDetailTarget);
     }
 
     public static IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload> EnsureSelectedMaterialLinksForTargetBeats(
@@ -119,9 +126,12 @@ internal static class ReferenceAnchoredDraftPreflight
 
             if (ReferenceDraftProvenanceIds.IsNoReuseMaterialId(candidate.MaterialId))
             {
-                if (string.IsNullOrWhiteSpace(beat.NoReuseReason))
+                if (!AllowsNoReuseProvenance(beat))
                 {
-                    throw new ArgumentException("Draft candidate no-reuse provenance is not approved by the blueprint beat.", nameof(candidates));
+                    var reason = string.IsNullOrWhiteSpace(beat.SourceBackedDetailTarget)
+                        ? "the blueprint beat has no approved no-reuse reason"
+                        : "the source-backed blueprint beat requires selected reference material";
+                    throw new ArgumentException("Draft candidate no-reuse provenance is not approved: " + reason + ".", nameof(candidates));
                 }
 
                 continue;

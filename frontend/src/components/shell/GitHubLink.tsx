@@ -1,7 +1,7 @@
 import { BrowserOpenURL } from '@/lib/novelist/runtime'
 
 export default function GitHubLink() {
-  const url = 'https://github.com/devhxj/goink'
+  const url = 'https://github.com/devhxj/novelist'
 
   return (
     <button
@@ -17,7 +17,7 @@ export default function GitHubLink() {
         opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 pointer-events-none">
         <p className="text-xs text-foreground mb-1">有任何问题？去提 Issue</p>
         <p className="text-xs text-foreground mb-1.5">如果对你有帮助，欢迎 Star</p>
-        <p className="text-[10px] text-muted-foreground font-mono">github.com/devhxj/goink</p>
+        <p className="text-[10px] text-muted-foreground font-mono">github.com/devhxj/novelist</p>
       </div>
     </button>
   )

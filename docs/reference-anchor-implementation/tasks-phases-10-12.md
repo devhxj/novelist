@@ -179,7 +179,7 @@ workspace/global reference corpus
 - [ ] Existing per-novel anchors migrate or are readable through a compatibility layer without losing source hashes, segment ids, material ids, user-verified tags, feedback, or audit provenance.
 - [x] Corpus records include visibility, license status, source trust, and optional user-defined tags, but no required per-novel binding gate.
 - [ ] Material search accepts story-context inputs and returns globally sourced candidates that are filtered by license/status policy and scored by beat function, emotion, POV, prose duty, technique, lexical similarity, embeddings when available, and feedback boosts.
-- [ ] Retrieval gaps are explicit states, not silent free-drafting fallbacks: automatic query expansion may run first, weak matches must be marked low confidence, optional no-reuse beats require approved reasons, and source-required beats must stop for user action.
+- [ ] Retrieval gaps are explicit states, not silent free-drafting fallbacks: automatic query expansion may run first, weak matches must be marked low confidence and carry elevated draft-audit risk, optional no-reuse beats require approved reasons, and source-required beats must stop for user action.
 - [ ] Blueprint generation no longer requires `anchor_ids`; it may accept an optional corpus search policy or explicit include/exclude anchors for advanced control.
 - [ ] Material binding records exact selected corpus material ids against the current blueprint `analysis_contract_hash` so later draft candidates remain auditable.
 - [ ] Per-novel known facts, forbidden facts, timeline state, character state, and POV boundaries still gate whether a globally sourced material may be used.
@@ -191,10 +191,10 @@ workspace/global reference corpus
 **Verification:**
 
 - [ ] Migration tests from per-novel `reference_anchors` to shared corpus records or compatibility reads.
-- [ ] Service tests proving global corpus materials can be searched from different novels without duplicating source import.
+- [x] Service tests proving workspace-corpus compatibility materials can be searched from different novels without duplicating source import.
 - [x] Tests proving per-novel forbidden facts and POV boundaries still reject globally sourced materials/candidates.
 - [x] Tests proving license/visibility policy filters corpus results before AI selection.
-- [ ] Retrieval-gap tests covering automatic query expansion, weak-match continuation, approved no-reuse continuation, and source-required stop states.
+- [ ] Retrieval-gap tests covering automatic query expansion, weak-match audit risk, approved no-reuse continuation, and source-required stop states.
 - [x] Binding/audit tests proving selected global material provenance is stored with blueprint hash and cannot be reused after blueprint edits.
 - [x] Feedback tests proving global tag feedback and per-novel usage feedback have different scopes.
 - [ ] Bridge and agent tests proving `anchor_ids` are optional and AI-driven corpus retrieval is the default path.
@@ -205,14 +205,31 @@ Targeted Phase 12 thin-slice checks completed:
 - [x] Orchestration binding can use `corpus_search_policy` include/exclude anchor filters and license-status filters when `anchor_ids` are omitted, while keeping the existing per-novel reference-anchor storage model.
 - [x] Reference material read paths now include `reference_anchors.novel_id = 0` workspace-corpus compatibility anchors for listing, search, adaptation, audit, tag correction, and per-novel feedback validation, while still excluding private anchors from other novels.
 - [x] Workspace-corpus compatibility anchors now carry `corpus_visibility`, `source_trust`, and `user_tags_json`; read paths include only `novel_id = 0 AND corpus_visibility = 'workspace'`, explicit `anchor_ids` cannot bypass private/restricted workspace visibility, and legacy `novel_id = 0` rows are promoted to workspace-visible once during schema migration.
+- [x] A single workspace-corpus import can be searched from multiple novels without duplicating `reference_source_segments` or `reference_materials`; both novels see the same `material_id`, `source_segment_id`, and `source_hash` through the compatibility layer.
 - [x] A real SQLite orchestration run can omit explicit `anchor_ids`, resolve `novel_id = 0` workspace-corpus anchors through the default corpus policy, bind selected material links, generate audited candidates, and stop at final insertion without writing chapter prose.
+- [x] A real MAF executor can start the default orchestration tool without exposing or passing `anchor_ids`; after user source/fact confirmation the persisted run uses workspace-corpus material through `corpus_search_policy` and stops at final insertion.
 - [x] Real SQLite orchestration coverage proves workspace-corpus anchors are filtered by `corpus_search_policy.license_statuses` before binding selected materials.
 - [x] Workspace-corpus usage feedback remains per-novel: accepted material feedback boosts binding only for the novel that recorded it, while other novels can still retrieve the shared material without inheriting that usage approval.
+- [x] Material search ranking now applies current-novel accepted material feedback as an `accepted_feedback` score component without leaking that boost to other novels that search the same workspace corpus material.
+- [x] The MAF `search_reference_materials` tool injects the active novel context, accepts story-context filters such as `narrative_duties` and `emotion_transitions`, describes license/visibility filtered corpus search, and returns material `score_components` for agent-side selection explanation.
 - [x] Workspace-corpus material links persist the current blueprint `analysis_contract_hash`; blueprint revisions mark old links stale and draft generation rejects stale/hash-mismatched links until materials are rebound.
+- [x] Material binding now runs deterministic query-expansion fallback when the exact beat query returns no candidates, marks selected fallback links with a negative `low_confidence` score component, and explains the expanded-query weak match in `fit_explanation`.
+- [x] Draft generation and persisted draft re-audit now read selected material-link score components; candidates backed by `low_confidence` weak-match links fail draft audit with provenance risk and required fixes, which also routes orchestration through the existing high-risk draft-audit stop.
+- [x] Approved no-reuse continuation is limited to beats without `source_backed_detail_target`; source-backed beats still require material-fit review, selected current material links, and non-`no-reuse` provenance before draft generation, even if `no_reuse_reason` is present.
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'WorkspaceCorpus|ReferenceOrchestrationRunUsesWorkspaceCorpus|ReferenceOrchestrationRunFiltersWorkspaceCorpus|ReferenceOrchestrationRunUsesCorpusSearchPolicy' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceOrchestrationAgentToolDefaultsToWorkspaceCorpusWithoutAnchorIds -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusMaterialsCanBeSearchedFromDifferentNovelsWithoutDuplicatingImport -v minimal`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'ReferenceOrchestrationAgentToolStartsRunWithoutApprovingHumanDecisions|ReferenceAnchorContractTests|MafToolRegistryTests' -v minimal`
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'CreateToolsIncludesReferenceToolsOnlyWhenServicesAreConfigured|ReferenceMaterialToolInjectsNovelContext' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter SearchMaterialsBoostsAcceptedMaterialFeedbackOnlyForCurrentNovel -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusFeedbackBoostsOnlyTheNovelThatRecordedUsage -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusMaterialLinksAreBoundToCurrentBlueprintAnalysisContract -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter BindBlueprintMaterialsMarksExpandedQueryFallbackAsLowConfidenceWeakMatch -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'BuildDraftAuditFailsWhenSelectedMaterialLinkIsLowConfidenceWeakMatch|BindBlueprintMaterialsMarksExpandedQueryFallbackAsLowConfidenceWeakMatch' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'SourceBackedNoReuseBeatStillRequiresSelectedMaterialBeforeDraftGeneration|ApprovedNoReuseBeatGeneratesDraftWithoutSelectedMaterialLink|RequiredMaterialBeatIdsStillRequiresSourceBackedNoReuseBeats|EnsureCandidateProvenanceRejectsNoReuseForSourceBackedBeat|ReviewDoesNotSkipMaterialFitForSourceBackedBeatWithNoReuseReason|BuildDraftAuditFailsWhenSourceBackedBeatUsesNoReuseProvenance' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter LegacyWorkspaceCorpusRowsMigrateToWorkspaceVisibleWithoutLosingMaterialIdentity -v minimal`
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter WorkspaceCorpusVisibilityFiltersAnchorsBeforeSearchAdaptAuditTagAndFeedback -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter ReferenceMaterialToolCannotBypassWorkspaceCorpusVisibilityWithExplicitAnchorIds -v minimal`
 - [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter ReferenceAnchorContractTests -v minimal`
 
 **Files likely touched:**

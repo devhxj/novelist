@@ -42,6 +42,66 @@ public sealed class ReferenceAnchoredDraftAuditorTests
     }
 
     [Fact]
+    public void BuildDraftAuditFailsWhenSourceBackedBeatUsesNoReuseProvenance()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            SourceBackedDetailTarget = "source-backed rain pressure detail",
+            NoReuseReason = "transition carries no reusable source material"
+        });
+        var candidate = Candidate(blueprint, "雨声压低了整条街的呼吸，林岚心里一紧，指尖停住。") with
+        {
+            MaterialId = ReferenceDraftProvenanceIds.BuildNoReuseMaterialId(blueprint.Beats[0].BeatId)
+        };
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.ProvenanceErrors, item => item.Contains("source-backed", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(audit.ProvenanceErrors, item => item.Contains("selected reference material", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildDraftAuditFailsWhenSelectedMaterialLinkIsLowConfidenceWeakMatch()
+    {
+        var blueprint = Blueprint(beat => beat);
+        var candidate = Candidate(blueprint, "雨声压低了整条街的呼吸，林岚心里一紧，指尖停住。");
+        var link = new ReferenceBlueprintMaterialLinkPayload(
+            "link-low-confidence",
+            blueprint.BlueprintId,
+            blueprint.Beats[0].BeatId,
+            candidate.MaterialId,
+            "show pressure",
+            ReferenceRewriteLevels.L1,
+            Selected: true,
+            Score: 0.25,
+            new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                ["low_confidence"] = -1.0,
+                ["function"] = 1.0
+            },
+            "Beat 1 fit: expanded query fallback weak match.",
+            DateTimeOffset.UnixEpoch);
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>(StringComparer.Ordinal)
+            {
+                [blueprint.Beats[0].BeatId] = link
+            });
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.ProvenanceErrors, item => item.Contains("low-confidence", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(audit.ProvenanceErrors, item => item.Contains("weak match", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("stronger reference material", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildDraftAuditFailsWhenCandidateContainsForbiddenFact()
     {
         var blueprint = Blueprint(

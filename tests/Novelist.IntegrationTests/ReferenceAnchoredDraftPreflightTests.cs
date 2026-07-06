@@ -92,7 +92,11 @@ public sealed class ReferenceAnchoredDraftPreflightTests
     public void RequiredMaterialBeatIdsSkipsApprovedNoReuseBeats()
     {
         var reusable = Beat("1:beat:1");
-        var noReuse = Beat("1:beat:2") with { NoReuseReason = "transition carries no reusable source material" };
+        var noReuse = Beat("1:beat:2") with
+        {
+            SourceBackedDetailTarget = string.Empty,
+            NoReuseReason = "transition carries no reusable source material"
+        };
 
         var required = ReferenceAnchoredDraftPreflight.RequiredMaterialBeatIds([reusable, noReuse]);
 
@@ -100,10 +104,28 @@ public sealed class ReferenceAnchoredDraftPreflightTests
     }
 
     [Fact]
+    public void RequiredMaterialBeatIdsStillRequiresSourceBackedNoReuseBeats()
+    {
+        var sourceBackedNoReuse = Beat("1:beat:2") with
+        {
+            SourceBackedDetailTarget = "source-backed rain pressure detail",
+            NoReuseReason = "transition carries no reusable source material"
+        };
+
+        var required = ReferenceAnchoredDraftPreflight.RequiredMaterialBeatIds([sourceBackedNoReuse]);
+
+        Assert.Equal(["1:beat:2"], required);
+    }
+
+    [Fact]
     public void EnsureSelectedMaterialLinksForTargetBeatsRejectsMissingRequiredLinks()
     {
         var reusable = Beat("1:beat:1");
-        var noReuse = Beat("1:beat:2") with { NoReuseReason = "transition carries no reusable source material" };
+        var noReuse = Beat("1:beat:2") with
+        {
+            SourceBackedDetailTarget = string.Empty,
+            NoReuseReason = "transition carries no reusable source material"
+        };
 
         var exception = Assert.Throws<ArgumentException>(() =>
             ReferenceAnchoredDraftPreflight.EnsureSelectedMaterialLinksForTargetBeats([reusable, noReuse], new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>()));
@@ -114,7 +136,11 @@ public sealed class ReferenceAnchoredDraftPreflightTests
     [Fact]
     public void EnsureSelectedMaterialLinksForTargetBeatsAllowsNoReuseOnlyTargets()
     {
-        var noReuse = Beat("1:beat:2") with { NoReuseReason = "transition carries no reusable source material" };
+        var noReuse = Beat("1:beat:2") with
+        {
+            SourceBackedDetailTarget = string.Empty,
+            NoReuseReason = "transition carries no reusable source material"
+        };
 
         var links = ReferenceAnchoredDraftPreflight.EnsureSelectedMaterialLinksForTargetBeats(
             [noReuse],
@@ -127,7 +153,11 @@ public sealed class ReferenceAnchoredDraftPreflightTests
     public void EnsureCandidateProvenanceAcceptsCurrentSelectedLinksAndApprovedNoReuse()
     {
         var reusable = Beat("1:beat:1");
-        var noReuse = Beat("1:beat:2") with { NoReuseReason = "transition carries no reusable source material" };
+        var noReuse = Beat("1:beat:2") with
+        {
+            SourceBackedDetailTarget = string.Empty,
+            NoReuseReason = "transition carries no reusable source material"
+        };
         var selectedLinks = new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>(StringComparer.Ordinal)
         {
             [reusable.BeatId] = Link(reusable.BeatId, "material-1")
@@ -140,6 +170,24 @@ public sealed class ReferenceAnchoredDraftPreflightTests
                 Candidate(reusable.BeatId, "material-1"),
                 Candidate(noReuse.BeatId, ReferenceDraftProvenanceIds.BuildNoReuseMaterialId(noReuse.BeatId))
             ]);
+    }
+
+    [Fact]
+    public void EnsureCandidateProvenanceRejectsNoReuseForSourceBackedBeat()
+    {
+        var sourceBackedNoReuse = Beat("1:beat:1") with
+        {
+            SourceBackedDetailTarget = "source-backed rain pressure detail",
+            NoReuseReason = "transition carries no reusable source material"
+        };
+
+        var exception = Assert.Throws<ArgumentException>(() =>
+            ReferenceAnchoredDraftPreflight.EnsureCandidateProvenance(
+                [sourceBackedNoReuse],
+                new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>(StringComparer.Ordinal),
+                [Candidate(sourceBackedNoReuse.BeatId, ReferenceDraftProvenanceIds.BuildNoReuseMaterialId(sourceBackedNoReuse.BeatId))]));
+
+        Assert.Contains("source-backed", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

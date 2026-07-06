@@ -26,7 +26,7 @@
 
 ---
 
-Novelist is the desktop AI writing system evolved from GoInk. The original foundations remain: structured creative state, Agent tool use, Skill-based writing methodology, local semantic search, diff approval, and Git history.
+Novelist is the desktop AI writing system evolved from and rebuilt on top of the MIT-licensed GoInk line. The original foundations remain: structured creative state, Agent tool use, Skill-based writing methodology, local semantic search, diff approval, and Git history.
 
 The current direction adds a higher layer. **Skills teach the AI how to write, but long-form writing also needs to prove what may be written before generation and whether the result is usable after generation.** Novelist is turning reference sources, chapter blueprints, material bindings, draft candidates, and audit results into checkable contracts instead of relying only on prompts or Skills.
 
@@ -42,7 +42,7 @@ Novelist is not just a chat shell, and it is not only a pile of prompts or Skill
 | Reference anchor layer | Turns reference sources into traceable materials, requires reviewed blueprints, binds materials, generates candidates, and audits drafts |
 | Human confirmation boundary | Chapter insertion, fact-boundary expansion, high-risk revisions, and final saves require author confirmation |
 
-The repository name still keeps the historical `goink`, but the current code, docs, and product direction use `Novelist`.
+The current project name, product name, and active implementation use `Novelist`. Names such as `goink.md` and `~/.goink` remain only as compatibility paths for existing user data and Skills.
 
 ## Why Skills Are Not Enough
 
@@ -154,7 +154,7 @@ Skills solve method and style. The reference anchor layer solves evidence, bound
 ## Current Implementation Status
 
 - The desktop mainline has moved to `.NET 10 + Photino.NET + React/Vite`.
-- The Go/Wails path is retired and kept only as historical code; new work should not go under `app/`, `internal/`, or `frontend/src/lib/wailsjs/`.
+- The Go/Wails path and old Python implementation are retired from the current tree; new work should not go under `app/`, `internal/`, `python-master/`, or `frontend/src/lib/wailsjs/`.
 - Reference anchor implementation phases 0-10 and phase 13 are complete.
 - Phase 11 continues to refine low-intervention orchestration, revision authorization, stop/recovery semantics, and final insertion UX.
 - Phase 12 continues the workspace-level shared reference corpus and AI-driven material selection model.
@@ -188,7 +188,7 @@ tests/
 
 ## Installation
 
-Download the installer for your platform from [Releases](https://github.com/devhxj/goink/releases):
+Download the installer for your platform from [Releases](https://github.com/devhxj/novelist/releases):
 
 - **Windows**: run the installer
 - **macOS**: open the DMG and drag to Applications
@@ -202,8 +202,8 @@ Windows SmartScreen may warn about an unsigned app; choose "More info" and conti
 
 ```bash
 sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0 curl file unzip
-git clone https://github.com/devhxj/goink
-cd goink
+git clone https://github.com/devhxj/novelist
+cd novelist
 dotnet restore Novelist.slnx
 npm --prefix frontend ci
 make deps
@@ -264,6 +264,17 @@ npm --prefix frontend run test:app
 | Vector Search | sqlite-vec + online Embeddings API or local ONNX |
 | Version Control | Built-in Git |
 | Safety Boundary | SafePath, approval flow, SSRF checks, reference-anchor audit, and manual final insertion |
+
+## License And Origin
+
+Novelist is released under the MIT License; see [LICENSE](LICENSE). The project
+began as a fork of the MIT-licensed GoInk line and has since been substantially
+rebuilt as a `.NET 10 + Photino.NET + React/Vite` application. See [NOTICE](NOTICE)
+for attribution and compatibility boundaries.
+
+This repository does not merge upstream code added after the upstream relicensing
+to AGPL. Keep the MIT copyright and permission notice when using or distributing
+copies or substantial portions of this software.
 
 ## License
 

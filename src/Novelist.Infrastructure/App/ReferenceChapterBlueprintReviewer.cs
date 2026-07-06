@@ -2442,7 +2442,7 @@ internal static class ReferenceChapterBlueprintReviewer
 
     private static bool HasReferenceQueryBeatFit(ReferenceChapterBlueprintBeatPayload beat)
     {
-        if (!string.IsNullOrWhiteSpace(beat.NoReuseReason))
+        if (ReferenceAnchoredDraftPreflight.AllowsNoReuseProvenance(beat))
         {
             return true;
         }

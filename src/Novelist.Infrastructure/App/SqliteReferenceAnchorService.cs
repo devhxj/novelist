@@ -423,6 +423,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
 
             var all = await ReadMaterialsAsync(connection, input.NovelId, anchorIds, cancellationToken);
             var unknownLicenseAnchorIds = await ReadUnknownLicenseAnchorIdsAsync(connection, input.NovelId, anchorIds, cancellationToken);
+            var acceptedFeedbackMaterialIds = await ReadAcceptedFeedbackMaterialIdsAsync(
+                connection,
+                input.NovelId,
+                cancellationToken);
             var embeddingScores = await TryBuildEmbeddingScoresAsync(
                 databasePath,
                 connection,
@@ -437,7 +441,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                     ScoreMaterialComponents(
                         item,
                         input,
-                        embeddingScores.TryGetValue(item.MaterialId, out var embeddingScore) ? embeddingScore : 0)))
+                        embeddingScores.TryGetValue(item.MaterialId, out var embeddingScore) ? embeddingScore : 0,
+                        acceptedFeedbackMaterialIds.Contains(item.MaterialId))))
                 .OrderByDescending(item => item.Score)
                 .ThenBy(item => item.Material.AnchorId)
                 .ThenBy(item => item.Material.MaterialId, StringComparer.Ordinal)
@@ -1722,6 +1727,31 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         return feedback;
     }
 
+    private static async ValueTask<IReadOnlySet<string>> ReadAcceptedFeedbackMaterialIdsAsync(
+        SqliteConnection connection,
+        long novelId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT DISTINCT material_id
+            FROM reference_user_feedback
+            WHERE novel_id = $novel_id
+              AND decision = $decision
+              AND material_id <> '';
+            """;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$decision", ReferenceFeedbackDecisions.Accepted);
+        var materialIds = new HashSet<string>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            materialIds.Add(reader.GetString(0));
+        }
+
+        return materialIds;
+    }
+
     private static async ValueTask<bool> ReuseCandidateExistsAsync(
         SqliteConnection connection,
         long novelId,
@@ -2494,7 +2524,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private static IReadOnlyDictionary<string, double> ScoreMaterialComponents(
         ReferenceMaterialPayload material,
         SearchReferenceMaterialsPayload input,
-        double embeddingScore)
+        double embeddingScore,
+        bool acceptedFeedback)
     {
         var components = new Dictionary<string, double>(StringComparer.Ordinal);
         var normalizedQuery = (input.Query ?? string.Empty).Trim();
@@ -2512,6 +2543,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         AddScore(components, "narrative_duty", NarrativeDutyScore(material, input.NarrativeDuties));
         AddScore(components, "emotion_transition", EmotionTransitionScore(material, input.EmotionTransitions));
         AddScore(components, "embedding", embeddingScore);
+        AddScore(components, "accepted_feedback", acceptedFeedback ? 4.0 : 0);
         AddScore(components, "confidence", material.FunctionConfidence + material.EmotionConfidence * 0.2 + material.PovConfidence * 0.1);
         AddScore(components, "length", Math.Max(0, 1.0 - material.Text.Length / 500.0));
         return components;

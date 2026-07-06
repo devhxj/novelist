@@ -20,7 +20,7 @@ Novelist is a .NET 10 + Photino.NET desktop app with a React/Vite frontend. The 
 
 Use idiomatic C# with nullable annotations and keep contracts in `Novelist.Contracts`, interfaces in `Novelist.Core`, and filesystem/runtime implementations in `Novelist.Infrastructure`. Run .NET commands from the repository root. Frontend work uses TypeScript, React 19, Tailwind CSS 4, shadcn/ui patterns, and ESLint flat config. Run npm commands from `frontend/`. Add owned frontend DTOs or bridge methods under `frontend/src/lib/novelist/` and `src/Novelist.Contracts/`.
 
-Do not revive the retired Go/Wails path: do not add new code under legacy `app/` or `internal/`, do not run Go/Wails build commands, and do not recreate `frontend/src/lib/wailsjs/`. Compatibility behavior belongs in the Photino bridge, .NET contracts, and owned TypeScript adapter.
+Do not revive retired legacy implementations: do not add new code under legacy `app/`, `internal/`, or `python-master/`, do not run Go/Wails or old Python build commands, and do not recreate `frontend/src/lib/wailsjs/`. Compatibility behavior belongs in the Photino bridge, .NET contracts, and owned TypeScript adapter.
 
 ## Testing Guidelines
 
@@ -28,7 +28,7 @@ Prefer focused unit tests in `tests/Novelist.Tests` for pure bridge/tool behavio
 
 ## Commit & Pull Request Guidelines
 
-Recent history uses concise English subjects with typed prefixes: `feat: ...`, `fix: ...`, `test: ...`, `docs: ...`, and occasional `assets:`. Keep subjects specific; avoid emoji and `Co-Authored-By` trailers. PRs should describe behavior changes, list verification commands, link issues when available, and include screenshots or recordings for UI changes.
+Recent history uses concise English subjects with typed prefixes: `feat: ...`, `fix: ...`, `test: ...`, `docs: ...`, and occasional `assets:`. Keep subjects specific; avoid emoji and `Co-Authored-By` trailers. PRs should describe behavior changes, list verification commands, link issues when available, and include screenshots or recordings for UI changes. Release workflow lives in `docs/releases/release-process.md`.
 
 ## Security & Configuration Tips
 
