@@ -997,26 +997,59 @@ function escapeRegExp(value) {
 async function verifySearchWorkflow(page) {
   await page.getByTitle('搜索').click()
   const searchInput = page.getByPlaceholder('搜索人物、地点、时间线、正文...')
+  const searchPanel = page.locator('aside').first()
 
   await expectVisible(page.getByText('输入关键词搜索'), 'search prompt')
 
   await searchInput.fill('没有结果')
   await expectVisible(page.getByText('无搜索结果'), 'empty search state')
 
-  await searchInput.fill('搜索失败')
+  await searchInput.fill('搜索失败后恢复')
   await expectVisible(page.getByText('搜索失败，请稍后重试'), 'search failure state')
-  await page.getByRole('button', { name: '重试' }).click()
-  await expectVisible(page.getByText('无搜索结果'), 'search retry recovery')
+  await searchPanel.getByRole('button', { name: '重试' }).click()
+  await expectVisible(page.getByText('正文匹配 (1)'), 'search retry recovery')
 
   await searchInput.fill('雨夜')
   await expectVisible(page.getByText('正文匹配 (1)'), 'content search group')
   await expectVisible(page.getByText('人物 (1)'), 'character search group')
+  await expectVisible(page.getByText('地点 (1)'), 'location search group')
+  await expectVisible(page.getByText('时间线 (1)'), 'timeline search group')
+  await expectVisible(page.getByText('故事弧 (1)'), 'story arc search group')
+  await expectVisible(page.getByText('偏好 (1)'), 'preference search group')
+  await expectVisible(page.getByText('故事记忆 (1)'), 'story memory search group')
   await expectVisible(page.getByText('语义匹配 (1)'), 'semantic search group')
   await expectVisible(page.getByText('林岚在').first(), 'content result preview')
+  await expectVisible(page.getByText('旧城门调查者'), 'character result preview')
+  await expectVisible(page.getByText('雨夜里暗号被冲淡'), 'location result preview')
+  await expectVisible(page.getByText('杯底留下半圈水痕'), 'timeline result preview')
+  await expectVisible(page.getByText('雨夜场景多用动作间隔承压'), 'preference result preview')
+  await expectVisible(page.getByText('故事记忆只返回章节语义摘要'), 'story memory preview')
+  await expectVisible(page.getByText('86%'), 'rag relevance score')
+  await assertSearchResultContainsRestrictedSourcePath(page)
   await expectHidden(page.getByText('D:\\books\\rain-reference.md'), 'reference source path in global search')
+  await expectHidden(page.getByText('D:\\restricted\\reference-source.md'), 'restricted reference source path in global search')
 
-  await page.locator('aside').getByRole('button', { name: /^雨夜线索/ }).click()
+  await searchPanel.getByRole('button', { name: /^旧城门/ }).click()
+  await expectVisible(page.getByRole('heading', { name: /地点/ }), 'location search navigation')
+  await expectVisible(page.getByRole('main').getByText('雨夜里暗号被冲淡的城门'), 'location search navigation target')
+
+  await page.getByTitle('搜索').click()
+  await searchPanel.getByRole('button', { name: /^雨夜场景规则/ }).click()
+  await expectVisible(page.getByRole('heading', { name: /创作偏好/ }), 'preference search navigation')
+  await expectVisible(page.getByRole('main').getByText('雨夜场景多用动作间隔承压。'), 'preference search navigation target')
+
+  await page.getByTitle('搜索').click()
+  const getContentBeforeStoryMemory = await bridgeCallCount(page, 'GetContent')
+  await searchPanel.getByRole('button', { name: /^故事记忆：旧城门约束/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetContent', getContentBeforeStoryMemory)
+  await expectVisible(page.locator('.monaco-editor').first(), 'story memory opened editor')
+  await expectVisible(page.getByText('第1章 雨夜线索').first(), 'story memory opened chapter')
+
+  await page.getByTitle('搜索').click()
+  await searchPanel.getByRole('button', { name: /^雨夜线索/ }).click()
   await expectVisible(page.getByText('第1章 雨夜线索').first(), 'search opened chapter')
+  await assertBridgeCallCount(page, 'SaveContent', 0)
+  await assertBridgeCallCount(page, 'runtime.shell.openExternal', 0)
 }
 
 async function verifyChatWorkflow(page) {
@@ -1049,6 +1082,7 @@ async function verifyChatWorkflow(page) {
   await expectVisible(page.getByText('模拟模型失败，请重试'), 'chat failure state')
   await page.locator('aside').getByRole('button', { name: '重试' }).click()
   await expectVisible(page.getByText('重试后恢复：模型返回稳定结果，未修改章节正文。'), 'chat retry recovery')
+  await page.getByRole('button', { name: '发送消息' }).waitFor({ state: 'visible', timeout: 12_000 })
 
   await input.fill('生成长文本 Markdown 报告')
   await input.press('Enter')
@@ -1728,6 +1762,14 @@ async function assertSavedEmbeddingProvider(page, expectedProvider) {
   assert.equal(actual, expectedProvider)
 }
 
+async function assertSearchResultContainsRestrictedSourcePath(page) {
+  const hasRestrictedPath = await page.evaluate(() =>
+    window.__appMockState.calls
+      .filter((call) => call.method === 'SearchAll')
+      .some((call) => call.result?.some?.((item) => item.source_path === 'D:\\restricted\\reference-source.md')))
+  assert.equal(hasRestrictedPath, true, 'Expected mocked search payload to include a restricted source path for leakage guardrail coverage.')
+}
+
 async function expectVisible(locator, description) {
   await locator.waitFor({ state: 'visible', timeout: 12_000 }).catch((error) => {
     throw new Error(`Expected visible: ${description}`, { cause: error })
@@ -1755,6 +1797,15 @@ async function waitForBridgeCall(page, method) {
   await page.waitForFunction(
     (method) => window.__appMockState.calls.some((call) => call.method === method),
     method,
+    { timeout: 12_000 },
+  )
+}
+
+async function waitForBridgeCallCountAfter(page, method, previousCount) {
+  await page.waitForFunction(
+    ({ method, previousCount }) =>
+      window.__appMockState.calls.filter((call) => call.method === method).length > previousCount,
+    { method, previousCount },
     { timeout: 12_000 },
   )
 }
@@ -2375,6 +2426,7 @@ function installConfigurableAppMockBridge(options = {}) {
       }
 
       const result = fault?.hasResult ? fault.result : await route(envelope.method, args)
+      state.calls[state.calls.length - 1].result = result
       respond({ kind: 'response', id: envelope.id, ok: true, result })
     } catch (error) {
       respond({
@@ -2940,8 +2992,13 @@ function installConfigurableAppMockBridge(options = {}) {
         state.searchFailureRecovered = true
         throw new Error('Mock search failure')
       }
+      if (query.includes('恢复')) return searchResults()
       return []
     }
+    return searchResults()
+  }
+
+  function searchResults() {
     return [
       {
         type: 'content',
@@ -2972,6 +3029,82 @@ function installConfigurableAppMockBridge(options = {}) {
         match_len: 0,
         relevance: 0.8,
         panel_id: 'characters',
+      },
+      {
+        type: 'location',
+        id: 1,
+        title: '旧城门',
+        subtitle: '城市',
+        chapter_num: 0,
+        file_path: '',
+        match_prefix: '雨夜里暗号被冲淡的城门。',
+        match_hit: '',
+        match_suffix: '',
+        match_position: 0,
+        match_len: 0,
+        relevance: 0.76,
+        panel_id: 'locations',
+      },
+      {
+        type: 'timeline',
+        id: 1,
+        title: '桌面水痕',
+        subtitle: '伏笔',
+        chapter_num: 1,
+        file_path: '',
+        match_prefix: '杯底留下半圈水痕，提示有人刚离开。',
+        match_hit: '',
+        match_suffix: '',
+        match_position: 0,
+        match_len: 0,
+        relevance: 0.74,
+        panel_id: 'timeline',
+      },
+      {
+        type: 'storyarc',
+        id: 1,
+        title: '雨夜调查线',
+        subtitle: 'main',
+        chapter_num: 0,
+        file_path: '',
+        match_prefix: '围绕桌面水痕推进。',
+        match_hit: '',
+        match_suffix: '',
+        match_position: 0,
+        match_len: 0,
+        relevance: 0.7,
+        panel_id: 'storyarcs',
+      },
+      {
+        type: 'preference',
+        id: 2,
+        title: '雨夜场景规则',
+        subtitle: '节奏',
+        chapter_num: 0,
+        file_path: '',
+        match_prefix: '雨夜场景多用动作间隔承压。',
+        match_hit: '',
+        match_suffix: '',
+        match_position: 0,
+        match_len: 0,
+        relevance: 0.72,
+        panel_id: 'preferences',
+      },
+      {
+        type: 'story_memory',
+        id: 4,
+        title: '故事记忆：旧城门约束',
+        subtitle: '第1章',
+        chapter_num: 1,
+        file_path: 'chapters/1.md',
+        match_prefix: '故事记忆只返回章节语义摘要，不暴露受限来源路径。',
+        match_hit: '',
+        match_suffix: '',
+        match_position: 0,
+        match_len: 0,
+        relevance: 0.88,
+        panel_id: 'chapters',
+        source_path: 'D:\\restricted\\reference-source.md',
       },
       {
         type: 'rag',

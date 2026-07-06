@@ -19,11 +19,13 @@ const TYPE_CONFIG: Record<string, { icon: typeof Search; label: string }> = {
   location:  { icon: MapPin, label: '地点' },
   timeline:  { icon: History, label: '时间线' },
   storyarc:  { icon: GitBranch, label: '故事弧' },
+  preference: { icon: FileText, label: '偏好' },
+  story_memory: { icon: Sparkles, label: '故事记忆' },
   chapter:   { icon: FileText, label: '章节' },
   rag:       { icon: Sparkles, label: '语义匹配' },
 }
 
-const GROUP_ORDER = ['content', 'character', 'location', 'chapter', 'timeline', 'storyarc', 'rag']
+const GROUP_ORDER = ['content', 'character', 'location', 'chapter', 'timeline', 'storyarc', 'preference', 'story_memory', 'rag']
 
 export default function SearchPanel({ novelId, query, results, onResultsChange, onNavigateEntity, onNavigateChapter }: Props) {
   const app = useApp()
@@ -115,7 +117,7 @@ export default function SearchPanel({ novelId, query, results, onResultsChange, 
   }
 
   function selectResult(r: SearchResult) {
-    if (r.type === 'content' || r.type === 'rag' || r.type === 'chapter') {
+    if (r.type === 'content' || r.type === 'rag' || r.type === 'story_memory' || r.type === 'chapter') {
       const displayTitle = r.title ? `第${r.chapter_num}章 ${r.title}` : `第${r.chapter_num}章`
       onNavigateChapter(r.file_path, displayTitle, r.chapter_num, r.match_position ?? 0, r.match_len ?? 0)
     } else {
