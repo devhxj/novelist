@@ -1,8 +1,7 @@
-using System.Collections;
 using System.Collections.Concurrent;
-using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Runtime.Loader;
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
 using Novelist.Contracts.Bridge;
 using Novelist.Core.App;
 using Novelist.Core.Bridge;
@@ -25,7 +24,7 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient
 
     public LocalOnnxEmbeddingClient(ILocalOnnxEmbeddingRunnerFactory? runnerFactory = null)
     {
-        _runnerFactory = runnerFactory ?? new ReflectionLocalOnnxEmbeddingRunnerFactory();
+        _runnerFactory = runnerFactory ?? new LocalOnnxEmbeddingRunnerFactory();
     }
 
     public async ValueTask<EmbeddingBatchResult> EmbedAsync(
@@ -736,52 +735,35 @@ public sealed class BertWordPieceTokenizer
     }
 }
 
-internal sealed class ReflectionLocalOnnxEmbeddingRunnerFactory : ILocalOnnxEmbeddingRunnerFactory
+internal sealed class LocalOnnxEmbeddingRunnerFactory : ILocalOnnxEmbeddingRunnerFactory
 {
     public ILocalOnnxEmbeddingRunner Create(LocalOnnxEmbeddingOptions options)
     {
-        return new ReflectionLocalOnnxEmbeddingRunner(options);
+        return new LocalOnnxEmbeddingRunner(options);
     }
 }
 
-internal sealed class ReflectionLocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRunner, IDisposable
+internal sealed class LocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRunner, IDisposable
 {
-    private const string ManagedAssemblyName = "Microsoft.ML.OnnxRuntime";
     private static readonly object NativeResolverLock = new();
-    private static readonly ConcurrentDictionary<Assembly, byte> NativeResolverAssemblies = new();
+    private static readonly ConcurrentDictionary<string, byte> NativeResolverAssemblyKeys = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, byte> NativeSearchDirectories = new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly object _session;
-    private readonly Type _namedOnnxValueType;
-    private readonly Type _denseTensorLongType;
-    private readonly MethodInfo _createLongTensorValue;
-    private readonly MethodInfo _runMethod;
+    private readonly InferenceSession _session;
     private readonly LocalOnnxSessionInputNames _inputNames;
     private readonly object _sync = new();
 
-    public ReflectionLocalOnnxEmbeddingRunner(LocalOnnxEmbeddingOptions options)
+    public LocalOnnxEmbeddingRunner(LocalOnnxEmbeddingOptions options)
     {
         try
         {
-            var assembly = LoadOnnxRuntimeAssembly(options.RuntimePath);
-            RegisterNativeLibraryResolver(assembly, options.RuntimePath);
-            var sessionType = assembly.GetType("Microsoft.ML.OnnxRuntime.InferenceSession", throwOnError: true)!;
-            _namedOnnxValueType = assembly.GetType("Microsoft.ML.OnnxRuntime.NamedOnnxValue", throwOnError: true)!;
-            _denseTensorLongType = assembly.GetType("Microsoft.ML.OnnxRuntime.Tensors.DenseTensor`1", throwOnError: true)!
-                .MakeGenericType(typeof(long));
-            _createLongTensorValue = FindCreateFromTensorMethod(_namedOnnxValueType, _denseTensorLongType);
-            _runMethod = FindRunMethod(sessionType, _namedOnnxValueType);
-            _session = Activator.CreateInstance(sessionType, options.ModelPath)
-                ?? throw ProviderError("Unable to create ONNX inference session.", retryable: false);
+            RegisterNativeLibraryResolver(options.RuntimePath);
+            _session = new InferenceSession(options.ModelPath);
             _inputNames = LocalOnnxSessionInputNames.From(ReadSessionInputNames(_session));
         }
         catch (BridgeRequestException)
         {
             throw;
-        }
-        catch (TargetInvocationException ex) when (ex.InnerException is not null)
-        {
-            throw ProviderError($"ONNX Runtime 初始化失败: {SanitizeRuntimeError(ex.InnerException)}", retryable: false);
         }
         catch (Exception ex)
         {
@@ -797,43 +779,31 @@ internal sealed class ReflectionLocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRu
         lock (_sync)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var dimensions = new[] { inputs.BatchSize, inputs.SequenceLength };
-            var requestItems = new List<object>(3)
+            var requestItems = new List<NamedOnnxValue>(3)
             {
-                CreateInput(_inputNames.InputIdsName, inputs.InputIds, dimensions)
+                CreateInput(_inputNames.InputIdsName, inputs.InputIds, inputs.BatchSize, inputs.SequenceLength)
             };
             if (_inputNames.AttentionMaskName is not null)
             {
-                requestItems.Add(CreateInput(_inputNames.AttentionMaskName, inputs.AttentionMask, dimensions));
+                requestItems.Add(CreateInput(_inputNames.AttentionMaskName, inputs.AttentionMask, inputs.BatchSize, inputs.SequenceLength));
             }
 
             if (_inputNames.TokenTypeIdsName is not null)
             {
-                requestItems.Add(CreateInput(_inputNames.TokenTypeIdsName, inputs.TokenTypeIds, dimensions));
-            }
-
-            var requestValues = Array.CreateInstance(_namedOnnxValueType, requestItems.Count);
-            for (var index = 0; index < requestItems.Count; index++)
-            {
-                requestValues.SetValue(requestItems[index], index);
+                requestItems.Add(CreateInput(_inputNames.TokenTypeIdsName, inputs.TokenTypeIds, inputs.BatchSize, inputs.SequenceLength));
             }
 
             try
             {
-                using var results = _runMethod.Invoke(_session, [requestValues]) as IDisposable
-                    ?? throw ProviderError("ONNX inference did not return disposable results.", retryable: false);
+                using var results = _session.Run(requestItems);
                 var output = ExtractOutput(results);
-                var values = ExtractFloatValues(output.Value);
-                var shape = ExtractTensorDimensions(output.Value);
+                var values = ExtractFloatValues(output.Tensor);
+                var shape = ExtractTensorDimensions(output.Tensor);
                 return ValueTask.FromResult(CreateTensorOutput(output.Name, values, shape, inputs));
             }
             catch (BridgeRequestException)
             {
                 throw;
-            }
-            catch (TargetInvocationException ex) when (ex.InnerException is not null)
-            {
-                throw ProviderError($"ONNX inference failed: {SanitizeRuntimeError(ex.InnerException)}", retryable: false);
             }
             catch (Exception ex)
             {
@@ -844,67 +814,14 @@ internal sealed class ReflectionLocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRu
 
     public void Dispose()
     {
-        (_session as IDisposable)?.Dispose();
+        _session.Dispose();
     }
 
-    private object CreateInput(string name, long[] values, int[] dimensions)
+    private static NamedOnnxValue CreateInput(string name, long[] values, int batchSize, int sequenceLength)
     {
-        try
-        {
-            var tensor = Activator.CreateInstance(_denseTensorLongType, values, dimensions)
-                ?? throw ProviderError("Unable to create ONNX input tensor.", retryable: false);
-            return _createLongTensorValue.Invoke(null, [name, tensor])
-                ?? throw ProviderError("Unable to create ONNX input value.", retryable: false);
-        }
-        catch (BridgeRequestException)
-        {
-            throw;
-        }
-        catch (TargetInvocationException ex) when (ex.InnerException is not null)
-        {
-            throw ProviderError($"Unable to create ONNX input tensor: {SanitizeRuntimeError(ex.InnerException)}", retryable: false);
-        }
-        catch (Exception ex)
-        {
-            throw ProviderError($"Unable to create ONNX input tensor: {SanitizeRuntimeError(ex)}", retryable: false);
-        }
-    }
-
-    private static MethodInfo FindCreateFromTensorMethod(Type namedOnnxValueType, Type denseTensorLongType)
-    {
-        var longTensorMethods = namedOnnxValueType
-            .GetMethods(BindingFlags.Public | BindingFlags.Static)
-            .Where(method => method.Name == "CreateFromTensor" &&
-                method.IsGenericMethodDefinition &&
-                method.GetGenericArguments().Length == 1)
-            .Select(method => method.MakeGenericMethod(typeof(long)))
-            .Where(method =>
-            {
-                var parameters = method.GetParameters();
-                return parameters.Length == 2 &&
-                    parameters[0].ParameterType == typeof(string) &&
-                    parameters[1].ParameterType.IsAssignableFrom(denseTensorLongType);
-            })
-            .ToArray();
-
-        return longTensorMethods
-            .OrderByDescending(method => method.GetParameters()[1].ParameterType == denseTensorLongType)
-            .FirstOrDefault()
-            ?? throw ProviderError("ONNX Runtime does not expose a compatible NamedOnnxValue.CreateFromTensor<T> method.", retryable: false);
-    }
-
-    private static MethodInfo FindRunMethod(Type sessionType, Type namedOnnxValueType)
-    {
-        var requestArrayType = namedOnnxValueType.MakeArrayType();
-        return sessionType
-            .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-            .Where(method => method.Name == "Run")
-            .Select(method => new { Method = method, Parameters = method.GetParameters() })
-            .Where(item => item.Parameters.Length == 1 &&
-                item.Parameters[0].ParameterType.IsAssignableFrom(requestArrayType))
-            .Select(item => item.Method)
-            .FirstOrDefault()
-            ?? throw ProviderError("ONNX Runtime does not expose a compatible InferenceSession.Run method.", retryable: false);
+        var dimensions = new[] { batchSize, sequenceLength };
+        var tensor = new DenseTensor<long>(values.AsMemory(), dimensions);
+        return NamedOnnxValue.CreateFromTensor(name, tensor);
     }
 
     private static string SanitizeRuntimeError(Exception exception)
@@ -915,21 +832,15 @@ internal sealed class ReflectionLocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRu
             : message;
     }
 
-    private static LocalOnnxNamedOutput ExtractOutput(IDisposable results)
+    private static LocalOnnxNamedTensorOutput ExtractOutput(
+        IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results)
     {
-        if (results is not IEnumerable enumerable)
+        var outputs = new List<LocalOnnxNamedTensorOutput>();
+        foreach (var item in results)
         {
-            throw ProviderError("ONNX inference results are not enumerable.", retryable: false);
-        }
-
-        var outputs = new List<LocalOnnxNamedOutput>();
-        foreach (var item in enumerable)
-        {
-            var name = item.GetType().GetProperty("Name")?.GetValue(item) as string ?? string.Empty;
-            var value = item.GetType().GetProperty("Value")?.GetValue(item);
-            if (value is not null)
+            if (item.Value is Tensor<float> tensor)
             {
-                outputs.Add(new LocalOnnxNamedOutput(name, value));
+                outputs.Add(new LocalOnnxNamedTensorOutput(item.Name ?? string.Empty, tensor));
             }
         }
 
@@ -943,64 +854,14 @@ internal sealed class ReflectionLocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRu
             outputs[0];
     }
 
-    private static float[] ExtractFloatValues(object tensor)
+    private static float[] ExtractFloatValues(Tensor<float> tensor)
     {
-        if (tensor is IEnumerable<float> floats)
-        {
-            return floats.ToArray();
-        }
-
-        var toArray = tensor.GetType().GetMethod("ToArray", Type.EmptyTypes);
-        if (toArray?.Invoke(tensor, []) is float[] values)
-        {
-            return values;
-        }
-
-        throw ProviderError("ONNX output tensor is not a float tensor.", retryable: false);
+        return tensor.ToArray();
     }
 
-    private static IReadOnlyList<int> ExtractTensorDimensions(object tensor)
+    private static IReadOnlyList<int> ExtractTensorDimensions(Tensor<float> tensor)
     {
-        try
-        {
-            var dimensions = tensor.GetType().GetProperty("Dimensions")?.GetValue(tensor);
-            return ToIntList(dimensions);
-        }
-        catch (Exception ex) when (ex is NotSupportedException or TargetInvocationException)
-        {
-            return [];
-        }
-    }
-
-    private static IReadOnlyList<int> ToIntList(object? value)
-    {
-        if (value is null)
-        {
-            return [];
-        }
-
-        if (value is IEnumerable<int> ints)
-        {
-            return ints.ToArray();
-        }
-
-        if (value is IEnumerable enumerable)
-        {
-            var result = new List<int>();
-            foreach (var item in enumerable)
-            {
-                if (item is null)
-                {
-                    continue;
-                }
-
-                result.Add(Convert.ToInt32(item, System.Globalization.CultureInfo.InvariantCulture));
-            }
-
-            return result;
-        }
-
-        return [];
+        return tensor.Dimensions.ToArray();
     }
 
     private static LocalOnnxTensorOutput CreateTensorOutput(
@@ -1095,31 +956,9 @@ internal sealed class ReflectionLocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRu
             normalized.Contains("pooled", StringComparison.Ordinal);
     }
 
-    private static Assembly LoadOnnxRuntimeAssembly(string runtimePath)
+    private static void RegisterNativeLibraryResolver(string runtimePath)
     {
-        var candidates = CandidateManagedAssemblies(runtimePath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        foreach (var candidate in candidates)
-        {
-            if (File.Exists(candidate))
-            {
-                return AssemblyLoadContext.Default.LoadFromAssemblyPath(candidate);
-            }
-        }
-
-        try
-        {
-            return Assembly.Load(ManagedAssemblyName);
-        }
-        catch (Exception ex) when (ex is FileNotFoundException or FileLoadException)
-        {
-            throw ProviderError(
-                "本地 ONNX Runtime 不可用：请将 Microsoft.ML.OnnxRuntime.dll 与原生 onnxruntime 库放入应用目录或 ONNX Runtime 路径。",
-                retryable: false);
-        }
-    }
-
-    private static void RegisterNativeLibraryResolver(Assembly assembly, string runtimePath)
-    {
+        var assembly = typeof(InferenceSession).Assembly;
         foreach (var directory in CandidateNativeSearchDirectories(runtimePath, assembly.Location)
             .Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -1131,14 +970,17 @@ internal sealed class ReflectionLocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRu
 
         lock (NativeResolverLock)
         {
-            if (!NativeResolverAssemblies.TryAdd(assembly, 0))
+            var assemblyKey = assembly.FullName ?? assembly.Location;
+            if (!NativeResolverAssemblyKeys.TryAdd(assemblyKey, 0))
             {
                 return;
             }
 
             try
             {
-                NativeLibrary.SetDllImportResolver(assembly, ResolveOnnxRuntimeNativeLibrary);
+                NativeLibrary.SetDllImportResolver(
+                    assembly,
+                    static (libraryName, _, _) => ResolveOnnxRuntimeNativeLibrary(libraryName));
             }
             catch (InvalidOperationException)
             {
@@ -1149,10 +991,7 @@ internal sealed class ReflectionLocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRu
         }
     }
 
-    private static IntPtr ResolveOnnxRuntimeNativeLibrary(
-        string libraryName,
-        Assembly assembly,
-        DllImportSearchPath? searchPath)
+    private static IntPtr ResolveOnnxRuntimeNativeLibrary(string libraryName)
     {
         if (!IsOnnxRuntimeNativeLibrary(libraryName))
         {
@@ -1174,48 +1013,6 @@ internal sealed class ReflectionLocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRu
     {
         return Path.GetFileNameWithoutExtension(libraryName)
             .Contains("onnxruntime", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static IEnumerable<string> CandidateManagedAssemblies(string runtimePath)
-    {
-        if (!string.IsNullOrWhiteSpace(runtimePath))
-        {
-            if (File.Exists(runtimePath) &&
-                string.Equals(Path.GetFileName(runtimePath), ManagedAssemblyName + ".dll", StringComparison.OrdinalIgnoreCase))
-            {
-                yield return Path.GetFullPath(runtimePath);
-            }
-
-            if (Directory.Exists(runtimePath))
-            {
-                foreach (var candidate in CandidateManagedAssemblyPaths(Path.GetFullPath(runtimePath)))
-                {
-                    yield return candidate;
-                }
-            }
-        }
-
-        foreach (var root in new[]
-        {
-            AppContext.BaseDirectory,
-            Path.Combine(AppContext.BaseDirectory, "runtime"),
-            Path.Combine(AppContext.BaseDirectory, "runtime", "onnx")
-        })
-        {
-            foreach (var candidate in CandidateManagedAssemblyPaths(root))
-            {
-                yield return candidate;
-            }
-        }
-    }
-
-    private static IEnumerable<string> CandidateManagedAssemblyPaths(string root)
-    {
-        yield return Path.Combine(root, ManagedAssemblyName + ".dll");
-        yield return Path.Combine(root, "lib", "net10.0", ManagedAssemblyName + ".dll");
-        yield return Path.Combine(root, "lib", "net8.0", ManagedAssemblyName + ".dll");
-        yield return Path.Combine(root, "lib", "net6.0", ManagedAssemblyName + ".dll");
-        yield return Path.Combine(root, "lib", "netstandard2.0", ManagedAssemblyName + ".dll");
     }
 
     private static IEnumerable<string> CandidateNativeSearchDirectories(
@@ -1319,27 +1116,11 @@ internal sealed class ReflectionLocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRu
         yield return "lib" + baseName + ".dylib";
     }
 
-    private static IReadOnlyList<string> ReadSessionInputNames(object session)
+    private static IReadOnlyList<string> ReadSessionInputNames(InferenceSession session)
     {
-        var metadata = session.GetType().GetProperty("InputMetadata")?.GetValue(session);
-        if (metadata is not IEnumerable enumerable)
-        {
-            return [];
-        }
-
-        var names = new List<string>();
-        foreach (var item in enumerable)
-        {
-            var key = item is DictionaryEntry entry
-                ? entry.Key as string
-                : item.GetType().GetProperty("Key")?.GetValue(item) as string;
-            if (!string.IsNullOrWhiteSpace(key))
-            {
-                names.Add(key);
-            }
-        }
-
-        return names;
+        return session.InputMetadata.Keys
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToArray();
     }
 
     private static string NormalizeName(string value)
@@ -1358,7 +1139,7 @@ internal sealed class ReflectionLocalOnnxEmbeddingRunner : ILocalOnnxEmbeddingRu
             retryable: retryable);
     }
 
-    private sealed record LocalOnnxNamedOutput(string Name, object Value);
+    private sealed record LocalOnnxNamedTensorOutput(string Name, Tensor<float> Tensor);
 
     private sealed record LocalOnnxSessionInputNames(
         string InputIdsName,

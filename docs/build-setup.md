@@ -35,33 +35,29 @@ npm --prefix frontend ci
 make deps
 ```
 
-`make deps` 只准备打包所需的 Git 运行时，输出到 `build/runtime/git/`。如果要随包提供本地 ONNX embedding，请将固定 BGE 模型放到 `build/runtime/models/`，将 ONNX Runtime 托管程序集/原生库放到 `build/runtime/onnx/`；发布脚本会分别复制到应用的 `runtime/models/` 与 `runtime/onnx/`。如果要随包提供 sqlite-vec 原生扩展，请将平台目录放到 `build/runtime/sqlite-vec/{rid}/`，例如：
+`make deps` 只准备打包所需的 Git 运行时，输出到 `build/runtime/git/`。ONNX Runtime 和 sqlite-vec 已通过 `Novelist.Infrastructure` 的 NuGet 引用进入项目：`dotnet publish` 会把 `Microsoft.ML.OnnxRuntime.dll`、`onnxruntime.*` 和 `vec0.*` 这些平台运行时资产放进发布输出。随包提供本地 ONNX embedding 时，只需要把固定 BGE 模型放到 `build/runtime/models/`；发布脚本会复制到应用的 `runtime/models/`。
 
 ```text
 build/runtime/
-├── models/
-│   ├── model.onnx                   # Xenova/bge-small-zh-v1.5 onnx/model_int8.onnx
-│   └── vocab.txt
-└── onnx/
-    ├── Microsoft.ML.OnnxRuntime.dll
-    └── onnxruntime.dll              # Windows；Linux/macOS 使用对应 .so/.dylib
+└── models/
+    ├── model.onnx                   # Xenova/bge-small-zh-v1.5 onnx/model_int8.onnx
+    └── vocab.txt
 ```
 
-也可以将 ONNX Runtime 按 NuGet 包解压后的结构放入 `build/runtime/onnx/`，应用会查找 `lib/net*/Microsoft.ML.OnnxRuntime.dll` 和 `runtimes/{rid}/native/onnxruntime.*`。本地 ONNX 模式在设置中选择 `ONNX` 即可，模型固定为 `bge-small-zh-v1.5` int8、512 维、512 token、CLS pooling + L2 归一化；该模式不会回退到在线 Embeddings API。在线 Embeddings API 模式不限制供应商、模型或维度。
+本地 ONNX 模式在设置中选择 `ONNX` 即可，模型固定为 `bge-small-zh-v1.5` int8、512 维、512 token、CLS pooling + L2 归一化；该模式不会回退到在线 Embeddings API。在线 Embeddings API 模式不限制供应商、模型或维度。
 
-sqlite-vec 目录示例：
+通常不需要手工放置 ONNX Runtime 或 sqlite-vec 原生库。仅在需要覆盖 NuGet 自带运行时资产时，才使用这些可选目录或环境变量：
 
 ```text
+build/runtime/onnx/
+└── runtimes/{rid}/native/onnxruntime.{dll|so|dylib}
+
 build/runtime/sqlite-vec/
-├── win-x64/
-│   └── sqlite_vec.dll
-├── linux-x64/
-│   └── sqlite_vec.so
-└── osx-arm64/
-    └── sqlite_vec.dylib
+└── {rid}/
+    └── vec0.{dll|so|dylib}
 ```
 
-也可以在运行时用 `NOVELIST_SQLITE_VEC_PATH` 指向明确的扩展文件。
+也可以在运行时用 `OnnxRuntimePath` 增加 ONNX 原生库搜索目录，或用 `NOVELIST_SQLITE_VEC_PATH` 指向明确的 sqlite-vec 扩展文件。
 
 ## 开发模式
 
@@ -117,9 +113,9 @@ bash scripts/novelist-publish.sh osx-arm64
 - 要求 `frontend/dist/index.html` 已存在；
 - 复制前端静态资源到 `build/bin/novelist/frontend/dist/`；
 - 复制 `build/runtime/git/` 到发布目录；
-- 复制可选的 `build/runtime/onnx/` 到发布目录；
+- 保留 `dotnet publish` 产生的 NuGet 运行时资产，包括 ONNX Runtime 和 sqlite-vec；
 - 复制可选的 `build/runtime/models/` 到发布目录；
-- 复制可选的 `build/runtime/sqlite-vec/` 到发布目录；
+- 复制可选的 `build/runtime/onnx/` 和 `build/runtime/sqlite-vec/` 覆盖目录；
 - 生成 `novelist` 或 `novelist.exe` 入口别名。
 
 平台打包入口：

@@ -326,6 +326,46 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task LocalOnnxEmbeddingClientRunsBundledBgeModelWhenRuntimeAssetsExist()
+    {
+        var modelPath = FindBundledOnnxModelFile("model.onnx");
+        var vocabPath = FindBundledOnnxModelFile("vocab.txt");
+        if (!File.Exists(modelPath) || !File.Exists(vocabPath))
+        {
+            return;
+        }
+
+        var client = new LocalOnnxEmbeddingClient();
+
+        var result = await client.EmbedAsync(
+            ["雨声压低了整条街的呼吸。", "旧城门下发现暗号。"],
+            new EmbeddingRequestOptions(
+                ProviderKey: "onnx",
+                EndpointUrl: "",
+                ApiKey: "",
+                ModelId: BuiltinOnnxEmbeddingModel.ModelId,
+                Dimensions: BuiltinOnnxEmbeddingModel.Dimensions,
+                User: null,
+                ProviderType: "onnx",
+                OnnxModelPath: modelPath,
+                OnnxVocabPath: vocabPath,
+                MaxSequenceLength: BuiltinOnnxEmbeddingModel.MaxSequenceLength,
+                NormalizeEmbeddings: BuiltinOnnxEmbeddingModel.NormalizeEmbeddings),
+            CancellationToken.None);
+
+        Assert.Equal(BuiltinOnnxEmbeddingModel.ModelId, result.Model);
+        Assert.Equal(BuiltinOnnxEmbeddingModel.Dimensions, result.Dimensions);
+        Assert.Equal(2, result.Items.Count);
+        Assert.All(result.Items, item =>
+        {
+            Assert.Equal(BuiltinOnnxEmbeddingModel.Dimensions, item.Vector.Count);
+            Assert.All(item.Vector, value => Assert.False(float.IsNaN(value) || float.IsInfinity(value)));
+            Assert.Equal(1.0, Math.Sqrt(item.Vector.Sum(value => value * value)), precision: 3);
+        });
+        Assert.NotEqual(result.Items[0].Vector, result.Items[1].Vector);
+    }
+
+    [Fact]
     public async Task BridgeEmbeddingHandlersPersistConfigTestConnectionAndExposeSqliteVecStatus()
     {
         var options = CreateOptions();
@@ -480,6 +520,26 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
         Assert.Null(result.CancelRequestId);
         Assert.False(string.IsNullOrWhiteSpace(result.OutboundJson));
         return JsonDocument.Parse(result.OutboundJson);
+    }
+
+    private static string FindBundledOnnxModelFile(string fileName)
+    {
+        foreach (var start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+        {
+            var directory = new DirectoryInfo(start);
+            while (directory is not null)
+            {
+                var candidate = Path.Combine(directory.FullName, "build", "runtime", "models", fileName);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+
+                directory = directory.Parent;
+            }
+        }
+
+        return string.Empty;
     }
 
     private sealed class RecordingEmbeddingClient : IEmbeddingClient

@@ -77,6 +77,14 @@ type MaterialPreviewState = {
   totalPages: number
 }
 
+type MaterialTagForm = {
+  functionTag: string
+  emotionTag: string
+  sceneTag: string
+  povTag: string
+  techniqueTag: string
+}
+
 const EMPTY_ANCHOR_FORM: CreateAnchorForm = {
   title: '',
   author: '',
@@ -113,6 +121,16 @@ const EMPTY_MATERIAL_PREVIEW: MaterialPreviewState = {
   size: 5,
   total: 0,
   totalPages: 1,
+}
+
+function tagFormFromMaterial(material: reference.Material): MaterialTagForm {
+  return {
+    functionTag: material.function_tag,
+    emotionTag: material.emotion_tag,
+    sceneTag: material.scene_tag,
+    povTag: material.pov_tag,
+    techniqueTag: material.technique_tag,
+  }
 }
 
 function sourceKindFromPath(path: string, fallback: string): string {
@@ -178,6 +196,8 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   const [anchorEditForm, setAnchorEditForm] = useState<AnchorForm | null>(null)
   const [expandedAnchorMaterialId, setExpandedAnchorMaterialId] = useState<number | null>(null)
   const [anchorMaterialPreview, setAnchorMaterialPreview] = useState<MaterialPreviewState>(EMPTY_MATERIAL_PREVIEW)
+  const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null)
+  const [materialTagForm, setMaterialTagForm] = useState<MaterialTagForm | null>(null)
   const [blueprintForm, setBlueprintForm] = useState<BlueprintForm>(EMPTY_BLUEPRINT_FORM)
   const [revisionForm, setRevisionForm] = useState<BlueprintRevisionForm>(EMPTY_REVISION_FORM)
   const [materialFilters, setMaterialFilters] = useState<MaterialSearchFilters>(EMPTY_MATERIAL_FILTERS)
@@ -392,6 +412,8 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     if (expandedAnchorMaterialId === anchor.anchor_id) {
       setExpandedAnchorMaterialId(null)
       setAnchorMaterialPreview(EMPTY_MATERIAL_PREVIEW)
+      setEditingMaterialId(null)
+      setMaterialTagForm(null)
       return
     }
 
@@ -416,6 +438,8 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     }))
     if (result) {
       setExpandedAnchorMaterialId(anchor.anchor_id)
+      setEditingMaterialId(null)
+      setMaterialTagForm(null)
       setAnchorMaterialPreview({
         items: result.items ?? [],
         page: result.page,
@@ -423,6 +447,39 @@ export default function ReferenceAnchorView({ novelId }: Props) {
         total: result.total,
         totalPages: result.total_pages,
       })
+    }
+  }
+
+  function beginEditMaterialTags(material: reference.Material) {
+    setEditingMaterialId(material.material_id)
+    setMaterialTagForm(tagFormFromMaterial(material))
+  }
+
+  function cancelEditMaterialTags() {
+    setEditingMaterialId(null)
+    setMaterialTagForm(null)
+  }
+
+  async function saveMaterialTags(material: reference.Material) {
+    if (!materialTagForm) return
+
+    const updated = await run(() => app.UpdateReferenceMaterialTags({
+      novel_id: novelId,
+      material_id: material.material_id,
+      function_tag: materialTagForm.functionTag.trim() || null,
+      emotion_tag: materialTagForm.emotionTag.trim() || null,
+      scene_tag: materialTagForm.sceneTag.trim() || null,
+      pov_tag: materialTagForm.povTag.trim() || null,
+      technique_tag: materialTagForm.techniqueTag.trim() || null,
+      origin: 'ui',
+      note: 'corpus material browser correction',
+    }), '材料标签已校正')
+    if (updated) {
+      setAnchorMaterialPreview(current => ({
+        ...current,
+        items: current.items.map(item => item.material_id === updated.material_id ? updated : item),
+      }))
+      cancelEditMaterialTags()
     }
   }
 
@@ -1099,9 +1156,60 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                                     <span className="min-w-0 truncate text-[11px] text-muted-foreground">
                                       {material.material_id} · {material.material_type} · {material.function_tag || 'untagged'} · {material.pov_tag || 'unknown'}
                                     </span>
-                                    {material.user_verified && <span className="shrink-0 text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
+                                    <span className="flex shrink-0 items-center gap-1">
+                                      {material.user_verified && <span className="text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
+                                      <button
+                                        type="button"
+                                        onClick={() => beginEditMaterialTags(material)}
+                                        disabled={loading}
+                                        className="rounded px-1.5 py-1 text-[11px] leading-none text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                                        aria-label={`校正 ${material.material_id} 的材料标签`}
+                                      >
+                                        校正
+                                      </button>
+                                    </span>
                                   </div>
                                   <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-foreground">{material.text}</p>
+                                  {editingMaterialId === material.material_id && materialTagForm && (
+                                    <div className="mt-2 space-y-2 rounded border border-border bg-background p-2">
+                                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                        <Field label="功能">
+                                          <input value={materialTagForm.functionTag} onChange={event => setMaterialTagForm(form => form ? ({ ...form, functionTag: event.target.value }) : form)} className={inputClass} aria-label="材料功能标签" />
+                                        </Field>
+                                        <Field label="情绪">
+                                          <input value={materialTagForm.emotionTag} onChange={event => setMaterialTagForm(form => form ? ({ ...form, emotionTag: event.target.value }) : form)} className={inputClass} aria-label="材料情绪标签" />
+                                        </Field>
+                                        <Field label="场景">
+                                          <input value={materialTagForm.sceneTag} onChange={event => setMaterialTagForm(form => form ? ({ ...form, sceneTag: event.target.value }) : form)} className={inputClass} aria-label="材料场景标签" />
+                                        </Field>
+                                        <Field label="POV">
+                                          <input value={materialTagForm.povTag} onChange={event => setMaterialTagForm(form => form ? ({ ...form, povTag: event.target.value }) : form)} className={inputClass} aria-label="材料 POV 标签" />
+                                        </Field>
+                                        <Field label="技法">
+                                          <input value={materialTagForm.techniqueTag} onChange={event => setMaterialTagForm(form => form ? ({ ...form, techniqueTag: event.target.value }) : form)} className={inputClass} aria-label="材料技法标签" />
+                                        </Field>
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            void saveMaterialTags(material)
+                                          }}
+                                          disabled={loading}
+                                          className="inline-flex items-center gap-1.5 rounded bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                                        >
+                                          <Check className="h-3.5 w-3.5" />保存标签
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={cancelEditMaterialTags}
+                                          className="inline-flex items-center gap-1.5 rounded bg-secondary px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/80"
+                                        >
+                                          <X className="h-3.5 w-3.5" />取消
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
                                   {materialScoreComponents(material).length > 0 && (
                                     <div className="mt-2 flex flex-wrap gap-1">
                                       {materialScoreComponents(material).slice(0, 4).map(([name, value]) => (

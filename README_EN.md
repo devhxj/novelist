@@ -6,11 +6,14 @@
 </div>
 
 <p align="center">
-  <img src="assets/logo-dark.svg#gh-dark-mode-only" alt="Novelist reference-anchored AI writing system" />
-  <img src="assets/logo-light.svg#gh-light-mode-only" alt="Novelist reference-anchored AI writing system" />
+  <img src="assets/logo-dark.svg#gh-dark-mode-only" alt="Novelist" />
+  <img src="assets/logo-light.svg#gh-light-mode-only" alt="Novelist" />
 </p>
 
-<h1 align="center">Novelist Reference-Anchored AI Long-Form Writing System<br><sub>Structured Memory × Skill Methodology × Blueprint Review × Draft Audit</sub></h1>
+<h1 align="center">Novelist</h1>
+<p align="center">
+  A local-first AI workbench for long-form fiction: structured memory, Agent tools, Skill methodology, reference anchoring, draft audit, and version history.
+</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/.NET-10.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" alt=".NET 10" />
@@ -26,38 +29,24 @@
 
 ---
 
-Novelist is a desktop AI writing system built around structured creative state, Agent tool use, Skill-based writing methodology, local semantic search, diff approval, and Git history.
+Novelist is built for long-form fiction projects. It is not just a chat shell, and it is not only a collection of prompts or Skills. It turns a novel project into queryable, maintainable, and auditable structured state, so AI can assist the work while critical writes still stay under author control.
 
-The current direction adds a higher layer. **Skills teach the AI how to write, but long-form writing also needs to prove what may be written before generation and whether the result is usable after generation.** Novelist is turning reference sources, chapter blueprints, material bindings, draft candidates, and audit results into checkable contracts instead of relying only on prompts or Skills.
+## Core Capabilities
 
-## Current Positioning
-
-Novelist is not just a chat shell, and it is not only a pile of prompts or Skills. It is a local-first long-form fiction workbench:
-
-| Layer | Responsibility |
+| Capability | Description |
 |---|---|
-| Structured creative state | Tracks characters, relationships, foreshadowing, arcs, locations, reader knowledge, preferences, and chapter plans |
-| Agent tools | Let the AI query, modify, and maintain project state during a conversation instead of only emitting text |
-| Skill methodology | Provides scene beats, dialogue subtext, pacing control, hooks, revision polish, de-AI flavoring, and other writing methods |
-| Reference anchor layer | Turns reference sources into traceable materials, requires reviewed blueprints, binds materials, generates candidates, and audits drafts |
-| Human confirmation boundary | Chapter insertion, fact-boundary expansion, high-risk revisions, and final saves require author confirmation |
+| Structured creative state | Manages characters, relationships, foreshadowing, arcs, locations, reader knowledge, preferences, and chapter plans |
+| Agent tool use | Lets AI inspect chapters, search prior text, update project state, maintain preferences, and generate candidates |
+| Skill methodology | Markdown Skills provide scene beats, dialogue subtext, pacing, hooks, revision, de-AI polishing, and other workflows |
+| Local semantic search | RAG state lives in SQLite/sqlite-vec; embeddings use an online OpenAI-compatible API or local ONNX |
+| Diff approval and history | Chapter edits go through explicit save and approval boundaries, with Git history for project changes |
+| Reference anchoring | Turns sources, blueprints, material bindings, draft candidates, and audit results into checkable records |
 
-The current project name, product name, and active implementation use `Novelist`. The story-state file is `novelist.md`, and the user Skill tool path is `~/.novelist/skills/`.
+## Reference Anchoring
 
-## Why Skills Are Not Enough
+The reference anchor layer answers: what may the AI write, what should it be based on, and is the result safe to use? Skills handle method and style. Reference anchoring handles sources, factual boundaries, POV, blueprint quality, material binding, and draft audit.
 
-Skills improve method and style, but they cannot reliably enforce these questions:
-
-- whether a reference source is usable, quotable, or adaptable;
-- whether generated content crosses known-fact or forbidden-fact boundaries;
-- whether the POV leaks knowledge the current viewpoint should not have;
-- whether a chapter blueprint only describes camera blocking instead of causality, emotion, narrative distance, and character-state change;
-- whether a draft candidate comes from an approved blueprint and bound materials;
-- whether the AI bypassed author confirmation and directly mutated chapter text.
-
-The reference anchor layer handles these hard constraints. It turns "does it resemble the source", "can this be adapted", "is there factual risk", and "may this be inserted" into structured records and deterministic checks. The AI may propose; it cannot bypass the gates.
-
-## Default Reference-Anchored Workflow
+Default flow:
 
 ```text
 author confirms source policy, chapter target, known facts, and forbidden facts
@@ -68,103 +57,68 @@ author confirms source policy, chapter target, known facts, and forbidden facts
   -> retrieve and bind reference materials
   -> generate beat-level draft candidates
   -> run draft audit
-  -> stop at final insertion confirmation
+  -> stop at final chapter-insertion confirmation
 ```
 
-The workflow automates low-risk mechanical stages but stops for:
+The workflow stops for author confirmation when:
 
-- source, license, or fact-boundary confirmation;
-- stale blueprints, missing materials, weak retrieval, or material hash mismatch;
-- failed blueprint review requiring revision;
-- high rewrite-level, POV, fact, or audit risk;
-- final chapter insertion.
+- source, license, known-fact, or forbidden-fact boundaries are unclear;
+- the blueprint is stale, materials are missing, retrieval is weak, or material hashes mismatch;
+- blueprint review fails and needs revision;
+- rewrite level, POV, fact boundaries, or audit findings are high risk;
+- a candidate draft is ready to be inserted into chapter prose.
 
-This flow does not automatically call `SaveContent` or write chapter prose. The AI can propose candidates and revisions; final writing still goes through author-confirmed editing and saving.
+The reference anchor workflow does not automatically call `SaveContent` or write chapter prose. AI may propose candidates and revisions; final insertion still goes through author-confirmed editing and saving.
 
-## Original Writing Capabilities Remain
+## Custom Skills
 
-### Structured Creative State
+Skills are writing-methodology modules. Each Skill is a Markdown file with YAML frontmatter, with three override layers and three activation modes:
 
-Novelist tracks character profiles, relationships, foreshadowing, arcs, location graphs, reader knowledge, and writing preferences. Long projects do not need the same world and character state restated in every conversation; the Agent can read and maintain structured data through tools.
+| Mechanism | Description |
+|---|---|
+| Override order | Novel-level `skills/<name>.md` > user-level `~/.novelist/skills/<name>.md` > read-only built-in `/builtin/skills/<name>.md` |
+| Activation modes | `auto` can be invoked by AI and by user `/` commands; `manual` only supports user `/` commands; `always` is injected at session start |
+| State file | `novelist.md` stores story state so the Agent can recover context and maintain long-term continuity |
 
-### Agent-Led Lookup, Editing, And Maintenance
-
-The system exposes structured tools to the Agent. During a conversation the AI can query characters, inspect chapters, search prior text, modify state, update preferences, and generate or revise content. After writing, maintenance prompts still ask the Agent to check character changes, foreshadowing status, arc progression, and reader knowledge.
-
-### Local Semantic Search
-
-RAG index and retrieval state live locally in SQLite/sqlite-vec. Embeddings can use an OpenAI-compatible online API or built-in ONNX mode. ONNX mode uses the bundled fixed `bge-small-zh-v1.5` int8 model and does not silently fall back to online APIs.
-
-### Diff Approval And Git History
-
-The AI should not overwrite chapter text directly. Chapter edits go through diff approval and explicit save paths, and project changes have Git history for rollback.
-
-## Skill System
-
-Skills are writing methodology modules. Each Skill is a `.md` file with YAML frontmatter and markdown content, supporting three override layers and three activation modes.
-
-### Three Layers
-
-Same-name Skills override by **Novel > User > Built-in** priority and hot-reload after edits.
-
-| Layer | Storage | Scope | Editable |
-|---|---|---|---|
-| Built-in | Read-only bundled | All novels | No |
-| User | data-dir `skills/`, with tool path `~/.novelist/skills/` | All novels | Yes |
-| Novel | `{novel}/skills/` | Current novel | Yes |
-
-### Three Modes
-
-| Mode | AI auto-invoke | User `/` trigger | Injected at session start | Listed in catalog |
-|---|---|---|---|---|
-| Smart `auto` | Yes | Yes | No | Yes |
-| Command `manual` | No | Yes | No | No |
-| Always-on `always` | Yes | Yes | Yes | No |
-
-Create a `.md` file and it becomes a new Skill:
+Minimal Skill file:
 
 ```markdown
 ---
-name: My Writing Process
-description: Custom personal creative workflow
-category: Custom
+name: Pacing Control
+description: Control scene progression, pauses, and suspense release
+category: Writing Method
 mode: auto
 ---
 
-# Markdown content
+# Usage
+
+Adjust narrative pacing according to the current chapter target.
 ```
 
-Skills solve method and style. The reference anchor layer solves evidence, boundaries, and auditability. They are stacked, not competing.
+## Current Status
 
-## Visualized State
+| Area | Status |
+|---|---|
+| Desktop mainline | Migrated to `.NET 10 + Photino.NET + React/Vite` |
+| Reference anchoring | Phases 0-11 and Phase 13 are complete; Phase 12 continues workspace-level shared reference corpora and AI-driven material selection |
+| Frontend build | Vite 8/Rolldown splits the app shell, workspace, Monaco, Markdown, Mermaid, and graph dependencies |
+| Retired implementations | Go/Wails and the old Python path are retired; new work should not go under `app/`, `internal/`, `python-master/`, or `frontend/src/lib/wailsjs/` |
+
+See [Release Notes](docs/releases/release-notes.md) for the full change history.
+
+## Screenshots
 
 <p align="center">
-  <img src="assets/arc-demo.png" alt="Story Arcs" />
+  <img src="assets/write-demo.png" width="80%" alt="Chapter writing" />
 </p>
 <p align="center">
-  <img src="assets/location-demo.png" alt="Location Graph" />
+  <img src="assets/arc-demo.png" width="48%" alt="Story arcs" />
+  <img src="assets/location-demo.png" width="48%" alt="Location graph" />
 </p>
 <p align="center">
-  <img src="assets/preferences-demo.png" alt="Writing Preferences" />
+  <img src="assets/preferences-demo.png" width="48%" alt="Writing preferences" />
+  <img src="assets/skill-demo.png" width="48%" alt="Skill system" />
 </p>
-<p align="center">
-  <img src="assets/skill-demo.png" width="80%" alt="Skill System" />
-</p>
-
-## Current Implementation Status
-
-- The desktop mainline has moved to `.NET 10 + Photino.NET + React/Vite`.
-- The Go/Wails path and old Python implementation are retired from the current tree; new work should not go under `app/`, `internal/`, `python-master/`, or `frontend/src/lib/wailsjs/`.
-- Reference anchor implementation phases 0-11 and phase 13 are complete.
-- Phase 11 low-intervention orchestration, revision authorization, high-risk stops, and final-insertion boundaries are closed at the current implementation boundary.
-- Phase 12 continues the workspace-level shared reference corpus and AI-driven material selection model.
-
-Detailed design:
-
-- [Reference Anchor Technical Baseline](docs/reference-anchor-layer-plan.md)
-- [Reference Anchor Implementation Plan](docs/reference-anchor-implementation-plan.md)
-- [Photino Bridge Contract](docs/novelist-photino-bridge-contract.md)
-- [Release Notes](docs/releases/release-notes.md)
 
 ## Project Structure
 
@@ -194,11 +148,20 @@ Download the installer for your platform from [Releases](https://github.com/devh
 - **macOS**: open the DMG and drag to Applications
 - **Linux**: run the AppImage
 
-An LLM API key is required. Built-in provider templates include DeepSeek, GLM, and MiMo, and OpenAI-compatible endpoints are supported. Semantic search can use an online Embeddings API or the built-in ONNX mode. Installers include the desktop host, frontend assets, and Git runtime. No Python, Node.js, or external database is required.
+An LLM API key is required. Built-in provider templates include DeepSeek, GLM, and MiMo, and OpenAI-compatible endpoints are supported. Installers include the desktop host, frontend assets, and Git runtime. No Python, Node.js, or external database is required.
+
+Semantic search can use an online Embeddings API or the built-in ONNX mode. ONNX mode uses the bundled fixed `bge-small-zh-v1.5` int8 model and does not silently fall back to online APIs.
 
 Windows SmartScreen may warn about an unsigned app; choose "More info" and continue if you trust the build.
 
 ## Build From Source
+
+Requirements:
+
+- .NET 10 SDK
+- Node.js/npm
+- GNU make and bash
+- GTK/WebKit dependencies for Linux desktop runtime
 
 ```bash
 sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0 curl file unzip
@@ -208,74 +171,59 @@ dotnet restore Novelist.slnx
 npm --prefix frontend ci
 make deps
 make build
-make dev
 ```
 
-`make dev` does not build frontend assets. For desktop development, run:
+Start desktop development mode:
 
 ```bash
 npm --prefix frontend run build
 make dev
 ```
 
-For frontend-only debugging:
+Frontend-only debugging:
 
 ```bash
 make frontend-dev
 ```
 
-This starts Vite only, so desktop bridge APIs are unavailable. To use the bridge against Vite, launch the Photino host with `--start-url=http://localhost:5173/`.
+`make frontend-dev` only starts Vite, so desktop bridge APIs are unavailable. To use the bridge against Vite, launch the Photino host with `--start-url=http://localhost:5173/`.
 
-## Verification
+## Common Commands
 
-Backend tests:
-
-```bash
-dotnet test Novelist.slnx --no-restore -v minimal
-```
-
-Frontend build, lint, and real-browser mock-bridge regression:
-
-```bash
-npm --prefix frontend run verify
-```
-
-Deep reference-anchor workflow:
-
-```bash
-npm --prefix frontend run test:reference-anchor
-```
-
-App-wide frontend smoke:
-
-```bash
-npm --prefix frontend run test:app
-```
-
-## Tech Stack
-
-| Layer | Technology |
+| Command | Purpose |
 |---|---|
-| Desktop | Photino.NET + .NET 10 |
-| Agent Engine | Microsoft Agent Framework + OpenAI-compatible streaming + structured tools |
-| Frontend | React 19 + TypeScript 6 + Tailwind CSS 4 + shadcn/ui |
-| Editor | Monaco Editor with locally bundled assets |
-| Storage | Filesystem JSON stores + SQLite |
-| Vector Search | sqlite-vec + online Embeddings API or local ONNX |
-| Version Control | Built-in Git |
-| Safety Boundary | SafePath, approval flow, SSRF checks, reference-anchor audit, and manual final insertion |
+| `make deps` | Download or reuse the packaged Git runtime |
+| `make dev` | Start the Photino/.NET desktop app |
+| `make build` | Build frontend assets, prepare runtime dependencies, and publish desktop output |
+| `make publish RID=win-x64` | Publish a self-contained build for a target RID |
+| `make package-windows` | Build the Windows installer |
+| `make package-linux` | Build the Linux AppImage |
+| `make package-macos` | Build the macOS DMG |
+| `npm --prefix frontend run build` | Run TypeScript build and Vite production build |
+| `npm --prefix frontend run lint` | Run frontend ESLint |
+| `npm --prefix frontend run verify` | Run frontend build, lint, reference-anchor workflow, and app-wide smoke test |
+| `dotnet test Novelist.slnx --no-restore -v minimal` | Run the .NET test suite |
+
+## Quality Boundaries
+
+When developing or reviewing this codebase, preserve these boundaries:
+
+- chapter prose writes must require author confirmation; reference-anchor orchestration must not directly save prose;
+- filesystem access must keep SafePath and sandbox checks;
+- web and external-resource tools must keep SSRF protection;
+- user-data migration must be copy-first, leave the source untouched, and write a manifest;
+- API keys, local model paths, and user data must stay out of git;
+- runtime Git and local ONNX model files belong in `build/runtime/` or app data/config paths; ONNX Runtime and sqlite-vec ship through NuGet publish assets, and any override libraries must stay out of source folders.
+
+## Documentation
+
+- [Reference Anchor Technical Baseline](docs/reference-anchor-layer-plan.md)
+- [Reference Anchor Implementation Plan](docs/reference-anchor-implementation-plan.md)
+- [Photino Bridge Contract](docs/novelist-photino-bridge-contract.md)
+- [Release Notes](docs/releases/release-notes.md)
 
 ## License And Origin
 
-Novelist is released under the MIT License; see [LICENSE](LICENSE). The project
-began as a fork of the MIT-licensed GoInk line and has since been substantially
-rebuilt as a `.NET 10 + Photino.NET + React/Vite` application. See [NOTICE](NOTICE)
-for attribution and compatibility boundaries.
+Novelist is released under the MIT License; see [LICENSE](LICENSE). The project began as a fork of the MIT-licensed GoInk line and has since been substantially rebuilt as a `.NET 10 + Photino.NET + React/Vite` application. See [NOTICE](NOTICE) for attribution and compatibility boundaries.
 
-This repository does not merge upstream code added after the upstream relicensing
-to AGPL. Keep the MIT copyright and permission notice when using or distributing
-copies or substantial portions of this software.
-
-## License
-
-MIT
+This repository does not merge upstream code added after the upstream relicensing to AGPL. Keep the MIT copyright and permission notice when using or distributing copies or substantial portions of this software.

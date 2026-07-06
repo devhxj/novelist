@@ -144,6 +144,16 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectVisible(firstMaterial.getByText('mat-001'), 'anchor material preview id')
   await expectVisible(firstMaterial.getByText('把杯子推远，杯底在木桌上留下半圈水痕。'), 'anchor material preview text')
   await expectVisible(firstMaterial.getByText('lexical 0.92'), 'anchor material preview score component')
+  await firstMaterial.getByRole('button', { name: /校正 mat-001 的材料标签/ }).click()
+  await firstMaterial.getByLabel('材料功能标签').fill('object_subtext')
+  await firstMaterial.getByLabel('材料情绪标签').fill('contained_tension')
+  await firstMaterial.getByLabel('材料场景标签').fill('rain_threshold')
+  await firstMaterial.getByLabel('材料 POV 标签').fill('limited_close')
+  await firstMaterial.getByLabel('材料技法标签').fill('delayed_reaction')
+  await firstMaterial.getByRole('button', { name: /^保存标签$/ }).click()
+  await expectVisible(page.getByText('材料标签已校正'), 'material tag update message')
+  await expectVisible(firstMaterial.getByText('object_subtext'), 'corrected material function tag')
+  await expectVisible(firstMaterial.getByText('limited_close'), 'corrected material pov tag')
   await expectVisible(page.getByText('第 1 / 2 页 · 共 6 条'), 'anchor material preview pagination summary')
   await page.getByRole('button', { name: /下一页材料/ }).click()
   await expectVisible(page.getByText('mat-006'), 'anchor material preview second page id')
@@ -258,6 +268,7 @@ async function verifyBridgeCalls(page) {
     'CreateReferenceAnchor',
     'PromoteReferenceAnchorToWorkspaceCorpus',
     'UpdateReferenceAnchorMetadata',
+    'UpdateReferenceMaterialTags',
     'RebuildReferenceAnchor',
     'SearchReferenceMaterials',
     'GenerateReferenceChapterBlueprint',
@@ -297,6 +308,18 @@ async function verifyBridgeCalls(page) {
   assert.equal(metadataCall.args[0].visibility, 'workspace', 'anchor metadata update payload must preserve workspace visibility')
   assert.equal(metadataCall.args[0].source_trust, 'user_verified', 'anchor metadata update payload must include source trust')
   assert.deepEqual(metadataCall.args[0].user_tags, ['雨夜', '动作克制', '精选'], 'anchor metadata update payload must include user tags')
+
+  const materialTagCall = calls.find((call) => call.method === 'UpdateReferenceMaterialTags')
+  assert(materialTagCall, 'missing UpdateReferenceMaterialTags call')
+  assert.equal(materialTagCall.args[0].novel_id, 42, 'material tag update payload must include novel id')
+  assert.equal(materialTagCall.args[0].material_id, 'mat-001', 'material tag update payload must include material id')
+  assert.equal(materialTagCall.args[0].function_tag, 'object_subtext', 'material tag update payload must include function tag')
+  assert.equal(materialTagCall.args[0].emotion_tag, 'contained_tension', 'material tag update payload must include emotion tag')
+  assert.equal(materialTagCall.args[0].scene_tag, 'rain_threshold', 'material tag update payload must include scene tag')
+  assert.equal(materialTagCall.args[0].pov_tag, 'limited_close', 'material tag update payload must include pov tag')
+  assert.equal(materialTagCall.args[0].technique_tag, 'delayed_reaction', 'material tag update payload must include technique tag')
+  assert.equal(materialTagCall.args[0].origin, 'ui', 'material tag update payload must mark UI origin')
+  assert.equal(materialTagCall.args[0].note, 'corpus material browser correction', 'material tag update payload must include correction note')
 
   const startCall = calls.find((call) => call.method === 'StartReferenceOrchestrationRun')
   assert(startCall, 'missing StartReferenceOrchestrationRun call')
@@ -553,6 +576,7 @@ function installReferenceAnchorMockBridge() {
       case 'CreateReferenceAnchor': return createReferenceAnchor(args[0])
       case 'PromoteReferenceAnchorToWorkspaceCorpus': return promoteReferenceAnchor(args[0])
       case 'UpdateReferenceAnchorMetadata': return updateReferenceAnchorMetadata(args[0])
+      case 'UpdateReferenceMaterialTags': return updateReferenceMaterialTags(args[0])
       case 'RebuildReferenceAnchor': return rebuildReferenceAnchor(args[1])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
       case 'GetReferenceChapterBlueprints': return Object.values(state.blueprints).map(toBlueprintSummary)
@@ -723,6 +747,23 @@ function installReferenceAnchorMockBridge() {
     }
 
     return pagedResult([1, 2, 3, 4, 5].map(material), page, size, 6)
+  }
+
+  function updateReferenceMaterialTags(input) {
+    return {
+      ...materialById(input.material_id),
+      function_tag: input.function_tag ?? 'emotion_evidence',
+      emotion_tag: input.emotion_tag ?? 'restrained',
+      scene_tag: input.scene_tag ?? 'rain_room',
+      pov_tag: input.pov_tag ?? 'close',
+      technique_tag: input.technique_tag ?? 'subtext',
+      user_verified: true,
+    }
+  }
+
+  function materialById(materialId) {
+    const match = String(materialId).match(/(\d+)$/)
+    return material(match ? Number.parseInt(match[1], 10) : 1)
   }
 
   function material(index = 1) {
