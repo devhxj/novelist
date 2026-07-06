@@ -353,6 +353,7 @@ async function verifyBootstrapStates(browser, url, consoleErrors, pageErrors) {
   await expectVisible(corruptRecoveryPage.getByRole('heading', { name: '启动检查失败' }), 'corrupt startup failure heading')
   await expectVisible(corruptRecoveryPage.getByText(/Bridge response is missing an ok flag/), 'corrupt startup failure detail')
   await corruptRecoveryPage.screenshot({ path: path.join(outputDir, 'app-00-corrupt-startup.png'), fullPage: true })
+  await corruptRecoveryPage.evaluate(() => window.__appMockState.clearFaultQueue?.('IsInitialized'))
   await corruptRecoveryPage.getByRole('button', { name: '重试' }).click()
   await expectVisible(corruptRecoveryPage.getByText('全局回归小说'), 'workspace after corrupt startup retry')
   await expectVisible(corruptRecoveryPage.getByText('AI 对话'), 'chat panel after corrupt startup retry')
@@ -509,6 +510,65 @@ async function writePageDiagnostics(page, artifactLabel) {
   }
 }
 
+function activityButton(page, label) {
+  return page.locator('nav').first().getByRole('button', { name: label })
+}
+
+async function getActivityStates(page) {
+  return await page.locator('nav').first().getByRole('button').evaluateAll((buttons) =>
+    buttons.map((button) => {
+      const title = button.getAttribute('title') ?? button.getAttribute('aria-label') ?? ''
+      const label = title.replace(/（即将推出）$/, '')
+      return {
+        label,
+        isActiveBackground: button.classList.contains('bg-muted'),
+        hasActiveIndicator: Array.from(button.querySelectorAll('span')).some((span) =>
+          span.classList.contains('bg-primary')),
+      }
+    }),
+  )
+}
+
+async function assertActiveActivity(page, label) {
+  await page.waitForFunction(
+    (expectedLabel) => {
+      const states = Array.from(document.querySelectorAll('nav:first-of-type button')).map((button) => {
+        const title = button.getAttribute('title') ?? button.getAttribute('aria-label') ?? ''
+        return {
+          label: title.replace(/（即将推出）$/, ''),
+          active: button.classList.contains('bg-muted') ||
+            Array.from(button.querySelectorAll('span')).some((span) => span.classList.contains('bg-primary')),
+        }
+      })
+      const active = states.filter((state) => state.active)
+      return active.length === 1 && active[0].label === expectedLabel
+    },
+    label,
+    { timeout: 12_000 },
+  ).catch((error) => {
+    throw new Error(`Expected active activity: ${label}`, { cause: error })
+  })
+
+  const states = await getActivityStates(page)
+  const activeStates = states.filter((state) => state.isActiveBackground || state.hasActiveIndicator)
+  assert.equal(activeStates.length, 1, `Expected exactly one active activity, got ${activeStates.map((state) => state.label).join(', ') || 'none'}.`)
+  assert.equal(activeStates[0].label, label, `Expected active activity ${label}, got ${activeStates[0].label}.`)
+  assert.equal(activeStates[0].isActiveBackground, true, `Expected ${label} to have active background.`)
+  assert.equal(activeStates[0].hasActiveIndicator, true, `Expected ${label} to have active indicator.`)
+}
+
+async function assertNoActiveActivity(page, description) {
+  const activeStates = (await getActivityStates(page))
+    .filter((state) => state.isActiveBackground || state.hasActiveIndicator)
+  assert.deepEqual(activeStates.map((state) => state.label), [], `Expected no active activity for ${description}.`)
+}
+
+async function assertHeaderButtonActive(page, label) {
+  const isActive = await page.locator('header').getByRole('button', { name: label }).evaluate((button) =>
+    button.classList.contains('text-foreground'))
+  assert.equal(isActive, true, `Expected header button ${label} to be active.`)
+}
+
 async function verifyShellNavigation(page) {
   await clickActivity(page, '书架')
   await expectVisible(page.getByRole('button', { name: '新建作品' }).last(), 'bookshelf create action')
@@ -522,53 +582,82 @@ async function verifyShellNavigation(page) {
   await expectVisible(page.getByText('第1章 雨夜线索').first(), 'editor tab from shell navigation')
   await expectVisible(page.locator('.monaco-editor').first(), 'editor surface from shell navigation')
   await expectVisible(page.getByPlaceholder('输入消息，按 / 调用技能...'), 'chat panel from shell navigation')
+  await assertSelectedChapterPath(page, 'chapters/1.md')
+  await assertActiveTabTitle(page, '第1章 雨夜线索')
 
   await clickActivity(page, '搜索')
   await expectVisible(page.getByPlaceholder('搜索人物、地点、时间线、正文...'), 'search sidebar from shell navigation')
   await expectVisible(page.getByText('输入关键词搜索'), 'search prompt from shell navigation')
 
   await clickActivity(page, '参考锚定')
+  await expectVisible(page.locator('aside').getByText('即将推出'), 'reference sidebar placeholder from shell navigation')
   await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'reference panel from shell navigation')
 
   await clickActivity(page, '角色')
+  await expectVisible(page.locator('aside').getByText(/角色 \(\d+\)/), 'characters sidebar from shell navigation')
+  await expectVisible(page.locator('aside').getByPlaceholder('搜索角色...'), 'characters sidebar search from shell navigation')
   await expectVisible(page.getByRole('heading', { name: /角色/ }), 'characters panel from shell navigation')
 
   await clickActivity(page, '地点')
+  await expectVisible(page.locator('aside').getByText(/地点 \(\d+\)/), 'locations sidebar from shell navigation')
   await expectVisible(page.getByRole('heading', { name: /地点/ }), 'locations panel from shell navigation')
 
   await clickActivity(page, '弧线')
+  await expectVisible(page.locator('aside').getByText(/叙事弧线 \(\d+\)/), 'story arcs sidebar from shell navigation')
+  await expectVisible(page.locator('aside').getByPlaceholder('搜索弧线...'), 'story arcs sidebar search from shell navigation')
   await expectVisible(page.getByRole('heading', { name: /弧线节点/ }), 'story arcs panel from shell navigation')
 
   await clickActivity(page, '时间线')
+  await expectVisible(page.locator('aside').getByText(/伏笔\/指令 \(\d+\)/), 'timeline sidebar from shell navigation')
+  await expectVisible(page.locator('aside').getByPlaceholder('搜索时间线...'), 'timeline sidebar search from shell navigation')
   await expectVisible(page.getByRole('heading', { name: /章节计划/ }), 'timeline panel from shell navigation')
 
   await clickActivity(page, '偏好')
+  await expectVisible(page.locator('aside').getByText(/创作偏好 \(\d+\)/), 'preferences sidebar from shell navigation')
+  await expectVisible(page.locator('aside').getByPlaceholder('搜索偏好...'), 'preferences sidebar search from shell navigation')
   await expectVisible(page.getByRole('heading', { name: /创作偏好/ }), 'preferences panel from shell navigation')
 
   await clickActivity(page, '读者视角')
+  await expectVisible(page.locator('aside').getByText(/读者视角 \(\d+\)/), 'reader sidebar from shell navigation')
+  await expectVisible(page.locator('aside').getByPlaceholder('搜索条目...'), 'reader sidebar search from shell navigation')
   await expectVisible(page.getByRole('heading', { name: /读者视角/ }), 'reader panel from shell navigation')
 
   await clickActivity(page, '技能')
   await expectVisible(page.getByText('技能 (2)'), 'skills panel from shell navigation')
+  await expectVisible(page.locator('aside').getByRole('button', { name: '新建技能' }), 'skills sidebar create action from shell navigation')
+  await expectVisible(page.locator('aside').getByPlaceholder('搜索...'), 'skills sidebar search from shell navigation')
 
   await page.locator('header').getByRole('button', { name: '个人中心' }).click()
+  await assertNoActiveActivity(page, 'profile panel')
+  await assertHeaderButtonActive(page, '个人中心')
+  await expectHidden(page.getByPlaceholder('输入消息，按 / 调用技能...'), 'chat panel hidden during profile navigation')
+  await expectVisible(page.locator('aside').getByText('即将推出'), 'profile sidebar placeholder from shell navigation')
   await expectVisible(page.getByText('Mock User'), 'profile panel from shell navigation')
   await expectVisible(page.getByText('累计字数'), 'profile stats from shell navigation')
 
   await clickActivity(page, '章节')
+  await expectVisible(page.getByText('章节 (2)'), 'chapter sidebar restored after profile navigation')
+  await ensureChapterBlockExpanded(page)
+  await assertSelectedChapterPath(page, 'chapters/1.md')
+  await assertActiveTabTitle(page, '第1章 雨夜线索')
+  await expectVisible(page.locator('.monaco-editor').first(), 'editor restored after repeated shell navigation')
   await expectVisible(page.getByPlaceholder('输入消息，按 / 调用技能...'), 'chat panel restored after profile navigation')
 
   await page.locator('header').getByRole('button', { name: '帮助' }).click()
   await expectVisible(page.getByText('欢迎使用 Novelist'), 'help dialog')
   await page.locator('.fixed').getByRole('button', { name: '✕' }).click()
+  await assertActiveActivity(page, '章节')
 
   await page.locator('header').getByRole('button', { name: '设置' }).click()
   await expectVisible(page.getByText('基础设置'), 'settings affordance from shell navigation')
   await page.locator('.fixed').getByRole('button', { name: '✕' }).click()
+  await assertActiveActivity(page, '章节')
+  await assertBridgeCallCount(page, 'SaveContent', 0)
 }
 
 async function clickActivity(page, label) {
-  await page.locator('nav').first().getByRole('button', { name: label }).click()
+  await activityButton(page, label).click()
+  await assertActiveActivity(page, label)
 }
 
 async function verifyChapterWorkflow(page) {
@@ -929,12 +1018,24 @@ async function verifyCompactViewportSmoke(browser, url, consoleErrors, pageError
   await chapterButton(page, '雨夜线索').click()
   await expectVisible(page.locator('.monaco-editor').first(), 'compact editor surface')
   await expectVisible(page.getByPlaceholder('输入消息，按 / 调用技能...'), 'compact chat input')
+  await assertSelectedChapterPath(page, 'chapters/1.md')
+  await assertActiveTabTitle(page, '第1章 雨夜线索')
 
   await clickActivity(page, '角色')
+  await expectVisible(page.locator('aside').getByText(/角色 \(\d+\)/), 'compact character sidebar')
   await expectVisible(page.getByRole('heading', { name: /角色/ }), 'compact character surface')
 
   await clickActivity(page, '参考锚定')
+  await expectVisible(page.locator('aside').getByText('即将推出'), 'compact reference sidebar placeholder')
   await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'compact reference surface')
+
+  await clickActivity(page, '章节')
+  await expectVisible(page.getByText('章节 (2)'), 'compact chapter sidebar restored')
+  await ensureChapterBlockExpanded(page)
+  await assertSelectedChapterPath(page, 'chapters/1.md')
+  await assertActiveTabTitle(page, '第1章 雨夜线索')
+  await expectVisible(page.locator('.monaco-editor').first(), 'compact editor restored after activity transitions')
+  await expectVisible(page.getByPlaceholder('输入消息，按 / 调用技能...'), 'compact chat restored after activity transitions')
 
   await assertBridgeCallCount(page, 'SaveContent', 0)
   await page.screenshot({ path: path.join(outputDir, 'app-08-compact.png'), fullPage: true })
@@ -1459,12 +1560,30 @@ async function assertActiveNovelId(page, expectedNovelId) {
 }
 
 async function assertSelectedChapterPath(page, expectedPath) {
+  const expectedTitle = expectedPath.endsWith('3.md')
+    ? '新章验收-改名'
+    : expectedPath.endsWith('2.md')
+      ? '旧城门'
+      : '雨夜线索'
+
+  await page.waitForFunction(
+    ({ expectedTitle }) => {
+      return Array.from(document.querySelectorAll('aside button')).some((button) =>
+        button.classList.contains('bg-primary/10') &&
+        (button.textContent ?? '').includes(expectedTitle))
+    },
+    { expectedTitle },
+    { timeout: 12_000 },
+  ).catch((error) => {
+    throw new Error(`Expected selected chapter for ${expectedPath}.`, { cause: error })
+  })
+
   const activeClasses = await page.locator('aside').getByRole('button', { name: /第\d+章/ }).evaluateAll((buttons) =>
     buttons
       .map((button) => ({ text: button.textContent ?? '', className: button.getAttribute('class') ?? '' }))
       .filter((button) => button.className.includes('bg-primary/10')),
   )
-  assert(activeClasses.some((button) => button.text.includes(expectedPath.endsWith('3.md') ? '新章验收-改名' : expectedPath.endsWith('2.md') ? '旧城门' : '雨夜线索')), `Expected selected chapter for ${expectedPath}.`)
+  assert(activeClasses.some((button) => button.text.includes(expectedTitle)), `Expected selected chapter for ${expectedPath}.`)
 }
 
 async function assertActiveTabTitle(page, expectedTitle) {
@@ -1972,6 +2091,15 @@ function installConfigurableAppMockBridge(options = {}) {
     skills: options.skills ?? defaultSkills,
   }
   const faultQueues = normalizeFaultQueues(options.faults ?? {})
+  Object.defineProperty(state, 'clearFaultQueue', {
+    configurable: true,
+    enumerable: false,
+    value(method) {
+      if (method) {
+        faultQueues[method] = []
+      }
+    },
+  })
 
   window.localStorage.removeItem('novelist_tabs_all')
   window.localStorage.setItem('theme', 'light')

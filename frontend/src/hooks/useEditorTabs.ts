@@ -6,12 +6,26 @@ function nextId(prefix: string) { return `${prefix}_${++idSeq}` }
 
 type TabMeta = Pick<EditorTab, 'path' | 'title' | 'type' | 'viewMode' | 'readOnly'>
 
+function tabMetasForStorage(tabs: EditorTab[], activeTabId: string | null): TabMeta[] {
+  const metas = tabs.map(t => ({ path: t.path, title: t.title, type: t.type, viewMode: t.viewMode, readOnly: t.readOnly }))
+  if (!activeTabId) return metas
+
+  const activeIndex = tabs.findIndex(t => t.id === activeTabId)
+  if (activeIndex < 0) return metas
+
+  return [
+    metas[activeIndex],
+    ...metas.filter((_, index) => index !== activeIndex),
+  ]
+}
+
 export function useEditorTabs(novelId: number) {
   const [tabs, setTabs] = useState<EditorTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const prevNovelIdRef = useRef(novelId)
   const allMetasRef = useRef<Record<string, TabMeta[]>>({})
   const initRef = useRef(false)
+  const skipInitialEmptyPersistRef = useRef(false)
   const activeTabIdRef = useRef(activeTabId)
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
 
@@ -27,6 +41,7 @@ export function useEditorTabs(novelId: number) {
     const key = String(novelId)
     const saved = allMetasRef.current[key]
     if (saved?.length) {
+      skipInitialEmptyPersistRef.current = true
       const restored: EditorTab[] = saved.map(t => ({
         ...t,
         id: nextId(t.type === 'diff' ? 'diff' : 'file'),
@@ -72,17 +87,28 @@ export function useEditorTabs(novelId: number) {
     }
   }, [novelId])
 
-  // tabs 变化时更新内存缓存（不立即写磁盘，beforeunload 时统一写）
+  // tabs 变化时立即持久化，避免 ContentPanel 在面板切换中卸载后丢失会话标签。
   useEffect(() => {
     if (!initRef.current) return
+    if (skipInitialEmptyPersistRef.current && tabs.length === 0) {
+      skipInitialEmptyPersistRef.current = false
+      return
+    }
+    skipInitialEmptyPersistRef.current = false
+
     const key = String(prevNovelIdRef.current)
-    const metas: TabMeta[] = tabs.map(t => ({ path: t.path, title: t.title, type: t.type, viewMode: t.viewMode, readOnly: t.readOnly }))
+    const metas = tabMetasForStorage(tabs, activeTabId)
     if (metas.length > 0) {
       allMetasRef.current[key] = metas
     } else {
       delete allMetasRef.current[key]
     }
-  }, [tabs])
+    try {
+      localStorage.setItem('novelist_tabs_all', JSON.stringify(allMetasRef.current))
+    } catch {
+      return
+    }
+  }, [tabs, activeTabId])
 
   const activeTab = tabs.find(t => t.id === activeTabId) ?? null
 
