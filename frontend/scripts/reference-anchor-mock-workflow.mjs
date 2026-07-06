@@ -45,6 +45,10 @@ async function main() {
     await page.getByTitle('参考锚定').waitFor({ state: 'visible' })
     await page.getByTitle('参考锚定').click()
     await expectVisible(page.getByRole('heading', { name: '参考锚定' }), 'reference panel heading')
+    await expectVisible(page.getByRole('heading', { name: '语料库管理' }), 'corpus library management heading')
+    await expectVisible(page.getByRole('heading', { name: '导入语料来源' }), 'corpus source import heading')
+    await expectVisible(page.getByRole('heading', { name: '库条目' }), 'corpus library entries heading')
+    await expectVisible(page.getByRole('heading', { name: '参考写作检索' }), 'reference drafting retrieval heading')
     await page.screenshot({ path: path.join(outputDir, 'reference-anchor-01-initial.png'), fullPage: true })
 
     logStep('checking advanced-mode boundary')

@@ -726,11 +726,21 @@ export default function ReferenceAnchorView({ novelId }: Props) {
         {message && <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">{message}</div>}
 
         <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-4">
-          <section className="space-y-4">
+          <section className="space-y-4" aria-labelledby="corpus-library-heading">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <BookMarked className="h-3.5 w-3.5 text-muted-foreground" />
+                <h3 id="corpus-library-heading" className="text-xs font-semibold text-foreground">语料库管理</h3>
+              </div>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                管理可检索来源、库条目元数据、可见性和材料预览；写作时默认由右侧流程按故事上下文自动检索。
+              </p>
+            </div>
+
             <div className="rounded-lg border border-border bg-card p-4">
               <div className="flex items-center gap-2 mb-3">
                 <Plus className="h-3.5 w-3.5 text-muted-foreground" />
-                <h3 className="text-xs font-semibold text-foreground">创建参考锚点</h3>
+                <h3 className="text-xs font-semibold text-foreground">导入语料来源</h3>
               </div>
               <div className="space-y-3">
                 <Field label="标题">
@@ -798,7 +808,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <BookMarked className="h-3.5 w-3.5 text-muted-foreground" />
-                  <h3 className="text-xs font-semibold text-foreground">锚点</h3>
+                  <h3 className="text-xs font-semibold text-foreground">库条目</h3>
                 </div>
                 <div className="inline-flex rounded-md border border-border bg-background p-0.5" aria-label="锚点范围筛选">
                   {[
@@ -1059,7 +1069,17 @@ export default function ReferenceAnchorView({ novelId }: Props) {
             </div>
           </section>
 
-          <section className="min-w-0 space-y-4">
+          <section className="min-w-0 space-y-4" aria-labelledby="reference-retrieval-heading">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Search className="h-3.5 w-3.5 text-muted-foreground" />
+                <h3 id="reference-retrieval-heading" className="text-xs font-semibold text-foreground">参考写作检索</h3>
+              </div>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                默认编排会按章节目标、事实边界和检索策略选择可用材料；手工搜索与蓝图调试保留在高级模式。
+              </p>
+            </div>
+
             <OrchestrationPanel
               chapterNumber={blueprintForm.chapterNumber}
               chapterGoal={blueprintForm.chapterGoal}
