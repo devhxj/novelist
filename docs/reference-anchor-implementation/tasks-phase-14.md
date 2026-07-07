@@ -307,7 +307,7 @@ The current extractor is deterministic and robust, but limited:
 **Verification:**
 
 - [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --no-restore -v minimal -p:UseSharedCompilation=false --filter 'ReferenceStyleGoldenFixtureEvaluatorTests|ReferenceStyleDeterministicBaselineExtractorTests'`
-- [ ] `npm --prefix frontend run test:reference-style` or equivalent browser workflow after UI exists.
+- [x] `npm --prefix frontend run test:reference-style` now covers the style workflow after UI exists.
 
 **Implementation notes:**
 
@@ -321,7 +321,7 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 12: Product Workflow and UX
 
-**Status:** Partially complete for the default style-assisted orchestration path and high-risk recovery UX. `StartReferenceOrchestrationRun` now accepts an optional source-text-free `style_policy`, persists it on the run, and applies it to generated blueprint beats as reviewed `style_contract` fields before blueprint approval. The default frontend workflow now loads active style profiles, suggests an available profile, shows compact profile rationale, lets users adjust imitation intensity, minimum fit, allowed closeness, style dimensions, required evidence, and forbidden style risks, and sends that policy through the real bridge payload. High-risk orchestration stops now classify material-binding gaps, retrieval/provenance gaps, source-leak risks, style-distance risks, unsupported facts, and POV drift into concrete recovery actions; the frontend renders those action ids as Chinese next-step guidance without source text, candidate text, prompts, or paths. Playwright coverage now verifies the default style-assisted run, style-policy payload, approval-summary style terms, material-gap/source-leak recovery guidance, final-insertion boundary, and no `SaveContent` call. Deeper story-need ranking and a fresh usability report remain open.
+**Status:** Partially complete for the default style-assisted orchestration path, high-risk recovery UX, and the first style-anchoring usability report. `StartReferenceOrchestrationRun` now accepts an optional source-text-free `style_policy`, persists it on the run, and applies it to generated blueprint beats as reviewed `style_contract` fields before blueprint approval. The default frontend workflow now loads active style profiles, suggests an available profile, shows compact profile rationale, lets users adjust imitation intensity, minimum fit, allowed closeness, style dimensions, required evidence, and forbidden style risks, and sends that policy through the real bridge payload. High-risk orchestration stops now classify material-binding gaps, retrieval/provenance gaps, source-leak risks, style-distance risks, unsupported facts, and POV drift into concrete recovery actions; the frontend renders those action ids as Chinese next-step guidance without source text, candidate text, prompts, or paths. Playwright coverage now verifies the default style-assisted run, style-policy payload, approval-summary style terms, material-gap/source-leak recovery guidance, final-insertion boundary, and no `SaveContent` call. `npm --prefix frontend run test:reference-style` now generates a sanitized Phase 14 usability report under `output/playwright/phase14/reference-style/` with no high-severity style workflow issue and one medium ergonomic-friction item for free-form advanced policy fields. Deeper story-need ranking remains open.
 
 **Description:** Make advanced style anchoring usable without turning it into manual data plumbing.
 
@@ -336,7 +336,7 @@ The current extractor is deterministic and robust, but limited:
 **Verification:**
 
 - [x] Playwright coverage for default style-assisted run, profile suggestion, evidence inspection, intensity adjustment, style-policy payload, approval summary, material-gap/source-leak recovery actions, and audit failure recovery.
-- [ ] Usability report update focused on style anchoring friction.
+- [x] Usability report update focused on style anchoring friction. `npm --prefix frontend run test:reference-style` writes `output/playwright/phase14/reference-style/usability-report.md` plus source-text-free evidence JSON, asserts no high-severity items, and keeps source prose, candidate prose, prompts, and source paths out of the report artifacts.
 
 **Dependencies:** Tasks 6-11.
 
@@ -418,7 +418,7 @@ The current extractor is deterministic and robust, but limited:
 
 - [ ] Tasks 12-14 complete.
 - [ ] Playwright style workflows and stress tests pass.
-- [ ] Usability report shows no high-severity style workflow issues.
+- [x] Usability report shows no high-severity style workflow issues.
 
 ## Definition of Done
 

@@ -219,7 +219,9 @@ make frontend-dev
 | `make package-macos` | 生成 macOS DMG |
 | `npm --prefix frontend run build` | TypeScript 构建和 Vite 生产构建 |
 | `npm --prefix frontend run lint` | 前端 ESLint |
-| `npm --prefix frontend run verify` | 前端 build、lint、参考锚定流程和基础 app-wide 烟测；发布级回归还需要 Phase 13 full/stress/usability，Phase 14 将新增 reference-style 专项命令 |
+| `npm --prefix frontend run test:reference-style` | 参考风格锚定浏览器流程，并生成 `output/playwright/phase14/reference-style/usability-report.md` |
+| `npm --prefix frontend run test:reference-style:stress` | 参考风格锚定 10MB 浏览器压力流程和指标 |
+| `npm --prefix frontend run verify` | 前端 build、lint、参考锚定流程和基础 app-wide 烟测；发布级回归还需要 Phase 13 full/stress/usability 与 Phase 14 reference-style/stress |
 | `dotnet test Novelist.slnx --no-restore -v minimal` | .NET 测试套件 |
 
 ## 质量边界

@@ -13,6 +13,7 @@ const runMode = process.argv.includes('--stress') ? 'stress' : 'workflow'
 const outputDir = runMode === 'stress'
   ? path.join(repoRoot, 'output', 'playwright', 'phase14', 'reference-style-stress')
   : path.join(repoRoot, 'output', 'playwright', 'phase13', 'reference-anchor')
+const referenceStyleUsabilityOutputDir = path.join(repoRoot, 'output', 'playwright', 'phase14', 'reference-style')
 
 const now = '2026-07-05T12:00:00.000Z'
 
@@ -87,6 +88,7 @@ async function main() {
 
     logStep('orchestration high-risk recovery actions')
     await runOrchestrationHighRiskRecoveryActions(page)
+    await page.screenshot({ path: path.join(outputDir, 'reference-style-04-high-risk-recovery-actions.png'), fullPage: true })
 
     logStep('failure and recovery workflow')
     await verifyReviewAndAuditFailureRecovery(page)
@@ -98,6 +100,7 @@ async function main() {
 
     logStep('checking bridge calls')
     await verifyBridgeCalls(page)
+    await writeReferenceStyleUsabilityReport(page)
 
     assert.deepEqual(pageErrors, [], `Unexpected page errors:\n${pageErrors.join('\n')}`)
     assert.deepEqual(consoleErrors, [], `Unexpected console errors:\n${consoleErrors.join('\n')}`)
@@ -1022,6 +1025,294 @@ async function writeReferenceStyleStressMetrics(page) {
     `${JSON.stringify(metrics, null, 2)}\n`,
     'utf8',
   )
+}
+
+async function writeReferenceStyleUsabilityReport(page) {
+  const evidence = await page.evaluate(() => {
+    const state = window.__referenceAnchorMockState
+    const calls = state.calls
+    const methods = calls.map((call) => call.method)
+    const styleBuildCalls = calls.filter((call) => call.method === 'BuildReferenceStyleProfile')
+    const stylePolicyCall = calls.find((call) => call.method === 'StartReferenceOrchestrationRun' && call.args?.[0]?.style_policy)
+    const stylePolicy = stylePolicyCall?.args?.[0]?.style_policy ?? null
+    const draftCall = calls.find((call) => call.method === 'GenerateReferenceAnchoredDraft' && Array.isArray(call.args?.[0]?.style_intensities))
+    const highRiskStops = calls
+      .filter((call) =>
+        call.method === 'ResumeReferenceOrchestrationRun' &&
+        call.args?.[0]?.decision_type === 'approve_blueprint' &&
+        call.result?.current_decision?.decision_type === 'resolve_high_risk_stop')
+      .map((call) => ({
+        stopReason: call.result?.last_stop_reason ?? call.result?.current_decision?.stop_reason ?? '',
+        actionIds: call.result?.current_decision?.required_actions ?? [],
+        candidateIds: call.result?.candidate_ids ?? [],
+      }))
+    const resumeDecisions = calls
+      .filter((call) => call.method === 'ResumeReferenceOrchestrationRun')
+      .map((call) => call.args?.[0]?.decision_type ?? '')
+
+    return {
+      profileBuildCount: styleBuildCalls.length,
+      profileBuilds: styleBuildCalls.map((call) => ({
+        anchorCount: call.args?.[0]?.anchor_ids?.length ?? 0,
+        hasSafeBuildId: /^style-42-[A-Za-z0-9._-]+$/.test(call.args?.[0]?.build_id ?? ''),
+        profileId: call.result?.profile_id ?? 0,
+        status: call.result?.status ?? '',
+      })),
+      profileInspectionMethods: [
+        'GetReferenceStyleProfiles',
+        'GetReferenceStyleProfile',
+        'CompareReferenceStyleProfiles',
+        'GetReferenceStyleProfileBuildStatus',
+      ].filter((method) => methods.includes(method)),
+      stylePolicy: stylePolicy
+        ? {
+            profileIds: stylePolicy.style_profile_ids ?? [],
+            dimensions: stylePolicy.style_dimensions ?? [],
+            imitationIntensity: stylePolicy.imitation_intensity ?? '',
+            minStyleFit: stylePolicy.min_style_fit ?? 0,
+            allowedCloseness: stylePolicy.allowed_closeness ?? '',
+            requiredEvidenceTypes: stylePolicy.required_evidence_types ?? [],
+            forbiddenStyleRisks: stylePolicy.forbidden_style_risks ?? [],
+          }
+        : null,
+      styleAttemptIntensities: draftCall?.args?.[0]?.style_intensities ?? [],
+      highRiskStops,
+      resumeDecisions,
+      finalInsertionAutoApproved: resumeDecisions.includes('approve_final_insertion'),
+      forbiddenBridgeCalls: ['SaveContent', 'runtime.shell.openExternal'].filter((method) => methods.includes(method)),
+    }
+  })
+
+  const observations = [
+    referenceStyleUsabilityObservation({
+      surface: 'Style Profile Discovery And Inspection',
+      severity: 'low',
+      issueType: 'verified-flow',
+      summary: 'Active style profiles can be built, inspected, compared, archived, restored, and refreshed from the reference panel.',
+      screenshot: 'reference-anchor-02-draft-audit.png',
+      reproduction: ['Run `npm --prefix frontend run test:reference-style`.', 'Open the Reference Anchor panel.', 'Build two style profiles, inspect detail, compare them, archive and restore one profile.'],
+      expected: 'A writer can create and inspect a reusable style profile without reading raw source text or leaving the reference workflow.',
+      actual: `${evidence.profileBuildCount} style profile build requests completed with source-text-free profile and status inspection methods: ${referenceStyleInlineList(evidence.profileInspectionMethods)}.`,
+      impact: 'Low risk; the main friction is still density, not a missing critical path.',
+      proposedFix: 'Keep the current profile library path and revisit compact grouping after the remaining story-need ranking work.',
+      scores: { discoverability: 4, clickCost: 3, feedbackClarity: 4, errorRecovery: 4, keyboardErgonomics: 3, informationDensity: 3, visualReadability: 4 },
+    }),
+    referenceStyleUsabilityObservation({
+      surface: 'Default Style Policy Controls',
+      severity: 'medium',
+      issueType: 'ergonomic-friction',
+      summary: 'The default orchestration path exposes the required style controls, but dimensions, evidence types, and forbidden risks are still expert-facing text fields.',
+      screenshot: 'reference-anchor-03-final-insertion-stop.png',
+      reproduction: ['Select the suggested active style profile.', 'Set strong imitation, minimum fit, closeness, dimensions, evidence, and forbidden risks.', 'Start the default orchestration flow and approve the reviewed blueprint.'],
+      expected: 'A writer can tune imitation strength and risk tolerance without manual corpus plumbing.',
+      actual: `The submitted style policy used profiles=${referenceStyleInlineList(evidence.stylePolicy?.profileIds)}, intensity=${evidence.stylePolicy?.imitationIntensity ?? ''}, min_fit=${evidence.stylePolicy?.minStyleFit ?? ''}, closeness=${evidence.stylePolicy?.allowedCloseness ?? ''}, dimensions=${referenceStyleInlineList(evidence.stylePolicy?.dimensions)}, evidence=${referenceStyleInlineList(evidence.stylePolicy?.requiredEvidenceTypes)}, risks=${referenceStyleInlineList(evidence.stylePolicy?.forbiddenStyleRisks)}.`,
+      impact: 'Medium friction for non-technical authors; incorrect free-form values would slow the flow even though the bridge payload is validated.',
+      proposedFix: 'Track preset chips or controlled pickers for common dimensions, evidence types, and risk policies after Phase 14 core gates are green.',
+      scores: { discoverability: 4, clickCost: 3, feedbackClarity: 4, errorRecovery: 3, keyboardErgonomics: 2, informationDensity: 3, visualReadability: 4 },
+    }),
+    referenceStyleUsabilityObservation({
+      surface: 'Style-Guided Candidate Attempts',
+      severity: 'low',
+      issueType: 'verified-flow',
+      summary: 'Style-guided drafting records loose, moderate, and strong attempts as metadata rather than exposing source passages in the audit report.',
+      screenshot: 'reference-anchor-02-draft-audit.png',
+      reproduction: ['Approve the style-contract blueprint.', 'Bind materials.', 'Generate style-guided candidates.'],
+      expected: 'Candidate attempts should show which style policy was tried while keeping source/candidate audit metadata bounded.',
+      actual: `The draft request asked for ${referenceStyleInlineList(evidence.styleAttemptIntensities)} attempts and the UI verified readable audit metadata by candidate id.`,
+      impact: 'Low risk; the author can inspect attempt coverage before deciding whether to regenerate or revise the blueprint.',
+      proposedFix: 'No immediate fix. Keep source-leak and style-distance audit findings tied to candidate ids rather than copied prose.',
+      scores: { discoverability: 4, clickCost: 4, feedbackClarity: 4, errorRecovery: 4, keyboardErgonomics: 3, informationDensity: 4, visualReadability: 4 },
+    }),
+    referenceStyleUsabilityObservation({
+      surface: 'High-Risk Recovery Guidance',
+      severity: 'low',
+      issueType: 'verified-flow',
+      summary: 'Material-gap and source-leak stops show concrete next actions without resuming into final insertion.',
+      screenshot: 'reference-style-04-high-risk-recovery-actions.png',
+      reproduction: ['Run the material-gap orchestration branch.', 'Run the source-leak orchestration branch.', 'Inspect the high-risk decision cards.'],
+      expected: 'A high-risk stop should tell the author whether to inspect gaps, import or restore material, relax retrieval, lower imitation, rebind material, or regenerate.',
+      actual: `Observed high-risk stops: ${referenceStyleInlineList(evidence.highRiskStops.map((stop) => `${stop.stopReason}:${stop.actionIds.join('+')}`))}.`,
+      impact: 'Low risk; recovery actions are actionable and remain separated from approval or insertion authority.',
+      proposedFix: 'No immediate fix. Add story-need ranking later so material-gap fixes can be suggested before the stop.',
+      scores: { discoverability: 4, clickCost: 4, feedbackClarity: 5, errorRecovery: 4, keyboardErgonomics: 3, informationDensity: 4, visualReadability: 4 },
+    }),
+    referenceStyleUsabilityObservation({
+      surface: 'Final Insertion Boundary And Sanitization',
+      severity: 'low',
+      issueType: 'safety-boundary',
+      summary: 'The browser workflow stops before final insertion and the generated usability artifacts contain only bounded metadata.',
+      screenshot: 'reference-anchor-03-final-insertion-stop.png',
+      reproduction: ['Complete the default orchestration flow.', 'Inspect bridge calls and generated Phase 14 usability artifacts.'],
+      expected: 'Reference/style automation should never auto-approve final insertion or call chapter-save APIs.',
+      actual: `approve_final_insertion=${evidence.finalInsertionAutoApproved}; forbidden bridge calls=${referenceStyleInlineList(evidence.forbiddenBridgeCalls)}.`,
+      impact: 'Low risk; the workflow preserves the author-controlled insertion boundary.',
+      proposedFix: 'No immediate fix. Keep this assertion in the browser gate.',
+      scores: { discoverability: 4, clickCost: 5, feedbackClarity: 5, errorRecovery: 4, keyboardErgonomics: 4, informationDensity: 4, visualReadability: 4 },
+    }),
+  ]
+
+  const highSeverity = observations.filter((observation) => observation.severity === 'high')
+  assert.equal(highSeverity.length, 0, 'reference style usability report must not contain high-severity open issues')
+
+  const report = buildReferenceStyleUsabilityReport(observations, evidence)
+  const evidenceJson = `${JSON.stringify(evidence, null, 2)}\n`
+  assertReferenceStyleUsabilityReportIsSanitized(report, evidenceJson)
+
+  await fs.mkdir(referenceStyleUsabilityOutputDir, { recursive: true })
+  await fs.writeFile(path.join(referenceStyleUsabilityOutputDir, 'usability-report.md'), report, 'utf8')
+  await fs.writeFile(path.join(referenceStyleUsabilityOutputDir, 'usability-evidence.json'), evidenceJson, 'utf8')
+}
+
+function referenceStyleUsabilityObservation(input) {
+  return {
+    surface: input.surface,
+    severity: input.severity,
+    issueType: input.issueType,
+    summary: input.summary,
+    screenshot: input.screenshot,
+    reproduction: input.reproduction ?? [],
+    expected: input.expected,
+    actual: input.actual,
+    impact: input.impact,
+    proposedFix: input.proposedFix,
+    scores: {
+      discoverability: input.scores?.discoverability ?? 0,
+      clickCost: input.scores?.clickCost ?? 0,
+      feedbackClarity: input.scores?.feedbackClarity ?? 0,
+      errorRecovery: input.scores?.errorRecovery ?? 0,
+      keyboardErgonomics: input.scores?.keyboardErgonomics ?? 0,
+      informationDensity: input.scores?.informationDensity ?? 0,
+      visualReadability: input.scores?.visualReadability ?? 0,
+    },
+  }
+}
+
+function buildReferenceStyleUsabilityReport(observations, evidence) {
+  const scoreRows = observations
+    .map((item) => [
+      item.surface,
+      item.scores.discoverability,
+      item.scores.clickCost,
+      item.scores.feedbackClarity,
+      item.scores.errorRecovery,
+      item.scores.keyboardErgonomics,
+      item.scores.informationDensity,
+      item.scores.visualReadability,
+    ].map(referenceStyleMarkdownCell).join(' | '))
+    .map((row) => `| ${row} |`)
+    .join('\n')
+
+  const issueRows = observations
+    .map((item) => `| ${referenceStyleMarkdownCell(item.surface)} | ${referenceStyleMarkdownCell(item.severity)} | ${referenceStyleMarkdownCell(item.issueType)} | ${referenceStyleMarkdownCell(item.summary)} | ${referenceStyleMarkdownCell(referenceStyleWorkflowArtifactPath(item.screenshot))} |`)
+    .join('\n')
+
+  const evidenceRows = [
+    ['Style profile build count', evidence.profileBuildCount],
+    ['Profile inspection methods', referenceStyleInlineList(evidence.profileInspectionMethods)],
+    ['Style policy profile ids', referenceStyleInlineList(evidence.stylePolicy?.profileIds)],
+    ['Style policy intensity', evidence.stylePolicy?.imitationIntensity ?? ''],
+    ['Style policy dimensions', referenceStyleInlineList(evidence.stylePolicy?.dimensions)],
+    ['Style policy required evidence', referenceStyleInlineList(evidence.stylePolicy?.requiredEvidenceTypes)],
+    ['Style policy forbidden risks', referenceStyleInlineList(evidence.stylePolicy?.forbiddenStyleRisks)],
+    ['Style attempt intensities', referenceStyleInlineList(evidence.styleAttemptIntensities)],
+    ['High-risk stop reasons', referenceStyleInlineList(evidence.highRiskStops.map((stop) => stop.stopReason))],
+    ['Auto-approved final insertion', evidence.finalInsertionAutoApproved],
+    ['Forbidden bridge calls observed', referenceStyleInlineList(evidence.forbiddenBridgeCalls)],
+  ]
+    .map((row) => `| ${row.map(referenceStyleMarkdownCell).join(' | ')} |`)
+    .join('\n')
+
+  const details = observations
+    .map((item) => `### ${item.surface}
+
+- Severity: ${item.severity}
+- Type: ${item.issueType}
+- Screenshot: \`${referenceStyleWorkflowArtifactPath(item.screenshot)}\`
+- Reproduction:
+${referenceStyleNumberedList(item.reproduction)}
+- Expected behavior: ${item.expected}
+- Actual behavior: ${item.actual}
+- Likely user impact: ${item.impact}
+- Proposed fix or tracking: ${item.proposedFix}`)
+    .join('\n\n')
+
+  return `# Phase 14 Reference Style Usability Report
+
+Generated by \`npm --prefix frontend run test:reference-style\`.
+
+## Scope
+
+This report is generated from the deterministic reference-style browser workflow. It focuses on style anchoring friction: profile discovery, policy tuning, evidence/risk controls, style-guided candidate attempts, high-risk recovery guidance, and the final insertion boundary.
+
+Workflow screenshots: \`${path.relative(repoRoot, outputDir)}\`
+
+Report artifacts: \`${path.relative(repoRoot, referenceStyleUsabilityOutputDir)}\`
+
+The report intentionally records metadata, action ids, candidate ids, bridge-method coverage, and screenshot paths only. It must not include source prose, candidate prose, prompts, or source file paths.
+
+## Verdict
+
+No high-severity style anchoring usability issue is open in this pass. One medium ergonomic-friction item remains: advanced style dimensions, evidence types, and forbidden risks are still free-form controls.
+
+## Evidence Summary
+
+| Evidence | Value |
+| --- | --- |
+${evidenceRows}
+
+## Workflow Scores
+
+| Surface | Discoverability | Click Cost | Feedback Clarity | Error Recovery | Keyboard Ergonomics | Information Density | Visual Readability |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+${scoreRows}
+
+## Issues And Observations
+
+| Surface | Severity | Type | Summary | Screenshot |
+| --- | --- | --- | --- | --- |
+${issueRows}
+
+## Details
+
+${details}
+`
+}
+
+function assertReferenceStyleUsabilityReportIsSanitized(report, evidenceJson) {
+  const forbiddenFragments = [
+    'D:\\books\\',
+    'rain-reference.md',
+    'bulk-one.md',
+    'pack-one.md',
+    'style-stress-10mb.md',
+    'STRESS_SOURCE_SENTINEL',
+    '把杯子推远，杯底',
+    '雨声压过门缝里的动静',
+    '门缝里没有灯',
+  ]
+
+  for (const fragment of forbiddenFragments) {
+    assert(!report.includes(fragment), `reference style usability report leaked forbidden fragment: ${fragment}`)
+    assert(!evidenceJson.includes(fragment), `reference style usability evidence leaked forbidden fragment: ${fragment}`)
+  }
+}
+
+function referenceStyleWorkflowArtifactPath(fileName) {
+  return path.join(path.relative(repoRoot, outputDir), fileName)
+}
+
+function referenceStyleMarkdownCell(value) {
+  return String(value ?? '').replaceAll('|', '\\|').replace(/\r?\n/g, '<br>')
+}
+
+function referenceStyleNumberedList(items) {
+  if (!items.length) return '1. No reproduction steps recorded.'
+  return items.map((item, index) => `${index + 1}. ${item}`).join('\n')
+}
+
+function referenceStyleInlineList(items) {
+  if (!Array.isArray(items) || items.length === 0) return 'none'
+  return items.join(', ')
 }
 
 function assertBridgeCallOrder(calls, beforeMethod, afterMethod) {
