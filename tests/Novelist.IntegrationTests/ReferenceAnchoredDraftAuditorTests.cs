@@ -149,6 +149,56 @@ public sealed class ReferenceAnchoredDraftAuditorTests
     }
 
     [Fact]
+    public void BuildDraftAuditFailsForExactPhraseReuseWithoutLeakingCopiedPhraseIntoReport()
+    {
+        const string copiedPhrase = "雨声压低了整条街的呼吸，林岚在门口停住";
+        const string sourceText = "她避开灯光，雨声压低了整条街的呼吸，林岚在门口停住，直到钥匙碰到掌心。";
+        const string candidateText = "她先整理桌上的旧照片，把所有线索按时间放回抽屉，又绕到窗边确认楼下没有人影。雨声压低了整条街的呼吸，林岚在门口停住。随后她才把话题转回那封信，没有提任何人的名字。";
+        var blueprint = Blueprint(beat => beat);
+        var candidate = Candidate(blueprint, candidateText) with
+        {
+            RewriteLevel = ReferenceRewriteLevels.L2,
+            AuditStatus = "passed"
+        };
+        var link = new ReferenceBlueprintMaterialLinkPayload(
+            "link-exact-phrase-source-leak",
+            blueprint.BlueprintId,
+            blueprint.Beats[0].BeatId,
+            candidate.MaterialId,
+            "show pressure",
+            ReferenceRewriteLevels.L2,
+            Selected: true,
+            Score: 1,
+            new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                ["function"] = 1.0
+            },
+            "Beat 1 fit: selected material.",
+            DateTimeOffset.UnixEpoch);
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>(StringComparer.Ordinal)
+            {
+                [blueprint.Beats[0].BeatId] = link
+            },
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [candidate.MaterialId] = sourceText
+            });
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("exact phrase", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(audit.ReadableReport);
+        var report = audit.ReadableReport!;
+        Assert.Contains(report.Findings, finding => finding.Message.Contains("exact phrase", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(report.Findings, finding => finding.Message.Contains(copiedPhrase, StringComparison.Ordinal));
+        Assert.DoesNotContain(report.Findings, finding => finding.RequiredAction.Contains(copiedPhrase, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BuildDraftAuditUsesStrongStyleContractSourceLeakThresholds()
     {
         const string sourceText = "雨声压低了整条街的呼吸，林岚在门口停住，指节慢慢发紧，心里一紧。";

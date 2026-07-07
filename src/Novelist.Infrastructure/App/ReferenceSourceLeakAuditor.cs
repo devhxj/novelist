@@ -59,7 +59,15 @@ internal static class ReferenceSourceLeakAuditor
         var coverage = covered.Count(value => value) / (double)candidate.Length;
         var longestSourceSpanChars = longestRun == 0 ? 0 : longestRun + NGramSize - 1;
         var longestSourceSpanRatio = longestSourceSpanChars / (double)candidate.Length;
+        var longestExactPhraseChars = LongestCommonSubstringLength(source, candidate);
+        var longestExactPhraseRatio = longestExactPhraseChars / (double)candidate.Length;
         var findings = new List<string>();
+
+        if (longestExactPhraseChars >= thresholds.ExactPhraseMinChars)
+        {
+            findings.Add(
+                $"{thresholds.Label}exact phrase reuse: longest exact shared phrase is {longestExactPhraseChars} normalized chars ({longestExactPhraseRatio:P0} of candidate).");
+        }
 
         if (longestSourceSpanChars >= thresholds.SourceSpanMinChars &&
             longestSourceSpanRatio >= thresholds.SourceSpanRatio)
@@ -86,6 +94,8 @@ internal static class ReferenceSourceLeakAuditor
                 coverage,
                 longestSourceSpanRatio,
                 longestSourceSpanChars,
+                longestExactPhraseRatio,
+                longestExactPhraseChars,
                 [],
                 ShouldFail: false)
             : new ReferenceSourceLeakAuditResult(
@@ -93,6 +103,8 @@ internal static class ReferenceSourceLeakAuditor
                 Math.Round(coverage, 4),
                 Math.Round(longestSourceSpanRatio, 4),
                 longestSourceSpanChars,
+                Math.Round(longestExactPhraseRatio, 4),
+                longestExactPhraseChars,
                 findings,
                 ShouldFail: true);
     }
@@ -115,6 +127,100 @@ internal static class ReferenceSourceLeakAuditor
         return ngrams;
     }
 
+    private static int LongestCommonSubstringLength(string first, string second)
+    {
+        if (first.Length == 0 || second.Length == 0)
+        {
+            return 0;
+        }
+
+        var pattern = first.Length <= second.Length ? first : second;
+        var text = ReferenceEquals(pattern, first) ? second : first;
+        var states = new List<SuffixAutomatonState>(capacity: pattern.Length * 2) { new() };
+        var last = 0;
+
+        foreach (var ch in pattern)
+        {
+            var current = states.Count;
+            states.Add(new SuffixAutomatonState { Length = states[last].Length + 1 });
+            var previous = last;
+            while (previous >= 0 && !states[previous].Next.ContainsKey(ch))
+            {
+                states[previous].Next[ch] = current;
+                previous = states[previous].Link;
+            }
+
+            if (previous == -1)
+            {
+                states[current].Link = 0;
+            }
+            else
+            {
+                var next = states[previous].Next[ch];
+                if (states[previous].Length + 1 == states[next].Length)
+                {
+                    states[current].Link = next;
+                }
+                else
+                {
+                    var clone = states.Count;
+                    states.Add(new SuffixAutomatonState
+                    {
+                        Length = states[previous].Length + 1,
+                        Link = states[next].Link,
+                        Next = new Dictionary<char, int>(states[next].Next)
+                    });
+
+                    while (previous >= 0 &&
+                        states[previous].Next.TryGetValue(ch, out var transition) &&
+                        transition == next)
+                    {
+                        states[previous].Next[ch] = clone;
+                        previous = states[previous].Link;
+                    }
+
+                    states[next].Link = clone;
+                    states[current].Link = clone;
+                }
+            }
+
+            last = current;
+        }
+
+        var state = 0;
+        var currentLength = 0;
+        var best = 0;
+        foreach (var ch in text)
+        {
+            if (states[state].Next.TryGetValue(ch, out var next))
+            {
+                state = next;
+                currentLength++;
+                best = Math.Max(best, currentLength);
+                continue;
+            }
+
+            while (state != 0 && !states[state].Next.ContainsKey(ch))
+            {
+                state = states[state].Link;
+            }
+
+            if (states[state].Next.TryGetValue(ch, out next))
+            {
+                currentLength = states[state].Length + 1;
+                state = next;
+                best = Math.Max(best, currentLength);
+            }
+            else
+            {
+                state = 0;
+                currentLength = 0;
+            }
+        }
+
+        return best;
+    }
+
     private static string Normalize(string value)
     {
         return new string((value ?? string.Empty)
@@ -124,6 +230,7 @@ internal static class ReferenceSourceLeakAuditor
 
     private sealed record SourceLeakThresholds(
         string Label,
+        int ExactPhraseMinChars,
         int SourceSpanMinChars,
         double SourceSpanRatio,
         double NGramOverlapRatio,
@@ -132,6 +239,7 @@ internal static class ReferenceSourceLeakAuditor
     {
         public static SourceLeakThresholds Default { get; } = new(
             string.Empty,
+            ExactPhraseMinChars: ReferenceSourceLeakAuditor.SourceSpanMinChars,
             ReferenceSourceLeakAuditor.SourceSpanMinChars,
             SourceSpanRatio: 0.45,
             NGramOverlapRatio: 0.55,
@@ -140,11 +248,21 @@ internal static class ReferenceSourceLeakAuditor
 
         public static SourceLeakThresholds Strong { get; } = new(
             "strong style ",
+            ExactPhraseMinChars: 12,
             SourceSpanMinChars: 12,
             SourceSpanRatio: 0.35,
             NGramOverlapRatio: 0.30,
             CoverageRatio: 0.60,
             HighCoverageRatio: 0.70);
+    }
+
+    private sealed class SuffixAutomatonState
+    {
+        public int Length { get; set; }
+
+        public int Link { get; set; } = -1;
+
+        public Dictionary<char, int> Next { get; set; } = [];
     }
 }
 
@@ -153,10 +271,14 @@ internal sealed record ReferenceSourceLeakAuditResult(
     double CandidateSourceCoverageRatio,
     double LongestSourceSpanRatio,
     int LongestSourceSpanChars,
+    double LongestExactPhraseRatio,
+    int LongestExactPhraseChars,
     IReadOnlyList<string> Findings,
     bool ShouldFail)
 {
     public static ReferenceSourceLeakAuditResult Empty { get; } = new(
+        0,
+        0,
         0,
         0,
         0,

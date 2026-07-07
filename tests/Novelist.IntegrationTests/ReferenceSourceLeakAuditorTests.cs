@@ -31,6 +31,21 @@ public sealed class ReferenceSourceLeakAuditorTests
     }
 
     [Fact]
+    public void AnalyzeFlagsExactCopiedPhraseEvenWhenCandidateCoverageIsLow()
+    {
+        const string copiedPhrase = "雨声压低了整条街的呼吸，林岚在门口停住";
+        var result = ReferenceSourceLeakAuditor.Analyze(
+            "她避开灯光，雨声压低了整条街的呼吸，林岚在门口停住，直到钥匙碰到掌心。",
+            "她先整理桌上的旧照片，把所有线索按时间放回抽屉，又绕到窗边确认楼下没有人影。雨声压低了整条街的呼吸，林岚在门口停住。随后她才把话题转回那封信，没有提任何人的名字。",
+            ReferenceRewriteLevels.L2);
+
+        Assert.True(result.ShouldFail);
+        Assert.True(result.LongestExactPhraseChars >= copiedPhrase.Length);
+        Assert.Contains(result.Findings, finding => finding.Contains("exact phrase", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Findings, finding => finding.Contains(copiedPhrase, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void AnalyzeFlagsHighNgramOverlapAfterSmallConnectorEdits()
     {
         var result = ReferenceSourceLeakAuditor.Analyze(
