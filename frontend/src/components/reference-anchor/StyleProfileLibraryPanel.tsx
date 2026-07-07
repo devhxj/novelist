@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Archive, BarChart3, BookOpenCheck, Eye, GitCompare, Loader2, RefreshCcw, RotateCcw, Wand2 } from 'lucide-react'
+import { Archive, BarChart3, BookOpenCheck, CircleCheck, CircleX, Clock3, Eye, GitCompare, Loader2, RefreshCcw, RotateCcw, TriangleAlert, Wand2 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { reference } from '@/lib/novelist/types'
 import { lines } from './blueprintRevision'
@@ -25,6 +25,10 @@ const EMPTY_STYLE_PROFILE_FORM: StyleProfileForm = {
   allowedLicenseStatuses: 'user_provided\nlicensed\npublic_domain',
   allowedSourceTrustLevels: 'user_verified\nimported',
 }
+
+const STYLE_PROFILE_BUILD_POLL_MS = 500
+const STYLE_PROFILE_BUILD_STORAGE_PREFIX = 'novelist:reference-style-profile-build:'
+const TERMINAL_STYLE_PROFILE_BUILD_STATUSES = new Set(['completed', 'failed', 'cancelled'])
 
 function formatTime(value: unknown): string {
   if (typeof value !== 'string') return ''
@@ -69,6 +73,117 @@ function featureEvidenceCount(feature: { evidence_ids: string[] }): number {
   return feature.evidence_ids?.length ?? 0
 }
 
+function isTerminalBuildStatus(status: reference.StyleProfileBuildStatus | null | undefined): boolean {
+  return Boolean(status?.status && TERMINAL_STYLE_PROFILE_BUILD_STATUSES.has(status.status))
+}
+
+function buildProgressPercent(status: reference.StyleProfileBuildStatus): number {
+  if (status.status === 'completed') return 100
+  if (status.progress_total <= 0) return 0
+  return Math.max(0, Math.min(100, Math.round((status.progress_completed / status.progress_total) * 100)))
+}
+
+function buildStageLabel(stage: string): string {
+  switch (stage) {
+    case 'queued': return '排队'
+    case 'validating': return '校验来源'
+    case 'reading_sources': return '读取来源'
+    case 'reading_materials': return '读取材料'
+    case 'persisting_profile': return '持久化画像'
+    case 'deterministic_baseline': return '确定性基线'
+    case 'llm_analysis': return '模型分析'
+    case 'completed': return '已完成'
+    case 'failed': return '失败'
+    case 'cancelled': return '已取消'
+    default: return stage || '未知阶段'
+  }
+}
+
+function buildStatusLabel(status: string): string {
+  switch (status) {
+    case 'running': return '运行中'
+    case 'completed': return '已完成'
+    case 'failed': return '失败'
+    case 'cancelled': return '已取消'
+    default: return status || '未知'
+  }
+}
+
+function buildStatusIcon(status: reference.StyleProfileBuildStatus): ReactNode {
+  if (status.status === 'completed') return <CircleCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+  if (status.status === 'failed') return <TriangleAlert className="h-3.5 w-3.5 text-destructive" />
+  if (status.status === 'cancelled') return <CircleX className="h-3.5 w-3.5 text-destructive" />
+  return <Loader2 className="h-3.5 w-3.5 animate-spin text-sky-700 dark:text-sky-300" />
+}
+
+function buildStorageKey(novelId: number): string {
+  return `${STYLE_PROFILE_BUILD_STORAGE_PREFIX}${novelId}`
+}
+
+function readStoredBuildId(novelId: number): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage.getItem(buildStorageKey(novelId))
+  } catch {
+    return null
+  }
+}
+
+function storeBuildId(novelId: number, buildId: string) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(buildStorageKey(novelId), buildId)
+  } catch {
+    // Best-effort resumable inspection only.
+  }
+}
+
+function forgetStoredBuildId(novelId: number, buildId: string) {
+  if (typeof window === 'undefined') return
+  try {
+    if (window.localStorage.getItem(buildStorageKey(novelId)) === buildId) {
+      window.localStorage.removeItem(buildStorageKey(novelId))
+    }
+  } catch {
+    // Ignore local storage failures; build status is still available by id.
+  }
+}
+
+function createStyleBuildId(novelId: number): string {
+  const randomPart = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID().replaceAll('-', '')
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`
+  return `style-${novelId}-${randomPart}`.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 96)
+}
+
+function createPendingBuildStatus(
+  novelId: number,
+  buildId: string,
+  title: string,
+  anchorIds: number[],
+): reference.StyleProfileBuildStatus {
+  const now = new Date().toISOString()
+  return {
+    build_id: buildId,
+    novel_id: novelId,
+    profile_id: null,
+    title,
+    status: 'running',
+    stage: 'queued',
+    progress_completed: 0,
+    progress_total: Math.max(anchorIds.length, 1),
+    anchor_ids: anchorIds,
+    source_hashes: [],
+    diagnostics: ['构建请求已提交，等待后端写入进度。'],
+    error_code: null,
+    error_message: null,
+    created_at: now,
+    updated_at: now,
+    completed_at: null,
+    cancelled_at: null,
+  }
+}
+
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
@@ -93,8 +208,14 @@ export function StyleProfileLibraryPanel({
   const [leftCompareId, setLeftCompareId] = useState('')
   const [rightCompareId, setRightCompareId] = useState('')
   const [loading, setLoading] = useState(false)
+  const [buildSubmitting, setBuildSubmitting] = useState(false)
+  const [buildCancelling, setBuildCancelling] = useState(false)
+  const [buildStatusRefreshing, setBuildStatusRefreshing] = useState(false)
+  const [activeBuildId, setActiveBuildId] = useState<string | null>(null)
+  const [buildStatus, setBuildStatus] = useState<reference.StyleProfileBuildStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const buildSequenceRef = useRef(0)
 
   const selectedAnchors = useMemo(
     () => selectedSourceAnchors(anchors, selectedAnchorIds),
@@ -117,6 +238,7 @@ export function StyleProfileLibraryPanel({
   const canCompare = Number.parseInt(leftCompareId, 10) > 0 &&
     Number.parseInt(rightCompareId, 10) > 0 &&
     leftCompareId !== rightCompareId
+  const buildIsActive = Boolean(activeBuildId && !isTerminalBuildStatus(buildStatus))
 
   const fetchProfiles = useCallback(async () => {
     return await app.GetReferenceStyleProfiles({
@@ -153,6 +275,81 @@ export function StyleProfileLibraryPanel({
       setLoading(false)
     }
   }, [fetchProfiles, novelId])
+
+  useEffect(() => {
+    if (!novelId) return
+
+    const storedBuildId = readStoredBuildId(novelId)
+    if (!storedBuildId) return
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const status = await app.GetReferenceStyleProfileBuildStatus({
+          novel_id: novelId,
+          build_id: storedBuildId,
+        })
+        if (cancelled) return
+        if (!status) {
+          forgetStoredBuildId(novelId, storedBuildId)
+          return
+        }
+
+        setBuildStatus(status)
+        if (!isTerminalBuildStatus(status)) {
+          setActiveBuildId(status.build_id)
+        }
+      } catch {
+        if (!cancelled) forgetStoredBuildId(novelId, storedBuildId)
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [app, novelId])
+
+  useEffect(() => {
+    if (!activeBuildId || !novelId) return
+
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const poll = async () => {
+      try {
+        const status = await app.GetReferenceStyleProfileBuildStatus({
+          novel_id: novelId,
+          build_id: activeBuildId,
+        })
+        if (cancelled) return
+
+        if (status) {
+          setBuildStatus(status)
+          if (isTerminalBuildStatus(status)) {
+            setActiveBuildId(null)
+            setBuildSubmitting(false)
+            setBuildCancelling(false)
+            if (status.status === 'completed' && status.profile_id) {
+              void loadProfiles()
+            }
+            return
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : '刷新构建状态失败')
+        }
+      }
+
+      if (!cancelled) {
+        timer = setTimeout(poll, STYLE_PROFILE_BUILD_POLL_MS)
+      }
+    }
+
+    timer = setTimeout(poll, STYLE_PROFILE_BUILD_POLL_MS)
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [activeBuildId, app, loadProfiles, novelId])
 
   useEffect(() => {
     let cancelled = false
@@ -200,20 +397,126 @@ export function StyleProfileLibraryPanel({
       return
     }
 
-    const built = await run(() => app.BuildReferenceStyleProfile({
-      novel_id: novelId,
-      title: form.title.trim(),
-      description: form.description.trim(),
-      anchor_ids: selectedAnchorIdList,
-      allowed_license_statuses: lines(form.allowedLicenseStatuses),
-      allowed_source_trust_levels: lines(form.allowedSourceTrustLevels),
-    }), '风格画像已构建')
-    if (built) {
+    const buildId = createStyleBuildId(novelId)
+    const title = form.title.trim()
+    const sequence = buildSequenceRef.current + 1
+    buildSequenceRef.current = sequence
+    storeBuildId(novelId, buildId)
+    setBuildStatus(createPendingBuildStatus(novelId, buildId, title, selectedAnchorIdList))
+    setActiveBuildId(buildId)
+    setBuildSubmitting(true)
+    setBuildCancelling(false)
+    setError(null)
+    setMessage(null)
+
+    try {
+      const built = await app.BuildReferenceStyleProfile({
+        build_id: buildId,
+        novel_id: novelId,
+        title,
+        description: form.description.trim(),
+        anchor_ids: selectedAnchorIdList,
+        allowed_license_statuses: lines(form.allowedLicenseStatuses),
+        allowed_source_trust_levels: lines(form.allowedSourceTrustLevels),
+      })
+      if (buildSequenceRef.current !== sequence) return
+
+      const latest = await app.GetReferenceStyleProfileBuildStatus({
+        novel_id: novelId,
+        build_id: buildId,
+      })
+      if (latest) setBuildStatus(latest)
+      setMessage('风格画像已构建')
       setForm(EMPTY_STYLE_PROFILE_FORM)
       setActiveProfile(built)
       setComparison(null)
       setLeftCompareId(String(built.profile_id))
+      setActiveBuildId(null)
       await loadProfiles()
+    } catch (err) {
+      if (buildSequenceRef.current !== sequence) return
+
+      const latest = await app.GetReferenceStyleProfileBuildStatus({
+        novel_id: novelId,
+        build_id: buildId,
+      }).catch(() => null)
+      if (latest) {
+        setBuildStatus(latest)
+        if (latest.status === 'cancelled') {
+          setMessage('风格画像构建已取消')
+        } else if (latest.status === 'failed') {
+          setError(latest.error_message || '风格画像构建失败')
+        } else {
+          setError(err instanceof Error ? err.message : '风格画像构建失败')
+        }
+      } else {
+        forgetStoredBuildId(novelId, buildId)
+        setBuildStatus(null)
+        setError(err instanceof Error ? err.message : '风格画像构建失败')
+      }
+      setActiveBuildId(null)
+    } finally {
+      if (buildSequenceRef.current === sequence) {
+        setBuildSubmitting(false)
+        setBuildCancelling(false)
+      }
+    }
+  }
+
+  async function refreshBuildStatus(success?: string) {
+    const buildId = buildStatus?.build_id ?? activeBuildId
+    if (!buildId) return null
+
+    setBuildStatusRefreshing(true)
+    setError(null)
+    try {
+      const status = await app.GetReferenceStyleProfileBuildStatus({
+        novel_id: novelId,
+        build_id: buildId,
+      })
+      if (!status) {
+        setBuildStatus(null)
+        forgetStoredBuildId(novelId, buildId)
+        setError('找不到该构建状态')
+        return null
+      }
+      setBuildStatus(status)
+      if (isTerminalBuildStatus(status)) {
+        setActiveBuildId(null)
+      } else {
+        setActiveBuildId(status.build_id)
+      }
+      if (success) setMessage(success)
+      return status
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '刷新构建状态失败')
+      return null
+    } finally {
+      setBuildStatusRefreshing(false)
+    }
+  }
+
+  async function cancelBuild() {
+    const buildId = activeBuildId ?? buildStatus?.build_id
+    if (!buildId || isTerminalBuildStatus(buildStatus)) return
+
+    setBuildCancelling(true)
+    setError(null)
+    setMessage(null)
+    try {
+      const status = await app.CancelReferenceStyleProfileBuild({
+        novel_id: novelId,
+        build_id: buildId,
+      })
+      setBuildStatus(status)
+      setMessage('风格画像构建已取消')
+      if (isTerminalBuildStatus(status)) {
+        setActiveBuildId(null)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '取消风格画像构建失败')
+    } finally {
+      setBuildCancelling(false)
     }
   }
 
@@ -338,14 +641,83 @@ export function StyleProfileLibraryPanel({
               onClick={() => {
                 void buildProfile()
               }}
-              disabled={loading || !canBuildProfile}
+              disabled={loading || buildSubmitting || buildIsActive || !canBuildProfile}
+              aria-busy={buildSubmitting}
               className="inline-flex items-center justify-center gap-1.5 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
             >
-              <Wand2 className="h-3.5 w-3.5" />
+              {buildSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
               构建风格画像
             </button>
           </div>
         </div>
+
+        {buildStatus && (
+          <div data-testid="reference-style-build-status" className="rounded-md border border-border bg-background p-3">
+            <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  {buildStatusIcon(buildStatus)}
+                  <h4 className="text-xs font-semibold text-foreground">构建状态</h4>
+                </div>
+                <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">
+                  {buildStatus.title || '未命名画像'} · {buildStatus.build_id}
+                </p>
+              </div>
+              <span className={`text-[11px] ${statusTone(buildStatus.status)}`}>{buildStatus.status}</span>
+            </div>
+            <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-secondary">
+              <div
+                className="h-full rounded-full bg-primary transition-[width]"
+                style={{ width: `${buildProgressPercent(buildStatus)}%` }}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-[11px] text-muted-foreground sm:grid-cols-4">
+              <div className="rounded border border-border bg-card px-2 py-1.5">状态 {buildStatusLabel(buildStatus.status)}</div>
+              <div className="rounded border border-border bg-card px-2 py-1.5">阶段 {buildStageLabel(buildStatus.stage)}</div>
+              <div className="rounded border border-border bg-card px-2 py-1.5">进度 {buildStatus.progress_completed}/{buildStatus.progress_total}</div>
+              <div className="rounded border border-border bg-card px-2 py-1.5">更新 {formatTime(buildStatus.updated_at) || '未知'}</div>
+            </div>
+            <div className="mt-2 grid grid-cols-1 gap-2 text-[11px] text-muted-foreground sm:grid-cols-2">
+              <div className="rounded border border-border bg-card px-2 py-1.5">来源 {buildStatus.anchor_ids.join(', ') || '无'}</div>
+              <div className="rounded border border-border bg-card px-2 py-1.5">哈希 {buildStatus.source_hashes.length}</div>
+            </div>
+            {(buildStatus.error_code || buildStatus.error_message || buildStatus.diagnostics.length > 0) && (
+              <div className="mt-2 space-y-1 text-[11px] leading-relaxed text-muted-foreground">
+                {buildStatus.error_code && <div className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-destructive">错误 {buildStatus.error_code}: {buildStatus.error_message || '无详细信息'}</div>}
+                {!buildStatus.error_code && buildStatus.error_message && <div className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-destructive">{buildStatus.error_message}</div>}
+                {buildStatus.diagnostics.slice(0, 4).map(diagnostic => (
+                  <div key={diagnostic} className="rounded border border-border bg-card px-2 py-1.5">{diagnostic}</div>
+                ))}
+              </div>
+            )}
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  void refreshBuildStatus('构建状态已刷新')
+                }}
+                disabled={buildStatusRefreshing}
+                className={actionButtonClass}
+              >
+                {buildStatusRefreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Clock3 className="h-3.5 w-3.5" />}
+                检查构建状态
+              </button>
+              {!isTerminalBuildStatus(buildStatus) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void cancelBuild()
+                  }}
+                  disabled={buildCancelling}
+                  className={actionButtonClass}
+                >
+                  {buildCancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CircleX className="h-3.5 w-3.5" />}
+                  取消构建
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="space-y-2">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">

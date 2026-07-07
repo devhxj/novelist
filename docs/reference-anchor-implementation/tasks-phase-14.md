@@ -365,13 +365,13 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 14: Performance, Robustness, and Phase 14 Playwright Gate
 
-**Status:** Partially complete for the backend robustness boundary. A 10MB user-provided source now imports through the real anchor service, produces more than 500 segments/materials, builds a deterministic style profile, records bounded evidence/provenance metadata, and keeps source phrases out of persisted feature vectors and deterministic analysis diagnostics. Style profile builds now create source-text-free persisted build-status rows with stage/progress metadata, bridge-readable status, explicit cancel marking, cancellation-token persistence, failed-build recovery inspection, and rebuild-after-failure coverage. Advanced/LLM-assisted profile stress, UI white-screen coverage, full frontend progress/cancel UX, and Playwright stress gates remain open.
+**Status:** Partially complete for the backend robustness and frontend progress/cancel boundary. A 10MB user-provided source now imports through the real anchor service, produces more than 500 segments/materials, builds a deterministic style profile, records bounded evidence/provenance metadata, and keeps source phrases out of persisted feature vectors and deterministic analysis diagnostics. Style profile builds now create source-text-free persisted build-status rows with stage/progress metadata, bridge-readable status, explicit cancel marking, cancellation-token persistence, failed-build recovery inspection, and rebuild-after-failure coverage. The frontend `风格画像库` now generates safe build ids, displays persisted build progress/diagnostics/errors, can cancel running builds, and can refresh failed/cancelled status for recovery inspection. Advanced/LLM-assisted profile stress, UI white-screen coverage, and the dedicated Playwright stress gate remain open.
 
 **Description:** Add stress and regression coverage for large style corpora and high-fidelity style workflows.
 
 **Acceptance criteria:**
 
-- [ ] 10MB source builds baseline and advanced style profiles without white screen or unbounded memory growth.
+- [ ] 10MB source builds baseline and advanced style profiles without white screen or unbounded memory growth. The normal browser workflow now covers progress/cancel/failure recovery; dedicated 10MB UI stress remains open.
 - [x] Backend deterministic profile build handles a 10MB imported source without persisting source text in profile features, evidence schema, or deterministic diagnostics.
 - [x] Backend profile build supports persisted progress, cancellation status, failure recovery, and resumable inspection. The current bridge method remains a synchronous build call for compatibility; persisted status rows make progress/failure/cancel visible and restart-readable, while a future background worker can reuse the same build-status table.
 - [ ] Material/profile search remains paged and responsive.
@@ -382,7 +382,7 @@ The current extractor is deterministic and robust, but limited:
 - [x] `dotnet test tests\Novelist.IntegrationTests\Novelist.IntegrationTests.csproj --no-restore -v minimal -p:UseSharedCompilation=false --filter 'ReferenceStyleProfileServiceTests|ReferenceAnchorAdvancedSegmentationTests'`
 - [x] `dotnet test tests\Novelist.Tests\Novelist.Tests.csproj --no-restore -v minimal -p:UseSharedCompilation=false --filter 'ReferenceStyleProfileBuildStatusPayloadsUseStableSnakeCaseJsonNamesWithoutTextFields|ReferenceStyleProfileHandlersRouteEveryMethodToServiceOperations|CompatibilityAppMethodListHasExpectedCoverage|CompatibilityRegistryIncludesReferenceAnchorMethods'`
 - [x] `dotnet test tests\Novelist.IntegrationTests\Novelist.IntegrationTests.csproj --no-restore -v minimal -p:UseSharedCompilation=false --filter 'FailedStyleProfileBuildPersistsRecoverableBuildStatusWithoutSourceText|CancelledStyleProfileBuildPersistsCancelledStatusWithoutActiveProfile'`
-- [ ] `npm --prefix frontend run test:reference-style`
+- [x] `npm --prefix frontend run test:reference-style`
 - [ ] `npm --prefix frontend run test:reference-style:stress`
 - [ ] Existing Phase 13 matrix remains green.
 - [ ] Full .NET tests pass for style-related services and contracts.

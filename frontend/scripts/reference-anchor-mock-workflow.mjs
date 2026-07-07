@@ -342,6 +342,8 @@ async function buildInspectArchiveRestoreAndCompareStyleProfiles(page) {
   await stylePanel.getByLabel('风格画像说明').fill('近距离 POV、克制动作和雨声压力')
   await stylePanel.getByRole('button', { name: /^构建风格画像$/ }).click()
   await expectVisible(stylePanel.getByText('风格画像已构建'), 'style profile built message')
+  await expectVisible(stylePanel.getByTestId('reference-style-build-status').getByText('completed', { exact: true }), 'first style profile completed build status')
+  await expectVisible(stylePanel.getByTestId('reference-style-build-status').getByText(/style-42-/), 'first style profile build id')
   await expectVisible(stylePanel.getByTestId('reference-style-profile-row').filter({ hasText: '雨夜克制画像' }), 'first style profile row')
   await expectVisible(stylePanel.getByTestId('reference-style-profile-detail').getByText(/dialogue_ratio/).first(), 'first style profile numeric feature')
   await expectVisible(stylePanel.getByTestId('reference-style-profile-detail').getByText(/证据 1/).first(), 'first style profile evidence count')
@@ -354,6 +356,22 @@ async function buildInspectArchiveRestoreAndCompareStyleProfiles(page) {
   await stylePanel.getByRole('button', { name: /^构建风格画像$/ }).click()
   await expectVisible(stylePanel.getByText('风格画像已构建'), 'second style profile built message')
   await expectVisible(stylePanel.getByTestId('reference-style-profile-row').filter({ hasText: '批量动作画像' }), 'second style profile row')
+
+  await stylePanel.getByLabel('风格画像标题').fill('失败画像')
+  await stylePanel.getByLabel('风格画像说明').fill('验证失败状态可恢复检查')
+  await stylePanel.getByRole('button', { name: /^构建风格画像$/ }).click()
+  await expectVisible(stylePanel.getByText('模拟画像构建失败', { exact: true }), 'style profile failed build message')
+  await expectVisible(stylePanel.getByTestId('reference-style-build-status').getByText('failed', { exact: true }), 'style profile failed build status')
+  await stylePanel.getByRole('button', { name: /^检查构建状态$/ }).click()
+  await expectVisible(stylePanel.getByText('构建状态已刷新'), 'style profile failed build resumable status refresh')
+
+  await stylePanel.getByLabel('风格画像标题').fill('取消画像')
+  await stylePanel.getByLabel('风格画像说明').fill('验证主动取消状态')
+  await stylePanel.getByRole('button', { name: /^构建风格画像$/ }).click()
+  await expectVisible(stylePanel.getByTestId('reference-style-build-status').getByText('running', { exact: true }), 'style profile running build status')
+  await stylePanel.getByRole('button', { name: /^取消构建$/ }).click()
+  await expectVisible(stylePanel.getByText('风格画像构建已取消'), 'style profile cancelled build message')
+  await expectVisible(stylePanel.getByTestId('reference-style-build-status').getByText('cancelled', { exact: true }), 'style profile cancelled build status')
 
   await stylePanel.getByRole('button', { name: /查看风格画像 雨夜克制画像/ }).click()
   await expectVisible(stylePanel.getByTestId('reference-style-profile-detail').getByRole('heading', { name: '雨夜克制画像' }), 'style profile detail title')
@@ -551,6 +569,8 @@ async function verifyBridgeCalls(page) {
     'RebuildReferenceAnchor',
     'SearchReferenceMaterials',
     'BuildReferenceStyleProfile',
+    'GetReferenceStyleProfileBuildStatus',
+    'CancelReferenceStyleProfileBuild',
     'GetReferenceStyleProfiles',
     'GetReferenceStyleProfile',
     'ArchiveReferenceStyleProfile',
@@ -711,14 +731,27 @@ async function verifyBridgeCalls(page) {
   assert.deepEqual(libraryRestoreMaterialsCall.args[0].material_ids, ['mat-001'], 'corpus material library restore payload must include selected archived material ids')
 
   const styleBuildCalls = calls.filter((call) => call.method === 'BuildReferenceStyleProfile')
-  assert.equal(styleBuildCalls.length, 2, 'style profile workflow must build two profiles for comparison')
+  assert.equal(styleBuildCalls.length, 4, 'style profile workflow must build two profiles, one failed profile, and one cancelled profile')
   assert.equal(styleBuildCalls[0].args[0].novel_id, 42, 'style profile build payload must include novel id')
   assert.equal(styleBuildCalls[0].args[0].title, '雨夜克制画像', 'first style profile build payload must include title')
   assert.deepEqual(styleBuildCalls[0].args[0].anchor_ids, [101], 'first style profile build payload must use selected first anchor')
   assert.deepEqual(styleBuildCalls[0].args[0].allowed_license_statuses, ['user_provided', 'licensed', 'public_domain'], 'style profile build payload must include license policy')
   assert.deepEqual(styleBuildCalls[0].args[0].allowed_source_trust_levels, ['user_verified', 'imported'], 'style profile build payload must include source-trust policy')
+  assert.match(styleBuildCalls[0].args[0].build_id, /^style-42-[A-Za-z0-9._-]+$/, 'first style profile build payload must include a safe build id')
   assert.equal(styleBuildCalls[1].args[0].title, '批量动作画像', 'second style profile build payload must include title')
   assert.deepEqual(styleBuildCalls[1].args[0].anchor_ids, [102], 'second style profile build payload must use selected second anchor')
+  assert.equal(styleBuildCalls[2].args[0].title, '失败画像', 'failed style profile build payload must preserve title')
+  assert.equal(styleBuildCalls[3].args[0].title, '取消画像', 'cancelled style profile build payload must preserve title')
+
+  const styleStatusCalls = calls.filter((call) => call.method === 'GetReferenceStyleProfileBuildStatus')
+  assert(styleStatusCalls.some((call) => call.args[0]?.build_id === styleBuildCalls[0].args[0].build_id), 'style profile workflow must inspect the first build status')
+  assert(styleStatusCalls.some((call) => call.args[0]?.build_id === styleBuildCalls[2].args[0].build_id), 'style profile workflow must inspect failed build status')
+  const styleCancelCall = calls.find((call) => call.method === 'CancelReferenceStyleProfileBuild')
+  assert(styleCancelCall, 'missing CancelReferenceStyleProfileBuild call')
+  assert.deepEqual(styleCancelCall.args[0], {
+    novel_id: 42,
+    build_id: styleBuildCalls[3].args[0].build_id,
+  }, 'style profile cancel payload must include novel and build id')
 
   const styleDetailCall = calls.find((call) => call.method === 'GetReferenceStyleProfile' && call.args[1] === 301)
   assert(styleDetailCall, 'missing GetReferenceStyleProfile call')
@@ -942,6 +975,8 @@ function installReferenceAnchorMockBridge() {
     nextStyleProfileId: 301,
     anchors: [],
     styleProfiles: [],
+    styleBuildStatuses: {},
+    cancelledStyleBuilds: new Set(),
     blueprints: {},
     runs: [],
     events: {},
@@ -966,7 +1001,9 @@ function installReferenceAnchorMockBridge() {
       sendMessage(message) {
         const envelope = JSON.parse(String(message))
         if (envelope.kind === 'request') {
-          window.setTimeout(() => handleRequest(envelope), 0)
+          window.setTimeout(() => {
+            void handleRequest(envelope)
+          }, 0)
         }
       },
       receiveMessage(callback) {
@@ -975,14 +1012,14 @@ function installReferenceAnchorMockBridge() {
     },
   })
 
-  function handleRequest(envelope) {
+  async function handleRequest(envelope) {
     try {
       const args = Array.isArray(envelope.payload?.args) ? envelope.payload.args : []
       state.calls.push({ method: envelope.method, args })
       if (envelope.method === 'SaveContent') {
         throw new Error('SaveContent is forbidden in the reference-anchor mock workflow.')
       }
-      const result = route(envelope.method, args)
+      const result = await route(envelope.method, args)
       respond({ kind: 'response', id: envelope.id, ok: true, result })
     } catch (error) {
       respond({
@@ -1042,6 +1079,8 @@ function installReferenceAnchorMockBridge() {
       case 'RebuildReferenceAnchor': return rebuildReferenceAnchor(args[1])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
       case 'BuildReferenceStyleProfile': return buildReferenceStyleProfile(args[0])
+      case 'GetReferenceStyleProfileBuildStatus': return getReferenceStyleProfileBuildStatus(args[0])
+      case 'CancelReferenceStyleProfileBuild': return cancelReferenceStyleProfileBuild(args[0])
       case 'GetReferenceStyleProfiles': return getReferenceStyleProfiles(args[0])
       case 'GetReferenceStyleProfile': return getReferenceStyleProfile(args[0], args[1])
       case 'ArchiveReferenceStyleProfile': return archiveReferenceStyleProfile(args[0])
@@ -1268,13 +1307,45 @@ function installReferenceAnchorMockBridge() {
     return pagedResult([1, 2, 3, 4, 5].map(material), page, size, 6)
   }
 
-  function buildReferenceStyleProfile(input) {
+  async function buildReferenceStyleProfile(input) {
     const profileId = state.nextStyleProfileId++
+    const buildId = input.build_id || `mock-style-build-${profileId}`
     const sourceAnchors = input.anchor_ids.map((anchorId) => {
       const anchor = state.anchors.find((item) => item.anchor_id === anchorId)
       if (!anchor) throw new Error(`Unknown reference anchor ${anchorId}`)
       return anchor
     })
+    const baseStatus = makeStyleBuildStatus(input, buildId, {
+      status: 'running',
+      stage: 'queued',
+      progress_completed: 0,
+      progress_total: 5,
+      source_hashes: sourceAnchors.map((anchor) => anchor.source_file_hash),
+      diagnostics: ['queued build metadata only'],
+    })
+    state.styleBuildStatuses[buildId] = baseStatus
+
+    await advanceStyleBuild(buildId, 'validating', 1)
+    await advanceStyleBuild(buildId, 'reading_sources', 2)
+
+    if (input.title.includes('失败')) {
+      state.styleBuildStatuses[buildId] = {
+        ...state.styleBuildStatuses[buildId],
+        status: 'failed',
+        stage: 'failed',
+        diagnostics: ['mock failure after source validation'],
+        error_code: 'mock_style_build_failure',
+        error_message: '模拟画像构建失败',
+        updated_at: now,
+        completed_at: now,
+      }
+      throw new Error('模拟画像构建失败')
+    }
+
+    await advanceStyleBuild(buildId, 'reading_materials', 3, input.title.includes('取消') ? 700 : 80)
+    await advanceStyleBuild(buildId, 'deterministic_baseline', 4)
+    await advanceStyleBuild(buildId, 'persisting_profile', 5)
+
     const profile = makeStyleProfile(profileId, {
       novel_id: input.novel_id,
       title: input.title,
@@ -1288,7 +1359,100 @@ function installReferenceAnchorMockBridge() {
       dominant_technique: profileId % 2 === 0 ? 'sensory_detail' : 'dialogue_exchange',
     })
     state.styleProfiles = [profile, ...state.styleProfiles]
+    state.styleBuildStatuses[buildId] = {
+      ...state.styleBuildStatuses[buildId],
+      profile_id: profile.profile_id,
+      status: 'completed',
+      stage: 'completed',
+      progress_completed: 5,
+      progress_total: 5,
+      diagnostics: ['completed without source text'],
+      error_code: null,
+      error_message: null,
+      updated_at: now,
+      completed_at: now,
+    }
     return profile
+  }
+
+  function getReferenceStyleProfileBuildStatus(input) {
+    return state.styleBuildStatuses[input.build_id] ?? null
+  }
+
+  function cancelReferenceStyleProfileBuild(input) {
+    state.cancelledStyleBuilds.add(input.build_id)
+    const existing = state.styleBuildStatuses[input.build_id] ?? makeStyleBuildStatus(input, input.build_id, {
+      status: 'running',
+      stage: 'queued',
+      progress_total: 1,
+    })
+    const cancelled = {
+      ...existing,
+      status: 'cancelled',
+      stage: 'cancelled',
+      diagnostics: ['cancelled by user request'],
+      error_code: 'cancelled',
+      error_message: '用户取消构建',
+      updated_at: now,
+      completed_at: now,
+      cancelled_at: now,
+    }
+    state.styleBuildStatuses[input.build_id] = cancelled
+    return cancelled
+  }
+
+  function makeStyleBuildStatus(input, buildId, overrides = {}) {
+    return {
+      build_id: buildId,
+      novel_id: input.novel_id,
+      profile_id: overrides.profile_id ?? null,
+      title: input.title ?? '未命名画像',
+      status: overrides.status ?? 'running',
+      stage: overrides.stage ?? 'queued',
+      progress_completed: overrides.progress_completed ?? 0,
+      progress_total: overrides.progress_total ?? 5,
+      anchor_ids: input.anchor_ids ?? [],
+      source_hashes: overrides.source_hashes ?? [],
+      diagnostics: overrides.diagnostics ?? [],
+      error_code: overrides.error_code ?? null,
+      error_message: overrides.error_message ?? null,
+      created_at: overrides.created_at ?? now,
+      updated_at: overrides.updated_at ?? now,
+      completed_at: overrides.completed_at ?? null,
+      cancelled_at: overrides.cancelled_at ?? null,
+    }
+  }
+
+  async function advanceStyleBuild(buildId, stage, completed, delayMs = 80) {
+    await delay(delayMs)
+    if (state.cancelledStyleBuilds.has(buildId)) {
+      const existing = state.styleBuildStatuses[buildId]
+      state.styleBuildStatuses[buildId] = {
+        ...existing,
+        status: 'cancelled',
+        stage: 'cancelled',
+        progress_completed: completed,
+        diagnostics: ['cancelled before profile commit'],
+        error_code: 'cancelled',
+        error_message: '用户取消构建',
+        updated_at: now,
+        completed_at: now,
+        cancelled_at: now,
+      }
+      throw new Error('用户取消构建')
+    }
+
+    state.styleBuildStatuses[buildId] = {
+      ...state.styleBuildStatuses[buildId],
+      stage,
+      progress_completed: completed,
+      diagnostics: [`${stage} metadata only`],
+      updated_at: now,
+    }
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms))
   }
 
   function getReferenceStyleProfiles(input) {

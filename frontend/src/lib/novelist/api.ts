@@ -239,7 +239,7 @@ export const appApi: NovelistAppApi = {
   AuditReferenceAnchoredDraft: appMethod<NovelistAppApi['AuditReferenceAnchoredDraft']>('AuditReferenceAnchoredDraft'),
   AuditReferenceReuse: appMethod<NovelistAppApi['AuditReferenceReuse']>('AuditReferenceReuse'),
   BindReferenceBlueprintMaterials: appMethod<NovelistAppApi['BindReferenceBlueprintMaterials']>('BindReferenceBlueprintMaterials'),
-  BuildReferenceStyleProfile: appMethod<NovelistAppApi['BuildReferenceStyleProfile']>('BuildReferenceStyleProfile'),
+  BuildReferenceStyleProfile: ((...args) => invokeAppArgs('BuildReferenceStyleProfile', args, { timeoutMs: null })) as NovelistAppApi['BuildReferenceStyleProfile'],
   CancelChat: appMethod<NovelistAppApi['CancelChat']>('CancelChat'),
   CancelReferenceOrchestrationRun: appMethod<NovelistAppApi['CancelReferenceOrchestrationRun']>('CancelReferenceOrchestrationRun'),
   CancelReferenceStyleProfileBuild: appMethod<NovelistAppApi['CancelReferenceStyleProfileBuild']>('CancelReferenceStyleProfileBuild'),
