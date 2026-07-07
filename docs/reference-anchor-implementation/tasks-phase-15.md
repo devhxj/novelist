@@ -4,7 +4,7 @@
 
 ## Phase 15: Goink-Master Feature Merge, Import Pipeline, Style Library, Narrative Pattern Extraction, Git History UI, and Product Robustness
 
-**Status:** Open as of 2026-07-07. Task 1 is complete: Phase 15 payload contracts, compatibility method names, owned frontend adapter method declarations, representative serialization/front-back registry tests, long-running `task_id` coverage, and app/build update-check endpoint configuration are in place. Task 2 has its app-settings persistence, style-sample storage, narrative pattern run storage, and import-run storage/state-machine slices implemented. Remaining Phase 15 bridge methods intentionally stay at the compatibility boundary until their corresponding service tasks land.
+**Status:** Open as of 2026-07-07. Task 1 is complete: Phase 15 payload contracts, compatibility method names, owned frontend adapter method declarations, representative serialization/front-back registry tests, long-running `task_id` coverage, and app/build update-check endpoint configuration are in place. Task 2 is complete for the storage and migration model: app-settings persistence, style-sample storage, narrative pattern run storage, import-run storage/state-machine behavior, and copy-first/additive migration preservation are implemented and covered. Remaining Phase 15 bridge methods intentionally stay at the compatibility boundary until their corresponding service tasks land.
 
 **Description:** Phase 15 merges the latest user-facing product capabilities from the legacy `goink-master` snapshot into the current Novelist .NET 10 + Photino.NET + React/Vite architecture. The source snapshot is useful as a behavior reference, not as an implementation target. The merge must port product semantics, data contracts, progress reporting, edge-case handling, and regression coverage into Novelist modules without reviving legacy Go/Wails/Python runtime paths.
 
@@ -156,12 +156,12 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 - [x] Import runs store enough state to diagnose failures and prove cleanup, without retaining full imported source text unnecessarily: task id, source path hash/display name, parser type, created novel id, created file roots, current durable phase, cleanup state, warning state, and timestamps.
 - [x] Import run state transitions are monotonic and explicit: `created`, `parsing`, `creating_novel`, `writing_files`, `saving_metadata`, `indexing`, `git_commit`, `completed`, `completed_with_warning`, `cleanup_pending`, `cleanup_completed`, `cleanup_blocked`, `failed`, `cancelled`.
 - [x] Settings persist Git author name/email, update-check preferences/dismissed version, side/chat panel widths, and window bounds/maximized state using current app settings mechanisms.
-- [ ] Migrations are copy-first or additive and preserve existing novels, chapters, skills, settings, reference anchors, and Phase 14 style profiles.
+- [x] Migrations are copy-first or additive and preserve existing novels, chapters, skills, settings, reference anchors, and Phase 14 style profiles.
 
 **Verification:**
 
-- [ ] Migration tests from pre-Phase 15 app data.
-- [ ] Migration tests with partially populated Phase 14 reference-style databases.
+- [x] Migration tests from pre-Phase 15 app data.
+- [x] Migration tests with partially populated Phase 14 reference-style databases.
 - [x] Import-run state machine tests prove invalid backwards transitions fail.
 - [x] Import-run storage tests cover source path hashing without raw path persistence, parser type/display name retention, created novel/file roots, diagnostics, skipped chapters, warning state, cleanup state, terminal timestamps, recovery pending/blocked classification, bridge routing, and invalid payload rejection.
 - [x] Pattern extraction storage tests cover durable run persistence, selected range retention, progress updates, trace append/read, generated skill preview metadata, cancellation/failure diagnostics, terminal timestamps, bridge routing, and invalid payload rejection.

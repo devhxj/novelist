@@ -120,6 +120,108 @@ public sealed class LegacyDataMigrationTests : IDisposable
         Assert.NotEmpty(log);
     }
 
+    [Fact]
+    public async Task MigrationPreservesExistingPhase15StoresAndTargetAppData()
+    {
+        var oldConfig = Path.Combine(_root, "old-config-phase15");
+        var oldData = Path.Combine(_root, "old-data-phase15");
+        var newConfig = Path.Combine(_root, "new-config-phase15");
+        var newData = Path.Combine(_root, "new-data-phase15");
+        Directory.CreateDirectory(oldConfig);
+        Directory.CreateDirectory(oldData);
+        Directory.CreateDirectory(newData);
+        await File.WriteAllTextAsync(
+            Path.Combine(oldConfig, "config.json"),
+            JsonSerializer.Serialize(new { data_dir = oldData }));
+        await CreateLegacyWorkspaceAsync(oldConfig, oldData);
+        await CreateLegacyDatabaseAsync(Path.Combine(oldData, "novel-agent.db"));
+
+        await WriteExistingPhase15TargetDataAsync(newData);
+        var preservedPaths = new[]
+        {
+            Path.Combine(newData, "app_settings.json"),
+            Path.Combine(newData, "novels", "index.json"),
+            Path.Combine(newData, "novels", "1", "chapters", "001.md"),
+            Path.Combine(newData, "style_samples", "index.json"),
+            Path.Combine(newData, "narrative_patterns", "runs.json"),
+            Path.Combine(newData, "novel_imports", "runs.json")
+        };
+        var hashesBefore = await HashFilesAsync(preservedPaths);
+
+        var options = new AppInitializationOptions
+        {
+            ConfigDirectory = newConfig,
+            DefaultDataDirectory = newData,
+            EnableLegacyMigration = true,
+            LegacyConfigDirectory = oldConfig,
+            LegacyDataDirectory = oldData
+        };
+
+        await new FileSystemAppInitializationService(options).InitializeAsync(newData, CancellationToken.None);
+
+        Assert.Equal(hashesBefore, await HashFilesAsync(preservedPaths));
+        Assert.Equal("目标章节正文", await File.ReadAllTextAsync(Path.Combine(newData, "novels", "1", "chapters", "001.md")));
+        Assert.True(File.Exists(Path.Combine(newData, "skills", "legacy-style.md")));
+
+        using var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(newData, "migration_manifest.json")));
+        var operations = manifest.RootElement.GetProperty("operations").EnumerateArray().ToArray();
+        Assert.Contains(operations, item =>
+            item.GetProperty("name").GetString() == "import_novels" &&
+            item.GetProperty("status").GetString() == "skipped");
+        Assert.Contains(operations, item =>
+            item.GetProperty("name").GetString() == "import_app_settings" &&
+            item.GetProperty("status").GetString() == "skipped");
+        Assert.Contains(operations, item =>
+            item.GetProperty("name").GetString() == "copy_novel_workspaces" &&
+            item.GetProperty("status").GetString() == "completed_with_warnings");
+    }
+
+    [Fact]
+    public async Task MigrationPreservesPartiallyPopulatedPhase14ReferenceStyleDatabase()
+    {
+        var oldConfig = Path.Combine(_root, "old-config-style");
+        var oldData = Path.Combine(_root, "old-data-style");
+        var newConfig = Path.Combine(_root, "new-config-style");
+        var newData = Path.Combine(_root, "new-data-style");
+        Directory.CreateDirectory(oldConfig);
+        Directory.CreateDirectory(oldData);
+        Directory.CreateDirectory(newData);
+        await File.WriteAllTextAsync(
+            Path.Combine(oldConfig, "config.json"),
+            JsonSerializer.Serialize(new { data_dir = oldData }));
+        await CreateLegacyWorkspaceAsync(oldConfig, oldData);
+        await CreateLegacyDatabaseAsync(Path.Combine(oldData, "novel-agent.db"));
+        await CreatePartialReferenceStyleDatabaseAsync(Path.Combine(newData, "reference-anchor", "index.sqlite"));
+        SqliteConnection.ClearAllPools();
+
+        var options = new AppInitializationOptions
+        {
+            ConfigDirectory = newConfig,
+            DefaultDataDirectory = newData,
+            EnableLegacyMigration = true,
+            LegacyConfigDirectory = oldConfig,
+            LegacyDataDirectory = oldData
+        };
+
+        await new FileSystemAppInitializationService(options).InitializeAsync(newData, CancellationToken.None);
+
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(newData, "reference-anchor", "index.sqlite"),
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false
+        }.ToString());
+        await connection.OpenAsync();
+
+        await using var profileCommand = connection.CreateCommand();
+        profileCommand.CommandText = "SELECT title FROM reference_style_profiles WHERE profile_id = 7;";
+        Assert.Equal("既有 Phase14 画像", (string?)await profileCommand.ExecuteScalarAsync());
+
+        await using var evidenceCommand = connection.CreateCommand();
+        evidenceCommand.CommandText = "SELECT COUNT(*) FROM reference_style_profile_evidence WHERE profile_id = 7;";
+        Assert.Equal(1L, (long)(await evidenceCommand.ExecuteScalarAsync())!);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
@@ -216,6 +318,289 @@ public sealed class LegacyDataMigrationTests : IDisposable
         await ExecuteAsync(connection, "INSERT INTO writing_log VALUES (901, '2026-07-01', 1, 101, 128, '2026-07-01T00:00:00Z')");
     }
 
+    private static async ValueTask WriteExistingPhase15TargetDataAsync(string newData)
+    {
+        Directory.CreateDirectory(Path.Combine(newData, "novels", "1", "chapters"));
+        Directory.CreateDirectory(Path.Combine(newData, "style_samples"));
+        Directory.CreateDirectory(Path.Combine(newData, "narrative_patterns"));
+        Directory.CreateDirectory(Path.Combine(newData, "novel_imports"));
+
+        await File.WriteAllTextAsync(
+            Path.Combine(newData, "app_settings.json"),
+            """
+            {
+              "ID": 1,
+              "last_novel_id": 1,
+              "selected_model_key": "target/provider",
+              "reasoning_effort": "target",
+              "approval_mode": "auto",
+              "chat_panel_width": 444,
+              "last_session_id": "target_session",
+              "user_name": "目标作者",
+              "git_author_name": "Target Git",
+              "git_author_email": "target@example.com",
+              "update_check_enabled": true,
+              "update_check_endpoint_url": "https://updates.example.test/releases.json",
+              "update_check_dismissed_version": "9.9.9",
+              "sidebar_width": 300,
+              "metadata_panel_width": 360,
+              "window_width": 1400,
+              "window_height": 900,
+              "window_maximized": true
+            }
+            """);
+        await File.WriteAllTextAsync(
+            Path.Combine(newData, "novels", "index.json"),
+            """
+            {
+              "version": 1,
+              "next_id": 2,
+              "items": [
+                {
+                  "id": 1,
+                  "title": "目标小说",
+                  "genre": "目标类型",
+                  "description": "目标描述",
+                  "created_at": "2026-07-07T00:00:00Z",
+                  "updated_at": "2026-07-07T00:00:00Z"
+                }
+              ]
+            }
+            """);
+        await File.WriteAllTextAsync(Path.Combine(newData, "novels", "1", "chapters", "001.md"), "目标章节正文");
+        await File.WriteAllTextAsync(
+            Path.Combine(newData, "style_samples", "index.json"),
+            """
+            {
+              "version": 1,
+              "next_id": 2,
+              "items": [
+                {
+                  "sample_id": 1,
+                  "novel_id": 1,
+                  "is_global": false,
+                  "name": "目标风格样本",
+                  "content": "目标样本文本。",
+                  "preview": "目标样本文本。",
+                  "tags": ["target"],
+                  "stats_schema_version": "style_sample_stats_v1",
+                  "stats": {
+                    "character_count": 7,
+                    "sentence_count": 1,
+                    "average_sentence_chars": 7,
+                    "dialogue_ratio": 0,
+                    "interiority_ratio": 0,
+                    "sensory_ratio": 0,
+                    "punctuation_per_100_chars": 14.2857
+                  },
+                  "source_metadata": null,
+                  "created_at": "2026-07-07T00:00:00Z",
+                  "updated_at": "2026-07-07T00:00:00Z"
+                }
+              ]
+            }
+            """);
+        await File.WriteAllTextAsync(
+            Path.Combine(newData, "narrative_patterns", "runs.json"),
+            """
+            {
+              "version": 1,
+              "runs": [
+                {
+                  "task_id": "target-pattern",
+                  "novel_id": 1,
+                  "status": "completed",
+                  "stage": "skill_preview",
+                  "progress_completed": 1,
+                  "progress_total": 1,
+                  "chapter_ranges": [{ "start_chapter": 1, "end_chapter": 1 }],
+                  "selected_chapter_ids": [],
+                  "provider_name": "target-provider",
+                  "model_id": "target-model",
+                  "reasoning_effort": "low",
+                  "skill_name": "目标叙事模式",
+                  "skill_preview": "目标模式",
+                  "generated_skill": {
+                    "name": "目标叙事模式",
+                    "preview": "目标模式",
+                    "status": "preview_ready",
+                    "updated_at": "2026-07-07T00:00:00Z"
+                  },
+                  "diagnostics": [],
+                  "error": null,
+                  "trace": [],
+                  "created_at": "2026-07-07T00:00:00Z",
+                  "updated_at": "2026-07-07T00:00:00Z",
+                  "completed_at": "2026-07-07T00:00:00Z",
+                  "cancelled_at": null,
+                  "failed_at": null
+                }
+              ]
+            }
+            """);
+        await File.WriteAllTextAsync(
+            Path.Combine(newData, "novel_imports", "runs.json"),
+            """
+            {
+              "version": 1,
+              "runs": [
+                {
+                  "task_id": "target-import",
+                  "state": "completed",
+                  "stage": "completed",
+                  "source_display_name": "target.txt",
+                  "source_path_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "parser_type": "txt",
+                  "requested_title": "目标导入",
+                  "commit_message": "import target",
+                  "created_novel_id": 1,
+                  "created_file_roots": ["novels/1"],
+                  "skipped_chapters": [],
+                  "diagnostics": [],
+                  "warnings": [],
+                  "error": null,
+                  "cleanup_state": "not_started",
+                  "warning_state": "none",
+                  "started_at": "2026-07-07T00:00:00Z",
+                  "updated_at": "2026-07-07T00:00:00Z",
+                  "completed_at": "2026-07-07T00:00:00Z"
+                }
+              ]
+            }
+            """);
+    }
+
+    private static async ValueTask CreatePartialReferenceStyleDatabaseAsync(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Pooling = false
+        }.ToString());
+        await connection.OpenAsync();
+        await ExecuteAsync(connection, """
+            CREATE TABLE reference_anchors (
+              anchor_id INTEGER PRIMARY KEY,
+              novel_id INTEGER,
+              title TEXT NOT NULL,
+              author TEXT NOT NULL,
+              source_path TEXT NOT NULL,
+              source_kind TEXT NOT NULL,
+              license_status TEXT NOT NULL,
+              source_file_hash TEXT NOT NULL,
+              build_version TEXT NOT NULL,
+              status TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              corpus_visibility TEXT NOT NULL DEFAULT 'private',
+              source_trust TEXT NOT NULL DEFAULT 'user_verified',
+              user_tags_json TEXT NOT NULL DEFAULT '[]'
+            );
+            """);
+        await ExecuteAsync(connection, """
+            CREATE TABLE reference_source_segments (
+              segment_id TEXT PRIMARY KEY,
+              anchor_id INTEGER NOT NULL,
+              chapter_index INTEGER NOT NULL,
+              chapter_title TEXT NOT NULL,
+              segment_type TEXT NOT NULL,
+              segment_index INTEGER NOT NULL,
+              parent_segment_id TEXT NOT NULL,
+              start_offset INTEGER NOT NULL,
+              end_offset INTEGER NOT NULL,
+              text TEXT NOT NULL,
+              text_hash TEXT NOT NULL
+            );
+            """);
+        await ExecuteAsync(connection, """
+            CREATE TABLE reference_materials (
+              material_id TEXT PRIMARY KEY,
+              anchor_id INTEGER NOT NULL,
+              source_segment_id TEXT NOT NULL,
+              material_type TEXT NOT NULL,
+              function_tag TEXT NOT NULL,
+              emotion_tag TEXT NOT NULL,
+              scene_tag TEXT NOT NULL,
+              pov_tag TEXT NOT NULL,
+              technique_tag TEXT NOT NULL,
+              function_confidence REAL NOT NULL,
+              emotion_confidence REAL NOT NULL,
+              pov_confidence REAL NOT NULL,
+              text TEXT NOT NULL,
+              source_hash TEXT NOT NULL,
+              extractor_version TEXT NOT NULL,
+              user_verified INTEGER NOT NULL,
+              created_at TEXT NOT NULL,
+              archived_at TEXT
+            );
+            """);
+        await ExecuteAsync(connection, """
+            CREATE TABLE reference_style_profiles (
+              profile_id INTEGER PRIMARY KEY,
+              novel_id INTEGER NOT NULL,
+              title TEXT NOT NULL,
+              description TEXT NOT NULL,
+              status TEXT NOT NULL,
+              analyzer_version TEXT NOT NULL,
+              feature_schema_version TEXT NOT NULL,
+              analyzer_source TEXT NOT NULL,
+              anchor_ids_json TEXT NOT NULL,
+              source_hashes_json TEXT NOT NULL,
+              allowed_license_statuses_json TEXT NOT NULL,
+              allowed_source_trust_levels_json TEXT NOT NULL,
+              feature_vector_json TEXT NOT NULL,
+              aggregate_confidence REAL NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              archived_at TEXT
+            );
+            """);
+        await ExecuteAsync(connection, """
+            CREATE TABLE reference_style_profile_evidence (
+              evidence_id TEXT PRIMARY KEY,
+              profile_id INTEGER NOT NULL,
+              anchor_id INTEGER NOT NULL,
+              source_segment_id TEXT NOT NULL,
+              material_id TEXT,
+              feature_key TEXT NOT NULL,
+              label TEXT NOT NULL,
+              start_offset INTEGER NOT NULL,
+              end_offset INTEGER NOT NULL,
+              text_hash TEXT NOT NULL,
+              confidence REAL NOT NULL,
+              analyzer_source TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            );
+            """);
+        await ExecuteAsync(connection, "INSERT INTO reference_anchors VALUES (5, 1, '既有锚点', '', 'source.md', 'markdown', 'user_provided', 'hash-source', 'reference-anchor-v1', 'ready', '2026-07-07T00:00:00Z', '2026-07-07T00:00:00Z', 'private', 'user_verified', '[]')");
+        await ExecuteAsync(connection, "INSERT INTO reference_source_segments VALUES ('seg-5-1', 5, 1, '第一章', 'chapter', 1, '', 0, 10, '既有片段', 'hash-segment')");
+        await ExecuteAsync(connection, "INSERT INTO reference_materials VALUES ('mat-5-1', 5, 'seg-5-1', 'scene', 'setup', 'restraint', 'rain', 'limited', 'contrast', 0.9, 0.8, 0.7, '既有材料', 'hash-material', 'reference-anchor-v1', 1, '2026-07-07T00:00:00Z', NULL)");
+        await ExecuteAsync(connection, """
+            INSERT INTO reference_style_profiles
+            VALUES (
+              7,
+              1,
+              '既有 Phase14 画像',
+              '',
+              'ready',
+              'reference-style-deterministic-v1',
+              'reference-style-feature-v1',
+              'deterministic',
+              '[5]',
+              '["hash-source"]',
+              '["user_provided"]',
+              '["user_verified"]',
+              '{"numeric_features":[],"distribution_features":[],"categorical_features":[]}',
+              0.75,
+              '2026-07-07T00:00:00Z',
+              '2026-07-07T00:00:00Z',
+              NULL
+            )
+            """);
+        await ExecuteAsync(connection, "INSERT INTO reference_style_profile_evidence VALUES ('ev-7-1', 7, 5, 'seg-5-1', 'mat-5-1', 'sentence_length', 'short', 0, 4, 'hash-evidence', 0.8, 'deterministic', '2026-07-07T00:00:00Z')");
+    }
+
     private static async ValueTask ExecuteAsync(SqliteConnection connection, string sql)
     {
         await using var command = connection.CreateCommand();
@@ -228,6 +613,17 @@ public sealed class LegacyDataMigrationTests : IDisposable
         await using var stream = File.OpenRead(path);
         var hash = await SHA256.HashDataAsync(stream);
         return Convert.ToHexString(hash);
+    }
+
+    private static async ValueTask<IReadOnlyDictionary<string, string>> HashFilesAsync(IEnumerable<string> paths)
+    {
+        var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var path in paths)
+        {
+            result[path] = await HashFileAsync(path);
+        }
+
+        return result;
     }
 
     private static byte[] EncryptLegacyLlmConfig(string json)
