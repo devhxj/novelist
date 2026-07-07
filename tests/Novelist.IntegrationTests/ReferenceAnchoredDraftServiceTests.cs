@@ -2212,6 +2212,98 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetDraftAuditsReturnsPersistedReportsWithoutCandidateOrSourceText()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("草稿审计报告查询测试", "", ""), CancellationToken.None);
+        var otherNovel = await novels.CreateNovelAsync(new CreateNovelPayload("草稿审计报告隔离测试", "", ""), CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(
+            options,
+            novels,
+            new FileSystemPlanningService(options, novels));
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                37,
+                "第三十七章蓝图",
+                "用无复用过渡承接压力",
+                AnchorIds: [],
+                KnownFacts: ["主角已经到场"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var revised = await service.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                blueprint.BlueprintId,
+                [
+                    new ReferenceBlueprintRevisionChangePayload(
+                        "beat:" + blueprint.Beats[0].BeatId + ":source_backed_detail_target",
+                        string.Empty),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        "beat:" + blueprint.Beats[0].BeatId + ":no_reuse_reason",
+                        "transition beat only carries approved chapter-state pressure without reusable source material")
+                ],
+                "user",
+                "approve no-reuse draft generation path"),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId),
+            CancellationToken.None);
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+        await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, review.ReviewId),
+            CancellationToken.None);
+        var draft = await service.GenerateDraftFromBlueprintAsync(
+            new GenerateReferenceAnchoredDraftPayload(novel.Id, revised.BlueprintId, [revised.Beats[0].BeatId]),
+            CancellationToken.None);
+        Assert.NotNull(draft.Audit);
+        var generatedAudit = draft.Audit!;
+        var candidate = Assert.Single(draft.Candidates);
+        var persistedAudit = await service.AuditDraftAgainstBlueprintAsync(
+            new AuditReferenceAnchoredDraftPayload(novel.Id, revised.BlueprintId, [candidate.CandidateId]),
+            CancellationToken.None);
+        var missingAudit = await service.AuditDraftAgainstBlueprintAsync(
+            new AuditReferenceAnchoredDraftPayload(novel.Id, revised.BlueprintId, ["missing-candidate-1"]),
+            CancellationToken.None);
+
+        var audits = await service.GetDraftAuditsAsync(
+            new GetReferenceAnchoredDraftAuditsPayload(novel.Id, revised.BlueprintId, CandidateIds: null, Limit: 10),
+            CancellationToken.None);
+
+        Assert.Equal([missingAudit.AuditId, persistedAudit.AuditId, generatedAudit.AuditId], audits.Select(audit => audit.AuditId).ToArray());
+        Assert.All(audits, audit =>
+        {
+            Assert.Equal(revised.BlueprintId, audit.BlueprintId);
+            Assert.NotNull(audit.ReadableReport);
+            var json = JsonSerializer.Serialize(audit, BridgeJson.SerializerOptions);
+            Assert.DoesNotContain("candidate_text", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("source_text", json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("prompt", json, StringComparison.OrdinalIgnoreCase);
+        });
+
+        for (var index = 0; index < 8; index++)
+        {
+            await service.AuditDraftAgainstBlueprintAsync(
+                new AuditReferenceAnchoredDraftPayload(novel.Id, revised.BlueprintId, [$"missing-candidate-extra-{index}"]),
+                CancellationToken.None);
+        }
+
+        var filtered = await service.GetDraftAuditsAsync(
+            new GetReferenceAnchoredDraftAuditsPayload(novel.Id, revised.BlueprintId, [candidate.CandidateId], Limit: 1),
+            CancellationToken.None);
+
+        Assert.Equal([persistedAudit.AuditId], filtered.Select(audit => audit.AuditId).ToArray());
+        Assert.All(filtered, audit => Assert.Contains(candidate.CandidateId, audit.CandidateIds ?? []));
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.GetDraftAuditsAsync(
+                new GetReferenceAnchoredDraftAuditsPayload(otherNovel.Id, revised.BlueprintId, CandidateIds: null, Limit: 10),
+                CancellationToken.None));
+    }
+
+    [Fact]
     public async Task MaterialBoundBlueprintStillRejectsDraftWithoutCurrentPassingReview()
     {
         var options = CreateOptions();

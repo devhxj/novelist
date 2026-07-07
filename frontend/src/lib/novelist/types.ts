@@ -1085,6 +1085,13 @@ export namespace reference {
     candidate_ids: string[]
   }
 
+  export interface GetAnchoredDraftAuditsInput {
+    novel_id: number
+    blueprint_id: number
+    candidate_ids?: string[] | null
+    limit?: number
+  }
+
   export interface AnchoredDraftAudit {
     audit_id: string
     blueprint_id: number

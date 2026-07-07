@@ -256,6 +256,7 @@ public sealed partial class NovelistMafToolRegistry
         private const string BindMaterialsDescription = "为已通过 approve_reference_chapter_blueprint 批准的蓝图 beat 返回参考材料候选；默认不自动选中，进入 generate_reference_anchored_draft 前需显式 select_top_candidate=true。";
         private const string GenerateDraftDescription = "从已按 generate_reference_chapter_blueprint -> review_reference_chapter_blueprint -> approve_reference_chapter_blueprint -> bind_reference_blueprint_materials 且 select_top_candidate=true 准备好的 approved/material_bound 蓝图生成候选段落；只返回 candidates，随后调用 audit_reference_anchored_draft，不调用 SaveContent，不直接写章节。";
         private const string AuditDraftDescription = "按 candidate_id 审计 generate_reference_anchored_draft 生成的 reference-anchored 草稿候选。纯检查工具，不写章节。";
+        private const string GetDraftAuditsDescription = "只读读取已持久化的 reference-anchored 草稿审计报告；只返回审计元数据、candidate_id、结构化 findings 和 required_action，不返回候选正文，不返回源文本，不返回 prompt，不能批准候选，不能恢复流程，不能写章节。";
         private const string StartOrchestrationDescription = "启动默认 reference orchestration 候选流程，只检索已导入且受 license/visibility 过滤的语料。novel_id 由运行时注入；agent 只能提供章节目标、已知/禁止事实和 corpus policy，不能导入新来源，不能读取任意文件，不能确认 source/fact，不能批准 blueprint revision，不能批准 final insertion，这些决策必须由作者完成。";
         private const string GetOrchestrationRunsDescription = "列出当前小说的 reference orchestration 运行历史，可按章节过滤；只读工具，不批准、不恢复、不写章节。";
         private const string GetOrchestrationRunDescription = "读取单个 reference orchestration run 的状态、当前停点和 required decision；只读工具，不批准、不恢复、不写章节。";
@@ -285,6 +286,7 @@ public sealed partial class NovelistMafToolRegistry
             tools.Add(CreateFunction(nameof(BindReferenceBlueprintMaterialsAsync), "bind_reference_blueprint_materials", BindMaterialsDescription));
             tools.Add(CreateFunction(nameof(GenerateReferenceAnchoredDraftAsync), "generate_reference_anchored_draft", GenerateDraftDescription));
             tools.Add(CreateFunction(nameof(AuditReferenceAnchoredDraftAsync), "audit_reference_anchored_draft", AuditDraftDescription));
+            tools.Add(CreateFunction(nameof(GetReferenceDraftAuditsAsync), "get_reference_draft_audits", GetDraftAuditsDescription));
             tools.Add(CreateFunction(nameof(StartReferenceOrchestrationRunAsync), "start_reference_orchestration_run", StartOrchestrationDescription));
             tools.Add(CreateFunction(nameof(GetReferenceOrchestrationRunsAsync), "get_reference_orchestration_runs", GetOrchestrationRunsDescription));
             tools.Add(CreateFunction(nameof(GetReferenceOrchestrationRunAsync), "get_reference_orchestration_run", GetOrchestrationRunDescription));
@@ -432,6 +434,25 @@ public sealed partial class NovelistMafToolRegistry
         {
             return _referenceDrafts.AuditDraftAgainstBlueprintAsync(
                 new AuditReferenceAnchoredDraftPayload(_context.NovelId, blueprint_id, candidate_ids),
+                cancellationToken);
+        }
+
+        [Description(GetDraftAuditsDescription)]
+        private ValueTask<IReadOnlyList<ReferenceAnchoredDraftAuditPayload>> GetReferenceDraftAuditsAsync(
+            [Description("蓝图 id")]
+            long blueprint_id,
+            [Description("可选候选段落 id 过滤；为空时返回最近审计报告")]
+            string[]? candidate_ids = null,
+            [Description("最多返回条数，默认 20，范围 1-100")]
+            int limit = 0,
+            CancellationToken cancellationToken = default)
+        {
+            return _referenceDrafts.GetDraftAuditsAsync(
+                new GetReferenceAnchoredDraftAuditsPayload(
+                    _context.NovelId,
+                    blueprint_id,
+                    candidate_ids,
+                    Math.Clamp(limit <= 0 ? 20 : limit, 1, 100)),
                 cancellationToken);
         }
 

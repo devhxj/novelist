@@ -85,6 +85,7 @@ approve_reference_chapter_blueprint
 bind_reference_blueprint_materials
 generate_reference_anchored_draft
 audit_reference_anchored_draft
+get_reference_draft_audits
 ```
 
 Default orchestration tools are exposed through the same draft adapter:
@@ -103,6 +104,7 @@ Current status:
 - `novel_id` is injected from `NovelistMafToolContext`, not exposed to the model schema;
 - reference tools do not expose session/turn/tool internals;
 - reference draft tools return blueprints, material links, candidates, and audits only;
+- `get_reference_draft_audits` reads persisted audit reports only; it returns audit metadata, candidate ids, readable findings, and required actions without candidate text, source text, prompts, or paths;
 - orchestration tools let the agent start, inspect, list, inspect run-event history, and cancel runs, but do not expose a generic resume/approval tool;
 - local orchestration event history is exposed through the desktop bridge as `GetReferenceOrchestrationRunEvents` and through the Agent surface as the read-only `get_reference_orchestration_run_events` tool; it is not exposed as an Agent approval or resume tool;
 - `start_reference_orchestration_run` always starts with `source_confirmed=false`, uses include/exclude anchors only inside `corpus_search_policy`, and cannot pass `anchor_ids`, `decision_type`, or `decision_payload`;
@@ -122,6 +124,7 @@ Tool limits:
 - `bind_reference_blueprint_materials`: allowed only after explicit approval; returns ranked candidates by beat duty fit, not only semantic similarity; `select_top_candidate` defaults to `false` and must be `true` to mark each beat's top candidate selected for draft generation
 - `generate_reference_anchored_draft`: requires an approved and material-bound `blueprint_id`; returns beat-scoped candidates only, not an assembled full chapter
 - `audit_reference_anchored_draft`: pure check only
+- `get_reference_draft_audits`: read-only persisted audit inspection; accepts `blueprint_id`, optional `candidate_ids`, and bounded `limit`; cannot approve, restore, insert, or write chapter prose
 - `start_reference_orchestration_run`: requires `chapter_number`; accepts optional chapter goal, known facts, forbidden facts, corpus search mode, include/exclude anchor filters, license statuses, and max results per beat; it does not confirm source/license or fact-boundary changes
 - `get_reference_orchestration_runs`: read-only run history, optional chapter filter
 - `get_reference_orchestration_run`: read-only run detail including current required decision
@@ -131,6 +134,7 @@ Tool limits:
 - no direct file path reads
 
 Tool schemas must not expose `novel_id`, `session_id`, `turn_id`, or `tool_id`.
+Draft audit inspection schemas also must not expose `content`, `text`, `candidate_text`, `source_text`, `prompt`, `path`, source file, URL, import, approval, or restore fields.
 Orchestration tool schemas also must not expose `source_confirmed`, `anchor_ids`, `decision_type`, `decision_payload`, free-form `content`, or `text` fields that could let the model bypass author gates.
 
 Agent workflow order is enforced in tool descriptions and service validation:

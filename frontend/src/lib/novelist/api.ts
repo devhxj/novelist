@@ -134,6 +134,7 @@ export interface NovelistAppApi {
   GetReaderPerspectives: AppMethod<[number], reader.ReaderPerspective[]>
   GetReferenceAnchorBuildStatus: AppMethod<[number, number], reference.BuildStatus | null>
   GetReferenceAnchors: AppMethod<[number], reference.Anchor[]>
+  GetReferenceAnchoredDraftAudits: AppMethod<[reference.GetAnchoredDraftAuditsInput], reference.AnchoredDraftAudit[]>
   GetReferenceChapterBlueprint: AppMethod<[number, number], reference.ChapterBlueprint | null>
   GetReferenceChapterBlueprints: AppMethod<[number, number | null], reference.ChapterBlueprintSummary[]>
   GetReferenceOrchestrationRun: AppMethod<[number, string], reference.OrchestrationRun | null>
@@ -290,6 +291,7 @@ export const appApi: NovelistAppApi = {
   GetReaderPerspectives: appMethod<NovelistAppApi['GetReaderPerspectives']>('GetReaderPerspectives'),
   GetReferenceAnchorBuildStatus: appMethod<NovelistAppApi['GetReferenceAnchorBuildStatus']>('GetReferenceAnchorBuildStatus'),
   GetReferenceAnchors: appMethod<NovelistAppApi['GetReferenceAnchors']>('GetReferenceAnchors'),
+  GetReferenceAnchoredDraftAudits: appMethod<NovelistAppApi['GetReferenceAnchoredDraftAudits']>('GetReferenceAnchoredDraftAudits'),
   GetReferenceChapterBlueprint: appMethod<NovelistAppApi['GetReferenceChapterBlueprint']>('GetReferenceChapterBlueprint'),
   GetReferenceChapterBlueprints: appMethod<NovelistAppApi['GetReferenceChapterBlueprints']>('GetReferenceChapterBlueprints'),
   GetReferenceOrchestrationRun: appMethod<NovelistAppApi['GetReferenceOrchestrationRun']>('GetReferenceOrchestrationRun'),

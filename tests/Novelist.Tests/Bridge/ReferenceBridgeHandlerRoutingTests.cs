@@ -178,6 +178,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         await AssertOkAsync(dispatcher, "BindReferenceBlueprintMaterials", new BindReferenceBlueprintMaterialsPayload(42, 501, 3, SelectTopCandidate: true));
         await AssertOkAsync(dispatcher, "GenerateReferenceAnchoredDraft", new GenerateReferenceAnchoredDraftPayload(42, 501, ["beat-1", "beat-2"]));
         await AssertOkAsync(dispatcher, "AuditReferenceAnchoredDraft", new AuditReferenceAnchoredDraftPayload(42, 501, ["candidate-1"]));
+        await AssertOkAsync(dispatcher, "GetReferenceAnchoredDraftAudits", new GetReferenceAnchoredDraftAuditsPayload(42, 501, ["candidate-1"], 10));
         await AssertOkAsync(dispatcher, "StartReferenceOrchestrationRun", new StartReferenceOrchestrationRunPayload(
             42,
             7,
@@ -211,6 +212,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "BindBlueprintMaterials:42:501:3:True",
                 "GenerateDraftFromBlueprint:42:501:beat-1,beat-2",
                 "AuditDraftAgainstBlueprint:42:501:candidate-1",
+                "GetDraftAudits:42:501:candidate-1:10",
                 "StartOrchestrationRun:42:7:tighten the reveal:known clue:culprit identity:<null>:story_context:3:user_provided:99::<false>",
                 "GetOrchestrationRuns:42:7",
                 "GetOrchestrationRun:42:run-1",
@@ -666,6 +668,16 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"AuditDraftAgainstBlueprint:{input.NovelId}:{input.BlueprintId}:{string.Join(',', input.CandidateIds)}");
             return ValueTask.FromResult<ReferenceAnchoredDraftAuditPayload>(null!);
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceAnchoredDraftAuditPayload>> GetDraftAuditsAsync(
+            GetReferenceAnchoredDraftAuditsPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"GetDraftAudits:{input.NovelId}:{input.BlueprintId}:{string.Join(',', input.CandidateIds ?? [])}:{input.Limit}");
+            IReadOnlyList<ReferenceAnchoredDraftAuditPayload> audits = [];
+            return ValueTask.FromResult(audits);
         }
 
         public ValueTask<ReferenceOrchestrationRunPayload> StartOrchestrationRunAsync(

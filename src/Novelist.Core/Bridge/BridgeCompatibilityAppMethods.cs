@@ -66,6 +66,7 @@ public static class BridgeCompatibilityAppMethods
         "GetReaderPerspectives",
         "GetReferenceAnchorBuildStatus",
         "GetReferenceAnchors",
+        "GetReferenceAnchoredDraftAudits",
         "GetReferenceChapterBlueprint",
         "GetReferenceChapterBlueprints",
         "GetReferenceOrchestrationRun",

@@ -14,6 +14,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 {
     private const string BuildVersion = "reference-blueprint-v1";
     private const long WorkspaceCorpusNovelId = 0;
+    private const int DefaultDraftAuditLimit = 20;
+    private const int MaxDraftAuditLimit = 100;
     private static readonly HashSet<string> AllowedStyleImitationIntensities = new(ReferenceStyleImitationIntensities.All, StringComparer.Ordinal);
     private const string ProseLikePlanNotice = "provided source text appears to be final prose; convert it into structured causality, emotion, POV, and prose duties before drafting";
     private static readonly JsonSerializerOptions JsonOptions = BridgeJson.SerializerOptions;
@@ -612,6 +614,42 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 styleFeatures);
             await PersistDraftAuditAsync(connection, null, blueprint.BlueprintId, audit, cancellationToken);
             return audit;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<IReadOnlyList<ReferenceAnchoredDraftAuditPayload>> GetDraftAuditsAsync(
+        GetReferenceAnchoredDraftAuditsPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateNovelId(input.NovelId);
+        ValidateBlueprintId(input.BlueprintId);
+        var blueprint = await GetChapterBlueprintAsync(input.NovelId, input.BlueprintId, cancellationToken)
+            ?? throw new ArgumentException("Blueprint does not exist.", nameof(input));
+        var candidateIds = NormalizeList(input.CandidateIds);
+        var requestedLimit = Math.Clamp(
+            input.Limit <= 0 ? DefaultDraftAuditLimit : input.Limit,
+            1,
+            MaxDraftAuditLimit);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var audits = await ReadDraftAuditsAsync(
+                connection,
+                blueprint.BlueprintId,
+                candidateIds,
+                requestedLimit,
+                cancellationToken);
+            return audits;
         }
         finally
         {
@@ -2717,6 +2755,72 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             JsonOptions));
         command.Parameters.AddWithValue("$audited_at", FormatTimestamp(audit.AuditedAt));
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceAnchoredDraftAuditPayload>> ReadDraftAuditsAsync(
+        SqliteConnection connection,
+        long blueprintId,
+        IReadOnlyList<string> candidateIds,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        var candidateFilter = string.Empty;
+        if (candidateIds.Count > 0)
+        {
+            var parameterNames = new List<string>(candidateIds.Count);
+            for (var index = 0; index < candidateIds.Count; index++)
+            {
+                var parameterName = "$candidate_id_" + index.ToString(CultureInfo.InvariantCulture);
+                parameterNames.Add(parameterName);
+                command.Parameters.AddWithValue(parameterName, candidateIds[index]);
+            }
+
+            candidateFilter = $$"""
+
+              AND EXISTS (
+                SELECT 1
+                FROM json_each(reference_draft_audits.candidate_ids_json) AS candidate_id
+                WHERE CAST(candidate_id.value AS TEXT) IN ({{string.Join(", ", parameterNames)}})
+              )
+            """;
+        }
+
+        command.CommandText = $$"""
+            SELECT audit_id, blueprint_id, candidate_ids_json, status, rewrite_level,
+                   provenance_errors_json, blueprint_errors_json, unsupported_fact_errors_json,
+                   pov_errors_json, ai_prose_risks_json, required_fixes_json, readable_report_json, audited_at
+            FROM reference_draft_audits
+            WHERE blueprint_id = $blueprint_id
+            {{candidateFilter}}
+            ORDER BY audited_at DESC, audit_id DESC
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        command.Parameters.AddWithValue("$limit", Math.Max(1, limit));
+        var audits = new List<ReferenceAnchoredDraftAuditPayload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var storedCandidateIds = ReadJson<IReadOnlyList<string>>(reader.GetString(2));
+            var audit = new ReferenceAnchoredDraftAuditPayload(
+                reader.GetString(0),
+                reader.GetInt64(1),
+                reader.GetString(3),
+                reader.GetString(4),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(5)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(6)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(7)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(8)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(9)),
+                ReadJson<IReadOnlyList<string>>(reader.GetString(10)),
+                ParseTimestamp(reader.GetString(12)),
+                storedCandidateIds,
+                ReadJson<ReferenceDraftAuditReadableReportPayload>(reader.GetString(11)));
+            audits.Add(audit);
+        }
+
+        return audits;
     }
 
     private static async ValueTask<IReadOnlyList<ReferenceDraftParagraphCandidatePayload>> ReadDraftCandidatesAsync(

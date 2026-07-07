@@ -1323,6 +1323,30 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void GetAnchoredDraftAuditsPayloadUsesStableSnakeCaseWithoutTextFields()
+    {
+        var payload = new GetReferenceAnchoredDraftAuditsPayload(
+            NovelId: 42,
+            BlueprintId: 501,
+            CandidateIds: ["candidate-1", "candidate-2"],
+            Limit: 25);
+
+        var serialized = JsonSerializer.Serialize(payload, BridgeJson.SerializerOptions);
+        using var json = JsonDocument.Parse(serialized);
+        var root = json.RootElement;
+
+        Assert.Equal(42, root.GetProperty("novel_id").GetInt64());
+        Assert.Equal(501, root.GetProperty("blueprint_id").GetInt64());
+        Assert.Equal("candidate-1", root.GetProperty("candidate_ids")[0].GetString());
+        Assert.Equal("candidate-2", root.GetProperty("candidate_ids")[1].GetString());
+        Assert.Equal(25, root.GetProperty("limit").GetInt32());
+        Assert.False(root.TryGetProperty("candidate_text", out _));
+        Assert.False(root.TryGetProperty("source_text", out _));
+        Assert.False(root.TryGetProperty("prompt", out _));
+        Assert.False(root.TryGetProperty("path", out _));
+    }
+
+    [Fact]
     public void CompatibilityRegistryIncludesReferenceAnchorMethods()
     {
         string[] expected =
@@ -1355,6 +1379,7 @@ public sealed class ReferenceAnchorContractTests
             "BindReferenceBlueprintMaterials",
             "GenerateReferenceAnchoredDraft",
             "AuditReferenceAnchoredDraft",
+            "GetReferenceAnchoredDraftAudits",
             "ArchiveReferenceStyleProfile",
             "BuildReferenceStyleProfile",
             "CompareReferenceStyleProfiles",

@@ -203,6 +203,7 @@ public sealed class MafToolRegistryTests
         Assert.DoesNotContain("get_reference_style_profile", draftToolNames);
         Assert.Contains("generate_reference_chapter_blueprint", draftToolNames);
         Assert.Contains("generate_reference_anchored_draft", draftToolNames);
+        Assert.Contains("get_reference_draft_audits", draftToolNames);
 
         var withOnlyStyleProfiles = new NovelistMafToolRegistry(
             new RecordingStoryMemorySearchService(),
@@ -259,6 +260,7 @@ public sealed class MafToolRegistryTests
         Assert.Contains("bind_reference_blueprint_materials", names);
         Assert.Contains("generate_reference_anchored_draft", names);
         Assert.Contains("audit_reference_anchored_draft", names);
+        Assert.Contains("get_reference_draft_audits", names);
         Assert.Contains("start_reference_orchestration_run", names);
         Assert.Contains("get_reference_orchestration_runs", names);
         Assert.Contains("get_reference_orchestration_run", names);
@@ -304,6 +306,20 @@ public sealed class MafToolRegistryTests
         Assert.True(bindMaterialsProperties.TryGetProperty("blueprint_id", out _));
         Assert.True(bindMaterialsProperties.TryGetProperty("max_results_per_beat", out _));
         Assert.True(bindMaterialsProperties.TryGetProperty("select_top_candidate", out _));
+
+        var getDraftAudits = tools.Single(tool => tool.Name == "get_reference_draft_audits");
+        AssertToolDescriptionContains(getDraftAudits, "只读", "不返回候选正文", "不返回源文本", "不能批准", "不能写章节");
+        Assert.True(getDraftAudits.JsonSchema.TryGetProperty("properties", out var getDraftAuditsProperties));
+        Assert.True(getDraftAuditsProperties.TryGetProperty("blueprint_id", out _));
+        Assert.True(getDraftAuditsProperties.TryGetProperty("candidate_ids", out _));
+        Assert.True(getDraftAuditsProperties.TryGetProperty("limit", out _));
+        Assert.False(getDraftAuditsProperties.TryGetProperty("novel_id", out _));
+        Assert.False(getDraftAuditsProperties.TryGetProperty("content", out _));
+        Assert.False(getDraftAuditsProperties.TryGetProperty("text", out _));
+        Assert.False(getDraftAuditsProperties.TryGetProperty("candidate_text", out _));
+        Assert.False(getDraftAuditsProperties.TryGetProperty("source_text", out _));
+        Assert.False(getDraftAuditsProperties.TryGetProperty("prompt", out _));
+        Assert.False(getDraftAuditsProperties.TryGetProperty("path", out _));
 
         var searchMaterials = tools.Single(tool => tool.Name == "search_reference_materials");
         AssertToolDescriptionContains(searchMaterials, "story context", "license", "score_components", "不直接写章节");
@@ -625,6 +641,51 @@ public sealed class MafToolRegistryTests
         Assert.Equal(501, drafts.LastBind.BlueprintId);
         Assert.Equal(4, drafts.LastBind.MaxResultsPerBeat);
         Assert.True(drafts.LastBind.SelectTopCandidate);
+    }
+
+    [Fact]
+    public async Task ReferenceDraftAuditInspectionToolInjectsNovelContextAndReturnsOnlyReports()
+    {
+        var drafts = new RecordingReferenceAnchoredDraftService();
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors: null,
+            referenceDrafts: drafts));
+
+        var result = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 1),
+            new ChatToolCall(
+                "call_reference_get_draft_audits",
+                "get_reference_draft_audits",
+                """{"blueprint_id":501,"candidate_ids":["candidate-1"],"limit":2}"""),
+            CancellationToken.None);
+
+        Assert.True(result.Success, result.Error);
+        Assert.NotNull(drafts.LastGetAudits);
+        Assert.Equal(23, drafts.LastGetAudits.NovelId);
+        Assert.Equal(501, drafts.LastGetAudits.BlueprintId);
+        Assert.Equal(["candidate-1"], drafts.LastGetAudits.CandidateIds);
+        Assert.Equal(2, drafts.LastGetAudits.Limit);
+
+        var audits = result.Data!.Value.EnumerateArray().ToArray();
+        var audit = Assert.Single(audits);
+        Assert.Equal("draft-audit-1", audit.GetProperty("audit_id").GetString());
+        Assert.Equal("candidate-1", audit.GetProperty("candidate_ids")[0].GetString());
+        Assert.Equal("Persisted draft audit failed for 1 candidate.", audit.GetProperty("readable_report").GetProperty("summary").GetString());
+        Assert.False(audit.TryGetProperty("candidate_text", out _));
+        Assert.False(audit.TryGetProperty("source_text", out _));
+        Assert.False(audit.TryGetProperty("prompt", out _));
+        Assert.False(audit.TryGetProperty("content", out _));
+        Assert.False(audit.TryGetProperty("path", out _));
     }
 
     [Fact]
@@ -1473,6 +1534,8 @@ public sealed class MafToolRegistryTests
     {
         public BindReferenceBlueprintMaterialsPayload? LastBind { get; private set; }
 
+        public GetReferenceAnchoredDraftAuditsPayload? LastGetAudits { get; private set; }
+
         public StartReferenceOrchestrationRunPayload? LastStart { get; private set; }
 
         public long LastGetEventsNovelId { get; private set; }
@@ -1611,6 +1674,41 @@ public sealed class MafToolRegistryTests
                 [],
                 [],
                 DateTimeOffset.UtcNow));
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceAnchoredDraftAuditPayload>> GetDraftAuditsAsync(
+            GetReferenceAnchoredDraftAuditsPayload input,
+            CancellationToken cancellationToken)
+        {
+            LastGetAudits = input;
+            IReadOnlyList<ReferenceAnchoredDraftAuditPayload> audits =
+            [
+                new ReferenceAnchoredDraftAuditPayload(
+                    "draft-audit-1",
+                    input.BlueprintId,
+                    "failed",
+                    ReferenceRewriteLevels.L2,
+                    ["weak provenance"],
+                    [],
+                    [],
+                    [],
+                    [],
+                    ["Bind stronger reference material."],
+                    DateTimeOffset.UtcNow,
+                    ["candidate-1"],
+                    new ReferenceDraftAuditReadableReportPayload(
+                        "Persisted draft audit failed for 1 candidate.",
+                        ["candidate-1"],
+                        [
+                            new ReferenceDraftAuditReadableFindingPayload(
+                                "provenance",
+                                "error",
+                                ["candidate-1"],
+                                "Candidate candidate-1 uses weak provenance.",
+                                "Bind stronger reference material.")
+                        ]))
+            ];
+            return ValueTask.FromResult(audits);
         }
 
         public ValueTask<ReferenceOrchestrationRunPayload> StartOrchestrationRunAsync(

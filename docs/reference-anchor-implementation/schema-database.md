@@ -191,7 +191,7 @@ reference_draft_audits
 - readable_report_json TEXT NOT NULL
 - audited_at TEXT NOT NULL
 
-`reference_draft_audits` persists generated and explicit anchored-draft audit outcomes. `candidate_ids_json` stores only candidate ids; `readable_report_json` stores the UI/report structure with summary, candidate ids, findings, category/severity, message, and required action. It deliberately does not persist candidate text, source text, prompts, or source excerpts in the audit report row. Draft candidate text remains confined to `reference_draft_paragraph_candidates` under the existing candidate-preview boundary.
+`reference_draft_audits` persists generated and explicit anchored-draft audit outcomes. `candidate_ids_json` stores only candidate ids; `readable_report_json` stores the UI/report structure with summary, candidate ids, findings, category/severity, message, and required action. It deliberately does not persist candidate text, source text, prompts, or source excerpts in the audit report row. `GetReferenceAnchoredDraftAudits` reads this table only after verifying the blueprint belongs to the requested novel, and it does not join `reference_draft_paragraph_candidates` or read candidate text. Draft candidate text remains confined to `reference_draft_paragraph_candidates` under the existing candidate-preview boundary.
 
 reference_chapter_blueprint_reviews
 - review_id TEXT PRIMARY KEY

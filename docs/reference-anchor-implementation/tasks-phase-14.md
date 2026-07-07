@@ -332,21 +332,22 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 13: Agent Tool Boundaries
 
-**Status:** Partially complete. Agent-side `search_reference_materials` can now pass style profile ids, style dimensions, and imitation intensity into the existing read/search material boundary while keeping `novel_id` runtime-injected and source/license/visibility filtering in the service. Agent-side `get_reference_style_profiles` and `get_reference_style_profile` now provide read-only profile inspection with injected novel context and no source text. MAF integration coverage proves style filters do not bypass cross-novel profile or private workspace-corpus boundaries. Style audit inspection tools and the remaining allowed/forbidden style-tool matrix remain open.
+**Status:** Partially complete. Agent-side `search_reference_materials` can now pass style profile ids, style dimensions, and imitation intensity into the existing read/search material boundary while keeping `novel_id` runtime-injected and source/license/visibility filtering in the service. Agent-side `get_reference_style_profiles` and `get_reference_style_profile` now provide read-only profile inspection with injected novel context and no source text. Agent-side `get_reference_draft_audits` and bridge `GetReferenceAnchoredDraftAudits` expose persisted draft audit reports as read-only metadata/findings with candidate-id filtering and bounded limits; they do not return candidate text, source text, prompts, paths, approvals, restore controls, or chapter-writing capability. MAF integration coverage proves style filters do not bypass cross-novel profile or private workspace-corpus boundaries, and draft audit inspection uses injected novel context with blueprint ownership validation. Dedicated style-audit inspection tools and the remaining allowed/forbidden style-tool matrix remain open.
 
 **Description:** Expose style search, profile inspection, and style-audit inspection to agents without allowing agent-side import, approval, or insertion.
 
 **Acceptance criteria:**
 
 - [x] Agent tools can search style profiles/materials with injected novel context. The material-search side is implemented for style filters, and profile inspection is available through read-only list/detail tools.
-- [ ] Agent tools cannot import sources, read arbitrary files, approve style contracts, approve blueprint revisions, or insert prose.
-- [ ] Tool descriptions make source/license/style-risk boundaries explicit.
+- [x] Agent tools cannot import sources, read arbitrary files, approve style contracts, approve blueprint revisions, or insert prose for the covered material/profile/draft-audit surfaces.
+- [x] Tool descriptions make source/license/style-risk/draft-audit boundaries explicit for the covered material/profile/draft-audit surfaces.
 
 **Verification:**
 
 - [x] MAF registry tests for style-aware reference material search filters, injected novel context, and absent style import/approval/insertion tools.
 - [x] MAF registry tests for dedicated style profile inspection tools.
-- [ ] Bridge/agent authority tests proving no bypass of user approvals. Material/profile visibility authority is covered at MAF executor integration level; style-audit inspection and the remaining approval matrix remain open.
+- [x] MAF registry/executor tests for draft audit inspection tool schema, injected novel context, and absence of candidate/source text, prompt, path, approval, restore, and write fields.
+- [ ] Bridge/agent authority tests proving no bypass of user approvals. Material/profile visibility and draft-audit inspection authority are covered at MAF executor/integration level; dedicated style-audit inspection and the remaining approval matrix remain open.
 
 **Dependencies:** Tasks 6-12.
 

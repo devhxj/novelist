@@ -408,6 +408,16 @@ public sealed record AuditReferenceAnchoredDraftPayload(
     [property: JsonPropertyName("blueprint_id")] long BlueprintId,
     [property: JsonPropertyName("candidate_ids")] IReadOnlyList<string> CandidateIds);
 
+public sealed record GetReferenceAnchoredDraftAuditsPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("candidate_ids")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? CandidateIds = null,
+    [property: JsonPropertyName("limit")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    int Limit = 0);
+
 public sealed record ReferenceAnchoredDraftAuditPayload(
     [property: JsonPropertyName("audit_id")] string AuditId,
     [property: JsonPropertyName("blueprint_id")] long BlueprintId,

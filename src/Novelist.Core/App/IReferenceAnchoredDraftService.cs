@@ -42,6 +42,10 @@ public interface IReferenceAnchoredDraftService
         AuditReferenceAnchoredDraftPayload input,
         CancellationToken cancellationToken);
 
+    ValueTask<IReadOnlyList<ReferenceAnchoredDraftAuditPayload>> GetDraftAuditsAsync(
+        GetReferenceAnchoredDraftAuditsPayload input,
+        CancellationToken cancellationToken);
+
     ValueTask<ReferenceOrchestrationRunPayload> StartOrchestrationRunAsync(
         StartReferenceOrchestrationRunPayload input,
         CancellationToken cancellationToken);
