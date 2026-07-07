@@ -1541,6 +1541,48 @@ function installReferenceAnchorMockBridge(options = {}) {
     switch (method) {
       case 'IsInitialized': return true
       case 'GetSettings': return settings()
+      case 'GetGitAuthorSettings': return { name: '', email: '', scope: 'app' }
+      case 'SaveGitAuthorSettings': return {
+        name: String(args[0]?.name ?? ''),
+        email: String(args[0]?.email ?? ''),
+        scope: 'app',
+      }
+      case 'GetUpdateCheckSettings': return {
+        enabled: false,
+        endpoint_url: '',
+        dismissed_version: '',
+        last_checked_at: null,
+      }
+      case 'SaveUpdateCheckSettings': return {
+        enabled: args[0]?.enabled === true,
+        endpoint_url: String(args[0]?.endpoint_url ?? ''),
+        dismissed_version: String(args[0]?.dismissed_version ?? ''),
+        last_checked_at: null,
+      }
+      case 'GetLayoutSettings': return {
+        sidebar_width: 280,
+        chat_panel_width: 360,
+        metadata_panel_width: 320,
+      }
+      case 'SaveLayoutSettings': return {
+        sidebar_width: Number(args[0]?.sidebar_width ?? 280),
+        chat_panel_width: Number(args[0]?.chat_panel_width ?? 360),
+        metadata_panel_width: Number(args[0]?.metadata_panel_width ?? 320),
+      }
+      case 'GetWindowSettings': return {
+        x: null,
+        y: null,
+        width: 1280,
+        height: 840,
+        maximized: false,
+      }
+      case 'SaveWindowSettings': return {
+        x: args[0]?.x ?? null,
+        y: args[0]?.y ?? null,
+        width: Number(args[0]?.width ?? 1280),
+        height: Number(args[0]?.height ?? 840),
+        maximized: args[0]?.maximized === true,
+      }
       case 'GetPlatform': return { os: 'win32' }
       case 'runtime.window.isMaximized': return false
       case 'runtime.window.minimize':
@@ -1610,6 +1652,19 @@ function installReferenceAnchorMockBridge(options = {}) {
       chat_panel_width: 360,
       last_session_id: '',
       user_name: 'Mock User',
+      git_author_name: '',
+      git_author_email: '',
+      update_check_enabled: false,
+      update_check_endpoint_url: '',
+      update_check_dismissed_version: '',
+      update_check_last_checked_at: null,
+      sidebar_width: 280,
+      metadata_panel_width: 320,
+      window_x: null,
+      window_y: null,
+      window_width: 1280,
+      window_height: 840,
+      window_maximized: false,
     }
   }
 

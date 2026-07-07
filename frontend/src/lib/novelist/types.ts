@@ -314,6 +314,19 @@ export namespace config {
     chat_panel_width: number
     last_session_id: string
     user_name: string
+    git_author_name: string
+    git_author_email: string
+    update_check_enabled: boolean
+    update_check_endpoint_url: string
+    update_check_dismissed_version: string
+    update_check_last_checked_at?: Timestamp | null
+    sidebar_width: number
+    metadata_panel_width: number
+    window_x?: number | null
+    window_y?: number | null
+    window_width: number
+    window_height: number
+    window_maximized: boolean
   }
 }
 

@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Novelist.Contracts.App;
+using Novelist.Contracts.Bridge;
 using Novelist.Core.App;
 
 namespace Novelist.Core.Bridge;
@@ -74,7 +76,61 @@ public static class AppSettingsBridgeHandlers
             return null;
         });
 
+        if (service is IPhase15AppSettingsService phase15Service)
+        {
+            dispatcher.Register("GetGitAuthorSettings", async (_, cancellationToken) =>
+                await phase15Service.GetGitAuthorSettingsAsync(cancellationToken));
+
+            dispatcher.Register("SaveGitAuthorSettings", async (context, cancellationToken) =>
+                await phase15Service.SaveGitAuthorSettingsAsync(
+                    ReadObjectArg<SaveGitAuthorSettingsPayload>(context.Payload, 0, "input"),
+                    cancellationToken));
+
+            dispatcher.Register("GetUpdateCheckSettings", async (_, cancellationToken) =>
+                await phase15Service.GetUpdateCheckSettingsAsync(cancellationToken));
+
+            dispatcher.Register("SaveUpdateCheckSettings", async (context, cancellationToken) =>
+                await phase15Service.SaveUpdateCheckSettingsAsync(
+                    ReadObjectArg<SaveUpdateCheckSettingsPayload>(context.Payload, 0, "input"),
+                    cancellationToken));
+
+            dispatcher.Register("GetLayoutSettings", async (_, cancellationToken) =>
+                await phase15Service.GetLayoutSettingsAsync(cancellationToken));
+
+            dispatcher.Register("SaveLayoutSettings", async (context, cancellationToken) =>
+                await phase15Service.SaveLayoutSettingsAsync(
+                    ReadObjectArg<SaveLayoutSettingsPayload>(context.Payload, 0, "input"),
+                    cancellationToken));
+
+            dispatcher.Register("GetWindowSettings", async (_, cancellationToken) =>
+                await phase15Service.GetWindowSettingsAsync(cancellationToken));
+
+            dispatcher.Register("SaveWindowSettings", async (context, cancellationToken) =>
+                await phase15Service.SaveWindowSettingsAsync(
+                    ReadObjectArg<SaveWindowSettingsPayload>(context.Payload, 0, "input"),
+                    cancellationToken));
+        }
+
         return dispatcher;
+    }
+
+    private static T ReadObjectArg<T>(JsonElement? payload, int index, string argumentName)
+    {
+        var value = ReadArg(payload, index, argumentName);
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            throw Invalid(argumentName, "Value must be an object.");
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<T>(value.GetRawText(), BridgeJson.SerializerOptions)
+                ?? throw Invalid(argumentName, "Value must not be null.");
+        }
+        catch (JsonException)
+        {
+            throw Invalid(argumentName, "Value must match the expected object shape.");
+        }
     }
 
     private static string ReadStringArg(JsonElement? payload, int index, string argumentName, bool allowEmpty)

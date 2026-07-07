@@ -24,3 +24,32 @@ public interface IAppSettingsService
 
     ValueTask SaveAvatarAsync(byte[] data, CancellationToken cancellationToken);
 }
+
+public interface IPhase15AppSettingsService : IAppSettingsService
+{
+    ValueTask<GitAuthorSettingsPayload> GetGitAuthorSettingsAsync(CancellationToken cancellationToken);
+
+    ValueTask<GitAuthorSettingsPayload> SaveGitAuthorSettingsAsync(
+        SaveGitAuthorSettingsPayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<UpdateCheckSettingsPayload> GetUpdateCheckSettingsAsync(CancellationToken cancellationToken);
+
+    ValueTask<UpdateCheckSettingsPayload> SaveUpdateCheckSettingsAsync(
+        SaveUpdateCheckSettingsPayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask SetUpdateCheckLastCheckedAtAsync(DateTimeOffset? checkedAt, CancellationToken cancellationToken);
+
+    ValueTask<LayoutSettingsPayload> GetLayoutSettingsAsync(CancellationToken cancellationToken);
+
+    ValueTask<LayoutSettingsPayload> SaveLayoutSettingsAsync(
+        SaveLayoutSettingsPayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<WindowSettingsPayload> GetWindowSettingsAsync(CancellationToken cancellationToken);
+
+    ValueTask<WindowSettingsPayload> SaveWindowSettingsAsync(
+        SaveWindowSettingsPayload input,
+        CancellationToken cancellationToken);
+}

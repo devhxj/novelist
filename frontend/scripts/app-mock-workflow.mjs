@@ -2828,6 +2828,19 @@ function settingsFixture(lastNovelId) {
     chat_panel_width: 360,
     last_session_id: '',
     user_name: 'Mock User',
+    git_author_name: '',
+    git_author_email: '',
+    update_check_enabled: false,
+    update_check_endpoint_url: '',
+    update_check_dismissed_version: '',
+    update_check_last_checked_at: null,
+    sidebar_width: 280,
+    metadata_panel_width: 320,
+    window_x: null,
+    window_y: null,
+    window_width: 1280,
+    window_height: 840,
+    window_maximized: false,
   }
 }
 
@@ -2843,6 +2856,19 @@ function installConfigurableAppMockBridge(options = {}) {
     chat_panel_width: 360,
     last_session_id: '',
     user_name: 'Mock User',
+    git_author_name: '',
+    git_author_email: '',
+    update_check_enabled: false,
+    update_check_endpoint_url: '',
+    update_check_dismissed_version: '',
+    update_check_last_checked_at: null,
+    sidebar_width: 280,
+    metadata_panel_width: 320,
+    window_x: null,
+    window_y: null,
+    window_width: 1280,
+    window_height: 840,
+    window_maximized: false,
   }
   const defaultNovel = {
     id: 42,
@@ -3287,21 +3313,95 @@ function installConfigurableAppMockBridge(options = {}) {
         state.activeNovelId = state.settings.last_novel_id
         return null
       case 'GetSettings': return state.settings
+      case 'GetGitAuthorSettings': return {
+        name: state.settings.git_author_name ?? '',
+        email: state.settings.git_author_email ?? '',
+        scope: 'app',
+      }
+      case 'SaveGitAuthorSettings':
+        state.settings.git_author_name = String(args[0]?.name ?? '')
+        state.settings.git_author_email = String(args[0]?.email ?? '')
+        return {
+          name: state.settings.git_author_name,
+          email: state.settings.git_author_email,
+          scope: 'app',
+        }
+      case 'GetUpdateCheckSettings': return {
+        enabled: state.settings.update_check_enabled === true,
+        endpoint_url: state.settings.update_check_endpoint_url ?? '',
+        dismissed_version: state.settings.update_check_dismissed_version ?? '',
+        last_checked_at: state.settings.update_check_last_checked_at ?? null,
+      }
+      case 'SaveUpdateCheckSettings':
+        state.settings.update_check_enabled = args[0]?.enabled === true
+        state.settings.update_check_endpoint_url = String(args[0]?.endpoint_url ?? '')
+        state.settings.update_check_dismissed_version = String(args[0]?.dismissed_version ?? '')
+        return {
+          enabled: state.settings.update_check_enabled,
+          endpoint_url: state.settings.update_check_endpoint_url,
+          dismissed_version: state.settings.update_check_dismissed_version,
+          last_checked_at: state.settings.update_check_last_checked_at ?? null,
+        }
+      case 'GetLayoutSettings': return {
+        sidebar_width: state.settings.sidebar_width ?? 280,
+        chat_panel_width: state.settings.chat_panel_width ?? 360,
+        metadata_panel_width: state.settings.metadata_panel_width ?? 320,
+      }
+      case 'SaveLayoutSettings':
+        state.settings.sidebar_width = Number(args[0]?.sidebar_width ?? state.settings.sidebar_width ?? 280)
+        state.settings.chat_panel_width = Number(args[0]?.chat_panel_width ?? state.settings.chat_panel_width ?? 360)
+        state.settings.metadata_panel_width = Number(args[0]?.metadata_panel_width ?? state.settings.metadata_panel_width ?? 320)
+        return {
+          sidebar_width: state.settings.sidebar_width,
+          chat_panel_width: state.settings.chat_panel_width,
+          metadata_panel_width: state.settings.metadata_panel_width,
+        }
+      case 'GetWindowSettings': return {
+        x: state.settings.window_x ?? null,
+        y: state.settings.window_y ?? null,
+        width: state.settings.window_width ?? 1280,
+        height: state.settings.window_height ?? 840,
+        maximized: state.settings.window_maximized === true,
+      }
+      case 'SaveWindowSettings':
+        state.settings.window_x = args[0]?.x ?? null
+        state.settings.window_y = args[0]?.y ?? null
+        state.settings.window_width = Number(args[0]?.width ?? state.settings.window_width ?? 1280)
+        state.settings.window_height = Number(args[0]?.height ?? state.settings.window_height ?? 840)
+        state.settings.window_maximized = args[0]?.maximized === true
+        return {
+          x: state.settings.window_x,
+          y: state.settings.window_y,
+          width: state.settings.window_width,
+          height: state.settings.window_height,
+          maximized: state.settings.window_maximized,
+        }
       case 'GetPlatform': return { os: 'win32', defaultPath: options.platformDefaultPath ?? 'D:\\NovelistData' }
       case 'runtime.window.isMaximized': return false
       case 'runtime.window.minimize':
       case 'runtime.window.toggleMaximize':
       case 'runtime.app.quit':
-      case 'SetLastSession':
-      case 'SetSelectedModel':
-      case 'SetReasoningEffort':
-      case 'SetApprovalMode':
-      case 'SetChatPanelWidth':
       case 'CancelChat':
       case 'ApproveTool':
       case 'RebuildNovelIndex':
       case 'TestConnection':
       case 'TestEmbeddingConnection':
+        return null
+      case 'SetLastSession':
+        state.settings.last_session_id = String(args[0] ?? '')
+        return null
+      case 'SetSelectedModel':
+        state.settings.selected_model_key = String(args[0] ?? '')
+        state.settings.reasoning_effort = String(args[1] ?? '')
+        return null
+      case 'SetReasoningEffort':
+        state.settings.reasoning_effort = String(args[0] ?? '')
+        return null
+      case 'SetApprovalMode':
+        state.settings.approval_mode = String(args[0] ?? '')
+        return null
+      case 'SetChatPanelWidth':
+        state.settings.chat_panel_width = Number(args[0] ?? state.settings.chat_panel_width ?? 360)
         return null
       case 'SaveLLMConfig':
         state.savedLLMConfig = args[0]
