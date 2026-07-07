@@ -362,6 +362,9 @@ public sealed class MafToolRegistryTests
         Assert.False(getStyleProfileProperties.TryGetProperty("source_text", out _));
         Assert.False(getStyleProfileProperties.TryGetProperty("content", out _));
 
+        var approveBlueprint = tools.Single(tool => tool.Name == "approve_reference_chapter_blueprint");
+        AssertToolDescriptionContains(approveBlueprint, "style_contract", "用户显式审批", "agent 不能批准 style contract");
+
         var startOrchestration = tools.Single(tool => tool.Name == "start_reference_orchestration_run");
         AssertToolDescriptionContains(
             startOrchestration,
@@ -470,6 +473,98 @@ public sealed class MafToolRegistryTests
             "只读",
             "不能构建",
             "不能导入");
+    }
+
+    [Fact]
+    public void ReferenceStyleAgentToolAuthorityMatrixAllowsOnlySearchInspectAndCandidatePreparation()
+    {
+        var registry = new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors: new RecordingReferenceAnchorService(),
+            referenceDrafts: new RecordingReferenceAnchoredDraftService(),
+            referenceStyleProfiles: new RecordingReferenceStyleProfileService());
+
+        var referenceTools = registry.CreateTools(new NovelistMafToolContext(17))
+            .Where(tool => tool.Name.Contains("reference", StringComparison.Ordinal))
+            .ToDictionary(tool => tool.Name);
+        var names = referenceTools.Keys.ToArray();
+
+        string[] allowedStyleSurface =
+        [
+            "generate_reference_chapter_blueprint",
+            "search_reference_materials",
+            "get_reference_style_profiles",
+            "get_reference_style_profile",
+            "revise_reference_chapter_blueprint",
+            "review_reference_chapter_blueprint",
+            "approve_reference_chapter_blueprint",
+            "bind_reference_blueprint_materials",
+            "generate_reference_anchored_draft",
+            "audit_reference_anchored_draft",
+            "get_reference_draft_audits",
+            "get_reference_style_audit_findings"
+        ];
+
+        foreach (var allowed in allowedStyleSurface)
+        {
+            Assert.Contains(allowed, names);
+        }
+
+        string[] forbiddenStyleSurface =
+        [
+            "build_reference_style_profile",
+            "import_reference_style_profile",
+            "archive_reference_style_profile",
+            "restore_reference_style_profile",
+            "update_reference_style_profile",
+            "delete_reference_style_profile",
+            "approve_reference_style_contract",
+            "approve_reference_orchestration_decision",
+            "resume_reference_orchestration_run",
+            "apply_reference_blueprint_revision",
+            "insert_reference_anchored_draft",
+            "insert_style_imitation_candidate",
+            "save_reference_anchored_draft",
+            "save_style_candidate",
+            "save_content",
+            "SaveContent"
+        ];
+
+        foreach (var forbidden in forbiddenStyleSurface)
+        {
+            Assert.DoesNotContain(forbidden, names);
+        }
+
+        foreach (var toolName in allowedStyleSurface)
+        {
+            var tool = referenceTools[toolName];
+            Assert.True(tool.JsonSchema.TryGetProperty("properties", out var properties), tool.Name);
+            foreach (var forbiddenProperty in ForbiddenReferenceStyleToolProperties)
+            {
+                Assert.False(properties.TryGetProperty(forbiddenProperty, out _), $"{tool.Name} exposes {forbiddenProperty}");
+            }
+        }
+
+        AssertToolDescriptionContains(
+            referenceTools["approve_reference_chapter_blueprint"],
+            "style_contract",
+            "用户显式审批",
+            "agent 不能批准 style contract");
+        AssertToolDescriptionContains(
+            referenceTools["get_reference_style_audit_findings"],
+            "只读",
+            "style/source-leak",
+            "不能批准",
+            "不能写章节");
     }
 
     [Fact]
@@ -1014,6 +1109,33 @@ public sealed class MafToolRegistryTests
             Assert.Contains(expected, tool.Description, StringComparison.Ordinal);
         }
     }
+
+    private static readonly string[] ForbiddenReferenceStyleToolProperties =
+    [
+        "novel_id",
+        "session_id",
+        "turn_id",
+        "tool_id",
+        "content",
+        "text",
+        "candidate_text",
+        "source_text",
+        "prompt",
+        "path",
+        "chapter_path",
+        "source_path",
+        "file_path",
+        "absolute_path",
+        "source_file",
+        "source_uri",
+        "source_url",
+        "import_path",
+        "approval_id",
+        "approved",
+        "restore",
+        "save",
+        "SaveContent"
+    ];
 
     private sealed class RecordingStoryMemorySearchService : IStoryMemorySearchService
     {

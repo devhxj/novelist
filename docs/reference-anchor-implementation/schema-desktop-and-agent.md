@@ -120,7 +120,7 @@ Tool limits:
 - `generate_reference_chapter_blueprint`: requires `chapter_number`, optional user chapter goal, known facts, forbidden facts, and active anchor ids; it must return logic, emotion, narration, character, reference, transition, and execution tracks
 - `review_reference_chapter_blueprint`: pure check only; must not revise the blueprint silently
 - `revise_reference_chapter_blueprint`: requires explicit field-level changes, records a revision, and invalidates approval/material links when reviewed fields change
-- `approve_reference_chapter_blueprint`: allowed only after a passing review
+- `approve_reference_chapter_blueprint`: allowed only after a passing review for ordinary blueprints; blueprints that contain `style_contract` fields require explicit user approval and reject `approver_origin` values such as `agent` or automated orchestration origins
 - `bind_reference_blueprint_materials`: allowed only after explicit approval; returns ranked candidates by beat duty fit, not only semantic similarity; `select_top_candidate` defaults to `false` and must be `true` to mark each beat's top candidate selected for draft generation
 - `generate_reference_anchored_draft`: requires an approved and material-bound `blueprint_id`; returns beat-scoped candidates only, not an assembled full chapter
 - `audit_reference_anchored_draft`: pure check only
@@ -155,6 +155,8 @@ search/reference context
 Agent hardening currently covered:
 
 - `ReferenceDraftToolDescriptionsEnforceBlueprintWorkflowOrder` proves models are told to generate/review/approve/bind before drafting and to avoid `SaveContent`;
+- `ReferenceStyleAgentToolAuthorityMatrixAllowsOnlySearchInspectAndCandidatePreparation` proves the Phase 14 style surface is limited to search, read-only profile/audit inspection, review/revision, material binding, candidate generation, and audit; it also proves style build/import/archive/restore, style-contract approval, orchestration approval/resume, insertion, save, path, prompt, source-text, and candidate-text fields are absent from the style tool matrix;
+- `ReferenceDraftToolCannotApproveStyleContractThroughMafExecutor` and the service-level approval tests prove an agent can propose/review a beat `style_contract`, but cannot approve that style contract because `approver_origin = agent` is rejected for style-contract blueprints;
 - `ReferenceOrchestrationAgentToolStartsRunWithoutApprovingHumanDecisions` proves the default agent orchestration entry starts at the source/fact confirmation gate and cannot pre-confirm it;
 - `ReferenceOrchestrationAgentToolReadsRunEventsWithoutApprovingHumanDecisions` proves the agent can inspect local run-event history without gaining resume, approval, revision, final-insertion, or chapter-write authority;
 - reference tool schema tests prove `novel_id`, `session_id`, `turn_id`, and `tool_id` remain hidden.

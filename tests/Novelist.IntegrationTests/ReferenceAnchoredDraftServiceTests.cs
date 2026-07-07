@@ -733,6 +733,61 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ApproveBlueprintRejectsAgentOriginForStyleContractBlueprint()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("风格审批来源测试", "", ""), CancellationToken.None);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, new FileSystemPlanningService(options, novels));
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                24,
+                "第二十四章风格蓝图",
+                "风格合约必须由用户批准",
+                [],
+                KnownFacts: ["主角已经到场"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var styleContractJson = JsonSerializer.Serialize(
+            new ReferenceBlueprintStyleContractPayload(
+                StyleProfileIds: [99],
+                StyleDimensions: ["dialogue_ratio"],
+                ImitationIntensity: ReferenceStyleImitationIntensities.Loose,
+                MinStyleFit: 0,
+                AllowedCloseness: "moderate",
+                RequiredEvidenceTypes: [],
+                ForbiddenStyleRisks: ["source_leak"]),
+            BridgeJson.SerializerOptions);
+        var revised = await service.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                blueprint.BlueprintId,
+                [new ReferenceBlueprintRevisionChangePayload($"beat:{blueprint.Beats[0].BeatId}:style_contract", styleContractJson)],
+                "agent",
+                "propose style contract"),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId),
+            CancellationToken.None);
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.ApproveChapterBlueprintAsync(
+                new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, review.ReviewId, "agent"),
+                CancellationToken.None));
+
+        Assert.Contains("style contract", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("user approval", exception.Message, StringComparison.OrdinalIgnoreCase);
+
+        var approved = await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, review.ReviewId, "user"),
+            CancellationToken.None);
+        Assert.Equal(ReferenceBlueprintStates.Approved, approved.Status);
+    }
+
+    [Fact]
     public async Task ReviewChapterBlueprintPersistsStructuredDefects()
     {
         var options = CreateOptions();

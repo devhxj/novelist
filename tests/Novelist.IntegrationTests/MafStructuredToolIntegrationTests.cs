@@ -736,6 +736,92 @@ public sealed class MafStructuredToolIntegrationTests : IDisposable
         Assert.Contains("stale", rejectedDraft, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task ReferenceDraftToolCannotApproveStyleContractThroughMafExecutor()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("MAF 风格审批边界", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novelService);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novelService);
+        var sourcePath = CreateSourceFile(
+            "maf-style-contract-reference-anchor.md",
+            """
+            # 第一章
+
+            雨声压低了整条街的呼吸。
+            """);
+        var anchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(
+                novel.Id,
+                "风格合约锚定参考",
+                null,
+                sourcePath,
+                "markdown",
+                "user_provided"),
+            CancellationToken.None);
+        var referenceDrafts = new SqliteReferenceAnchoredDraftService(options, novelService, planning, referenceAnchors);
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new EmptyStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors,
+            referenceDrafts));
+
+        var blueprint = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "generate_reference_chapter_blueprint",
+            $$"""
+            {"chapter_number":7,"title":"第七章风格蓝图","chapter_goal":"雨夜停顿","known_facts":["雨声压低了整条街的呼吸"],"forbidden_facts":[],"anchor_ids":[{{anchor.AnchorId}}]}
+            """);
+        var blueprintId = blueprint.GetProperty("blueprint_id").GetInt64();
+        var beatId = blueprint.GetProperty("beats")[0].GetProperty("beat_id").GetString();
+        var styleContractJson = JsonSerializer.Serialize(
+            new ReferenceBlueprintStyleContractPayload(
+                StyleProfileIds: [99],
+                StyleDimensions: ["dialogue_ratio"],
+                ImitationIntensity: ReferenceStyleImitationIntensities.Loose,
+                MinStyleFit: 0,
+                AllowedCloseness: "moderate",
+                RequiredEvidenceTypes: [],
+                ForbiddenStyleRisks: ["source_leak"]),
+            BridgeJson.SerializerOptions);
+
+        var revised = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "revise_reference_chapter_blueprint",
+            $$"""
+            {"blueprint_id":{{blueprintId}},"changes":[{"field_path":"beat:{{beatId}}:style_contract","new_value":{{JsonSerializer.Serialize(styleContractJson)}}}],"origin":"agent","revision_reason":"propose style contract without approving it"}
+            """);
+        Assert.Equal("draft", revised.GetProperty("status").GetString());
+
+        var review = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "review_reference_chapter_blueprint",
+            $$"""{"blueprint_id":{{blueprintId}}}""");
+        Assert.Equal("passed", review.GetProperty("status").GetString());
+
+        var rejectedApproval = await ExecuteFailureAsync(
+            executor,
+            novel.Id,
+            "approve_reference_chapter_blueprint",
+            $$"""{"blueprint_id":{{blueprintId}},"review_id":{{JsonSerializer.Serialize(review.GetProperty("review_id").GetString())}}}""");
+        Assert.Contains("style contract", rejectedApproval, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("user", rejectedApproval, StringComparison.OrdinalIgnoreCase);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))

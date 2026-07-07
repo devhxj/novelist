@@ -346,6 +346,14 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 throw new ArgumentException("Stale blueprint must be regenerated before approval.", nameof(input));
             }
 
+            if (BlueprintHasStyleContract(blueprint) &&
+                !string.Equals(approverOrigin, "user", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException(
+                    "Blueprints with style contract fields require explicit user approval; agent or automated origins may review or revise them but cannot approve them.",
+                    nameof(input));
+            }
+
             var review = await ReadReviewAsync(connection, input.BlueprintId, input.ReviewId, cancellationToken)
                 ?? throw new ArgumentException("Review does not exist for this blueprint.", nameof(input));
             if (!string.Equals(review.Status, ReferenceBlueprintReviewStatuses.Passed, StringComparison.Ordinal))
@@ -4015,6 +4023,11 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
     private static string NormalizeApproverOrigin(string? origin)
     {
         return string.IsNullOrWhiteSpace(origin) ? "user" : origin.Trim();
+    }
+
+    private static bool BlueprintHasStyleContract(ReferenceChapterBlueprintPayload blueprint)
+    {
+        return blueprint.Beats.Any(beat => beat.StyleContract is not null);
     }
 
     private static IReadOnlyList<long> NormalizeAnchorIds(IReadOnlyList<long>? values)
