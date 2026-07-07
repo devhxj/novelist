@@ -2276,6 +2276,94 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             .ToArray();
     }
 
+    private async ValueTask<IReadOnlyDictionary<long, ReferenceStyleFeatureVectorPayload>> ReadStyleFeaturesByProfileIdAsync(
+        long novelId,
+        ReferenceChapterBlueprintPayload blueprint,
+        CancellationToken cancellationToken)
+    {
+        var profileIds = ExtractStyleProfileIds(blueprint);
+        if (profileIds.Count == 0)
+        {
+            return new Dictionary<long, ReferenceStyleFeatureVectorPayload>();
+        }
+
+        var databasePath = await DatabasePathAsync(cancellationToken);
+        await EnsureSchemaAsync(databasePath, cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        return await ReadStyleFeaturesByProfileIdAsync(
+            connection,
+            novelId,
+            profileIds,
+            cancellationToken);
+    }
+
+    private static async ValueTask<IReadOnlyDictionary<long, ReferenceStyleFeatureVectorPayload>> ReadStyleFeaturesByProfileIdAsync(
+        SqliteConnection connection,
+        long novelId,
+        ReferenceChapterBlueprintPayload blueprint,
+        CancellationToken cancellationToken)
+    {
+        return await ReadStyleFeaturesByProfileIdAsync(
+            connection,
+            novelId,
+            ExtractStyleProfileIds(blueprint),
+            cancellationToken);
+    }
+
+    private static async ValueTask<IReadOnlyDictionary<long, ReferenceStyleFeatureVectorPayload>> ReadStyleFeaturesByProfileIdAsync(
+        SqliteConnection connection,
+        long novelId,
+        IReadOnlyList<long> profileIds,
+        CancellationToken cancellationToken)
+    {
+        if (profileIds.Count == 0 ||
+            !await TableExistsAsync(connection, "reference_style_profiles", cancellationToken))
+        {
+            return new Dictionary<long, ReferenceStyleFeatureVectorPayload>();
+        }
+
+        await using var command = connection.CreateCommand();
+        var parameterNames = new List<string>(profileIds.Count);
+        for (var index = 0; index < profileIds.Count; index++)
+        {
+            var parameterName = "$style_profile_id_" + index.ToString(CultureInfo.InvariantCulture);
+            parameterNames.Add(parameterName);
+            command.Parameters.AddWithValue(parameterName, profileIds[index]);
+        }
+
+        command.CommandText = $$"""
+            SELECT profile_id, feature_vector_json
+            FROM reference_style_profiles
+            WHERE novel_id = $novel_id
+              AND status = $status
+              AND archived_at IS NULL
+              AND profile_id IN ({{string.Join(", ", parameterNames)}});
+            """;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$status", ReferenceStyleProfileStatuses.Active);
+
+        var features = new Dictionary<long, ReferenceStyleFeatureVectorPayload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            features[reader.GetInt64(0)] = ReadJson<ReferenceStyleFeatureVectorPayload>(reader.GetString(1));
+        }
+
+        return features;
+    }
+
+    private static IReadOnlyList<long> ExtractStyleProfileIds(ReferenceChapterBlueprintPayload blueprint)
+    {
+        return blueprint.Beats
+            .Select(beat => beat.StyleContract)
+            .Where(contract => contract is not null &&
+                !string.Equals(contract.ImitationIntensity, ReferenceStyleImitationIntensities.DiagnosticOnly, StringComparison.Ordinal))
+            .SelectMany(contract => contract!.StyleProfileIds)
+            .Where(profileId => profileId > 0)
+            .Distinct()
+            .ToArray();
+    }
+
     private static async ValueTask<bool> TableExistsAsync(
         SqliteConnection connection,
         string tableName,
@@ -3808,7 +3896,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             ?? throw new ArgumentException("Blueprint revision approval requires a pending proposed revision.", nameof(decisionPayload));
     }
 
-    private static ReferenceOrchestrationApprovalSummaryPayload BuildBlueprintApprovalSummary(
+    internal static ReferenceOrchestrationApprovalSummaryPayload BuildBlueprintApprovalSummary(
         ReferenceChapterBlueprintPayload blueprint,
         ReferenceChapterBlueprintReviewPayload review)
     {
@@ -3828,6 +3916,14 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         var materialUsePlan = materialTypes.Length == 0
             ? blueprint.ReferenceAnalysis.Summary
             : blueprint.ReferenceAnalysis.Summary + "; required material types: " + string.Join(", ", materialTypes);
+        var styleContractSummary = BuildStyleContractApprovalSummary(blueprint);
+        if (!string.IsNullOrWhiteSpace(styleContractSummary))
+        {
+            materialUsePlan = string.IsNullOrWhiteSpace(materialUsePlan)
+                ? styleContractSummary
+                : materialUsePlan + "; " + styleContractSummary;
+        }
+
         var rewriteBudget = blueprint.Beats
             .Select(beat => beat.MaxRewriteLevel)
             .OrderByDescending(RewriteLevelRank)
@@ -3852,6 +3948,68 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             materialUsePlan,
             rewriteBudget,
             highRiskFindings);
+    }
+
+    private static string BuildStyleContractApprovalSummary(ReferenceChapterBlueprintPayload blueprint)
+    {
+        var summaries = blueprint.Beats
+            .Where(beat => beat.StyleContract is not null)
+            .OrderBy(beat => beat.BeatIndex)
+            .Select(FormatStyleContractApprovalSummary)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Take(6)
+            .ToArray();
+        return summaries.Length == 0
+            ? string.Empty
+            : "style contracts: " + string.Join("; ", summaries);
+    }
+
+    private static string FormatStyleContractApprovalSummary(ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var contract = beat.StyleContract;
+        if (contract is null)
+        {
+            return string.Empty;
+        }
+
+        var parts = new List<string>
+        {
+            "beat " + beat.BeatIndex.ToString(CultureInfo.InvariantCulture)
+        };
+        AddCompactList(parts, "profiles", contract.StyleProfileIds.Select(value => value.ToString(CultureInfo.InvariantCulture)), maxCount: 4);
+        AddCompactValue(parts, "intensity", contract.ImitationIntensity);
+        if (contract.MinStyleFit > 0)
+        {
+            AddCompactValue(parts, "min_fit", contract.MinStyleFit.ToString("0.####", CultureInfo.InvariantCulture));
+        }
+
+        AddCompactValue(parts, "closeness", contract.AllowedCloseness);
+        AddCompactList(parts, "dims", contract.StyleDimensions, maxCount: 5);
+        AddCompactList(parts, "evidence", contract.RequiredEvidenceTypes, maxCount: 4);
+        AddCompactList(parts, "risks", contract.ForbiddenStyleRisks, maxCount: 4);
+        return string.Join(" ", parts);
+    }
+
+    private static void AddCompactValue(List<string> parts, string label, string value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            parts.Add(label + "=" + value.Trim());
+        }
+    }
+
+    private static void AddCompactList(List<string> parts, string label, IEnumerable<string> values, int maxCount)
+    {
+        var normalized = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .Take(maxCount)
+            .ToArray();
+        if (normalized.Length > 0)
+        {
+            parts.Add(label + "=" + string.Join(",", normalized));
+        }
     }
 
     private static ReferenceOrchestrationApprovalSummaryPayload BuildDraftAuditApprovalSummary(

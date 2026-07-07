@@ -165,3 +165,28 @@ authorized source corpus
 ```
 
 Phase 14 must keep the Phase 0-13 safety model: no arbitrary file reads, no agent-side source import, no direct `SaveContent`, no unapproved blueprint/style contract, and no candidate insertion before audit.
+
+## 2026-07-07 Planning Update: Phase 15 Goink-Master Feature Merge
+
+Phase 15 opens a product-merge planning boundary for the latest `goink-master` snapshot. The snapshot adds import, style material, narrative pattern, Git visualization, layout/update/settings, and error-feedback features that are valuable to Novelist, but the merge must port behavior into the current .NET 10 + Photino.NET architecture instead of reintroducing the retired Go/Wails or Python implementations.
+
+The target merge workflow is:
+
+```text
+goink-master behavior reference
+  -> Novelist contracts and compatibility registrations
+  -> safe storage/migration and bridge handlers
+  -> infrastructure services with fault injection
+  -> owned TypeScript adapter and React UI
+  -> Playwright plus .NET regression gates
+```
+
+The most important Phase 15 safety boundaries are:
+
+- EPUB/TXT/MD import is user/bridge initiated, path-safe, progress-reporting, cancellable, and cleanup-backed.
+- Import recovery is durable and startup-reconciled; process death during import must not leave silent orphaned files or rows.
+- Style samples are user-curated material cards that can feed deterministic statistics and validated skill generation; they do not bypass Phase 14 style-profile, source-leak, or draft-audit gates.
+- Narrative pattern extraction produces reusable guidance skills and traceable analysis, not hidden authority to mutate chapters.
+- Git history is read-only visualization in this phase; mutation operations such as reset, checkout, revert, and restore are not included.
+- Update checks are timeout-bounded and non-blocking, with explicit user action required before opening release URLs.
+- Copyable diagnostics must redact secrets and long source text.

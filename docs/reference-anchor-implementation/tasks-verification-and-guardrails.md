@@ -50,6 +50,13 @@ npm run test:reference-style
 npm run test:reference-style:stress
 ```
 
+Run after Phase 15 product-merge workflows exist:
+
+```text
+cd frontend
+npm run test:phase15
+```
+
 Targeted new tests:
 
 ```text
@@ -96,6 +103,17 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 - Do not ship high-fidelity imitation without source-leak, n-gram overlap, rewrite-level, fact, POV, and style-quality audit tests.
 - Do not let LLM-assisted style analysis write ungrounded labels; every advanced label must cite source segment ids or be downgraded/rejected.
 - Do not let style profile generation duplicate large source text outside the source segment/material tables.
+- Do not port `goink-master` by adding new Go/Wails/Python runtime code; port behavior into current .NET/Photino/React modules.
+- Do not expose arbitrary local file reads through EPUB/TXT/MD import or drag/drop.
+- Do not let import failures leave orphaned novel rows, chapter files, Git repos, RAG/index state, or reference build state.
+- Do not let incomplete import runs left by process death remain unreconciled after startup.
+- Do not silently import low-confidence decoded text; visible failure is preferable to mojibake.
+- Do not allow oversized imports or EPUB expansion to bypass configured limits.
+- Do not delete successfully imported user data only because the post-import Git commit failed.
+- Do not let style sample extraction or narrative pattern extraction write chapter content, approve reference blueprints, approve final insertion, or bypass audit.
+- Do not expose Git reset, checkout, revert, restore, or other mutating history operations in the Phase 15 Git visualization UI.
+- Do not let automatic update checks block startup, depend on live network in tests, or open external URLs without explicit user action.
+- Do not let copyable diagnostics include API keys, bearer tokens, local secrets, or long raw source text.
 
 ## Phase 10 Design Decisions Boundary
 
@@ -154,6 +172,14 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 - Safety policy: basic reference import/search must keep working without model configuration. LLM-assisted style analysis is opt-in, validated, source-grounded, and unable to bypass deterministic gates.
 - Imitation policy: high-fidelity style anchoring must be feature- and evidence-based, not direct copying. Strong imitation mode increases audit strictness.
 - Regression policy: Phase 14 must keep the full Phase 13 matrix green and add `test:reference-style` plus `test:reference-style:stress`.
+
+## Phase 15 Goink-Master Feature Merge Boundary
+
+- Status: proposed as of 2026-07-07.
+- Scope: EPUB/TXT/MD import with encoding detection and cleanup, style sample library and validated imitation skill extraction, narrative pattern extraction, read-only Git history visualization, configurable Git author identity, sidebar/window persistence, update checks, multi-range chapter selection, visible copyable errors, relative-time refresh, and associated bug fixes.
+- Merge policy: `goink-master` is a read-only behavior reference. New code belongs in current Novelist contracts, core services, infrastructure, Photino desktop integration, owned TypeScript adapter, and React components.
+- Safety policy: import/style/pattern/Git/update features must not add arbitrary file reads, agent-side imports, implicit chapter mutation, direct `SaveContent`, or unsafe external URL opening.
+- Regression policy: Phase 15 must keep the full Phase 13 matrix green, preserve Phase 14 style/profile guardrails, and add `test:phase15` plus backend parser/import/Git/style/pattern/update fault-injection coverage.
 
 ## Recommended Next Coding Sessions
 

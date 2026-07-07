@@ -99,13 +99,14 @@ The current extractor is deterministic and robust, but limited:
 
 - [x] Style profiles can be built without LLM configuration.
 - [x] Feature values are reproducible for the same source hash and analyzer version.
-- [ ] Search and style audit can read these baseline features. Search-side baseline scoring is implemented; style audit remains open.
+- [x] Search and style audit can read these baseline features. Search-side baseline scoring is implemented, and anchored draft audit now reads persisted profile feature vectors for supported deterministic numeric dimensions.
 
 **Verification:**
 
 - [x] Unit tests for rhythm, punctuation, dialogue ratio, paragraph cadence, and hook marker extraction.
 - [x] Integration test builds a deterministic style profile from a Chinese fixture.
 - [x] Integration test proves material search can read baseline profile evidence without cross-novel profile bypass.
+- [x] Integration test proves draft audit can read persisted profile feature vectors for deterministic style-distance checks.
 
 **Dependencies:** Tasks 1-2.
 
@@ -195,7 +196,7 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 8: Style Contract for Blueprint Beats
 
-**Status:** Partially complete. Backend contracts, SQLite storage, analysis-contract hashing, whole-contract revision, material-binding consumption, and deterministic review diagnostics for invalid style contracts exist. Compact approval summary UI and field-level editing remain open.
+**Status:** Partially complete. Backend contracts, SQLite storage, analysis-contract hashing, whole-contract revision, material-binding consumption, deterministic review diagnostics for invalid style contracts, and compact orchestration approval summaries exist. Field-level editing UI and Playwright approval-summary coverage remain open.
 
 **Description:** Extend blueprint/material binding so each beat can carry a style contract: target style profile, style duties, imitation intensity, allowed closeness, required evidence types, and forbidden style risks.
 
@@ -204,12 +205,13 @@ The current extractor is deterministic and robust, but limited:
 - [x] Blueprint beat contracts can express target style profile ids, style dimensions/duties, imitation intensity, minimum style fit, allowed closeness, required evidence types, and forbidden style risks. Full rhythm/POV/dialogue/sensory/hook/payoff taxonomy mapping remains open.
 - [x] Approval hash includes style contract fields.
 - [x] Editing style contract invalidates approval/material links.
-- [ ] Style contracts can be summarized compactly for user approval.
+- [x] Style contracts can be summarized compactly for user approval. Orchestration blueprint approval summaries now include compact beat-level style contract profile ids, intensity, minimum fit, closeness, dimensions, evidence, and risk terms in `material_use_plan`.
 
 **Verification:**
 
 - [x] Contract/hash invalidation tests for JSON payload and analysis-contract hash.
 - [x] Blueprint review tests for missing or contradictory style duties. The deterministic reviewer now fails missing style profile ids, empty style duties, strong imitation with too-low `min_style_fit`, and required style evidence labels/material granularities that are incompatible with the beat material search.
+- [x] Integration test proves blueprint approval summary includes compact style contract terms.
 - [ ] Playwright approval-summary coverage.
 
 **Dependencies:** Tasks 5-7.
@@ -238,15 +240,15 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 10: Style and Source-Leak Audit
 
-**Status:** Partially complete. Reuse audit and anchored draft audit now have deterministic source-leak foundations for non-L0/L1 candidates using n-gram overlap, candidate source coverage, and source-span concentration. Anchored draft audit applies stricter source-leak thresholds for beats whose style contract uses strong imitation. Full style-distance audit, UI surfacing, and draft-candidate style-quality audit remain open.
+**Status:** Partially complete. Reuse audit and anchored draft audit now have deterministic source-leak foundations for non-L0/L1 candidates using n-gram overlap, candidate source coverage, and source-span concentration. Anchored draft audit applies stricter source-leak thresholds for beats whose style contract uses strong imitation, enforces selected-link `min_style_fit`, and compares candidates against persisted deterministic profile numeric features for supported style dimensions. Full style-quality taxonomy, UI surfacing, persisted readable reports, and the full style-intensity matrix remain open.
 
 **Description:** Add a dedicated audit layer for high-fidelity imitation risk and quality.
 
 **Acceptance criteria:**
 
-- [ ] Audit computes exact phrase overlap, n-gram overlap, source-span concentration, candidate/source similarity, style-feature distance, factual drift, POV drift, and generic AI prose signals. Reuse audit currently covers n-gram overlap, source-span concentration, source coverage, rewrite level, simple fact drift, and generic AI prose phrase risk; anchored draft audit now reuses deterministic source-leak checks against selected material text.
+- [ ] Audit computes exact phrase overlap, n-gram overlap, source-span concentration, candidate/source similarity, style-feature distance, factual drift, POV drift, and generic AI prose signals. Reuse audit currently covers n-gram overlap, source-span concentration, source coverage, rewrite level, simple fact drift, and generic AI prose phrase risk; anchored draft audit now reuses deterministic source-leak checks against selected material text and computes deterministic style-feature distance for supported baseline numeric dimensions (`dialogue_ratio`, `interiority_ratio`, `sensory_ratio`, `action_afterbeat_ratio`, `transition_ratio`, `hook_marker_ratio`, `punctuation_per_100_chars`, and `average_sentence_chars`).
 - [x] Strong imitation mode has stricter source-leak thresholds for anchored draft audit when a beat style contract uses `imitation_intensity = "strong"`.
-- [ ] Audit fails candidates that are too close to a source span or too far from required style features. Reuse audit and anchored draft audit now fail non-L0/L1 near-copy candidates that exceed deterministic source-leak thresholds; style-feature distance remains open.
+- [x] Audit fails candidates that are too close to a source span or too far from required style features. Reuse audit and anchored draft audit now fail non-L0/L1 near-copy candidates that exceed deterministic source-leak thresholds, and anchored draft audit fails candidates whose selected material falls below `min_style_fit` or whose observable style features are too far from persisted deterministic profile targets for supported dimensions.
 - [ ] Audit report is readable in UI and persisted with candidate ids.
 
 **Verification:**
@@ -255,6 +257,7 @@ The current extractor is deterministic and robust, but limited:
 - [ ] Integration tests for L2/L3/L4 rewrite-risk escalation. L2 anchored-draft near-copy, strong-style source-leak tightening, and L3/L4 high-rewrite stops are covered; the full style-intensity matrix remains open.
 - [x] Fixtures proving near-copy candidates fail even when rewrite level is otherwise allowed.
 - [x] Fixtures proving near-copy candidates fail even when style fit is high for strong style contracts.
+- [x] Fixtures proving low selected-link style fit and persisted-profile style-feature distance fail anchored draft audit.
 
 **Dependencies:** Task 9.
 

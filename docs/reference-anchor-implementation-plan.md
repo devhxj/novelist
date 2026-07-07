@@ -4,7 +4,7 @@ This implementation plan has been split into focused companion documents so each
 
 ## Status
 
-Core implementation phases 0-13 are complete at the current implementation boundary. Phase 14 is now open to upgrade the anchor layer into advanced style anchoring and high-fidelity imitation: multi-scale literary understanding, style profiles, style-aware retrieval, style-guided candidates, and source-leak/style-quality audit.
+Core implementation phases 0-13 are complete at the current implementation boundary. Phase 14 is now open to upgrade the anchor layer into advanced style anchoring and high-fidelity imitation: multi-scale literary understanding, style profiles, style-aware retrieval, style-guided candidates, and source-leak/style-quality audit. Phase 15 is proposed as the `goink-master` feature-merge plan for import, style material library, narrative pattern extraction, Git history visualization, desktop UX hardening, and error-feedback fixes in the current Novelist architecture.
 
 ## Date
 
@@ -35,6 +35,7 @@ Core implementation phases 0-13 are complete at the current implementation bound
 - [Tasks phases 10-12](reference-anchor-implementation/tasks-phases-10-12.md)
 - [Tasks phase 13](reference-anchor-implementation/tasks-phase-13.md)
 - [Tasks phase 14](reference-anchor-implementation/tasks-phase-14.md)
+- [Tasks phase 15](reference-anchor-implementation/tasks-phase-15.md)
 - [Verification and guardrails](reference-anchor-implementation/tasks-verification-and-guardrails.md)
 
 ## Reading Order

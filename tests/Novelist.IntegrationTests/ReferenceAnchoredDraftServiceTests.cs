@@ -1648,6 +1648,61 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task BlueprintApprovalSummaryIncludesCompactStyleContractPlan()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("风格审批摘要测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning);
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                45,
+                "风格审批摘要蓝图",
+                "雨声压低",
+                [1],
+                KnownFacts: ["雨声压低了整条街的呼吸"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var beatPath = "beat:" + blueprint.Beats[0].BeatId + ":";
+        var styleContractJson = JsonSerializer.Serialize(
+            new ReferenceBlueprintStyleContractPayload(
+                StyleProfileIds: [99],
+                StyleDimensions: ["dialogue_ratio", "sensory_ratio"],
+                ImitationIntensity: ReferenceStyleImitationIntensities.Strong,
+                MinStyleFit: 0.8,
+                AllowedCloseness: "moderate",
+                RequiredEvidenceTypes: ["dialogue_exchange"],
+                ForbiddenStyleRisks: ["source_leak", "style_distance"]),
+            BridgeJson.SerializerOptions);
+        var revised = await service.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                blueprint.BlueprintId,
+                [new ReferenceBlueprintRevisionChangePayload(beatPath + "style_contract", styleContractJson)],
+                "user",
+                "add style contract for approval summary"),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId),
+            CancellationToken.None);
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+
+        var summary = SqliteReferenceAnchoredDraftService.BuildBlueprintApprovalSummary(revised, review);
+
+        Assert.Contains("style contracts:", summary.MaterialUsePlan, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("beat 1", summary.MaterialUsePlan, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("profiles=99", summary.MaterialUsePlan, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("intensity=strong", summary.MaterialUsePlan, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("min_fit=0.8", summary.MaterialUsePlan, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("dims=dialogue_ratio,sensory_ratio", summary.MaterialUsePlan, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("evidence=dialogue_exchange", summary.MaterialUsePlan, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("risks=source_leak,style_distance", summary.MaterialUsePlan, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task BindBlueprintMaterialsUsesBlueprintTagFiltersAndExternalEvidenceDutyFit()
     {
         var options = CreateOptions();
@@ -2084,6 +2139,155 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             audit.RequiredFixes,
             item => item.Contains("n-gram", StringComparison.OrdinalIgnoreCase) ||
                 item.Contains("source-span", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task AuditDraftAgainstBlueprintUsesPersistedStyleProfileFeatureDistance()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("草稿风格距离审计测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        var sourcePath = CreateSourceFile(
+            "draft-style-distance-profile.md",
+            """
+            # 第一章
+
+            “你来了？”
+
+            “我来了。”
+
+            “门外有人。”
+
+            “别回头。”
+            """);
+        var realReferenceAnchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await realReferenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "高对话风格参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var styleService = new SqliteReferenceStyleProfileService(options, novels);
+        var profile = await styleService.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                novel.Id,
+                "高对话风格",
+                "dialogue-heavy deterministic baseline",
+                [anchor.AnchorId],
+                ["user_provided"],
+                [ReferenceSourceTrustLevels.UserVerified]),
+            CancellationToken.None);
+        var profileDialogueRatio = profile.Features.NumericFeatures.Single(feature => feature.FeatureKey == "dialogue_ratio").Value;
+        Assert.True(profileDialogueRatio > 0.7);
+
+        var selectedMaterial = new ReferenceMaterialPayload(
+            MaterialId: "dialogue-style-selected",
+            AnchorId: anchor.AnchorId,
+            SourceSegmentId: "segment-dialogue-style-selected",
+            MaterialType: ReferenceMaterialTypes.Sentence,
+            FunctionTag: "dialogue",
+            EmotionTag: "pressure",
+            SceneTag: "dialogue",
+            PovTag: "close",
+            TechniqueTag: "dialogue_exchange",
+            FunctionConfidence: 1,
+            EmotionConfidence: 1,
+            PovConfidence: 1,
+            Text: "“你来了？”",
+            SourceHash: "source-hash-dialogue-style-selected",
+            ExtractorVersion: "test",
+            UserVerified: true,
+            CreatedAt: DateTimeOffset.UtcNow,
+            ScoreComponents: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                ["style_fit"] = 1.25,
+                ["lexical"] = 2.5
+            });
+        var referenceAnchors = new FixedReferenceAnchorService(selectedMaterial, applySearchFilters: true);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                13,
+                "第十三章蓝图",
+                "雨声压低了整条街的呼吸",
+                [anchor.AnchorId],
+                KnownFacts: ["雨声压低了整条街的呼吸"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var beatPath = "beat:" + blueprint.Beats[0].BeatId + ":";
+        var styleContractJson = JsonSerializer.Serialize(
+            new ReferenceBlueprintStyleContractPayload(
+                StyleProfileIds: [profile.ProfileId],
+                StyleDimensions: ["dialogue_ratio"],
+                ImitationIntensity: ReferenceStyleImitationIntensities.Strong,
+                MinStyleFit: 0.8,
+                AllowedCloseness: "moderate",
+                RequiredEvidenceTypes: ["dialogue_exchange"],
+                ForbiddenStyleRisks: ["style_distance"]),
+            BridgeJson.SerializerOptions);
+        var revised = await service.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                blueprint.BlueprintId,
+                [
+                    new ReferenceBlueprintRevisionChangePayload(beatPath + "reference_query.query", "你来了"),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.material_types",
+                        JsonSerializer.Serialize(new[] { ReferenceMaterialTypes.Sentence })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.emotion_tags",
+                        JsonSerializer.Serialize(new[] { "pressure" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.function_tags",
+                        JsonSerializer.Serialize(new[] { "dialogue" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.pov_tags",
+                        JsonSerializer.Serialize(new[] { "close" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.technique_tags",
+                        JsonSerializer.Serialize(new[] { "dialogue_exchange" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "required_material_types",
+                        JsonSerializer.Serialize(new[] { ReferenceMaterialTypes.Sentence })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "prose_duties",
+                        JsonSerializer.Serialize(new[] { "interiority", "external_evidence" })),
+                    new ReferenceBlueprintRevisionChangePayload(beatPath + "style_contract", styleContractJson)
+                ],
+                "user",
+                "verify style profile distance audit"),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId),
+            CancellationToken.None);
+        Assert.Equal("passed", review.Status);
+        var approved = await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, review.ReviewId),
+            CancellationToken.None);
+        await service.BindBlueprintMaterialsAsync(
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, approved.BlueprintId, 2, SelectTopCandidate: true),
+            CancellationToken.None);
+        var selected = Assert.Single(await ReadSelectedMaterialLinksAsync(options, approved.BlueprintId));
+        var candidate = new ReferenceDraftParagraphCandidatePayload(
+            "manual-style-distance-candidate",
+            approved.BlueprintId,
+            selected.BeatId,
+            selected.MaterialId,
+            ReferenceRewriteLevels.L2,
+            "雨声压低了整条街的呼吸，林岚心里一紧，指尖在杯沿发紧，却仍然没有后退。",
+            ChangedSlots: [],
+            NonSlotEdits: [],
+            AuditStatus: "passed",
+            DateTimeOffset.UnixEpoch);
+        await InsertDraftCandidateAsync(options, candidate);
+
+        var audit = await service.AuditDraftAgainstBlueprintAsync(
+            new AuditReferenceAnchoredDraftPayload(novel.Id, approved.BlueprintId, [candidate.CandidateId]),
+            CancellationToken.None);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("style-distance", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("dialogue_ratio", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
