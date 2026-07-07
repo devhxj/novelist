@@ -266,7 +266,7 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 10: Style and Source-Leak Audit
 
-**Status:** Partially complete. Reuse audit and anchored draft audit now have deterministic source-leak foundations for non-L0/L1 candidates using n-gram overlap, candidate source coverage, and source-span concentration. Anchored draft audit applies stricter source-leak thresholds for beats whose style contract uses strong imitation, enforces selected-link `min_style_fit`, and compares candidates against persisted deterministic profile numeric features for supported style dimensions. Full style-quality taxonomy, UI surfacing, persisted readable reports, and the full style-intensity matrix remain open.
+**Status:** Partially complete. Reuse audit and anchored draft audit now have deterministic source-leak foundations for non-L0/L1 candidates using n-gram overlap, candidate source coverage, and source-span concentration. Anchored draft audit applies stricter source-leak thresholds for beats whose style contract uses strong imitation, enforces selected-link `min_style_fit`, and compares candidates against persisted deterministic profile numeric features for supported style dimensions. Anchored draft audit payloads now include candidate ids plus a structured readable report, and generated/explicit draft audits persist that report in SQLite without candidate/source text. Full style-quality taxonomy and broader style-intensity evaluation remain open.
 
 **Description:** Add a dedicated audit layer for high-fidelity imitation risk and quality.
 
@@ -275,12 +275,12 @@ The current extractor is deterministic and robust, but limited:
 - [ ] Audit computes exact phrase overlap, n-gram overlap, source-span concentration, candidate/source similarity, style-feature distance, factual drift, POV drift, and generic AI prose signals. Reuse audit currently covers n-gram overlap, source-span concentration, source coverage, rewrite level, simple fact drift, and generic AI prose phrase risk; anchored draft audit now reuses deterministic source-leak checks against selected material text and computes deterministic style-feature distance for supported baseline numeric dimensions (`dialogue_ratio`, `interiority_ratio`, `sensory_ratio`, `action_afterbeat_ratio`, `transition_ratio`, `hook_marker_ratio`, `punctuation_per_100_chars`, and `average_sentence_chars`).
 - [x] Strong imitation mode has stricter source-leak thresholds for anchored draft audit when a beat style contract uses `imitation_intensity = "strong"`.
 - [x] Audit fails candidates that are too close to a source span or too far from required style features. Reuse audit and anchored draft audit now fail non-L0/L1 near-copy candidates that exceed deterministic source-leak thresholds, and anchored draft audit fails candidates whose selected material falls below `min_style_fit` or whose observable style features are too far from persisted deterministic profile targets for supported dimensions.
-- [ ] Audit report is readable in UI and persisted with candidate ids.
+- [x] Audit report is readable in UI and persisted with candidate ids. `GenerateReferenceAnchoredDraft` and `AuditReferenceAnchoredDraft` persist `reference_draft_audits` rows with `candidate_ids_json` and `readable_report_json`; the frontend shows the report summary, candidate ids, finding category/severity, and required action without adding candidate/source text fields.
 
 **Verification:**
 
 - [x] Unit tests for overlap/similarity thresholds.
-- [ ] Integration tests for L2/L3/L4 rewrite-risk escalation. L2 anchored-draft near-copy, strong-style source-leak tightening, and L3/L4 high-rewrite stops are covered; the full style-intensity matrix remains open.
+- [ ] Integration tests for L2/L3/L4 rewrite-risk escalation. L2 anchored-draft near-copy, strong-style source-leak tightening, L3/L4 high-rewrite stops, readable audit persistence, and missing-candidate audit persistence are covered; the full style-intensity matrix remains open.
 - [x] Fixtures proving near-copy candidates fail even when rewrite level is otherwise allowed.
 - [x] Fixtures proving near-copy candidates fail even when style fit is high for strong style contracts.
 - [x] Fixtures proving low selected-link style fit and persisted-profile style-feature distance fail anchored draft audit.

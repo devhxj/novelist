@@ -423,6 +423,7 @@ async function generateReviseApproveBindAndDraft(page) {
   await detail.getByRole('button', { name: /^候选$/ }).click()
   await expectVisible(page.getByText('候选段落已生成'), 'draft generated message')
   await expectVisible(page.getByText('审计 passed · L1'), 'draft audit status')
+  await expectVisible(detail.getByText(/Draft audit passed for 3 candidate\(s\) at rewrite level L1/), 'readable draft audit summary')
   await expectVisible(detail.getByText('雨声压过门缝里的动静').first(), 'draft candidate text')
   await expectVisible(detail.getByText(/风格尝试 intensity=loose status=attempted profiles=301/), 'loose style attempt summary')
   await expectVisible(detail.getByText(/风格尝试 intensity=moderate status=attempted profiles=301/), 'moderate style attempt summary')
@@ -507,8 +508,9 @@ async function verifyReviewAndAuditFailureRecovery(page) {
   await detail.getByRole('button', { name: /^候选$/ }).click()
   await expectVisible(page.getByText('候选段落已生成'), 'failed audit draft generated')
   await expectVisible(detail.getByText('审计 failed · L3'), 'failed draft audit status')
-  await expectVisible(detail.getByText('候选引用了未绑定的门外身份。'), 'failed audit provenance issue')
-  await expectVisible(detail.getByText('回到蓝图修订，移除未支持事实并降低改写级别。'), 'failed audit required fix')
+  await expectVisible(detail.getByText(/Draft audit failed for 1 candidate\(s\) at rewrite level L3/), 'failed readable audit summary')
+  await expectVisible(detail.getByText('候选引用了未绑定的门外身份。').first(), 'failed audit provenance issue')
+  await expectVisible(detail.getByText('回到蓝图修订，移除未支持事实并降低改写级别。').first(), 'failed audit required fix')
 
   await detail.getByLabel('段落意图').fill('审计修复：只保留桌面和雨声信息，不揭示门外身份。')
   await detail.getByRole('button', { name: /保存修订/ }).click()
@@ -1669,6 +1671,25 @@ function installReferenceAnchorMockBridge() {
           ]
         : [],
     }))
+    const candidateIds = candidates.map((candidate) => candidate.candidate_id)
+    const readableFindings = shouldFailAudit
+      ? [
+          {
+            category: 'provenance',
+            severity: 'error',
+            candidate_ids: ['candidate-001'],
+            message: '候选引用了未绑定的门外身份。',
+            required_action: '重新绑定来源材料，或回到蓝图移除未支持事实。',
+          },
+          {
+            category: 'required_fix',
+            severity: 'action',
+            candidate_ids: ['candidate-001'],
+            message: '回到蓝图修订，移除未支持事实并降低改写级别。',
+            required_action: '回到蓝图修订，移除未支持事实并降低改写级别。',
+          },
+        ]
+      : []
     return {
       blueprint_id: input.blueprint_id,
       candidates,
@@ -1684,6 +1705,14 @@ function installReferenceAnchorMockBridge() {
         ai_prose_risks: shouldFailAudit ? ['突然确认了门外身份过于解释化。'] : [],
         required_fixes: shouldFailAudit ? ['回到蓝图修订，移除未支持事实并降低改写级别。'] : [],
         audited_at: now,
+        candidate_ids: candidateIds,
+        readable_report: {
+          summary: shouldFailAudit
+            ? `Draft audit failed for ${candidateIds.length} candidate(s) at rewrite level ${rewriteLevel} with ${readableFindings.length} finding(s).`
+            : `Draft audit passed for ${candidateIds.length} candidate(s) at rewrite level ${rewriteLevel}.`,
+          candidate_ids: candidateIds,
+          findings: readableFindings,
+        },
       },
     }
   }

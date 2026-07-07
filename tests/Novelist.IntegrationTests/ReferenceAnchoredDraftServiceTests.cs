@@ -2144,6 +2144,71 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
                 draft.Candidates.Select(candidate => candidate.CandidateId).ToArray()),
             CancellationToken.None);
         Assert.Equal(draft.Audit?.Status, persistedAudit.Status);
+        Assert.Equal(draft.Candidates.Select(candidate => candidate.CandidateId).ToArray(), persistedAudit.CandidateIds);
+        Assert.Equal(persistedAudit.CandidateIds, persistedAudit.ReadableReport?.CandidateIds);
+
+        var auditRows = await ReadDraftAuditRowsAsync(options, approved.BlueprintId);
+        Assert.Equal(2, auditRows.Count);
+        Assert.Contains(auditRows, row => row.AuditId == draft.Audit?.AuditId);
+        Assert.Contains(auditRows, row => row.AuditId == persistedAudit.AuditId);
+        Assert.All(auditRows, row =>
+        {
+            Assert.Equal(approved.BlueprintId, row.BlueprintId);
+            Assert.Equal(draft.Candidates.Select(candidate => candidate.CandidateId).ToArray(), row.CandidateIds);
+            Assert.NotNull(row.ReadableReport);
+            Assert.Equal(row.CandidateIds, row.ReadableReport.CandidateIds);
+            Assert.DoesNotContain("candidate_text", row.ReadableReportJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("source_text", row.ReadableReportJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("prompt", row.ReadableReportJson, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Fact]
+    public async Task AuditDraftAgainstBlueprintPersistsReadableReportForMissingCandidateIds()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("缺失候选审计报告测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning);
+        var blueprint = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                36,
+                "缺失候选蓝图",
+                "雨声压低",
+                [1],
+                KnownFacts: ["雨声压低了整条街的呼吸"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId),
+            CancellationToken.None);
+        var approved = await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, blueprint.BlueprintId, review.ReviewId),
+            CancellationToken.None);
+
+        var audit = await service.AuditDraftAgainstBlueprintAsync(
+            new AuditReferenceAnchoredDraftPayload(novel.Id, approved.BlueprintId, ["missing-candidate-1"]),
+            CancellationToken.None);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Equal(["missing-candidate-1"], audit.CandidateIds);
+        Assert.Equal(["missing-candidate-1"], audit.ReadableReport?.CandidateIds);
+        Assert.Contains(audit.ProvenanceErrors, error => error.Contains("missing-candidate-1", StringComparison.Ordinal));
+        var finding = Assert.Single(audit.ReadableReport?.Findings ?? []);
+        Assert.Equal("provenance", finding.Category);
+        Assert.Equal(["missing-candidate-1"], finding.CandidateIds);
+        Assert.Contains("missing-candidate-1", finding.Message, StringComparison.Ordinal);
+
+        var row = Assert.Single(await ReadDraftAuditRowsAsync(options, approved.BlueprintId));
+        Assert.Equal(audit.AuditId, row.AuditId);
+        Assert.Equal(["missing-candidate-1"], row.CandidateIds);
+        Assert.Contains("missing-candidate-1", row.ReadableReportJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("candidate_text", row.ReadableReportJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", row.ReadableReportJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", row.ReadableReportJson, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -5501,6 +5566,15 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         string SourcePlanHash,
         string AnalysisContractHash);
 
+    private sealed record DraftAuditRow(
+        string AuditId,
+        long BlueprintId,
+        IReadOnlyList<string> CandidateIds,
+        string Status,
+        string RewriteLevel,
+        ReferenceDraftAuditReadableReportPayload ReadableReport,
+        string ReadableReportJson);
+
     private static async ValueTask<IReadOnlyList<string>> ReadTableColumnsAsync(
         AppInitializationOptions options,
         string tableName)
@@ -5523,6 +5597,44 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         }
 
         return columns;
+    }
+
+    private static async ValueTask<IReadOnlyList<DraftAuditRow>> ReadDraftAuditRowsAsync(
+        AppInitializationOptions options,
+        long blueprintId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT audit_id, blueprint_id, candidate_ids_json, status, rewrite_level, readable_report_json
+            FROM reference_draft_audits
+            WHERE blueprint_id = $blueprint_id
+            ORDER BY audited_at ASC, audit_id ASC;
+            """;
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        var rows = new List<DraftAuditRow>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var readableReportJson = reader.GetString(5);
+            rows.Add(new DraftAuditRow(
+                reader.GetString(0),
+                reader.GetInt64(1),
+                JsonSerializer.Deserialize<IReadOnlyList<string>>(reader.GetString(2), BridgeJson.SerializerOptions) ?? [],
+                reader.GetString(3),
+                reader.GetString(4),
+                JsonSerializer.Deserialize<ReferenceDraftAuditReadableReportPayload>(readableReportJson, BridgeJson.SerializerOptions)
+                    ?? throw new InvalidOperationException("Stored draft audit readable report is empty."),
+                readableReportJson));
+        }
+
+        return rows;
     }
 
     private static async ValueTask InsertDraftCandidateAsync(

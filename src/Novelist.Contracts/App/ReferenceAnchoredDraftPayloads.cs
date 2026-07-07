@@ -419,7 +419,21 @@ public sealed record ReferenceAnchoredDraftAuditPayload(
     [property: JsonPropertyName("pov_errors")] IReadOnlyList<string> PovErrors,
     [property: JsonPropertyName("ai_prose_risks")] IReadOnlyList<string> AiProseRisks,
     [property: JsonPropertyName("required_fixes")] IReadOnlyList<string> RequiredFixes,
-    [property: JsonPropertyName("audited_at")] DateTimeOffset AuditedAt);
+    [property: JsonPropertyName("audited_at")] DateTimeOffset AuditedAt,
+    [property: JsonPropertyName("candidate_ids")] IReadOnlyList<string>? CandidateIds = null,
+    [property: JsonPropertyName("readable_report")] ReferenceDraftAuditReadableReportPayload? ReadableReport = null);
+
+public sealed record ReferenceDraftAuditReadableReportPayload(
+    [property: JsonPropertyName("summary")] string Summary,
+    [property: JsonPropertyName("candidate_ids")] IReadOnlyList<string> CandidateIds,
+    [property: JsonPropertyName("findings")] IReadOnlyList<ReferenceDraftAuditReadableFindingPayload> Findings);
+
+public sealed record ReferenceDraftAuditReadableFindingPayload(
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("severity")] string Severity,
+    [property: JsonPropertyName("candidate_ids")] IReadOnlyList<string> CandidateIds,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("required_action")] string RequiredAction);
 
 public sealed record ReferenceCorpusSearchPolicyPayload(
     [property: JsonPropertyName("mode")] string Mode,

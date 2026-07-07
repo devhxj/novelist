@@ -153,6 +153,42 @@ function FindingSections({ sections, emptyText }: { sections: FindingSection[]; 
   )
 }
 
+function DraftAuditReadableReport({ report }: { report: reference.DraftAuditReadableReport | null | undefined }) {
+  if (!report) {
+    return null
+  }
+
+  return (
+    <div className="mt-2 rounded border border-border bg-card px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs font-medium text-foreground">{report.summary}</p>
+        {(report.candidate_ids ?? []).map(candidateId => (
+          <span key={candidateId} className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">
+            {candidateId}
+          </span>
+        ))}
+      </div>
+      {(report.findings ?? []).length > 0 && (
+        <div className="mt-2 space-y-2">
+          {report.findings.map((finding, index) => (
+            <div key={`${finding.category}:${finding.message}:${index}`} className="rounded border border-border bg-background px-2.5 py-2">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                <span className={statusTone(finding.severity)}>{finding.severity}</span>
+                <span>{finding.category}</span>
+                {(finding.candidate_ids ?? []).map(candidateId => (
+                  <span key={candidateId} className="break-all">{candidateId}</span>
+                ))}
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-foreground">{finding.message}</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{finding.required_action}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ReviewDefects({ defects }: { defects: reference.ChapterBlueprintReviewDefect[] }) {
   if (defects.length === 0) {
     return null
@@ -599,6 +635,7 @@ export function BlueprintDetail({
         <div className="mt-4 rounded-md border border-border bg-background p-3">
           <h4 className="text-xs font-semibold text-foreground">候选段落</h4>
           {draft.audit && <p className={`mt-1 text-xs ${statusTone(draft.audit.status)}`}>审计 {draft.audit.status} · {draft.audit.rewrite_level}</p>}
+          {draft.audit && <DraftAuditReadableReport report={draft.audit.readable_report} />}
           {draft.audit && <FindingSections sections={auditSections} emptyText="当前草稿审计没有返回结构化问题。" />}
           <div className="mt-2 space-y-2">
             {draft.candidates.map(candidate => (

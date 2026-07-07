@@ -176,6 +176,23 @@ reference_chapter_blueprint_beats
 
 `style_contract_json` is the Phase 14 beat-level style contract. It stores target style profile ids, style dimensions, imitation intensity, minimum style-fit score, allowed closeness, required evidence types, and forbidden style risks. It is included in `analysis_contract_hash`; revising it makes previous approvals and material links stale. Deterministic blueprint review fails contracts with missing/invalid style profile ids, no style duties, contradictory intensity/fit thresholds, or required evidence labels/material granularities incompatible with the beat's effective material search. Material binding passes the style profile ids/dimensions/intensity into `SearchReferenceMaterials`; selected links below the contract's minimum style fit are persisted as `low_confidence` weak matches with a negative `style_fit_gap` score component. Draft audit consumes the same contract: non-diagnostic contracts verify the selected link's `style_fit` against `min_style_fit` and, when active referenced profile rows exist, compare candidate-observable deterministic features against `reference_style_profiles.feature_vector_json` for supported numeric dimensions.
 
+reference_draft_audits
+- audit_id TEXT PRIMARY KEY
+- blueprint_id INTEGER NOT NULL
+- candidate_ids_json TEXT NOT NULL
+- status TEXT NOT NULL
+- rewrite_level TEXT NOT NULL
+- provenance_errors_json TEXT NOT NULL
+- blueprint_errors_json TEXT NOT NULL
+- unsupported_fact_errors_json TEXT NOT NULL
+- pov_errors_json TEXT NOT NULL
+- ai_prose_risks_json TEXT NOT NULL
+- required_fixes_json TEXT NOT NULL
+- readable_report_json TEXT NOT NULL
+- audited_at TEXT NOT NULL
+
+`reference_draft_audits` persists generated and explicit anchored-draft audit outcomes. `candidate_ids_json` stores only candidate ids; `readable_report_json` stores the UI/report structure with summary, candidate ids, findings, category/severity, message, and required action. It deliberately does not persist candidate text, source text, prompts, or source excerpts in the audit report row. Draft candidate text remains confined to `reference_draft_paragraph_candidates` under the existing candidate-preview boundary.
+
 reference_chapter_blueprint_reviews
 - review_id TEXT PRIMARY KEY
 - blueprint_id INTEGER NOT NULL

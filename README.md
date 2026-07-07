@@ -104,6 +104,13 @@ mode: auto
 | 前端构建 | Vite 8/Rolldown 已拆分主入口、工作区、Monaco、Markdown、Mermaid 和图谱依赖 |
 | 旧实现 | Go/Wails 与旧 Python 实现已退役；新功能不要写入 `app/`、`internal/`、`python-master/` 或 `frontend/src/lib/wailsjs/` |
 
+## 最新更新
+
+### 2026-07-07
+
+- 参考锚定草稿审计现在会在候选段落区显示可读报告，包括候选 ID、问题分类、严重级别和处理动作。
+- 生成草稿和手动审计都会持久化审计报告与候选 ID；报告不额外保存候选正文、来源正文或 Prompt。
+
 完整变更见 [Release Notes](docs/releases/release-notes.md)。
 
 ## 截图

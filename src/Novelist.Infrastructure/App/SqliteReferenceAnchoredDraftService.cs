@@ -533,7 +533,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             selectedLinks,
             selectedMaterialTexts,
             styleFeatures);
-        await PersistDraftCandidatesAsync(blueprint.BlueprintId, candidates, cancellationToken);
+        await PersistDraftCandidatesAsync(blueprint.BlueprintId, candidates, audit, cancellationToken);
 
         return new ReferenceAnchoredDraftPayload(blueprint.BlueprintId, candidates, audit);
     }
@@ -572,14 +572,14 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 .ToArray();
             if (missing.Length > 0)
             {
-                var provenanceAudit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(blueprint, candidates, DateTimeOffset.UtcNow);
-                return provenanceAudit with
-                {
-                    Status = "failed",
-                    ProvenanceErrors = provenanceAudit.ProvenanceErrors
-                        .Concat(missing.Select(id => $"Draft candidate does not exist for this blueprint: {id}"))
-                        .ToArray()
-                };
+                var provenanceAudit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+                    blueprint,
+                    candidates,
+                    DateTimeOffset.UtcNow,
+                    requestedCandidateIds: candidateIds,
+                    additionalProvenanceErrors: missing.Select(id => $"Draft candidate does not exist for this blueprint: {id}").ToArray());
+                await PersistDraftAuditAsync(connection, null, blueprint.BlueprintId, provenanceAudit, cancellationToken);
+                return provenanceAudit;
             }
 
             var candidateBeatIds = candidates
@@ -603,13 +603,15 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 input.NovelId,
                 blueprint,
                 cancellationToken);
-            return ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
                 blueprint,
                 candidates,
                 DateTimeOffset.UtcNow,
                 selectedLinks,
                 selectedMaterialTexts,
                 styleFeatures);
+            await PersistDraftAuditAsync(connection, null, blueprint.BlueprintId, audit, cancellationToken);
+            return audit;
         }
         finally
         {
@@ -2607,9 +2609,10 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
     private async ValueTask PersistDraftCandidatesAsync(
         long blueprintId,
         IReadOnlyList<ReferenceDraftParagraphCandidatePayload> candidates,
+        ReferenceAnchoredDraftAuditPayload? audit,
         CancellationToken cancellationToken)
     {
-        if (candidates.Count == 0)
+        if (candidates.Count == 0 && audit is null)
         {
             return;
         }
@@ -2647,12 +2650,73 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
 
+            if (audit is not null)
+            {
+                await PersistDraftAuditAsync(connection, transaction, blueprintId, audit, cancellationToken);
+            }
+
             await transaction.CommitAsync(cancellationToken);
         }
         finally
         {
             _mutex.Release();
         }
+    }
+
+    private async ValueTask PersistDraftAuditAsync(
+        long blueprintId,
+        ReferenceAnchoredDraftAuditPayload audit,
+        CancellationToken cancellationToken)
+    {
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            await PersistDraftAuditAsync(connection, null, blueprintId, audit, cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private static async ValueTask PersistDraftAuditAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        long blueprintId,
+        ReferenceAnchoredDraftAuditPayload audit,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT OR REPLACE INTO reference_draft_audits
+              (audit_id, blueprint_id, candidate_ids_json, status, rewrite_level,
+               provenance_errors_json, blueprint_errors_json, unsupported_fact_errors_json,
+               pov_errors_json, ai_prose_risks_json, required_fixes_json, readable_report_json, audited_at)
+            VALUES
+              ($audit_id, $blueprint_id, $candidate_ids_json, $status, $rewrite_level,
+               $provenance_errors_json, $blueprint_errors_json, $unsupported_fact_errors_json,
+               $pov_errors_json, $ai_prose_risks_json, $required_fixes_json, $readable_report_json, $audited_at);
+            """;
+        command.Parameters.AddWithValue("$audit_id", audit.AuditId);
+        command.Parameters.AddWithValue("$blueprint_id", blueprintId);
+        command.Parameters.AddWithValue("$candidate_ids_json", JsonSerializer.Serialize(audit.CandidateIds ?? [], JsonOptions));
+        command.Parameters.AddWithValue("$status", audit.Status);
+        command.Parameters.AddWithValue("$rewrite_level", audit.RewriteLevel);
+        command.Parameters.AddWithValue("$provenance_errors_json", JsonSerializer.Serialize(audit.ProvenanceErrors, JsonOptions));
+        command.Parameters.AddWithValue("$blueprint_errors_json", JsonSerializer.Serialize(audit.BlueprintErrors, JsonOptions));
+        command.Parameters.AddWithValue("$unsupported_fact_errors_json", JsonSerializer.Serialize(audit.UnsupportedFactErrors, JsonOptions));
+        command.Parameters.AddWithValue("$pov_errors_json", JsonSerializer.Serialize(audit.PovErrors, JsonOptions));
+        command.Parameters.AddWithValue("$ai_prose_risks_json", JsonSerializer.Serialize(audit.AiProseRisks, JsonOptions));
+        command.Parameters.AddWithValue("$required_fixes_json", JsonSerializer.Serialize(audit.RequiredFixes, JsonOptions));
+        command.Parameters.AddWithValue("$readable_report_json", JsonSerializer.Serialize(
+            audit.ReadableReport ?? BuildFallbackReadableDraftAuditReport(audit),
+            JsonOptions));
+        command.Parameters.AddWithValue("$audited_at", FormatTimestamp(audit.AuditedAt));
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async ValueTask<IReadOnlyList<ReferenceDraftParagraphCandidatePayload>> ReadDraftCandidatesAsync(
@@ -3429,6 +3493,23 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
               FOREIGN KEY(blueprint_id) REFERENCES reference_chapter_blueprints(blueprint_id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS reference_draft_audits (
+              audit_id TEXT PRIMARY KEY,
+              blueprint_id INTEGER NOT NULL,
+              candidate_ids_json TEXT NOT NULL,
+              status TEXT NOT NULL,
+              rewrite_level TEXT NOT NULL,
+              provenance_errors_json TEXT NOT NULL,
+              blueprint_errors_json TEXT NOT NULL,
+              unsupported_fact_errors_json TEXT NOT NULL,
+              pov_errors_json TEXT NOT NULL,
+              ai_prose_risks_json TEXT NOT NULL,
+              required_fixes_json TEXT NOT NULL,
+              readable_report_json TEXT NOT NULL,
+              audited_at TEXT NOT NULL,
+              FOREIGN KEY(blueprint_id) REFERENCES reference_chapter_blueprints(blueprint_id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS reference_orchestration_runs (
               run_id TEXT PRIMARY KEY,
               novel_id INTEGER NOT NULL,
@@ -3484,6 +3565,9 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 
             CREATE INDEX IF NOT EXISTS idx_reference_draft_candidates_blueprint
               ON reference_draft_paragraph_candidates(blueprint_id, beat_id, created_at);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_draft_audits_blueprint
+              ON reference_draft_audits(blueprint_id, audited_at);
 
             CREATE INDEX IF NOT EXISTS idx_reference_orchestration_runs_novel_chapter
               ON reference_orchestration_runs(novel_id, chapter_number, updated_at);
@@ -5033,6 +5117,53 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             ReferenceRewriteLevels.L4 => 4,
             _ => 99
         };
+    }
+
+    private static ReferenceDraftAuditReadableReportPayload BuildFallbackReadableDraftAuditReport(
+        ReferenceAnchoredDraftAuditPayload audit)
+    {
+        var candidateIds = audit.CandidateIds ?? [];
+        var findings = new List<ReferenceDraftAuditReadableFindingPayload>();
+        AddFallbackDraftAuditFindings(findings, "provenance", "error", audit.ProvenanceErrors, candidateIds);
+        AddFallbackDraftAuditFindings(findings, "blueprint", "error", audit.BlueprintErrors, candidateIds);
+        AddFallbackDraftAuditFindings(findings, "unsupported_fact", "error", audit.UnsupportedFactErrors, candidateIds);
+        AddFallbackDraftAuditFindings(findings, "pov", "error", audit.PovErrors, candidateIds);
+        AddFallbackDraftAuditFindings(findings, "ai_prose", "warning", audit.AiProseRisks, candidateIds);
+        AddFallbackDraftAuditFindings(findings, "required_fix", "action", audit.RequiredFixes, candidateIds);
+        var summary = string.Equals(audit.Status, "passed", StringComparison.Ordinal)
+            ? $"Draft audit passed for {candidateIds.Count} candidate(s) at rewrite level {audit.RewriteLevel}."
+            : $"Draft audit failed for {candidateIds.Count} candidate(s) at rewrite level {audit.RewriteLevel} with {findings.Count} finding(s).";
+        return new ReferenceDraftAuditReadableReportPayload(summary, candidateIds, findings);
+    }
+
+    private static void AddFallbackDraftAuditFindings(
+        List<ReferenceDraftAuditReadableFindingPayload> findings,
+        string category,
+        string severity,
+        IReadOnlyList<string> messages,
+        IReadOnlyList<string> candidateIds)
+    {
+        foreach (var message in messages.Where(message => !string.IsNullOrWhiteSpace(message)))
+        {
+            var findingCandidateIds = candidateIds
+                .Where(candidateId => message.Contains(candidateId, StringComparison.Ordinal))
+                .ToArray();
+            findings.Add(new ReferenceDraftAuditReadableFindingPayload(
+                category,
+                severity,
+                findingCandidateIds,
+                message,
+                category switch
+                {
+                    "provenance" => "Resolve provenance or retrieval gaps before insertion.",
+                    "blueprint" => "Revise the candidate or blueprint so it satisfies the approved beat contract.",
+                    "unsupported_fact" => "Remove unsupported facts or approve them before regeneration.",
+                    "pov" => "Keep the candidate inside the approved POV boundary.",
+                    "ai_prose" => "Revise generic or screenplay-like prose before insertion.",
+                    "required_fix" => message,
+                    _ => "Inspect and resolve this audit finding before insertion."
+                }));
+        }
     }
 
     private static DateTimeOffset ParseTimestamp(string value)

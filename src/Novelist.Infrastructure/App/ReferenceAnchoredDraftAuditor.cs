@@ -11,7 +11,9 @@ internal static class ReferenceAnchoredDraftAuditor
         DateTimeOffset now,
         IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload>? selectedMaterialLinksByBeatId = null,
         IReadOnlyDictionary<string, string>? selectedMaterialTextByMaterialId = null,
-        IReadOnlyDictionary<long, ReferenceStyleFeatureVectorPayload>? styleFeaturesByProfileId = null)
+        IReadOnlyDictionary<long, ReferenceStyleFeatureVectorPayload>? styleFeaturesByProfileId = null,
+        IReadOnlyList<string>? requestedCandidateIds = null,
+        IReadOnlyList<string>? additionalProvenanceErrors = null)
     {
         ArgumentNullException.ThrowIfNull(blueprint);
         ArgumentNullException.ThrowIfNull(candidates);
@@ -190,6 +192,9 @@ internal static class ReferenceAnchoredDraftAuditor
             }
         }
 
+        provenanceErrors.AddRange((additionalProvenanceErrors ?? [])
+            .Where(error => !string.IsNullOrWhiteSpace(error)));
+
         var status = provenanceErrors.Count == 0 &&
             blueprintErrors.Count == 0 &&
             unsupportedFactErrors.Count == 0 &&
@@ -201,6 +206,23 @@ internal static class ReferenceAnchoredDraftAuditor
             .Select(candidate => candidate.RewriteLevel)
             .OrderByDescending(RewriteLevelRank)
             .FirstOrDefault() ?? ReferenceRewriteLevels.L0;
+        var candidateIds = candidates
+            .Select(candidate => candidate.CandidateId)
+            .Concat(requestedCandidateIds ?? [])
+            .Where(candidateId => !string.IsNullOrWhiteSpace(candidateId))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var readableReport = BuildReadableReport(
+            status,
+            rewriteLevel,
+            candidateIds,
+            provenanceErrors,
+            blueprintErrors,
+            unsupportedFactErrors,
+            povErrors,
+            aiRisks,
+            requiredFixes,
+            candidateIds);
         return new ReferenceAnchoredDraftAuditPayload(
             "draft-audit-" + Guid.NewGuid().ToString("N"),
             blueprint.BlueprintId,
@@ -212,7 +234,93 @@ internal static class ReferenceAnchoredDraftAuditor
             povErrors,
             aiRisks,
             requiredFixes,
-            now);
+            now,
+            candidateIds,
+            readableReport);
+    }
+
+    private static ReferenceDraftAuditReadableReportPayload BuildReadableReport(
+        string status,
+        string rewriteLevel,
+        IReadOnlyList<string> candidateIds,
+        IReadOnlyList<string> provenanceErrors,
+        IReadOnlyList<string> blueprintErrors,
+        IReadOnlyList<string> unsupportedFactErrors,
+        IReadOnlyList<string> povErrors,
+        IReadOnlyList<string> aiRisks,
+        IReadOnlyList<string> requiredFixes,
+        IReadOnlyList<string> knownCandidateIds)
+    {
+        var findings = new List<ReferenceDraftAuditReadableFindingPayload>();
+        AddFindings(findings, "provenance", "error", provenanceErrors, knownCandidateIds);
+        AddFindings(findings, "blueprint", "error", blueprintErrors, knownCandidateIds);
+        AddFindings(findings, "unsupported_fact", "error", unsupportedFactErrors, knownCandidateIds);
+        AddFindings(findings, "pov", "error", povErrors, knownCandidateIds);
+        AddFindings(findings, "ai_prose", "warning", aiRisks, knownCandidateIds);
+        AddFindings(findings, "required_fix", "action", requiredFixes, knownCandidateIds);
+        var summary = string.Equals(status, "passed", StringComparison.Ordinal)
+            ? $"Draft audit passed for {candidateIds.Count} candidate(s) at rewrite level {rewriteLevel}."
+            : $"Draft audit failed for {candidateIds.Count} candidate(s) at rewrite level {rewriteLevel} with {findings.Count} finding(s).";
+        return new ReferenceDraftAuditReadableReportPayload(
+            summary,
+            candidateIds,
+            findings);
+    }
+
+    private static void AddFindings(
+        List<ReferenceDraftAuditReadableFindingPayload> findings,
+        string category,
+        string severity,
+        IReadOnlyList<string> messages,
+        IReadOnlyList<string> knownCandidateIds)
+    {
+        foreach (var message in messages.Where(message => !string.IsNullOrWhiteSpace(message)))
+        {
+            findings.Add(new ReferenceDraftAuditReadableFindingPayload(
+                category,
+                severity,
+                ExtractCandidateIdsFromMessage(message, knownCandidateIds),
+                message,
+                RequiredActionFor(category, message)));
+        }
+    }
+
+    private static IReadOnlyList<string> ExtractCandidateIdsFromMessage(
+        string message,
+        IReadOnlyList<string> knownCandidateIds)
+    {
+        var knownMatches = knownCandidateIds
+            .Where(candidateId => !string.IsNullOrWhiteSpace(candidateId) &&
+                message.Contains(candidateId, StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (knownMatches.Length > 0)
+        {
+            return knownMatches;
+        }
+
+        return Regex.Matches(message, @"candidate-[A-Za-z0-9:_-]+|draft-[A-Za-z0-9:_-]+", RegexOptions.IgnoreCase)
+            .Select(match => match.Value.TrimEnd('.', ',', ';', ':'))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static string RequiredActionFor(string category, string message)
+    {
+        if (string.Equals(category, "required_fix", StringComparison.Ordinal))
+        {
+            return message;
+        }
+
+        return category switch
+        {
+            "provenance" => "Rebind stronger source material, revise the blueprint query, or resolve the retrieval gap before insertion.",
+            "blueprint" => "Revise the candidate or blueprint so the candidate satisfies the approved beat contract.",
+            "unsupported_fact" => "Remove unsupported facts from the candidate or add them to approved scene facts before regeneration.",
+            "pov" => "Keep the candidate inside the approved POV and narrative-distance boundary.",
+            "ai_prose" => "Add concrete novelistic prose evidence and remove generic or screenplay-like phrasing.",
+            _ => "Inspect and resolve this audit finding before insertion."
+        };
     }
 
     private static bool HasLowConfidenceWeakMatch(

@@ -104,6 +104,13 @@ Adjust narrative pacing according to the current chapter target.
 | Frontend build | Vite 8/Rolldown splits the app shell, workspace, Monaco, Markdown, Mermaid, and graph dependencies |
 | Retired implementations | Go/Wails and the old Python path are retired; new work should not go under `app/`, `internal/`, `python-master/`, or `frontend/src/lib/wailsjs/` |
 
+## Latest Updates
+
+### 2026-07-07
+
+- Reference-anchored draft audit now shows a readable report in the candidate area, including candidate IDs, finding category, severity, and required action.
+- Draft generation and manual audit both persist the audit report with candidate IDs; the report does not add candidate prose, source prose, or prompts.
+
 See [Release Notes](docs/releases/release-notes.md) for the full change history.
 
 ## Screenshots

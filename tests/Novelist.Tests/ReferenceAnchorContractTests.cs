@@ -1273,6 +1273,56 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void AnchoredDraftAuditPayloadSerializesReadableReportWithoutCandidateOrSourceText()
+    {
+        var payload = new ReferenceAnchoredDraftAuditPayload(
+            AuditId: "draft-audit-1",
+            BlueprintId: 10,
+            Status: "failed",
+            RewriteLevel: ReferenceRewriteLevels.L3,
+            ProvenanceErrors: ["Candidate candidate-1 uses low-confidence weak match material provenance."],
+            BlueprintErrors: [],
+            UnsupportedFactErrors: [],
+            PovErrors: [],
+            AiProseRisks: [],
+            RequiredFixes: ["Bind stronger reference material for candidate candidate-1."],
+            AuditedAt: DateTimeOffset.Parse("2026-07-05T00:00:00Z"),
+            CandidateIds: ["candidate-1"],
+            ReadableReport: new ReferenceDraftAuditReadableReportPayload(
+                Summary: "Draft audit failed for 1 candidate.",
+                CandidateIds: ["candidate-1"],
+                Findings:
+                [
+                    new ReferenceDraftAuditReadableFindingPayload(
+                        Category: "provenance",
+                        Severity: "error",
+                        CandidateIds: ["candidate-1"],
+                        Message: "Candidate candidate-1 uses low-confidence weak match material provenance.",
+                        RequiredAction: "Bind stronger reference material for candidate candidate-1.")
+                ]));
+
+        var serialized = JsonSerializer.Serialize(payload, BridgeJson.SerializerOptions);
+        using var json = JsonDocument.Parse(serialized);
+        var root = json.RootElement;
+
+        Assert.Equal("draft-audit-1", root.GetProperty("audit_id").GetString());
+        Assert.Equal("candidate-1", root.GetProperty("candidate_ids")[0].GetString());
+        var report = root.GetProperty("readable_report");
+        Assert.Equal("Draft audit failed for 1 candidate.", report.GetProperty("summary").GetString());
+        Assert.Equal("candidate-1", report.GetProperty("candidate_ids")[0].GetString());
+        var finding = Assert.Single(report.GetProperty("findings").EnumerateArray());
+        Assert.Equal("provenance", finding.GetProperty("category").GetString());
+        Assert.Equal("error", finding.GetProperty("severity").GetString());
+        Assert.Equal("candidate-1", finding.GetProperty("candidate_ids")[0].GetString());
+        Assert.Equal("Bind stronger reference material for candidate candidate-1.", finding.GetProperty("required_action").GetString());
+        Assert.False(finding.TryGetProperty("candidate_text", out _));
+        Assert.False(finding.TryGetProperty("source_text", out _));
+        Assert.False(finding.TryGetProperty("prompt", out _));
+        Assert.DoesNotContain("候选段落", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("source text", serialized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void CompatibilityRegistryIncludesReferenceAnchorMethods()
     {
         string[] expected =

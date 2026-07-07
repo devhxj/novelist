@@ -1097,6 +1097,22 @@ export namespace reference {
     ai_prose_risks: string[]
     required_fixes: string[]
     audited_at: Timestamp
+    candidate_ids?: string[] | null
+    readable_report?: DraftAuditReadableReport | null
+  }
+
+  export interface DraftAuditReadableReport {
+    summary: string
+    candidate_ids: string[]
+    findings: DraftAuditReadableFinding[]
+  }
+
+  export interface DraftAuditReadableFinding {
+    category: string
+    severity: string
+    candidate_ids: string[]
+    message: string
+    required_action: string
   }
 
   export interface CorpusSearchPolicy {
