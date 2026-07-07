@@ -19,8 +19,8 @@ models/
 /build/dist/
 /build/*.AppDir/
 /frontend/dist/
-novelist
-novelist.exe
+/novelist
+/novelist.exe
 
 # .NET
 /.dotnet/

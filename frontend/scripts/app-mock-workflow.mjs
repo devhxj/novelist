@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -1095,15 +1095,22 @@ async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors,
   const fixtureDir = path.join(outputDir, 'fixtures', 'import-export')
   await fs.mkdir(fixtureDir, { recursive: true })
   const pickedReferenceSourceFile = path.join(fixtureDir, 'reference-source.md')
+  const pickedNovelImportFile = path.join(fixtureDir, 'picker-import.txt')
+  const droppedNovelImportFile = path.join(fixtureDir, 'drop-import.md')
+  const droppedNovelImportUriFile = path.join(fixtureDir, 'drop-import-uri.markdown')
   await fs.writeFile(
     pickedReferenceSourceFile,
     '# Phase 13 import/export fixture\n\n雨夜参考源只用于文件选择 mock，不读取真实用户项目。\n',
     'utf8',
   )
+  await fs.writeFile(pickedNovelImportFile, '第一章\n通过文件选择导入。', 'utf8')
+  await fs.writeFile(droppedNovelImportFile, '# 第一章\n\n通过拖放导入。', 'utf8')
+  await fs.writeFile(droppedNovelImportUriFile, '# 第一章\n\n通过 file URI 拖放导入。', 'utf8')
 
   const page = await newAppPage(browser, consoleErrors, pageErrors, {
     initialized: true,
     pickedReferenceSourceFile,
+    pickedNovelImportFile,
   })
   await page.goto(url, { waitUntil: 'domcontentloaded' })
   await expectVisible(page.getByText('全局回归小说'), 'file-picker workflow workspace')
@@ -1130,6 +1137,87 @@ async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors,
     { novel_id: 42, format: 'markdown' },
     { novel_id: 42, format: 'txt' },
   ])
+
+  const pickImportBefore = await bridgeCallCount(page, 'PickNovelImportFile')
+  const startImportBefore = await bridgeCallCount(page, 'StartNovelImport')
+  const getContentBeforeImport = await bridgeCallCount(page, 'GetContent')
+  await page.getByRole('button', { name: '导入小说' }).click()
+  await waitForBridgeCallCountAfter(page, 'PickNovelImportFile', pickImportBefore)
+  await waitForBridgeCallCountAfter(page, 'StartNovelImport', startImportBefore)
+  await expectVisible(page.getByText('已导入：picker-import'), 'file-picker novel import success')
+  await expectVisible(novelCard(page, 'picker-import'), 'file-picker imported novel card')
+  await assertLastBridgeCallInput(page, 'StartNovelImport', {
+    source_path: pickedNovelImportFile,
+    source_display_name: 'picker-import.txt',
+    import_kind: 'txt',
+  })
+  assert.equal(
+    await bridgeCallCount(page, 'GetContent'),
+    getContentBeforeImport,
+    'Novel import picker must not route source paths through generic content reads.',
+  )
+
+  const importDropzone = page.getByTestId('novel-import-dropzone')
+  const dropImportBefore = await bridgeCallCount(page, 'StartNovelImport')
+  await dispatchNovelImportDrop(page, { kind: 'empty' })
+  await expectVisible(page.getByText('没有可导入的文件'), 'empty novel import drop rejection')
+  await dispatchNovelImportDrop(page, { kind: 'url', url: 'https://example.test/book.txt' })
+  await expectVisible(page.getByText('不能拖入 URL'), 'URL novel import drop rejection')
+  await dispatchNovelImportDrop(page, { kind: 'directory' })
+  await expectVisible(page.getByText('不能拖入文件夹'), 'folder novel import drop rejection')
+  await dispatchNovelImportDrop(page, {
+    kind: 'files',
+    files: [
+      { name: 'unsupported.pdf', path: path.join(fixtureDir, 'unsupported.pdf'), type: 'application/pdf' },
+      { name: 'unsupported.docx', path: path.join(fixtureDir, 'unsupported.docx'), type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+    ],
+  })
+  await expectVisible(page.getByText('仅支持 EPUB、TXT 或 Markdown 文件'), 'unsupported novel import drop rejection')
+  assert.equal(
+    await bridgeCallCount(page, 'StartNovelImport'),
+    dropImportBefore,
+    'Rejected novel import drops must not call StartNovelImport.',
+  )
+
+  const getContentBeforeUriDrop = await bridgeCallCount(page, 'GetContent')
+  await dispatchNovelImportDrop(page, {
+    kind: 'fileUriText',
+    uri: pathToFileURL(droppedNovelImportUriFile).href,
+  })
+  await waitForBridgeCallCountAfter(page, 'StartNovelImport', dropImportBefore)
+  await expectVisible(page.getByText('已导入：drop-import-uri'), 'file URI novel import drop success')
+  await expectVisible(novelCard(page, 'drop-import-uri'), 'file URI imported novel card')
+  await assertLastBridgeCallInput(page, 'StartNovelImport', {
+    source_path: droppedNovelImportUriFile,
+    source_display_name: 'drop-import-uri.markdown',
+    import_kind: 'markdown',
+  })
+  assert.equal(
+    await bridgeCallCount(page, 'GetContent'),
+    getContentBeforeUriDrop,
+    'Dropped file URI novel import paths must not route through generic content reads.',
+  )
+
+  const getContentBeforeDrop = await bridgeCallCount(page, 'GetContent')
+  const fileDropImportBefore = await bridgeCallCount(page, 'StartNovelImport')
+  await importDropzone.hover()
+  await dispatchNovelImportDrop(page, {
+    kind: 'files',
+    files: [{ name: 'drop-import.md', path: droppedNovelImportFile, type: 'text/markdown' }],
+  })
+  await waitForBridgeCallCountAfter(page, 'StartNovelImport', fileDropImportBefore)
+  await expectVisible(page.getByText('已导入：drop-import'), 'drag-drop novel import success')
+  await expectVisible(novelCard(page, 'drop-import'), 'drag-drop imported novel card')
+  await assertLastBridgeCallInput(page, 'StartNovelImport', {
+    source_path: droppedNovelImportFile,
+    source_display_name: 'drop-import.md',
+    import_kind: 'markdown',
+  })
+  assert.equal(
+    await bridgeCallCount(page, 'GetContent'),
+    getContentBeforeDrop,
+    'Dropped novel import paths must not route through generic content reads.',
+  )
 
   await page.getByRole('button', { name: '更换封面 全局回归小说' }).click({ force: true })
   const coverInput = page.locator('input[type="file"][accept="image/*"]').first()
@@ -1170,6 +1258,7 @@ async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors,
   })
 
   await assertBridgeCallCount(page, 'PickReferenceSourceFile', 1)
+  await assertBridgeCallCount(page, 'PickNovelImportFile', 1)
   await assertBridgeCallCount(page, 'SaveContent', 0)
   await assertBridgeCallCount(page, 'runtime.shell.openExternal', 0)
   await assertOnlyTemporaryFixturePaths(page, fixtureDir)
@@ -2618,6 +2707,85 @@ async function assertOnlyTemporaryFixturePaths(page, allowedFixtureRoot) {
   )
 }
 
+async function dispatchNovelImportDrop(page, payload) {
+  await page.evaluate((payload) => {
+    const target = document.querySelector('[data-testid="novel-import-dropzone"]')
+    if (!target) throw new Error('Novel import dropzone was not found.')
+
+    const event = new Event('drop', { bubbles: true, cancelable: true })
+    if (payload.kind === 'files') {
+      const dataTransfer = new DataTransfer()
+      for (const dropped of payload.files ?? []) {
+        const file = new File(['mock import fixture'], dropped.name, { type: dropped.type ?? '' })
+        Object.defineProperty(file, 'path', {
+          configurable: true,
+          enumerable: false,
+          value: dropped.path,
+        })
+        dataTransfer.items.add(file)
+      }
+      Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
+    } else if (payload.kind === 'url') {
+      const data = {
+        'text/plain': payload.url,
+        'text/uri-list': payload.url,
+      }
+      Object.defineProperty(event, 'dataTransfer', {
+        value: {
+          files: [],
+          items: [],
+          getData(type) {
+            return data[type] ?? ''
+          },
+        },
+      })
+    } else if (payload.kind === 'fileUriText') {
+      const data = {
+        'text/plain': payload.uri,
+        'text/uri-list': '',
+      }
+      Object.defineProperty(event, 'dataTransfer', {
+        value: {
+          files: [],
+          items: [],
+          getData(type) {
+            return data[type] ?? ''
+          },
+        },
+      })
+    } else if (payload.kind === 'directory') {
+      Object.defineProperty(event, 'dataTransfer', {
+        value: {
+          files: [],
+          items: [
+            {
+              kind: 'file',
+              webkitGetAsEntry() {
+                return { isDirectory: true }
+              },
+            },
+          ],
+          getData() {
+            return ''
+          },
+        },
+      })
+    } else {
+      Object.defineProperty(event, 'dataTransfer', {
+        value: {
+          files: [],
+          items: [],
+          getData() {
+            return ''
+          },
+        },
+      })
+    }
+
+    target.dispatchEvent(event)
+  }, payload)
+}
+
 function startServer(port, target) {
   if (target === 'dist') return startVitePreview(port)
   return startVite(port)
@@ -3108,6 +3276,7 @@ function installConfigurableAppMockBridge(options = {}) {
     exportedNovels: [],
     savedCovers: [],
     savedAvatars: [],
+    novelImportRuns: [],
     createdReferenceAnchors: [],
     referenceAnchors: options.referenceAnchors ?? defaultReferenceAnchors,
     referenceBuildStatuses: options.referenceBuildStatuses ?? {},
@@ -3438,6 +3607,14 @@ function installConfigurableAppMockBridge(options = {}) {
       case 'ExportNovel':
         state.exportedNovels.push({ novel_id: args[0], format: args[1] })
         return null
+      case 'PickNovelImportFile': return options.pickedNovelImportFile ?? null
+      case 'StartNovelImport': return startNovelImport(args[0])
+      case 'GetNovelImportRun': return state.novelImportRuns.find((run) => run.task_id === args[0]?.task_id) ?? null
+      case 'GetNovelImportRecoveryStatus': return {
+        pending_runs: state.novelImportRuns.filter((run) => !['completed', 'completed_with_warning', 'failed', 'cancelled'].includes(run.state)),
+        blocked_runs: state.novelImportRuns.filter((run) => run.state === 'cleanup_blocked'),
+        checked_at: now,
+      }
       case 'GetChapters': return chapters(args[0])
       case 'CreateChapter': return createChapter(args[0])
       case 'UpdateChapterTitle':
@@ -3581,6 +3758,60 @@ function installConfigurableAppMockBridge(options = {}) {
       state.activeNovelId = state.novels[0]?.id ?? 0
       state.settings.last_novel_id = state.activeNovelId
     }
+  }
+
+  function startNovelImport(input) {
+    const sourcePath = String(input?.source_path ?? '')
+    const sourceDisplayName = String(input?.source_display_name ?? fileNameFromPath(sourcePath) ?? '导入小说.txt')
+    const importKind = String(input?.import_kind ?? importKindFromFileName(sourceDisplayName) ?? 'txt')
+    const title = sourceDisplayName
+      .replace(/\.(epub|txt|md|markdown)$/i, '')
+      .trim() || '导入小说'
+    const novel = {
+      id: state.nextNovelId++,
+      title,
+      genre: importKind === 'epub' ? 'EPUB 导入' : '文本导入',
+      description: '由小说导入流程创建',
+      created_at: now,
+      updated_at: now,
+    }
+    state.novels = [...state.novels, novel]
+    state.chaptersByNovelId[novel.id] = []
+
+    const run = {
+      task_id: String(input?.task_id ?? `import-${state.novelImportRuns.length + 1}`),
+      state: 'completed',
+      stage: 'completed',
+      source_display_name: sourceDisplayName,
+      source_path_hash: `sha256:mock-import-${state.novelImportRuns.length + 1}`,
+      parser_type: importKind,
+      created_novel_id: novel.id,
+      created_file_roots: [`novels/${novel.id}`],
+      skipped_chapters: [],
+      diagnostics: [],
+      warnings: [],
+      error: null,
+      started_at: now,
+      updated_at: now,
+      completed_at: now,
+    }
+    state.novelImportRuns = [...state.novelImportRuns, run]
+    return run
+  }
+
+  function fileNameFromPath(value) {
+    return String(value)
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .at(-1)
+  }
+
+  function importKindFromFileName(value) {
+    const lower = String(value).toLowerCase()
+    if (lower.endsWith('.epub')) return 'epub'
+    if (lower.endsWith('.txt')) return 'txt'
+    if (lower.endsWith('.md') || lower.endsWith('.markdown')) return 'markdown'
+    return ''
   }
 
   function chapters(novelId = state.activeNovelId) {

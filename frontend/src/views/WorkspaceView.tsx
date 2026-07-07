@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { flushSync } from 'react-dom'
 import { useApp } from '@/hooks/useApp'
 import type { novel, chapter, search } from '@/hooks/useApp'
+import type { novelImport } from '@/lib/novelist/types'
+import { buildStartNovelImportInput } from '@/lib/novelist/importBoundary'
 import ActivityBar from '@/components/shell/ActivityBar'
 import StatusBar from '@/components/shell/StatusBar'
 import SidePanel from '@/components/sidebar/SidePanel'
@@ -253,6 +255,20 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
     await app.SaveCover(novelID, Array.from(new Uint8Array(buf)))
   }
 
+  async function handlePickNovelImportFile() {
+    return await app.PickNovelImportFile()
+  }
+
+  async function handleStartNovelImport(sourcePath: string): Promise<novelImport.ImportRun> {
+    const run = await app.StartNovelImport(buildStartNovelImportInput(sourcePath))
+    await loadNovels()
+    if (run.created_novel_id) {
+      setActiveNovelId(run.created_novel_id)
+      await app.SetActiveNovel({ novel_id: run.created_novel_id })
+    }
+    return run
+  }
+
   const activeNovel = novels.find(n => n.id === activeNovelId)
 
   // ── 窗口按钮样式 ────────────────────────────────────────
@@ -376,6 +392,8 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
             onCreateNovel={() => setShowCreateDialog(true)}
             onSaveCover={handleSaveCover}
             onExportNovel={(n) => setExportNovelId(n.id)}
+            onPickNovelImportFile={handlePickNovelImportFile}
+            onStartNovelImport={handleStartNovelImport}
           />
         ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && activePanel !== 'reference' && activePanel !== 'profile' && (
           <ContentPanel
