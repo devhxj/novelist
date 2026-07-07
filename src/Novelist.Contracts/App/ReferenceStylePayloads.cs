@@ -26,6 +26,21 @@ public static class ReferenceStyleFeatureSchemaVersions
 public static class ReferenceStyleAnalyzerVersions
 {
     public const string DeterministicV1 = "reference-style-deterministic-v1";
+    public const string LlmAssistedV1 = "reference-style-llm-assisted-v1";
+}
+
+public static class ReferenceStyleLlmAnalysisSchemaVersions
+{
+    public const string V1 = "reference-style-llm-analysis-v1";
+}
+
+public static class ReferenceStyleLlmAnalysisValidationStatuses
+{
+    public const string Passed = "passed";
+    public const string Partial = "partial";
+    public const string Rejected = "rejected";
+    public const string InvalidJson = "invalid_json";
+    public const string InvalidSchema = "invalid_schema";
 }
 
 public static class ReferenceStyleImitationIntensities
@@ -137,3 +152,32 @@ public sealed record ReferenceStyleEvidenceSpanPayload(
     [property: JsonPropertyName("text_hash")] string TextHash,
     [property: JsonPropertyName("confidence")] double Confidence,
     [property: JsonPropertyName("analyzer_source")] string AnalyzerSource);
+
+public sealed record ReferenceStyleLlmAnalysisRequestPayload(
+    [property: JsonPropertyName("profile_id")] long ProfileId,
+    [property: JsonPropertyName("schema_version")] string SchemaVersion,
+    [property: JsonPropertyName("requested_feature_keys")] IReadOnlyList<string> RequestedFeatureKeys,
+    [property: JsonPropertyName("windows")] IReadOnlyList<ReferenceStyleAnalysisWindowPayload> Windows);
+
+public sealed record ReferenceStyleAnalysisWindowPayload(
+    [property: JsonPropertyName("window_id")] string WindowId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("source_segment_id")] string SourceSegmentId,
+    [property: JsonPropertyName("material_id")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? MaterialId,
+    [property: JsonPropertyName("start_offset")] int StartOffset,
+    [property: JsonPropertyName("end_offset")] int EndOffset,
+    [property: JsonPropertyName("text_hash")] string TextHash,
+    [property: JsonPropertyName("text")] string Text);
+
+public sealed record ReferenceStyleLlmAnalysisRejectedLabelPayload(
+    [property: JsonPropertyName("feature_key")] string FeatureKey,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("reason")] string Reason);
+
+public sealed record ReferenceStyleLlmAnalysisValidationResultPayload(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("evidence_spans")] IReadOnlyList<ReferenceStyleEvidenceSpanPayload> EvidenceSpans,
+    [property: JsonPropertyName("rejected_labels")] IReadOnlyList<ReferenceStyleLlmAnalysisRejectedLabelPayload> RejectedLabels,
+    [property: JsonPropertyName("diagnostics")] IReadOnlyList<string> Diagnostics);

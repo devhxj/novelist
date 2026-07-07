@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
+using Novelist.Core.App;
 using Novelist.Infrastructure.App;
 
 namespace Novelist.IntegrationTests;
@@ -327,6 +328,151 @@ public sealed class ReferenceStyleProfileServiceTests : IDisposable
             CancellationToken.None));
     }
 
+    [Fact]
+    public async Task BuildStyleProfileUsesInjectedLlmAnalyzerForGroundedAdvancedLabels()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("LLM 画像测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "style-llm-source.md",
+            """
+            # 第一章
+
+            她说：“门口别停。”雨声压住门口。
+            """);
+        var anchorService = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await anchorService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "LLM 风格参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var analyzer = new RecordingReferenceStyleLlmAnalyzer(request =>
+        {
+            var window = request.Windows.First(window => window.MaterialId is not null);
+            return $$"""
+            {
+              "schema_version": "{{ReferenceStyleLlmAnalysisSchemaVersions.V1}}",
+              "labels": [
+                {
+                  "feature_key": "hook_pattern",
+                  "label": "question_tail",
+                  "confidence": 0.99,
+                  "evidence": [
+                    {
+                      "source_segment_id": "{{window.SourceSegmentId}}",
+                      "material_id": "{{window.MaterialId}}",
+                      "start_offset": {{window.StartOffset}},
+                      "end_offset": {{Math.Min(window.EndOffset, window.StartOffset + 8)}}
+                    }
+                  ]
+                }
+              ]
+            }
+            """;
+        });
+        var styleService = new SqliteReferenceStyleProfileService(options, novels, analyzer);
+
+        var profile = await styleService.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                novel.Id,
+                "LLM 增强画像",
+                "",
+                [anchor.AnchorId],
+                ["user_provided"],
+                [ReferenceSourceTrustLevels.UserVerified]),
+            CancellationToken.None);
+
+        Assert.NotNull(analyzer.LastRequest);
+        Assert.Equal(profile.ProfileId, analyzer.LastRequest.ProfileId);
+        Assert.Equal(ReferenceStyleLlmAnalysisSchemaVersions.V1, analyzer.LastRequest.SchemaVersion);
+        Assert.NotEmpty(analyzer.LastRequest.Windows);
+        Assert.All(analyzer.LastRequest.Windows, window =>
+        {
+            Assert.True(window.AnchorId > 0);
+            Assert.False(string.IsNullOrWhiteSpace(window.SourceSegmentId));
+            Assert.True(window.EndOffset > window.StartOffset);
+            Assert.False(string.IsNullOrWhiteSpace(window.TextHash));
+            Assert.False(string.IsNullOrWhiteSpace(window.Text));
+        });
+        Assert.Equal(ReferenceStyleAnalyzerSources.LlmAssisted, profile.AnalyzerSource);
+        Assert.Equal(ReferenceStyleAnalyzerVersions.LlmAssistedV1, profile.AnalyzerVersion);
+        var llmEvidence = Assert.Single(profile.EvidenceSpans, evidence => evidence.FeatureKey == "hook_pattern");
+        Assert.Equal(ReferenceStyleAnalyzerSources.LlmAssisted, llmEvidence.AnalyzerSource);
+        Assert.Equal(0.95, llmEvidence.Confidence);
+        Assert.Contains(profile.Features.CategoricalFeatures, feature =>
+            feature.FeatureKey == "hook_pattern" &&
+            feature.Label == "question_tail" &&
+            feature.EvidenceIds.Contains(llmEvidence.EvidenceId, StringComparer.Ordinal));
+
+        var styled = await anchorService.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "门口",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                Page: 1,
+                Size: 10,
+                StyleProfileIds: [profile.ProfileId],
+                StyleDimensions: ["hook_pattern"],
+                ImitationIntensity: ReferenceStyleImitationIntensities.Moderate),
+            CancellationToken.None);
+        Assert.Contains(styled.Items, item =>
+            item.ScoreComponents?.TryGetValue("style_fit", out var styleFit) == true &&
+            styleFit > 0);
+
+        var runs = await ReadAnalysisRunsAsync(options, profile.ProfileId);
+        Assert.Contains(runs, run => run.AnalyzerSource == ReferenceStyleAnalyzerSources.DeterministicBaseline && run.Status == "completed");
+        Assert.Contains(runs, run => run.AnalyzerSource == ReferenceStyleAnalyzerSources.LlmAssisted && run.Status == ReferenceStyleLlmAnalysisValidationStatuses.Passed);
+    }
+
+    [Fact]
+    public async Task BuildStyleProfileFallsBackWhenInjectedLlmAnalyzerReturnsInvalidJson()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("LLM fallback 测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "style-llm-invalid-source.md",
+            """
+            # 第一章
+
+            她说：“先别开门。”雨声已经压住了脚步。
+            """);
+        var anchorService = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await anchorService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "LLM fallback 参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var analyzer = new RecordingReferenceStyleLlmAnalyzer(_ => "{not json");
+        var styleService = new SqliteReferenceStyleProfileService(options, novels, analyzer);
+
+        var profile = await styleService.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                novel.Id,
+                "LLM fallback 画像",
+                "",
+                [anchor.AnchorId],
+                ["user_provided"],
+                [ReferenceSourceTrustLevels.UserVerified]),
+            CancellationToken.None);
+
+        Assert.NotNull(analyzer.LastRequest);
+        Assert.Equal(ReferenceStyleAnalyzerSources.DeterministicBaseline, profile.AnalyzerSource);
+        Assert.Equal(ReferenceStyleAnalyzerVersions.DeterministicV1, profile.AnalyzerVersion);
+        Assert.DoesNotContain(profile.EvidenceSpans, evidence => evidence.AnalyzerSource == ReferenceStyleAnalyzerSources.LlmAssisted);
+        Assert.DoesNotContain(profile.Features.CategoricalFeatures, feature => feature.FeatureKey == "hook_pattern");
+
+        var runs = await ReadAnalysisRunsAsync(options, profile.ProfileId);
+        Assert.Contains(runs, run => run.AnalyzerSource == ReferenceStyleAnalyzerSources.DeterministicBaseline && run.Status == "completed");
+        var llmRun = Assert.Single(runs, run => run.AnalyzerSource == ReferenceStyleAnalyzerSources.LlmAssisted);
+        Assert.Equal(ReferenceStyleLlmAnalysisValidationStatuses.InvalidJson, llmRun.Status);
+        Assert.Contains("valid JSON", llmRun.DiagnosticsJson, StringComparison.OrdinalIgnoreCase);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -486,6 +632,32 @@ public sealed class ReferenceStyleProfileServiceTests : IDisposable
         await command.ExecuteNonQueryAsync();
     }
 
+    private static async ValueTask<IReadOnlyList<PersistedAnalysisRun>> ReadAnalysisRunsAsync(
+        AppInitializationOptions options,
+        long profileId)
+    {
+        await using var connection = await OpenReferenceConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT analyzer_source, status, diagnostics_json
+            FROM reference_style_analysis_runs
+            WHERE profile_id = $profile_id
+            ORDER BY created_at ASC, run_id ASC;
+            """;
+        command.Parameters.AddWithValue("$profile_id", profileId);
+        var rows = new List<PersistedAnalysisRun>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            rows.Add(new PersistedAnalysisRun(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2)));
+        }
+
+        return rows;
+    }
+
     private static async ValueTask<SqliteConnection> OpenReferenceConnectionAsync(AppInitializationOptions options)
     {
         var databasePath = Path.Combine(options.DefaultDataDirectory, "reference-anchor", "index.sqlite");
@@ -500,4 +672,29 @@ public sealed class ReferenceStyleProfileServiceTests : IDisposable
     private sealed record PersistedStyleProfile(
         string FeatureVectorJson,
         IReadOnlyList<string> EvidenceColumns);
+
+    private sealed record PersistedAnalysisRun(
+        string AnalyzerSource,
+        string Status,
+        string DiagnosticsJson);
+
+    private sealed class RecordingReferenceStyleLlmAnalyzer : IReferenceStyleLlmAnalyzer
+    {
+        private readonly Func<ReferenceStyleLlmAnalysisRequestPayload, string?> _handler;
+
+        public RecordingReferenceStyleLlmAnalyzer(Func<ReferenceStyleLlmAnalysisRequestPayload, string?> handler)
+        {
+            _handler = handler;
+        }
+
+        public ReferenceStyleLlmAnalysisRequestPayload? LastRequest { get; private set; }
+
+        public ValueTask<string?> AnalyzeAsync(
+            ReferenceStyleLlmAnalysisRequestPayload request,
+            CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+            return ValueTask.FromResult(_handler(request));
+        }
+    }
 }

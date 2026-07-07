@@ -11,6 +11,8 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
 {
     private const long WorkspaceCorpusNovelId = 0;
     private const int MaxAnchorCount = 50;
+    private const int MaxLlmAnalysisWindows = 64;
+    private const int MaxLlmAnalysisWindowTextChars = 1200;
     private static readonly JsonSerializerOptions JsonOptions = BridgeJson.SerializerOptions;
     private static readonly string[] DefaultAllowedLicenseStatuses = ["user_provided", "licensed", "public_domain"];
     private static readonly string[] DefaultAllowedSourceTrustLevels =
@@ -27,14 +29,17 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
 
     private readonly AppInitializationOptions _options;
     private readonly INovelService _novels;
+    private readonly IReferenceStyleLlmAnalyzer? _llmAnalyzer;
     private readonly SemaphoreSlim _mutex = new(1, 1);
 
     public SqliteReferenceStyleProfileService(
         AppInitializationOptions? options = null,
-        INovelService? novels = null)
+        INovelService? novels = null,
+        IReferenceStyleLlmAnalyzer? llmAnalyzer = null)
     {
         _options = options ?? new AppInitializationOptions();
         _novels = novels ?? new FileSystemNovelService(_options);
+        _llmAnalyzer = llmAnalyzer;
     }
 
     public async ValueTask<ReferenceStyleProfilePayload> BuildStyleProfileAsync(
@@ -79,6 +84,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                 throw new ArgumentException("Style profile requires at least one active reference material.", nameof(input.AnchorIds));
             }
 
+            var sourceHashes = sources.Select(source => source.SourceFileHash).ToArray();
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             try
             {
@@ -89,7 +95,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                     title,
                     description,
                     anchorIds,
-                    sources.Select(source => source.SourceFileHash).ToArray(),
+                    sourceHashes,
                     allowedLicenseStatuses,
                     allowedSourceTrustLevels,
                     now,
@@ -114,23 +120,73 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                     connection,
                     transaction,
                     baseline.EvidenceSpans,
-                    now,
-                    cancellationToken);
-                await UpdateProfileFeaturesAsync(
-                    connection,
-                    transaction,
-                    profileId,
-                    baseline.Features,
-                    baseline.AggregateConfidence,
+                    ReferenceStyleAnalyzerVersions.DeterministicV1,
                     now,
                     cancellationToken);
                 await InsertAnalysisRunAsync(
                     connection,
                     transaction,
                     profileId,
+                    ReferenceStyleAnalyzerVersions.DeterministicV1,
+                    ReferenceStyleAnalyzerSources.DeterministicBaseline,
                     anchorIds,
-                    sources.Select(source => source.SourceFileHash).ToArray(),
+                    sourceHashes,
+                    "completed",
                     baseline.Diagnostics,
+                    now,
+                    cancellationToken);
+
+                var analyzerVersion = ReferenceStyleAnalyzerVersions.DeterministicV1;
+                var analyzerSource = ReferenceStyleAnalyzerSources.DeterministicBaseline;
+                var features = baseline.Features;
+                var evidenceSpans = baseline.EvidenceSpans;
+                if (_llmAnalyzer is not null)
+                {
+                    var windows = BuildLlmAnalysisWindows(materials);
+                    var validation = await RunLlmAnalysisAsync(profileId, windows, cancellationToken);
+                    await InsertAnalysisRunAsync(
+                        connection,
+                        transaction,
+                        profileId,
+                        ReferenceStyleAnalyzerVersions.LlmAssistedV1,
+                        ReferenceStyleAnalyzerSources.LlmAssisted,
+                        anchorIds,
+                        sourceHashes,
+                        validation.Status,
+                        BuildLlmDiagnostics(validation),
+                        now,
+                        cancellationToken);
+
+                    if (validation.EvidenceSpans.Count > 0)
+                    {
+                        await InsertEvidenceAsync(
+                            connection,
+                            transaction,
+                            validation.EvidenceSpans,
+                            now,
+                            cancellationToken);
+                        await InsertMaterialStyleTagsAsync(
+                            connection,
+                            transaction,
+                            validation.EvidenceSpans,
+                            ReferenceStyleAnalyzerVersions.LlmAssistedV1,
+                            now,
+                            cancellationToken);
+                        analyzerVersion = ReferenceStyleAnalyzerVersions.LlmAssistedV1;
+                        analyzerSource = ReferenceStyleAnalyzerSources.LlmAssisted;
+                        features = MergeLlmCategoricalFeatures(baseline.Features, validation.EvidenceSpans);
+                        evidenceSpans = baseline.EvidenceSpans.Concat(validation.EvidenceSpans).ToArray();
+                    }
+                }
+
+                await UpdateProfileFeaturesAsync(
+                    connection,
+                    transaction,
+                    profileId,
+                    features,
+                    baseline.AggregateConfidence,
+                    analyzerVersion,
+                    analyzerSource,
                     now,
                     cancellationToken);
 
@@ -142,16 +198,16 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                     title,
                     description,
                     ReferenceStyleProfileStatuses.Active,
-                    ReferenceStyleAnalyzerVersions.DeterministicV1,
+                    analyzerVersion,
                     ReferenceStyleFeatureSchemaVersions.V1,
-                    ReferenceStyleAnalyzerSources.DeterministicBaseline,
+                    analyzerSource,
                     anchorIds,
-                    sources.Select(source => source.SourceFileHash).ToArray(),
+                    sourceHashes,
                     allowedLicenseStatuses,
                     allowedSourceTrustLevels,
                     baseline.AggregateConfidence,
-                    baseline.Features,
-                    baseline.EvidenceSpans,
+                    features,
+                    evidenceSpans,
                     now,
                     now,
                     ArchivedAt: null);
@@ -569,6 +625,148 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         return rows;
     }
 
+    private async ValueTask<ReferenceStyleLlmAnalysisValidationResultPayload> RunLlmAnalysisAsync(
+        long profileId,
+        IReadOnlyList<ReferenceStyleAnalysisWindowPayload> windows,
+        CancellationToken cancellationToken)
+    {
+        if (_llmAnalyzer is null)
+        {
+            throw new InvalidOperationException("Reference style LLM analyzer is not configured.");
+        }
+
+        try
+        {
+            var request = new ReferenceStyleLlmAnalysisRequestPayload(
+                profileId,
+                ReferenceStyleLlmAnalysisSchemaVersions.V1,
+                ReferenceStyleLlmAnalysisValidator.SupportedFeatureKeys,
+                windows);
+            var outputJson = await _llmAnalyzer.AnalyzeAsync(request, cancellationToken);
+            return ReferenceStyleLlmAnalysisValidator.Validate(profileId, outputJson ?? string.Empty, windows);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            return new ReferenceStyleLlmAnalysisValidationResultPayload(
+                ReferenceStyleLlmAnalysisValidationStatuses.Rejected,
+                [],
+                [],
+                [$"LLM style analyzer failed before validation ({exception.GetType().Name})."]);
+        }
+    }
+
+    private static IReadOnlyList<ReferenceStyleAnalysisWindowPayload> BuildLlmAnalysisWindows(
+        IReadOnlyList<ReferenceStyleMaterialSample> materials)
+    {
+        return materials
+            .Where(material => !string.IsNullOrWhiteSpace(material.MaterialId) &&
+                !string.IsNullOrWhiteSpace(material.SourceSegmentId) &&
+                !string.IsNullOrWhiteSpace(material.TextHash) &&
+                !string.IsNullOrWhiteSpace(material.Text) &&
+                material.AnchorId > 0 &&
+                material.EndOffset > material.StartOffset)
+            .GroupBy(material => material.MaterialId, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .OrderBy(material => LlmMaterialTypePriority(material.MaterialType))
+            .ThenBy(material => material.AnchorId)
+            .ThenBy(material => material.StartOffset)
+            .ThenBy(material => material.MaterialId, StringComparer.Ordinal)
+            .Take(MaxLlmAnalysisWindows)
+            .Select(BuildLlmAnalysisWindow)
+            .Where(window => window.EndOffset > window.StartOffset)
+            .ToArray();
+    }
+
+    private static ReferenceStyleAnalysisWindowPayload BuildLlmAnalysisWindow(
+        ReferenceStyleMaterialSample material,
+        int index)
+    {
+        var text = TruncateLlmWindowText(material.Text);
+        var endOffset = Math.Min(material.EndOffset, material.StartOffset + text.Length);
+        return new ReferenceStyleAnalysisWindowPayload(
+            "style-window-" + (index + 1).ToString(CultureInfo.InvariantCulture),
+            material.AnchorId,
+            material.SourceSegmentId,
+            material.MaterialId,
+            material.StartOffset,
+            endOffset,
+            material.TextHash,
+            text);
+    }
+
+    private static int LlmMaterialTypePriority(string materialType)
+    {
+        return materialType switch
+        {
+            ReferenceMaterialTypes.Sentence => 0,
+            ReferenceMaterialTypes.Passage => 1,
+            ReferenceMaterialTypes.DialogueExchange => 2,
+            ReferenceMaterialTypes.Hook => 3,
+            ReferenceMaterialTypes.ActionAfterbeat => 4,
+            ReferenceMaterialTypes.ImageMotif => 5,
+            ReferenceMaterialTypes.Transition => 6,
+            ReferenceMaterialTypes.Payoff => 7,
+            ReferenceMaterialTypes.Beat => 8,
+            ReferenceMaterialTypes.Scene => 9,
+            _ => 10
+        };
+    }
+
+    private static string TruncateLlmWindowText(string text)
+    {
+        var normalized = text.Trim();
+        return normalized.Length <= MaxLlmAnalysisWindowTextChars
+            ? normalized
+            : normalized[..MaxLlmAnalysisWindowTextChars];
+    }
+
+    private static ReferenceStyleFeatureVectorPayload MergeLlmCategoricalFeatures(
+        ReferenceStyleFeatureVectorPayload baseline,
+        IReadOnlyList<ReferenceStyleEvidenceSpanPayload> evidenceSpans)
+    {
+        var categories = new List<ReferenceStyleCategoricalFeaturePayload>(baseline.CategoricalFeatures);
+        foreach (var featureGroup in evidenceSpans
+            .GroupBy(evidence => evidence.FeatureKey, StringComparer.Ordinal)
+            .OrderBy(group => group.Key, StringComparer.Ordinal))
+        {
+            var featureEvidenceCount = Math.Max(1, featureGroup.Count());
+            foreach (var labelGroup in featureGroup
+                .GroupBy(evidence => evidence.Label, StringComparer.Ordinal)
+                .OrderBy(group => group.Key, StringComparer.Ordinal))
+            {
+                var evidenceIds = labelGroup
+                    .Select(evidence => evidence.EvidenceId)
+                    .Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal)
+                    .ToArray();
+                categories.Add(new ReferenceStyleCategoricalFeaturePayload(
+                    featureGroup.Key,
+                    labelGroup.Key,
+                    Math.Round(labelGroup.Count() / (double)featureEvidenceCount, 4),
+                    Math.Round(labelGroup.Average(evidence => Math.Clamp(evidence.Confidence, 0, 1)), 4),
+                    evidenceIds));
+            }
+        }
+
+        return baseline with { CategoricalFeatures = categories };
+    }
+
+    private static IReadOnlyDictionary<string, object> BuildLlmDiagnostics(
+        ReferenceStyleLlmAnalysisValidationResultPayload validation)
+    {
+        return new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["status"] = validation.Status,
+            ["diagnostics"] = validation.Diagnostics,
+            ["rejected_labels"] = validation.RejectedLabels,
+            ["accepted_evidence_count"] = validation.EvidenceSpans.Count
+        };
+    }
+
     private static async ValueTask<long> InsertProfileShellAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -692,6 +890,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         SqliteConnection connection,
         SqliteTransaction transaction,
         IReadOnlyList<ReferenceStyleEvidenceSpanPayload> evidenceSpans,
+        string analyzerVersion,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
@@ -714,7 +913,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             command.Parameters.AddWithValue("$confidence", evidence.Confidence);
             command.Parameters.AddWithValue("$evidence_id", evidence.EvidenceId);
             command.Parameters.AddWithValue("$analyzer_source", evidence.AnalyzerSource);
-            command.Parameters.AddWithValue("$analyzer_version", ReferenceStyleAnalyzerVersions.DeterministicV1);
+            command.Parameters.AddWithValue("$analyzer_version", analyzerVersion);
             command.Parameters.AddWithValue("$created_at", FormatTimestamp(now));
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -726,6 +925,8 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         long profileId,
         ReferenceStyleFeatureVectorPayload features,
         double aggregateConfidence,
+        string analyzerVersion,
+        string analyzerSource,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
@@ -735,11 +936,15 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             UPDATE reference_style_profiles
             SET feature_vector_json = $feature_vector_json,
                 aggregate_confidence = $aggregate_confidence,
+                analyzer_version = $analyzer_version,
+                analyzer_source = $analyzer_source,
                 updated_at = $updated_at
             WHERE profile_id = $profile_id;
             """;
         command.Parameters.AddWithValue("$feature_vector_json", JsonSerializer.Serialize(features, JsonOptions));
         command.Parameters.AddWithValue("$aggregate_confidence", aggregateConfidence);
+        command.Parameters.AddWithValue("$analyzer_version", analyzerVersion);
+        command.Parameters.AddWithValue("$analyzer_source", analyzerSource);
         command.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
         command.Parameters.AddWithValue("$profile_id", profileId);
         var updated = await command.ExecuteNonQueryAsync(cancellationToken);
@@ -753,9 +958,12 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         SqliteConnection connection,
         SqliteTransaction transaction,
         long profileId,
+        string analyzerVersion,
+        string analyzerSource,
         IReadOnlyList<long> anchorIds,
         IReadOnlyList<string> sourceHashes,
-        IReadOnlyDictionary<string, string> diagnostics,
+        string status,
+        object diagnostics,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
@@ -771,12 +979,12 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             """;
         command.Parameters.AddWithValue("$run_id", "style-run-" + Guid.NewGuid().ToString("N"));
         command.Parameters.AddWithValue("$profile_id", profileId);
-        command.Parameters.AddWithValue("$analyzer_version", ReferenceStyleAnalyzerVersions.DeterministicV1);
+        command.Parameters.AddWithValue("$analyzer_version", analyzerVersion);
         command.Parameters.AddWithValue("$feature_schema_version", ReferenceStyleFeatureSchemaVersions.V1);
-        command.Parameters.AddWithValue("$analyzer_source", ReferenceStyleAnalyzerSources.DeterministicBaseline);
+        command.Parameters.AddWithValue("$analyzer_source", analyzerSource);
         command.Parameters.AddWithValue("$input_anchor_ids_json", JsonSerializer.Serialize(anchorIds, JsonOptions));
         command.Parameters.AddWithValue("$input_source_hashes_json", JsonSerializer.Serialize(sourceHashes, JsonOptions));
-        command.Parameters.AddWithValue("$status", "completed");
+        command.Parameters.AddWithValue("$status", status);
         command.Parameters.AddWithValue("$diagnostics_json", JsonSerializer.Serialize(diagnostics, JsonOptions));
         command.Parameters.AddWithValue("$created_at", FormatTimestamp(now));
         await command.ExecuteNonQueryAsync(cancellationToken);

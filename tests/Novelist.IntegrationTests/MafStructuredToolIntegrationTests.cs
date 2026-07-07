@@ -353,6 +353,129 @@ public sealed class MafStructuredToolIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task ReferenceMaterialStyleFiltersCannotBypassProfileOrCorpusBoundariesThroughMafExecutor()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var settings = new FileSystemAppSettingsService(options);
+        var novelService = new FileSystemNovelService(options, settings);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("MAF 风格边界", "", ""), CancellationToken.None);
+        var otherNovel = await novelService.CreateNovelAsync(new CreateNovelPayload("MAF 其他风格边界", "", ""), CancellationToken.None);
+        var referenceAnchors = new SqliteReferenceAnchorService(options, novelService);
+        var styleProfiles = new SqliteReferenceStyleProfileService(options, novelService);
+
+        var dialogueSourcePath = CreateSourceFile(
+            "maf-style-visible-dialogue.md",
+            """
+            # 第一章
+
+            她说：“门口别停。”雨声压住门口。
+            """);
+        var neutralSourcePath = CreateSourceFile(
+            "maf-style-visible-neutral.md",
+            """
+            # 第一章
+
+            他在门口停住。雨声落在门口。
+            """);
+        var hiddenSourcePath = CreateSourceFile(
+            "maf-style-hidden.md",
+            """
+            # 第一章
+
+            她说：“隐藏门口还有人。”这条私有共享语料不应被读到。
+            """);
+        var otherSourcePath = CreateSourceFile(
+            "maf-style-other-profile.md",
+            """
+            # 第一章
+
+            她说：“门口还有人。”后来灯光暗下去。
+            """);
+
+        var dialogueAnchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "MAF 对话风格", null, dialogueSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var neutralAnchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "MAF 中性风格", null, neutralSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var hiddenAnchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "MAF 隐藏风格", null, hiddenSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var otherAnchor = await referenceAnchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(otherNovel.Id, "MAF 跨小说风格", null, otherSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        await MarkAnchorAsWorkspaceCorpusAsync(options, hiddenAnchor.AnchorId, ReferenceCorpusVisibilities.Private);
+
+        var profile = await styleProfiles.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                novel.Id,
+                "MAF 对话画像",
+                "",
+                [dialogueAnchor.AnchorId],
+                ["user_provided"],
+                [ReferenceSourceTrustLevels.UserVerified]),
+            CancellationToken.None);
+        var otherProfile = await styleProfiles.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                otherNovel.Id,
+                "MAF 跨小说画像",
+                "",
+                [otherAnchor.AnchorId],
+                ["user_provided"],
+                [ReferenceSourceTrustLevels.UserVerified]),
+            CancellationToken.None);
+
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new EmptyStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors,
+            referenceDrafts: null,
+            referenceStyleProfiles: styleProfiles));
+
+        var styledSearch = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "search_reference_materials",
+            $$"""
+            {"anchor_ids":[{{dialogueAnchor.AnchorId}},{{neutralAnchor.AnchorId}}],"query":"门口","material_types":["sentence"],"style_profile_ids":[{{profile.ProfileId}}],"style_dimensions":["dialogue_ratio"],"imitation_intensity":"strong","page":1,"size":10}
+            """);
+
+        var styledItems = styledSearch.GetProperty("items").EnumerateArray().ToArray();
+        Assert.True(styledItems.Length >= 2);
+        Assert.Equal(dialogueAnchor.AnchorId, styledItems[0].GetProperty("anchor_id").GetInt64());
+        var firstComponents = styledItems[0].GetProperty("score_components");
+        Assert.True(firstComponents.GetProperty("style_fit").GetDouble() > 0);
+        Assert.True(firstComponents.GetProperty("source_risk_penalty").GetDouble() < 0);
+
+        var crossNovelProfileError = await ExecuteFailureAsync(
+            executor,
+            novel.Id,
+            "search_reference_materials",
+            $$"""
+            {"anchor_ids":[{{dialogueAnchor.AnchorId}},{{neutralAnchor.AnchorId}}],"query":"门口","material_types":["sentence"],"style_profile_ids":[{{otherProfile.ProfileId}}],"style_dimensions":["dialogue_ratio"],"imitation_intensity":"strong","page":1,"size":10}
+            """);
+        Assert.Contains("style profile", crossNovelProfileError, StringComparison.OrdinalIgnoreCase);
+
+        var hiddenAnchorSearch = await ExecuteAsync(
+            executor,
+            novel.Id,
+            "search_reference_materials",
+            $$"""
+            {"anchor_ids":[{{hiddenAnchor.AnchorId}}],"query":"隐藏门口","material_types":["sentence"],"style_profile_ids":[{{profile.ProfileId}}],"style_dimensions":["dialogue_ratio"],"imitation_intensity":"strong","page":1,"size":10}
+            """);
+        Assert.Empty(hiddenAnchorSearch.GetProperty("items").EnumerateArray());
+    }
+
+    [Fact]
     public async Task ReferenceOrchestrationAgentToolDefaultsToWorkspaceCorpusWithoutAnchorIds()
     {
         var options = CreateOptions();

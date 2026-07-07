@@ -94,7 +94,8 @@ public static class DesktopBridgeComposition
             webFetchService,
             webSearchService,
             referenceAnchorService,
-            referenceAnchoredDraftService));
+            referenceAnchoredDraftService,
+            referenceStyleProfiles: referenceStyleProfileService));
         var chatService = new FileSystemChatSessionService(
             options,
             novelService,

@@ -114,21 +114,23 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 4: LLM-Assisted Style Analyst Interface
 
+**Status:** Partially complete. A core `IReferenceStyleLlmAnalyzer` boundary and bounded-window request payload now exist, and `SqliteReferenceStyleProfileService` can use an injected analyzer provider after the deterministic baseline is built. Returned model JSON is treated as untrusted: `ReferenceStyleLlmAnalysisValidator` accepts only versioned JSON, requires each label to cite source segment ids and offsets inside supplied bounded windows, rejects unsupported or ungrounded labels, downgrades overconfident labels, and returns diagnostics. Accepted LLM evidence is persisted as `llm_assisted` evidence/material tags and merged into categorical profile features; invalid or rejected output records an LLM analysis run and leaves the deterministic profile intact. Desktop composition coverage proves normal bridge-triggered profile builds stay deterministic without a default provider. Production provider wiring remains open.
+
 **Description:** Add an optional model-assisted analyzer that enriches materials with advanced style labels and evidence-backed explanations.
 
 **Acceptance criteria:**
 
-- [ ] Analyzer accepts bounded source spans or sampled segment windows, never arbitrary file paths.
-- [ ] Model output must be valid JSON matching a versioned schema.
-- [ ] Every advanced label must cite source segment ids and character offsets.
-- [ ] Invalid, unsupported, ungrounded, or overconfident labels are rejected or downgraded.
-- [ ] No model configuration means the system falls back to deterministic baseline features.
+- [x] Analyzer accepts bounded source spans or sampled segment windows, never arbitrary file paths. The core analyzer request carries only `windows` with source segment/material provenance and bounded text excerpts.
+- [x] Model output must be valid JSON matching a versioned schema. The first validator slice requires `schema_version = reference-style-llm-analysis-v1` and strict root/label/evidence shapes.
+- [x] Every advanced label must cite source segment ids and character offsets.
+- [x] Invalid, unsupported, ungrounded, or overconfident labels are rejected or downgraded.
+- [x] No model configuration means the system falls back to deterministic baseline features. The service constructor defaults to no provider, and invalid injected-provider output records diagnostics while keeping the deterministic profile metadata/features/evidence.
 
 **Verification:**
 
-- [ ] Unit tests for schema validation, source-span grounding, confidence downgrade, and invalid JSON fallback.
-- [ ] Integration test using an injected fake analyzer provider.
-- [ ] No-live-network test for default desktop/test composition.
+- [x] Unit tests for schema validation, source-span grounding, confidence downgrade, and invalid JSON fallback.
+- [x] Integration test using an injected fake analyzer provider.
+- [x] No-live-network test for default desktop/test composition. Photino composition smoke coverage builds a style profile through the desktop bridge and verifies only the deterministic analysis run is persisted when no provider is configured.
 
 **Dependencies:** Tasks 1-3.
 
@@ -188,7 +190,7 @@ The current extractor is deterministic and robust, but limited:
 **Verification:**
 
 - [x] Integration tests for style-fit ranking and weak-match fallback. Style-fit ranking and low style-fit weak-match audit risk are covered.
-- [ ] Agent-tool tests prove style filters cannot bypass license/visibility/fact boundaries.
+- [x] Agent-tool tests prove style filters cannot bypass profile/corpus visibility boundaries. MAF executor integration now verifies style-aware material search still fails cross-novel style profiles and cannot read explicitly requested private workspace corpus anchors.
 
 **Dependencies:** Tasks 2-6.
 
@@ -306,18 +308,21 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 13: Agent Tool Boundaries
 
+**Status:** Partially complete. Agent-side `search_reference_materials` can now pass style profile ids, style dimensions, and imitation intensity into the existing read/search material boundary while keeping `novel_id` runtime-injected and source/license/visibility filtering in the service. Agent-side `get_reference_style_profiles` and `get_reference_style_profile` now provide read-only profile inspection with injected novel context and no source text. MAF integration coverage proves style filters do not bypass cross-novel profile or private workspace-corpus boundaries. Style audit inspection tools and the remaining allowed/forbidden style-tool matrix remain open.
+
 **Description:** Expose style search, profile inspection, and style-audit inspection to agents without allowing agent-side import, approval, or insertion.
 
 **Acceptance criteria:**
 
-- [ ] Agent tools can search style profiles/materials with injected novel context.
+- [x] Agent tools can search style profiles/materials with injected novel context. The material-search side is implemented for style filters, and profile inspection is available through read-only list/detail tools.
 - [ ] Agent tools cannot import sources, read arbitrary files, approve style contracts, approve blueprint revisions, or insert prose.
 - [ ] Tool descriptions make source/license/style-risk boundaries explicit.
 
 **Verification:**
 
-- [ ] MAF registry tests for allowed and forbidden style tools.
-- [ ] Bridge/agent authority tests proving no bypass of user approvals.
+- [x] MAF registry tests for style-aware reference material search filters, injected novel context, and absent style import/approval/insertion tools.
+- [x] MAF registry tests for dedicated style profile inspection tools.
+- [ ] Bridge/agent authority tests proving no bypass of user approvals. Material/profile visibility authority is covered at MAF executor integration level; style-audit inspection and the remaining approval matrix remain open.
 
 **Dependencies:** Tasks 6-12.
 

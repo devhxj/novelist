@@ -155,6 +155,7 @@ public sealed class MafToolRegistryTests
         Assert.DoesNotContain(
             withoutReferenceServices.CreateTools(new NovelistMafToolContext(17)),
             tool => tool.Name.StartsWith("search_reference", StringComparison.Ordinal) ||
+                tool.Name.StartsWith("get_reference_style", StringComparison.Ordinal) ||
                 tool.Name.StartsWith("generate_reference", StringComparison.Ordinal));
 
         var withOnlyReferenceAnchors = new NovelistMafToolRegistry(
@@ -176,6 +177,8 @@ public sealed class MafToolRegistryTests
         Assert.Contains("search_reference_materials", materialToolNames);
         Assert.Contains("adapt_reference_material", materialToolNames);
         Assert.Contains("audit_reference_reuse", materialToolNames);
+        Assert.DoesNotContain("get_reference_style_profiles", materialToolNames);
+        Assert.DoesNotContain("get_reference_style_profile", materialToolNames);
         Assert.DoesNotContain("generate_reference_chapter_blueprint", materialToolNames);
         Assert.DoesNotContain("generate_reference_anchored_draft", materialToolNames);
 
@@ -196,8 +199,36 @@ public sealed class MafToolRegistryTests
             .ToArray();
         Assert.DoesNotContain("get_reference_anchors", draftToolNames);
         Assert.DoesNotContain("search_reference_materials", draftToolNames);
+        Assert.DoesNotContain("get_reference_style_profiles", draftToolNames);
+        Assert.DoesNotContain("get_reference_style_profile", draftToolNames);
         Assert.Contains("generate_reference_chapter_blueprint", draftToolNames);
         Assert.Contains("generate_reference_anchored_draft", draftToolNames);
+
+        var withOnlyStyleProfiles = new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors: null,
+            referenceDrafts: null,
+            referenceStyleProfiles: new RecordingReferenceStyleProfileService());
+        var styleProfileToolNames = withOnlyStyleProfiles.CreateTools(new NovelistMafToolContext(17))
+            .Select(tool => tool.Name)
+            .ToArray();
+        Assert.Contains("get_reference_style_profiles", styleProfileToolNames);
+        Assert.Contains("get_reference_style_profile", styleProfileToolNames);
+        Assert.DoesNotContain("build_reference_style_profile", styleProfileToolNames);
+        Assert.DoesNotContain("import_reference_style_profile", styleProfileToolNames);
+        Assert.DoesNotContain("approve_reference_style_contract", styleProfileToolNames);
+        Assert.DoesNotContain("insert_style_imitation_candidate", styleProfileToolNames);
+        Assert.DoesNotContain("search_reference_materials", styleProfileToolNames);
+        Assert.DoesNotContain("generate_reference_anchored_draft", styleProfileToolNames);
 
         var registry = new NovelistMafToolRegistry(
             new RecordingStoryMemorySearchService(),
@@ -211,7 +242,8 @@ public sealed class MafToolRegistryTests
             webFetch: null,
             webSearch: null,
             referenceAnchors: new RecordingReferenceAnchorService(),
-            referenceDrafts: new RecordingReferenceAnchoredDraftService());
+            referenceDrafts: new RecordingReferenceAnchoredDraftService(),
+            referenceStyleProfiles: new RecordingReferenceStyleProfileService());
 
         var tools = registry.CreateTools(new NovelistMafToolContext(17));
         var names = tools.Select(tool => tool.Name).ToArray();
@@ -232,10 +264,16 @@ public sealed class MafToolRegistryTests
         Assert.Contains("get_reference_orchestration_run", names);
         Assert.Contains("get_reference_orchestration_run_events", names);
         Assert.Contains("cancel_reference_orchestration_run", names);
+        Assert.Contains("get_reference_style_profiles", names);
+        Assert.Contains("get_reference_style_profile", names);
         Assert.DoesNotContain("resume_reference_orchestration_run", names);
         Assert.DoesNotContain("approve_reference_orchestration_decision", names);
         Assert.DoesNotContain("apply_reference_blueprint_revision", names);
         Assert.DoesNotContain("insert_reference_anchored_draft", names);
+        Assert.DoesNotContain("build_reference_style_profile", names);
+        Assert.DoesNotContain("approve_reference_style_contract", names);
+        Assert.DoesNotContain("import_reference_style_profile", names);
+        Assert.DoesNotContain("insert_style_imitation_candidate", names);
 
         foreach (var tool in tools.Where(tool => tool.Name.Contains("reference", StringComparison.Ordinal)))
         {
@@ -271,6 +309,23 @@ public sealed class MafToolRegistryTests
         Assert.True(searchMaterialsProperties.TryGetProperty("narrative_duties", out _));
         Assert.True(searchMaterialsProperties.TryGetProperty("emotion_transitions", out _));
         Assert.True(searchMaterialsProperties.TryGetProperty("prose_duties", out _));
+        Assert.True(searchMaterialsProperties.TryGetProperty("style_profile_ids", out _));
+        Assert.True(searchMaterialsProperties.TryGetProperty("style_dimensions", out _));
+        Assert.True(searchMaterialsProperties.TryGetProperty("imitation_intensity", out _));
+
+        var listStyleProfiles = tools.Single(tool => tool.Name == "get_reference_style_profiles");
+        AssertToolDescriptionContains(listStyleProfiles, "只读", "不能构建", "不能导入", "不能审批", "不能写章节");
+        Assert.True(listStyleProfiles.JsonSchema.TryGetProperty("properties", out var listStyleProfileProperties));
+        Assert.True(listStyleProfileProperties.TryGetProperty("include_archived", out _));
+        Assert.False(listStyleProfileProperties.TryGetProperty("anchor_ids", out _));
+        Assert.False(listStyleProfileProperties.TryGetProperty("source_path", out _));
+
+        var getStyleProfile = tools.Single(tool => tool.Name == "get_reference_style_profile");
+        AssertToolDescriptionContains(getStyleProfile, "evidence", "不返回源文本", "只读", "不能审批");
+        Assert.True(getStyleProfile.JsonSchema.TryGetProperty("properties", out var getStyleProfileProperties));
+        Assert.True(getStyleProfileProperties.TryGetProperty("profile_id", out _));
+        Assert.False(getStyleProfileProperties.TryGetProperty("source_text", out _));
+        Assert.False(getStyleProfileProperties.TryGetProperty("content", out _));
 
         var startOrchestration = tools.Single(tool => tool.Name == "start_reference_orchestration_run");
         AssertToolDescriptionContains(
@@ -326,7 +381,8 @@ public sealed class MafToolRegistryTests
             webFetch: null,
             webSearch: null,
             referenceAnchors: new RecordingReferenceAnchorService(),
-            referenceDrafts: new RecordingReferenceAnchoredDraftService());
+            referenceDrafts: new RecordingReferenceAnchoredDraftService(),
+            referenceStyleProfiles: new RecordingReferenceStyleProfileService());
 
         var referenceTools = registry.CreateTools(new NovelistMafToolContext(17))
             .Where(tool => tool.Name.Contains("reference", StringComparison.Ordinal))
@@ -339,6 +395,9 @@ public sealed class MafToolRegistryTests
         Assert.DoesNotContain("promote_reference_anchor_to_workspace_corpus", names);
         Assert.DoesNotContain("update_reference_anchor_metadata", names);
         Assert.DoesNotContain("delete_reference_anchor", names);
+        Assert.DoesNotContain("build_reference_style_profile", names);
+        Assert.DoesNotContain("archive_reference_style_profile", names);
+        Assert.DoesNotContain("update_reference_style_profile", names);
 
         foreach (var tool in referenceTools)
         {
@@ -370,6 +429,12 @@ public sealed class MafToolRegistryTests
             "license/visibility",
             "不能导入",
             "不能读取任意文件");
+        AssertToolDescriptionContains(
+            referenceTools.Single(tool => tool.Name == "get_reference_style_profiles"),
+            "已存在",
+            "只读",
+            "不能构建",
+            "不能导入");
     }
 
     [Fact]
@@ -448,7 +513,7 @@ public sealed class MafToolRegistryTests
             new ChatToolCall(
                 "call_reference_search",
                 "search_reference_materials",
-                """{"query":"雨夜压迫感","anchor_ids":[7],"material_types":["sentence"],"narrative_duties":["external_evidence"],"emotion_transitions":["neutral->pressure"],"prose_duties":["source_backed_detail"],"page":1,"size":5}"""),
+                """{"query":"雨夜压迫感","anchor_ids":[7],"material_types":["sentence"],"narrative_duties":["external_evidence"],"emotion_transitions":["neutral->pressure"],"prose_duties":["source_backed_detail"],"style_profile_ids":[99],"style_dimensions":["dialogue_ratio"],"imitation_intensity":"strong","page":1,"size":5}"""),
             CancellationToken.None);
 
         Assert.True(result.Success, result.Error);
@@ -460,11 +525,70 @@ public sealed class MafToolRegistryTests
         Assert.Equal(["external_evidence"], anchors.LastSearch.NarrativeDuties);
         Assert.Equal(["neutral->pressure"], anchors.LastSearch.EmotionTransitions);
         Assert.Equal(["source_backed_detail"], anchors.LastSearch.ProseDuties);
+        Assert.Equal([99], anchors.LastSearch.StyleProfileIds);
+        Assert.Equal(["dialogue_ratio"], anchors.LastSearch.StyleDimensions);
+        Assert.Equal(ReferenceStyleImitationIntensities.Strong, anchors.LastSearch.ImitationIntensity);
         var material = result.Data!.Value.GetProperty("items")[0];
         Assert.Equal("mat-1", material.GetProperty("material_id").GetString());
         var components = material.GetProperty("score_components");
         Assert.Equal(2.5, components.GetProperty("story_context").GetDouble());
         Assert.Equal(1.25, components.GetProperty("prose_duty").GetDouble());
+    }
+
+    [Fact]
+    public async Task ReferenceStyleProfileToolsInjectNovelContext()
+    {
+        var styleProfiles = new RecordingReferenceStyleProfileService();
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors: null,
+            referenceDrafts: null,
+            referenceStyleProfiles: styleProfiles));
+
+        var listResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 1),
+            new ChatToolCall(
+                "call_reference_style_profiles",
+                "get_reference_style_profiles",
+                """{"include_archived":true}"""),
+            CancellationToken.None);
+
+        Assert.True(listResult.Success, listResult.Error);
+        Assert.NotNull(styleProfiles.LastList);
+        Assert.Equal(23, styleProfiles.LastList.NovelId);
+        Assert.True(styleProfiles.LastList.IncludeArchived);
+        var summary = listResult.Data!.Value[0];
+        Assert.Equal(99, summary.GetProperty("profile_id").GetInt64());
+        Assert.Equal(23, summary.GetProperty("novel_id").GetInt64());
+
+        var detailResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 2),
+            new ChatToolCall(
+                "call_reference_style_profile",
+                "get_reference_style_profile",
+                """{"profile_id":99}"""),
+            CancellationToken.None);
+
+        Assert.True(detailResult.Success, detailResult.Error);
+        Assert.Equal(23, styleProfiles.LastGetNovelId);
+        Assert.Equal(99, styleProfiles.LastGetProfileId);
+        var profile = detailResult.Data!.Value;
+        Assert.Equal(99, profile.GetProperty("profile_id").GetInt64());
+        Assert.True(profile.TryGetProperty("features", out var features));
+        Assert.Equal("dialogue_ratio", features.GetProperty("numeric_features")[0].GetProperty("feature_key").GetString());
+        Assert.True(profile.TryGetProperty("evidence_spans", out var evidenceSpans));
+        Assert.Equal("ev-1", evidenceSpans[0].GetProperty("evidence_id").GetString());
+        Assert.False(profile.TryGetProperty("source_text", out _));
+        Assert.False(profile.TryGetProperty("content", out _));
     }
 
     [Fact]
@@ -882,6 +1006,100 @@ public sealed class MafToolRegistryTests
                 [prompt],
                 "综合摘要",
                 [new WebSearchSourcePayload("来源", "https://example.test/source")]));
+        }
+    }
+
+    private sealed class RecordingReferenceStyleProfileService : IReferenceStyleProfileService
+    {
+        public GetReferenceStyleProfilesPayload? LastList { get; private set; }
+
+        public long LastGetNovelId { get; private set; }
+
+        public long LastGetProfileId { get; private set; }
+
+        public ValueTask<ReferenceStyleProfilePayload> BuildStyleProfileAsync(
+            BuildReferenceStyleProfilePayload input,
+            CancellationToken cancellationToken)
+        {
+            throw new NotSupportedException("MAF tools must not build style profiles.");
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceStyleProfileSummaryPayload>> GetStyleProfilesAsync(
+            GetReferenceStyleProfilesPayload input,
+            CancellationToken cancellationToken)
+        {
+            LastList = input;
+            IReadOnlyList<ReferenceStyleProfileSummaryPayload> profiles =
+            [
+                new ReferenceStyleProfileSummaryPayload(
+                    99,
+                    input.NovelId,
+                    "雨夜克制风格",
+                    "deterministic baseline",
+                    ReferenceStyleProfileStatuses.Active,
+                    ReferenceStyleAnalyzerVersions.DeterministicV1,
+                    ReferenceStyleFeatureSchemaVersions.V1,
+                    ReferenceStyleAnalyzerSources.DeterministicBaseline,
+                    [7],
+                    ["hash"],
+                    0.91,
+                    DateTimeOffset.UtcNow,
+                    DateTimeOffset.UtcNow,
+                    ArchivedAt: null)
+            ];
+            return ValueTask.FromResult(profiles);
+        }
+
+        public ValueTask<ReferenceStyleProfilePayload?> GetStyleProfileAsync(
+            long novelId,
+            long profileId,
+            CancellationToken cancellationToken)
+        {
+            LastGetNovelId = novelId;
+            LastGetProfileId = profileId;
+            return ValueTask.FromResult<ReferenceStyleProfilePayload?>(new ReferenceStyleProfilePayload(
+                profileId,
+                novelId,
+                "雨夜克制风格",
+                "deterministic baseline",
+                ReferenceStyleProfileStatuses.Active,
+                ReferenceStyleAnalyzerVersions.DeterministicV1,
+                ReferenceStyleFeatureSchemaVersions.V1,
+                ReferenceStyleAnalyzerSources.DeterministicBaseline,
+                [7],
+                ["hash"],
+                ["user_provided"],
+                [ReferenceSourceTrustLevels.UserVerified],
+                0.91,
+                new ReferenceStyleFeatureVectorPayload(
+                    [
+                        new ReferenceStyleNumericFeaturePayload(
+                            "dialogue_ratio",
+                            0.42,
+                            "ratio",
+                            0.9,
+                            ["ev-1"])
+                    ],
+                    [],
+                    []),
+                [
+                    new ReferenceStyleEvidenceSpanPayload(
+                        "ev-1",
+                        profileId,
+                        7,
+                        "seg-1",
+                        "mat-1",
+                        "dialogue_ratio",
+                        "dialogue",
+                        0,
+                        12,
+                        "span-hash",
+                        0.9,
+                        ReferenceStyleAnalyzerSources.DeterministicBaseline)
+                ],
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                ArchivedAt: null));
         }
     }
 

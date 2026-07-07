@@ -22,12 +22,18 @@ public sealed partial class NovelistMafToolRegistry
             var draftTools = new ReferenceDraftMafTools(_referenceDrafts, context, _serializerOptions);
             draftTools.AddAvailableTools(tools);
         }
+
+        if (_referenceStyleProfiles is not null)
+        {
+            var styleProfileTools = new ReferenceStyleProfileMafTools(_referenceStyleProfiles, context, _serializerOptions);
+            styleProfileTools.AddAvailableTools(tools);
+        }
     }
 
     private sealed class ReferenceMafTools
     {
         private const string GetAnchorsDescription = "列出当前小说可访问的已导入参考锚定书籍。novel_id 由运行时注入，不需要也不能传入；不能导入新来源，不能读取任意文件。";
-        private const string SearchMaterialsDescription = "按 story context 搜索已导入且受 license/visibility 过滤的参考语料库。返回材料 id、标签、来源、文本和 score_components；用于给蓝图 beat 绑定材料，不直接写章节，不能导入新来源，不能读取任意文件。";
+        private const string SearchMaterialsDescription = "按 story context 和可选 style filters 搜索已导入且受 license/visibility 过滤的参考语料库。返回材料 id、标签、来源、文本和 score_components；style_profile_ids 只影响受授权材料排序和 style-risk 解释，不能绕过来源/许可边界。用于给蓝图 beat 绑定材料，不直接写章节，不能导入新来源，不能读取任意文件。";
         private const string AdaptMaterialDescription = "预览参考材料改写。只允许基于 material_id、slot_values、scene_facts 和 max_rewrite_level 生成候选，不直接写章节。";
         private const string AuditReuseDescription = "审计参考材料复用候选。纯检查工具，不写章节，不保存正文。";
 
@@ -80,7 +86,7 @@ public sealed partial class NovelistMafToolRegistry
             long[]? anchor_ids = null,
             [Description("搜索查询，描述需要的情绪、叙事功能、场景压力或句料特征")]
             string? query = null,
-            [Description("材料类型过滤：chapter / paragraph / sentence / passage")]
+            [Description("材料类型过滤：chapter / paragraph / sentence / passage / scene / beat / dialogue_exchange / action_afterbeat / image_motif / hook / payoff / transition")]
             string[]? material_types = null,
             [Description("情绪标签过滤")]
             string[]? emotion_tags = null,
@@ -96,6 +102,12 @@ public sealed partial class NovelistMafToolRegistry
             string[]? emotion_transitions = null,
             [Description("文体/执行职责过滤，例如 source_backed_detail / external_evidence / subtext / delayed_reaction")]
             string[]? prose_duties = null,
+            [Description("可选 style profile id 列表；只用于受授权参考材料的 style-aware 排序，不绕过 license/visibility 过滤")]
+            long[]? style_profile_ids = null,
+            [Description("可选 style 维度过滤，例如 dialogue_ratio / sensory_ratio / transition_ratio / hook_marker_ratio")]
+            string[]? style_dimensions = null,
+            [Description("可选 imitation intensity：diagnostic_only / loose / moderate / strong")]
+            string? imitation_intensity = null,
             [Description("页码，默认 1")]
             int page = 0,
             [Description("每页数量，默认 10，最大 20")]
@@ -116,7 +128,11 @@ public sealed partial class NovelistMafToolRegistry
                     Math.Clamp(size <= 0 ? 10 : size, 1, 20),
                     narrative_duties,
                     emotion_transitions,
-                    prose_duties),
+                    prose_duties,
+                    ArchiveFilter: null,
+                    StyleProfileIds: style_profile_ids,
+                    StyleDimensions: style_dimensions,
+                    ImitationIntensity: imitation_intensity),
                 cancellationToken);
         }
 
@@ -162,6 +178,72 @@ public sealed partial class NovelistMafToolRegistry
                     string.IsNullOrWhiteSpace(max_rewrite_level) ? ReferenceRewriteLevels.L1 : max_rewrite_level,
                     scene_facts ?? []),
                 cancellationToken);
+        }
+    }
+
+    private sealed class ReferenceStyleProfileMafTools
+    {
+        private const string GetProfilesDescription = "列出当前小说已存在的 reference style profiles。novel_id 由运行时注入；只读工具，不能构建 style profile，不能导入 style profile，不能审批 style contract，不能写章节。";
+        private const string GetProfileDescription = "读取单个 reference style profile 的结构化 features 和 evidence spans。novel_id 由运行时注入；只读工具，不返回源文本，不能构建 style profile，不能导入 style profile，不能审批 style contract，不能写章节。";
+
+        private readonly IReferenceStyleProfileService _styleProfiles;
+        private readonly NovelistMafToolContext _context;
+        private readonly JsonSerializerOptions _serializerOptions;
+
+        public ReferenceStyleProfileMafTools(
+            IReferenceStyleProfileService styleProfiles,
+            NovelistMafToolContext context,
+            JsonSerializerOptions serializerOptions)
+        {
+            _styleProfiles = styleProfiles;
+            _context = context;
+            _serializerOptions = serializerOptions;
+        }
+
+        public void AddAvailableTools(List<AIFunction> tools)
+        {
+            tools.Add(CreateFunction(nameof(GetReferenceStyleProfilesAsync), "get_reference_style_profiles", GetProfilesDescription));
+            tools.Add(CreateFunction(nameof(GetReferenceStyleProfileAsync), "get_reference_style_profile", GetProfileDescription));
+        }
+
+        private AIFunction CreateFunction(string methodName, string toolName, string description)
+        {
+            var method = typeof(ReferenceStyleProfileMafTools).GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic)
+                ?? throw new MissingMethodException(typeof(ReferenceStyleProfileMafTools).FullName, methodName);
+            return AIFunctionFactory.Create(
+                method,
+                this,
+                new AIFunctionFactoryOptions
+                {
+                    Name = toolName,
+                    Description = description,
+                    SerializerOptions = _serializerOptions
+                });
+        }
+
+        [Description(GetProfilesDescription)]
+        private ValueTask<IReadOnlyList<ReferenceStyleProfileSummaryPayload>> GetReferenceStyleProfilesAsync(
+            [Description("是否包含 archived style profiles，默认 false")]
+            bool include_archived = false,
+            CancellationToken cancellationToken = default)
+        {
+            return _styleProfiles.GetStyleProfilesAsync(
+                new GetReferenceStyleProfilesPayload(_context.NovelId, include_archived),
+                cancellationToken);
+        }
+
+        [Description(GetProfileDescription)]
+        private ValueTask<ReferenceStyleProfilePayload?> GetReferenceStyleProfileAsync(
+            [Description("style profile id")]
+            long profile_id,
+            CancellationToken cancellationToken = default)
+        {
+            if (profile_id <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(profile_id), profile_id, "profile_id must be positive.");
+            }
+
+            return _styleProfiles.GetStyleProfileAsync(_context.NovelId, profile_id, cancellationToken);
         }
     }
 

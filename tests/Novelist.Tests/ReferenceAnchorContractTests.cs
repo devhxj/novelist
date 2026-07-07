@@ -361,6 +361,84 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void ReferenceStyleLlmAnalysisPayloadsUseStableSnakeCaseJsonNamesWithoutPaths()
+    {
+        var window = new ReferenceStyleAnalysisWindowPayload(
+            WindowId: "win-1",
+            AnchorId: 7,
+            SourceSegmentId: "seg-1",
+            MaterialId: "mat-1",
+            StartOffset: 10,
+            EndOffset: 42,
+            TextHash: "window-hash",
+            Text: "bounded excerpt only");
+        var request = new ReferenceStyleLlmAnalysisRequestPayload(
+            ProfileId: 99,
+            SchemaVersion: ReferenceStyleLlmAnalysisSchemaVersions.V1,
+            RequestedFeatureKeys: ["hook_pattern"],
+            Windows: [window]);
+
+        var rejected = new ReferenceStyleLlmAnalysisRejectedLabelPayload(
+            FeatureKey: "unsupported_magic",
+            Label: "too_vague",
+            Reason: "Unsupported style feature key.");
+
+        var result = new ReferenceStyleLlmAnalysisValidationResultPayload(
+            Status: ReferenceStyleLlmAnalysisValidationStatuses.Partial,
+            EvidenceSpans:
+            [
+                new ReferenceStyleEvidenceSpanPayload(
+                    EvidenceId: "llm-style-1",
+                    ProfileId: 99,
+                    AnchorId: 7,
+                    SourceSegmentId: "seg-1",
+                    MaterialId: "mat-1",
+                    FeatureKey: "hook_pattern",
+                    Label: "question_tail",
+                    StartOffset: 10,
+                    EndOffset: 20,
+                    TextHash: "window-hash",
+                    Confidence: 0.95,
+                    AnalyzerSource: ReferenceStyleAnalyzerSources.LlmAssisted)
+            ],
+            RejectedLabels: [rejected],
+            Diagnostics: ["confidence downgraded"]);
+
+        using var requestJson = JsonDocument.Parse(JsonSerializer.Serialize(request, BridgeJson.SerializerOptions));
+        var requestRoot = requestJson.RootElement;
+        Assert.Equal(99, requestRoot.GetProperty("profile_id").GetInt64());
+        Assert.Equal("reference-style-llm-analysis-v1", requestRoot.GetProperty("schema_version").GetString());
+        Assert.Equal("hook_pattern", requestRoot.GetProperty("requested_feature_keys")[0].GetString());
+        Assert.Equal("win-1", requestRoot.GetProperty("windows")[0].GetProperty("window_id").GetString());
+        Assert.False(requestRoot.TryGetProperty("path", out _));
+        Assert.False(requestRoot.TryGetProperty("source_path", out _));
+        Assert.False(requestRoot.TryGetProperty("ProfileId", out _));
+
+        using var windowJson = JsonDocument.Parse(JsonSerializer.Serialize(window, BridgeJson.SerializerOptions));
+        var windowRoot = windowJson.RootElement;
+        Assert.Equal("win-1", windowRoot.GetProperty("window_id").GetString());
+        Assert.Equal(7, windowRoot.GetProperty("anchor_id").GetInt64());
+        Assert.Equal("seg-1", windowRoot.GetProperty("source_segment_id").GetString());
+        Assert.Equal("mat-1", windowRoot.GetProperty("material_id").GetString());
+        Assert.Equal(10, windowRoot.GetProperty("start_offset").GetInt32());
+        Assert.Equal("window-hash", windowRoot.GetProperty("text_hash").GetString());
+        Assert.Equal("bounded excerpt only", windowRoot.GetProperty("text").GetString());
+        Assert.False(windowRoot.TryGetProperty("path", out _));
+        Assert.False(windowRoot.TryGetProperty("source_path", out _));
+        Assert.False(windowRoot.TryGetProperty("WindowId", out _));
+
+        using var resultJson = JsonDocument.Parse(JsonSerializer.Serialize(result, BridgeJson.SerializerOptions));
+        var resultRoot = resultJson.RootElement;
+        Assert.Equal("partial", resultRoot.GetProperty("status").GetString());
+        Assert.Equal("llm-style-1", resultRoot.GetProperty("evidence_spans")[0].GetProperty("evidence_id").GetString());
+        Assert.Equal("llm_assisted", resultRoot.GetProperty("evidence_spans")[0].GetProperty("analyzer_source").GetString());
+        Assert.Equal("unsupported_magic", resultRoot.GetProperty("rejected_labels")[0].GetProperty("feature_key").GetString());
+        Assert.Equal("confidence downgraded", resultRoot.GetProperty("diagnostics")[0].GetString());
+        Assert.False(resultRoot.GetProperty("evidence_spans")[0].TryGetProperty("text", out _));
+        Assert.False(resultRoot.TryGetProperty("RejectedLabels", out _));
+    }
+
+    [Fact]
     public void SearchReferenceMaterialsPayloadUsesStableNarrativeFilterJsonNames()
     {
         var payload = new SearchReferenceMaterialsPayload(

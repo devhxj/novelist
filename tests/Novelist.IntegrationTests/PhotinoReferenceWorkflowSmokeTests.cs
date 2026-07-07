@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Novelist.App.Desktop;
+using Novelist.Contracts.App;
 using Novelist.Contracts.Bridge;
 using Novelist.Core.App;
 using Novelist.Infrastructure.App;
@@ -136,6 +138,69 @@ public sealed class PhotinoReferenceWorkflowSmokeTests : IDisposable
         Assert.DoesNotContain(window.RequestedMethods, method => string.Equals(method, "SaveContent", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task DesktopCompositionBuildsStyleProfileWithoutDefaultLlmAnalyzerProvider()
+    {
+        var options = CreateOptions();
+        var window = new RecordingWindow();
+        var bridge = DesktopBridgeComposition.CreateBridge(window, options);
+
+        await SendAsync(bridge, window, "Initialize", options.DefaultDataDirectory);
+        var novel = await SendAsync(bridge, window, "CreateNovel", new
+        {
+            title = "桌面风格画像 no llm",
+            description = "",
+            genre = "悬疑"
+        });
+        var novelId = novel.GetProperty("id").GetInt64();
+        var sourcePath = CreateSourceFile(
+            "desktop-style-reference.md",
+            """
+            # 第一章
+
+            她说：“先别开门。”
+
+            雨声已经压住了脚步，门外忽然安静下来？
+            """);
+
+        var anchor = await SendAsync(bridge, window, "CreateReferenceAnchor", new
+        {
+            novel_id = novelId,
+            title = "桌面风格参考",
+            author = (string?)null,
+            source_path = sourcePath,
+            source_kind = "markdown",
+            license_status = "user_provided"
+        });
+        var anchorId = anchor.GetProperty("anchor_id").GetInt64();
+
+        var profile = await SendAsync(bridge, window, "BuildReferenceStyleProfile", new
+        {
+            novel_id = novelId,
+            title = "默认无模型画像",
+            description = "",
+            anchor_ids = new[] { anchorId },
+            allowed_license_statuses = new[] { "user_provided" },
+            allowed_source_trust_levels = new[] { ReferenceSourceTrustLevels.UserVerified }
+        });
+
+        Assert.Equal(ReferenceStyleAnalyzerSources.DeterministicBaseline, profile.GetProperty("analyzer_source").GetString());
+        Assert.Equal(ReferenceStyleAnalyzerVersions.DeterministicV1, profile.GetProperty("analyzer_version").GetString());
+        Assert.DoesNotContain(
+            profile.GetProperty("evidence_spans").EnumerateArray(),
+            evidence => string.Equals(
+                evidence.GetProperty("analyzer_source").GetString(),
+                ReferenceStyleAnalyzerSources.LlmAssisted,
+                StringComparison.Ordinal));
+
+        var profileId = profile.GetProperty("profile_id").GetInt64();
+        var runs = await ReadStyleAnalysisRunsAsync(options, profileId);
+        var run = Assert.Single(runs);
+        Assert.Equal(ReferenceStyleAnalyzerSources.DeterministicBaseline, run.AnalyzerSource);
+        Assert.Equal("completed", run.Status);
+        Assert.DoesNotContain(window.RequestedMethods, method => string.Equals(method, "TestLlmConnection", StringComparison.Ordinal));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -190,6 +255,40 @@ public sealed class PhotinoReferenceWorkflowSmokeTests : IDisposable
                 : message);
         return response.RootElement.GetProperty("result").Clone();
     }
+
+    private static async ValueTask<IReadOnlyList<PersistedStyleAnalysisRun>> ReadStyleAnalysisRunsAsync(
+        AppInitializationOptions options,
+        long profileId)
+    {
+        var databasePath = Path.Combine(options.DefaultDataDirectory, "reference-anchor", "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT analyzer_source, status
+            FROM reference_style_analysis_runs
+            WHERE profile_id = $profile_id
+            ORDER BY created_at ASC, run_id ASC;
+            """;
+        command.Parameters.AddWithValue("$profile_id", profileId);
+
+        var rows = new List<PersistedStyleAnalysisRun>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            rows.Add(new PersistedStyleAnalysisRun(
+                reader.GetString(0),
+                reader.GetString(1)));
+        }
+
+        return rows;
+    }
+
+    private sealed record PersistedStyleAnalysisRun(
+        string AnalyzerSource,
+        string Status);
 
     private sealed class RecordingWindow : IPhotinoWindow
     {
