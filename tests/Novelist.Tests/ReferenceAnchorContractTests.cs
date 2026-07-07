@@ -1177,6 +1177,8 @@ public sealed class ReferenceAnchorContractTests
         Assert.Contains(ReferenceFeedbackDecisions.Rejected, ReferenceFeedbackDecisions.All);
         Assert.Contains(ReferenceFeedbackDecisions.Edited, ReferenceFeedbackDecisions.All);
         Assert.Contains(ReferenceFeedbackTargetTypes.ReuseCandidate, ReferenceFeedbackTargetTypes.All);
+        Assert.Contains(ReferenceStyleAttemptStatuses.Attempted, ReferenceStyleAttemptStatuses.All);
+        Assert.Contains(ReferenceStyleAttemptStatuses.RetrievalGap, ReferenceStyleAttemptStatuses.All);
     }
 
     [Fact]
@@ -1196,7 +1198,21 @@ public sealed class ReferenceAnchorContractTests
                     ChangedSlots: [new ReferenceSlotValuePayload("object", "门")],
                     NonSlotEdits: [],
                     AuditStatus: "passed",
-                    CreatedAt: DateTimeOffset.Parse("2026-07-05T00:00:00Z"))
+                    CreatedAt: DateTimeOffset.Parse("2026-07-05T00:00:00Z"),
+                    StyleAttempts:
+                    [
+                        new ReferenceDraftStyleAttemptPayload(
+                            StyleProfileIds: [99],
+                            StyleDimensions: ["dialogue_ratio", "sensory_ratio"],
+                            ImitationIntensity: ReferenceStyleImitationIntensities.Strong,
+                            MinStyleFit: 0.8,
+                            AllowedCloseness: "moderate",
+                            RequiredEvidenceTypes: ["dialogue_exchange"],
+                            ForbiddenStyleRisks: ["source_leak"],
+                            SelectedMaterialStyleFit: 1.25,
+                            SelectedMaterialLowConfidence: false,
+                            Status: ReferenceStyleAttemptStatuses.Attempted)
+                    ])
             ],
             Audit: null);
 
@@ -1207,9 +1223,53 @@ public sealed class ReferenceAnchorContractTests
         var candidate = Assert.Single(root.GetProperty("candidates").EnumerateArray());
         Assert.Equal("beat-1", candidate.GetProperty("beat_id").GetString());
         Assert.Equal("候选段落", candidate.GetProperty("text").GetString());
+        var styleAttempt = Assert.Single(candidate.GetProperty("style_attempts").EnumerateArray());
+        Assert.Equal(99, styleAttempt.GetProperty("style_profile_ids")[0].GetInt64());
+        Assert.Equal("dialogue_ratio", styleAttempt.GetProperty("style_dimensions")[0].GetString());
+        Assert.Equal("strong", styleAttempt.GetProperty("imitation_intensity").GetString());
+        Assert.Equal(0.8, styleAttempt.GetProperty("min_style_fit").GetDouble());
+        Assert.Equal("moderate", styleAttempt.GetProperty("allowed_closeness").GetString());
+        Assert.Equal("dialogue_exchange", styleAttempt.GetProperty("required_evidence_types")[0].GetString());
+        Assert.Equal("source_leak", styleAttempt.GetProperty("forbidden_style_risks")[0].GetString());
+        Assert.Equal(1.25, styleAttempt.GetProperty("selected_material_style_fit").GetDouble());
+        Assert.False(styleAttempt.GetProperty("selected_material_low_confidence").GetBoolean());
+        Assert.Equal("attempted", styleAttempt.GetProperty("status").GetString());
         Assert.False(root.TryGetProperty("chapter_text", out _));
         Assert.False(root.TryGetProperty("assembled_text", out _));
         Assert.False(root.TryGetProperty("full_chapter", out _));
+        Assert.False(styleAttempt.TryGetProperty("source_text", out _));
+        Assert.False(styleAttempt.TryGetProperty("text", out _));
+        Assert.False(styleAttempt.TryGetProperty("prompt", out _));
+    }
+
+    [Fact]
+    public void GenerateAnchoredDraftPayloadSupportsOptionalStyleIntensityMatrix()
+    {
+        var payload = new GenerateReferenceAnchoredDraftPayload(
+            NovelId: 42,
+            BlueprintId: 501,
+            BeatIds: ["beat-1"],
+            StyleIntensities:
+            [
+                ReferenceStyleImitationIntensities.Loose,
+                ReferenceStyleImitationIntensities.Moderate,
+                ReferenceStyleImitationIntensities.Strong
+            ],
+            CandidatesPerBeat: 3);
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(payload, BridgeJson.SerializerOptions));
+        var root = json.RootElement;
+
+        Assert.Equal(42, root.GetProperty("novel_id").GetInt64());
+        Assert.Equal(501, root.GetProperty("blueprint_id").GetInt64());
+        Assert.Equal("beat-1", root.GetProperty("beat_ids")[0].GetString());
+        Assert.Equal("loose", root.GetProperty("style_intensities")[0].GetString());
+        Assert.Equal("moderate", root.GetProperty("style_intensities")[1].GetString());
+        Assert.Equal("strong", root.GetProperty("style_intensities")[2].GetString());
+        Assert.Equal(3, root.GetProperty("candidates_per_beat").GetInt32());
+        Assert.False(root.TryGetProperty("content", out _));
+        Assert.False(root.TryGetProperty("chapter_text", out _));
+        Assert.False(root.TryGetProperty("SaveContent", out _));
     }
 
     [Fact]

@@ -504,12 +504,18 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             ?? throw new ArgumentException("Blueprint does not exist.", nameof(input));
         ReferenceAnchoredDraftPreflight.EnsureDraftGenerationAllowed(blueprint);
         var targetBeats = ReferenceAnchoredDraftPreflight.SelectTargetBeats(blueprint, input.BeatIds);
+        var requestedStyleIntensities = NormalizeCandidateStyleIntensities(input.StyleIntensities);
+        var candidatesPerBeat = Math.Clamp(input.CandidatesPerBeat <= 0
+            ? Math.Max(1, requestedStyleIntensities.Count)
+            : input.CandidatesPerBeat, 1, 6);
         var selectedLinks = await EnsureSelectedMaterialLinksAsync(input.NovelId, blueprint, targetBeats, cancellationToken);
         var candidates = await GenerateBeatCandidatesAsync(
             input.NovelId,
             blueprint,
             targetBeats,
             selectedLinks,
+            requestedStyleIntensities,
+            candidatesPerBeat,
             cancellationToken);
         ReferenceAnchoredDraftPreflight.EnsureCandidateProvenance(targetBeats, selectedLinks, candidates);
         var selectedMaterialTexts = await ReadSelectedMaterialTextsByMaterialIdAsync(
@@ -1049,16 +1055,22 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         ReferenceChapterBlueprintPayload blueprint,
         IReadOnlyList<ReferenceChapterBlueprintBeatPayload> targetBeats,
         IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload> selectedLinks,
+        IReadOnlyList<string> requestedStyleIntensities,
+        int candidatesPerBeat,
         CancellationToken cancellationToken)
     {
         var candidates = new List<ReferenceDraftParagraphCandidatePayload>();
         foreach (var beat in targetBeats.OrderBy(item => item.BeatIndex))
         {
+            var beatStyleIntensities = CandidateStyleIntensitiesForBeat(beat, requestedStyleIntensities, candidatesPerBeat);
             if (!selectedLinks.TryGetValue(beat.BeatId, out var link))
             {
                 if (ReferenceAnchoredDraftPreflight.AllowsNoReuseProvenance(beat))
                 {
-                    candidates.Add(BuildNoReuseDraftCandidate(blueprint, beat));
+                    foreach (var intensity in beatStyleIntensities)
+                    {
+                        candidates.Add(BuildNoReuseDraftCandidate(blueprint, beat, intensity));
+                    }
                 }
 
                 continue;
@@ -1066,26 +1078,32 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 
             var referenceAnchors = _referenceAnchors
                 ?? throw new ArgumentException("Reference-anchored draft generation requires a configured reference anchor service.", nameof(_referenceAnchors));
-            var adapted = await referenceAnchors.AdaptMaterialAsync(
-                new AdaptReferenceMaterialPayload(
-                    novelId,
+            foreach (var intensity in beatStyleIntensities)
+            {
+                var styleAttempts = BuildStyleAttempts(beat, link, intensity);
+                var adapted = await referenceAnchors.AdaptMaterialAsync(
+                    new AdaptReferenceMaterialPayload(
+                        novelId,
+                        link.MaterialId,
+                        beat.SlotPlan,
+                        beat.MaxRewriteLevel,
+                        beat.SceneFacts.Concat(beat.ViewpointAllowedKnowledge).Distinct(StringComparer.Ordinal).ToArray(),
+                        styleAttempts.FirstOrDefault()),
+                    cancellationToken);
+                var candidate = new ReferenceDraftParagraphCandidatePayload(
+                    "draft-" + Guid.NewGuid().ToString("N"),
+                    blueprint.BlueprintId,
+                    beat.BeatId,
                     link.MaterialId,
-                    beat.SlotPlan,
-                    beat.MaxRewriteLevel,
-                    beat.SceneFacts.Concat(beat.ViewpointAllowedKnowledge).Distinct(StringComparer.Ordinal).ToArray()),
-                cancellationToken);
-            var candidate = new ReferenceDraftParagraphCandidatePayload(
-                "draft-" + Guid.NewGuid().ToString("N"),
-                blueprint.BlueprintId,
-                beat.BeatId,
-                link.MaterialId,
-                adapted.RewriteLevel,
-                adapted.Text,
-                adapted.ChangedSlots,
-                adapted.NonSlotEdits,
-                adapted.Audit.Status,
-                DateTimeOffset.UtcNow);
-            candidates.Add(candidate);
+                    adapted.RewriteLevel,
+                    adapted.Text,
+                    adapted.ChangedSlots,
+                    adapted.NonSlotEdits,
+                    adapted.Audit.Status,
+                    DateTimeOffset.UtcNow,
+                    styleAttempts);
+                candidates.Add(candidate);
+            }
         }
 
         if (candidates.Count == 0)
@@ -1098,9 +1116,11 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 
     private static ReferenceDraftParagraphCandidatePayload BuildNoReuseDraftCandidate(
         ReferenceChapterBlueprintPayload blueprint,
-        ReferenceChapterBlueprintBeatPayload beat)
+        ReferenceChapterBlueprintBeatPayload beat,
+        string imitationIntensity)
     {
         var text = BuildNoReuseDraftText(blueprint, beat);
+        var styleAttempts = BuildStyleAttempts(beat, link: null, imitationIntensity);
         return new ReferenceDraftParagraphCandidatePayload(
             "draft-" + Guid.NewGuid().ToString("N"),
             blueprint.BlueprintId,
@@ -1111,7 +1131,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             Array.Empty<ReferenceSlotValuePayload>(),
             Array.Empty<string>(),
             "passed",
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            styleAttempts);
     }
 
     private static string BuildNoReuseDraftText(
@@ -1137,6 +1158,133 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         }
 
         return text;
+    }
+
+    private static IReadOnlyList<string> NormalizeCandidateStyleIntensities(IReadOnlyList<string>? intensities)
+    {
+        return intensities?
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => ValidateAllowedText(value.Trim(), nameof(intensities), AllowedStyleImitationIntensities))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray() ?? [];
+    }
+
+    private static IReadOnlyList<string> CandidateStyleIntensitiesForBeat(
+        ReferenceChapterBlueprintBeatPayload beat,
+        IReadOnlyList<string> requestedStyleIntensities,
+        int candidatesPerBeat)
+    {
+        if (beat.StyleContract is null)
+        {
+            return [ReferenceStyleImitationIntensities.Moderate];
+        }
+
+        var candidates = requestedStyleIntensities.Count > 0
+            ? requestedStyleIntensities
+            : [beat.StyleContract?.ImitationIntensity ?? ReferenceStyleImitationIntensities.Moderate];
+        return candidates
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => ValidateAllowedText(value, nameof(requestedStyleIntensities), AllowedStyleImitationIntensities))
+            .Distinct(StringComparer.Ordinal)
+            .Take(Math.Clamp(candidatesPerBeat <= 0 ? 1 : candidatesPerBeat, 1, 6))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<ReferenceDraftStyleAttemptPayload> BuildStyleAttempts(
+        ReferenceChapterBlueprintBeatPayload beat,
+        ReferenceBlueprintMaterialLinkPayload? link,
+        string imitationIntensity)
+    {
+        return beat.StyleContract is null ? [] : [BuildStyleAttempt(beat, link, imitationIntensity)];
+    }
+
+    private static ReferenceDraftStyleAttemptPayload BuildStyleAttempt(
+        ReferenceChapterBlueprintBeatPayload beat,
+        ReferenceBlueprintMaterialLinkPayload? link,
+        string imitationIntensity)
+    {
+        var contract = NormalizeStyleContract(beat.StyleContract);
+        var profileIds = contract?.StyleProfileIds ?? [];
+        var dimensions = contract?.StyleDimensions ?? [];
+        var minStyleFit = contract?.MinStyleFit ?? 0;
+        var allowedCloseness = contract?.AllowedCloseness ?? string.Empty;
+        var evidenceTypes = contract?.RequiredEvidenceTypes ?? [];
+        var forbiddenRisks = contract?.ForbiddenStyleRisks ?? [];
+        var selectedStyleFit = TryGetPositiveScoreComponent(link, "style_fit", out var styleFit)
+            ? styleFit
+            : (double?)null;
+        var lowConfidence = HasNegativeScoreComponent(link, "low_confidence");
+        var effectiveIntensity = ValidateAllowedText(
+            string.IsNullOrWhiteSpace(imitationIntensity) ? contract?.ImitationIntensity ?? ReferenceStyleImitationIntensities.Moderate : imitationIntensity,
+            nameof(imitationIntensity),
+            AllowedStyleImitationIntensities);
+        var status = StyleAttemptStatus(contract, link, lowConfidence, effectiveIntensity);
+
+        return new ReferenceDraftStyleAttemptPayload(
+            profileIds,
+            dimensions,
+            effectiveIntensity,
+            minStyleFit,
+            allowedCloseness,
+            evidenceTypes,
+            forbiddenRisks,
+            selectedStyleFit,
+            lowConfidence,
+            status);
+    }
+
+    private static string StyleAttemptStatus(
+        ReferenceBlueprintStyleContractPayload? contract,
+        ReferenceBlueprintMaterialLinkPayload? link,
+        bool lowConfidence,
+        string imitationIntensity)
+    {
+        if (contract is null || contract.StyleProfileIds.Count == 0)
+        {
+            return ReferenceStyleAttemptStatuses.NotApplicable;
+        }
+
+        if (string.Equals(imitationIntensity, ReferenceStyleImitationIntensities.DiagnosticOnly, StringComparison.Ordinal))
+        {
+            return ReferenceStyleAttemptStatuses.DiagnosticOnly;
+        }
+
+        if (link is null || lowConfidence)
+        {
+            return ReferenceStyleAttemptStatuses.RetrievalGap;
+        }
+
+        return ReferenceStyleAttemptStatuses.Attempted;
+    }
+
+    private static bool TryGetPositiveScoreComponent(
+        ReferenceBlueprintMaterialLinkPayload? link,
+        string name,
+        out double value)
+    {
+        value = 0;
+        if (link?.ScoreComponents is null ||
+            !link.ScoreComponents.TryGetValue(name, out var component) ||
+            component <= 0 ||
+            double.IsNaN(component) ||
+            double.IsInfinity(component))
+        {
+            return false;
+        }
+
+        value = component;
+        return true;
+    }
+
+    private static bool HasNegativeScoreComponent(
+        ReferenceBlueprintMaterialLinkPayload? link,
+        string name)
+    {
+        return link?.ScoreComponents is not null &&
+            link.ScoreComponents.TryGetValue(name, out var component) &&
+            component < 0 &&
+            !double.IsNaN(component) &&
+            !double.IsInfinity(component);
     }
 
     private static string FirstNonEmpty(params string[] values)
@@ -2480,10 +2628,10 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 command.CommandText = """
                     INSERT OR REPLACE INTO reference_draft_paragraph_candidates
                       (candidate_id, blueprint_id, beat_id, material_id, rewrite_level, text,
-                       changed_slots_json, non_slot_edits_json, audit_status, created_at)
+                       changed_slots_json, non_slot_edits_json, audit_status, created_at, style_attempts_json)
                     VALUES
                       ($candidate_id, $blueprint_id, $beat_id, $material_id, $rewrite_level, $text,
-                       $changed_slots_json, $non_slot_edits_json, $audit_status, $created_at);
+                       $changed_slots_json, $non_slot_edits_json, $audit_status, $created_at, $style_attempts_json);
                     """;
                 command.Parameters.AddWithValue("$candidate_id", candidate.CandidateId);
                 command.Parameters.AddWithValue("$blueprint_id", blueprintId);
@@ -2495,6 +2643,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 command.Parameters.AddWithValue("$non_slot_edits_json", JsonSerializer.Serialize(candidate.NonSlotEdits, JsonOptions));
                 command.Parameters.AddWithValue("$audit_status", candidate.AuditStatus);
                 command.Parameters.AddWithValue("$created_at", FormatTimestamp(candidate.CreatedAt));
+                command.Parameters.AddWithValue("$style_attempts_json", JsonSerializer.Serialize(candidate.StyleAttempts ?? [], JsonOptions));
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -2528,7 +2677,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 
         command.CommandText = $$"""
             SELECT candidate_id, blueprint_id, beat_id, material_id, rewrite_level, text,
-                   changed_slots_json, non_slot_edits_json, audit_status, created_at
+                   changed_slots_json, non_slot_edits_json, audit_status, created_at, style_attempts_json
             FROM reference_draft_paragraph_candidates
             WHERE blueprint_id = $blueprint_id
               AND candidate_id IN ({{string.Join(", ", parameterNames)}})
@@ -2549,7 +2698,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 ReadJson<IReadOnlyList<ReferenceSlotValuePayload>>(reader.GetString(6)),
                 ReadJson<IReadOnlyList<string>>(reader.GetString(7)),
                 reader.GetString(8),
-                ParseTimestamp(reader.GetString(9))));
+                ParseTimestamp(reader.GetString(9)),
+                ReadJson<IReadOnlyList<ReferenceDraftStyleAttemptPayload>>(reader.GetString(10))));
         }
 
         return candidates;
@@ -3275,6 +3425,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
               non_slot_edits_json TEXT NOT NULL,
               audit_status TEXT NOT NULL,
               created_at TEXT NOT NULL,
+              style_attempts_json TEXT NOT NULL DEFAULT '[]',
               FOREIGN KEY(blueprint_id) REFERENCES reference_chapter_blueprints(blueprint_id) ON DELETE CASCADE
             );
 
@@ -3478,6 +3629,12 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             "reference_blueprint_material_links",
             "status",
             "TEXT NOT NULL DEFAULT 'active'",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_draft_paragraph_candidates",
+            "style_attempts_json",
+            "TEXT NOT NULL DEFAULT '[]'",
             cancellationToken);
     }
 

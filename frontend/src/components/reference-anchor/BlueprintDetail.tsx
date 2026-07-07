@@ -97,6 +97,23 @@ function styleContractSummary(contract: reference.BlueprintStyleContract | null 
   return parts.join(' ')
 }
 
+function styleAttemptSummary(attempt: reference.DraftStyleAttempt): string {
+  const parts = [
+    attempt.imitation_intensity ? `intensity=${attempt.imitation_intensity}` : '',
+    attempt.status ? `status=${attempt.status}` : '',
+    compactList(attempt.style_profile_ids) ? `profiles=${compactList(attempt.style_profile_ids, 4)}` : '',
+    compactList(attempt.style_dimensions) ? `dims=${compactList(attempt.style_dimensions, 4)}` : '',
+    Number.isFinite(attempt.min_style_fit) && attempt.min_style_fit > 0 ? `min_fit=${attempt.min_style_fit}` : '',
+    typeof attempt.selected_material_style_fit === 'number' && Number.isFinite(attempt.selected_material_style_fit)
+      ? `material_fit=${attempt.selected_material_style_fit}`
+      : '',
+    attempt.selected_material_low_confidence ? 'low_confidence' : '',
+    compactList(attempt.required_evidence_types, 3) ? `evidence=${compactList(attempt.required_evidence_types, 3)}` : '',
+    compactList(attempt.forbidden_style_risks, 3) ? `risks=${compactList(attempt.forbidden_style_risks, 3)}` : '',
+  ].filter(Boolean)
+  return parts.join(' ')
+}
+
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
@@ -592,6 +609,15 @@ export function BlueprintDetail({
                   <span>{candidate.rewrite_level}</span>
                   <span>{candidate.audit_status}</span>
                 </div>
+                {(candidate.style_attempts ?? []).length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {(candidate.style_attempts ?? []).map((attempt, index) => (
+                      <span key={`${candidate.candidate_id}:style:${index}`} className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                        风格尝试 {styleAttemptSummary(attempt)}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {candidate.changed_slots.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {candidate.changed_slots.map(slot => (

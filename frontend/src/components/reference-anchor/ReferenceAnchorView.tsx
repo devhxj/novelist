@@ -1239,10 +1239,17 @@ export default function ReferenceAnchorView({ novelId }: Props) {
 
   async function generateDraft() {
     if (!activeBlueprint) return
+    const hasStyleContract = activeBlueprint.beats.some(beat => beat.style_contract)
     const result = await run(() => app.GenerateReferenceAnchoredDraft({
       novel_id: novelId,
       blueprint_id: activeBlueprint.blueprint_id,
       beat_ids: [],
+      ...(hasStyleContract
+        ? {
+            style_intensities: ['loose', 'moderate', 'strong'],
+            candidates_per_beat: 3,
+          } as const
+        : {}),
     }), '候选段落已生成')
     if (result) setDraft(result)
   }

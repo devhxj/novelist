@@ -423,7 +423,10 @@ async function generateReviseApproveBindAndDraft(page) {
   await detail.getByRole('button', { name: /^候选$/ }).click()
   await expectVisible(page.getByText('候选段落已生成'), 'draft generated message')
   await expectVisible(page.getByText('审计 passed · L1'), 'draft audit status')
-  await expectVisible(page.getByText('雨声压过门缝里的动静'), 'draft candidate text')
+  await expectVisible(detail.getByText('雨声压过门缝里的动静').first(), 'draft candidate text')
+  await expectVisible(detail.getByText(/风格尝试 intensity=loose status=attempted profiles=301/), 'loose style attempt summary')
+  await expectVisible(detail.getByText(/风格尝试 intensity=moderate status=attempted profiles=301/), 'moderate style attempt summary')
+  await expectVisible(detail.getByText(/风格尝试 intensity=strong status=attempted profiles=301/), 'strong style attempt summary')
 }
 
 async function runDefaultOrchestrationToFinalInsertionStop(page) {
@@ -748,6 +751,16 @@ async function verifyBridgeCalls(page) {
   assert.equal(revisedStyleContract.allowed_closeness, 'moderate', 'style contract revision must include allowed closeness')
   assert.deepEqual(revisedStyleContract.required_evidence_types, ['dialogue_exchange'], 'style contract revision must include evidence requirements')
   assert.deepEqual(revisedStyleContract.forbidden_style_risks, ['source_leak', 'style_distance'], 'style contract revision must include forbidden style risks')
+
+  const styleDraftCall = calls.find((call) =>
+    call.method === 'GenerateReferenceAnchoredDraft' &&
+    call.args[0]?.blueprint_id === styleContractRevisionCall.args[0].blueprint_id)
+  assert(styleDraftCall, 'missing style-guided draft generation call')
+  assert.deepEqual(
+    styleDraftCall.args[0].style_intensities,
+    ['loose', 'moderate', 'strong'],
+    'style-guided draft generation must request loose/moderate/strong candidates')
+  assert.equal(styleDraftCall.args[0].candidates_per_beat, 3, 'style-guided draft generation must request three candidates per beat')
 
   const startCall = calls.find((call) => call.method === 'StartReferenceOrchestrationRun')
   assert(startCall, 'missing StartReferenceOrchestrationRun call')
@@ -1623,24 +1636,42 @@ function installReferenceAnchorMockBridge() {
     const shouldFailAudit = blueprint.title.includes('缺陷') && !recoveredAudit
     const auditStatus = shouldFailAudit ? 'failed' : 'passed'
     const rewriteLevel = shouldFailAudit ? 'L3' : 'L1'
+    const styleContract = blueprint.beats[0].style_contract
+    const styleIntensities = (input.style_intensities?.length ? input.style_intensities : [styleContract?.imitation_intensity ?? 'moderate'])
+      .slice(0, input.candidates_per_beat || 1)
+    const candidates = styleIntensities.map((intensity, index) => ({
+      candidate_id: index === 0 ? 'candidate-001' : `candidate-00${index + 1}`,
+      blueprint_id: input.blueprint_id,
+      beat_id: blueprint.beats[0].beat_id,
+      material_id: 'mat-001',
+      rewrite_level: rewriteLevel,
+      text: shouldFailAudit
+        ? '雨声压过门缝里的动静，她突然确认了门外身份，把杯子推远。'
+        : '雨声压过门缝里的动静，她把杯子推远，指尖停在那半圈水痕旁，没有立刻抬头。',
+      changed_slots: [{ slot_name: 'object', value: '杯子' }],
+      non_slot_edits: ['调整为当前 POV 的感官证据。'],
+      audit_status: auditStatus,
+      created_at: now,
+      style_attempts: styleContract
+        ? [
+            {
+              style_profile_ids: styleContract.style_profile_ids,
+              style_dimensions: styleContract.style_dimensions,
+              imitation_intensity: intensity,
+              min_style_fit: styleContract.min_style_fit,
+              allowed_closeness: styleContract.allowed_closeness,
+              required_evidence_types: styleContract.required_evidence_types,
+              forbidden_style_risks: styleContract.forbidden_style_risks,
+              selected_material_style_fit: 1.25,
+              selected_material_low_confidence: false,
+              status: 'attempted',
+            },
+          ]
+        : [],
+    }))
     return {
       blueprint_id: input.blueprint_id,
-      candidates: [
-        {
-          candidate_id: 'candidate-001',
-          blueprint_id: input.blueprint_id,
-          beat_id: blueprint.beats[0].beat_id,
-          material_id: 'mat-001',
-          rewrite_level: rewriteLevel,
-          text: shouldFailAudit
-            ? '雨声压过门缝里的动静，她突然确认了门外身份，把杯子推远。'
-            : '雨声压过门缝里的动静，她把杯子推远，指尖停在那半圈水痕旁，没有立刻抬头。',
-          changed_slots: [{ slot_name: 'object', value: '杯子' }],
-          non_slot_edits: ['调整为当前 POV 的感官证据。'],
-          audit_status: auditStatus,
-          created_at: now,
-        },
-      ],
+      candidates,
       audit: {
         audit_id: 'audit-001',
         blueprint_id: input.blueprint_id,

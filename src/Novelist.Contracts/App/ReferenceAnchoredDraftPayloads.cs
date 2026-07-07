@@ -223,6 +223,16 @@ public sealed record ReferenceBlueprintStyleContractPayload(
     [property: JsonPropertyName("required_evidence_types")] IReadOnlyList<string> RequiredEvidenceTypes,
     [property: JsonPropertyName("forbidden_style_risks")] IReadOnlyList<string> ForbiddenStyleRisks);
 
+public static class ReferenceStyleAttemptStatuses
+{
+    public const string NotApplicable = "not_applicable";
+    public const string Attempted = "attempted";
+    public const string DiagnosticOnly = "diagnostic_only";
+    public const string RetrievalGap = "retrieval_gap";
+
+    public static IReadOnlyList<string> All { get; } = [NotApplicable, Attempted, DiagnosticOnly, RetrievalGap];
+}
+
 public sealed record ReferenceChapterBlueprintBeatPayload(
     [property: JsonPropertyName("beat_id")] string BeatId,
     [property: JsonPropertyName("beat_index")] int BeatIndex,
@@ -355,7 +365,13 @@ public sealed record ReferenceBlueprintMaterialBindingResultPayload(
 public sealed record GenerateReferenceAnchoredDraftPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("blueprint_id")] long BlueprintId,
-    [property: JsonPropertyName("beat_ids")] IReadOnlyList<string> BeatIds);
+    [property: JsonPropertyName("beat_ids")] IReadOnlyList<string> BeatIds,
+    [property: JsonPropertyName("style_intensities")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? StyleIntensities = null,
+    [property: JsonPropertyName("candidates_per_beat")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    int CandidatesPerBeat = 0);
 
 public sealed record ReferenceAnchoredDraftPayload(
     [property: JsonPropertyName("blueprint_id")] long BlueprintId,
@@ -372,7 +388,20 @@ public sealed record ReferenceDraftParagraphCandidatePayload(
     [property: JsonPropertyName("changed_slots")] IReadOnlyList<ReferenceSlotValuePayload> ChangedSlots,
     [property: JsonPropertyName("non_slot_edits")] IReadOnlyList<string> NonSlotEdits,
     [property: JsonPropertyName("audit_status")] string AuditStatus,
-    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
+    [property: JsonPropertyName("style_attempts")] IReadOnlyList<ReferenceDraftStyleAttemptPayload>? StyleAttempts = null);
+
+public sealed record ReferenceDraftStyleAttemptPayload(
+    [property: JsonPropertyName("style_profile_ids")] IReadOnlyList<long> StyleProfileIds,
+    [property: JsonPropertyName("style_dimensions")] IReadOnlyList<string> StyleDimensions,
+    [property: JsonPropertyName("imitation_intensity")] string ImitationIntensity,
+    [property: JsonPropertyName("min_style_fit")] double MinStyleFit,
+    [property: JsonPropertyName("allowed_closeness")] string AllowedCloseness,
+    [property: JsonPropertyName("required_evidence_types")] IReadOnlyList<string> RequiredEvidenceTypes,
+    [property: JsonPropertyName("forbidden_style_risks")] IReadOnlyList<string> ForbiddenStyleRisks,
+    [property: JsonPropertyName("selected_material_style_fit")] double? SelectedMaterialStyleFit,
+    [property: JsonPropertyName("selected_material_low_confidence")] bool SelectedMaterialLowConfidence,
+    [property: JsonPropertyName("status")] string Status);
 
 public sealed record AuditReferenceAnchoredDraftPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,

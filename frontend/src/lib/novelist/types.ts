@@ -1040,6 +1040,23 @@ export namespace reference {
     novel_id: number
     blueprint_id: number
     beat_ids: string[]
+    style_intensities?: StyleImitationIntensity[] | null
+    candidates_per_beat?: number
+  }
+
+  export type StyleImitationIntensity = 'diagnostic_only' | 'loose' | 'moderate' | 'strong'
+
+  export interface DraftStyleAttempt {
+    style_profile_ids: number[]
+    style_dimensions: string[]
+    imitation_intensity: StyleImitationIntensity
+    min_style_fit: number
+    allowed_closeness: string
+    required_evidence_types: string[]
+    forbidden_style_risks: string[]
+    selected_material_style_fit?: number | null
+    selected_material_low_confidence: boolean
+    status: 'not_applicable' | 'attempted' | 'diagnostic_only' | 'retrieval_gap'
   }
 
   export interface DraftParagraphCandidate {
@@ -1053,6 +1070,7 @@ export namespace reference {
     non_slot_edits: string[]
     audit_status: string
     created_at: Timestamp
+    style_attempts?: DraftStyleAttempt[] | null
   }
 
   export interface AnchoredDraft {

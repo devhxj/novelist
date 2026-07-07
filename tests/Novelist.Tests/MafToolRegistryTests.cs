@@ -290,6 +290,8 @@ public sealed class MafToolRegistryTests
         Assert.True(generateDraft.JsonSchema.TryGetProperty("properties", out var generateDraftProperties));
         Assert.True(generateDraftProperties.TryGetProperty("blueprint_id", out _));
         Assert.True(generateDraftProperties.TryGetProperty("beat_ids", out _));
+        Assert.True(generateDraftProperties.TryGetProperty("style_intensities", out _));
+        Assert.True(generateDraftProperties.TryGetProperty("candidates_per_beat", out _));
         Assert.False(generateDraftProperties.TryGetProperty("content", out _));
         Assert.False(generateDraftProperties.TryGetProperty("text", out _));
         Assert.False(generateDraftProperties.TryGetProperty("path", out _));

@@ -1994,6 +1994,159 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GenerateDraftRecordsStyleAttemptsForLooseModerateAndStrongCandidates()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("风格候选矩阵测试", "", ""), CancellationToken.None);
+        var planning = new FileSystemPlanningService(options, novels);
+        var material = new ReferenceMaterialPayload(
+            MaterialId: "style-candidate-material",
+            AnchorId: 1,
+            SourceSegmentId: "segment-style-candidate",
+            MaterialType: ReferenceMaterialTypes.Sentence,
+            FunctionTag: "dialogue",
+            EmotionTag: "pressure",
+            SceneTag: "dialogue",
+            PovTag: "close",
+            TechniqueTag: "dialogue_exchange",
+            FunctionConfidence: 1,
+            EmotionConfidence: 1,
+            PovConfidence: 1,
+            Text: "“你听见了吗？”雨声压着门缝。",
+            SourceHash: "source-hash-style-candidate",
+            ExtractorVersion: "test",
+            UserVerified: true,
+            CreatedAt: DateTimeOffset.UtcNow,
+            ScoreComponents: new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                ["style_fit"] = 1.25,
+                ["lexical"] = 2.5
+            });
+        var referenceAnchors = new FixedReferenceAnchorService(material, applySearchFilters: true);
+        var service = new SqliteReferenceAnchoredDraftService(options, novels, planning, referenceAnchors);
+        var generated = await service.GenerateChapterBlueprintAsync(
+            new GenerateReferenceChapterBlueprintPayload(
+                novel.Id,
+                35,
+                "风格候选矩阵蓝图",
+                "雨声压着门缝",
+                [1],
+                KnownFacts: ["雨声压着门缝"],
+                ForbiddenFacts: []),
+            CancellationToken.None);
+        var beatPath = "beat:" + generated.Beats[0].BeatId + ":";
+        var styleContractJson = JsonSerializer.Serialize(
+            new ReferenceBlueprintStyleContractPayload(
+                StyleProfileIds: [301],
+                StyleDimensions: ["dialogue_ratio", "sensory_ratio"],
+                ImitationIntensity: ReferenceStyleImitationIntensities.Strong,
+                MinStyleFit: 0.8,
+                AllowedCloseness: "moderate",
+                RequiredEvidenceTypes: ["dialogue_exchange"],
+                ForbiddenStyleRisks: ["source_leak"]),
+            BridgeJson.SerializerOptions);
+        var revised = await service.ReviseChapterBlueprintAsync(
+            new ReviseReferenceChapterBlueprintPayload(
+                novel.Id,
+                generated.BlueprintId,
+                [
+                    new ReferenceBlueprintRevisionChangePayload(beatPath + "reference_query.query", "雨声压着门缝"),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.material_types",
+                        JsonSerializer.Serialize(new[] { ReferenceMaterialTypes.Sentence })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.emotion_tags",
+                        JsonSerializer.Serialize(new[] { "pressure" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.function_tags",
+                        JsonSerializer.Serialize(new[] { "dialogue" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.pov_tags",
+                        JsonSerializer.Serialize(new[] { "close" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "reference_query.technique_tags",
+                        JsonSerializer.Serialize(new[] { "dialogue_exchange" })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "required_material_types",
+                        JsonSerializer.Serialize(new[] { ReferenceMaterialTypes.Sentence })),
+                    new ReferenceBlueprintRevisionChangePayload(
+                        beatPath + "prose_duties",
+                        JsonSerializer.Serialize(new[] { "dialogue", "external_evidence" })),
+                    new ReferenceBlueprintRevisionChangePayload(beatPath + "style_contract", styleContractJson)
+                ],
+                "user",
+                "style candidate matrix"),
+            CancellationToken.None);
+        var review = await service.ReviewChapterBlueprintAsync(
+            new ReviewReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId),
+            CancellationToken.None);
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+        var approved = await service.ApproveChapterBlueprintAsync(
+            new ApproveReferenceChapterBlueprintPayload(novel.Id, revised.BlueprintId, review.ReviewId),
+            CancellationToken.None);
+        var binding = await service.BindBlueprintMaterialsAsync(
+            new BindReferenceBlueprintMaterialsPayload(novel.Id, approved.BlueprintId, MaxResultsPerBeat: 3, SelectTopCandidate: true),
+            CancellationToken.None);
+        var selected = Assert.Single(binding.Links, link => link.Selected);
+
+        var draft = await service.GenerateDraftFromBlueprintAsync(
+            new GenerateReferenceAnchoredDraftPayload(
+                novel.Id,
+                approved.BlueprintId,
+                [approved.Beats[0].BeatId],
+                StyleIntensities:
+                [
+                    ReferenceStyleImitationIntensities.Loose,
+                    ReferenceStyleImitationIntensities.Moderate,
+                    ReferenceStyleImitationIntensities.Strong
+                ],
+                CandidatesPerBeat: 3),
+            CancellationToken.None);
+
+        Assert.Equal(3, draft.Candidates.Count);
+        Assert.Equal(3, referenceAnchors.AdaptInputs.Count);
+        Assert.Equal(
+            [ReferenceStyleImitationIntensities.Loose, ReferenceStyleImitationIntensities.Moderate, ReferenceStyleImitationIntensities.Strong],
+            draft.Candidates.Select(candidate => Assert.Single(candidate.StyleAttempts ?? []).ImitationIntensity).ToArray());
+        Assert.All(draft.Candidates, candidate =>
+        {
+            Assert.Equal(approved.Beats[0].BeatId, candidate.BeatId);
+            Assert.Equal(selected.MaterialId, candidate.MaterialId);
+            var attempt = Assert.Single(candidate.StyleAttempts ?? []);
+            Assert.Equal([301], attempt.StyleProfileIds);
+            Assert.Equal(["dialogue_ratio", "sensory_ratio"], attempt.StyleDimensions);
+            Assert.Equal(0.8, attempt.MinStyleFit);
+            Assert.Equal("moderate", attempt.AllowedCloseness);
+            Assert.Equal(["dialogue_exchange"], attempt.RequiredEvidenceTypes);
+            Assert.Equal(["source_leak"], attempt.ForbiddenStyleRisks);
+            Assert.Equal(1.25, attempt.SelectedMaterialStyleFit);
+            Assert.False(attempt.SelectedMaterialLowConfidence);
+            Assert.Equal(ReferenceStyleAttemptStatuses.Attempted, attempt.Status);
+        });
+        Assert.All(referenceAnchors.AdaptInputs, input =>
+        {
+            Assert.Equal(selected.MaterialId, input.MaterialId);
+            Assert.NotNull(input.StyleContext);
+            Assert.Equal([301], input.StyleContext!.StyleProfileIds);
+            Assert.Equal(1.25, input.StyleContext.SelectedMaterialStyleFit);
+        });
+        Assert.DoesNotContain(draft.Candidates, candidate => candidate.StyleAttempts?.Any(attempt =>
+            attempt.GetType().GetProperties().Any(property =>
+                property.Name.Contains("SourceText", StringComparison.OrdinalIgnoreCase) ||
+                property.Name.Contains("Prompt", StringComparison.OrdinalIgnoreCase))) == true);
+
+        var persistedAudit = await service.AuditDraftAgainstBlueprintAsync(
+            new AuditReferenceAnchoredDraftPayload(
+                novel.Id,
+                approved.BlueprintId,
+                draft.Candidates.Select(candidate => candidate.CandidateId).ToArray()),
+            CancellationToken.None);
+        Assert.Equal(draft.Audit?.Status, persistedAudit.Status);
+    }
+
+    [Fact]
     public async Task MaterialBoundBlueprintStillRejectsDraftWithoutCurrentPassingReview()
     {
         var options = CreateOptions();
@@ -5387,10 +5540,10 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         command.CommandText = """
             INSERT OR REPLACE INTO reference_draft_paragraph_candidates
               (candidate_id, blueprint_id, beat_id, material_id, rewrite_level, text,
-               changed_slots_json, non_slot_edits_json, audit_status, created_at)
+               changed_slots_json, non_slot_edits_json, audit_status, created_at, style_attempts_json)
             VALUES
               ($candidate_id, $blueprint_id, $beat_id, $material_id, $rewrite_level, $text,
-               $changed_slots_json, $non_slot_edits_json, $audit_status, $created_at);
+               $changed_slots_json, $non_slot_edits_json, $audit_status, $created_at, $style_attempts_json);
             """;
         command.Parameters.AddWithValue("$candidate_id", candidate.CandidateId);
         command.Parameters.AddWithValue("$blueprint_id", candidate.BlueprintId);
@@ -5402,6 +5555,7 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         command.Parameters.AddWithValue("$non_slot_edits_json", JsonSerializer.Serialize(candidate.NonSlotEdits, BridgeJson.SerializerOptions));
         command.Parameters.AddWithValue("$audit_status", candidate.AuditStatus);
         command.Parameters.AddWithValue("$created_at", candidate.CreatedAt.ToString("O"));
+        command.Parameters.AddWithValue("$style_attempts_json", JsonSerializer.Serialize(candidate.StyleAttempts ?? [], BridgeJson.SerializerOptions));
         await command.ExecuteNonQueryAsync();
     }
 

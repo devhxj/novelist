@@ -406,10 +406,19 @@ public sealed partial class NovelistMafToolRegistry
             long blueprint_id,
             [Description("指定 beat id，空数组表示全部目标 beat")]
             string[]? beat_ids = null,
+            [Description("可选候选风格强度矩阵，仅允许 diagnostic_only/loose/moderate/strong；不提供时使用蓝图 beat 的 style_contract 强度")]
+            string[]? style_intensities = null,
+            [Description("每个 beat 最多生成的候选数，默认 1，范围 1-6")]
+            int candidates_per_beat = 0,
             CancellationToken cancellationToken = default)
         {
             return _referenceDrafts.GenerateDraftFromBlueprintAsync(
-                new GenerateReferenceAnchoredDraftPayload(_context.NovelId, blueprint_id, beat_ids ?? []),
+                new GenerateReferenceAnchoredDraftPayload(
+                    _context.NovelId,
+                    blueprint_id,
+                    beat_ids ?? [],
+                    style_intensities,
+                    Math.Clamp(candidates_per_beat <= 0 ? 1 : candidates_per_beat, 1, 6)),
                 cancellationToken);
         }
 

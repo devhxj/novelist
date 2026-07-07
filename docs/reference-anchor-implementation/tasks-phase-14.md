@@ -238,19 +238,27 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 9: Style-Guided Candidate Generation
 
+**Status:** Complete for the first auditable style-guided candidate boundary. Draft generation now accepts optional style intensity matrices, passes a beat-scoped style context into material adaptation, produces multiple candidates for loose/moderate/strong settings when requested, and records each candidate's attempted style obligations without copying source text. Candidate records persist `style_attempts` with profile ids, dimensions, requested intensity, minimum fit, closeness policy, evidence/risk terms, selected-material fit score, low-confidence retrieval status, and attempt status. The workflow still returns candidates only and does not write chapter content.
+
 **Description:** Generate beat-scoped candidates that use selected materials and style contracts while preserving facts, POV, and rewrite budget.
 
 **Acceptance criteria:**
 
-- [ ] Candidate generation receives one approved beat contract plus selected material/style evidence links.
-- [ ] Candidate output records which style features it attempted to satisfy.
-- [ ] Multiple candidates can be generated with different style-intensity settings.
-- [ ] Generated candidates never write directly to chapter content.
+- [x] Candidate generation receives one approved beat contract plus selected material/style evidence links. The internal material adaptation payload now carries a structured `style_context` derived from the approved beat style contract and selected material score components; agent-facing tools cannot forge this context.
+- [x] Candidate output records which style features it attempted to satisfy. `ReferenceDraftParagraphCandidatePayload.style_attempts` stores structured style obligations and selected-material style-fit metadata, not source text or prompt text.
+- [x] Multiple candidates can be generated with different style-intensity settings. `GenerateReferenceAnchoredDraftPayload` supports optional `style_intensities` and `candidates_per_beat`, and the frontend style-contract path requests loose/moderate/strong candidates.
+- [x] Generated candidates never write directly to chapter content. Generation still returns `ReferenceAnchoredDraftPayload` candidates only; existing no-`SaveContent` browser and integration checks remain in place.
 
 **Verification:**
 
-- [ ] Integration tests for loose/moderate/strong style candidate generation with fake provider.
-- [ ] Guardrail tests for no `SaveContent`.
+- [x] Integration tests for loose/moderate/strong style candidate generation with fake provider. `GenerateDraftRecordsStyleAttemptsForLooseModerateAndStrongCandidates` verifies the style context reaches the fake reference adapter, three candidates are returned, and persisted candidates can be audited.
+- [x] Guardrail tests for no `SaveContent`. Existing candidate-only integration coverage and the reference-style browser workflow continue to assert the reference-anchor workflow does not call `SaveContent`.
+
+**Implementation notes:**
+
+- `ReferenceDraftStyleAttemptPayload` is intentionally structured and source-text-free. It records ids, feature names, requested intensity, fit thresholds, retrieval status, and risk/evidence labels only.
+- `reference_draft_paragraph_candidates.style_attempts_json` is additive and defaults to `[]` for existing databases.
+- `BlueprintDetail` displays compact style-attempt chips on generated candidates; the browser workflow asserts loose/moderate/strong attempts and exact bridge payloads.
 
 **Dependencies:** Tasks 1-8.
 

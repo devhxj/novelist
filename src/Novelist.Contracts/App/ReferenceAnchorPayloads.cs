@@ -379,7 +379,10 @@ public sealed record AdaptReferenceMaterialPayload(
     [property: JsonPropertyName("material_id")] string MaterialId,
     [property: JsonPropertyName("slot_values")] IReadOnlyList<ReferenceSlotValuePayload> SlotValues,
     [property: JsonPropertyName("max_rewrite_level")] string MaxRewriteLevel,
-    [property: JsonPropertyName("scene_facts")] IReadOnlyList<string> SceneFacts);
+    [property: JsonPropertyName("scene_facts")] IReadOnlyList<string> SceneFacts,
+    [property: JsonPropertyName("style_context")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    ReferenceDraftStyleAttemptPayload? StyleContext = null);
 
 public sealed record AdaptReferenceMaterialResultPayload(
     [property: JsonPropertyName("candidate_id")] string CandidateId,
