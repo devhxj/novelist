@@ -253,6 +253,176 @@ public sealed class ReferenceAnchoredDraftAuditorTests
         Assert.Contains(audit.RequiredFixes, item => item.Contains("strong", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Theory]
+    [InlineData(ReferenceRewriteLevels.L0, "passed")]
+    [InlineData(ReferenceRewriteLevels.L1, "passed")]
+    [InlineData(ReferenceRewriteLevels.L2, "failed")]
+    [InlineData(ReferenceRewriteLevels.L3, "failed")]
+    [InlineData(ReferenceRewriteLevels.L4, "failed")]
+    public void BuildDraftAuditSourceLeakMatrixHonorsRewriteLevel(
+        string rewriteLevel,
+        string expectedStatus)
+    {
+        const string sourceText = "雨声压低了整条街的呼吸，林岚在门口停住，指尖慢慢发紧，心里一紧。";
+        var blueprint = Blueprint(beat => beat);
+        var candidate = Candidate(blueprint, sourceText) with
+        {
+            RewriteLevel = rewriteLevel,
+            AuditStatus = "passed"
+        };
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>(StringComparer.Ordinal)
+            {
+                [blueprint.Beats[0].BeatId] = SelectedLink(blueprint, candidate, rewriteLevel)
+            },
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [candidate.MaterialId] = sourceText
+            });
+
+        Assert.Equal(expectedStatus, audit.Status);
+        if (rewriteLevel is ReferenceRewriteLevels.L0 or ReferenceRewriteLevels.L1)
+        {
+            Assert.DoesNotContain(audit.RequiredFixes, item => item.Contains("source-leak", StringComparison.OrdinalIgnoreCase));
+        }
+        else
+        {
+            Assert.Contains(audit.RequiredFixes, item => item.Contains("source-leak", StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (rewriteLevel is ReferenceRewriteLevels.L3 or ReferenceRewriteLevels.L4)
+        {
+            Assert.Contains(audit.RequiredFixes, item => item.Contains("high-risk rewrite level " + rewriteLevel, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    [Theory]
+    [InlineData(ReferenceStyleImitationIntensities.DiagnosticOnly, "passed")]
+    [InlineData(ReferenceStyleImitationIntensities.Loose, "passed")]
+    [InlineData(ReferenceStyleImitationIntensities.Moderate, "passed")]
+    [InlineData(ReferenceStyleImitationIntensities.Strong, "failed")]
+    public void BuildDraftAuditSourceLeakThresholdMatrixHonorsImitationIntensity(
+        string imitationIntensity,
+        string expectedStatus)
+    {
+        const string sourceText = "雨声压低了整条街的呼吸，林岚在门口停住，指节慢慢发紧，心里一紧。";
+        const string candidateText = "雨声压低了街的呼吸，林岚却在门口停了一下，指节发紧，心里仍然发沉。";
+        var blueprint = Blueprint(beat => beat with
+        {
+            StyleContract = new ReferenceBlueprintStyleContractPayload(
+                StyleProfileIds: [99],
+                StyleDimensions: ["dialogue_ratio"],
+                ImitationIntensity: imitationIntensity,
+                MinStyleFit: 1.0,
+                AllowedCloseness: "moderate",
+                RequiredEvidenceTypes: ["dialogue_exchange"],
+                ForbiddenStyleRisks: ["source_leak"])
+        });
+        var candidate = Candidate(blueprint, candidateText) with
+        {
+            RewriteLevel = ReferenceRewriteLevels.L2,
+            AuditStatus = "passed"
+        };
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>(StringComparer.Ordinal)
+            {
+                [blueprint.Beats[0].BeatId] = SelectedLink(
+                    blueprint,
+                    candidate,
+                    ReferenceRewriteLevels.L2,
+                    new Dictionary<string, double>(StringComparer.Ordinal)
+                    {
+                        ["style_fit"] = 1.25
+                    },
+                    "Beat 1 fit: selected material with style fit.")
+            },
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [candidate.MaterialId] = sourceText
+            });
+
+        Assert.Equal(expectedStatus, audit.Status);
+        if (string.Equals(imitationIntensity, ReferenceStyleImitationIntensities.Strong, StringComparison.Ordinal))
+        {
+            Assert.Contains(audit.RequiredFixes, item => item.Contains("source-leak", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(audit.RequiredFixes, item => item.Contains("strong", StringComparison.OrdinalIgnoreCase));
+        }
+        else
+        {
+            Assert.DoesNotContain(audit.RequiredFixes, item => item.Contains("source-leak", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    [Theory]
+    [InlineData(ReferenceStyleImitationIntensities.DiagnosticOnly, "passed")]
+    [InlineData(ReferenceStyleImitationIntensities.Loose, "passed")]
+    [InlineData(ReferenceStyleImitationIntensities.Moderate, "passed")]
+    [InlineData(ReferenceStyleImitationIntensities.Strong, "failed")]
+    public void BuildDraftAuditStyleDistanceToleranceMatrixHonorsImitationIntensity(
+        string imitationIntensity,
+        string expectedStatus)
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            StyleContract = new ReferenceBlueprintStyleContractPayload(
+                StyleProfileIds: [99],
+                StyleDimensions: ["dialogue_ratio"],
+                ImitationIntensity: imitationIntensity,
+                MinStyleFit: 0.8,
+                AllowedCloseness: "moderate",
+                RequiredEvidenceTypes: ["dialogue_exchange"],
+                ForbiddenStyleRisks: ["style_distance"])
+        });
+        var candidate = Candidate(
+            blueprint,
+            "雨声压低了整条街的呼吸，林岚心里一紧，指尖在杯沿发紧，却仍然没有后退。") with
+        {
+            RewriteLevel = ReferenceRewriteLevels.L2,
+            AuditStatus = "passed"
+        };
+        var profileFeatures = StyleProfiles(
+            99,
+            NumericStyleFeature("dialogue_ratio", 0.4, "ratio"));
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>(StringComparer.Ordinal)
+            {
+                [blueprint.Beats[0].BeatId] = SelectedLink(
+                    blueprint,
+                    candidate,
+                    ReferenceRewriteLevels.L2,
+                    new Dictionary<string, double>(StringComparer.Ordinal)
+                    {
+                        ["style_fit"] = 1.25
+                    },
+                    "Beat 1 fit: selected material with style fit.")
+            },
+            selectedMaterialTextByMaterialId: null,
+            profileFeatures);
+
+        Assert.Equal(expectedStatus, audit.Status);
+        if (string.Equals(imitationIntensity, ReferenceStyleImitationIntensities.Strong, StringComparison.Ordinal))
+        {
+            Assert.Contains(audit.RequiredFixes, item => item.Contains("style-distance", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(audit.RequiredFixes, item => item.Contains("dialogue_ratio", StringComparison.OrdinalIgnoreCase));
+        }
+        else
+        {
+            Assert.DoesNotContain(audit.RequiredFixes, item => item.Contains("style-distance", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
     [Fact]
     public void BuildDraftAuditFailsWhenSelectedMaterialStyleFitFallsBelowStyleContractMinimum()
     {
@@ -1499,6 +1669,30 @@ public sealed class ReferenceAnchoredDraftAuditorTests
             [],
             [],
             "passed",
+            DateTimeOffset.UnixEpoch);
+    }
+
+    private static ReferenceBlueprintMaterialLinkPayload SelectedLink(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceDraftParagraphCandidatePayload candidate,
+        string rewriteLevel,
+        IReadOnlyDictionary<string, double>? scoreComponents = null,
+        string? fitExplanation = null)
+    {
+        return new ReferenceBlueprintMaterialLinkPayload(
+            "link-" + candidate.CandidateId,
+            blueprint.BlueprintId,
+            blueprint.Beats[0].BeatId,
+            candidate.MaterialId,
+            "show pressure",
+            rewriteLevel,
+            Selected: true,
+            Score: 1,
+            scoreComponents ?? new Dictionary<string, double>(StringComparer.Ordinal)
+            {
+                ["function"] = 1.0
+            },
+            fitExplanation ?? "Beat 1 fit: selected material.",
             DateTimeOffset.UnixEpoch);
     }
 

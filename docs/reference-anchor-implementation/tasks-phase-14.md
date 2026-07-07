@@ -266,7 +266,7 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 10: Style and Source-Leak Audit
 
-**Status:** Partially complete. Reuse audit and anchored draft audit now have deterministic source-leak foundations for non-L0/L1 candidates using exact phrase reuse, n-gram overlap, candidate source coverage, and source-span concentration. Anchored draft audit applies stricter source-leak thresholds for beats whose style contract uses strong imitation, enforces selected-link `min_style_fit`, and compares candidates against persisted deterministic profile numeric features for supported style dimensions. Anchored draft audit payloads now include candidate ids plus a structured readable report, and generated/explicit draft audits persist that report in SQLite without candidate/source text. Full style-quality taxonomy and broader style-intensity evaluation remain open.
+**Status:** Partially complete. Reuse audit and anchored draft audit now have deterministic source-leak foundations for non-L0/L1 candidates using exact phrase reuse, n-gram overlap, candidate source coverage, and source-span concentration. Anchored draft audit applies stricter source-leak thresholds for beats whose style contract uses strong imitation, enforces selected-link `min_style_fit`, and compares candidates against persisted deterministic profile numeric features for supported style dimensions. The anchored-draft test matrix now proves L0/L1 near-copy candidates are not source-leak-failed, L2/L3/L4 near-copy candidates are source-leak-failed, strong imitation catches a boundary source-leak candidate that diagnostic/loose/moderate modes allow, and strong style-distance tolerance is stricter than diagnostic/loose/moderate for the covered numeric-feature boundary. Anchored draft audit payloads now include candidate ids plus a structured readable report, and generated/explicit draft audits persist that report in SQLite without candidate/source text. Full style-quality taxonomy and broader style-intensity evaluation remain open.
 
 **Description:** Add a dedicated audit layer for high-fidelity imitation risk and quality.
 
@@ -280,7 +280,7 @@ The current extractor is deterministic and robust, but limited:
 **Verification:**
 
 - [x] Unit tests for exact phrase, overlap, and similarity thresholds.
-- [ ] Integration tests for L2/L3/L4 rewrite-risk escalation. L2 anchored-draft near-copy, strong-style source-leak tightening, L3/L4 high-rewrite stops, readable audit persistence, and missing-candidate audit persistence are covered; the full style-intensity matrix remains open.
+- [x] Integration tests for L2/L3/L4 rewrite-risk escalation. The anchored-draft auditor matrix now covers L0/L1 pass behavior, L2/L3/L4 source-leak failure, high-rewrite required fixes, strong-style source-leak tightening versus diagnostic/loose/moderate, and strong style-distance tolerance versus diagnostic/loose/moderate. Orchestration-level L3/L4 high-rewrite stops, readable audit persistence, and missing-candidate audit persistence remain covered by existing integration tests.
 - [x] Fixtures proving near-copy candidates fail even when rewrite level is otherwise allowed.
 - [x] Fixtures proving near-copy candidates fail even when style fit is high for strong style contracts.
 - [x] Fixtures proving low selected-link style fit and persisted-profile style-feature distance fail anchored draft audit.
