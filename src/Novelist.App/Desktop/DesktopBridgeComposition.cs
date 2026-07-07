@@ -51,6 +51,7 @@ public static class DesktopBridgeComposition
         var approvalCoordinator = new ToolApprovalCoordinator(eventSink);
         var skillService = new FileSystemSkillCatalogService(options, novelService, llmService);
         var styleSampleService = new FileSystemStyleSampleService(options, novelService);
+        var narrativePatternService = new FileSystemNarrativePatternExtractionService(options, novelService);
         var searchService = new FileSystemWorkspaceSearchService(
             options,
             novelService,
@@ -137,6 +138,7 @@ public static class DesktopBridgeComposition
                 storyMemoryService,
                 referenceSourceFilePicker)
             .RegisterStyleSampleHandlers(styleSampleService)
+            .RegisterNarrativePatternHandlers(narrativePatternService)
             .RegisterReferenceAnchorHandlers(referenceAnchorService)
             .RegisterReferenceStyleProfileHandlers(referenceStyleProfileService)
             .RegisterReferenceAnchoredDraftHandlers(referenceAnchoredDraftService)
