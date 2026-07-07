@@ -731,6 +731,196 @@ public sealed class ReferenceStyleProfileServiceTests : IDisposable
         Assert.Contains("valid JSON", llmRun.DiagnosticsJson, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task FailedStyleProfileBuildPersistsRecoverableBuildStatusWithoutSourceText()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("画像失败恢复测试", "", ""), CancellationToken.None);
+        const string sourceSentinel = "雨声压低了整条街的呼吸";
+        var sourcePath = CreateSourceFile(
+            "style-failure-source.md",
+            $$"""
+            # 第一章
+
+            {{sourceSentinel}}。她说：“先别开门。”
+            """);
+        var anchorService = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await anchorService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "失败恢复参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var materialIds = await ReadMaterialIdsAsync(options, anchor.AnchorId);
+        Assert.NotEmpty(materialIds);
+        await anchorService.DeleteMaterialsAsync(
+            new DeleteReferenceMaterialsPayload(novel.Id, materialIds),
+            CancellationToken.None);
+        var styleService = new SqliteReferenceStyleProfileService(options, novels);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () => await styleService.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                novel.Id,
+                "失败画像",
+                "",
+                [anchor.AnchorId],
+                ["user_provided"],
+                [ReferenceSourceTrustLevels.UserVerified],
+                BuildId: "style-build-failed"),
+            CancellationToken.None).AsTask());
+
+        var status = await styleService.GetStyleProfileBuildStatusAsync(
+            new GetReferenceStyleProfileBuildStatusPayload(novel.Id, "style-build-failed"),
+            CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal("style-build-failed", status.BuildId);
+        Assert.Equal(ReferenceStyleProfileBuildStatuses.Failed, status.Status);
+        Assert.Equal(ReferenceStyleProfileBuildStages.Failed, status.Stage);
+        Assert.Null(status.ProfileId);
+        Assert.Equal([anchor.AnchorId], status.AnchorIds);
+        Assert.Equal([anchor.SourceFileHash], status.SourceHashes);
+        Assert.Equal("ArgumentException", status.ErrorCode);
+        Assert.DoesNotContain(sourceSentinel, status.ErrorMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain(sourcePath, status.ErrorMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain(status.Diagnostics, item => item.Contains(sourceSentinel, StringComparison.Ordinal));
+        Assert.DoesNotContain(status.Diagnostics, item => item.Contains(sourcePath, StringComparison.Ordinal));
+        var buildColumns = await ReadTableColumnsAsync(options, "reference_style_profile_builds");
+        Assert.DoesNotContain(buildColumns, column => column.Contains("text", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(buildColumns, column => column.Contains("path", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(buildColumns, column => column.Contains("prompt", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(buildColumns, column => column.Contains("content", StringComparison.OrdinalIgnoreCase));
+
+        var reloadedStatus = await new SqliteReferenceStyleProfileService(options, novels).GetStyleProfileBuildStatusAsync(
+            new GetReferenceStyleProfileBuildStatusPayload(novel.Id, "style-build-failed"),
+            CancellationToken.None);
+        Assert.NotNull(reloadedStatus);
+        Assert.Equal(ReferenceStyleProfileBuildStatuses.Failed, reloadedStatus.Status);
+
+        var profilesAfterFailure = await styleService.GetStyleProfilesAsync(
+            new GetReferenceStyleProfilesPayload(novel.Id, IncludeArchived: true),
+            CancellationToken.None);
+        Assert.DoesNotContain(profilesAfterFailure, profile => profile.Title == "失败画像");
+
+        await anchorService.RestoreMaterialsAsync(
+            new RestoreReferenceMaterialsPayload(novel.Id, materialIds),
+            CancellationToken.None);
+        var recovered = await new SqliteReferenceStyleProfileService(options, novels).BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                novel.Id,
+                "恢复后画像",
+                "",
+                [anchor.AnchorId],
+                ["user_provided"],
+                [ReferenceSourceTrustLevels.UserVerified],
+                BuildId: "style-build-recovered"),
+            CancellationToken.None);
+        Assert.True(recovered.ProfileId > 0);
+        var recoveredStatus = await styleService.GetStyleProfileBuildStatusAsync(
+            new GetReferenceStyleProfileBuildStatusPayload(novel.Id, "style-build-recovered"),
+            CancellationToken.None);
+        Assert.NotNull(recoveredStatus);
+        Assert.Equal(ReferenceStyleProfileBuildStatuses.Completed, recoveredStatus.Status);
+        Assert.Equal(recovered.ProfileId, recoveredStatus.ProfileId);
+    }
+
+    [Fact]
+    public async Task CancelledStyleProfileBuildPersistsCancelledStatusWithoutActiveProfile()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("画像取消测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "style-cancel-source.md",
+            """
+            # 第一章
+
+            雨声压低了整条街的呼吸。她说：“先别开门。”
+            """);
+        var anchorService = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await anchorService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "取消参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var analyzer = new CancellingReferenceStyleLlmAnalyzer();
+        var styleService = new SqliteReferenceStyleProfileService(options, novels, analyzer);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await styleService.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                novel.Id,
+                "取消画像",
+                "",
+                [anchor.AnchorId],
+                ["user_provided"],
+                [ReferenceSourceTrustLevels.UserVerified],
+                BuildId: "style-build-cancelled"),
+            CancellationToken.None).AsTask());
+
+        var status = await styleService.GetStyleProfileBuildStatusAsync(
+            new GetReferenceStyleProfileBuildStatusPayload(novel.Id, "style-build-cancelled"),
+            CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal(ReferenceStyleProfileBuildStatuses.Cancelled, status.Status);
+        Assert.Equal(ReferenceStyleProfileBuildStages.Cancelled, status.Stage);
+        Assert.Null(status.ProfileId);
+        Assert.NotNull(status.CancelledAt);
+
+        var profiles = await styleService.GetStyleProfilesAsync(
+            new GetReferenceStyleProfilesPayload(novel.Id, IncludeArchived: true),
+            CancellationToken.None);
+        Assert.DoesNotContain(profiles, profile => profile.Title == "取消画像");
+    }
+
+    [Fact]
+    public async Task CancelStyleProfileBuildSignalsActiveBuildAndPersistsCancelledStatus()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("主动取消画像测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "style-explicit-cancel-source.md",
+            """
+            # 第一章
+
+            雨声压低了整条街的呼吸。她说：“先别开门。”
+            """);
+        var anchorService = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await anchorService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "主动取消参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var analyzer = new BlockingReferenceStyleLlmAnalyzer();
+        var styleService = new SqliteReferenceStyleProfileService(options, novels, analyzer);
+        var buildTask = styleService.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                novel.Id,
+                "主动取消画像",
+                "",
+                [anchor.AnchorId],
+                ["user_provided"],
+                [ReferenceSourceTrustLevels.UserVerified],
+                BuildId: "style-build-explicit-cancel"),
+            CancellationToken.None).AsTask();
+
+        await analyzer.WaitUntilStartedAsync(TimeSpan.FromSeconds(10));
+        var cancelStatus = await styleService.CancelStyleProfileBuildAsync(
+            new CancelReferenceStyleProfileBuildPayload(novel.Id, "style-build-explicit-cancel"),
+            CancellationToken.None);
+        Assert.Equal(ReferenceStyleProfileBuildStatuses.Cancelled, cancelStatus.Status);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await buildTask);
+        var persisted = await styleService.GetStyleProfileBuildStatusAsync(
+            new GetReferenceStyleProfileBuildStatusPayload(novel.Id, "style-build-explicit-cancel"),
+            CancellationToken.None);
+        Assert.NotNull(persisted);
+        Assert.Equal(ReferenceStyleProfileBuildStatuses.Cancelled, persisted.Status);
+        Assert.NotNull(persisted.CancelledAt);
+        Assert.Null(persisted.ProfileId);
+
+        var profiles = await styleService.GetStyleProfilesAsync(
+            new GetReferenceStyleProfilesPayload(novel.Id, IncludeArchived: true),
+            CancellationToken.None);
+        Assert.DoesNotContain(profiles, profile => profile.Title == "主动取消画像");
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -898,6 +1088,46 @@ public sealed class ReferenceStyleProfileServiceTests : IDisposable
         return rows;
     }
 
+    private static async ValueTask<IReadOnlyList<string>> ReadMaterialIdsAsync(
+        AppInitializationOptions options,
+        long anchorId)
+    {
+        await using var connection = await OpenReferenceConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT material_id
+            FROM reference_materials
+            WHERE anchor_id = $anchor_id
+            ORDER BY material_id ASC;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        var rows = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            rows.Add(reader.GetString(0));
+        }
+
+        return rows;
+    }
+
+    private static async ValueTask<IReadOnlyList<string>> ReadTableColumnsAsync(
+        AppInitializationOptions options,
+        string tableName)
+    {
+        await using var connection = await OpenReferenceConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA table_info(" + tableName + ");";
+        var columns = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            columns.Add(reader.GetString(1));
+        }
+
+        return columns;
+    }
+
     private static async ValueTask<bool> TableExistsAsync(AppInitializationOptions options, string tableName)
     {
         await using var connection = await OpenReferenceConnectionAsync(options);
@@ -1005,6 +1235,39 @@ public sealed class ReferenceStyleProfileServiceTests : IDisposable
         {
             LastRequest = request;
             return ValueTask.FromResult(_handler(request));
+        }
+    }
+
+    private sealed class CancellingReferenceStyleLlmAnalyzer : IReferenceStyleLlmAnalyzer
+    {
+        public ValueTask<string?> AnalyzeAsync(
+            ReferenceStyleLlmAnalysisRequestPayload request,
+            CancellationToken cancellationToken)
+        {
+            throw new OperationCanceledException("cancelled by test");
+        }
+    }
+
+    private sealed class BlockingReferenceStyleLlmAnalyzer : IReferenceStyleLlmAnalyzer
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async ValueTask<string?> AnalyzeAsync(
+            ReferenceStyleLlmAnalysisRequestPayload request,
+            CancellationToken cancellationToken)
+        {
+            _started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return null;
+        }
+
+        public async ValueTask WaitUntilStartedAsync(TimeSpan timeout)
+        {
+            var completed = await Task.WhenAny(_started.Task, Task.Delay(timeout));
+            if (!ReferenceEquals(completed, _started.Task))
+            {
+                throw new TimeoutException("Style analyzer did not start.");
+            }
         }
     }
 }

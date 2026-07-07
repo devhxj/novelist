@@ -245,6 +245,12 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             [ReferenceSourceTrustLevels.UserVerified, ReferenceSourceTrustLevels.Imported]));
         await AssertOkAsync(dispatcher, "GetReferenceStyleProfiles", new GetReferenceStyleProfilesPayload(42, IncludeArchived: true));
         await AssertOkAsync(dispatcher, "GetReferenceStyleProfile", 42L, 501L);
+        await AssertOkAsync(dispatcher, "GetReferenceStyleProfileBuildStatus", new GetReferenceStyleProfileBuildStatusPayload(
+            42,
+            "style-build-1"));
+        await AssertOkAsync(dispatcher, "CancelReferenceStyleProfileBuild", new CancelReferenceStyleProfileBuildPayload(
+            42,
+            "style-build-1"));
         await AssertOkAsync(dispatcher, "ArchiveReferenceStyleProfile", new ArchiveReferenceStyleProfilePayload(42, 501));
         await AssertOkAsync(dispatcher, "RestoreReferenceStyleProfile", new RestoreReferenceStyleProfilePayload(42, 501));
         await AssertOkAsync(dispatcher, "CompareReferenceStyleProfiles", new CompareReferenceStyleProfilesPayload(42, 501, 502));
@@ -254,6 +260,8 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "BuildStyleProfile:42:雨夜克制风格:deterministic baseline:99,100:user_provided,licensed:user_verified,imported",
                 "GetStyleProfiles:42:True",
                 "GetStyleProfile:42:501",
+                "GetStyleProfileBuildStatus:42:style-build-1",
+                "CancelStyleProfileBuild:42:style-build-1",
                 "ArchiveStyleProfile:42:501",
                 "RestoreStyleProfile:42:501",
                 "CompareStyleProfiles:42:501:502"
@@ -559,6 +567,24 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"GetStyleProfile:{novelId}:{profileId}");
             return ValueTask.FromResult<ReferenceStyleProfilePayload?>(null);
+        }
+
+        public ValueTask<ReferenceStyleProfileBuildStatusPayload?> GetStyleProfileBuildStatusAsync(
+            GetReferenceStyleProfileBuildStatusPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"GetStyleProfileBuildStatus:{input.NovelId}:{input.BuildId}");
+            return ValueTask.FromResult<ReferenceStyleProfileBuildStatusPayload?>(null);
+        }
+
+        public ValueTask<ReferenceStyleProfileBuildStatusPayload> CancelStyleProfileBuildAsync(
+            CancelReferenceStyleProfileBuildPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"CancelStyleProfileBuild:{input.NovelId}:{input.BuildId}");
+            return ValueTask.FromResult<ReferenceStyleProfileBuildStatusPayload>(null!);
         }
 
         public ValueTask<ReferenceStyleProfilePayload> ArchiveStyleProfileAsync(

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
@@ -11,6 +12,8 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
 {
     private const long WorkspaceCorpusNovelId = 0;
     private const int MaxAnchorCount = 50;
+    private const int MaxBuildIdLength = 128;
+    private const int StyleProfileBuildProgressTotal = 7;
     private const int MaxLlmAnalysisWindows = 64;
     private const int MaxLlmAnalysisWindowTextChars = 1200;
     private static readonly JsonSerializerOptions JsonOptions = BridgeJson.SerializerOptions;
@@ -31,6 +34,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
     private readonly INovelService _novels;
     private readonly IReferenceStyleLlmAnalyzer? _llmAnalyzer;
     private readonly SemaphoreSlim _mutex = new(1, 1);
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeBuildCancellations = new(StringComparer.Ordinal);
 
     public SqliteReferenceStyleProfileService(
         AppInitializationOptions? options = null,
@@ -47,45 +51,128 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
-        ValidateNovelId(input.NovelId);
-        await EnsureNovelExistsAsync(input.NovelId, cancellationToken);
-
-        var title = NormalizeRequiredText(input.Title, nameof(input.Title), maxLength: 200);
-        var description = NormalizeOptionalText(input.Description, nameof(input.Description), maxLength: 1000);
-        var anchorIds = NormalizeAnchorIds(input.AnchorIds);
-        var allowedLicenseStatuses = NormalizeAllowedList(
-            input.AllowedLicenseStatuses,
-            DefaultAllowedLicenseStatuses,
-            AllowedLicenseStatuses,
-            nameof(input.AllowedLicenseStatuses));
-        var allowedSourceTrustLevels = NormalizeAllowedList(
-            input.AllowedSourceTrustLevels,
-            DefaultAllowedSourceTrustLevels,
-            AllowedSourceTrustLevels,
-            nameof(input.AllowedSourceTrustLevels));
-        var now = DateTimeOffset.UtcNow;
+        var buildId = NormalizeBuildId(input.BuildId);
         var databasePath = await DatabasePathAsync(cancellationToken);
+        var titleForFailure = NormalizeBestEffortTitle(input.Title);
+        var anchorIdsForFailure = NormalizeBestEffortAnchorIds(input.AnchorIds);
 
-        await _mutex.WaitAsync(cancellationToken);
+        long novelIdForFailure = Math.Max(0, input.NovelId);
+        string title = titleForFailure;
+        IReadOnlyList<long> anchorIds = anchorIdsForFailure;
+        IReadOnlyList<string> sourceHashesForFailure = [];
+        var mutexAcquired = false;
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (!_activeBuildCancellations.TryAdd(buildId, linkedCancellation))
+        {
+            throw new InvalidOperationException("Reference style profile build is already running.");
+        }
+
+        var buildCancellationToken = linkedCancellation.Token;
+
         try
         {
-            await EnsureSchemaAsync(databasePath, cancellationToken);
-            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            await EnsureSchemaAsync(databasePath, buildCancellationToken);
+            await UpsertStyleBuildStatusAsync(
+                databasePath,
+                buildId,
+                Math.Max(0, input.NovelId),
+                profileId: null,
+                titleForFailure,
+                ReferenceStyleProfileBuildStatuses.Running,
+                ReferenceStyleProfileBuildStages.Queued,
+                progressCompleted: 0,
+                StyleProfileBuildProgressTotal,
+                anchorIdsForFailure,
+                [],
+                [],
+                errorCode: null,
+                errorMessage: null,
+                completedAt: null,
+                cancelledAt: null,
+                buildCancellationToken);
+            await _mutex.WaitAsync(buildCancellationToken);
+            mutexAcquired = true;
+            await EnsureSchemaAsync(databasePath, buildCancellationToken);
+            await UpdateStyleBuildProgressAsync(
+                databasePath,
+                buildId,
+                novelIdForFailure,
+                title,
+                ReferenceStyleProfileBuildStages.Validating,
+                progressCompleted: 1,
+                anchorIds,
+                sourceHashesForFailure,
+                buildCancellationToken);
+            ValidateNovelId(input.NovelId);
+            novelIdForFailure = input.NovelId;
+            await EnsureNovelExistsAsync(input.NovelId, buildCancellationToken);
+
+            title = NormalizeRequiredText(input.Title, nameof(input.Title), maxLength: 200);
+            var description = NormalizeOptionalText(input.Description, nameof(input.Description), maxLength: 1000);
+            anchorIds = NormalizeAnchorIds(input.AnchorIds);
+            var allowedLicenseStatuses = NormalizeAllowedList(
+                input.AllowedLicenseStatuses,
+                DefaultAllowedLicenseStatuses,
+                AllowedLicenseStatuses,
+                nameof(input.AllowedLicenseStatuses));
+            var allowedSourceTrustLevels = NormalizeAllowedList(
+                input.AllowedSourceTrustLevels,
+                DefaultAllowedSourceTrustLevels,
+                AllowedSourceTrustLevels,
+                nameof(input.AllowedSourceTrustLevels));
+            var now = DateTimeOffset.UtcNow;
+
+            await EnsureSchemaAsync(databasePath, buildCancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, buildCancellationToken);
+            await ThrowIfStyleBuildCancelledAsync(connection, transaction: null, buildId, buildCancellationToken);
+            await UpdateStyleBuildProgressAsync(
+                databasePath,
+                buildId,
+                input.NovelId,
+                title,
+                ReferenceStyleProfileBuildStages.ReadingSources,
+                progressCompleted: 2,
+                anchorIds,
+                sourceHashesForFailure,
+                buildCancellationToken);
             var sources = await ReadAccessibleSourcesAsync(
                 connection,
                 input.NovelId,
                 anchorIds,
                 allowedLicenseStatuses,
                 allowedSourceTrustLevels,
-                cancellationToken);
-            var materials = await ReadActiveMaterialsAsync(connection, anchorIds, cancellationToken);
+                buildCancellationToken);
+            sourceHashesForFailure = sources.Select(source => source.SourceFileHash).ToArray();
+            await ThrowIfStyleBuildCancelledAsync(connection, transaction: null, buildId, buildCancellationToken);
+            await UpdateStyleBuildProgressAsync(
+                databasePath,
+                buildId,
+                input.NovelId,
+                title,
+                ReferenceStyleProfileBuildStages.ReadingMaterials,
+                progressCompleted: 3,
+                anchorIds,
+                sourceHashesForFailure,
+                buildCancellationToken);
+            var materials = await ReadActiveMaterialsAsync(connection, anchorIds, buildCancellationToken);
             if (materials.Count == 0)
             {
                 throw new ArgumentException("Style profile requires at least one active reference material.", nameof(input.AnchorIds));
             }
 
-            var sourceHashes = sources.Select(source => source.SourceFileHash).ToArray();
-            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            var sourceHashes = sourceHashesForFailure;
+            await ThrowIfStyleBuildCancelledAsync(connection, transaction: null, buildId, buildCancellationToken);
+            await UpdateStyleBuildProgressAsync(
+                databasePath,
+                buildId,
+                input.NovelId,
+                title,
+                ReferenceStyleProfileBuildStages.PersistingProfile,
+                progressCompleted: 4,
+                anchorIds,
+                sourceHashes,
+                buildCancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(buildCancellationToken);
             try
             {
                 var profileId = await InsertProfileShellAsync(
@@ -99,7 +186,14 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                     allowedLicenseStatuses,
                     allowedSourceTrustLevels,
                     now,
-                    cancellationToken);
+                    buildCancellationToken);
+                await UpdateStyleBuildProfileIdAsync(
+                    connection,
+                    transaction,
+                    buildId,
+                    profileId,
+                    now,
+                    buildCancellationToken);
 
                 await InsertProfileSourcesAsync(
                     connection,
@@ -107,22 +201,43 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                     profileId,
                     sources,
                     materials,
-                    cancellationToken);
+                    buildCancellationToken);
 
+                await ThrowIfStyleBuildCancelledAsync(connection, transaction, buildId, buildCancellationToken);
+                await UpdateStyleBuildProgressAsync(
+                    connection,
+                    transaction,
+                    buildId,
+                    input.NovelId,
+                    profileId,
+                    title,
+                    ReferenceStyleProfileBuildStatuses.Running,
+                    ReferenceStyleProfileBuildStages.DeterministicBaseline,
+                    progressCompleted: 5,
+                    StyleProfileBuildProgressTotal,
+                    anchorIds,
+                    sourceHashes,
+                    [],
+                    errorCode: null,
+                    errorMessage: null,
+                    completedAt: null,
+                    cancelledAt: null,
+                    now,
+                    buildCancellationToken);
                 var baseline = ReferenceStyleDeterministicBaselineExtractor.Build(profileId, materials);
                 await InsertEvidenceAsync(
                     connection,
                     transaction,
                     baseline.EvidenceSpans,
                     now,
-                    cancellationToken);
+                    buildCancellationToken);
                 await InsertMaterialStyleTagsAsync(
                     connection,
                     transaction,
                     baseline.EvidenceSpans,
                     ReferenceStyleAnalyzerVersions.DeterministicV1,
                     now,
-                    cancellationToken);
+                    buildCancellationToken);
                 await InsertAnalysisRunAsync(
                     connection,
                     transaction,
@@ -134,7 +249,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                     "completed",
                     baseline.Diagnostics,
                     now,
-                    cancellationToken);
+                    buildCancellationToken);
 
                 var analyzerVersion = ReferenceStyleAnalyzerVersions.DeterministicV1;
                 var analyzerSource = ReferenceStyleAnalyzerSources.DeterministicBaseline;
@@ -142,8 +257,29 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                 var evidenceSpans = baseline.EvidenceSpans;
                 if (_llmAnalyzer is not null)
                 {
+                    await ThrowIfStyleBuildCancelledAsync(connection, transaction, buildId, buildCancellationToken);
+                    await UpdateStyleBuildProgressAsync(
+                        connection,
+                        transaction,
+                        buildId,
+                        input.NovelId,
+                        profileId,
+                        title,
+                        ReferenceStyleProfileBuildStatuses.Running,
+                        ReferenceStyleProfileBuildStages.LlmAnalysis,
+                        progressCompleted: 6,
+                        StyleProfileBuildProgressTotal,
+                        anchorIds,
+                        sourceHashes,
+                        [],
+                        errorCode: null,
+                        errorMessage: null,
+                        completedAt: null,
+                        cancelledAt: null,
+                        now,
+                        buildCancellationToken);
                     var windows = BuildLlmAnalysisWindows(materials);
-                    var validation = await RunLlmAnalysisAsync(profileId, windows, cancellationToken);
+                    var validation = await RunLlmAnalysisAsync(profileId, windows, buildCancellationToken);
                     if (validation is not null)
                     {
                         await InsertAnalysisRunAsync(
@@ -157,7 +293,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                             validation.Status,
                             BuildLlmDiagnostics(validation),
                             now,
-                            cancellationToken);
+                            buildCancellationToken);
 
                         if (validation.EvidenceSpans.Count > 0)
                         {
@@ -166,14 +302,14 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                                 transaction,
                                 validation.EvidenceSpans,
                                 now,
-                                cancellationToken);
+                                buildCancellationToken);
                             await InsertMaterialStyleTagsAsync(
                                 connection,
                                 transaction,
                                 validation.EvidenceSpans,
                                 ReferenceStyleAnalyzerVersions.LlmAssistedV1,
                                 now,
-                                cancellationToken);
+                                buildCancellationToken);
                             analyzerVersion = ReferenceStyleAnalyzerVersions.LlmAssistedV1;
                             analyzerSource = ReferenceStyleAnalyzerSources.LlmAssisted;
                             features = MergeLlmCategoricalFeatures(baseline.Features, validation.EvidenceSpans);
@@ -191,9 +327,29 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                     analyzerVersion,
                     analyzerSource,
                     now,
-                    cancellationToken);
+                    buildCancellationToken);
+                await UpdateStyleBuildProgressAsync(
+                    connection,
+                    transaction,
+                    buildId,
+                    input.NovelId,
+                    profileId,
+                    title,
+                    ReferenceStyleProfileBuildStatuses.Completed,
+                    ReferenceStyleProfileBuildStages.Completed,
+                    StyleProfileBuildProgressTotal,
+                    StyleProfileBuildProgressTotal,
+                    anchorIds,
+                    sourceHashes,
+                    [],
+                    errorCode: null,
+                    errorMessage: null,
+                    completedAt: now,
+                    cancelledAt: null,
+                    now,
+                    buildCancellationToken);
 
-                await transaction.CommitAsync(cancellationToken);
+                await transaction.CommitAsync(buildCancellationToken);
 
                 return new ReferenceStyleProfilePayload(
                     profileId,
@@ -217,13 +373,28 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             }
             catch
             {
-                await transaction.RollbackAsync(cancellationToken);
+                await transaction.RollbackAsync(CancellationToken.None);
                 throw;
             }
         }
+        catch (OperationCanceledException)
+        {
+            await MarkStyleBuildCancelledAsync(databasePath, buildId, novelIdForFailure, title, anchorIds, sourceHashesForFailure, CancellationToken.None);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            await MarkStyleBuildFailedAsync(databasePath, buildId, novelIdForFailure, title, anchorIds, sourceHashesForFailure, exception, CancellationToken.None);
+            throw;
+        }
         finally
         {
-            _mutex.Release();
+            if (mutexAcquired)
+            {
+                _mutex.Release();
+            }
+
+            _activeBuildCancellations.TryRemove(buildId, out _);
         }
     }
 
@@ -288,6 +459,78 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         {
             _mutex.Release();
         }
+    }
+
+    public async ValueTask<ReferenceStyleProfileBuildStatusPayload?> GetStyleProfileBuildStatusAsync(
+        GetReferenceStyleProfileBuildStatusPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        var buildId = NormalizeBuildId(input.BuildId);
+        var databasePath = await DatabasePathAsync(cancellationToken);
+        await EnsureSchemaAsync(databasePath, cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        return await ReadStyleBuildStatusAsync(connection, input.NovelId, buildId, cancellationToken);
+    }
+
+    public async ValueTask<ReferenceStyleProfileBuildStatusPayload> CancelStyleProfileBuildAsync(
+        CancelReferenceStyleProfileBuildPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        var buildId = NormalizeBuildId(input.BuildId);
+        var databasePath = await DatabasePathAsync(cancellationToken);
+        await EnsureSchemaAsync(databasePath, cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        var existing = await ReadStyleBuildStatusAsync(connection, input.NovelId, buildId, cancellationToken)
+            ?? throw new ArgumentException($"Reference style profile build '{buildId}' is not accessible.", nameof(input.BuildId));
+        if (string.Equals(existing.Status, ReferenceStyleProfileBuildStatuses.Completed, StringComparison.Ordinal) ||
+            string.Equals(existing.Status, ReferenceStyleProfileBuildStatuses.Failed, StringComparison.Ordinal) ||
+            string.Equals(existing.Status, ReferenceStyleProfileBuildStatuses.Cancelled, StringComparison.Ordinal))
+        {
+            return existing;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (_activeBuildCancellations.TryGetValue(buildId, out var activeCancellation))
+        {
+            activeCancellation.Cancel();
+            return existing with
+            {
+                Status = ReferenceStyleProfileBuildStatuses.Cancelled,
+                Stage = ReferenceStyleProfileBuildStages.Cancelled,
+                Diagnostics = ["cancel_requested"],
+                UpdatedAt = now,
+                CancelledAt = now
+            };
+        }
+
+        await UpsertStyleBuildStatusAsync(
+            connection,
+            transaction: null,
+            existing.BuildId,
+            existing.NovelId,
+            existing.ProfileId,
+            existing.Title,
+            ReferenceStyleProfileBuildStatuses.Cancelled,
+            ReferenceStyleProfileBuildStages.Cancelled,
+            existing.ProgressCompleted,
+            existing.ProgressTotal,
+            existing.AnchorIds,
+            existing.SourceHashes,
+            ["cancel_requested"],
+            errorCode: null,
+            errorMessage: null,
+            createdAt: existing.CreatedAt,
+            updatedAt: now,
+            completedAt: existing.CompletedAt,
+            cancelledAt: now,
+            cancellationToken);
+
+        return await ReadStyleBuildStatusAsync(connection, input.NovelId, buildId, cancellationToken)
+            ?? throw new InvalidOperationException("Reference style profile build disappeared after cancellation.");
     }
 
     public async ValueTask<ReferenceStyleProfilePayload> ArchiveStyleProfileAsync(
@@ -473,6 +716,27 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
               archived_at TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS reference_style_profile_builds (
+              build_id TEXT PRIMARY KEY,
+              novel_id INTEGER NOT NULL,
+              profile_id INTEGER,
+              title TEXT NOT NULL,
+              status TEXT NOT NULL,
+              stage TEXT NOT NULL,
+              progress_completed INTEGER NOT NULL,
+              progress_total INTEGER NOT NULL,
+              anchor_ids_json TEXT NOT NULL,
+              source_hashes_json TEXT NOT NULL,
+              diagnostics_json TEXT NOT NULL,
+              error_code TEXT,
+              error_message TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              completed_at TEXT,
+              cancelled_at TEXT,
+              FOREIGN KEY(profile_id) REFERENCES reference_style_profiles(profile_id) ON DELETE SET NULL
+            );
+
             CREATE TABLE IF NOT EXISTS reference_style_profile_sources (
               profile_id INTEGER NOT NULL,
               anchor_id INTEGER NOT NULL,
@@ -539,6 +803,9 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
 
             CREATE INDEX IF NOT EXISTS idx_reference_style_profiles_novel
               ON reference_style_profiles(novel_id, status, updated_at);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_style_profile_builds_novel
+              ON reference_style_profile_builds(novel_id, updated_at);
 
             CREATE INDEX IF NOT EXISTS idx_reference_style_profile_sources_anchor
               ON reference_style_profile_sources(anchor_id);
@@ -622,6 +889,356 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         command.Parameters.AddWithValue("$private_visibility", ReferenceCorpusVisibilities.Private);
         command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask UpdateStyleBuildProfileIdAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string buildId,
+        long profileId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE reference_style_profile_builds
+            SET profile_id = $profile_id,
+                updated_at = $updated_at
+            WHERE build_id = $build_id;
+            """;
+        command.Parameters.AddWithValue("$profile_id", profileId);
+        command.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
+        command.Parameters.AddWithValue("$build_id", buildId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask UpdateStyleBuildProgressAsync(
+        string databasePath,
+        string buildId,
+        long novelId,
+        string title,
+        string stage,
+        int progressCompleted,
+        IReadOnlyList<long> anchorIds,
+        IReadOnlyList<string> sourceHashes,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await UpsertStyleBuildStatusAsync(
+            connection,
+            transaction: null,
+            buildId,
+            novelId,
+            profileId: null,
+            title,
+            ReferenceStyleProfileBuildStatuses.Running,
+            stage,
+            progressCompleted,
+            StyleProfileBuildProgressTotal,
+            anchorIds,
+            sourceHashes,
+            [],
+            errorCode: null,
+            errorMessage: null,
+            createdAt: DateTimeOffset.UtcNow,
+            updatedAt: DateTimeOffset.UtcNow,
+            completedAt: null,
+            cancelledAt: null,
+            cancellationToken);
+    }
+
+    private static async ValueTask UpdateStyleBuildProgressAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string buildId,
+        long novelId,
+        long? profileId,
+        string title,
+        string status,
+        string stage,
+        int progressCompleted,
+        int progressTotal,
+        IReadOnlyList<long> anchorIds,
+        IReadOnlyList<string> sourceHashes,
+        IReadOnlyList<string> diagnostics,
+        string? errorCode,
+        string? errorMessage,
+        DateTimeOffset? completedAt,
+        DateTimeOffset? cancelledAt,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        await UpsertStyleBuildStatusAsync(
+            connection,
+            transaction,
+            buildId,
+            novelId,
+            profileId,
+            title,
+            status,
+            stage,
+            progressCompleted,
+            progressTotal,
+            anchorIds,
+            sourceHashes,
+            diagnostics,
+            errorCode,
+            errorMessage,
+            createdAt: now,
+            updatedAt: now,
+            completedAt,
+            cancelledAt,
+            cancellationToken);
+    }
+
+    private static async ValueTask UpsertStyleBuildStatusAsync(
+        string databasePath,
+        string buildId,
+        long novelId,
+        long? profileId,
+        string title,
+        string status,
+        string stage,
+        int progressCompleted,
+        int progressTotal,
+        IReadOnlyList<long> anchorIds,
+        IReadOnlyList<string> sourceHashes,
+        IReadOnlyList<string> diagnostics,
+        string? errorCode,
+        string? errorMessage,
+        DateTimeOffset? completedAt,
+        DateTimeOffset? cancelledAt,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        await UpsertStyleBuildStatusAsync(
+            connection,
+            transaction: null,
+            buildId,
+            novelId,
+            profileId,
+            title,
+            status,
+            stage,
+            progressCompleted,
+            progressTotal,
+            anchorIds,
+            sourceHashes,
+            diagnostics,
+            errorCode,
+            errorMessage,
+            createdAt: now,
+            updatedAt: now,
+            completedAt,
+            cancelledAt,
+            cancellationToken);
+    }
+
+    private static async ValueTask UpsertStyleBuildStatusAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        string buildId,
+        long novelId,
+        long? profileId,
+        string title,
+        string status,
+        string stage,
+        int progressCompleted,
+        int progressTotal,
+        IReadOnlyList<long> anchorIds,
+        IReadOnlyList<string> sourceHashes,
+        IReadOnlyList<string> diagnostics,
+        string? errorCode,
+        string? errorMessage,
+        DateTimeOffset createdAt,
+        DateTimeOffset updatedAt,
+        DateTimeOffset? completedAt,
+        DateTimeOffset? cancelledAt,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO reference_style_profile_builds
+              (build_id, novel_id, profile_id, title, status, stage,
+               progress_completed, progress_total, anchor_ids_json, source_hashes_json,
+               diagnostics_json, error_code, error_message, created_at, updated_at,
+               completed_at, cancelled_at)
+            VALUES
+              ($build_id, $novel_id, $profile_id, $title, $status, $stage,
+               $progress_completed, $progress_total, $anchor_ids_json, $source_hashes_json,
+               $diagnostics_json, $error_code, $error_message, $created_at, $updated_at,
+               $completed_at, $cancelled_at)
+            ON CONFLICT(build_id) DO UPDATE SET
+              novel_id = excluded.novel_id,
+              profile_id = excluded.profile_id,
+              title = excluded.title,
+              status = excluded.status,
+              stage = excluded.stage,
+              progress_completed = excluded.progress_completed,
+              progress_total = excluded.progress_total,
+              anchor_ids_json = excluded.anchor_ids_json,
+              source_hashes_json = excluded.source_hashes_json,
+              diagnostics_json = excluded.diagnostics_json,
+              error_code = excluded.error_code,
+              error_message = excluded.error_message,
+              updated_at = excluded.updated_at,
+              completed_at = COALESCE(excluded.completed_at, reference_style_profile_builds.completed_at),
+              cancelled_at = COALESCE(excluded.cancelled_at, reference_style_profile_builds.cancelled_at);
+            """;
+        command.Parameters.AddWithValue("$build_id", buildId);
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$profile_id", (object?)profileId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$title", title);
+        command.Parameters.AddWithValue("$status", status);
+        command.Parameters.AddWithValue("$stage", stage);
+        command.Parameters.AddWithValue("$progress_completed", Math.Max(0, progressCompleted));
+        command.Parameters.AddWithValue("$progress_total", Math.Max(0, progressTotal));
+        command.Parameters.AddWithValue("$anchor_ids_json", JsonSerializer.Serialize(anchorIds, JsonOptions));
+        command.Parameters.AddWithValue("$source_hashes_json", JsonSerializer.Serialize(sourceHashes, JsonOptions));
+        command.Parameters.AddWithValue("$diagnostics_json", JsonSerializer.Serialize(SanitizeDiagnostics(diagnostics), JsonOptions));
+        command.Parameters.AddWithValue("$error_code", (object?)NormalizeOptionalErrorField(errorCode, maxLength: 128) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$error_message", (object?)NormalizeOptionalErrorField(errorMessage, maxLength: 512) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$created_at", FormatTimestamp(createdAt));
+        command.Parameters.AddWithValue("$updated_at", FormatTimestamp(updatedAt));
+        command.Parameters.AddWithValue("$completed_at", completedAt is null ? DBNull.Value : FormatTimestamp(completedAt.Value));
+        command.Parameters.AddWithValue("$cancelled_at", cancelledAt is null ? DBNull.Value : FormatTimestamp(cancelledAt.Value));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask<ReferenceStyleProfileBuildStatusPayload?> ReadStyleBuildStatusAsync(
+        SqliteConnection connection,
+        long novelId,
+        string buildId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT build_id, novel_id, profile_id, title, status, stage,
+                   progress_completed, progress_total, anchor_ids_json, source_hashes_json,
+                   diagnostics_json, error_code, error_message, created_at, updated_at,
+                   completed_at, cancelled_at
+            FROM reference_style_profile_builds
+            WHERE novel_id = $novel_id
+              AND build_id = $build_id;
+            """;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$build_id", buildId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadStyleBuildStatus(reader) : null;
+    }
+
+    private static async ValueTask ThrowIfStyleBuildCancelledAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        string buildId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT status
+            FROM reference_style_profile_builds
+            WHERE build_id = $build_id;
+            """;
+        command.Parameters.AddWithValue("$build_id", buildId);
+        var status = await command.ExecuteScalarAsync(cancellationToken) as string;
+        if (string.Equals(status, ReferenceStyleProfileBuildStatuses.Cancelled, StringComparison.Ordinal))
+        {
+            throw new OperationCanceledException("Reference style profile build was cancelled.");
+        }
+    }
+
+    private static async ValueTask MarkStyleBuildFailedAsync(
+        string databasePath,
+        string buildId,
+        long novelId,
+        string title,
+        IReadOnlyList<long> anchorIds,
+        IReadOnlyList<string> sourceHashes,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        var existing = await ReadStyleBuildStatusByIdAsync(connection, buildId, cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        await UpsertStyleBuildStatusAsync(
+            connection,
+            transaction: null,
+            buildId,
+            existing?.NovelId ?? novelId,
+            profileId: null,
+            existing?.Title ?? title,
+            ReferenceStyleProfileBuildStatuses.Failed,
+            ReferenceStyleProfileBuildStages.Failed,
+            existing?.ProgressCompleted ?? 0,
+            existing?.ProgressTotal ?? StyleProfileBuildProgressTotal,
+            existing?.AnchorIds.Count > 0 ? existing.AnchorIds : anchorIds,
+            existing?.SourceHashes.Count > 0 ? existing.SourceHashes : sourceHashes,
+            BuildFailureDiagnostics(exception),
+            exception.GetType().Name,
+            "Style profile build failed before completion.",
+            createdAt: existing?.CreatedAt ?? now,
+            updatedAt: now,
+            completedAt: null,
+            cancelledAt: null,
+            cancellationToken);
+    }
+
+    private static async ValueTask MarkStyleBuildCancelledAsync(
+        string databasePath,
+        string buildId,
+        long novelId,
+        string title,
+        IReadOnlyList<long> anchorIds,
+        IReadOnlyList<string> sourceHashes,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        var existing = await ReadStyleBuildStatusByIdAsync(connection, buildId, cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        await UpsertStyleBuildStatusAsync(
+            connection,
+            transaction: null,
+            buildId,
+            existing?.NovelId ?? novelId,
+            profileId: null,
+            existing?.Title ?? title,
+            ReferenceStyleProfileBuildStatuses.Cancelled,
+            ReferenceStyleProfileBuildStages.Cancelled,
+            existing?.ProgressCompleted ?? 0,
+            existing?.ProgressTotal ?? StyleProfileBuildProgressTotal,
+            existing?.AnchorIds.Count > 0 ? existing.AnchorIds : anchorIds,
+            existing?.SourceHashes.Count > 0 ? existing.SourceHashes : sourceHashes,
+            ["cancelled"],
+            errorCode: null,
+            errorMessage: null,
+            createdAt: existing?.CreatedAt ?? now,
+            updatedAt: now,
+            completedAt: null,
+            cancelledAt: now,
+            cancellationToken);
+    }
+
+    private static async ValueTask<ReferenceStyleProfileBuildStatusPayload?> ReadStyleBuildStatusByIdAsync(
+        SqliteConnection connection,
+        string buildId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT build_id, novel_id, profile_id, title, status, stage,
+                   progress_completed, progress_total, anchor_ids_json, source_hashes_json,
+                   diagnostics_json, error_code, error_message, created_at, updated_at,
+                   completed_at, cancelled_at
+            FROM reference_style_profile_builds
+            WHERE build_id = $build_id;
+            """;
+        command.Parameters.AddWithValue("$build_id", buildId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadStyleBuildStatus(reader) : null;
     }
 
     private async ValueTask<IReadOnlyList<ReferenceStyleAnchorSource>> ReadAccessibleSourcesAsync(
@@ -751,7 +1368,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                 ? null
                 : ReferenceStyleLlmAnalysisValidator.Validate(profileId, outputJson, windows);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
             throw;
         }
@@ -1463,6 +2080,28 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             reader.IsDBNull(13) ? null : ParseTimestamp(reader.GetString(13)));
     }
 
+    private static ReferenceStyleProfileBuildStatusPayload ReadStyleBuildStatus(SqliteDataReader reader)
+    {
+        return new ReferenceStyleProfileBuildStatusPayload(
+            reader.GetString(0),
+            reader.GetInt64(1),
+            reader.IsDBNull(2) ? null : reader.GetInt64(2),
+            reader.GetString(3),
+            reader.GetString(4),
+            reader.GetString(5),
+            reader.GetInt32(6),
+            reader.GetInt32(7),
+            ReadLongList(reader.GetString(8)),
+            ReadStringList(reader.GetString(9)),
+            ReadStringList(reader.GetString(10)),
+            reader.IsDBNull(11) ? null : reader.GetString(11),
+            reader.IsDBNull(12) ? null : reader.GetString(12),
+            ParseTimestamp(reader.GetString(13)),
+            ParseTimestamp(reader.GetString(14)),
+            reader.IsDBNull(15) ? null : ParseTimestamp(reader.GetString(15)),
+            reader.IsDBNull(16) ? null : ParseTimestamp(reader.GetString(16)));
+    }
+
     private static ReferenceStyleProfilePayload ReadStyleProfile(SqliteDataReader reader)
     {
         return new ReferenceStyleProfilePayload(
@@ -1516,6 +2155,87 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
     private static IReadOnlyList<string> ReadStringList(string json)
     {
         return JsonSerializer.Deserialize<IReadOnlyList<string>>(json, JsonOptions) ?? [];
+    }
+
+    private static string NormalizeBuildId(string? buildId)
+    {
+        var normalized = NormalizeOptionalText(buildId, nameof(buildId), MaxBuildIdLength);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "style-build-" + Guid.NewGuid().ToString("N");
+        }
+
+        if (normalized.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not '-' and not '_' and not '.'))
+        {
+            throw new ArgumentException("Style profile build id may contain only ASCII letters, digits, '.', '_' and '-'.", nameof(buildId));
+        }
+
+        return normalized;
+    }
+
+    private static string NormalizeBestEffortTitle(string? value)
+    {
+        try
+        {
+            var normalized = NormalizeOptionalText(value, nameof(value), maxLength: 200);
+            return normalized.Length == 0 ? "Untitled style profile" : normalized;
+        }
+        catch
+        {
+            return "Untitled style profile";
+        }
+    }
+
+    private static IReadOnlyList<long> NormalizeBestEffortAnchorIds(IReadOnlyList<long>? anchorIds)
+    {
+        if (anchorIds is null || anchorIds.Count == 0)
+        {
+            return [];
+        }
+
+        return anchorIds
+            .Where(anchorId => anchorId > 0)
+            .Distinct()
+            .Take(MaxAnchorCount)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildFailureDiagnostics(Exception exception)
+    {
+        return [$"failed:{NormalizeOptionalErrorField(exception.GetType().Name, maxLength: 128) ?? "Exception"}"];
+    }
+
+    private static IReadOnlyList<string> SanitizeDiagnostics(IReadOnlyList<string>? diagnostics)
+    {
+        if (diagnostics is null || diagnostics.Count == 0)
+        {
+            return [];
+        }
+
+        return diagnostics
+            .Select(diagnostic => NormalizeOptionalErrorField(diagnostic, maxLength: 256))
+            .Where(diagnostic => !string.IsNullOrWhiteSpace(diagnostic))
+            .Distinct(StringComparer.Ordinal)
+            .Take(16)
+            .ToArray()!;
+    }
+
+    private static string? NormalizeOptionalErrorField(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = new string(value
+            .Trim()
+            .Select(character => char.IsControl(character) ? ' ' : character)
+            .ToArray());
+        normalized = normalized.Length <= maxLength ? normalized : normalized[..maxLength];
+        normalized = normalized
+            .Replace("\\", "/", StringComparison.Ordinal)
+            .Replace("..", ".", StringComparison.Ordinal);
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 
     private static string NormalizeRequiredText(string? value, string name, int maxLength)

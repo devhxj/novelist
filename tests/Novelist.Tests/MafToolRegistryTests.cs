@@ -1351,6 +1351,20 @@ public sealed class MafToolRegistryTests
                 ArchivedAt: null));
         }
 
+        public ValueTask<ReferenceStyleProfileBuildStatusPayload?> GetStyleProfileBuildStatusAsync(
+            GetReferenceStyleProfileBuildStatusPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<ReferenceStyleProfileBuildStatusPayload?>(null);
+        }
+
+        public ValueTask<ReferenceStyleProfileBuildStatusPayload> CancelStyleProfileBuildAsync(
+            CancelReferenceStyleProfileBuildPayload input,
+            CancellationToken cancellationToken)
+        {
+            throw new NotSupportedException("MAF tools must not cancel style profile builds.");
+        }
+
         public ValueTask<ReferenceStyleProfilePayload> ArchiveStyleProfileAsync(
             ArchiveReferenceStyleProfilePayload input,
             CancellationToken cancellationToken)

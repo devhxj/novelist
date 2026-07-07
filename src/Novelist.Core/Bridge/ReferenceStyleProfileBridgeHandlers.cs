@@ -30,6 +30,16 @@ public static class ReferenceStyleProfileBridgeHandlers
                 ReadLongArg(context.Payload, 1, "profileId"),
                 cancellationToken));
 
+        dispatcher.Register("GetReferenceStyleProfileBuildStatus", async (context, cancellationToken) =>
+            await service.GetStyleProfileBuildStatusAsync(
+                ReadObjectArg<GetReferenceStyleProfileBuildStatusPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
+        dispatcher.Register("CancelReferenceStyleProfileBuild", async (context, cancellationToken) =>
+            await service.CancelStyleProfileBuildAsync(
+                ReadObjectArg<CancelReferenceStyleProfileBuildPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
         dispatcher.Register("ArchiveReferenceStyleProfile", async (context, cancellationToken) =>
             await service.ArchiveStyleProfileAsync(
                 ReadObjectArg<ArchiveReferenceStyleProfilePayload>(context.Payload, 0, "input"),

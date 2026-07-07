@@ -668,6 +668,37 @@ export namespace reference {
     anchor_ids: number[]
     allowed_license_statuses: string[]
     allowed_source_trust_levels: string[]
+    build_id?: string | null
+  }
+
+  export interface GetStyleProfileBuildStatusInput {
+    novel_id: number
+    build_id: string
+  }
+
+  export interface CancelStyleProfileBuildInput {
+    novel_id: number
+    build_id: string
+  }
+
+  export interface StyleProfileBuildStatus {
+    build_id: string
+    novel_id: number
+    profile_id?: number | null
+    title: string
+    status: string
+    stage: string
+    progress_completed: number
+    progress_total: number
+    anchor_ids: number[]
+    source_hashes: string[]
+    diagnostics: string[]
+    error_code?: string | null
+    error_message?: string | null
+    created_at: Timestamp
+    updated_at: Timestamp
+    completed_at?: Timestamp | null
+    cancelled_at?: Timestamp | null
   }
 
   export interface GetStyleProfilesInput {

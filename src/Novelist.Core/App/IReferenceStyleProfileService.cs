@@ -17,6 +17,14 @@ public interface IReferenceStyleProfileService
         long profileId,
         CancellationToken cancellationToken);
 
+    ValueTask<ReferenceStyleProfileBuildStatusPayload?> GetStyleProfileBuildStatusAsync(
+        GetReferenceStyleProfileBuildStatusPayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<ReferenceStyleProfileBuildStatusPayload> CancelStyleProfileBuildAsync(
+        CancelReferenceStyleProfileBuildPayload input,
+        CancellationToken cancellationToken);
+
     ValueTask<ReferenceStyleProfilePayload> ArchiveStyleProfileAsync(
         ArchiveReferenceStyleProfilePayload input,
         CancellationToken cancellationToken);

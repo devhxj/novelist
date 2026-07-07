@@ -10,6 +10,44 @@ public static class ReferenceStyleProfileStatuses
     public static IReadOnlyList<string> All { get; } = [Active, Archived];
 }
 
+public static class ReferenceStyleProfileBuildStatuses
+{
+    public const string Running = "running";
+    public const string Completed = "completed";
+    public const string Failed = "failed";
+    public const string Cancelled = "cancelled";
+
+    public static IReadOnlyList<string> All { get; } = [Running, Completed, Failed, Cancelled];
+}
+
+public static class ReferenceStyleProfileBuildStages
+{
+    public const string Queued = "queued";
+    public const string Validating = "validating";
+    public const string ReadingSources = "reading_sources";
+    public const string ReadingMaterials = "reading_materials";
+    public const string PersistingProfile = "persisting_profile";
+    public const string DeterministicBaseline = "deterministic_baseline";
+    public const string LlmAnalysis = "llm_analysis";
+    public const string Completed = "completed";
+    public const string Failed = "failed";
+    public const string Cancelled = "cancelled";
+
+    public static IReadOnlyList<string> All { get; } =
+    [
+        Queued,
+        Validating,
+        ReadingSources,
+        ReadingMaterials,
+        PersistingProfile,
+        DeterministicBaseline,
+        LlmAnalysis,
+        Completed,
+        Failed,
+        Cancelled
+    ];
+}
+
 public static class ReferenceStyleAnalyzerSources
 {
     public const string DeterministicBaseline = "deterministic_baseline";
@@ -291,7 +329,18 @@ public sealed record BuildReferenceStyleProfilePayload(
     [property: JsonPropertyName("description")] string Description,
     [property: JsonPropertyName("anchor_ids")] IReadOnlyList<long> AnchorIds,
     [property: JsonPropertyName("allowed_license_statuses")] IReadOnlyList<string> AllowedLicenseStatuses,
-    [property: JsonPropertyName("allowed_source_trust_levels")] IReadOnlyList<string> AllowedSourceTrustLevels);
+    [property: JsonPropertyName("allowed_source_trust_levels")] IReadOnlyList<string> AllowedSourceTrustLevels,
+    [property: JsonPropertyName("build_id")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? BuildId = null);
+
+public sealed record GetReferenceStyleProfileBuildStatusPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("build_id")] string BuildId);
+
+public sealed record CancelReferenceStyleProfileBuildPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("build_id")] string BuildId);
 
 public sealed record GetReferenceStyleProfilesPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
@@ -327,6 +376,35 @@ public sealed record ReferenceStyleProfileSummaryPayload(
     [property: JsonPropertyName("archived_at")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     DateTimeOffset? ArchivedAt);
+
+public sealed record ReferenceStyleProfileBuildStatusPayload(
+    [property: JsonPropertyName("build_id")] string BuildId,
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("profile_id")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    long? ProfileId,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("stage")] string Stage,
+    [property: JsonPropertyName("progress_completed")] int ProgressCompleted,
+    [property: JsonPropertyName("progress_total")] int ProgressTotal,
+    [property: JsonPropertyName("anchor_ids")] IReadOnlyList<long> AnchorIds,
+    [property: JsonPropertyName("source_hashes")] IReadOnlyList<string> SourceHashes,
+    [property: JsonPropertyName("diagnostics")] IReadOnlyList<string> Diagnostics,
+    [property: JsonPropertyName("error_code")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ErrorCode,
+    [property: JsonPropertyName("error_message")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ErrorMessage,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
+    [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt,
+    [property: JsonPropertyName("completed_at")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    DateTimeOffset? CompletedAt,
+    [property: JsonPropertyName("cancelled_at")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    DateTimeOffset? CancelledAt);
 
 public sealed record ReferenceStyleProfileComparisonPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,

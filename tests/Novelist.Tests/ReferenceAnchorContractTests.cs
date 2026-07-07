@@ -478,6 +478,81 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void ReferenceStyleProfileBuildStatusPayloadsUseStableSnakeCaseJsonNamesWithoutTextFields()
+    {
+        var build = new BuildReferenceStyleProfilePayload(
+            NovelId: 42,
+            Title: "雨夜克制风格",
+            Description: "bounded metadata only",
+            AnchorIds: [7, 8],
+            AllowedLicenseStatuses: ["user_provided"],
+            AllowedSourceTrustLevels: [ReferenceSourceTrustLevels.UserVerified],
+            BuildId: "style-build-test");
+        var get = new GetReferenceStyleProfileBuildStatusPayload(
+            NovelId: 42,
+            BuildId: "style-build-test");
+        var cancel = new CancelReferenceStyleProfileBuildPayload(
+            NovelId: 42,
+            BuildId: "style-build-test");
+        var status = new ReferenceStyleProfileBuildStatusPayload(
+            BuildId: "style-build-test",
+            NovelId: 42,
+            ProfileId: null,
+            Title: "雨夜克制风格",
+            Status: ReferenceStyleProfileBuildStatuses.Failed,
+            Stage: ReferenceStyleProfileBuildStages.Failed,
+            ProgressCompleted: 2,
+            ProgressTotal: 6,
+            AnchorIds: [7, 8],
+            SourceHashes: ["source-hash"],
+            Diagnostics: ["validation_error"],
+            ErrorCode: "validation_error",
+            ErrorMessage: "Style profile build failed before completion.",
+            CreatedAt: DateTimeOffset.Parse("2026-07-07T00:00:00Z"),
+            UpdatedAt: DateTimeOffset.Parse("2026-07-07T00:01:00Z"),
+            CompletedAt: null,
+            CancelledAt: null);
+
+        using var buildJson = JsonDocument.Parse(JsonSerializer.Serialize(build, BridgeJson.SerializerOptions));
+        var buildRoot = buildJson.RootElement;
+        Assert.Equal("style-build-test", buildRoot.GetProperty("build_id").GetString());
+        Assert.False(buildRoot.TryGetProperty("BuildId", out _));
+
+        using var getJson = JsonDocument.Parse(JsonSerializer.Serialize(get, BridgeJson.SerializerOptions));
+        Assert.Equal(42, getJson.RootElement.GetProperty("novel_id").GetInt64());
+        Assert.Equal("style-build-test", getJson.RootElement.GetProperty("build_id").GetString());
+
+        using var cancelJson = JsonDocument.Parse(JsonSerializer.Serialize(cancel, BridgeJson.SerializerOptions));
+        Assert.Equal(42, cancelJson.RootElement.GetProperty("novel_id").GetInt64());
+        Assert.Equal("style-build-test", cancelJson.RootElement.GetProperty("build_id").GetString());
+
+        var serializedStatus = JsonSerializer.Serialize(status, BridgeJson.SerializerOptions);
+        using var statusJson = JsonDocument.Parse(serializedStatus);
+        var root = statusJson.RootElement;
+        Assert.Equal("style-build-test", root.GetProperty("build_id").GetString());
+        Assert.Equal(42, root.GetProperty("novel_id").GetInt64());
+        Assert.Equal("failed", root.GetProperty("status").GetString());
+        Assert.Equal("failed", root.GetProperty("stage").GetString());
+        Assert.Equal(2, root.GetProperty("progress_completed").GetInt32());
+        Assert.Equal(6, root.GetProperty("progress_total").GetInt32());
+        Assert.Equal(7, root.GetProperty("anchor_ids")[0].GetInt64());
+        Assert.Equal("source-hash", root.GetProperty("source_hashes")[0].GetString());
+        Assert.Equal("validation_error", root.GetProperty("diagnostics")[0].GetString());
+        Assert.Equal("validation_error", root.GetProperty("error_code").GetString());
+        Assert.Equal("Style profile build failed before completion.", root.GetProperty("error_message").GetString());
+        Assert.False(root.TryGetProperty("profile_id", out _));
+        Assert.False(root.TryGetProperty("source_text", out _));
+        Assert.False(root.TryGetProperty("candidate_text", out _));
+        Assert.False(root.TryGetProperty("prompt", out _));
+        Assert.False(root.TryGetProperty("path", out _));
+        Assert.False(root.TryGetProperty("content", out _));
+        Assert.DoesNotContain("source_text", serializedStatus, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", serializedStatus, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", serializedStatus, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("path", serializedStatus, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ReferenceStyleLlmAnalysisPayloadsUseStableSnakeCaseJsonNamesWithoutPaths()
     {
         var window = new ReferenceStyleAnalysisWindowPayload(
@@ -1179,6 +1254,10 @@ public sealed class ReferenceAnchorContractTests
         Assert.Contains(ReferenceFeedbackTargetTypes.ReuseCandidate, ReferenceFeedbackTargetTypes.All);
         Assert.Contains(ReferenceStyleAttemptStatuses.Attempted, ReferenceStyleAttemptStatuses.All);
         Assert.Contains(ReferenceStyleAttemptStatuses.RetrievalGap, ReferenceStyleAttemptStatuses.All);
+        Assert.Contains(ReferenceStyleProfileBuildStatuses.Running, ReferenceStyleProfileBuildStatuses.All);
+        Assert.Contains(ReferenceStyleProfileBuildStatuses.Completed, ReferenceStyleProfileBuildStatuses.All);
+        Assert.Contains(ReferenceStyleProfileBuildStatuses.Failed, ReferenceStyleProfileBuildStatuses.All);
+        Assert.Contains(ReferenceStyleProfileBuildStatuses.Cancelled, ReferenceStyleProfileBuildStatuses.All);
     }
 
     [Fact]
@@ -1433,6 +1512,8 @@ public sealed class ReferenceAnchorContractTests
             "CompareReferenceStyleProfiles",
             "GetReferenceStyleProfiles",
             "GetReferenceStyleProfile",
+            "GetReferenceStyleProfileBuildStatus",
+            "CancelReferenceStyleProfileBuild",
             "RestoreReferenceStyleProfile",
             "StartReferenceOrchestrationRun",
             "GetReferenceOrchestrationRuns",

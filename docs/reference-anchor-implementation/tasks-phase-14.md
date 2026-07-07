@@ -365,7 +365,7 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 14: Performance, Robustness, and Phase 14 Playwright Gate
 
-**Status:** Partially complete for the backend 10MB deterministic style-profile boundary. A 10MB user-provided source now imports through the real anchor service, produces more than 500 segments/materials, builds a deterministic style profile, records bounded evidence/provenance metadata, and keeps source phrases out of persisted feature vectors and deterministic analysis diagnostics. Advanced/LLM-assisted profile stress, UI white-screen coverage, progress/cancel/recovery, and Playwright stress gates remain open.
+**Status:** Partially complete for the backend robustness boundary. A 10MB user-provided source now imports through the real anchor service, produces more than 500 segments/materials, builds a deterministic style profile, records bounded evidence/provenance metadata, and keeps source phrases out of persisted feature vectors and deterministic analysis diagnostics. Style profile builds now create source-text-free persisted build-status rows with stage/progress metadata, bridge-readable status, explicit cancel marking, cancellation-token persistence, failed-build recovery inspection, and rebuild-after-failure coverage. Advanced/LLM-assisted profile stress, UI white-screen coverage, full frontend progress/cancel UX, and Playwright stress gates remain open.
 
 **Description:** Add stress and regression coverage for large style corpora and high-fidelity style workflows.
 
@@ -373,13 +373,15 @@ The current extractor is deterministic and robust, but limited:
 
 - [ ] 10MB source builds baseline and advanced style profiles without white screen or unbounded memory growth.
 - [x] Backend deterministic profile build handles a 10MB imported source without persisting source text in profile features, evidence schema, or deterministic diagnostics.
-- [ ] Profile build supports progress, cancellation, failure recovery, and resumable inspection.
+- [x] Backend profile build supports persisted progress, cancellation status, failure recovery, and resumable inspection. The current bridge method remains a synchronous build call for compatibility; persisted status rows make progress/failure/cancel visible and restart-readable, while a future background worker can reuse the same build-status table.
 - [ ] Material/profile search remains paged and responsive.
 - [ ] The full style workflow is covered by Playwright with screenshots, bridge-call logs, console diagnostics, and traces.
 
 **Verification:**
 
 - [x] `dotnet test tests\Novelist.IntegrationTests\Novelist.IntegrationTests.csproj --no-restore -v minimal -p:UseSharedCompilation=false --filter 'ReferenceStyleProfileServiceTests|ReferenceAnchorAdvancedSegmentationTests'`
+- [x] `dotnet test tests\Novelist.Tests\Novelist.Tests.csproj --no-restore -v minimal -p:UseSharedCompilation=false --filter 'ReferenceStyleProfileBuildStatusPayloadsUseStableSnakeCaseJsonNamesWithoutTextFields|ReferenceStyleProfileHandlersRouteEveryMethodToServiceOperations|CompatibilityAppMethodListHasExpectedCoverage|CompatibilityRegistryIncludesReferenceAnchorMethods'`
+- [x] `dotnet test tests\Novelist.IntegrationTests\Novelist.IntegrationTests.csproj --no-restore -v minimal -p:UseSharedCompilation=false --filter 'FailedStyleProfileBuildPersistsRecoverableBuildStatusWithoutSourceText|CancelledStyleProfileBuildPersistsCancelledStatusWithoutActiveProfile'`
 - [ ] `npm --prefix frontend run test:reference-style`
 - [ ] `npm --prefix frontend run test:reference-style:stress`
 - [ ] Existing Phase 13 matrix remains green.
