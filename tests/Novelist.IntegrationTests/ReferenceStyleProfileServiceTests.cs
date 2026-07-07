@@ -85,6 +85,180 @@ public sealed class ReferenceStyleProfileServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ArchiveAndRestoreStyleProfileHidesDefaultLibraryRowsWithoutDeletingEvidence()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("画像归档测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "archive-style-source.md",
+            """
+            # 第一章
+
+            她说：“门口别停。”
+
+            雨声压低了整条街的呼吸。
+            """);
+        var anchorService = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await anchorService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "归档参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var styleService = new SqliteReferenceStyleProfileService(options, novels);
+        var profile = await styleService.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                novel.Id,
+                "可归档画像",
+                "",
+                [anchor.AnchorId],
+                ["user_provided"],
+                [ReferenceSourceTrustLevels.UserVerified]),
+            CancellationToken.None);
+
+        var archived = await styleService.ArchiveStyleProfileAsync(
+            new ArchiveReferenceStyleProfilePayload(novel.Id, profile.ProfileId),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceStyleProfileStatuses.Archived, archived.Status);
+        Assert.NotNull(archived.ArchivedAt);
+        Assert.NotEmpty(archived.EvidenceSpans);
+        Assert.Equal(profile.EvidenceSpans.Count, archived.EvidenceSpans.Count);
+
+        var defaultList = await styleService.GetStyleProfilesAsync(
+            new GetReferenceStyleProfilesPayload(novel.Id),
+            CancellationToken.None);
+        Assert.DoesNotContain(defaultList, item => item.ProfileId == profile.ProfileId);
+
+        var archivedList = await styleService.GetStyleProfilesAsync(
+            new GetReferenceStyleProfilesPayload(novel.Id, IncludeArchived: true),
+            CancellationToken.None);
+        var archivedSummary = Assert.Single(archivedList, item => item.ProfileId == profile.ProfileId);
+        Assert.Equal(ReferenceStyleProfileStatuses.Archived, archivedSummary.Status);
+        Assert.NotNull(archivedSummary.ArchivedAt);
+
+        var detailWhileArchived = await styleService.GetStyleProfileAsync(novel.Id, profile.ProfileId, CancellationToken.None);
+        Assert.NotNull(detailWhileArchived);
+        Assert.Equal(ReferenceStyleProfileStatuses.Archived, detailWhileArchived.Status);
+        Assert.Equal(profile.EvidenceSpans.Count, detailWhileArchived.EvidenceSpans.Count);
+
+        var restored = await styleService.RestoreStyleProfileAsync(
+            new RestoreReferenceStyleProfilePayload(novel.Id, profile.ProfileId),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceStyleProfileStatuses.Active, restored.Status);
+        Assert.Null(restored.ArchivedAt);
+        Assert.NotEmpty(restored.EvidenceSpans);
+        var restoredDefaultList = await styleService.GetStyleProfilesAsync(
+            new GetReferenceStyleProfilesPayload(novel.Id),
+            CancellationToken.None);
+        Assert.Contains(restoredDefaultList, item => item.ProfileId == profile.ProfileId);
+    }
+
+    [Fact]
+    public async Task CompareStyleProfilesReturnsFeatureDeltasAndRejectsCrossNovelProfiles()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("画像比较测试", "", ""), CancellationToken.None);
+        var otherNovel = await novels.CreateNovelAsync(new CreateNovelPayload("其他画像比较测试", "", ""), CancellationToken.None);
+        var dialogueSourcePath = CreateSourceFile(
+            "compare-dialogue.md",
+            """
+            # 第一章
+
+            她说：“别回头。”
+
+            他问：“为什么？”
+            """);
+        var quietSourcePath = CreateSourceFile(
+            "compare-quiet.md",
+            """
+            # 第一章
+
+            雨声压低了屋檐，灯影贴在墙上。
+
+            他在门口停了很久，指节慢慢发紧。
+            """);
+        var otherSourcePath = CreateSourceFile(
+            "compare-other.md",
+            """
+            # 第一章
+
+            她说：“门外还有人。”
+            """);
+        var anchorService = new SqliteReferenceAnchorService(options, novels);
+        var dialogueAnchor = await anchorService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "对话比较参考", null, dialogueSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var quietAnchor = await anchorService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "克制比较参考", null, quietSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var otherAnchor = await anchorService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(otherNovel.Id, "跨小说比较参考", null, otherSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var styleService = new SqliteReferenceStyleProfileService(options, novels);
+        var dialogueProfile = await styleService.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                novel.Id,
+                "对话画像",
+                "",
+                [dialogueAnchor.AnchorId],
+                ["user_provided"],
+                [ReferenceSourceTrustLevels.UserVerified]),
+            CancellationToken.None);
+        var quietProfile = await styleService.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                novel.Id,
+                "克制画像",
+                "",
+                [quietAnchor.AnchorId],
+                ["user_provided"],
+                [ReferenceSourceTrustLevels.UserVerified]),
+            CancellationToken.None);
+        var otherProfile = await styleService.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                otherNovel.Id,
+                "跨小说画像",
+                "",
+                [otherAnchor.AnchorId],
+                ["user_provided"],
+                [ReferenceSourceTrustLevels.UserVerified]),
+            CancellationToken.None);
+
+        var comparison = await styleService.CompareStyleProfilesAsync(
+            new CompareReferenceStyleProfilesPayload(novel.Id, dialogueProfile.ProfileId, quietProfile.ProfileId),
+            CancellationToken.None);
+
+        Assert.Equal(novel.Id, comparison.NovelId);
+        Assert.Equal(dialogueProfile.ProfileId, comparison.LeftProfile.ProfileId);
+        Assert.Equal(quietProfile.ProfileId, comparison.RightProfile.ProfileId);
+        var dialogueRatio = Assert.Single(
+            comparison.NumericDifferences,
+            item => item.FeatureKey == "dialogue_ratio");
+        Assert.NotNull(dialogueRatio.LeftValue);
+        Assert.NotNull(dialogueRatio.RightValue);
+        Assert.NotNull(dialogueRatio.AbsoluteDelta);
+        Assert.True(dialogueRatio.AbsoluteDelta > 0);
+        Assert.Equal(
+            Math.Abs(dialogueRatio.LeftValue.Value - dialogueRatio.RightValue.Value),
+            dialogueRatio.AbsoluteDelta.Value,
+            precision: 8);
+        Assert.Contains(comparison.DistributionDifferences, item => item.FeatureKey == "sentence_length_distribution");
+        Assert.Contains(comparison.CategoricalDifferences, item => item.FeatureKey == "dominant_technique");
+
+        await Assert.ThrowsAsync<ArgumentException>(async () => await styleService.CompareStyleProfilesAsync(
+            new CompareReferenceStyleProfilesPayload(novel.Id, dialogueProfile.ProfileId, otherProfile.ProfileId),
+            CancellationToken.None).AsTask());
+        await Assert.ThrowsAsync<ArgumentException>(async () => await styleService.ArchiveStyleProfileAsync(
+            new ArchiveReferenceStyleProfilePayload(otherNovel.Id, dialogueProfile.ProfileId),
+            CancellationToken.None).AsTask());
+        await Assert.ThrowsAsync<ArgumentException>(async () => await styleService.RestoreStyleProfileAsync(
+            new RestoreReferenceStyleProfilePayload(otherNovel.Id, dialogueProfile.ProfileId),
+            CancellationToken.None).AsTask());
+    }
+
+    [Fact]
     public async Task BuildStyleProfileMigratesPrePhase14DatabaseWithoutChangingReferenceIds()
     {
         var options = CreateOptions();

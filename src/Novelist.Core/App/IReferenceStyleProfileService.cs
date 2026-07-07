@@ -16,4 +16,16 @@ public interface IReferenceStyleProfileService
         long novelId,
         long profileId,
         CancellationToken cancellationToken);
+
+    ValueTask<ReferenceStyleProfilePayload> ArchiveStyleProfileAsync(
+        ArchiveReferenceStyleProfilePayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<ReferenceStyleProfilePayload> RestoreStyleProfileAsync(
+        RestoreReferenceStyleProfilePayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<ReferenceStyleProfileComparisonPayload> CompareStyleProfilesAsync(
+        CompareReferenceStyleProfilesPayload input,
+        CancellationToken cancellationToken);
 }

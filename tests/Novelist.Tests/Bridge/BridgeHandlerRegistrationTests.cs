@@ -109,7 +109,7 @@ public sealed class BridgeHandlerRegistrationTests
     [Fact]
     public void CompatibilityAppMethodListHasExpectedCoverage()
     {
-        Assert.Equal(124, BridgeCompatibilityAppMethods.MethodNames.Count);
+        Assert.Equal(127, BridgeCompatibilityAppMethods.MethodNames.Count);
         Assert.Equal(BridgeCompatibilityAppMethods.MethodNames.Count, BridgeCompatibilityAppMethods.MethodNames.Distinct(StringComparer.Ordinal).Count());
         Assert.Contains("Chat", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetCover", BridgeCompatibilityAppMethods.MethodNames);
@@ -126,6 +126,9 @@ public sealed class BridgeHandlerRegistrationTests
         Assert.Contains("BuildReferenceStyleProfile", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetReferenceStyleProfiles", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetReferenceStyleProfile", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("ArchiveReferenceStyleProfile", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("RestoreReferenceStyleProfile", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("CompareReferenceStyleProfiles", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("StartReferenceOrchestrationRun", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetReferenceOrchestrationRunEvents", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("ResumeReferenceOrchestrationRun", BridgeCompatibilityAppMethods.MethodNames);

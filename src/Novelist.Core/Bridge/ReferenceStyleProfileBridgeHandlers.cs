@@ -30,6 +30,21 @@ public static class ReferenceStyleProfileBridgeHandlers
                 ReadLongArg(context.Payload, 1, "profileId"),
                 cancellationToken));
 
+        dispatcher.Register("ArchiveReferenceStyleProfile", async (context, cancellationToken) =>
+            await service.ArchiveStyleProfileAsync(
+                ReadObjectArg<ArchiveReferenceStyleProfilePayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
+        dispatcher.Register("RestoreReferenceStyleProfile", async (context, cancellationToken) =>
+            await service.RestoreStyleProfileAsync(
+                ReadObjectArg<RestoreReferenceStyleProfilePayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
+        dispatcher.Register("CompareReferenceStyleProfiles", async (context, cancellationToken) =>
+            await service.CompareStyleProfilesAsync(
+                ReadObjectArg<CompareReferenceStyleProfilesPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
         return dispatcher;
     }
 

@@ -38,6 +38,9 @@ AuditReferenceAnchoredDraft
 BuildReferenceStyleProfile
 GetReferenceStyleProfiles
 GetReferenceStyleProfile
+ArchiveReferenceStyleProfile
+RestoreReferenceStyleProfile
+CompareReferenceStyleProfiles
 StartReferenceOrchestrationRun
 GetReferenceOrchestrationRuns
 GetReferenceOrchestrationRun
@@ -73,10 +76,12 @@ Phase 14 adds the first style-profile bridge surface:
 - `BuildReferenceStyleProfile` accepts `novel_id`, title, description, selected `anchor_ids`, allowed license statuses, and allowed source-trust levels. It builds a deterministic baseline profile from accessible active materials only. Empty policy lists use conservative defaults: `user_provided`, `licensed`, `public_domain` for license status and `user_verified`, `imported` for source trust; `unknown` and `unverified` require explicit opt-in.
 - `GetReferenceStyleProfiles` lists profile summaries for a novel and can include archived rows when requested.
 - `GetReferenceStyleProfile` returns a profile detail with structured feature vectors and evidence spans. Evidence spans expose provenance ids, source offsets, hashes, confidence, and analyzer source, but not source text.
+- `ArchiveReferenceStyleProfile` and `RestoreReferenceStyleProfile` accept `novel_id` plus `profile_id`, update only the profile status/archive timestamp for a profile owned by that novel, and return the refreshed profile detail with existing evidence intact. Cross-novel profile ids fail validation instead of becoming no-ops.
+- `CompareReferenceStyleProfiles` accepts `novel_id`, `left_profile_id`, and `right_profile_id`, requires both profiles to belong to the requested novel, and returns profile summaries plus numeric, distribution, and categorical feature deltas. The comparison payload deliberately excludes evidence spans and source text; callers can fetch profile detail separately when they need provenance.
 
-The style-profile bridge is inspect/build only at this boundary. It does not approve style contracts, generate style-guided prose, call `SaveContent`, or expose arbitrary source-file reads.
+The style-profile bridge is build/inspect/library-management only at this boundary. It does not approve style contracts, generate style-guided prose, call `SaveContent`, or expose arbitrary source-file reads.
 
-Phase 14 also defines the first LLM-assisted style analysis core boundary, but it is not yet exposed as a bridge method. `ReferenceStyleLlmAnalysisRequestPayload` carries a target `profile_id`, the required `schema_version`, requested feature keys, and bounded source `windows` with segment/material provenance, offsets, text hash, and a bounded text excerpt. It deliberately has no source path, URL, arbitrary file path, or import field. `IReferenceStyleLlmAnalyzer` providers return untrusted JSON; `ReferenceStyleLlmAnalysisValidator` accepts only `reference-style-llm-analysis-v1`, rejects unsupported schema/properties, requires every accepted label to cite a source segment id and offsets inside the supplied windows, rejects unsupported or ungrounded labels, caps overconfident LLM confidence at 0.95, and emits `ReferenceStyleEvidenceSpanPayload` records without source text. `SqliteReferenceStyleProfileService` can use an explicitly injected provider to persist accepted LLM evidence/material tags and merge accepted labels into categorical profile features; invalid, rejected, empty, or provider-failed output records an `llm_assisted` analysis run and keeps the deterministic profile intact. Desktop composition still has no default LLM style analyzer provider, so normal bridge-triggered style profile builds remain the default no-network deterministic path until production provider wiring is explicitly added.
+Phase 14 also defines the first LLM-assisted style analysis core boundary, but it is not exposed as a separate bridge method. `ReferenceStyleTaxonomy` defines `reference-style-taxonomy-v1` feature keys, allowed labels, categories, and compatible beat-duty hints; the human-readable map lives in `docs/reference-anchor-implementation/style-taxonomy-v1.md`. `ReferenceStyleLlmAnalysisRequestPayload` carries a target `profile_id`, the required `schema_version`, requested feature keys, and bounded source `windows` with segment/material provenance, offsets, text hash, and a bounded text excerpt. It deliberately has no source path, URL, arbitrary file path, or import field. `ReferenceStyleChatCompletionLlmAnalyzer` is wired into desktop composition through the user's selected chat model; when no model is selected it returns no output, so bridge-triggered style profile builds stay deterministic and do not record an LLM run. When a selected model is available, providers return untrusted JSON only; `ReferenceStyleLlmAnalysisValidator` accepts only `reference-style-llm-analysis-v1`, rejects unsupported schema/properties, unsupported feature keys, and unsupported labels for a feature key, requires every accepted label to cite a source segment id and offsets inside the supplied windows, rejects unsupported or ungrounded labels, caps overconfident LLM confidence at 0.95, and emits `ReferenceStyleEvidenceSpanPayload` records without source text. `SqliteReferenceStyleProfileService` persists accepted LLM evidence/material tags and merges accepted labels into categorical profile features; invalid, rejected, or provider-failed output records an `llm_assisted` analysis run and keeps the deterministic profile intact.
 
 Implementation files:
 
@@ -93,6 +98,8 @@ src/Novelist.Core/Bridge/ReferenceAnchorBridgeHandlers.cs
 src/Novelist.Core/Bridge/ReferenceAnchoredDraftBridgeHandlers.cs
 src/Novelist.Core/Bridge/ReferenceStyleProfileBridgeHandlers.cs
 src/Novelist.Core/Bridge/BridgeCompatibilityAppMethods.cs
+src/Novelist.Infrastructure/App/ReferenceStyleChatCompletionLlmAnalyzer.cs
+src/Novelist.Infrastructure/App/SqliteReferenceStyleProfileService.cs
 ```
 
 Handler pattern should mirror `WorkspaceUtilityBridgeHandlers`:

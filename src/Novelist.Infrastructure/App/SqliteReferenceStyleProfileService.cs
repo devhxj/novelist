@@ -144,38 +144,41 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                 {
                     var windows = BuildLlmAnalysisWindows(materials);
                     var validation = await RunLlmAnalysisAsync(profileId, windows, cancellationToken);
-                    await InsertAnalysisRunAsync(
-                        connection,
-                        transaction,
-                        profileId,
-                        ReferenceStyleAnalyzerVersions.LlmAssistedV1,
-                        ReferenceStyleAnalyzerSources.LlmAssisted,
-                        anchorIds,
-                        sourceHashes,
-                        validation.Status,
-                        BuildLlmDiagnostics(validation),
-                        now,
-                        cancellationToken);
-
-                    if (validation.EvidenceSpans.Count > 0)
+                    if (validation is not null)
                     {
-                        await InsertEvidenceAsync(
+                        await InsertAnalysisRunAsync(
                             connection,
                             transaction,
-                            validation.EvidenceSpans,
-                            now,
-                            cancellationToken);
-                        await InsertMaterialStyleTagsAsync(
-                            connection,
-                            transaction,
-                            validation.EvidenceSpans,
+                            profileId,
                             ReferenceStyleAnalyzerVersions.LlmAssistedV1,
+                            ReferenceStyleAnalyzerSources.LlmAssisted,
+                            anchorIds,
+                            sourceHashes,
+                            validation.Status,
+                            BuildLlmDiagnostics(validation),
                             now,
                             cancellationToken);
-                        analyzerVersion = ReferenceStyleAnalyzerVersions.LlmAssistedV1;
-                        analyzerSource = ReferenceStyleAnalyzerSources.LlmAssisted;
-                        features = MergeLlmCategoricalFeatures(baseline.Features, validation.EvidenceSpans);
-                        evidenceSpans = baseline.EvidenceSpans.Concat(validation.EvidenceSpans).ToArray();
+
+                        if (validation.EvidenceSpans.Count > 0)
+                        {
+                            await InsertEvidenceAsync(
+                                connection,
+                                transaction,
+                                validation.EvidenceSpans,
+                                now,
+                                cancellationToken);
+                            await InsertMaterialStyleTagsAsync(
+                                connection,
+                                transaction,
+                                validation.EvidenceSpans,
+                                ReferenceStyleAnalyzerVersions.LlmAssistedV1,
+                                now,
+                                cancellationToken);
+                            analyzerVersion = ReferenceStyleAnalyzerVersions.LlmAssistedV1;
+                            analyzerSource = ReferenceStyleAnalyzerSources.LlmAssisted;
+                            features = MergeLlmCategoricalFeatures(baseline.Features, validation.EvidenceSpans);
+                            evidenceSpans = baseline.EvidenceSpans.Concat(validation.EvidenceSpans).ToArray();
+                        }
                     }
                 }
 
@@ -280,6 +283,107 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
             var profile = await ReadStyleProfileAsync(connection, novelId, profileId, cancellationToken);
             return profile;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<ReferenceStyleProfilePayload> ArchiveStyleProfileAsync(
+        ArchiveReferenceStyleProfilePayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        ValidateProfileId(input.ProfileId);
+        return await UpdateStyleProfileArchiveStateAsync(input.NovelId, input.ProfileId, archive: true, cancellationToken);
+    }
+
+    public async ValueTask<ReferenceStyleProfilePayload> RestoreStyleProfileAsync(
+        RestoreReferenceStyleProfilePayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        ValidateProfileId(input.ProfileId);
+        return await UpdateStyleProfileArchiveStateAsync(input.NovelId, input.ProfileId, archive: false, cancellationToken);
+    }
+
+    public async ValueTask<ReferenceStyleProfileComparisonPayload> CompareStyleProfilesAsync(
+        CompareReferenceStyleProfilesPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        ValidateProfileId(input.LeftProfileId);
+        ValidateProfileId(input.RightProfileId);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var left = await ReadStyleProfileAsync(connection, input.NovelId, input.LeftProfileId, cancellationToken);
+            var right = await ReadStyleProfileAsync(connection, input.NovelId, input.RightProfileId, cancellationToken);
+            if (left is null || right is null)
+            {
+                throw new ArgumentException("Reference style profiles must belong to the requested novel.", nameof(input));
+            }
+
+            return BuildStyleProfileComparison(input.NovelId, left, right, DateTimeOffset.UtcNow);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private async ValueTask<ReferenceStyleProfilePayload> UpdateStyleProfileArchiveStateAsync(
+        long novelId,
+        long profileId,
+        bool archive,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = archive
+                ? """
+                    UPDATE reference_style_profiles
+                    SET status = $status,
+                        archived_at = COALESCE(archived_at, $archived_at),
+                        updated_at = $updated_at
+                    WHERE novel_id = $novel_id
+                      AND profile_id = $profile_id;
+                    """
+                : """
+                    UPDATE reference_style_profiles
+                    SET status = $status,
+                        archived_at = NULL,
+                        updated_at = $updated_at
+                    WHERE novel_id = $novel_id
+                      AND profile_id = $profile_id;
+                    """;
+            command.Parameters.AddWithValue("$status", archive ? ReferenceStyleProfileStatuses.Archived : ReferenceStyleProfileStatuses.Active);
+            command.Parameters.AddWithValue("$archived_at", FormatTimestamp(now));
+            command.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
+            command.Parameters.AddWithValue("$novel_id", novelId);
+            command.Parameters.AddWithValue("$profile_id", profileId);
+            var updated = await command.ExecuteNonQueryAsync(cancellationToken);
+            if (updated != 1)
+            {
+                throw new ArgumentException($"Reference style profile '{profileId}' is not accessible.", nameof(profileId));
+            }
+
+            return await ReadStyleProfileAsync(connection, novelId, profileId, cancellationToken)
+                ?? throw new InvalidOperationException("Reference style profile disappeared after archive state update.");
         }
         finally
         {
@@ -625,7 +729,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         return rows;
     }
 
-    private async ValueTask<ReferenceStyleLlmAnalysisValidationResultPayload> RunLlmAnalysisAsync(
+    private async ValueTask<ReferenceStyleLlmAnalysisValidationResultPayload?> RunLlmAnalysisAsync(
         long profileId,
         IReadOnlyList<ReferenceStyleAnalysisWindowPayload> windows,
         CancellationToken cancellationToken)
@@ -643,7 +747,9 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                 ReferenceStyleLlmAnalysisValidator.SupportedFeatureKeys,
                 windows);
             var outputJson = await _llmAnalyzer.AnalyzeAsync(request, cancellationToken);
-            return ReferenceStyleLlmAnalysisValidator.Validate(profileId, outputJson ?? string.Empty, windows);
+            return outputJson is null
+                ? null
+                : ReferenceStyleLlmAnalysisValidator.Validate(profileId, outputJson, windows);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1042,6 +1148,197 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         }
 
         return evidence;
+    }
+
+    private static ReferenceStyleProfileComparisonPayload BuildStyleProfileComparison(
+        long novelId,
+        ReferenceStyleProfilePayload left,
+        ReferenceStyleProfilePayload right,
+        DateTimeOffset comparedAt)
+    {
+        return new ReferenceStyleProfileComparisonPayload(
+            novelId,
+            ToSummary(left),
+            ToSummary(right),
+            CompareNumericFeatures(left.Features, right.Features),
+            CompareDistributionFeatures(left.Features, right.Features),
+            CompareCategoricalFeatures(left.Features, right.Features),
+            comparedAt);
+    }
+
+    private static ReferenceStyleProfileSummaryPayload ToSummary(ReferenceStyleProfilePayload profile)
+    {
+        return new ReferenceStyleProfileSummaryPayload(
+            profile.ProfileId,
+            profile.NovelId,
+            profile.Title,
+            profile.Description,
+            profile.Status,
+            profile.AnalyzerVersion,
+            profile.FeatureSchemaVersion,
+            profile.AnalyzerSource,
+            profile.SourceAnchorIds,
+            profile.SourceHashes,
+            profile.AggregateConfidence,
+            profile.CreatedAt,
+            profile.UpdatedAt,
+            profile.ArchivedAt);
+    }
+
+    private static IReadOnlyList<ReferenceStyleNumericFeatureDifferencePayload> CompareNumericFeatures(
+        ReferenceStyleFeatureVectorPayload left,
+        ReferenceStyleFeatureVectorPayload right)
+    {
+        var leftByKey = left.NumericFeatures
+            .GroupBy(feature => feature.FeatureKey, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var rightByKey = right.NumericFeatures
+            .GroupBy(feature => feature.FeatureKey, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+
+        return leftByKey.Keys
+            .Concat(rightByKey.Keys)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .Select(featureKey =>
+            {
+                leftByKey.TryGetValue(featureKey, out var leftFeature);
+                rightByKey.TryGetValue(featureKey, out var rightFeature);
+                var leftValue = leftFeature?.Value;
+                var rightValue = rightFeature?.Value;
+                return new ReferenceStyleNumericFeatureDifferencePayload(
+                    featureKey,
+                    leftFeature?.Unit ?? rightFeature?.Unit ?? string.Empty,
+                    leftValue,
+                    rightValue,
+                    BothPresentAbsoluteDelta(leftValue, rightValue),
+                    RelativeDelta(leftValue, rightValue),
+                    leftFeature?.Confidence,
+                    rightFeature?.Confidence);
+            })
+            .ToArray();
+    }
+
+    private static IReadOnlyList<ReferenceStyleDistributionFeatureDifferencePayload> CompareDistributionFeatures(
+        ReferenceStyleFeatureVectorPayload left,
+        ReferenceStyleFeatureVectorPayload right)
+    {
+        var leftByKey = left.DistributionFeatures
+            .GroupBy(feature => feature.FeatureKey, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var rightByKey = right.DistributionFeatures
+            .GroupBy(feature => feature.FeatureKey, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+
+        return leftByKey.Keys
+            .Concat(rightByKey.Keys)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .Select(featureKey =>
+            {
+                leftByKey.TryGetValue(featureKey, out var leftFeature);
+                rightByKey.TryGetValue(featureKey, out var rightFeature);
+                return new ReferenceStyleDistributionFeatureDifferencePayload(
+                    featureKey,
+                    leftFeature?.Unit ?? rightFeature?.Unit ?? string.Empty,
+                    CompareDistributionBuckets(leftFeature, rightFeature),
+                    leftFeature?.Confidence,
+                    rightFeature?.Confidence);
+            })
+            .ToArray();
+    }
+
+    private static IReadOnlyList<ReferenceStyleDistributionBucketDifferencePayload> CompareDistributionBuckets(
+        ReferenceStyleDistributionFeaturePayload? left,
+        ReferenceStyleDistributionFeaturePayload? right)
+    {
+        var leftByLabel = (left?.Buckets ?? [])
+            .GroupBy(bucket => bucket.Label, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var rightByLabel = (right?.Buckets ?? [])
+            .GroupBy(bucket => bucket.Label, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+
+        return leftByLabel.Keys
+            .Concat(rightByLabel.Keys)
+            .Distinct(StringComparer.Ordinal)
+            .Select(label =>
+            {
+                leftByLabel.TryGetValue(label, out var leftBucket);
+                rightByLabel.TryGetValue(label, out var rightBucket);
+                var leftWeight = leftBucket?.Weight;
+                var rightWeight = rightBucket?.Weight;
+                return new ReferenceStyleDistributionBucketDifferencePayload(
+                    label,
+                    leftBucket?.Min,
+                    leftBucket?.Max,
+                    leftWeight,
+                    rightBucket?.Min,
+                    rightBucket?.Max,
+                    rightWeight,
+                    MissingAsZeroAbsoluteDelta(leftWeight, rightWeight));
+            })
+            .OrderBy(bucket => bucket.LeftMin ?? bucket.RightMin ?? 0)
+            .ThenBy(bucket => bucket.Label, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<ReferenceStyleCategoricalFeatureDifferencePayload> CompareCategoricalFeatures(
+        ReferenceStyleFeatureVectorPayload left,
+        ReferenceStyleFeatureVectorPayload right)
+    {
+        var leftByKey = left.CategoricalFeatures
+            .GroupBy(feature => (feature.FeatureKey, feature.Label))
+            .ToDictionary(group => group.Key, group => group.First());
+        var rightByKey = right.CategoricalFeatures
+            .GroupBy(feature => (feature.FeatureKey, feature.Label))
+            .ToDictionary(group => group.Key, group => group.First());
+
+        return leftByKey.Keys
+            .Concat(rightByKey.Keys)
+            .Distinct()
+            .OrderBy(key => key.FeatureKey, StringComparer.Ordinal)
+            .ThenBy(key => key.Label, StringComparer.Ordinal)
+            .Select(key =>
+            {
+                leftByKey.TryGetValue(key, out var leftFeature);
+                rightByKey.TryGetValue(key, out var rightFeature);
+                var leftWeight = leftFeature?.Weight;
+                var rightWeight = rightFeature?.Weight;
+                return new ReferenceStyleCategoricalFeatureDifferencePayload(
+                    key.FeatureKey,
+                    key.Label,
+                    leftWeight,
+                    rightWeight,
+                    MissingAsZeroAbsoluteDelta(leftWeight, rightWeight),
+                    leftFeature?.Confidence,
+                    rightFeature?.Confidence);
+            })
+            .ToArray();
+    }
+
+    private static double? BothPresentAbsoluteDelta(double? left, double? right)
+    {
+        return left is null || right is null
+            ? null
+            : Math.Abs(left.Value - right.Value);
+    }
+
+    private static double? MissingAsZeroAbsoluteDelta(double? left, double? right)
+    {
+        return left is null && right is null
+            ? null
+            : Math.Abs((left ?? 0) - (right ?? 0));
+    }
+
+    private static double? RelativeDelta(double? left, double? right)
+    {
+        if (left is null || right is null || Math.Abs(left.Value) < double.Epsilon)
+        {
+            return null;
+        }
+
+        return Math.Abs(right.Value - left.Value) / Math.Abs(left.Value);
     }
 
     private async ValueTask EnsureNovelExistsAsync(long novelId, CancellationToken cancellationToken)

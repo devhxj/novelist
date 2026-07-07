@@ -34,6 +34,238 @@ public static class ReferenceStyleLlmAnalysisSchemaVersions
     public const string V1 = "reference-style-llm-analysis-v1";
 }
 
+public static class ReferenceStyleTaxonomyVersions
+{
+    public const string V1 = "reference-style-taxonomy-v1";
+}
+
+public static class ReferenceStyleTaxonomyCategories
+{
+    public const string Narration = "narration";
+    public const string ProseRhythm = "prose_rhythm";
+    public const string DialogueAndSubtext = "dialogue_and_subtext";
+    public const string ImageryAndSensation = "imagery_and_sensation";
+    public const string TensionAndStructure = "tension_and_structure";
+    public const string WebFictionMechanics = "web_fiction_mechanics";
+
+    public static IReadOnlyList<string> All { get; } =
+    [
+        Narration,
+        ProseRhythm,
+        DialogueAndSubtext,
+        ImageryAndSensation,
+        TensionAndStructure,
+        WebFictionMechanics
+    ];
+}
+
+public sealed record ReferenceStyleTaxonomyFeaturePayload(
+    [property: JsonPropertyName("feature_key")] string FeatureKey,
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("description")] string Description,
+    [property: JsonPropertyName("labels")] IReadOnlyList<string> Labels,
+    [property: JsonPropertyName("compatible_beat_duties")] IReadOnlyList<string> CompatibleBeatDuties);
+
+public static class ReferenceStyleTaxonomy
+{
+    public const string Version = ReferenceStyleTaxonomyVersions.V1;
+
+    public static IReadOnlyList<ReferenceStyleTaxonomyFeaturePayload> Features { get; } =
+    [
+        Feature(
+            "narration_distance",
+            ReferenceStyleTaxonomyCategories.Narration,
+            "How close the narration stays to viewpoint perception and interiority.",
+            ["close_limited", "mid_summary", "distant_omniscient"],
+            ["interiority", "pov_control", "narration_distance"]),
+        Feature(
+            "pov_control",
+            ReferenceStyleTaxonomyCategories.Narration,
+            "How consistently viewpoint knowledge, perception, and camera access are controlled.",
+            ["tight_internal", "limited_external", "head_hopping_risk"],
+            ["pov_control", "viewpoint_boundary", "interiority"]),
+        Feature(
+            "rhythm",
+            ReferenceStyleTaxonomyCategories.ProseRhythm,
+            "The local tempo and pressure created by sentence movement.",
+            ["staccato", "balanced", "rolling_periodic"],
+            ["rhythm", "pacing", "pressure"]),
+        Feature(
+            "sentence_shape",
+            ReferenceStyleTaxonomyCategories.ProseRhythm,
+            "The dominant clause and sentence construction pattern.",
+            ["short_direct", "layered_clause", "fragment_pressure"],
+            ["sentence_shape", "rhythm", "anti_screenplay"]),
+        Feature(
+            "paragraph_cadence",
+            ReferenceStyleTaxonomyCategories.ProseRhythm,
+            "How paragraphs bundle action, perception, reflection, and turn endings.",
+            ["single_beat", "braided_motion_reflection", "long_wave"],
+            ["paragraph_cadence", "rhythm", "scene_flow"]),
+        Feature(
+            "dialogue_mechanics",
+            ReferenceStyleTaxonomyCategories.DialogueAndSubtext,
+            "How dialogue turns, tags, interruptions, and beats carry scene pressure.",
+            ["short_turns", "interrupted_exchange", "subtext_reply"],
+            ["dialogue", "subtext", "external_evidence"]),
+        Feature(
+            "subtext",
+            ReferenceStyleTaxonomyCategories.DialogueAndSubtext,
+            "How the prose implies unstated motive, conflict, and withheld response.",
+            ["withheld_answer", "displaced_topic", "implication_gap"],
+            ["subtext", "dialogue", "emotion_pressure"]),
+        Feature(
+            "externalized_emotion",
+            ReferenceStyleTaxonomyCategories.DialogueAndSubtext,
+            "How emotion is shown through visible behavior instead of explanation.",
+            ["body_afterbeat", "object_handling", "silence_response"],
+            ["external_evidence", "physical_afterbeat", "interiority"]),
+        Feature(
+            "sensory_image",
+            ReferenceStyleTaxonomyCategories.ImageryAndSensation,
+            "Which concrete sensory channel carries place, pressure, and mood.",
+            ["tactile_grounding", "auditory_pressure", "visual_anchor"],
+            ["sensory_anchor", "environment", "source_backed_detail"]),
+        Feature(
+            "metaphor_system",
+            ReferenceStyleTaxonomyCategories.ImageryAndSensation,
+            "How figurative language is grounded, repeated, or abstracted.",
+            ["concrete_vehicle", "recurring_symbol", "abstract_risk"],
+            ["image_system", "sensory_anchor", "anti_ai_prose"]),
+        Feature(
+            "image_system",
+            ReferenceStyleTaxonomyCategories.ImageryAndSensation,
+            "How repeated images or motifs organize scene tone and promise.",
+            ["weather_motif", "object_motif", "light_shadow_motif"],
+            ["image_system", "sensory_anchor", "theme_motif"]),
+        Feature(
+            "tension_pressure",
+            ReferenceStyleTaxonomyCategories.TensionAndStructure,
+            "How conflict pressure narrows choices and escalates reader attention.",
+            ["narrowing_options", "ticking_clock", "interpersonal_threat"],
+            ["pressure", "conflict", "escalation"]),
+        Feature(
+            "hook_pattern",
+            ReferenceStyleTaxonomyCategories.TensionAndStructure,
+            "How a local passage ending opens a question, reversal, or threat.",
+            ["question_tail", "reversal_tail", "threat_arrival"],
+            ["hook", "reader_question", "pressure"]),
+        Feature(
+            "payoff_pattern",
+            ReferenceStyleTaxonomyCategories.TensionAndStructure,
+            "How the prose resolves a planted question or emotional setup.",
+            ["answer_reveal", "emotional_release", "promise_fulfilled"],
+            ["payoff", "reveal", "emotion_turn"]),
+        Feature(
+            "transition_pattern",
+            ReferenceStyleTaxonomyCategories.TensionAndStructure,
+            "How the prose moves between beats, time, scene, and causality.",
+            ["time_jump", "causal_bridge", "scene_cut"],
+            ["transition", "causality", "scene_flow"]),
+        Feature(
+            "exposition_handling",
+            ReferenceStyleTaxonomyCategories.TensionAndStructure,
+            "How necessary information is embedded, delayed, or over-explained.",
+            ["embedded_in_action", "dialogue_exposition", "infodump_risk"],
+            ["exposition", "source_backed_detail", "anti_ai_prose"]),
+        Feature(
+            "action_clarity",
+            ReferenceStyleTaxonomyCategories.TensionAndStructure,
+            "How clearly physical movement, blocking, and sequence are legible.",
+            ["clean_blocking", "ambiguous_blocking", "sequential_motion"],
+            ["action", "blocking", "external_evidence"]),
+        Feature(
+            "anti_screenplay_prose",
+            ReferenceStyleTaxonomyCategories.ProseRhythm,
+            "Whether action is novelistic prose instead of camera-direction staging.",
+            ["interiorized_action", "camera_direction_risk", "prose_afterbeat"],
+            ["anti_screenplay", "interiority", "physical_afterbeat"]),
+        Feature(
+            "chapter_hook",
+            ReferenceStyleTaxonomyCategories.WebFictionMechanics,
+            "How a chapter ending renews reader desire to continue.",
+            ["cliffhanger_question", "new_threat", "promise_open"],
+            ["hook", "chapter_hook", "reader_promise"]),
+        Feature(
+            "escalation_beat",
+            ReferenceStyleTaxonomyCategories.WebFictionMechanics,
+            "How a serial beat increases cost, complication, or opposition.",
+            ["complication", "cost_increase", "pressure_turn"],
+            ["escalation", "pressure", "conflict"]),
+        Feature(
+            "payoff_beat",
+            ReferenceStyleTaxonomyCategories.WebFictionMechanics,
+            "How a beat delivers a concrete reveal, release, or tactical gain.",
+            ["reveal_payoff", "emotional_payoff", "tactical_payoff"],
+            ["payoff", "reveal", "pleasure_point"]),
+        Feature(
+            "compression_expansion",
+            ReferenceStyleTaxonomyCategories.WebFictionMechanics,
+            "How the prose compresses connective tissue or expands high-value moments.",
+            ["compressed_summary", "expanded_moment", "balanced_scene"],
+            ["pacing", "rhythm", "scene_focus"]),
+        Feature(
+            "pleasure_point_delivery",
+            ReferenceStyleTaxonomyCategories.WebFictionMechanics,
+            "How web-fiction satisfaction points are staged and released.",
+            ["power_reversal", "competence_display", "emotional_catharsis"],
+            ["pleasure_point", "payoff", "reader_promise"]),
+        Feature(
+            "cliffhanger_type",
+            ReferenceStyleTaxonomyCategories.WebFictionMechanics,
+            "The specific unresolved tension used to carry the reader forward.",
+            ["danger_cut", "secret_reveal", "choice_suspended"],
+            ["hook", "cliffhanger", "reader_question"]),
+        Feature(
+            "information_withholding",
+            ReferenceStyleTaxonomyCategories.WebFictionMechanics,
+            "How the text withholds information fairly without confusing causality.",
+            ["fair_gap", "delayed_identity", "hidden_motive"],
+            ["reader_question", "mystery", "causality"]),
+        Feature(
+            "reader_promise_tracking",
+            ReferenceStyleTaxonomyCategories.WebFictionMechanics,
+            "How the passage plants, renews, or pays off serial reader promises.",
+            ["promise_planted", "promise_renewed", "promise_paid_off"],
+            ["reader_promise", "hook", "payoff"])
+    ];
+
+    public static IReadOnlyList<string> FeatureKeys { get; } = Features
+        .Select(feature => feature.FeatureKey)
+        .ToArray();
+
+    private static readonly IReadOnlyDictionary<string, ReferenceStyleTaxonomyFeaturePayload> FeaturesByKey = Features
+        .ToDictionary(feature => feature.FeatureKey, StringComparer.Ordinal);
+
+    public static bool IsSupportedFeatureKey(string featureKey)
+    {
+        return FeaturesByKey.ContainsKey(featureKey);
+    }
+
+    public static bool IsSupportedLabel(string featureKey, string label)
+    {
+        return FeaturesByKey.TryGetValue(featureKey, out var feature) &&
+            feature.Labels.Contains(label, StringComparer.Ordinal);
+    }
+
+    public static ReferenceStyleTaxonomyFeaturePayload GetFeature(string featureKey)
+    {
+        return FeaturesByKey.TryGetValue(featureKey, out var feature)
+            ? feature
+            : throw new ArgumentException($"Unsupported style taxonomy feature key: {featureKey}.", nameof(featureKey));
+    }
+
+    private static ReferenceStyleTaxonomyFeaturePayload Feature(
+        string featureKey,
+        string category,
+        string description,
+        IReadOnlyList<string> labels,
+        IReadOnlyList<string> compatibleBeatDuties)
+    {
+        return new ReferenceStyleTaxonomyFeaturePayload(featureKey, category, description, labels, compatibleBeatDuties);
+    }
+}
+
 public static class ReferenceStyleLlmAnalysisValidationStatuses
 {
     public const string Passed = "passed";
@@ -65,6 +297,19 @@ public sealed record GetReferenceStyleProfilesPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("include_archived")] bool IncludeArchived = false);
 
+public sealed record ArchiveReferenceStyleProfilePayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("profile_id")] long ProfileId);
+
+public sealed record RestoreReferenceStyleProfilePayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("profile_id")] long ProfileId);
+
+public sealed record CompareReferenceStyleProfilesPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("left_profile_id")] long LeftProfileId,
+    [property: JsonPropertyName("right_profile_id")] long RightProfileId);
+
 public sealed record ReferenceStyleProfileSummaryPayload(
     [property: JsonPropertyName("profile_id")] long ProfileId,
     [property: JsonPropertyName("novel_id")] long NovelId,
@@ -82,6 +327,51 @@ public sealed record ReferenceStyleProfileSummaryPayload(
     [property: JsonPropertyName("archived_at")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     DateTimeOffset? ArchivedAt);
+
+public sealed record ReferenceStyleProfileComparisonPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("left_profile")] ReferenceStyleProfileSummaryPayload LeftProfile,
+    [property: JsonPropertyName("right_profile")] ReferenceStyleProfileSummaryPayload RightProfile,
+    [property: JsonPropertyName("numeric_differences")] IReadOnlyList<ReferenceStyleNumericFeatureDifferencePayload> NumericDifferences,
+    [property: JsonPropertyName("distribution_differences")] IReadOnlyList<ReferenceStyleDistributionFeatureDifferencePayload> DistributionDifferences,
+    [property: JsonPropertyName("categorical_differences")] IReadOnlyList<ReferenceStyleCategoricalFeatureDifferencePayload> CategoricalDifferences,
+    [property: JsonPropertyName("compared_at")] DateTimeOffset ComparedAt);
+
+public sealed record ReferenceStyleNumericFeatureDifferencePayload(
+    [property: JsonPropertyName("feature_key")] string FeatureKey,
+    [property: JsonPropertyName("unit")] string Unit,
+    [property: JsonPropertyName("left_value")] double? LeftValue,
+    [property: JsonPropertyName("right_value")] double? RightValue,
+    [property: JsonPropertyName("absolute_delta")] double? AbsoluteDelta,
+    [property: JsonPropertyName("relative_delta")] double? RelativeDelta,
+    [property: JsonPropertyName("left_confidence")] double? LeftConfidence,
+    [property: JsonPropertyName("right_confidence")] double? RightConfidence);
+
+public sealed record ReferenceStyleDistributionFeatureDifferencePayload(
+    [property: JsonPropertyName("feature_key")] string FeatureKey,
+    [property: JsonPropertyName("unit")] string Unit,
+    [property: JsonPropertyName("buckets")] IReadOnlyList<ReferenceStyleDistributionBucketDifferencePayload> Buckets,
+    [property: JsonPropertyName("left_confidence")] double? LeftConfidence,
+    [property: JsonPropertyName("right_confidence")] double? RightConfidence);
+
+public sealed record ReferenceStyleDistributionBucketDifferencePayload(
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("left_min")] double? LeftMin,
+    [property: JsonPropertyName("left_max")] double? LeftMax,
+    [property: JsonPropertyName("left_weight")] double? LeftWeight,
+    [property: JsonPropertyName("right_min")] double? RightMin,
+    [property: JsonPropertyName("right_max")] double? RightMax,
+    [property: JsonPropertyName("right_weight")] double? RightWeight,
+    [property: JsonPropertyName("absolute_delta")] double? AbsoluteDelta);
+
+public sealed record ReferenceStyleCategoricalFeatureDifferencePayload(
+    [property: JsonPropertyName("feature_key")] string FeatureKey,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("left_weight")] double? LeftWeight,
+    [property: JsonPropertyName("right_weight")] double? RightWeight,
+    [property: JsonPropertyName("absolute_delta")] double? AbsoluteDelta,
+    [property: JsonPropertyName("left_confidence")] double? LeftConfidence,
+    [property: JsonPropertyName("right_confidence")] double? RightConfidence);
 
 public sealed record ReferenceStyleProfilePayload(
     [property: JsonPropertyName("profile_id")] long ProfileId,

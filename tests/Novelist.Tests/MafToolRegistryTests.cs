@@ -1101,6 +1101,27 @@ public sealed class MafToolRegistryTests
                 DateTimeOffset.UtcNow,
                 ArchivedAt: null));
         }
+
+        public ValueTask<ReferenceStyleProfilePayload> ArchiveStyleProfileAsync(
+            ArchiveReferenceStyleProfilePayload input,
+            CancellationToken cancellationToken)
+        {
+            throw new NotSupportedException("MAF tools must not archive style profiles.");
+        }
+
+        public ValueTask<ReferenceStyleProfilePayload> RestoreStyleProfileAsync(
+            RestoreReferenceStyleProfilePayload input,
+            CancellationToken cancellationToken)
+        {
+            throw new NotSupportedException("MAF tools must not restore style profiles.");
+        }
+
+        public ValueTask<ReferenceStyleProfileComparisonPayload> CompareStyleProfilesAsync(
+            CompareReferenceStyleProfilesPayload input,
+            CancellationToken cancellationToken)
+        {
+            throw new NotSupportedException("MAF tools must not compare style profiles.");
+        }
     }
 
     private sealed class RecordingReferenceAnchorService : IReferenceAnchorService

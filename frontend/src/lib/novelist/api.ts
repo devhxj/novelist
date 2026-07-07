@@ -75,6 +75,7 @@ export interface NovelistAppApi {
   ApproveTool: AppMethod<[string, boolean, string], void>
   AdaptReferenceMaterial: AppMethod<[reference.AdaptMaterialInput], reference.AdaptMaterialResult>
   ApproveReferenceChapterBlueprint: AppMethod<[reference.ApproveChapterBlueprintInput], reference.ChapterBlueprint>
+  ArchiveReferenceStyleProfile: AppMethod<[reference.ArchiveStyleProfileInput], reference.StyleProfile>
   AuditReferenceAnchoredDraft: AppMethod<[reference.AuditAnchoredDraftInput], reference.AnchoredDraftAudit>
   AuditReferenceReuse: AppMethod<[reference.AuditReuseInput], reference.ReuseAudit>
   BindReferenceBlueprintMaterials: AppMethod<[reference.BindBlueprintMaterialsInput], reference.BlueprintMaterialBindingResult>
@@ -82,6 +83,7 @@ export interface NovelistAppApi {
   CancelChat: AppMethod<[string], void>
   CancelReferenceOrchestrationRun: AppMethod<[reference.CancelOrchestrationRunInput], reference.OrchestrationRun>
   Chat: AppMethod<[app.ChatInput], app.ChatResult>
+  CompareReferenceStyleProfiles: AppMethod<[reference.CompareStyleProfilesInput], reference.StyleProfileComparison>
   CompressContext: AppMethod<[app.CompressInput], app.CompressResult>
   CreateArcNode: AppMethod<[number, app.CreateArcNodeInput], storyarc.ArcNode>
   CreateChapter: AppMethod<[app.CreateChapterInput], chapter.Chapter>
@@ -161,6 +163,7 @@ export interface NovelistAppApi {
   RecordReferenceUserFeedback: AppMethod<[reference.RecordUserFeedbackInput], reference.UserFeedback>
   ResumeReferenceOrchestrationRun: AppMethod<[reference.ResumeOrchestrationRunInput], reference.OrchestrationRun>
   RestoreReferenceMaterials: AppMethod<[reference.RestoreMaterialsInput], void>
+  RestoreReferenceStyleProfile: AppMethod<[reference.RestoreStyleProfileInput], reference.StyleProfile>
   ReviseReferenceChapterBlueprint: AppMethod<[reference.ReviseChapterBlueprintInput], reference.ChapterBlueprint>
   ReviewReferenceChapterBlueprint: AppMethod<[reference.ReviewChapterBlueprintInput], reference.ChapterBlueprintReview>
   SaveAvatar: AppMethod<[number[]], void>
@@ -228,6 +231,7 @@ export const appApi: NovelistAppApi = {
   ApproveTool: appMethod<NovelistAppApi['ApproveTool']>('ApproveTool'),
   AdaptReferenceMaterial: appMethod<NovelistAppApi['AdaptReferenceMaterial']>('AdaptReferenceMaterial'),
   ApproveReferenceChapterBlueprint: appMethod<NovelistAppApi['ApproveReferenceChapterBlueprint']>('ApproveReferenceChapterBlueprint'),
+  ArchiveReferenceStyleProfile: appMethod<NovelistAppApi['ArchiveReferenceStyleProfile']>('ArchiveReferenceStyleProfile'),
   AuditReferenceAnchoredDraft: appMethod<NovelistAppApi['AuditReferenceAnchoredDraft']>('AuditReferenceAnchoredDraft'),
   AuditReferenceReuse: appMethod<NovelistAppApi['AuditReferenceReuse']>('AuditReferenceReuse'),
   BindReferenceBlueprintMaterials: appMethod<NovelistAppApi['BindReferenceBlueprintMaterials']>('BindReferenceBlueprintMaterials'),
@@ -235,6 +239,7 @@ export const appApi: NovelistAppApi = {
   CancelChat: appMethod<NovelistAppApi['CancelChat']>('CancelChat'),
   CancelReferenceOrchestrationRun: appMethod<NovelistAppApi['CancelReferenceOrchestrationRun']>('CancelReferenceOrchestrationRun'),
   Chat: ((...args) => invokeAppArgs('Chat', args, { timeoutMs: null })) as NovelistAppApi['Chat'],
+  CompareReferenceStyleProfiles: appMethod<NovelistAppApi['CompareReferenceStyleProfiles']>('CompareReferenceStyleProfiles'),
   CompressContext: appMethod<NovelistAppApi['CompressContext']>('CompressContext'),
   CreateArcNode: appMethod<NovelistAppApi['CreateArcNode']>('CreateArcNode'),
   CreateChapter: appMethod<NovelistAppApi['CreateChapter']>('CreateChapter'),
@@ -314,6 +319,7 @@ export const appApi: NovelistAppApi = {
   RecordReferenceUserFeedback: appMethod<NovelistAppApi['RecordReferenceUserFeedback']>('RecordReferenceUserFeedback'),
   ResumeReferenceOrchestrationRun: appMethod<NovelistAppApi['ResumeReferenceOrchestrationRun']>('ResumeReferenceOrchestrationRun'),
   RestoreReferenceMaterials: appMethod<NovelistAppApi['RestoreReferenceMaterials']>('RestoreReferenceMaterials'),
+  RestoreReferenceStyleProfile: appMethod<NovelistAppApi['RestoreReferenceStyleProfile']>('RestoreReferenceStyleProfile'),
   ReviseReferenceChapterBlueprint: appMethod<NovelistAppApi['ReviseReferenceChapterBlueprint']>('ReviseReferenceChapterBlueprint'),
   ReviewReferenceChapterBlueprint: appMethod<NovelistAppApi['ReviewReferenceChapterBlueprint']>('ReviewReferenceChapterBlueprint'),
   SaveAvatar: appMethod<NovelistAppApi['SaveAvatar']>('SaveAvatar'),

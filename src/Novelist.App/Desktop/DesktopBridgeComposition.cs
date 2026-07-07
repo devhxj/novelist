@@ -72,7 +72,8 @@ public static class DesktopBridgeComposition
             sqliteVecProvider);
         var referenceStyleProfileService = new SqliteReferenceStyleProfileService(
             options,
-            novelService);
+            novelService,
+            new ReferenceStyleChatCompletionLlmAnalyzer(settingsService, chatCompletionClient));
         var referenceAnchoredDraftService = new SqliteReferenceAnchoredDraftService(
             options,
             novelService,

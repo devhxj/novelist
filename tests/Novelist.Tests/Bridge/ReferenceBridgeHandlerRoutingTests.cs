@@ -236,12 +236,18 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             [ReferenceSourceTrustLevels.UserVerified, ReferenceSourceTrustLevels.Imported]));
         await AssertOkAsync(dispatcher, "GetReferenceStyleProfiles", new GetReferenceStyleProfilesPayload(42, IncludeArchived: true));
         await AssertOkAsync(dispatcher, "GetReferenceStyleProfile", 42L, 501L);
+        await AssertOkAsync(dispatcher, "ArchiveReferenceStyleProfile", new ArchiveReferenceStyleProfilePayload(42, 501));
+        await AssertOkAsync(dispatcher, "RestoreReferenceStyleProfile", new RestoreReferenceStyleProfilePayload(42, 501));
+        await AssertOkAsync(dispatcher, "CompareReferenceStyleProfiles", new CompareReferenceStyleProfilesPayload(42, 501, 502));
 
         Assert.Equal(
             [
                 "BuildStyleProfile:42:雨夜克制风格:deterministic baseline:99,100:user_provided,licensed:user_verified,imported",
                 "GetStyleProfiles:42:True",
-                "GetStyleProfile:42:501"
+                "GetStyleProfile:42:501",
+                "ArchiveStyleProfile:42:501",
+                "RestoreStyleProfile:42:501",
+                "CompareStyleProfiles:42:501:502"
             ],
             service.Calls);
     }
@@ -544,6 +550,33 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"GetStyleProfile:{novelId}:{profileId}");
             return ValueTask.FromResult<ReferenceStyleProfilePayload?>(null);
+        }
+
+        public ValueTask<ReferenceStyleProfilePayload> ArchiveStyleProfileAsync(
+            ArchiveReferenceStyleProfilePayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"ArchiveStyleProfile:{input.NovelId}:{input.ProfileId}");
+            return ValueTask.FromResult<ReferenceStyleProfilePayload>(null!);
+        }
+
+        public ValueTask<ReferenceStyleProfilePayload> RestoreStyleProfileAsync(
+            RestoreReferenceStyleProfilePayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"RestoreStyleProfile:{input.NovelId}:{input.ProfileId}");
+            return ValueTask.FromResult<ReferenceStyleProfilePayload>(null!);
+        }
+
+        public ValueTask<ReferenceStyleProfileComparisonPayload> CompareStyleProfilesAsync(
+            CompareReferenceStyleProfilesPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"CompareStyleProfiles:{input.NovelId}:{input.LeftProfileId}:{input.RightProfileId}");
+            return ValueTask.FromResult<ReferenceStyleProfileComparisonPayload>(null!);
         }
     }
 

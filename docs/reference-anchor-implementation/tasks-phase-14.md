@@ -114,7 +114,7 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 4: LLM-Assisted Style Analyst Interface
 
-**Status:** Partially complete. A core `IReferenceStyleLlmAnalyzer` boundary and bounded-window request payload now exist, and `SqliteReferenceStyleProfileService` can use an injected analyzer provider after the deterministic baseline is built. Returned model JSON is treated as untrusted: `ReferenceStyleLlmAnalysisValidator` accepts only versioned JSON, requires each label to cite source segment ids and offsets inside supplied bounded windows, rejects unsupported or ungrounded labels, downgrades overconfident labels, and returns diagnostics. Accepted LLM evidence is persisted as `llm_assisted` evidence/material tags and merged into categorical profile features; invalid or rejected output records an LLM analysis run and leaves the deterministic profile intact. Desktop composition coverage proves normal bridge-triggered profile builds stay deterministic without a default provider. Production provider wiring remains open.
+**Status:** Complete for the first LLM-assisted analyzer boundary. A core `IReferenceStyleLlmAnalyzer` boundary and bounded-window request payload now exist, and `SqliteReferenceStyleProfileService` can use an analyzer provider after the deterministic baseline is built. `ReferenceStyleChatCompletionLlmAnalyzer` is wired in desktop composition through the user's selected model; if no model is selected it returns no output and the profile build remains deterministic without recording an LLM run. Returned model JSON is treated as untrusted: `ReferenceStyleLlmAnalysisValidator` accepts only versioned JSON, requires each label to cite source segment ids and offsets inside supplied bounded windows, rejects unsupported or ungrounded labels, downgrades overconfident labels, and returns diagnostics. Accepted LLM evidence is persisted as `llm_assisted` evidence/material tags and merged into categorical profile features; invalid, rejected, or provider-failed output records an LLM analysis run and leaves the deterministic profile intact.
 
 **Description:** Add an optional model-assisted analyzer that enriches materials with advanced style labels and evidence-backed explanations.
 
@@ -130,6 +130,7 @@ The current extractor is deterministic and robust, but limited:
 
 - [x] Unit tests for schema validation, source-span grounding, confidence downgrade, and invalid JSON fallback.
 - [x] Integration test using an injected fake analyzer provider.
+- [x] Integration tests for selected-model chat-completion provider prompting and no-selected-model skip behavior.
 - [x] No-live-network test for default desktop/test composition. Photino composition smoke coverage builds a style profile through the desktop bridge and verifies only the deterministic analysis run is persisted when no provider is configured.
 
 **Dependencies:** Tasks 1-3.
@@ -138,25 +139,29 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 5: Advanced Style Taxonomy
 
+**Status:** Complete for the first versioned taxonomy contract. `ReferenceStyleTaxonomy` now defines `reference-style-taxonomy-v1` with stable feature keys, allowed labels, categories, and compatible beat-duty hints. The LLM validator rejects unsupported labels as well as unsupported feature keys, and the chat-completion analyzer includes allowed labels in its bounded prompt. The taxonomy is documented in `docs/reference-anchor-implementation/style-taxonomy-v1.md`.
+
 **Description:** Define and implement a high-fidelity fiction style taxonomy suitable for long-form Chinese novels and web fiction.
 
 **Acceptance criteria:**
 
-- [ ] Taxonomy covers narration distance, POV control, rhythm, sentence shape, paragraph cadence, dialogue mechanics, subtext, externalized emotion, sensory image, metaphor/image system, tension pressure, hook, payoff, transition, exposition handling, action clarity, and anti-screenplay prose.
-- [ ] Taxonomy includes web-fiction mechanics: chapter hook, escalation beat, payoff beat, compression/expansion,爽点 delivery, cliffhanger type, information withholding, and reader-promise tracking.
-- [ ] Labels include confidence, evidence spans, and analyzer source.
-- [ ] Taxonomy is documented and versioned.
+- [x] Taxonomy covers narration distance, POV control, rhythm, sentence shape, paragraph cadence, dialogue mechanics, subtext, externalized emotion, sensory image, metaphor/image system, tension pressure, hook, payoff, transition, exposition handling, action clarity, and anti-screenplay prose.
+- [x] Taxonomy includes web-fiction mechanics: chapter hook, escalation beat, payoff beat, compression/expansion,爽点 delivery, cliffhanger type, information withholding, and reader-promise tracking.
+- [x] Labels include confidence, evidence spans, and analyzer source. Accepted labels become `ReferenceStyleEvidenceSpanPayload` records with confidence, analyzer source, source ids, offsets, and hashes.
+- [x] Taxonomy is documented and versioned.
 
 **Verification:**
 
-- [ ] Golden fixture tests for each major style label.
-- [ ] Regression tests for label compatibility with blueprint beat duties.
+- [x] Golden fixture tests for every taxonomy label through grounded validator acceptance.
+- [x] Regression tests for label compatibility with blueprint beat duties.
 
 **Dependencies:** Tasks 3-4.
 
 **Estimated scope:** M.
 
 ## Task 6: Style Profile Builder and Library UI
+
+**Status:** Partially complete. The backend bridge/service boundary now supports profile build, list, detail, archive, restore, and deterministic profile comparison. Archived profiles are hidden from default profile lists and still readable when `include_archived` is requested or a known profile id is inspected. Profile comparison returns structured numeric, distribution, and categorical feature deltas without source text. The product UI and Playwright coverage remain open.
 
 **Description:** Add a product surface for building, inspecting, comparing, archiving, and reusing style profiles.
 

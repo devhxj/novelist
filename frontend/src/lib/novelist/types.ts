@@ -675,6 +675,22 @@ export namespace reference {
     include_archived?: boolean
   }
 
+  export interface ArchiveStyleProfileInput {
+    novel_id: number
+    profile_id: number
+  }
+
+  export interface RestoreStyleProfileInput {
+    novel_id: number
+    profile_id: number
+  }
+
+  export interface CompareStyleProfilesInput {
+    novel_id: number
+    left_profile_id: number
+    right_profile_id: number
+  }
+
   export interface StyleProfileSummary {
     profile_id: number
     novel_id: number
@@ -697,6 +713,56 @@ export namespace reference {
     allowed_source_trust_levels: string[]
     features: StyleFeatureVector
     evidence_spans: StyleEvidenceSpan[]
+  }
+
+  export interface StyleProfileComparison {
+    novel_id: number
+    left_profile: StyleProfileSummary
+    right_profile: StyleProfileSummary
+    numeric_differences: StyleNumericFeatureDifference[]
+    distribution_differences: StyleDistributionFeatureDifference[]
+    categorical_differences: StyleCategoricalFeatureDifference[]
+    compared_at: Timestamp
+  }
+
+  export interface StyleNumericFeatureDifference {
+    feature_key: string
+    unit: string
+    left_value: number | null
+    right_value: number | null
+    absolute_delta: number | null
+    relative_delta: number | null
+    left_confidence: number | null
+    right_confidence: number | null
+  }
+
+  export interface StyleDistributionFeatureDifference {
+    feature_key: string
+    unit: string
+    buckets: StyleDistributionBucketDifference[]
+    left_confidence: number | null
+    right_confidence: number | null
+  }
+
+  export interface StyleDistributionBucketDifference {
+    label: string
+    left_min: number | null
+    left_max: number | null
+    left_weight: number | null
+    right_min: number | null
+    right_max: number | null
+    right_weight: number | null
+    absolute_delta: number | null
+  }
+
+  export interface StyleCategoricalFeatureDifference {
+    feature_key: string
+    label: string
+    left_weight: number | null
+    right_weight: number | null
+    absolute_delta: number | null
+    left_confidence: number | null
+    right_confidence: number | null
   }
 
   export interface StyleFeatureVector {

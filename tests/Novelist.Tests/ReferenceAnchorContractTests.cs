@@ -361,6 +361,123 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void ReferenceStyleProfileLibraryPayloadsUseStableSnakeCaseJsonNamesWithoutSourceText()
+    {
+        var archive = new ArchiveReferenceStyleProfilePayload(
+            NovelId: 42,
+            ProfileId: 100);
+        var restore = new RestoreReferenceStyleProfilePayload(
+            NovelId: 42,
+            ProfileId: 100);
+        var compareInput = new CompareReferenceStyleProfilesPayload(
+            NovelId: 42,
+            LeftProfileId: 100,
+            RightProfileId: 101);
+
+        using var archiveJson = JsonDocument.Parse(JsonSerializer.Serialize(archive, BridgeJson.SerializerOptions));
+        Assert.Equal(42, archiveJson.RootElement.GetProperty("novel_id").GetInt64());
+        Assert.Equal(100, archiveJson.RootElement.GetProperty("profile_id").GetInt64());
+        Assert.False(archiveJson.RootElement.TryGetProperty("NovelId", out _));
+        Assert.False(archiveJson.RootElement.TryGetProperty("ProfileId", out _));
+
+        using var restoreJson = JsonDocument.Parse(JsonSerializer.Serialize(restore, BridgeJson.SerializerOptions));
+        Assert.Equal(42, restoreJson.RootElement.GetProperty("novel_id").GetInt64());
+        Assert.Equal(100, restoreJson.RootElement.GetProperty("profile_id").GetInt64());
+        Assert.False(restoreJson.RootElement.TryGetProperty("NovelId", out _));
+
+        using var compareInputJson = JsonDocument.Parse(JsonSerializer.Serialize(compareInput, BridgeJson.SerializerOptions));
+        Assert.Equal(42, compareInputJson.RootElement.GetProperty("novel_id").GetInt64());
+        Assert.Equal(100, compareInputJson.RootElement.GetProperty("left_profile_id").GetInt64());
+        Assert.Equal(101, compareInputJson.RootElement.GetProperty("right_profile_id").GetInt64());
+        Assert.False(compareInputJson.RootElement.TryGetProperty("LeftProfileId", out _));
+
+        var leftSummary = new ReferenceStyleProfileSummaryPayload(
+            ProfileId: 100,
+            NovelId: 42,
+            Title: "短句风格",
+            Description: "",
+            Status: ReferenceStyleProfileStatuses.Active,
+            AnalyzerVersion: ReferenceStyleAnalyzerVersions.DeterministicV1,
+            FeatureSchemaVersion: ReferenceStyleFeatureSchemaVersions.V1,
+            AnalyzerSource: ReferenceStyleAnalyzerSources.DeterministicBaseline,
+            SourceAnchorIds: [7],
+            SourceHashes: ["left-source-hash"],
+            AggregateConfidence: 0.8,
+            CreatedAt: DateTimeOffset.Parse("2026-07-07T00:00:00Z"),
+            UpdatedAt: DateTimeOffset.Parse("2026-07-07T00:00:00Z"),
+            ArchivedAt: null);
+        var rightSummary = leftSummary with
+        {
+            ProfileId = 101,
+            Title = "对话风格",
+            SourceAnchorIds = [8],
+            SourceHashes = ["right-source-hash"]
+        };
+        var comparison = new ReferenceStyleProfileComparisonPayload(
+            NovelId: 42,
+            LeftProfile: leftSummary,
+            RightProfile: rightSummary,
+            NumericDifferences:
+            [
+                new ReferenceStyleNumericFeatureDifferencePayload(
+                    FeatureKey: "dialogue_ratio",
+                    Unit: "ratio",
+                    LeftValue: 0.1,
+                    RightValue: 0.4,
+                    AbsoluteDelta: 0.3,
+                    RelativeDelta: 3.0,
+                    LeftConfidence: 0.8,
+                    RightConfidence: 0.9)
+            ],
+            DistributionDifferences:
+            [
+                new ReferenceStyleDistributionFeatureDifferencePayload(
+                    FeatureKey: "sentence_length_distribution",
+                    Unit: "chars",
+                    Buckets:
+                    [
+                        new ReferenceStyleDistributionBucketDifferencePayload(
+                            Label: "short",
+                            LeftMin: 0,
+                            LeftMax: 20,
+                            LeftWeight: 0.6,
+                            RightMin: 0,
+                            RightMax: 20,
+                            RightWeight: 0.3,
+                            AbsoluteDelta: 0.3)
+                    ],
+                    LeftConfidence: 0.8,
+                    RightConfidence: 0.9)
+            ],
+            CategoricalDifferences:
+            [
+                new ReferenceStyleCategoricalFeatureDifferencePayload(
+                    FeatureKey: "hook_pattern",
+                    Label: "question_tail",
+                    LeftWeight: 0.7,
+                    RightWeight: null,
+                    AbsoluteDelta: 0.7,
+                    LeftConfidence: 0.8,
+                    RightConfidence: null)
+            ],
+            ComparedAt: DateTimeOffset.Parse("2026-07-07T00:05:00Z"));
+
+        var serialized = JsonSerializer.Serialize(comparison, BridgeJson.SerializerOptions);
+        using var comparisonJson = JsonDocument.Parse(serialized);
+        var root = comparisonJson.RootElement;
+        Assert.Equal(42, root.GetProperty("novel_id").GetInt64());
+        Assert.Equal(100, root.GetProperty("left_profile").GetProperty("profile_id").GetInt64());
+        Assert.Equal(101, root.GetProperty("right_profile").GetProperty("profile_id").GetInt64());
+        Assert.Equal("dialogue_ratio", root.GetProperty("numeric_differences")[0].GetProperty("feature_key").GetString());
+        Assert.Equal(0.3, root.GetProperty("numeric_differences")[0].GetProperty("absolute_delta").GetDouble());
+        Assert.Equal("short", root.GetProperty("distribution_differences")[0].GetProperty("buckets")[0].GetProperty("label").GetString());
+        Assert.Equal("question_tail", root.GetProperty("categorical_differences")[0].GetProperty("label").GetString());
+        Assert.False(root.TryGetProperty("LeftProfile", out _));
+        Assert.DoesNotContain("source_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("evidence_spans", serialized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ReferenceStyleLlmAnalysisPayloadsUseStableSnakeCaseJsonNamesWithoutPaths()
     {
         var window = new ReferenceStyleAnalysisWindowPayload(
@@ -1128,9 +1245,12 @@ public sealed class ReferenceAnchorContractTests
             "BindReferenceBlueprintMaterials",
             "GenerateReferenceAnchoredDraft",
             "AuditReferenceAnchoredDraft",
+            "ArchiveReferenceStyleProfile",
             "BuildReferenceStyleProfile",
+            "CompareReferenceStyleProfiles",
             "GetReferenceStyleProfiles",
             "GetReferenceStyleProfile",
+            "RestoreReferenceStyleProfile",
             "StartReferenceOrchestrationRun",
             "GetReferenceOrchestrationRuns",
             "GetReferenceOrchestrationRun",

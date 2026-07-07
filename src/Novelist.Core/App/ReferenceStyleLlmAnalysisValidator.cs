@@ -34,37 +34,7 @@ public static class ReferenceStyleLlmAnalysisValidator
         "end_offset"
     };
 
-    public static IReadOnlyList<string> SupportedFeatureKeys { get; } =
-    [
-        "narration_distance",
-        "pov_control",
-        "rhythm",
-        "sentence_shape",
-        "paragraph_cadence",
-        "dialogue_mechanics",
-        "subtext",
-        "externalized_emotion",
-        "sensory_image",
-        "metaphor_system",
-        "image_system",
-        "tension_pressure",
-        "hook_pattern",
-        "payoff_pattern",
-        "transition_pattern",
-        "exposition_handling",
-        "action_clarity",
-        "anti_screenplay_prose",
-        "chapter_hook",
-        "escalation_beat",
-        "payoff_beat",
-        "compression_expansion",
-        "pleasure_point_delivery",
-        "cliffhanger_type",
-        "information_withholding",
-        "reader_promise_tracking"
-    ];
-
-    private static readonly HashSet<string> SupportedFeatureKeySet = new(SupportedFeatureKeys, StringComparer.Ordinal);
+    public static IReadOnlyList<string> SupportedFeatureKeys { get; } = ReferenceStyleTaxonomy.FeatureKeys;
 
     public static ReferenceStyleLlmAnalysisValidationResultPayload Validate(
         long profileId,
@@ -184,9 +154,15 @@ public static class ReferenceStyleLlmAnalysisValidator
             return;
         }
 
-        if (!SupportedFeatureKeySet.Contains(featureKey))
+        if (!ReferenceStyleTaxonomy.IsSupportedFeatureKey(featureKey))
         {
             rejected.Add(new ReferenceStyleLlmAnalysisRejectedLabelPayload(featureKey, label, "Unsupported style feature key."));
+            return;
+        }
+
+        if (!ReferenceStyleTaxonomy.IsSupportedLabel(featureKey, label))
+        {
+            rejected.Add(new ReferenceStyleLlmAnalysisRejectedLabelPayload(featureKey, label, "Unsupported style label for feature key."));
             return;
         }
 
