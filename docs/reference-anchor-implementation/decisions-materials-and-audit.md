@@ -100,6 +100,7 @@ Initial deterministic checks:
 - locked phrases preserved for L1/L2
 - adapted candidate is non-empty and below max output length
 - simple unsupported fact detection via new proper nouns/numbers/object-like tokens compared to slot values and scene facts
+- source-leak detection for non-L0/L1 reuse and anchored draft candidates via normalized character n-gram overlap, candidate source coverage, and source-span concentration
 - high-risk AI phrase list
 
 LLM-assisted audit can be a second pass later, but deterministic audit gates must exist first.

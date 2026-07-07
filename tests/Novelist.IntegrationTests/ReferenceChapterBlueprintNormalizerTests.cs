@@ -126,6 +126,38 @@ public sealed class ReferenceChapterBlueprintNormalizerTests
     }
 
     [Fact]
+    public void ComputeAnalysisContractHashChangesWhenStyleContractChanges()
+    {
+        var baseline = Blueprint(configureBeat: beat => beat with
+        {
+            StyleContract = new ReferenceBlueprintStyleContractPayload(
+                StyleProfileIds: [1],
+                StyleDimensions: ["dialogue_ratio"],
+                ImitationIntensity: ReferenceStyleImitationIntensities.Moderate,
+                MinStyleFit: 0.75,
+                AllowedCloseness: "moderate",
+                RequiredEvidenceTypes: ["dialogue_exchange"],
+                ForbiddenStyleRisks: ["source_leak"])
+        });
+        var changed = Blueprint(configureBeat: beat => beat with
+        {
+            StyleContract = new ReferenceBlueprintStyleContractPayload(
+                StyleProfileIds: [1],
+                StyleDimensions: ["dialogue_ratio"],
+                ImitationIntensity: ReferenceStyleImitationIntensities.Strong,
+                MinStyleFit: 1.25,
+                AllowedCloseness: "low",
+                RequiredEvidenceTypes: ["dialogue_exchange"],
+                ForbiddenStyleRisks: ["source_leak"])
+        });
+
+        var baselineHash = ReferenceChapterBlueprintNormalizer.ComputeAnalysisContractHash(baseline);
+        var changedHash = ReferenceChapterBlueprintNormalizer.ComputeAnalysisContractHash(changed);
+
+        Assert.NotEqual(baselineHash, changedHash);
+    }
+
+    [Fact]
     public void ComputeAnalysisContractHashPreservesOrderedArraySemantics()
     {
         var baseline = Blueprint();

@@ -63,8 +63,30 @@ public static class ReferenceMaterialTypes
     public const string Paragraph = "paragraph";
     public const string Sentence = "sentence";
     public const string Passage = "passage";
+    public const string Scene = "scene";
+    public const string Beat = "beat";
+    public const string DialogueExchange = "dialogue_exchange";
+    public const string ActionAfterbeat = "action_afterbeat";
+    public const string ImageMotif = "image_motif";
+    public const string Hook = "hook";
+    public const string Payoff = "payoff";
+    public const string Transition = "transition";
 
-    public static IReadOnlyList<string> All { get; } = [Chapter, Paragraph, Sentence, Passage];
+    public static IReadOnlyList<string> All { get; } =
+    [
+        Chapter,
+        Paragraph,
+        Sentence,
+        Passage,
+        Scene,
+        Beat,
+        DialogueExchange,
+        ActionAfterbeat,
+        ImageMotif,
+        Hook,
+        Payoff,
+        Transition
+    ];
 }
 
 public static class ReferenceMaterialArchiveFilters
@@ -337,7 +359,16 @@ public sealed record SearchReferenceMaterialsPayload(
     IReadOnlyList<string>? ProseDuties = null,
     [property: JsonPropertyName("archive_filter")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    string? ArchiveFilter = null);
+    string? ArchiveFilter = null,
+    [property: JsonPropertyName("style_profile_ids")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<long>? StyleProfileIds = null,
+    [property: JsonPropertyName("style_dimensions")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? StyleDimensions = null,
+    [property: JsonPropertyName("imitation_intensity")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ImitationIntensity = null);
 
 public sealed record ReferenceSlotValuePayload(
     [property: JsonPropertyName("slot_name")] string SlotName,

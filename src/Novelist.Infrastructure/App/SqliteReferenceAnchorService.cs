@@ -21,6 +21,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private const long MaxSourceBytes = 20L * 1024L * 1024L;
     private const int EmbeddingBatchSize = 64;
     private const int UnknownLicensePreviewMaxChars = 48;
+    private const int AdvancedSceneMaxParagraphs = 8;
+    private const int AdvancedEvidenceWindowChars = 480;
+    private const int MaxStyleProfileFilters = 8;
+    private const int MaxStyleDimensionFilters = 16;
     private static readonly Regex MarkdownHeadingPattern = new(@"^\s{0,3}#{1,6}\s+(.+?)\s*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex BlankLinePattern = new(@"\n\s*\n", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex RiskTokenPattern = new(@"[A-Za-z][A-Za-z0-9_]{1,}|\d+(?:\.\d+)?", RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -30,10 +34,13 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private static readonly string[] InteriorityMarkers = ["心", "想", "觉得", "明白", "知道", "意识到", "记得", "忘了"];
     private static readonly string[] ActionMarkers = ["走", "停", "看", "拿", "推", "转", "站", "坐", "伸", "退", "进", "出"];
     private static readonly string[] TransitionMarkers = ["后来", "然后", "这时", "与此同时", "片刻", "很快", "直到"];
+    private static readonly string[] HookMarkers = ["忽然", "突然", "竟", "没想到", "门外", "安静下来", "悬", "威胁", "？", "?"];
+    private static readonly string[] PayoffMarkers = ["终于", "答案", "真相", "原来", "明白", "不是", "兑现", "揭开", "揭露"];
     private static readonly string[] EmotionEvidenceMarkers = ["喉咙", "指尖", "手指", "指节", "掌心", "眼神", "目光", "声音", "沉默", "停顿", "没有回答", "避开", "咽下", "发紧", "发凉", "发涩", "发颤", "颤", "扣紧", "蜷紧", "欲言又止", "杯子推远", "只把钥匙放回"];
     private static readonly string[] RestrainedEmotionMarkers = ["没有回答", "却", "避开", "咽下", "忍住", "发紧", "发凉", "发涩", "沉默", "扣紧", "蜷紧", "欲言又止", "杯子推远", "只把钥匙放回"];
     private static readonly string[] LimitedPovMarkers = ["看不见", "没看见", "不知道", "并不知道", "没有察觉", "未曾发现", "无从知道", "背对着", "背对", "没有回头", "没回头", "未回头"];
     private static readonly string[] AfterbeatMarkers = ["移开目光", "垂下眼", "停了一下", "停住", "顿了顿", "沉默了一下", "攥紧", "松开"];
+    private static readonly string[] ActionAfterbeatEvidenceMarkers = [.. AfterbeatMarkers, .. EmotionEvidenceMarkers];
     private static readonly string[] AiRiskPhrases = ["无法言喻", "复杂的情绪", "某种意义上", "仿佛有什么", "命运的齿轮", "心中涌起"];
 
     private static readonly HashSet<string> AllowedSourceExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -61,6 +68,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private static readonly HashSet<string> AllowedFeedbackDecisions = new(ReferenceFeedbackDecisions.All, StringComparer.Ordinal);
     private static readonly HashSet<string> AllowedFeedbackTargetTypes = new(ReferenceFeedbackTargetTypes.All, StringComparer.Ordinal);
     private static readonly HashSet<string> AllowedMaterialArchiveFilters = new(ReferenceMaterialArchiveFilters.Allowed, StringComparer.Ordinal);
+    private static readonly HashSet<string> AllowedStyleImitationIntensities = new(ReferenceStyleImitationIntensities.All, StringComparer.Ordinal);
 
     private readonly AppInitializationOptions _options;
     private readonly INovelService _novels;
@@ -446,6 +454,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         var archiveFilter = string.IsNullOrWhiteSpace(input.ArchiveFilter)
             ? ReferenceMaterialArchiveFilters.Active
             : ValidateAllowedText(input.ArchiveFilter, nameof(input.ArchiveFilter), AllowedMaterialArchiveFilters);
+        var styleOptions = NormalizeStyleSearchOptions(input);
         await _mutex.WaitAsync(cancellationToken);
         try
         {
@@ -464,6 +473,12 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             }
 
             var all = await ReadMaterialsAsync(connection, input.NovelId, anchorIds, archiveFilter, cancellationToken);
+            var styleContext = await ReadStyleSearchContextAsync(
+                connection,
+                input.NovelId,
+                anchorIds,
+                styleOptions,
+                cancellationToken);
             var unknownLicenseAnchorIds = await ReadUnknownLicenseAnchorIdsAsync(connection, input.NovelId, anchorIds, cancellationToken);
             var acceptedFeedbackMaterialIds = await ReadAcceptedFeedbackMaterialIdsAsync(
                 connection,
@@ -484,7 +499,9 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                         item,
                         input,
                         embeddingScores.TryGetValue(item.MaterialId, out var embeddingScore) ? embeddingScore : 0,
-                        acceptedFeedbackMaterialIds.Contains(item.MaterialId))))
+                        acceptedFeedbackMaterialIds.Contains(item.MaterialId),
+                        styleContext.FitScores.TryGetValue(item.MaterialId, out var styleFitScore) ? styleFitScore : 0,
+                        styleContext.SourceAnchorIds.Contains(item.AnchorId) ? styleContext.SourceRiskPenalty : 0)))
                 .OrderByDescending(item => item.Score)
                 .ThenBy(item => item.Material.AnchorId)
                 .ThenBy(item => item.Material.MaterialId, StringComparer.Ordinal)
@@ -2914,7 +2931,239 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             }
         }
 
+        AppendAdvancedSegments(anchorId, sourceText, chapters, segments);
         return segments;
+    }
+
+    private static void AppendAdvancedSegments(
+        long anchorId,
+        string sourceText,
+        IReadOnlyList<TextSpan> chapters,
+        List<ReferenceSourceSegment> segments)
+    {
+        var sceneIndex = 0;
+        var beatIndex = 0;
+        var dialogueExchangeIndex = 0;
+        var actionAfterbeatIndex = 0;
+        var imageMotifIndex = 0;
+        var hookIndex = 0;
+        var payoffIndex = 0;
+        var transitionIndex = 0;
+
+        for (var chapterOffset = 0; chapterOffset < chapters.Count; chapterOffset++)
+        {
+            var chapter = chapters[chapterOffset];
+            var chapterIndex = chapterOffset + 1;
+            var chapterHash = HashText(chapter.Text);
+            var chapterId = BuildSegmentId(anchorId, "chapter", chapterIndex, 0, chapterHash);
+            var paragraphs = SplitParagraphs(chapter.Text, chapter.StartOffset).ToArray();
+            if (paragraphs.Length == 0)
+            {
+                continue;
+            }
+
+            for (var sceneStart = 0; sceneStart < paragraphs.Length;)
+            {
+                var sceneEnd = FindSceneEnd(paragraphs, sceneStart);
+                var sceneSpan = BuildAbsoluteSpan(
+                    sourceText,
+                    paragraphs[sceneStart].StartOffset,
+                    paragraphs[sceneEnd - 1].EndOffset);
+                var sceneId = AddAdvancedSegment(
+                    segments,
+                    anchorId,
+                    chapterIndex,
+                    chapter.Title,
+                    ReferenceMaterialTypes.Scene,
+                    ref sceneIndex,
+                    chapterId,
+                    sceneSpan);
+                if (sceneId.Length == 0)
+                {
+                    sceneStart = sceneEnd;
+                    continue;
+                }
+
+                for (var paragraphOffset = sceneStart; paragraphOffset < sceneEnd; paragraphOffset++)
+                {
+                    var beat = paragraphs[paragraphOffset];
+                    var beatId = AddAdvancedSegment(
+                        segments,
+                        anchorId,
+                        chapterIndex,
+                        chapter.Title,
+                        ReferenceMaterialTypes.Beat,
+                        ref beatIndex,
+                        sceneId,
+                        beat);
+                    if (beatId.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    AddAdvancedChildSegments(
+                        segments,
+                        anchorId,
+                        chapterIndex,
+                        chapter.Title,
+                        beatId,
+                        beat,
+                        isLastBeatInChapter: paragraphOffset == paragraphs.Length - 1,
+                        ref dialogueExchangeIndex,
+                        ref actionAfterbeatIndex,
+                        ref imageMotifIndex,
+                        ref hookIndex,
+                        ref payoffIndex,
+                        ref transitionIndex);
+                }
+
+                sceneStart = sceneEnd;
+            }
+        }
+    }
+
+    private static void AddAdvancedChildSegments(
+        List<ReferenceSourceSegment> segments,
+        long anchorId,
+        int chapterIndex,
+        string chapterTitle,
+        string beatId,
+        TextSpan beat,
+        bool isLastBeatInChapter,
+        ref int dialogueExchangeIndex,
+        ref int actionAfterbeatIndex,
+        ref int imageMotifIndex,
+        ref int hookIndex,
+        ref int payoffIndex,
+        ref int transitionIndex)
+    {
+        if (ContainsAny(beat.Text, DialogueMarkers))
+        {
+            AddAdvancedSegment(
+                segments,
+                anchorId,
+                chapterIndex,
+                chapterTitle,
+                ReferenceMaterialTypes.DialogueExchange,
+                ref dialogueExchangeIndex,
+                beatId,
+                BuildEvidenceWindow(beat, DialogueMarkers));
+        }
+
+        if (IsActionAfterbeatCandidate(beat.Text))
+        {
+            AddAdvancedSegment(
+                segments,
+                anchorId,
+                chapterIndex,
+                chapterTitle,
+                ReferenceMaterialTypes.ActionAfterbeat,
+                ref actionAfterbeatIndex,
+                beatId,
+                BuildEvidenceWindow(beat, ActionAfterbeatEvidenceMarkers));
+        }
+
+        if (ContainsAny(beat.Text, SensoryMarkers))
+        {
+            AddAdvancedSegment(
+                segments,
+                anchorId,
+                chapterIndex,
+                chapterTitle,
+                ReferenceMaterialTypes.ImageMotif,
+                ref imageMotifIndex,
+                beatId,
+                BuildEvidenceWindow(beat, SensoryMarkers));
+        }
+
+        if (IsHookCandidate(beat.Text, isLastBeatInChapter))
+        {
+            AddAdvancedSegment(
+                segments,
+                anchorId,
+                chapterIndex,
+                chapterTitle,
+                ReferenceMaterialTypes.Hook,
+                ref hookIndex,
+                beatId,
+                BuildEvidenceWindow(beat, HookMarkers, preferTail: true));
+        }
+
+        if (ContainsAny(beat.Text, PayoffMarkers))
+        {
+            AddAdvancedSegment(
+                segments,
+                anchorId,
+                chapterIndex,
+                chapterTitle,
+                ReferenceMaterialTypes.Payoff,
+                ref payoffIndex,
+                beatId,
+                BuildEvidenceWindow(beat, PayoffMarkers));
+        }
+
+        if (ContainsAny(beat.Text, TransitionMarkers))
+        {
+            AddAdvancedSegment(
+                segments,
+                anchorId,
+                chapterIndex,
+                chapterTitle,
+                ReferenceMaterialTypes.Transition,
+                ref transitionIndex,
+                beatId,
+                BuildEvidenceWindow(beat, TransitionMarkers));
+        }
+    }
+
+    private static string AddAdvancedSegment(
+        List<ReferenceSourceSegment> segments,
+        long anchorId,
+        int chapterIndex,
+        string chapterTitle,
+        string segmentType,
+        ref int segmentIndex,
+        string parentSegmentId,
+        TextSpan span)
+    {
+        var text = span.Text.Trim();
+        if (text.Length == 0 || span.EndOffset <= span.StartOffset)
+        {
+            return string.Empty;
+        }
+
+        segmentIndex++;
+        var hash = HashText(text);
+        var segmentId = BuildSegmentId(anchorId, segmentType, chapterIndex, segmentIndex, hash);
+        segments.Add(new ReferenceSourceSegment(
+            segmentId,
+            chapterIndex,
+            chapterTitle,
+            segmentType,
+            segmentIndex,
+            parentSegmentId,
+            span.StartOffset,
+            span.EndOffset,
+            text,
+            hash));
+        return segmentId;
+    }
+
+    private static int FindSceneEnd(IReadOnlyList<TextSpan> paragraphs, int sceneStart)
+    {
+        var sceneEnd = sceneStart + 1;
+        while (sceneEnd < paragraphs.Count && sceneEnd - sceneStart < AdvancedSceneMaxParagraphs)
+        {
+            if (StartsSceneBoundary(paragraphs[sceneEnd].Text) ||
+                IsHookCandidate(paragraphs[sceneEnd - 1].Text, isLastBeatInChapter: false))
+            {
+                break;
+            }
+
+            sceneEnd++;
+        }
+
+        return sceneEnd;
     }
 
     private static IReadOnlyList<ReferenceMaterialPayload> BuildMaterials(
@@ -2929,6 +3178,14 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             {
                 "sentence" => ReferenceMaterialTypes.Sentence,
                 "paragraph" => ReferenceMaterialTypes.Passage,
+                "scene" => ReferenceMaterialTypes.Scene,
+                "beat" => ReferenceMaterialTypes.Beat,
+                "dialogue_exchange" => ReferenceMaterialTypes.DialogueExchange,
+                "action_afterbeat" => ReferenceMaterialTypes.ActionAfterbeat,
+                "image_motif" => ReferenceMaterialTypes.ImageMotif,
+                "hook" => ReferenceMaterialTypes.Hook,
+                "payoff" => ReferenceMaterialTypes.Payoff,
+                "transition" => ReferenceMaterialTypes.Transition,
                 _ => string.Empty
             };
             if (materialType.Length == 0)
@@ -2942,7 +3199,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 continue;
             }
 
-            var tags = ClassifyMaterial(text);
+            var tags = ApplyAdvancedMaterialTagOverrides(materialType, ClassifyMaterial(text));
             var materialId = BuildMaterialId(anchorId, materialType, segment.SegmentIndex, segment.TextHash);
             materials.Add(new ReferenceMaterialPayload(
                 materialId,
@@ -2970,6 +3227,154 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private static int CountMaterialSlots(IReadOnlyList<ReferenceMaterialPayload> materials)
     {
         return materials.Sum(material => ReferenceMaterialSlotDetector.Detect(material).Count);
+    }
+
+    private static TextSpan BuildAbsoluteSpan(string sourceText, int startOffset, int endOffset)
+    {
+        var start = Math.Clamp(startOffset, 0, sourceText.Length);
+        var end = Math.Clamp(endOffset, start, sourceText.Length);
+        return TrimSpan(sourceText, start, end);
+    }
+
+    private static TextSpan BuildEvidenceWindow(
+        TextSpan container,
+        IReadOnlyList<string> markers,
+        bool preferTail = false)
+    {
+        if (container.Text.Length <= AdvancedEvidenceWindowChars)
+        {
+            return container;
+        }
+
+        var anchorIndex = preferTail
+            ? container.Text.Length - 1
+            : FindFirstMarkerIndex(container.Text, markers);
+        if (anchorIndex < 0)
+        {
+            anchorIndex = 0;
+        }
+
+        var maxStart = Math.Max(0, container.Text.Length - AdvancedEvidenceWindowChars);
+        var start = preferTail
+            ? maxStart
+            : Math.Clamp(anchorIndex - AdvancedEvidenceWindowChars / 3, 0, maxStart);
+        var end = Math.Min(container.Text.Length, start + AdvancedEvidenceWindowChars);
+        var trimmed = TrimSpan(container.Text, start, end);
+        return trimmed with
+        {
+            StartOffset = container.StartOffset + trimmed.StartOffset,
+            EndOffset = container.StartOffset + trimmed.EndOffset
+        };
+    }
+
+    private static int FindFirstMarkerIndex(string text, IReadOnlyList<string> markers)
+    {
+        var best = -1;
+        foreach (var marker in markers.Where(marker => marker.Length > 0))
+        {
+            var index = text.IndexOf(marker, StringComparison.Ordinal);
+            if (index >= 0 && (best < 0 || index < best))
+            {
+                best = index;
+            }
+        }
+
+        return best;
+    }
+
+    private static bool StartsSceneBoundary(string text)
+    {
+        var trimmed = text.TrimStart();
+        return TransitionMarkers.Any(marker => trimmed.StartsWith(marker, StringComparison.Ordinal));
+    }
+
+    private static bool IsActionAfterbeatCandidate(string text)
+    {
+        return ContainsAny(text, AfterbeatMarkers) ||
+            (ContainsAny(text, ActionMarkers) &&
+                (ContainsAny(text, EmotionEvidenceMarkers) || ContainsAny(text, RestrainedEmotionMarkers)));
+    }
+
+    private static bool IsHookCandidate(string text, bool isLastBeatInChapter)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0)
+        {
+            return false;
+        }
+
+        var last = trimmed[^1];
+        return last is '？' or '?' or '！' or '!' ||
+            ContainsAny(trimmed, HookMarkers) ||
+            (isLastBeatInChapter && ContainsAny(trimmed, PayoffMarkers));
+    }
+
+    private static MaterialTags ApplyAdvancedMaterialTagOverrides(string materialType, MaterialTags tags)
+    {
+        return materialType switch
+        {
+            ReferenceMaterialTypes.Scene => tags with
+            {
+                FunctionTag = "scene",
+                SceneTag = "scene",
+                TechniqueTag = tags.TechniqueTag == "plain" ? "scene_structure" : tags.TechniqueTag,
+                FunctionConfidence = Math.Max(tags.FunctionConfidence, 0.75)
+            },
+            ReferenceMaterialTypes.Beat => tags with
+            {
+                FunctionTag = "beat",
+                SceneTag = "beat",
+                TechniqueTag = tags.TechniqueTag == "plain" ? "beat_structure" : tags.TechniqueTag,
+                FunctionConfidence = Math.Max(tags.FunctionConfidence, 0.75)
+            },
+            ReferenceMaterialTypes.DialogueExchange => tags with
+            {
+                FunctionTag = "dialogue",
+                SceneTag = "conversation",
+                TechniqueTag = "dialogue_exchange",
+                FunctionConfidence = Math.Max(tags.FunctionConfidence, 0.9),
+                EmotionConfidence = Math.Max(tags.EmotionConfidence, 0.75)
+            },
+            ReferenceMaterialTypes.ActionAfterbeat => tags with
+            {
+                FunctionTag = tags.FunctionTag == "narration" ? "emotion_evidence" : tags.FunctionTag,
+                SceneTag = "afterbeat",
+                TechniqueTag = "afterbeat",
+                FunctionConfidence = Math.Max(tags.FunctionConfidence, 0.85),
+                EmotionConfidence = Math.Max(tags.EmotionConfidence, 0.75)
+            },
+            ReferenceMaterialTypes.ImageMotif => tags with
+            {
+                FunctionTag = "environment",
+                SceneTag = "image_motif",
+                TechniqueTag = "sensory_detail",
+                FunctionConfidence = Math.Max(tags.FunctionConfidence, 0.9)
+            },
+            ReferenceMaterialTypes.Hook => tags with
+            {
+                FunctionTag = "hook",
+                EmotionTag = tags.EmotionTag == "neutral" ? "uncertain" : tags.EmotionTag,
+                SceneTag = "tension",
+                TechniqueTag = "hook",
+                FunctionConfidence = Math.Max(tags.FunctionConfidence, 0.9),
+                EmotionConfidence = Math.Max(tags.EmotionConfidence, 0.75)
+            },
+            ReferenceMaterialTypes.Payoff => tags with
+            {
+                FunctionTag = "payoff",
+                SceneTag = "reveal",
+                TechniqueTag = "payoff",
+                FunctionConfidence = Math.Max(tags.FunctionConfidence, 0.9)
+            },
+            ReferenceMaterialTypes.Transition => tags with
+            {
+                FunctionTag = "transition",
+                SceneTag = "transition",
+                TechniqueTag = "transition",
+                FunctionConfidence = Math.Max(tags.FunctionConfidence, 0.9)
+            },
+            _ => tags
+        };
     }
 
     private static MaterialTags ClassifyMaterial(string text)
@@ -3192,6 +3597,225 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             filters.Any(filter => string.Equals(value, filter, StringComparison.OrdinalIgnoreCase));
     }
 
+    private static StyleSearchOptions NormalizeStyleSearchOptions(SearchReferenceMaterialsPayload input)
+    {
+        var profileIds = NormalizeStyleProfileIds(input.StyleProfileIds);
+        var dimensions = NormalizeStyleDimensions(input.StyleDimensions);
+        var intensity = string.IsNullOrWhiteSpace(input.ImitationIntensity)
+            ? ReferenceStyleImitationIntensities.Moderate
+            : ValidateAllowedText(input.ImitationIntensity, nameof(input.ImitationIntensity), AllowedStyleImitationIntensities);
+        return new StyleSearchOptions(
+            profileIds,
+            dimensions,
+            intensity,
+            StyleFitWeight(intensity),
+            SourceRiskPenalty(intensity));
+    }
+
+    private static IReadOnlyList<long> NormalizeStyleProfileIds(IReadOnlyList<long>? profileIds)
+    {
+        if (profileIds is null || profileIds.Count == 0)
+        {
+            return [];
+        }
+
+        var normalized = new List<long>(profileIds.Count);
+        var seen = new HashSet<long>();
+        foreach (var profileId in profileIds)
+        {
+            if (profileId <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(profileIds), profileId, "Reference style profile id must be positive.");
+            }
+
+            if (seen.Add(profileId))
+            {
+                normalized.Add(profileId);
+            }
+        }
+
+        if (normalized.Count > MaxStyleProfileFilters)
+        {
+            throw new ArgumentException($"At most {MaxStyleProfileFilters} style profiles can be used for one material search.", nameof(profileIds));
+        }
+
+        return normalized;
+    }
+
+    private static IReadOnlyList<string> NormalizeStyleDimensions(IReadOnlyList<string>? dimensions)
+    {
+        if (dimensions is null || dimensions.Count == 0)
+        {
+            return [];
+        }
+
+        var normalized = dimensions
+            .Select(value => NormalizeOptionalText(value, nameof(dimensions), maxLength: 128))
+            .Where(value => value.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (normalized.Length > MaxStyleDimensionFilters)
+        {
+            throw new ArgumentException($"At most {MaxStyleDimensionFilters} style dimensions can be used for one material search.", nameof(dimensions));
+        }
+
+        return normalized;
+    }
+
+    private static double StyleFitWeight(string intensity)
+    {
+        return intensity switch
+        {
+            ReferenceStyleImitationIntensities.DiagnosticOnly => 0,
+            ReferenceStyleImitationIntensities.Loose => 1.5,
+            ReferenceStyleImitationIntensities.Strong => 4.0,
+            _ => 2.5
+        };
+    }
+
+    private static double SourceRiskPenalty(string intensity)
+    {
+        return intensity switch
+        {
+            ReferenceStyleImitationIntensities.Strong => -0.45,
+            ReferenceStyleImitationIntensities.Moderate => -0.2,
+            _ => 0
+        };
+    }
+
+    private static async ValueTask<StyleSearchContext> ReadStyleSearchContextAsync(
+        SqliteConnection connection,
+        long novelId,
+        IReadOnlyList<long> anchorIds,
+        StyleSearchOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (options.ProfileIds.Count == 0)
+        {
+            return StyleSearchContext.Empty;
+        }
+
+        if (!await TableExistsAsync(connection, "reference_style_profiles", cancellationToken) ||
+            !await TableExistsAsync(connection, "reference_material_style_tags", cancellationToken))
+        {
+            throw new ArgumentException("Reference style profile does not exist for this novel.", nameof(options));
+        }
+
+        await using var command = connection.CreateCommand();
+        var profileParameters = AddLongParameters(command, "$style_profile_id_", options.ProfileIds);
+        command.CommandText = $$"""
+            SELECT profile_id, anchor_ids_json, aggregate_confidence
+            FROM reference_style_profiles
+            WHERE novel_id = $novel_id
+              AND status = $status
+              AND archived_at IS NULL
+              AND profile_id IN ({{string.Join(", ", profileParameters)}});
+            """;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$status", ReferenceStyleProfileStatuses.Active);
+
+        var profileConfidences = new Dictionary<long, double>();
+        var sourceAnchorIds = new HashSet<long>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var profileId = reader.GetInt64(0);
+                profileConfidences[profileId] = reader.GetDouble(2);
+                foreach (var sourceAnchorId in ReadLongList(reader.GetString(1)))
+                {
+                    sourceAnchorIds.Add(sourceAnchorId);
+                }
+            }
+        }
+
+        if (profileConfidences.Count != options.ProfileIds.Count)
+        {
+            throw new ArgumentException("Reference style profile does not exist or is archived for this novel.", nameof(options));
+        }
+
+        var fitScores = await ReadStyleFitScoresAsync(
+            connection,
+            anchorIds,
+            options,
+            profileConfidences,
+            cancellationToken);
+        return new StyleSearchContext(fitScores, sourceAnchorIds, options.SourceRiskPenalty);
+    }
+
+    private static async ValueTask<IReadOnlyDictionary<string, double>> ReadStyleFitScoresAsync(
+        SqliteConnection connection,
+        IReadOnlyList<long> anchorIds,
+        StyleSearchOptions options,
+        IReadOnlyDictionary<long, double> profileConfidences,
+        CancellationToken cancellationToken)
+    {
+        if (anchorIds.Count == 0 || options.FitWeight <= 0)
+        {
+            return new Dictionary<string, double>(StringComparer.Ordinal);
+        }
+
+        await using var command = connection.CreateCommand();
+        var anchorParameters = AddLongParameters(command, "$style_anchor_id_", anchorIds);
+        var profileParameters = AddLongParameters(command, "$style_tag_profile_id_", options.ProfileIds);
+        var dimensionPredicate = string.Empty;
+        if (options.Dimensions.Count > 0)
+        {
+            var dimensionParameters = AddStringParameters(command, "$style_dimension_", options.Dimensions);
+            dimensionPredicate = $"AND t.tag_key IN ({string.Join(", ", dimensionParameters)})";
+        }
+
+        command.CommandText = $$"""
+            SELECT t.material_id, t.profile_id, t.tag_key, MAX(t.confidence)
+            FROM reference_material_style_tags t
+            INNER JOIN reference_materials m ON m.material_id = t.material_id
+            WHERE t.profile_id IN ({{string.Join(", ", profileParameters)}})
+              AND m.anchor_id IN ({{string.Join(", ", anchorParameters)}})
+              AND m.archived_at IS NULL
+              {{dimensionPredicate}}
+            GROUP BY t.material_id, t.profile_id, t.tag_key;
+            """;
+
+        var rawScores = new Dictionary<string, double>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var materialId = reader.GetString(0);
+            var profileId = reader.GetInt64(1);
+            var confidence = Math.Clamp(reader.GetDouble(3), 0, 1);
+            var profileConfidence = profileConfidences.TryGetValue(profileId, out var value)
+                ? Math.Clamp(value, 0, 1)
+                : 0;
+            var contribution = confidence * profileConfidence;
+            rawScores[materialId] = rawScores.TryGetValue(materialId, out var existing)
+                ? existing + contribution
+                : contribution;
+        }
+
+        var denominator = Math.Max(1, options.Dimensions.Count);
+        return rawScores.ToDictionary(
+            item => item.Key,
+            item => Math.Round(Math.Min(1.0, item.Value / denominator) * options.FitWeight, 4),
+            StringComparer.Ordinal);
+    }
+
+    private static async ValueTask<bool> TableExistsAsync(
+        SqliteConnection connection,
+        string tableName,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name = $table_name
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$table_name", tableName);
+        return await command.ExecuteScalarAsync(cancellationToken) is not null;
+    }
+
     private async ValueTask<IReadOnlyDictionary<string, double>> TryBuildEmbeddingScoresAsync(
         string databasePath,
         SqliteConnection connection,
@@ -3293,7 +3917,9 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         ReferenceMaterialPayload material,
         SearchReferenceMaterialsPayload input,
         double embeddingScore,
-        bool acceptedFeedback)
+        bool acceptedFeedback,
+        double styleFitScore,
+        double sourceRiskPenalty)
     {
         var components = new Dictionary<string, double>(StringComparer.Ordinal);
         var normalizedQuery = (input.Query ?? string.Empty).Trim();
@@ -3311,8 +3937,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         AddScore(components, "narrative_duty", NarrativeDutyScore(material, input.NarrativeDuties));
         AddScore(components, "emotion_transition", EmotionTransitionScore(material, input.EmotionTransitions));
         AddScore(components, "prose_duty", ProseDutyScore(material, input.ProseDuties));
+        AddScore(components, "style_fit", styleFitScore);
         AddScore(components, "embedding", embeddingScore);
         AddScore(components, "accepted_feedback", acceptedFeedback ? 4.0 : 0);
+        AddScoreComponent(components, "source_risk_penalty", sourceRiskPenalty);
         AddScore(components, "confidence", material.FunctionConfidence + material.EmotionConfidence * 0.2 + material.PovConfidence * 0.1);
         AddScore(components, "length", Math.Max(0, 1.0 - material.Text.Length / 500.0));
         return components;
@@ -3481,6 +4109,14 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
     }
 
+    private static void AddScoreComponent(IDictionary<string, double> components, string name, double value)
+    {
+        if (Math.Abs(value) > 0.000001)
+        {
+            components[name] = Math.Round(value, 4);
+        }
+    }
+
     private static string TruncateUnknownLicensePreview(string text)
     {
         var normalized = (text ?? string.Empty).Trim();
@@ -3567,6 +4203,15 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         foreach (var phrase in AiRiskPhrases.Where(phrase => candidateText.Contains(phrase, StringComparison.Ordinal)))
         {
             aiProseRisks.Add($"Candidate contains high-risk AI phrase: {phrase}");
+        }
+
+        var sourceLeak = ReferenceSourceLeakAuditor.Analyze(material.Text, candidateText, rewriteLevel);
+        if (sourceLeak.ShouldFail)
+        {
+            foreach (var finding in sourceLeak.Findings)
+            {
+                requiredFixes.Add($"Source-leak risk: {finding}");
+            }
         }
 
         if (string.Equals(rewriteLevel, ReferenceRewriteLevels.L4, StringComparison.Ordinal))
@@ -3863,6 +4508,43 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         return JsonSerializer.Deserialize<IReadOnlyList<string>>(json, JsonOptions) ?? [];
     }
 
+    private static IReadOnlyList<long> ReadLongList(string json)
+    {
+        return JsonSerializer.Deserialize<IReadOnlyList<long>>(json, JsonOptions) ?? [];
+    }
+
+    private static IReadOnlyList<string> AddLongParameters(
+        SqliteCommand command,
+        string prefix,
+        IReadOnlyList<long> values)
+    {
+        var parameterNames = new List<string>(values.Count);
+        for (var index = 0; index < values.Count; index++)
+        {
+            var parameterName = prefix + index.ToString(CultureInfo.InvariantCulture);
+            parameterNames.Add(parameterName);
+            command.Parameters.AddWithValue(parameterName, values[index]);
+        }
+
+        return parameterNames;
+    }
+
+    private static IReadOnlyList<string> AddStringParameters(
+        SqliteCommand command,
+        string prefix,
+        IReadOnlyList<string> values)
+    {
+        var parameterNames = new List<string>(values.Count);
+        for (var index = 0; index < values.Count; index++)
+        {
+            var parameterName = prefix + index.ToString(CultureInfo.InvariantCulture);
+            parameterNames.Add(parameterName);
+            command.Parameters.AddWithValue(parameterName, values[index]);
+        }
+
+        return parameterNames;
+    }
+
     private static string HashText(string text)
     {
         return HashBytes(Encoding.UTF8.GetBytes(text));
@@ -3952,6 +4634,24 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private sealed record AdaptedMaterial(
         string Text,
         IReadOnlyList<ReferenceSlotValuePayload> ChangedSlots);
+
+    private sealed record StyleSearchOptions(
+        IReadOnlyList<long> ProfileIds,
+        IReadOnlyList<string> Dimensions,
+        string Intensity,
+        double FitWeight,
+        double SourceRiskPenalty);
+
+    private sealed record StyleSearchContext(
+        IReadOnlyDictionary<string, double> FitScores,
+        IReadOnlySet<long> SourceAnchorIds,
+        double SourceRiskPenalty)
+    {
+        public static StyleSearchContext Empty { get; } = new(
+            new Dictionary<string, double>(StringComparer.Ordinal),
+            new HashSet<long>(),
+            0);
+    }
 
     private sealed record ScoredSearchMaterial(
         ReferenceMaterialPayload Material,

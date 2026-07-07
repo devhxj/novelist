@@ -4,7 +4,7 @@
 
 ## Database Schema
 
-The current schema is created by `SqliteReferenceAnchorService.EnsureSchemaAsync` and `SqliteReferenceAnchoredDraftService.EnsureSchemaAsync` in the dedicated reference-anchor SQLite database.
+The current schema is created by `SqliteReferenceAnchorService.EnsureSchemaAsync`, `SqliteReferenceAnchoredDraftService.EnsureSchemaAsync`, and `SqliteReferenceStyleProfileService.EnsureSchemaAsync` in the dedicated reference-anchor SQLite database.
 
 Current core tables:
 
@@ -26,6 +26,11 @@ reference_blueprint_material_links
 reference_draft_paragraph_candidates
 reference_orchestration_runs
 reference_orchestration_run_events
+reference_style_profiles
+reference_style_profile_sources
+reference_style_profile_evidence
+reference_style_analysis_runs
+reference_material_style_tags
 ```
 
 Core columns:
@@ -63,6 +68,8 @@ reference_source_segments
 - text TEXT NOT NULL
 - text_hash TEXT NOT NULL
 
+`segment_type` currently includes core `chapter`, `paragraph`, and `sentence` rows plus Phase 14 deterministic advanced rows: `scene`, `beat`, `dialogue_exchange`, `action_afterbeat`, `image_motif`, `hook`, `payoff`, and `transition`. Core ids remain deterministic under the existing chapter/paragraph/sentence scheme. Advanced rows are appended after core segmentation and keep explicit parent links: `scene -> chapter`, `beat -> scene`, and dialogue/action-afterbeat/image/hook/payoff/transition evidence rows -> `beat`. Large evidence children store bounded deterministic source windows so 10MB imports stay searchable without duplicating every long paragraph for each child type.
+
 reference_materials
 - material_id TEXT PRIMARY KEY
 - anchor_id INTEGER NOT NULL
@@ -81,6 +88,8 @@ reference_materials
 - extractor_version TEXT NOT NULL
 - user_verified INTEGER NOT NULL
 - created_at TEXT NOT NULL
+
+`material_type` keeps the existing sentence/passages retrieval surface and now also supports `scene`, `beat`, `dialogue_exchange`, `action_afterbeat`, `image_motif`, `hook`, `payoff`, and `transition`. Each material's `source_hash` is the hash of its source segment text, so rebuilds can preserve user tag corrections and archive markers by stable id or unique material-type/hash match.
 
 reference_chapter_blueprints
 - blueprint_id INTEGER PRIMARY KEY
@@ -162,7 +171,10 @@ reference_chapter_blueprint_beats
 - locked_phrase_policy TEXT NOT NULL
 - no_reuse_reason TEXT NOT NULL
 - prose_duties_json TEXT NOT NULL
+- style_contract_json TEXT NOT NULL
 - risk_flags_json TEXT NOT NULL
+
+`style_contract_json` is the Phase 14 beat-level style contract. It stores target style profile ids, style dimensions, imitation intensity, minimum style-fit score, allowed closeness, required evidence types, and forbidden style risks. It is included in `analysis_contract_hash`; revising it makes previous approvals and material links stale. Deterministic blueprint review fails contracts with missing/invalid style profile ids, no style duties, contradictory intensity/fit thresholds, or required evidence labels/material granularities incompatible with the beat's effective material search. Material binding passes the style profile ids/dimensions/intensity into `SearchReferenceMaterials`; selected links below the contract's minimum style fit are persisted as `low_confidence` weak matches with a negative `style_fit_gap` score component.
 
 reference_chapter_blueprint_reviews
 - review_id TEXT PRIMARY KEY
@@ -230,7 +242,7 @@ reference_blueprint_material_links
 - status TEXT NOT NULL
 - created_at TEXT NOT NULL
 
-`score_components_json` on persisted material links currently records material type, function, emotion, POV, prose-duty, lexical, embedding similarity, confidence, `user_verified`, current-novel accepted-feedback boosts, and negative `low_confidence` markers for expanded-query weak matches when applicable. `SearchReferenceMaterials` also returns transient score components for lexical/tag fit, story-context narrative duty, emotion transition, prose duty, embedding similarity when available, confidence, current-novel accepted feedback, and length. Draft generation and persisted draft re-audit read the selected link for the current `analysis_contract_hash`; a low-confidence selected link turns into draft-audit provenance risk until the material is rebound, the blueprint query is revised, or the retrieval gap is explicitly resolved.
+`score_components_json` on persisted material links currently records material type, function, emotion, POV, prose-duty, lexical, embedding similarity, optional style fit, negative style-fit gaps, confidence, `user_verified`, current-novel accepted-feedback boosts, and negative `low_confidence` markers for expanded-query or low style-fit weak matches when applicable. `SearchReferenceMaterials` also returns transient score components for lexical/tag fit, story-context narrative duty, emotion transition, prose duty, optional style fit from `reference_material_style_tags`, optional same-source `source_risk_penalty` for moderate/strong style requests, embedding similarity when available, confidence, current-novel accepted feedback, and length. Draft generation and persisted draft re-audit read the selected link for the current `analysis_contract_hash`; a low-confidence selected link turns into draft-audit provenance risk until the material is rebound, the blueprint query is revised, or the retrieval gap is explicitly resolved. When the selected material row is still visible and active, draft audit also reads its source text from `reference_materials` and applies deterministic source-leak checks to non-L0/L1 candidates without storing extra source text in draft rows. If the beat style contract uses strong imitation, draft audit uses stricter source-leak thresholds against that selected material text.
 
 reference_draft_paragraph_candidates
 - candidate_id TEXT PRIMARY KEY
@@ -291,7 +303,78 @@ reference_user_feedback
 - edited_text_hash TEXT NOT NULL
 - origin TEXT NOT NULL
 - created_at TEXT NOT NULL
+
+reference_style_profiles
+- profile_id INTEGER PRIMARY KEY
+- novel_id INTEGER NOT NULL
+- title TEXT NOT NULL
+- description TEXT NOT NULL
+- status TEXT NOT NULL
+- analyzer_version TEXT NOT NULL
+- feature_schema_version TEXT NOT NULL
+- analyzer_source TEXT NOT NULL
+- anchor_ids_json TEXT NOT NULL
+- source_hashes_json TEXT NOT NULL
+- allowed_license_statuses_json TEXT NOT NULL
+- allowed_source_trust_levels_json TEXT NOT NULL
+- feature_vector_json TEXT NOT NULL
+- aggregate_confidence REAL NOT NULL
+- created_at TEXT NOT NULL
+- updated_at TEXT NOT NULL
+- archived_at TEXT
+
+reference_style_profile_sources
+- profile_id INTEGER NOT NULL
+- anchor_id INTEGER NOT NULL
+- source_file_hash TEXT NOT NULL
+- license_status TEXT NOT NULL
+- source_trust TEXT NOT NULL
+- corpus_visibility TEXT NOT NULL
+- material_count INTEGER NOT NULL
+- segment_count INTEGER NOT NULL
+
+reference_style_profile_evidence
+- evidence_id TEXT PRIMARY KEY
+- profile_id INTEGER NOT NULL
+- anchor_id INTEGER NOT NULL
+- source_segment_id TEXT NOT NULL
+- material_id TEXT
+- feature_key TEXT NOT NULL
+- label TEXT NOT NULL
+- start_offset INTEGER NOT NULL
+- end_offset INTEGER NOT NULL
+- text_hash TEXT NOT NULL
+- confidence REAL NOT NULL
+- analyzer_source TEXT NOT NULL
+- created_at TEXT NOT NULL
+
+reference_style_analysis_runs
+- run_id TEXT PRIMARY KEY
+- profile_id INTEGER NOT NULL
+- analyzer_version TEXT NOT NULL
+- feature_schema_version TEXT NOT NULL
+- analyzer_source TEXT NOT NULL
+- input_anchor_ids_json TEXT NOT NULL
+- input_source_hashes_json TEXT NOT NULL
+- status TEXT NOT NULL
+- diagnostics_json TEXT NOT NULL
+- created_at TEXT NOT NULL
+
+reference_material_style_tags
+- profile_id INTEGER NOT NULL
+- material_id TEXT NOT NULL
+- tag_key TEXT NOT NULL
+- tag_value TEXT NOT NULL
+- confidence REAL NOT NULL
+- evidence_id TEXT NOT NULL
+- analyzer_source TEXT NOT NULL
+- analyzer_version TEXT NOT NULL
+- created_at TEXT NOT NULL
 ```
+
+`reference_style_profile_evidence` intentionally does not store source text. It stores source/material provenance ids, offsets, hashes, feature key, label, confidence, and analyzer source. The large imported source text remains only in `reference_source_segments` and `reference_materials`.
+
+`reference_material_style_tags` is the search-side bridge from deterministic or future model-assisted style analysis to retrieval. `SearchReferenceMaterials.style_profile_ids` reads only active profiles owned by the current novel, then joins these tags back to currently visible active materials. The join never expands material visibility and cross-novel or archived profile ids fail the request.
 
 Current indexes:
 
@@ -312,6 +395,10 @@ idx_reference_blueprint_links_beat
 idx_reference_draft_candidates_blueprint
 idx_reference_orchestration_runs_novel_chapter
 idx_reference_orchestration_run_events_run
+idx_reference_style_profiles_novel
+idx_reference_style_profile_sources_anchor
+idx_reference_style_evidence_profile_feature
+idx_reference_material_style_tags_material
 idx_reference_feedback_novel_target
 idx_reference_feedback_material
 ```
@@ -323,6 +410,8 @@ PRAGMA foreign_keys = ON;
 ```
 
 The current RAG service does not enable foreign keys because it has only two flat tables. Reference-anchor storage has real parent/child integrity and enables it.
+
+The Phase 14 style-profile tables use foreign keys back to `reference_anchors`, `reference_source_segments`, and `reference_materials` with restrictive provenance behavior. Soft-archiving materials keeps evidence readable because material rows remain in place. Hard-deleting a referenced source/material is blocked by SQLite foreign keys instead of silently orphaning profile provenance.
 
 `reference_orchestration_runs` is the Phase 11 run state and resume surface. It persists stage/status, source/fact decision details, optional explicit anchors, corpus search policy, artifact ids, stop reason, and error text so a run can be inspected or resumed after restart. The current implementation records generated `blueprint_id` and deterministic `review_id` after source confirmation, stores pending required decisions in `current_decision_json`, can persist a proposed field-level blueprint revision inside that decision, stops for blueprint approval or revision, then after blueprint approval can record generated `candidate_ids_json` and stop for final insertion. The final-insertion decision is an inspection boundary only: `ResumeReferenceOrchestrationRun` rejects `approve_final_insertion`, leaving the run parked with candidate ids until a separate user-confirmed chapter edit/save path handles prose insertion. Stale blueprint detection persists as a high-risk `resolve_high_risk_stop` decision with `stale_blueprint` in the approval summary, so a run can be inspected after the source plan invalidates a pending or approved blueprint. Material binding gaps persist as a high-risk `resolve_high_risk_stop` decision at `material_binding`, with `high_risk_gate_blocked`, missing beat ids in the approval summary, and error text retained for inspection; resolving that stop marks the run failed without free-drafting. Draft audit failure persists as a high-risk `resolve_high_risk_stop` decision at `draft_audit`, with candidate ids, stop reason, and error text retained for inspection; resolving that stop marks the run failed without inserting prose. Draft audit details remain available by re-auditing the persisted candidates; a later slice can add a first-class audit history column/table if the UI needs durable audit snapshots.
 

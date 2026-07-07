@@ -255,6 +255,112 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void ReferenceStyleProfilePayloadsUseStableSnakeCaseJsonNamesWithoutSourceText()
+    {
+        var build = new BuildReferenceStyleProfilePayload(
+            NovelId: 42,
+            Title: "雨夜克制风格",
+            Description: "从工作区语料构建的确定性基线风格画像",
+            AnchorIds: [7, 8],
+            AllowedLicenseStatuses: ["user_provided", "licensed"],
+            AllowedSourceTrustLevels: [ReferenceSourceTrustLevels.UserVerified, ReferenceSourceTrustLevels.Imported]);
+
+        using var buildJson = JsonDocument.Parse(JsonSerializer.Serialize(build, BridgeJson.SerializerOptions));
+        var buildRoot = buildJson.RootElement;
+        Assert.Equal(42, buildRoot.GetProperty("novel_id").GetInt64());
+        Assert.Equal("雨夜克制风格", buildRoot.GetProperty("title").GetString());
+        Assert.Equal("从工作区语料构建的确定性基线风格画像", buildRoot.GetProperty("description").GetString());
+        Assert.Equal([7, 8], buildRoot.GetProperty("anchor_ids").EnumerateArray().Select(item => item.GetInt64()).ToArray());
+        Assert.Equal("user_provided", buildRoot.GetProperty("allowed_license_statuses")[0].GetString());
+        Assert.Equal("user_verified", buildRoot.GetProperty("allowed_source_trust_levels")[0].GetString());
+        Assert.False(buildRoot.TryGetProperty("NovelId", out _));
+        Assert.False(buildRoot.TryGetProperty("AnchorIds", out _));
+
+        var evidence = new ReferenceStyleEvidenceSpanPayload(
+            EvidenceId: "style-evidence-1",
+            ProfileId: 100,
+            AnchorId: 7,
+            SourceSegmentId: "segment-1",
+            MaterialId: "material-1",
+            FeatureKey: "dialogue_ratio",
+            Label: "dialogue_exchange",
+            StartOffset: 12,
+            EndOffset: 28,
+            TextHash: "segment-hash",
+            Confidence: 0.8,
+            AnalyzerSource: ReferenceStyleAnalyzerSources.DeterministicBaseline);
+
+        var featureVector = new ReferenceStyleFeatureVectorPayload(
+            NumericFeatures:
+            [
+                new ReferenceStyleNumericFeaturePayload(
+                    FeatureKey: "average_sentence_chars",
+                    Value: 18.5,
+                    Unit: "chars",
+                    Confidence: 0.75,
+                    EvidenceIds: ["style-evidence-1"])
+            ],
+            DistributionFeatures:
+            [
+                new ReferenceStyleDistributionFeaturePayload(
+                    FeatureKey: "sentence_length_distribution",
+                    Unit: "chars",
+                    Buckets:
+                    [
+                        new ReferenceStyleDistributionBucketPayload("short", 0, 20, 0.6),
+                        new ReferenceStyleDistributionBucketPayload("medium", 21, 60, 0.4)
+                    ],
+                    Confidence: 0.75,
+                    EvidenceIds: ["style-evidence-1"])
+            ],
+            CategoricalFeatures:
+            [
+                new ReferenceStyleCategoricalFeaturePayload(
+                    FeatureKey: "dominant_technique",
+                    Label: "dialogue_exchange",
+                    Weight: 0.4,
+                    Confidence: 0.7,
+                    EvidenceIds: ["style-evidence-1"])
+            ]);
+
+        var profile = new ReferenceStyleProfilePayload(
+            ProfileId: 100,
+            NovelId: 42,
+            Title: "雨夜克制风格",
+            Description: "从工作区语料构建的确定性基线风格画像",
+            Status: ReferenceStyleProfileStatuses.Active,
+            AnalyzerVersion: "reference-style-deterministic-v1",
+            FeatureSchemaVersion: ReferenceStyleFeatureSchemaVersions.V1,
+            AnalyzerSource: ReferenceStyleAnalyzerSources.DeterministicBaseline,
+            SourceAnchorIds: [7],
+            SourceHashes: ["source-hash"],
+            AllowedLicenseStatuses: ["user_provided"],
+            AllowedSourceTrustLevels: [ReferenceSourceTrustLevels.UserVerified],
+            AggregateConfidence: 0.72,
+            Features: featureVector,
+            EvidenceSpans: [evidence],
+            CreatedAt: DateTimeOffset.Parse("2026-07-07T00:00:00Z"),
+            UpdatedAt: DateTimeOffset.Parse("2026-07-07T00:00:00Z"),
+            ArchivedAt: null);
+
+        using var profileJson = JsonDocument.Parse(JsonSerializer.Serialize(profile, BridgeJson.SerializerOptions));
+        var root = profileJson.RootElement;
+        Assert.Equal(100, root.GetProperty("profile_id").GetInt64());
+        Assert.Equal("active", root.GetProperty("status").GetString());
+        Assert.Equal("reference-style-deterministic-v1", root.GetProperty("analyzer_version").GetString());
+        Assert.Equal("style-profile-v1", root.GetProperty("feature_schema_version").GetString());
+        Assert.Equal("deterministic_baseline", root.GetProperty("analyzer_source").GetString());
+        Assert.Equal(7, root.GetProperty("source_anchor_ids")[0].GetInt64());
+        Assert.Equal("source-hash", root.GetProperty("source_hashes")[0].GetString());
+        Assert.Equal(0.72, root.GetProperty("aggregate_confidence").GetDouble());
+        Assert.Equal("average_sentence_chars", root.GetProperty("features").GetProperty("numeric_features")[0].GetProperty("feature_key").GetString());
+        Assert.Equal("style-evidence-1", root.GetProperty("evidence_spans")[0].GetProperty("evidence_id").GetString());
+        Assert.False(root.GetProperty("evidence_spans")[0].TryGetProperty("text", out _));
+        Assert.False(root.TryGetProperty("ProfileId", out _));
+        Assert.False(root.TryGetProperty("SourceText", out _));
+    }
+
+    [Fact]
     public void SearchReferenceMaterialsPayloadUsesStableNarrativeFilterJsonNames()
     {
         var payload = new SearchReferenceMaterialsPayload(
@@ -271,7 +377,10 @@ public sealed class ReferenceAnchorContractTests
             NarrativeDuties: ["external_evidence"],
             EmotionTransitions: ["neutral->heightened"],
             ProseDuties: ["source_backed_detail"],
-            ArchiveFilter: ReferenceMaterialArchiveFilters.Archived);
+            ArchiveFilter: ReferenceMaterialArchiveFilters.Archived,
+            StyleProfileIds: [99],
+            StyleDimensions: ["dialogue_ratio"],
+            ImitationIntensity: ReferenceStyleImitationIntensities.Strong);
 
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(payload, BridgeJson.SerializerOptions));
         var root = json.RootElement;
@@ -280,10 +389,16 @@ public sealed class ReferenceAnchorContractTests
         Assert.Equal("neutral->heightened", root.GetProperty("emotion_transitions")[0].GetString());
         Assert.Equal("source_backed_detail", root.GetProperty("prose_duties")[0].GetString());
         Assert.Equal("archived", root.GetProperty("archive_filter").GetString());
+        Assert.Equal(99, root.GetProperty("style_profile_ids")[0].GetInt64());
+        Assert.Equal("dialogue_ratio", root.GetProperty("style_dimensions")[0].GetString());
+        Assert.Equal("strong", root.GetProperty("imitation_intensity").GetString());
         Assert.False(root.TryGetProperty("NarrativeDuties", out _));
         Assert.False(root.TryGetProperty("EmotionTransitions", out _));
         Assert.False(root.TryGetProperty("ProseDuties", out _));
         Assert.False(root.TryGetProperty("ArchiveFilter", out _));
+        Assert.False(root.TryGetProperty("StyleProfileIds", out _));
+        Assert.False(root.TryGetProperty("StyleDimensions", out _));
+        Assert.False(root.TryGetProperty("ImitationIntensity", out _));
     }
 
     [Fact]
@@ -392,7 +507,15 @@ public sealed class ReferenceAnchorContractTests
             LockedPhrasePolicy: "preserve physical afterbeat cadence",
             NoReuseReason: "",
             ProseDuties: ["interiority", "physical_afterbeat"],
-            RiskFlags: ["fake_emotion"]);
+            RiskFlags: ["fake_emotion"],
+            StyleContract: new ReferenceBlueprintStyleContractPayload(
+                StyleProfileIds: [99],
+                StyleDimensions: ["dialogue_ratio", "paragraph_cadence"],
+                ImitationIntensity: ReferenceStyleImitationIntensities.Strong,
+                MinStyleFit: 1.25,
+                AllowedCloseness: "moderate",
+                RequiredEvidenceTypes: ["dialogue_exchange"],
+                ForbiddenStyleRisks: ["source_leak"]));
 
         var review = new ReferenceChapterBlueprintReviewPayload(
             ReviewId: "review-1",
@@ -500,6 +623,9 @@ public sealed class ReferenceAnchorContractTests
         Assert.Equal("linger on hesitation before the next action", root.GetProperty("beats")[0].GetProperty("paragraph_intention").GetString());
         Assert.Equal("dwell", root.GetProperty("beats")[0].GetProperty("execution_mode").GetString());
         Assert.Equal("preserve physical afterbeat cadence", root.GetProperty("beats")[0].GetProperty("locked_phrase_policy").GetString());
+        Assert.Equal(99, root.GetProperty("beats")[0].GetProperty("style_contract").GetProperty("style_profile_ids")[0].GetInt64());
+        Assert.Equal("strong", root.GetProperty("beats")[0].GetProperty("style_contract").GetProperty("imitation_intensity").GetString());
+        Assert.Equal(1.25, root.GetProperty("beats")[0].GetProperty("style_contract").GetProperty("min_style_fit").GetDouble());
         Assert.Equal("close interiority hesitation", root.GetProperty("beats")[0].GetProperty("reference_query").GetProperty("query").GetString());
         Assert.Equal("missing payoff", root.GetProperty("latest_review").GetProperty("logic_errors")[0].GetString());
         Assert.Equal(1, root.GetProperty("latest_review").GetProperty("review_version").GetInt32());
@@ -924,6 +1050,9 @@ public sealed class ReferenceAnchorContractTests
             "BindReferenceBlueprintMaterials",
             "GenerateReferenceAnchoredDraft",
             "AuditReferenceAnchoredDraft",
+            "BuildReferenceStyleProfile",
+            "GetReferenceStyleProfiles",
+            "GetReferenceStyleProfile",
             "StartReferenceOrchestrationRun",
             "GetReferenceOrchestrationRuns",
             "GetReferenceOrchestrationRun",

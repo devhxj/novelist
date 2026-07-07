@@ -4,7 +4,26 @@ namespace Novelist.Infrastructure.App;
 
 internal static class ReferenceChapterBlueprintReviewer
 {
-    public const int CurrentReviewVersion = 62;
+    public const int CurrentReviewVersion = 63;
+
+    private const double StrongStyleMinimumFitFloor = 0.75;
+    private const double MaximumStyleFitThreshold = 10.0;
+    private static readonly HashSet<string> SupportedStyleEvidenceTypes = new(
+        ReferenceMaterialTypes.All.Concat(
+        [
+            "dialogue_exchange",
+            "interiority",
+            "sensory_detail",
+            "afterbeat",
+            "transition",
+            "hook_marker",
+            "length_sample",
+            "dominant_function",
+            "dominant_emotion",
+            "dominant_pov",
+            "dominant_technique"
+        ]),
+        StringComparer.Ordinal);
 
     public static ReferenceChapterBlueprintReviewPayload BuildReview(
         ReferenceChapterBlueprintPayload blueprint,
@@ -186,6 +205,152 @@ internal static class ReferenceChapterBlueprintReviewer
                         $"Forbidden fact appears in execution contract {field.FieldName}: {forbidden}",
                         $"Remove the forbidden fact from execution_contract.{field.FieldName} or move it out of the forbidden fact set.");
                 }
+            }
+        }
+
+        void AddStyleContractDefects(ReferenceChapterBlueprintBeatPayload beat)
+        {
+            var styleContract = beat.StyleContract;
+            if (styleContract is null)
+            {
+                return;
+            }
+
+            var profileIds = styleContract.StyleProfileIds?
+                .Where(profileId => profileId > 0)
+                .Distinct()
+                .ToArray() ?? [];
+            var invalidProfileIds = styleContract.StyleProfileIds?
+                .Where(profileId => profileId <= 0)
+                .Distinct()
+                .ToArray() ?? [];
+            foreach (var invalidProfileId in invalidProfileIds)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.style_profile_ids",
+                    $"Beat {beat.BeatIndex} style contract uses invalid style profile id: {invalidProfileId}.",
+                    "Set style_contract.style_profile_ids to positive profile ids before review.");
+            }
+
+            var styleDimensions = NormalizeTags(styleContract.StyleDimensions).ToArray();
+            var requiredEvidenceTypes = NormalizeTags(styleContract.RequiredEvidenceTypes).ToArray();
+            if (profileIds.Length == 0)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.style_profile_ids",
+                    $"Beat {beat.BeatIndex} style contract declares style duties without style profile ids.",
+                    "Select at least one active style profile id before style-aware material binding.");
+            }
+
+            if (styleDimensions.Length == 0 && requiredEvidenceTypes.Length == 0)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.style_dimensions",
+                    $"Beat {beat.BeatIndex} style contract has no style duties.",
+                    "Add at least one style dimension or required evidence type so approval can review the style duty.");
+            }
+
+            var intensity = string.IsNullOrWhiteSpace(styleContract.ImitationIntensity)
+                ? string.Empty
+                : styleContract.ImitationIntensity.Trim();
+            var knownIntensity = ReferenceStyleImitationIntensities.All.Contains(intensity, StringComparer.Ordinal)
+                ? intensity
+                : string.Empty;
+            if (intensity.Length == 0)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.imitation_intensity",
+                    $"Beat {beat.BeatIndex} style contract is missing imitation_intensity.",
+                    "Set imitation_intensity to diagnostic_only, loose, moderate, or strong.");
+            }
+            else if (knownIntensity.Length == 0)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.imitation_intensity",
+                    $"Beat {beat.BeatIndex} style contract uses unsupported imitation_intensity: {intensity}.",
+                    "Set imitation_intensity to diagnostic_only, loose, moderate, or strong.");
+            }
+
+            if (double.IsNaN(styleContract.MinStyleFit) ||
+                double.IsInfinity(styleContract.MinStyleFit) ||
+                styleContract.MinStyleFit < 0 ||
+                styleContract.MinStyleFit > MaximumStyleFitThreshold)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.min_style_fit",
+                    $"Beat {beat.BeatIndex} style contract uses invalid min_style_fit: {styleContract.MinStyleFit}.",
+                    $"Set min_style_fit to a finite value between 0 and {MaximumStyleFitThreshold}.");
+            }
+            else if (string.Equals(knownIntensity, ReferenceStyleImitationIntensities.Strong, StringComparison.Ordinal) &&
+                styleContract.MinStyleFit < StrongStyleMinimumFitFloor)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.min_style_fit",
+                    $"Beat {beat.BeatIndex} strong style contract sets min_style_fit too low: {styleContract.MinStyleFit}.",
+                    $"Raise min_style_fit to at least {StrongStyleMinimumFitFloor} or lower imitation_intensity before approval.");
+            }
+            else if (string.Equals(knownIntensity, ReferenceStyleImitationIntensities.DiagnosticOnly, StringComparison.Ordinal) &&
+                styleContract.MinStyleFit > 0)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.min_style_fit",
+                    $"Beat {beat.BeatIndex} diagnostic-only style contract still enforces min_style_fit.",
+                    "Set min_style_fit to 0 for diagnostic_only, or choose loose, moderate, or strong if style fit should gate binding.");
+            }
+
+            foreach (var unsupportedEvidenceType in requiredEvidenceTypes
+                .Where(evidenceType => !SupportedStyleEvidenceTypes.Contains(evidenceType))
+                .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "style_contract.required_evidence_types",
+                    $"Beat {beat.BeatIndex} style contract uses unsupported required evidence type: {unsupportedEvidenceType}.",
+                    "Use a known deterministic style evidence label or reference material type before material binding.");
+            }
+
+            var materialTypes = NormalizeTags(beat.ReferenceQuery.MaterialTypes.Count > 0
+                    ? beat.ReferenceQuery.MaterialTypes
+                    : beat.RequiredMaterialTypes)
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var evidenceType in requiredEvidenceTypes
+                .Where(evidenceType => SupportedStyleEvidenceTypes.Contains(evidenceType))
+                .Where(evidenceType => materialTypes.Count > 0 && !IsStyleEvidenceCompatibleWithMaterialTypes(evidenceType, materialTypes))
+                .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "style_contract.required_evidence_types",
+                    $"Beat {beat.BeatIndex} requires style evidence type {evidenceType} that material search cannot return.",
+                    "Align style_contract.required_evidence_types with reference_query.material_types or required_material_types before binding.");
             }
         }
 
@@ -876,6 +1041,8 @@ internal static class ReferenceChapterBlueprintReviewer
                     $"Beat {beat.BeatIndex} uses unsupported reference_query.material_types value: {unsupportedMaterialType}",
                     "Set reference_query.material_types to chapter, paragraph, sentence, or passage before material search.");
             }
+
+            AddStyleContractDefects(beat);
 
             if (string.IsNullOrWhiteSpace(beat.ReferenceQuery.Query) || beat.RequiredMaterialTypes.Count == 0)
             {
@@ -2594,6 +2761,88 @@ internal static class ReferenceChapterBlueprintReviewer
     private static bool ContainsAnyTag(IReadOnlyList<string> values, IReadOnlyList<string> candidates)
     {
         return values.Any(value => candidates.Contains(value, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static bool IsStyleEvidenceCompatibleWithMaterialTypes(
+        string evidenceType,
+        IReadOnlySet<string> materialTypes)
+    {
+        return StyleEvidenceCompatibleMaterialTypes(evidenceType)
+            .Any(materialTypes.Contains);
+    }
+
+    private static IReadOnlyList<string> StyleEvidenceCompatibleMaterialTypes(string evidenceType)
+    {
+        return evidenceType switch
+        {
+            "dialogue_exchange" =>
+            [
+                ReferenceMaterialTypes.Sentence,
+                ReferenceMaterialTypes.Paragraph,
+                ReferenceMaterialTypes.Passage,
+                ReferenceMaterialTypes.DialogueExchange,
+                ReferenceMaterialTypes.Beat,
+                ReferenceMaterialTypes.Scene,
+                ReferenceMaterialTypes.Chapter
+            ],
+            "interiority" =>
+            [
+                ReferenceMaterialTypes.Sentence,
+                ReferenceMaterialTypes.Paragraph,
+                ReferenceMaterialTypes.Passage,
+                ReferenceMaterialTypes.Beat,
+                ReferenceMaterialTypes.Scene,
+                ReferenceMaterialTypes.Chapter
+            ],
+            "sensory_detail" =>
+            [
+                ReferenceMaterialTypes.Sentence,
+                ReferenceMaterialTypes.Paragraph,
+                ReferenceMaterialTypes.Passage,
+                ReferenceMaterialTypes.ImageMotif,
+                ReferenceMaterialTypes.Beat,
+                ReferenceMaterialTypes.Scene,
+                ReferenceMaterialTypes.Chapter
+            ],
+            "afterbeat" =>
+            [
+                ReferenceMaterialTypes.Sentence,
+                ReferenceMaterialTypes.Paragraph,
+                ReferenceMaterialTypes.Passage,
+                ReferenceMaterialTypes.ActionAfterbeat,
+                ReferenceMaterialTypes.Beat,
+                ReferenceMaterialTypes.Scene,
+                ReferenceMaterialTypes.Chapter
+            ],
+            "transition" =>
+            [
+                ReferenceMaterialTypes.Sentence,
+                ReferenceMaterialTypes.Paragraph,
+                ReferenceMaterialTypes.Passage,
+                ReferenceMaterialTypes.Transition,
+                ReferenceMaterialTypes.Beat,
+                ReferenceMaterialTypes.Scene,
+                ReferenceMaterialTypes.Chapter
+            ],
+            "hook_marker" =>
+            [
+                ReferenceMaterialTypes.Sentence,
+                ReferenceMaterialTypes.Paragraph,
+                ReferenceMaterialTypes.Passage,
+                ReferenceMaterialTypes.Hook,
+                ReferenceMaterialTypes.Beat,
+                ReferenceMaterialTypes.Scene,
+                ReferenceMaterialTypes.Chapter
+            ],
+            "length_sample" =>
+            [
+                ReferenceMaterialTypes.Sentence,
+                ReferenceMaterialTypes.Paragraph,
+                ReferenceMaterialTypes.Passage
+            ],
+            "dominant_function" or "dominant_emotion" or "dominant_pov" or "dominant_technique" => ReferenceMaterialTypes.All,
+            _ => [evidenceType]
+        };
     }
 
     private static bool ContainsAny(string value, IReadOnlyList<string> markers)

@@ -222,6 +222,31 @@ public sealed class ReferenceBridgeHandlerRoutingTests
     }
 
     [Fact]
+    public async Task ReferenceStyleProfileHandlersRouteEveryMethodToServiceOperations()
+    {
+        var service = new RecordingReferenceStyleProfileService();
+        var dispatcher = new BridgeDispatcher().RegisterReferenceStyleProfileHandlers(service);
+
+        await AssertOkAsync(dispatcher, "BuildReferenceStyleProfile", new BuildReferenceStyleProfilePayload(
+            42,
+            "雨夜克制风格",
+            "deterministic baseline",
+            [99, 100],
+            ["user_provided", "licensed"],
+            [ReferenceSourceTrustLevels.UserVerified, ReferenceSourceTrustLevels.Imported]));
+        await AssertOkAsync(dispatcher, "GetReferenceStyleProfiles", new GetReferenceStyleProfilesPayload(42, IncludeArchived: true));
+        await AssertOkAsync(dispatcher, "GetReferenceStyleProfile", 42L, 501L);
+
+        Assert.Equal(
+            [
+                "BuildStyleProfile:42:雨夜克制风格:deterministic baseline:99,100:user_provided,licensed:user_verified,imported",
+                "GetStyleProfiles:42:True",
+                "GetStyleProfile:42:501"
+            ],
+            service.Calls);
+    }
+
+    [Fact]
     public async Task ReferenceAnchorHandlersPreserveExistingBridgeErrorSemantics()
     {
         var service = new RecordingReferenceAnchorService();
@@ -485,6 +510,40 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             Calls.Add($"GetUserFeedback:{input.NovelId}:{input.TargetType}:{input.TargetId}:{input.Limit}");
             IReadOnlyList<ReferenceUserFeedbackPayload> feedback = [];
             return ValueTask.FromResult(feedback);
+        }
+    }
+
+    private sealed class RecordingReferenceStyleProfileService : IReferenceStyleProfileService
+    {
+        public List<string> Calls { get; } = [];
+
+        public ValueTask<ReferenceStyleProfilePayload> BuildStyleProfileAsync(
+            BuildReferenceStyleProfilePayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"BuildStyleProfile:{input.NovelId}:{input.Title}:{input.Description}:{string.Join(',', input.AnchorIds)}:{string.Join(',', input.AllowedLicenseStatuses)}:{string.Join(',', input.AllowedSourceTrustLevels)}");
+            return ValueTask.FromResult<ReferenceStyleProfilePayload>(null!);
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceStyleProfileSummaryPayload>> GetStyleProfilesAsync(
+            GetReferenceStyleProfilesPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"GetStyleProfiles:{input.NovelId}:{input.IncludeArchived}");
+            IReadOnlyList<ReferenceStyleProfileSummaryPayload> profiles = [];
+            return ValueTask.FromResult(profiles);
+        }
+
+        public ValueTask<ReferenceStyleProfilePayload?> GetStyleProfileAsync(
+            long novelId,
+            long profileId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"GetStyleProfile:{novelId}:{profileId}");
+            return ValueTask.FromResult<ReferenceStyleProfilePayload?>(null);
         }
     }
 

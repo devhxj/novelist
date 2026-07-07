@@ -78,6 +78,7 @@ export interface NovelistAppApi {
   AuditReferenceAnchoredDraft: AppMethod<[reference.AuditAnchoredDraftInput], reference.AnchoredDraftAudit>
   AuditReferenceReuse: AppMethod<[reference.AuditReuseInput], reference.ReuseAudit>
   BindReferenceBlueprintMaterials: AppMethod<[reference.BindBlueprintMaterialsInput], reference.BlueprintMaterialBindingResult>
+  BuildReferenceStyleProfile: AppMethod<[reference.BuildStyleProfileInput], reference.StyleProfile>
   CancelChat: AppMethod<[string], void>
   CancelReferenceOrchestrationRun: AppMethod<[reference.CancelOrchestrationRunInput], reference.OrchestrationRun>
   Chat: AppMethod<[app.ChatInput], app.ChatResult>
@@ -136,6 +137,8 @@ export interface NovelistAppApi {
   GetReferenceOrchestrationRun: AppMethod<[number, string], reference.OrchestrationRun | null>
   GetReferenceOrchestrationRunEvents: AppMethod<[number, string], reference.OrchestrationRunEvent[]>
   GetReferenceOrchestrationRuns: AppMethod<[number, number | null], reference.OrchestrationRun[]>
+  GetReferenceStyleProfile: AppMethod<[number, number], reference.StyleProfile | null>
+  GetReferenceStyleProfiles: AppMethod<[reference.GetStyleProfilesInput], reference.StyleProfileSummary[]>
   GetReferenceUserFeedback: AppMethod<[reference.GetUserFeedbackInput], reference.UserFeedback[]>
   GetSession: AppMethod<[string], app.SessionDetail>
   GetSessionMessages: AppMethod<[string], session.Message[]>
@@ -228,6 +231,7 @@ export const appApi: NovelistAppApi = {
   AuditReferenceAnchoredDraft: appMethod<NovelistAppApi['AuditReferenceAnchoredDraft']>('AuditReferenceAnchoredDraft'),
   AuditReferenceReuse: appMethod<NovelistAppApi['AuditReferenceReuse']>('AuditReferenceReuse'),
   BindReferenceBlueprintMaterials: appMethod<NovelistAppApi['BindReferenceBlueprintMaterials']>('BindReferenceBlueprintMaterials'),
+  BuildReferenceStyleProfile: appMethod<NovelistAppApi['BuildReferenceStyleProfile']>('BuildReferenceStyleProfile'),
   CancelChat: appMethod<NovelistAppApi['CancelChat']>('CancelChat'),
   CancelReferenceOrchestrationRun: appMethod<NovelistAppApi['CancelReferenceOrchestrationRun']>('CancelReferenceOrchestrationRun'),
   Chat: ((...args) => invokeAppArgs('Chat', args, { timeoutMs: null })) as NovelistAppApi['Chat'],
@@ -286,6 +290,8 @@ export const appApi: NovelistAppApi = {
   GetReferenceOrchestrationRun: appMethod<NovelistAppApi['GetReferenceOrchestrationRun']>('GetReferenceOrchestrationRun'),
   GetReferenceOrchestrationRunEvents: appMethod<NovelistAppApi['GetReferenceOrchestrationRunEvents']>('GetReferenceOrchestrationRunEvents'),
   GetReferenceOrchestrationRuns: appMethod<NovelistAppApi['GetReferenceOrchestrationRuns']>('GetReferenceOrchestrationRuns'),
+  GetReferenceStyleProfile: appMethod<NovelistAppApi['GetReferenceStyleProfile']>('GetReferenceStyleProfile'),
+  GetReferenceStyleProfiles: appMethod<NovelistAppApi['GetReferenceStyleProfiles']>('GetReferenceStyleProfiles'),
   GetReferenceUserFeedback: appMethod<NovelistAppApi['GetReferenceUserFeedback']>('GetReferenceUserFeedback'),
   GetSession: appMethod<NovelistAppApi['GetSession']>('GetSession'),
   GetSessionMessages: appMethod<NovelistAppApi['GetSessionMessages']>('GetSessionMessages'),

@@ -70,6 +70,9 @@ public static class DesktopBridgeComposition
             embeddingService,
             embeddingClient,
             sqliteVecProvider);
+        var referenceStyleProfileService = new SqliteReferenceStyleProfileService(
+            options,
+            novelService);
         var referenceAnchoredDraftService = new SqliteReferenceAnchoredDraftService(
             options,
             novelService,
@@ -131,6 +134,7 @@ public static class DesktopBridgeComposition
                 storyMemoryService,
                 referenceSourceFilePicker)
             .RegisterReferenceAnchorHandlers(referenceAnchorService)
+            .RegisterReferenceStyleProfileHandlers(referenceStyleProfileService)
             .RegisterReferenceAnchoredDraftHandlers(referenceAnchoredDraftService)
             .RegisterApprovalHandlers(approvalCoordinator)
             .RegisterChatSessionHandlers(chatService);

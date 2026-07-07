@@ -4,9 +4,9 @@
 
 ## Status
 
-Phases 0-13 are complete at the current implementation boundary. `tasks-and-verification.md` tracks the completed phase history and the regression matrix that now protects the Phase 13 product-quality gate.
+Phases 0-13 are complete at the current implementation boundary. Phase 14 is open and tracked in `tasks-and-verification.md` as the advanced style anchoring and high-fidelity imitation phase.
 
-This plan is still the source of truth for the target design. No implementation-plan phase is currently open unless contracts, storage, bridge, agent, or frontend behavior regresses, or a new phase is explicitly defined.
+This plan is still the source of truth for the target design. Treat Phase 14 as the open implementation-plan phase unless contracts, storage, bridge, agent, or frontend behavior regresses.
 
 ## Date
 

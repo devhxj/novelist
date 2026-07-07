@@ -143,4 +143,25 @@ dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --n
 
 The closed boundary includes app-wide Playwright coverage, reference-anchor workflow coverage, 10MB Chinese novel/reference stress coverage, deterministic source segmentation and material generation from supplied text, source-hash/provenance assertions, material-library paging/search, blueprint binding, draft-audit guardrails, usability reporting, and production-asset/Photino boundary checks. Artifacts are recorded under `output/playwright/phase13/`.
 
-No implementation-plan phase is currently open. Future work such as deeper corpus-library product IA, global feedback tuning, optional LLM-assisted tagging/adaptation, and hard-delete administration should be handled as future product work or a newly defined phase, not as unfinished Phase 13 scope.
+At the Phase 13 closure boundary, no implementation-plan phase remained open. Future work such as deeper corpus-library product IA, global feedback tuning, optional LLM-assisted tagging/adaptation, and hard-delete administration was intentionally left for future product work or a newly defined phase, not as unfinished Phase 13 scope.
+
+## 2026-07-07 Planning Update: Phase 14 Advanced Style Anchoring
+
+Phase 14 opens a new implementation boundary because the current material bank is robust but not deep enough for high-fidelity imitation. Current automatic material generation is mainly deterministic sentence/paragraph extraction with useful first-pass tags. Phase 14 must add multi-scale literary understanding and style anchoring: scenes, beats, dialogue exchanges, hooks, payoff mechanics, image systems, rhythm, paragraph cadence, narrative distance, web-fiction escalation, and evidence-backed style profiles.
+
+The new goal is not a loose prompt that asks a model to "write like this". The target workflow is:
+
+```text
+authorized source corpus
+  -> multi-scale segmentation
+  -> deterministic baseline style features
+  -> optional source-grounded LLM style analysis
+  -> versioned style profiles with evidence spans
+  -> style-aware material retrieval by story context
+  -> approved beat-level style contract
+  -> style-guided candidate generation
+  -> source-leak, rewrite-level, fact, POV, and style-quality audit
+  -> user-confirmed insertion only
+```
+
+Phase 14 must keep the Phase 0-13 safety model: no arbitrary file reads, no agent-side source import, no direct `SaveContent`, no unapproved blueprint/style contract, and no candidate insertion before audit.

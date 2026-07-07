@@ -100,7 +100,7 @@ Adjust narrative pacing according to the current chapter target.
 | Area | Status |
 |---|---|
 | Desktop mainline | Migrated to `.NET 10 + Photino.NET + React/Vite` |
-| Reference anchoring | Phases 0-12 are complete at the current implementation boundary; Phase 13 is reopened as full-product Playwright QA, usability review, and 10MB large-novel robustness coverage, with materials generated automatically from passed novel/reference text |
+| Reference anchoring | Phases 0-13 are complete at the current implementation boundary; Phase 14 is open for advanced material understanding, style profiles, style-aware retrieval, imitation candidates, and source-leak/style-quality audit |
 | Frontend build | Vite 8/Rolldown splits the app shell, workspace, Monaco, Markdown, Mermaid, and graph dependencies |
 | Retired implementations | Go/Wails and the old Python path are retired; new work should not go under `app/`, `internal/`, `python-master/`, or `frontend/src/lib/wailsjs/` |
 
@@ -201,7 +201,7 @@ make frontend-dev
 | `make package-macos` | Build the macOS DMG |
 | `npm --prefix frontend run build` | Run TypeScript build and Vite production build |
 | `npm --prefix frontend run lint` | Run frontend ESLint |
-| `npm --prefix frontend run verify` | Run frontend build, lint, reference-anchor workflow, and baseline app-wide smoke test; expanded Phase 13 also requires full, stress, and usability commands |
+| `npm --prefix frontend run verify` | Run frontend build, lint, reference-anchor workflow, and baseline app-wide smoke test; release-grade regression also requires Phase 13 full/stress/usability commands, and Phase 14 will add reference-style commands |
 | `dotnet test Novelist.slnx --no-restore -v minimal` | Run the .NET test suite |
 
 ## Quality Boundaries

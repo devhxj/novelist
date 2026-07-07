@@ -2256,6 +2256,126 @@ public sealed class ReferenceChapterBlueprintReviewerTests
     }
 
     [Fact]
+    public void BuildReviewFailsStyleContractWithoutProfileIds()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            StyleContract = StyleContract(profileIds: [])
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.MaterialFitErrors, item => item.Contains("style profile", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "material_fit" &&
+                defect.FieldPath.Contains("style_contract.style_profile_ids", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsStrongStyleContractWithWeakMinimumFit()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            StyleContract = StyleContract(
+                intensity: ReferenceStyleImitationIntensities.Strong,
+                minStyleFit: 0.25)
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(
+            review.MaterialFitErrors,
+            item => item.Contains("strong", StringComparison.OrdinalIgnoreCase) &&
+                item.Contains("min_style_fit", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "material_fit" &&
+                defect.FieldPath.Contains("style_contract.min_style_fit", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsStyleContractEvidenceTypeOutsideMaterialTypes()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            RequiredMaterialTypes = [ReferenceMaterialTypes.Sentence],
+            ReferenceQuery = beat.ReferenceQuery with
+            {
+                MaterialTypes = [ReferenceMaterialTypes.Sentence]
+            },
+            StyleContract = StyleContract(evidenceTypes: [ReferenceMaterialTypes.Scene])
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.ReferenceBindingErrors, item => item.Contains("style evidence", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "reference_binding" &&
+                defect.FieldPath.Contains("style_contract.required_evidence_types", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewFailsStyleContractWithoutStyleDuties()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            StyleContract = StyleContract(
+                dimensions: [],
+                evidenceTypes: [])
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Failed, review.Status);
+        Assert.Contains(review.MaterialFitErrors, item => item.Contains("style duties", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(
+            review.Defects,
+            defect => defect.Category == "material_fit" &&
+                defect.FieldPath.Contains("style_contract.style_dimensions", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewPassesCompatibleStyleContract()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            StyleContract = StyleContract()
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+        Assert.DoesNotContain(review.MaterialFitErrors, item => item.Contains("style contract", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(review.ReferenceBindingErrors, item => item.Contains("style evidence", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void BuildReviewAllowsDialogueExchangeStyleEvidenceOnSentenceMaterials()
+    {
+        var blueprint = Blueprint(beat => beat with
+        {
+            RequiredMaterialTypes = [ReferenceMaterialTypes.Sentence],
+            ReferenceQuery = beat.ReferenceQuery with
+            {
+                MaterialTypes = [ReferenceMaterialTypes.Sentence]
+            },
+            StyleContract = StyleContract(evidenceTypes: ["dialogue_exchange"])
+        });
+
+        var review = ReferenceChapterBlueprintReviewer.BuildReview(blueprint, DateTimeOffset.UnixEpoch);
+
+        Assert.Equal(ReferenceBlueprintReviewStatuses.Passed, review.Status);
+        Assert.DoesNotContain(
+            review.ReferenceBindingErrors,
+            item => item.Contains("style evidence", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void BuildReviewFailsUnsupportedReferenceQueryFact()
     {
         var blueprint = Blueprint(beat => beat with
@@ -2430,6 +2550,25 @@ public sealed class ReferenceChapterBlueprintReviewerTests
             ["anti-screenplay"],
             ["detail"],
             ["reject"]);
+    }
+
+    private static ReferenceBlueprintStyleContractPayload StyleContract(
+        IReadOnlyList<long>? profileIds = null,
+        IReadOnlyList<string>? dimensions = null,
+        string intensity = ReferenceStyleImitationIntensities.Moderate,
+        double minStyleFit = 0.75,
+        string allowedCloseness = "moderate",
+        IReadOnlyList<string>? evidenceTypes = null,
+        IReadOnlyList<string>? forbiddenRisks = null)
+    {
+        return new ReferenceBlueprintStyleContractPayload(
+            profileIds ?? [99],
+            dimensions ?? ["dialogue_ratio"],
+            intensity,
+            minStyleFit,
+            allowedCloseness,
+            evidenceTypes ?? [ReferenceMaterialTypes.Sentence],
+            forbiddenRisks ?? ["source_leak"]);
     }
 
     private static ReferenceChapterBlueprintExecutionTrackPayload WithExecutionContractList(

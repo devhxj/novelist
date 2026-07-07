@@ -108,7 +108,8 @@ internal static class ReferenceChapterBlueprintNormalizer
                     SlotPlan = NormalizeSlotPlan(beat.SlotPlan),
                     LockedPhrasePolicy = NormalizeString(beat.LockedPhrasePolicy),
                     NoReuseReason = NormalizeString(beat.NoReuseReason),
-                    ProseDuties = NormalizeStringList(beat.ProseDuties)
+                    ProseDuties = NormalizeStringList(beat.ProseDuties),
+                    StyleContract = NormalizeStyleContract(beat.StyleContract)
                 })
                 .ToArray()
         };
@@ -165,6 +166,48 @@ internal static class ReferenceChapterBlueprintNormalizer
                 NormalizeString(slot.Value)))
             .Where(slot => !string.IsNullOrWhiteSpace(slot.SlotName) || !string.IsNullOrWhiteSpace(slot.Value))
             .ToArray() ?? [];
+    }
+
+    private static ReferenceBlueprintStyleContractPayload? NormalizeStyleContract(
+        ReferenceBlueprintStyleContractPayload? contract)
+    {
+        if (contract is null)
+        {
+            return null;
+        }
+
+        var profileIds = contract.StyleProfileIds?
+            .Where(id => id > 0)
+            .Distinct()
+            .ToArray() ?? [];
+        var dimensions = NormalizeStringList(contract.StyleDimensions);
+        var evidenceTypes = NormalizeStringList(contract.RequiredEvidenceTypes);
+        var forbiddenRisks = NormalizeStringList(contract.ForbiddenStyleRisks);
+        var intensity = NormalizeString(contract.ImitationIntensity);
+        var allowedCloseness = NormalizeString(contract.AllowedCloseness);
+        var minStyleFit = double.IsNaN(contract.MinStyleFit) || double.IsInfinity(contract.MinStyleFit)
+            ? 0
+            : Math.Max(0, Math.Round(contract.MinStyleFit, 4));
+
+        if (profileIds.Length == 0 &&
+            dimensions.Count == 0 &&
+            evidenceTypes.Count == 0 &&
+            forbiddenRisks.Count == 0 &&
+            intensity.Length == 0 &&
+            allowedCloseness.Length == 0 &&
+            minStyleFit <= 0)
+        {
+            return null;
+        }
+
+        return new ReferenceBlueprintStyleContractPayload(
+            profileIds,
+            dimensions,
+            intensity,
+            minStyleFit,
+            allowedCloseness,
+            evidenceTypes,
+            forbiddenRisks);
     }
 
     private static IReadOnlyList<string> NormalizeStringList(IReadOnlyList<string>? values)

@@ -3045,6 +3045,48 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AuditCandidateFailsNearCopyEvenWhenRewriteLevelIsAllowed()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("近复制审计测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("near-copy.md", "雨声压低了整条街的呼吸，林岚在门口停住，指节慢慢发紧。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "近复制参考", null, sourcePath, "text", "user_provided"),
+            CancellationToken.None);
+        var materials = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "林岚",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        var material = Assert.Single(materials.Items);
+
+        var audit = await service.AuditCandidateAsync(
+            new AuditReferenceReusePayload(
+                novel.Id,
+                material.MaterialId,
+                "雨声压低了整条街的呼吸，林岚在门口停住，指节慢慢发紧，然后他把钥匙放下。",
+                ReferenceRewriteLevels.L3,
+                SceneFacts: ["钥匙"]),
+            CancellationToken.None);
+
+        Assert.NotEqual(ReferenceRewriteLevels.L4, audit.RewriteLevel);
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("source-leak", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("n-gram", StringComparison.OrdinalIgnoreCase) || item.Contains("source-span", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task AuditCandidateFailsL4EvenWhenMaximumAllowsL4()
     {
         var options = CreateOptions();

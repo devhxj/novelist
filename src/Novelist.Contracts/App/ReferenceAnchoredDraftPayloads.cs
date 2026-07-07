@@ -214,6 +214,15 @@ public sealed record ReferenceChapterBlueprintPayload(
     public string BuildVersion { get; init; } = string.Empty;
 }
 
+public sealed record ReferenceBlueprintStyleContractPayload(
+    [property: JsonPropertyName("style_profile_ids")] IReadOnlyList<long> StyleProfileIds,
+    [property: JsonPropertyName("style_dimensions")] IReadOnlyList<string> StyleDimensions,
+    [property: JsonPropertyName("imitation_intensity")] string ImitationIntensity,
+    [property: JsonPropertyName("min_style_fit")] double MinStyleFit,
+    [property: JsonPropertyName("allowed_closeness")] string AllowedCloseness,
+    [property: JsonPropertyName("required_evidence_types")] IReadOnlyList<string> RequiredEvidenceTypes,
+    [property: JsonPropertyName("forbidden_style_risks")] IReadOnlyList<string> ForbiddenStyleRisks);
+
 public sealed record ReferenceChapterBlueprintBeatPayload(
     [property: JsonPropertyName("beat_id")] string BeatId,
     [property: JsonPropertyName("beat_index")] int BeatIndex,
@@ -258,7 +267,10 @@ public sealed record ReferenceChapterBlueprintBeatPayload(
     [property: JsonPropertyName("locked_phrase_policy")] string LockedPhrasePolicy,
     [property: JsonPropertyName("no_reuse_reason")] string NoReuseReason,
     [property: JsonPropertyName("prose_duties")] IReadOnlyList<string> ProseDuties,
-    [property: JsonPropertyName("risk_flags")] IReadOnlyList<string> RiskFlags);
+    [property: JsonPropertyName("risk_flags")] IReadOnlyList<string> RiskFlags,
+    [property: JsonPropertyName("style_contract")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    ReferenceBlueprintStyleContractPayload? StyleContract = null);
 
 public sealed record ReviewReferenceChapterBlueprintPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,

@@ -13,6 +13,8 @@ namespace Novelist.Infrastructure.App;
 public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraftService
 {
     private const string BuildVersion = "reference-blueprint-v1";
+    private const long WorkspaceCorpusNovelId = 0;
+    private static readonly HashSet<string> AllowedStyleImitationIntensities = new(ReferenceStyleImitationIntensities.All, StringComparer.Ordinal);
     private const string ProseLikePlanNotice = "provided source text appears to be final prose; convert it into structured causality, emotion, POV, and prose duties before drafting";
     private static readonly JsonSerializerOptions JsonOptions = BridgeJson.SerializerOptions;
 
@@ -438,12 +440,14 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 beat,
                 maxResultsPerBeat,
                 cancellationToken);
+            var styleContract = NormalizeStyleContract(beat.StyleContract);
             var scored = search.Materials
                 .Select(material => ScoreMaterialForBeat(
                     blueprint.BlueprintId,
                     blueprint.AnalysisContractHash,
                     beat,
                     material,
+                    styleContract,
                     acceptedFeedbackMaterialIds,
                     search.ExpandedQueryFallback,
                     now))
@@ -508,7 +512,21 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             selectedLinks,
             cancellationToken);
         ReferenceAnchoredDraftPreflight.EnsureCandidateProvenance(targetBeats, selectedLinks, candidates);
-        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(blueprint, candidates, DateTimeOffset.UtcNow, selectedLinks);
+        var selectedMaterialTexts = await ReadSelectedMaterialTextsByMaterialIdAsync(
+            input.NovelId,
+            selectedLinks.Values,
+            cancellationToken);
+        var styleFeatures = await ReadStyleFeaturesByProfileIdAsync(
+            input.NovelId,
+            blueprint,
+            cancellationToken);
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            candidates,
+            DateTimeOffset.UtcNow,
+            selectedLinks,
+            selectedMaterialTexts,
+            styleFeatures);
         await PersistDraftCandidatesAsync(blueprint.BlueprintId, candidates, cancellationToken);
 
         return new ReferenceAnchoredDraftPayload(blueprint.BlueprintId, candidates, audit);
@@ -569,7 +587,23 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 blueprint.AnalysisContractHash,
                 candidateBeatIds,
                 cancellationToken);
-            return ReferenceAnchoredDraftAuditor.BuildDraftAudit(blueprint, candidates, DateTimeOffset.UtcNow, selectedLinks);
+            var selectedMaterialTexts = await ReadSelectedMaterialTextsByMaterialIdAsync(
+                connection,
+                input.NovelId,
+                selectedLinks.Values,
+                cancellationToken);
+            var styleFeatures = await ReadStyleFeaturesByProfileIdAsync(
+                connection,
+                input.NovelId,
+                blueprint,
+                cancellationToken);
+            return ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+                blueprint,
+                candidates,
+                DateTimeOffset.UtcNow,
+                selectedLinks,
+                selectedMaterialTexts,
+                styleFeatures);
         }
         finally
         {
@@ -1168,6 +1202,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         var searchAnchorIds = NormalizeAnchorIds(anchorIds);
         var query = beat.ReferenceQuery;
         var size = Math.Clamp(maxResultsPerBeat * 5, maxResultsPerBeat, 100);
+        var styleContract = NormalizeStyleContract(beat.StyleContract);
         var result = await referenceAnchors.SearchMaterialsAsync(
             new SearchReferenceMaterialsPayload(
                 novelId,
@@ -1179,7 +1214,10 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 query.PovTags,
                 query.TechniqueTags,
                 Page: 1,
-                Size: size),
+                Size: size,
+                StyleProfileIds: styleContract?.StyleProfileIds,
+                StyleDimensions: styleContract?.StyleDimensions,
+                ImitationIntensity: styleContract?.ImitationIntensity),
             cancellationToken);
 
         if (result.Items.Count > 0 || string.IsNullOrWhiteSpace(query.Query))
@@ -1198,7 +1236,10 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 query.PovTags,
                 query.TechniqueTags,
                 Page: 1,
-                Size: size),
+                Size: size,
+                StyleProfileIds: styleContract?.StyleProfileIds,
+                StyleDimensions: styleContract?.StyleDimensions,
+                ImitationIntensity: styleContract?.ImitationIntensity),
             cancellationToken);
         return new MaterialSearchResult(fallback.Items, ExpandedQueryFallback: fallback.Items.Count > 0);
     }
@@ -1270,6 +1311,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         string analysisContractHash,
         ReferenceChapterBlueprintBeatPayload beat,
         ReferenceMaterialPayload material,
+        ReferenceBlueprintStyleContractPayload? styleContract,
         IReadOnlySet<string> acceptedFeedbackMaterialIds,
         bool expandedQueryFallback,
         DateTimeOffset now)
@@ -1293,7 +1335,15 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         AddScore(components, "accepted_feedback", acceptedFeedbackMaterialIds.Contains(material.MaterialId) ? 2.0 : 0);
         var embeddingFit = TryGetScoreComponent(material, "embedding", out var embeddingScore);
         AddScore(components, "embedding", embeddingScore);
-        if (expandedQueryFallback)
+        var hasStyleFit = TryGetScoreComponent(material, "style_fit", out var styleFitScore);
+        AddScore(components, "style_fit", styleFitScore);
+        var lowStyleFit = IsLowStyleFit(styleContract, styleFitScore);
+        if (lowStyleFit)
+        {
+            components["style_fit_gap"] = -Math.Round(StyleFitMinimum(styleContract) - styleFitScore, 4);
+        }
+
+        if (expandedQueryFallback || lowStyleFit)
         {
             components["low_confidence"] = -1.0;
         }
@@ -1326,9 +1376,28 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 materialTypeFit,
                 acceptedFeedbackMaterialIds.Contains(material.MaterialId),
                 embeddingFit,
+                hasStyleFit,
+                lowStyleFit,
                 expandedQueryFallback),
             now);
         return new ScoredMaterialLink(link, analysisContractHash, components, hasFunctionalFit);
+    }
+
+    private static bool IsLowStyleFit(
+        ReferenceBlueprintStyleContractPayload? styleContract,
+        double styleFitScore)
+    {
+        if (styleContract is null || styleContract.StyleProfileIds.Count == 0)
+        {
+            return false;
+        }
+
+        return styleFitScore < StyleFitMinimum(styleContract);
+    }
+
+    private static double StyleFitMinimum(ReferenceBlueprintStyleContractPayload? styleContract)
+    {
+        return styleContract?.MinStyleFit > 0 ? styleContract.MinStyleFit : 0.0001;
     }
 
     private static string BuildMaterialFitExplanation(
@@ -1341,6 +1410,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         bool materialTypeFit,
         bool acceptedFeedbackFit,
         bool embeddingFit,
+        bool styleFit,
+        bool lowStyleFit,
         bool expandedQueryFallback)
     {
         var matches = new List<string>();
@@ -1377,6 +1448,16 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         if (embeddingFit)
         {
             matches.Add("embedding rank");
+        }
+
+        if (styleFit)
+        {
+            matches.Add("style fit");
+        }
+
+        if (lowStyleFit)
+        {
+            matches.Add("low style fit weak match");
         }
 
         if (expandedQueryFallback)
@@ -1689,7 +1770,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                    subtext_plan, source_backed_detail_target, candidate_rejection_rule,
                    scene_facts_json, forbidden_facts_json, reference_query_json,
                    required_material_types_json, max_rewrite_level, slot_plan_json,
-                   locked_phrase_policy, no_reuse_reason, prose_duties_json, risk_flags_json)
+                   locked_phrase_policy, no_reuse_reason, prose_duties_json, risk_flags_json,
+                   style_contract_json)
                 VALUES
                   ($beat_id, $blueprint_id, $beat_index, $scene_index, $beat_type, $narrative_function,
                    $logic_premise, $conflict_pressure, $causality_in, $causality_out, $transition_in,
@@ -1702,7 +1784,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                    $subtext_plan, $source_backed_detail_target, $candidate_rejection_rule,
                    $scene_facts_json, $forbidden_facts_json, $reference_query_json,
                    $required_material_types_json, $max_rewrite_level, $slot_plan_json,
-                   $locked_phrase_policy, $no_reuse_reason, $prose_duties_json, $risk_flags_json);
+                   $locked_phrase_policy, $no_reuse_reason, $prose_duties_json, $risk_flags_json,
+                   $style_contract_json);
                 """;
             command.Parameters.AddWithValue("$beat_id", beat.BeatId);
             command.Parameters.AddWithValue("$blueprint_id", blueprintId);
@@ -1749,6 +1832,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             command.Parameters.AddWithValue("$no_reuse_reason", beat.NoReuseReason);
             command.Parameters.AddWithValue("$prose_duties_json", JsonSerializer.Serialize(beat.ProseDuties, JsonOptions));
             command.Parameters.AddWithValue("$risk_flags_json", JsonSerializer.Serialize(beat.RiskFlags, JsonOptions));
+            command.Parameters.AddWithValue("$style_contract_json", WriteStyleContract(beat.StyleContract));
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
     }
@@ -1964,7 +2048,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                    subtext_plan, source_backed_detail_target, candidate_rejection_rule,
                    scene_facts_json, forbidden_facts_json, reference_query_json,
                    required_material_types_json, max_rewrite_level, slot_plan_json,
-                   locked_phrase_policy, no_reuse_reason, prose_duties_json, risk_flags_json
+                   locked_phrase_policy, no_reuse_reason, prose_duties_json, risk_flags_json,
+                   style_contract_json
             FROM reference_chapter_blueprint_beats
             WHERE blueprint_id = $blueprint_id
             ORDER BY beat_index ASC;
@@ -2018,7 +2103,8 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 reader.GetString(40),
                 reader.GetString(41),
                 ReadJson<IReadOnlyList<string>>(reader.GetString(42)),
-                ReadJson<IReadOnlyList<string>>(reader.GetString(43))));
+                ReadJson<IReadOnlyList<string>>(reader.GetString(43)),
+                ReadStyleContract(reader.GetString(44))));
         }
 
         return beats;
@@ -2081,6 +2167,144 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         }
 
         return linked;
+    }
+
+    private async ValueTask<IReadOnlyDictionary<string, string>> ReadSelectedMaterialTextsByMaterialIdAsync(
+        long novelId,
+        IEnumerable<ReferenceBlueprintMaterialLinkPayload> selectedLinks,
+        CancellationToken cancellationToken)
+    {
+        var materialIds = ExtractSelectedMaterialIds(selectedLinks);
+        if (materialIds.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            return await ReadSelectedMaterialTextsByMaterialIdAsync(
+                connection,
+                novelId,
+                materialIds,
+                cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private static async ValueTask<IReadOnlyDictionary<string, string>> ReadSelectedMaterialTextsByMaterialIdAsync(
+        SqliteConnection connection,
+        long novelId,
+        IEnumerable<ReferenceBlueprintMaterialLinkPayload> selectedLinks,
+        CancellationToken cancellationToken)
+    {
+        return await ReadSelectedMaterialTextsByMaterialIdAsync(
+            connection,
+            novelId,
+            ExtractSelectedMaterialIds(selectedLinks),
+            cancellationToken);
+    }
+
+    private static async ValueTask<IReadOnlyDictionary<string, string>> ReadSelectedMaterialTextsByMaterialIdAsync(
+        SqliteConnection connection,
+        long novelId,
+        IReadOnlyList<string> materialIds,
+        CancellationToken cancellationToken)
+    {
+        if (materialIds.Count == 0 ||
+            !await TableExistsAsync(connection, "reference_materials", cancellationToken) ||
+            !await TableExistsAsync(connection, "reference_anchors", cancellationToken))
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        var hasCorpusVisibility = await ColumnExistsAsync(connection, "reference_anchors", "corpus_visibility", cancellationToken);
+        var hasArchivedAt = await ColumnExistsAsync(connection, "reference_materials", "archived_at", cancellationToken);
+        var visibilityPredicate = hasCorpusVisibility
+            ? """
+            (a.novel_id = $novel_id OR
+                   ((a.novel_id IS NULL OR a.novel_id = $workspace_corpus_novel_id) AND
+                    a.corpus_visibility = $workspace_corpus_visibility))
+            """
+            : "a.novel_id = $novel_id";
+        var archivedPredicate = hasArchivedAt ? "AND m.archived_at IS NULL" : string.Empty;
+        await using var command = connection.CreateCommand();
+        var parameterNames = new List<string>(materialIds.Count);
+        for (var index = 0; index < materialIds.Count; index++)
+        {
+            var parameterName = "$material_id_" + index.ToString(CultureInfo.InvariantCulture);
+            parameterNames.Add(parameterName);
+            command.Parameters.AddWithValue(parameterName, materialIds[index]);
+        }
+
+        command.CommandText = $$"""
+            SELECT m.material_id, m.text
+            FROM reference_materials m
+            INNER JOIN reference_anchors a ON a.anchor_id = m.anchor_id
+            WHERE {{visibilityPredicate}}
+              {{archivedPredicate}}
+              AND m.material_id IN ({{string.Join(", ", parameterNames)}});
+            """;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+        command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
+        var texts = new Dictionary<string, string>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            texts[reader.GetString(0)] = reader.GetString(1);
+        }
+
+        return texts;
+    }
+
+    private static IReadOnlyList<string> ExtractSelectedMaterialIds(
+        IEnumerable<ReferenceBlueprintMaterialLinkPayload> selectedLinks)
+    {
+        return selectedLinks
+            .Where(link => link.Selected)
+            .Select(link => link.MaterialId)
+            .Where(materialId => !string.IsNullOrWhiteSpace(materialId) &&
+                !ReferenceDraftProvenanceIds.IsNoReuseMaterialId(materialId))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static async ValueTask<bool> TableExistsAsync(
+        SqliteConnection connection,
+        string tableName,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name = $table_name
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$table_name", tableName);
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is not null;
+    }
+
+    private static async ValueTask<bool> ColumnExistsAsync(
+        SqliteConnection connection,
+        string tableName,
+        string columnName,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM pragma_table_info($table_name) WHERE name = $column_name LIMIT 1;";
+        command.Parameters.AddWithValue("$table_name", tableName);
+        command.Parameters.AddWithValue("$column_name", columnName);
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is not null;
     }
 
     private static async ValueTask ReplaceBlueprintMaterialLinksAsync(
@@ -2872,6 +3096,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
               locked_phrase_policy TEXT NOT NULL,
               no_reuse_reason TEXT NOT NULL,
               prose_duties_json TEXT NOT NULL,
+              style_contract_json TEXT NOT NULL DEFAULT '',
               risk_flags_json TEXT NOT NULL,
               FOREIGN KEY(blueprint_id) REFERENCES reference_chapter_blueprints(blueprint_id) ON DELETE CASCADE
             );
@@ -3092,6 +3317,12 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             connection,
             "reference_chapter_blueprint_beats",
             "candidate_rejection_rule",
+            "TEXT NOT NULL DEFAULT ''",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_chapter_blueprint_beats",
+            "style_contract_json",
             "TEXT NOT NULL DEFAULT ''",
             cancellationToken);
         await EnsureColumnAsync(
@@ -3888,6 +4119,17 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
     }
 
+    private static string ValidateAllowedText(string value, string parameterName, IReadOnlySet<string> allowed)
+    {
+        var normalized = NormalizeOptional(value, string.Empty, 120);
+        if (!allowed.Contains(normalized))
+        {
+            throw new ArgumentException($"Unsupported value '{normalized}'.", parameterName);
+        }
+
+        return normalized;
+    }
+
     private static bool LooksLikeFinalProseParagraph(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -4306,6 +4548,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             "locked_phrase_policy" => beat.LockedPhrasePolicy,
             "no_reuse_reason" => beat.NoReuseReason,
             "prose_duties" => JsonSerializer.Serialize(beat.ProseDuties, JsonOptions),
+            "style_contract" => WriteStyleContract(beat.StyleContract),
             "reference_query.query" => beat.ReferenceQuery.Query,
             "reference_query.material_types" => JsonSerializer.Serialize(beat.ReferenceQuery.MaterialTypes, JsonOptions),
             "reference_query.emotion_tags" => JsonSerializer.Serialize(beat.ReferenceQuery.EmotionTags, JsonOptions),
@@ -4363,6 +4606,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
             "locked_phrase_policy" => beat with { LockedPhrasePolicy = normalized },
             "no_reuse_reason" => beat with { NoReuseReason = normalized },
             "prose_duties" => beat with { ProseDuties = ParseRevisionStringList(value) },
+            "style_contract" => beat with { StyleContract = ParseRevisionStyleContract(value) },
             "reference_query.query" => beat with { ReferenceQuery = beat.ReferenceQuery with { Query = normalized } },
             "reference_query.material_types" => beat with { ReferenceQuery = beat.ReferenceQuery with { MaterialTypes = ParseRevisionStringList(value) } },
             "reference_query.emotion_tags" => beat with { ReferenceQuery = beat.ReferenceQuery with { EmotionTags = ParseRevisionStringList(value) } },
@@ -4398,6 +4642,34 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         {
             throw new ArgumentException(
                 "Revision slot_plan value must be a JSON array of { slot_name, value } objects.",
+                nameof(value),
+                exception);
+        }
+    }
+
+    private static ReferenceBlueprintStyleContractPayload? ParseRevisionStyleContract(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        if (!trimmed.StartsWith("{", StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "Revision style_contract value must be a JSON object.",
+                nameof(value));
+        }
+
+        try
+        {
+            return NormalizeStyleContract(JsonSerializer.Deserialize<ReferenceBlueprintStyleContractPayload>(trimmed, JsonOptions));
+        }
+        catch (JsonException exception)
+        {
+            throw new ArgumentException(
+                "Revision style_contract value must be a JSON object.",
                 nameof(value),
                 exception);
         }
@@ -4462,6 +4734,65 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
     {
         return JsonSerializer.Deserialize<T>(json, JsonOptions)
             ?? throw new InvalidOperationException("Stored JSON payload is empty.");
+    }
+
+    private static ReferenceBlueprintStyleContractPayload? ReadStyleContract(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        return NormalizeStyleContract(ReadJson<ReferenceBlueprintStyleContractPayload>(json));
+    }
+
+    private static string WriteStyleContract(ReferenceBlueprintStyleContractPayload? styleContract)
+    {
+        var normalized = NormalizeStyleContract(styleContract);
+        return normalized is null ? string.Empty : JsonSerializer.Serialize(normalized, JsonOptions);
+    }
+
+    private static ReferenceBlueprintStyleContractPayload? NormalizeStyleContract(
+        ReferenceBlueprintStyleContractPayload? styleContract)
+    {
+        if (styleContract is null)
+        {
+            return null;
+        }
+
+        var profileIds = styleContract.StyleProfileIds?
+            .Where(profileId => profileId > 0)
+            .Distinct()
+            .Take(8)
+            .ToArray() ?? [];
+        var dimensions = NormalizeList(styleContract.StyleDimensions).Take(16).ToArray();
+        var intensity = string.IsNullOrWhiteSpace(styleContract.ImitationIntensity)
+            ? ReferenceStyleImitationIntensities.Moderate
+            : ValidateAllowedText(styleContract.ImitationIntensity, nameof(styleContract.ImitationIntensity), AllowedStyleImitationIntensities);
+        var minStyleFit = double.IsNaN(styleContract.MinStyleFit) || double.IsInfinity(styleContract.MinStyleFit)
+            ? 0
+            : Math.Clamp(styleContract.MinStyleFit, 0, 10);
+        var allowedCloseness = NormalizeOptional(styleContract.AllowedCloseness, string.Empty, 80);
+        var evidenceTypes = NormalizeList(styleContract.RequiredEvidenceTypes).Take(16).ToArray();
+        var forbiddenRisks = NormalizeList(styleContract.ForbiddenStyleRisks).Take(16).ToArray();
+        if (profileIds.Length == 0 &&
+            dimensions.Length == 0 &&
+            minStyleFit <= 0 &&
+            string.IsNullOrWhiteSpace(allowedCloseness) &&
+            evidenceTypes.Length == 0 &&
+            forbiddenRisks.Length == 0)
+        {
+            return null;
+        }
+
+        return new ReferenceBlueprintStyleContractPayload(
+            profileIds,
+            dimensions,
+            intensity,
+            Math.Round(minStyleFit, 4),
+            allowedCloseness,
+            evidenceTypes,
+            forbiddenRisks);
     }
 
     private static void ValidateNovelId(long novelId)

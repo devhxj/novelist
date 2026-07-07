@@ -574,6 +574,9 @@ export namespace reference {
     emotion_transitions?: string[] | null
     prose_duties?: string[] | null
     archive_filter?: 'active' | 'archived' | 'all' | null
+    style_profile_ids?: number[] | null
+    style_dimensions?: string[] | null
+    imitation_intensity?: 'diagnostic_only' | 'loose' | 'moderate' | 'strong' | null
   }
 
   export interface SlotValue {
@@ -658,6 +661,96 @@ export namespace reference {
     created_at: Timestamp
   }
 
+  export interface BuildStyleProfileInput {
+    novel_id: number
+    title: string
+    description: string
+    anchor_ids: number[]
+    allowed_license_statuses: string[]
+    allowed_source_trust_levels: string[]
+  }
+
+  export interface GetStyleProfilesInput {
+    novel_id: number
+    include_archived?: boolean
+  }
+
+  export interface StyleProfileSummary {
+    profile_id: number
+    novel_id: number
+    title: string
+    description: string
+    status: string
+    analyzer_version: string
+    feature_schema_version: string
+    analyzer_source: string
+    source_anchor_ids: number[]
+    source_hashes: string[]
+    aggregate_confidence: number
+    created_at: Timestamp
+    updated_at: Timestamp
+    archived_at?: Timestamp | null
+  }
+
+  export interface StyleProfile extends StyleProfileSummary {
+    allowed_license_statuses: string[]
+    allowed_source_trust_levels: string[]
+    features: StyleFeatureVector
+    evidence_spans: StyleEvidenceSpan[]
+  }
+
+  export interface StyleFeatureVector {
+    numeric_features: StyleNumericFeature[]
+    distribution_features: StyleDistributionFeature[]
+    categorical_features: StyleCategoricalFeature[]
+  }
+
+  export interface StyleNumericFeature {
+    feature_key: string
+    value: number
+    unit: string
+    confidence: number
+    evidence_ids: string[]
+  }
+
+  export interface StyleDistributionFeature {
+    feature_key: string
+    unit: string
+    buckets: StyleDistributionBucket[]
+    confidence: number
+    evidence_ids: string[]
+  }
+
+  export interface StyleDistributionBucket {
+    label: string
+    min: number
+    max: number
+    weight: number
+  }
+
+  export interface StyleCategoricalFeature {
+    feature_key: string
+    label: string
+    weight: number
+    confidence: number
+    evidence_ids: string[]
+  }
+
+  export interface StyleEvidenceSpan {
+    evidence_id: string
+    profile_id: number
+    anchor_id: number
+    source_segment_id: string
+    material_id?: string | null
+    feature_key: string
+    label: string
+    start_offset: number
+    end_offset: number
+    text_hash: string
+    confidence: number
+    analyzer_source: string
+  }
+
   export interface GenerateChapterBlueprintInput {
     novel_id: number
     chapter_number: number
@@ -730,6 +823,16 @@ export namespace reference {
     candidate_rejection_rules: string[]
   }
 
+  export interface BlueprintStyleContract {
+    style_profile_ids: number[]
+    style_dimensions: string[]
+    imitation_intensity: 'diagnostic_only' | 'loose' | 'moderate' | 'strong'
+    min_style_fit: number
+    allowed_closeness: string
+    required_evidence_types: string[]
+    forbidden_style_risks: string[]
+  }
+
   export interface ChapterBlueprintBeat {
     beat_id: string
     beat_index: number
@@ -775,6 +878,7 @@ export namespace reference {
     no_reuse_reason: string
     prose_duties: string[]
     risk_flags: string[]
+    style_contract?: BlueprintStyleContract | null
   }
 
   export interface ReviewChapterBlueprintInput {

@@ -9,7 +9,9 @@ internal static class ReferenceAnchoredDraftAuditor
         ReferenceChapterBlueprintPayload blueprint,
         IReadOnlyList<ReferenceDraftParagraphCandidatePayload> candidates,
         DateTimeOffset now,
-        IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload>? selectedMaterialLinksByBeatId = null)
+        IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload>? selectedMaterialLinksByBeatId = null,
+        IReadOnlyDictionary<string, string>? selectedMaterialTextByMaterialId = null,
+        IReadOnlyDictionary<long, ReferenceStyleFeatureVectorPayload>? styleFeaturesByProfileId = null)
     {
         ArgumentNullException.ThrowIfNull(blueprint);
         ArgumentNullException.ThrowIfNull(candidates);
@@ -46,6 +48,21 @@ internal static class ReferenceAnchoredDraftAuditor
             {
                 provenanceErrors.Add($"Candidate {candidate.CandidateId} uses low-confidence weak match material provenance.");
                 requiredFixes.Add($"Bind stronger reference material for candidate {candidate.CandidateId}, revise the blueprint query, or resolve the retrieval gap before insertion.");
+            }
+
+            foreach (var sourceLeakFinding in FindSourceLeakFindings(beat, candidate, selectedMaterialTextByMaterialId))
+            {
+                requiredFixes.Add($"Source-leak risk for candidate {candidate.CandidateId}: {sourceLeakFinding}");
+            }
+
+            foreach (var styleDistanceFinding in FindStyleDistanceFindings(
+                beat,
+                candidate,
+                selectedMaterialLinksByBeatId,
+                styleFeaturesByProfileId))
+            {
+                blueprintErrors.Add($"Candidate {candidate.CandidateId} violates style contract: {styleDistanceFinding}");
+                requiredFixes.Add($"Style-distance risk for candidate {candidate.CandidateId}: {styleDistanceFinding}");
             }
 
             if (string.IsNullOrWhiteSpace(candidate.Text))
@@ -213,6 +230,263 @@ internal static class ReferenceAnchoredDraftAuditor
 
         return lowConfidence < 0;
     }
+
+    private static IReadOnlyList<string> FindSourceLeakFindings(
+        ReferenceChapterBlueprintBeatPayload beat,
+        ReferenceDraftParagraphCandidatePayload candidate,
+        IReadOnlyDictionary<string, string>? selectedMaterialTextByMaterialId)
+    {
+        if (selectedMaterialTextByMaterialId is null ||
+            string.IsNullOrWhiteSpace(candidate.MaterialId) ||
+            ReferenceDraftProvenanceIds.IsNoReuseMaterialId(candidate.MaterialId) ||
+            !selectedMaterialTextByMaterialId.TryGetValue(candidate.MaterialId, out var sourceText))
+        {
+            return [];
+        }
+
+        var result = ReferenceSourceLeakAuditor.Analyze(
+            sourceText,
+            candidate.Text,
+            candidate.RewriteLevel,
+            beat.StyleContract?.ImitationIntensity);
+        return result.ShouldFail ? result.Findings : [];
+    }
+
+    private static IReadOnlyList<string> FindStyleDistanceFindings(
+        ReferenceChapterBlueprintBeatPayload beat,
+        ReferenceDraftParagraphCandidatePayload candidate,
+        IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload>? selectedMaterialLinksByBeatId,
+        IReadOnlyDictionary<long, ReferenceStyleFeatureVectorPayload>? styleFeaturesByProfileId)
+    {
+        var styleContract = beat.StyleContract;
+        if (styleContract is null ||
+            styleContract.StyleProfileIds.Count == 0 ||
+            string.Equals(styleContract.ImitationIntensity, ReferenceStyleImitationIntensities.DiagnosticOnly, StringComparison.Ordinal))
+        {
+            return [];
+        }
+
+        var findings = new List<string>();
+        var minStyleFit = Math.Max(0, styleContract.MinStyleFit);
+        if (minStyleFit > 0 &&
+            TryGetSelectedMaterialLink(candidate, selectedMaterialLinksByBeatId, out var link) &&
+            !TryGetScoreComponent(link, "style_fit", out var styleFit))
+        {
+            findings.Add($"selected material has no style_fit score for min_style_fit {minStyleFit:0.####}.");
+        }
+        else if (minStyleFit > 0 &&
+            TryGetSelectedMaterialLink(candidate, selectedMaterialLinksByBeatId, out link) &&
+            TryGetScoreComponent(link, "style_fit", out styleFit) &&
+            styleFit < minStyleFit)
+        {
+            findings.Add($"selected material style_fit {styleFit:0.####} is below min_style_fit {minStyleFit:0.####}.");
+        }
+
+        var dimensions = styleContract.StyleDimensions
+            .Select(NormalizeStyleFeatureKey)
+            .Where(IsAuditableStyleFeatureKey)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (dimensions.Length == 0 || styleFeaturesByProfileId is null || styleFeaturesByProfileId.Count == 0)
+        {
+            return findings;
+        }
+
+        var candidateFeatures = BuildCandidateStyleFeatureSnapshot(candidate.Text);
+        foreach (var dimension in dimensions)
+        {
+            var target = AverageProfileNumericFeature(styleContract.StyleProfileIds, styleFeaturesByProfileId, dimension);
+            if (target is null)
+            {
+                continue;
+            }
+
+            var actual = CandidateStyleFeatureValue(candidateFeatures, dimension);
+            var tolerance = StyleDistanceTolerance(styleContract.ImitationIntensity, dimension);
+            var distance = Math.Abs(actual - target.Value);
+            if (distance > tolerance)
+            {
+                findings.Add(
+                    $"{dimension} distance {distance:0.####} exceeds {styleContract.ImitationIntensity} tolerance {tolerance:0.####} (target {target.Value:0.####}, candidate {actual:0.####}).");
+            }
+        }
+
+        return findings
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static bool TryGetSelectedMaterialLink(
+        ReferenceDraftParagraphCandidatePayload candidate,
+        IReadOnlyDictionary<string, ReferenceBlueprintMaterialLinkPayload>? selectedMaterialLinksByBeatId,
+        out ReferenceBlueprintMaterialLinkPayload link)
+    {
+        if (selectedMaterialLinksByBeatId is not null &&
+            selectedMaterialLinksByBeatId.TryGetValue(candidate.BeatId, out var selected) &&
+            string.Equals(selected.MaterialId, candidate.MaterialId, StringComparison.Ordinal))
+        {
+            link = selected;
+            return true;
+        }
+
+        link = null!;
+        return false;
+    }
+
+    private static bool TryGetScoreComponent(
+        ReferenceBlueprintMaterialLinkPayload link,
+        string name,
+        out double value)
+    {
+        if (link.ScoreComponents is not null && link.ScoreComponents.TryGetValue(name, out value))
+        {
+            return true;
+        }
+
+        value = 0;
+        return false;
+    }
+
+    private static double? AverageProfileNumericFeature(
+        IReadOnlyList<long> styleProfileIds,
+        IReadOnlyDictionary<long, ReferenceStyleFeatureVectorPayload> styleFeaturesByProfileId,
+        string featureKey)
+    {
+        var values = styleProfileIds
+            .Where(styleFeaturesByProfileId.ContainsKey)
+            .Select(profileId => styleFeaturesByProfileId[profileId])
+            .SelectMany(features => features.NumericFeatures)
+            .Where(feature => string.Equals(NormalizeStyleFeatureKey(feature.FeatureKey), featureKey, StringComparison.Ordinal))
+            .Select(feature => feature.Value)
+            .ToArray();
+        return values.Length == 0 ? null : values.Average();
+    }
+
+    private static string NormalizeStyleFeatureKey(string featureKey)
+    {
+        return string.IsNullOrWhiteSpace(featureKey)
+            ? string.Empty
+            : featureKey.Trim().Replace('-', '_').ToLowerInvariant();
+    }
+
+    private static bool IsAuditableStyleFeatureKey(string featureKey)
+    {
+        return featureKey is "dialogue_ratio" or "interiority_ratio" or "sensory_ratio" or
+            "action_afterbeat_ratio" or "transition_ratio" or "hook_marker_ratio" or
+            "punctuation_per_100_chars" or "average_sentence_chars";
+    }
+
+    private static CandidateStyleFeatureSnapshot BuildCandidateStyleFeatureSnapshot(string text)
+    {
+        var sentences = SplitSentences(text);
+        var sentenceCount = Math.Max(1, sentences.Length);
+        var textLength = Math.Max(1, text?.Length ?? 0);
+        return new CandidateStyleFeatureSnapshot(
+            Ratio(sentences.Count(IsDialogueStyleSentence), sentenceCount),
+            Ratio(sentences.Count(HasInteriorityEvidence), sentenceCount),
+            Ratio(sentences.Count(HasSensoryEvidence), sentenceCount),
+            Ratio(sentences.Count(IsActionAfterbeatStyleSentence), sentenceCount),
+            Ratio(sentences.Count(HasTransitionEvidence), sentenceCount),
+            Ratio(sentences.Count(HasHookMarkerEvidence), sentenceCount),
+            Math.Round(CountPunctuation(text ?? string.Empty) * 100.0 / textLength, 4),
+            sentences.Length == 0 ? 0 : Math.Round(sentences.Average(sentence => sentence.Length), 4));
+    }
+
+    private static double CandidateStyleFeatureValue(CandidateStyleFeatureSnapshot snapshot, string featureKey)
+    {
+        return featureKey switch
+        {
+            "dialogue_ratio" => snapshot.DialogueRatio,
+            "interiority_ratio" => snapshot.InteriorityRatio,
+            "sensory_ratio" => snapshot.SensoryRatio,
+            "action_afterbeat_ratio" => snapshot.ActionAfterbeatRatio,
+            "transition_ratio" => snapshot.TransitionRatio,
+            "hook_marker_ratio" => snapshot.HookMarkerRatio,
+            "punctuation_per_100_chars" => snapshot.PunctuationPer100Chars,
+            "average_sentence_chars" => snapshot.AverageSentenceChars,
+            _ => 0
+        };
+    }
+
+    private static double StyleDistanceTolerance(string imitationIntensity, string featureKey)
+    {
+        var baseTolerance = featureKey switch
+        {
+            "punctuation_per_100_chars" => 8.0,
+            "average_sentence_chars" => 24.0,
+            _ => 0.45
+        };
+
+        return imitationIntensity switch
+        {
+            ReferenceStyleImitationIntensities.Strong => baseTolerance * 0.75,
+            ReferenceStyleImitationIntensities.Loose => baseTolerance * 1.5,
+            _ => baseTolerance
+        };
+    }
+
+    private static double Ratio(int count, int total)
+    {
+        return total <= 0 ? 0 : Math.Round(count / (double)total, 4);
+    }
+
+    private static bool IsDialogueStyleSentence(string sentence)
+    {
+        return IsDialogueLine(sentence) ||
+            sentence.Contains("“", StringComparison.Ordinal) ||
+            sentence.Contains("”", StringComparison.Ordinal) ||
+            sentence.Contains("「", StringComparison.Ordinal) ||
+            sentence.Contains("」", StringComparison.Ordinal) ||
+            sentence.Contains("\"", StringComparison.Ordinal) ||
+            ContainsAny(sentence, ["说：", "道：", "问：", "答："]);
+    }
+
+    private static bool IsActionAfterbeatStyleSentence(string sentence)
+    {
+        return ContainsAny(
+            sentence,
+            [
+                "走", "停", "看", "拿", "推", "转", "站", "坐", "伸", "退",
+                "进", "出", "抬", "低", "回头", "靠近", "离开", "避开", "放下"
+            ]) &&
+            (HasInteriorityEvidence(sentence) ||
+                HasExternalEvidenceForStyle(sentence) ||
+                HasDelayedReactionEvidence(sentence) ||
+                HasSubtextEvidence(sentence));
+    }
+
+    private static bool HasHookMarkerEvidence(string text)
+    {
+        return ContainsAny(
+            text,
+            ["？", "?", "！", "!", "却", "忽然", "只剩", "再也", "门外", "身后", "下一刻", "偏偏"]);
+    }
+
+    private static bool HasExternalEvidenceForStyle(string text)
+    {
+        return ContainsAny(
+            text,
+            [
+                "指尖", "手指", "掌心", "喉咙", "胸口", "肩", "背脊", "呼吸", "气息",
+                "目光", "眼神", "声音", "唇", "停顿", "沉默", "发紧", "发涩", "发凉",
+                "颤", "抖", "僵", "避开", "咽下", "攥", "雨声", "风声", "冷意", "压低", "压住"
+            ]);
+    }
+
+    private static int CountPunctuation(string text)
+    {
+        return text.Count(character => character is '，' or ',' or '。' or '.' or '？' or '?' or '！' or '!' or '；' or ';' or '、' or '：' or ':');
+    }
+
+    private sealed record CandidateStyleFeatureSnapshot(
+        double DialogueRatio,
+        double InteriorityRatio,
+        double SensoryRatio,
+        double ActionAfterbeatRatio,
+        double TransitionRatio,
+        double HookMarkerRatio,
+        double PunctuationPer100Chars,
+        double AverageSentenceChars);
 
     internal static IReadOnlyList<string> ExtractRequiredProsePhrases(ReferenceChapterBlueprintBeatPayload beat)
     {

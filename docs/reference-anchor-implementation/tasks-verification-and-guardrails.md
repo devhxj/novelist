@@ -42,6 +42,14 @@ npm run test:app:stress
 npm run test:app:usability
 ```
 
+Run after Phase 14 style anchoring commands exist:
+
+```text
+cd frontend
+npm run test:reference-style
+npm run test:reference-style:stress
+```
+
 Targeted new tests:
 
 ```text
@@ -85,6 +93,9 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 - Do not ship L2+ adaptation without rewrite-level tests.
 - Do not ship blueprint-gated drafting without blueprint review tests and draft audit tests.
 - Do not add frontend API methods without updating `BridgeCompatibilityAppMethods`.
+- Do not ship high-fidelity imitation without source-leak, n-gram overlap, rewrite-level, fact, POV, and style-quality audit tests.
+- Do not let LLM-assisted style analysis write ungrounded labels; every advanced label must cite source segment ids or be downgraded/rejected.
+- Do not let style profile generation duplicate large source text outside the source segment/material tables.
 
 ## Phase 10 Design Decisions Boundary
 
@@ -136,9 +147,17 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 - Real Photino boundary: keep Vite/mocked-bridge tests as the broad product surface, but verify production `dist`, WebView cache freshness, Monaco visibility, representative bridge routing, and stale chunk absence through targeted desktop tests/smoke.
 - CI policy: `npm run verify` remains a baseline command; Phase 13 closure and future regressions additionally require `test:app:full`, `test:app:stress`, and `test:app:usability`.
 
+## Phase 14 Advanced Style Anchoring Boundary
+
+- Status: open as of 2026-07-07.
+- Scope: multi-scale segmentation, advanced material/style taxonomy, style profiles, optional source-grounded LLM analysis, style-aware retrieval, beat-level style contracts, style-guided candidates, source-leak/style-quality audit, UI/agent boundaries, and Phase 14 regression tests.
+- Safety policy: basic reference import/search must keep working without model configuration. LLM-assisted style analysis is opt-in, validated, source-grounded, and unable to bypass deterministic gates.
+- Imitation policy: high-fidelity style anchoring must be feature- and evidence-based, not direct copying. Strong imitation mode increases audit strictness.
+- Regression policy: Phase 14 must keep the full Phase 13 matrix green and add `test:reference-style` plus `test:reference-style:stress`.
+
 ## Recommended Next Coding Sessions
 
-Use the closed Phase 13 Playwright QA gate as the regression boundary. Do not restart from Phase 0-13 unless contracts or implemented behavior have regressed.
+Start with Phase 14 contracts, storage, deterministic style baseline, and source-leak audit foundations. Keep the closed Phase 13 Playwright QA gate as the regression boundary; do not restart from Phase 0-13 unless contracts or implemented behavior have regressed.
 
 Latest Phase 13 closure scope: the full matrix passed on 2026-07-07, including frontend build/lint, `test:reference-anchor`, `test:app`, `test:app:full`, `test:app:stress`, `test:app:usability`, `Novelist.Tests`, and `Novelist.IntegrationTests`. Artifacts are under `output/playwright/phase13/`, including smoke/full/reference/stress screenshots and traces plus `usability-report.md`.
 
@@ -196,14 +215,15 @@ Latest verified scope: `dotnet test tests/Novelist.IntegrationTests/Novelist.Int
 
 Recommended next session:
 
-1. Keep the closed Phase 13 full-product Playwright QA gate green while making future UI, bridge, corpus, or desktop changes.
-2. Keep the Phase 11/12 orchestration and corpus gates intact while extending future product behavior.
+1. Implement Phase 14 Task 1 and Task 2: style feature contracts/storage plus multi-scale source segmentation.
+2. Add deterministic style baseline extraction before wiring any LLM-assisted analyzer.
+3. Keep the Phase 11/12 orchestration and corpus gates intact while extending style behavior.
 
 Recommended following session:
 
-1. Keep broadening deterministic Chinese narration, emotion, POV, and unsupported-fact fixtures; any optional model-assisted tagging or adaptation should be designed later as an explicit opt-in path that feeds the deterministic gates.
-2. Treat additional hard-delete policy, deeper library product IA, and global feedback tuning as future product work unless a new phase explicitly pulls them into scope.
-3. Keep the existing app-wide baseline and expanded Phase 13 matrix green during future changes.
+1. Add optional LLM-assisted style analysis only after deterministic style features and validation tests exist.
+2. Build source-leak/style-quality audit before shipping high-fidelity candidate generation.
+3. Keep the existing app-wide baseline and expanded Phase 13 matrix green during Phase 14 changes.
 
 Do not broaden frontend workflow beyond the review-first path until source corpus, material binding, blueprint review, and draft audit are reliable. The system's quality depends on immutable provenance, hard blueprint gates, and candidate audit before any manual insertion.
 
