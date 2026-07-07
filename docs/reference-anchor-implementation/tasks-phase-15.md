@@ -4,7 +4,7 @@
 
 ## Phase 15: Goink-Master Feature Merge, Import Pipeline, Style Library, Narrative Pattern Extraction, Git History UI, and Product Robustness
 
-**Status:** Open as of 2026-07-07. Task 1 has started with the first contract/compatibility boundary slice: Phase 15 payload contracts, compatibility method names, owned frontend adapter method declarations, and representative serialization/front-back registry tests exist. The bridge methods intentionally remain not implemented until the corresponding service tasks land.
+**Status:** Open as of 2026-07-07. Task 1 is complete: Phase 15 payload contracts, compatibility method names, owned frontend adapter method declarations, representative serialization/front-back registry tests, long-running `task_id` coverage, and app/build update-check endpoint configuration are in place. The Phase 15 bridge methods intentionally remain not implemented until the corresponding service tasks land.
 
 **Description:** Phase 15 merges the latest user-facing product capabilities from the legacy `goink-master` snapshot into the current Novelist .NET 10 + Photino.NET + React/Vite architecture. The source snapshot is useful as a behavior reference, not as an implementation target. The merge must port product semantics, data contracts, progress reporting, edge-case handling, and regression coverage into Novelist modules without reviving legacy Go/Wails/Python runtime paths.
 
@@ -107,7 +107,7 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 ## Task 1: Phase 15 Contract Inventory and Compatibility Boundary
 
-**Status:** Started for the contract/compatibility boundary. The first slice defines backend payload contracts for import, style samples, style skill extraction, narrative pattern extraction, Git history, update/layout/window settings, and copyable diagnostics; adds 30 Phase 15 method names to `BridgeCompatibilityAppMethods`; and mirrors those methods/types in `frontend/src/lib/novelist/api.ts` and `types.ts`. These methods currently route through the stable compatibility not-implemented handler; real service handlers are tracked by later tasks.
+**Status:** Complete for the contract/compatibility boundary. Backend payload contracts exist for import, style samples, style skill extraction, narrative pattern extraction, Git history, update/layout/window settings, copyable diagnostics, and app/build update-check configuration; 30 Phase 15 method names are registered in `BridgeCompatibilityAppMethods`; owned frontend adapter method/type declarations are synced in `frontend/src/lib/novelist/api.ts` and `types.ts`. These methods currently route through the stable compatibility not-implemented handler; real service handlers are tracked by later tasks.
 
 **Description:** Define all new Phase 15 bridge contracts, method names, progress events, and compatibility registrations before implementation. This task prevents ad hoc payload drift across backend and frontend.
 
@@ -118,13 +118,14 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 - [x] JSON uses stable snake_case for new product payloads unless an existing current Novelist payload already has a different convention. Representative serialization coverage exists for import, style, pattern, Git, update, and diagnostics payloads; broader null/empty-list cases can expand with service-specific tests.
 - [x] Bridge method names are added to `BridgeCompatibilityAppMethods`, backend handler registration tests, and `frontend/src/lib/novelist/api.ts`.
 - [x] Every long-running operation carries a client-supplied or generated `task_id`.
-- [ ] Release/update-check endpoint configuration is represented as app/build configuration, not hard-coded into frontend code.
+- [x] Release/update-check endpoint configuration is represented as app/build configuration, not hard-coded into frontend code. `GetAppConfig` exposes `update_check` from `Novelist.App` MSBuild metadata/startup arguments via `AppInitializationOptions`; default builds keep the endpoint empty and automatic checks disabled unless product configuration explicitly selects an endpoint.
 
 **Verification:**
 
 - [x] Contract serialization tests prove stable field names for representative Phase 15 payloads and assert no raw source/candidate/prompt content fields in diagnostic/import records.
 - [x] Bridge routing tests cover every new method through compatibility registration and the stable not-implemented boundary.
 - [x] Frontend contract tests fail if `api.ts` and compatibility method registrations diverge.
+- [x] App initialization and frontend adapter tests prove update-check endpoint configuration comes from backend app/build configuration and no live release endpoint is hard-coded into the owned frontend bridge adapter.
 
 **Dependencies:** None.
 

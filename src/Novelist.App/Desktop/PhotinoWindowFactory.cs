@@ -24,7 +24,7 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             DesktopLaunchLog.Write("Photino temporary files path not configured; using platform default.");
         }
         var adapter = new PhotinoWindowAdapter(window);
-        var bridge = DesktopBridgeComposition.CreateBridge(adapter);
+        var bridge = DesktopBridgeComposition.CreateBridge(adapter, settings.AppOptions);
 
         window
             .SetTitle(settings.Title)

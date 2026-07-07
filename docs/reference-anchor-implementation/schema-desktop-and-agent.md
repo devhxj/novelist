@@ -44,7 +44,7 @@ var chatToolExecutor = new NovelistMafChatToolExecutor(new NovelistMafToolRegist
     referenceAnchoredDraftService));
 ```
 
-`PhotinoWindowFactory` remains responsible for window setup and routes `RegisterWebMessageReceivedHandler` into the bridge returned by `DesktopBridgeComposition.CreateBridge(...)`. The composition helper registers both Photino bridge handler groups on the shared dispatcher:
+`PhotinoWindowFactory` remains responsible for window setup and routes `RegisterWebMessageReceivedHandler` into the bridge returned by `DesktopBridgeComposition.CreateBridge(...)`. `PhotinoLaunchMode` now carries app/build product configuration into `AppInitializationOptions`: `Novelist.App` MSBuild metadata can set the update-check endpoint/default/timeout, startup arguments can override them, and `GetAppConfig` exposes the resulting `update_check` object to the frontend. Default builds keep the endpoint empty and automatic checks disabled, so no live release URL is hard-coded in the owned TypeScript bridge adapter. The composition helper registers both Photino bridge handler groups on the shared dispatcher:
 
 ```csharp
 .RegisterReferenceAnchorHandlers(referenceAnchorService)

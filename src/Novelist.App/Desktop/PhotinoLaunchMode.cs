@@ -15,7 +15,8 @@ public static class PhotinoLaunchMode
         string? defaultStartUrl = null,
         string? webViewDataPathKey = null)
     {
-        var startUrl = args
+        var argList = args as IReadOnlyCollection<string> ?? args.ToArray();
+        var startUrl = argList
             .FirstOrDefault(arg => arg.StartsWith(StartUrlPrefix, StringComparison.OrdinalIgnoreCase))?
             .Substring(StartUrlPrefix.Length);
 
@@ -24,6 +25,7 @@ public static class PhotinoLaunchMode
             Width: 1280,
             Height: 840,
             StartUrl: string.IsNullOrWhiteSpace(startUrl) ? defaultStartUrl ?? "about:blank" : startUrl,
-            WebViewDataPathKey: string.IsNullOrWhiteSpace(startUrl) ? webViewDataPathKey : null);
+            WebViewDataPathKey: string.IsNullOrWhiteSpace(startUrl) ? webViewDataPathKey : null,
+            AppOptions: DesktopAppConfiguration.CreateAppInitializationOptions(argList));
     }
 }

@@ -293,6 +293,18 @@ export namespace character {
 }
 
 export namespace config {
+  export interface UpdateCheckConfiguration {
+    endpoint_url: string
+    default_enabled: boolean
+    timeout_ms: number
+  }
+
+  export interface AppConfig {
+    initialized: boolean
+    data_dir?: string | null
+    update_check: UpdateCheckConfiguration
+  }
+
   export interface AppSettings {
     ID: number
     last_novel_id: number

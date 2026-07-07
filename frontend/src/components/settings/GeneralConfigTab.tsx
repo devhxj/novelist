@@ -11,7 +11,7 @@ export default function GeneralConfigTab() {
 
   useEffect(() => {
     app.GetAppConfig().then(cfg => {
-      setDataDir((cfg?.data_dir as string) || '')
+      setDataDir(cfg?.data_dir || '')
     }).catch(() => {})
     app.GetNovels().then(list => {
       setNovels(list || [])

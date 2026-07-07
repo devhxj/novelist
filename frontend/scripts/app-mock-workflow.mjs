@@ -3309,7 +3309,15 @@ function installConfigurableAppMockBridge(options = {}) {
       case 'SaveEmbeddingConfig':
         state.savedEmbeddingConfig = args[0]
         return null
-      case 'GetAppConfig': return { data_dir: options.platformDefaultPath ?? 'D:\\NovelistData' }
+      case 'GetAppConfig': return {
+        initialized: state.initialized,
+        data_dir: options.platformDefaultPath ?? 'D:\\NovelistData',
+        update_check: {
+          endpoint_url: '',
+          default_enabled: false,
+          timeout_ms: 5000,
+        },
+      }
       case 'SetActiveNovel':
         state.activeNovelId = args[0]?.novel_id ?? state.activeNovelId
         state.settings.last_novel_id = state.activeNovelId

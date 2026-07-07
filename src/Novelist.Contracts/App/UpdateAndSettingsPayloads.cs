@@ -6,6 +6,11 @@ public sealed record CheckForUpdatesPayload(
     [property: JsonPropertyName("task_id")] string TaskId,
     [property: JsonPropertyName("manual")] bool Manual);
 
+public sealed record UpdateCheckConfigurationPayload(
+    [property: JsonPropertyName("endpoint_url")] string EndpointUrl,
+    [property: JsonPropertyName("default_enabled")] bool DefaultEnabled,
+    [property: JsonPropertyName("timeout_ms")] int TimeoutMs);
+
 public sealed record UpdateCheckResultPayload(
     [property: JsonPropertyName("task_id")] string TaskId,
     [property: JsonPropertyName("status")] string Status,

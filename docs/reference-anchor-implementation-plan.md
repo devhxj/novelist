@@ -4,7 +4,7 @@ This implementation plan has been split into focused companion documents so each
 
 ## Status
 
-Core implementation phases 0-14 are complete at the current implementation boundary. Phase 15 is now open as the `goink-master` feature-merge plan for import, style material library, narrative pattern extraction, Git history visualization, desktop UX hardening, and error-feedback fixes in the current Novelist architecture.
+Core implementation phases 0-14 are complete at the current implementation boundary. Phase 15 is now open as the `goink-master` feature-merge plan for import, style material library, narrative pattern extraction, Git history visualization, desktop UX hardening, and error-feedback fixes in the current Novelist architecture. Phase 15 Task 1 is complete at the contract/compatibility boundary; Task 2 is the next storage and migration slice.
 
 ## Date
 

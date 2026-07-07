@@ -6,4 +6,5 @@ public sealed record AppConfigPayload(
     [property: JsonPropertyName("initialized")] bool Initialized,
     [property: JsonPropertyName("data_dir")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    string? DataDir);
+    string? DataDir,
+    [property: JsonPropertyName("update_check")] UpdateCheckConfigurationPayload UpdateCheck);

@@ -12,6 +12,12 @@ public sealed record AppInitializationOptions
 
     public string? LegacyDataDirectory { get; init; }
 
+    public string UpdateCheckEndpointUrl { get; init; } = string.Empty;
+
+    public bool UpdateChecksEnabledByDefault { get; init; }
+
+    public int UpdateCheckTimeoutMs { get; init; } = 5000;
+
     private static string DefaultConfigDirectory()
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);

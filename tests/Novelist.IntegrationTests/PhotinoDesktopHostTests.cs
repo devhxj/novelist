@@ -14,6 +14,10 @@ public sealed class PhotinoDesktopHostTests
         Assert.Equal(1280, settings.Width);
         Assert.Equal(840, settings.Height);
         Assert.Equal("about:blank", settings.StartUrl);
+        Assert.NotNull(settings.AppOptions);
+        Assert.True(settings.AppOptions.EnableLegacyMigration);
+        Assert.Equal("", settings.AppOptions.UpdateCheckEndpointUrl);
+        Assert.False(settings.AppOptions.UpdateChecksEnabledByDefault);
     }
 
     [Fact]
@@ -36,6 +40,23 @@ public sealed class PhotinoDesktopHostTests
 
         Assert.Equal("http://localhost:5173/", settings.StartUrl);
         Assert.Null(settings.WebViewDataPathKey);
+    }
+
+    [Fact]
+    public void LaunchSettingsCarryUpdateCheckProductConfigurationFromArguments()
+    {
+        var settings = PhotinoLaunchMode.CreateSettings(
+            [
+                PhotinoLaunchMode.DesktopFlag,
+                "--Novelist:UpdateCheckEndpointUrl=https://updates.example.test/novelist/releases.json",
+                "--Novelist:UpdateChecksEnabledByDefault=true",
+                "--Novelist:UpdateCheckTimeoutMs=2500"
+            ]);
+
+        Assert.NotNull(settings.AppOptions);
+        Assert.Equal("https://updates.example.test/novelist/releases.json", settings.AppOptions.UpdateCheckEndpointUrl);
+        Assert.True(settings.AppOptions.UpdateChecksEnabledByDefault);
+        Assert.Equal(2500, settings.AppOptions.UpdateCheckTimeoutMs);
     }
 
     [Fact]

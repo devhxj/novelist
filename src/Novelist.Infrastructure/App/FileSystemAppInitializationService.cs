@@ -7,6 +7,10 @@ namespace Novelist.Infrastructure.App;
 
 public sealed class FileSystemAppInitializationService : IAppInitializationService
 {
+    private const int DefaultUpdateCheckTimeoutMs = 5000;
+    private const int MinUpdateCheckTimeoutMs = 500;
+    private const int MaxUpdateCheckTimeoutMs = 30000;
+
     private static readonly JsonSerializerOptions ConfigJsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
@@ -55,8 +59,8 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
     {
         var config = await LoadConfigAsync(cancellationToken);
         return config is null
-            ? new AppConfigPayload(false, null)
-            : new AppConfigPayload(true, config.DataDir);
+            ? new AppConfigPayload(false, null, CreateUpdateCheckConfiguration())
+            : new AppConfigPayload(true, config.DataDir, CreateUpdateCheckConfiguration());
     }
 
     public async ValueTask UpdateDataDirectoryAsync(string dataDirectory, CancellationToken cancellationToken)
@@ -111,6 +115,22 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
     }
 
     private string ConfigPath => Path.Combine(_options.ConfigDirectory, "config.json");
+
+    private UpdateCheckConfigurationPayload CreateUpdateCheckConfiguration()
+    {
+        var endpointUrl = (_options.UpdateCheckEndpointUrl ?? string.Empty).Trim();
+        var timeoutMs = _options.UpdateCheckTimeoutMs;
+        if (timeoutMs <= 0)
+        {
+            timeoutMs = DefaultUpdateCheckTimeoutMs;
+        }
+
+        timeoutMs = Math.Clamp(timeoutMs, MinUpdateCheckTimeoutMs, MaxUpdateCheckTimeoutMs);
+        return new UpdateCheckConfigurationPayload(
+            endpointUrl,
+            DefaultEnabled: _options.UpdateChecksEnabledByDefault && endpointUrl.Length > 0,
+            TimeoutMs: timeoutMs);
+    }
 
     private void TryDeleteConfig()
     {

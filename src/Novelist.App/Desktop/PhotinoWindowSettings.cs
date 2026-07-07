@@ -1,3 +1,5 @@
+using Novelist.Infrastructure.App;
+
 namespace Novelist.App.Desktop;
 
 public sealed record PhotinoWindowSettings(
@@ -5,4 +7,5 @@ public sealed record PhotinoWindowSettings(
     int Width,
     int Height,
     string StartUrl,
-    string? WebViewDataPathKey = null);
+    string? WebViewDataPathKey = null,
+    AppInitializationOptions? AppOptions = null);

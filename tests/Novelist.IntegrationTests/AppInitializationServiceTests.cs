@@ -34,6 +34,38 @@ public sealed class AppInitializationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AppConfigIncludesUpdateCheckProductConfigurationBeforeAndAfterInitialization()
+    {
+        var configDirectory = Path.Combine(_root, "config");
+        var defaultDataDirectory = Path.Combine(_root, "default-data");
+        var selectedDataDirectory = Path.Combine(_root, "selected-data");
+        var service = new FileSystemAppInitializationService(new AppInitializationOptions
+        {
+            ConfigDirectory = configDirectory,
+            DefaultDataDirectory = defaultDataDirectory,
+            UpdateCheckEndpointUrl = "https://updates.example.test/novelist/releases.json",
+            UpdateChecksEnabledByDefault = true,
+            UpdateCheckTimeoutMs = 2500
+        });
+
+        var before = await service.GetAppConfigAsync(CancellationToken.None);
+        Assert.False(before.Initialized);
+        Assert.Null(before.DataDir);
+        Assert.Equal("https://updates.example.test/novelist/releases.json", before.UpdateCheck.EndpointUrl);
+        Assert.True(before.UpdateCheck.DefaultEnabled);
+        Assert.Equal(2500, before.UpdateCheck.TimeoutMs);
+
+        await service.InitializeAsync(selectedDataDirectory, CancellationToken.None);
+
+        var after = await service.GetAppConfigAsync(CancellationToken.None);
+        Assert.True(after.Initialized);
+        Assert.Equal(Path.GetFullPath(selectedDataDirectory), after.DataDir);
+        Assert.Equal("https://updates.example.test/novelist/releases.json", after.UpdateCheck.EndpointUrl);
+        Assert.True(after.UpdateCheck.DefaultEnabled);
+        Assert.Equal(2500, after.UpdateCheck.TimeoutMs);
+    }
+
+    [Fact]
     public async Task ServiceUpdatesDataDirectoryAndKeepsPlatformPayloadStable()
     {
         var configDirectory = Path.Combine(_root, "config");
@@ -94,6 +126,7 @@ public sealed class AppInitializationServiceTests : IDisposable
         var result = after.RootElement.GetProperty("result");
         Assert.True(result.GetProperty("initialized").GetBoolean());
         Assert.EndsWith("bridge-data", result.GetProperty("data_dir").GetString(), StringComparison.Ordinal);
+        Assert.Equal("", result.GetProperty("update_check").GetProperty("endpoint_url").GetString());
     }
 
     public void Dispose()

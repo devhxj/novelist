@@ -4,7 +4,7 @@
 
 ## Status
 
-Phases 0-14 are complete at the current implementation boundary. Phase 15 is open and tracked in `tasks-and-verification.md` as the `goink-master` feature merge plan for import, style material library, narrative pattern extraction, Git history visualization, desktop UX persistence/update checks, and error-feedback hardening.
+Phases 0-14 are complete at the current implementation boundary. Phase 15 is open and tracked in `tasks-and-verification.md` as the `goink-master` feature merge plan for import, style material library, narrative pattern extraction, Git history visualization, desktop UX persistence/update checks, and error-feedback hardening. Phase 15 Task 1 is complete at the contract/compatibility boundary; storage and implementation services start from Task 2.
 
 This plan is still the source of truth for the target design. Treat Phase 15 as the open product-merge implementation phase unless contracts, storage, bridge, agent, or frontend behavior regresses.
 

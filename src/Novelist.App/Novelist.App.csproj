@@ -5,7 +5,25 @@
     <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <NovelistUpdateCheckEndpointUrl Condition="'$(NovelistUpdateCheckEndpointUrl)' == ''"></NovelistUpdateCheckEndpointUrl>
+    <NovelistUpdateChecksEnabledByDefault Condition="'$(NovelistUpdateChecksEnabledByDefault)' == ''">false</NovelistUpdateChecksEnabledByDefault>
+    <NovelistUpdateCheckTimeoutMs Condition="'$(NovelistUpdateCheckTimeoutMs)' == ''">5000</NovelistUpdateCheckTimeoutMs>
   </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>Novelist:UpdateCheckEndpointUrl</_Parameter1>
+      <_Parameter2>$(NovelistUpdateCheckEndpointUrl)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>Novelist:UpdateChecksEnabledByDefault</_Parameter1>
+      <_Parameter2>$(NovelistUpdateChecksEnabledByDefault)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>Novelist:UpdateCheckTimeoutMs</_Parameter1>
+      <_Parameter2>$(NovelistUpdateCheckTimeoutMs)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Photino.NET" Version="4.0.16" />

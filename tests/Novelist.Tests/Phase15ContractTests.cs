@@ -8,6 +8,30 @@ namespace Novelist.Tests;
 public sealed class Phase15ContractTests
 {
     [Fact]
+    public void AppConfigPayloadCarriesUpdateCheckConfigurationWithStableSnakeCaseJsonNames()
+    {
+        var payload = new AppConfigPayload(
+            Initialized: true,
+            DataDir: @"D:\novelist\data",
+            UpdateCheck: new UpdateCheckConfigurationPayload(
+                EndpointUrl: "https://updates.example.test/novelist/releases.json",
+                DefaultEnabled: true,
+                TimeoutMs: 2500));
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(payload, BridgeJson.SerializerOptions));
+        var root = json.RootElement;
+        Assert.True(root.GetProperty("initialized").GetBoolean());
+        Assert.Equal(@"D:\novelist\data", root.GetProperty("data_dir").GetString());
+
+        var updateCheck = root.GetProperty("update_check");
+        Assert.Equal("https://updates.example.test/novelist/releases.json", updateCheck.GetProperty("endpoint_url").GetString());
+        Assert.True(updateCheck.GetProperty("default_enabled").GetBoolean());
+        Assert.Equal(2500, updateCheck.GetProperty("timeout_ms").GetInt32());
+        Assert.False(root.TryGetProperty("updateCheck", out _));
+        Assert.False(updateCheck.TryGetProperty("EndpointUrl", out _));
+    }
+
+    [Fact]
     public void NovelImportPayloadsUseStableSnakeCaseJsonNamesWithoutSourceText()
     {
         var request = new StartNovelImportPayload(

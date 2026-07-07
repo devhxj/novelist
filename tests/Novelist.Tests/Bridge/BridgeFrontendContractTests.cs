@@ -23,6 +23,20 @@ public sealed class BridgeFrontendContractTests
         Assert.Equal(BridgeRuntimeMethodNames.All.Order(StringComparer.Ordinal), frontendMethods.Order(StringComparer.Ordinal));
     }
 
+    [Fact]
+    public void FrontendUpdateContractsUseBackendAppConfigWithoutHardCodedReleaseEndpoint()
+    {
+        var root = FindRepositoryRoot();
+        var apiSource = File.ReadAllText(Path.Combine(root, "frontend", "src", "lib", "novelist", "api.ts"));
+        var typeSource = File.ReadAllText(Path.Combine(root, "frontend", "src", "lib", "novelist", "types.ts"));
+        var bridgeAdapterSource = apiSource + Environment.NewLine + typeSource;
+
+        Assert.Contains("GetAppConfig: AppMethod<[], config.AppConfig>", apiSource, StringComparison.Ordinal);
+        Assert.Contains("update_check", typeSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("api.github.com/repos", bridgeAdapterSource, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sigpanic/goink", bridgeAdapterSource, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData("GetNovels")]
     [InlineData("SearchAll")]

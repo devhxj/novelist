@@ -128,7 +128,7 @@ export interface NovelistAppApi {
   ExtractStyle: AppMethod<[app.ExtractStyleInput], app.ExtractStyleResult>
   GenerateReferenceAnchoredDraft: AppMethod<[reference.GenerateAnchoredDraftInput], reference.AnchoredDraft>
   GenerateReferenceChapterBlueprint: AppMethod<[reference.GenerateChapterBlueprintInput], reference.ChapterBlueprint>
-  GetAppConfig: AppMethod<[], Record<string, unknown>>
+  GetAppConfig: AppMethod<[], config.AppConfig>
   GetArcNodes: AppMethod<[number, number, number], storyarc.ArcNode[]>
   GetChapterPlans: AppMethod<[number], timeline.ChapterPlan[]>
   GetChapters: AppMethod<[number], chapter.Chapter[]>
