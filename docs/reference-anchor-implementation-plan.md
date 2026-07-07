@@ -4,18 +4,18 @@ This implementation plan has been split into focused companion documents so each
 
 ## Status
 
-Core implementation phases 0-13 are complete at the current implementation boundary. Phase 14 is now open to upgrade the anchor layer into advanced style anchoring and high-fidelity imitation: multi-scale literary understanding, style profiles, style-aware retrieval, style-guided candidates, and source-leak/style-quality audit. Phase 15 is proposed as the `goink-master` feature-merge plan for import, style material library, narrative pattern extraction, Git history visualization, desktop UX hardening, and error-feedback fixes in the current Novelist architecture.
+Core implementation phases 0-14 are complete at the current implementation boundary. Phase 15 is now open as the `goink-master` feature-merge plan for import, style material library, narrative pattern extraction, Git history visualization, desktop UX hardening, and error-feedback fixes in the current Novelist architecture.
 
 ## Date
 
-2026-07-04
+2026-07-07
 
 ## Stable Entry Points
 
 - [Overview and architecture](reference-anchor-implementation/overview.md): stable overview index for status/scope, planning updates, and architecture map.
 - [Implementation decisions](reference-anchor-implementation/decisions.md): stable decisions index for foundation, pipeline, quality, material, and audit decisions.
 - [Schema and integration plan](reference-anchor-implementation/schema-and-integration.md): stable integration index for database, bridge, desktop/agent, and frontend surfaces.
-- [Tasks, tests, and guardrails](reference-anchor-implementation/tasks-and-verification.md): stable task index for phase breakdowns, test matrix, guardrails, and open Phase 14 work.
+- [Tasks, tests, and guardrails](reference-anchor-implementation/tasks-and-verification.md): stable task index for phase breakdowns, test matrix, guardrails, and open Phase 15 work.
 
 ## Topic Documents
 

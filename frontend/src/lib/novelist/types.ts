@@ -401,6 +401,360 @@ export namespace novel {
   }
 }
 
+export namespace diagnostics {
+  export interface CopyableDiagnostic {
+    code: string
+    message: string
+    detail: string
+    operation: string
+    task_id?: string | null
+    run_id?: string | null
+    bridge_method?: string | null
+    timestamp: Timestamp
+  }
+}
+
+export namespace novelImport {
+  export interface StartNovelImportInput {
+    task_id: string
+    source_path: string
+    source_display_name: string
+    import_kind: 'epub' | 'txt' | 'markdown'
+    requested_title?: string | null
+    commit_message?: string | null
+  }
+
+  export interface CancelNovelImportInput {
+    task_id: string
+    reason: string
+  }
+
+  export interface GetNovelImportRunInput {
+    task_id: string
+  }
+
+  export interface ImportProgress {
+    task_id: string
+    state: string
+    stage: string
+    progress_completed: number
+    progress_total: number
+    message: string
+    created_novel_id?: number | null
+    updated_at: Timestamp
+  }
+
+  export interface ImportRun {
+    task_id: string
+    state: string
+    stage: string
+    source_display_name: string
+    source_path_hash: string
+    parser_type: string
+    created_novel_id?: number | null
+    created_file_roots: string[]
+    skipped_chapters: SkippedChapter[]
+    diagnostics: ImportDiagnostic[]
+    warnings: ImportWarning[]
+    error?: diagnostics.CopyableDiagnostic | null
+    started_at: Timestamp
+    updated_at: Timestamp
+    completed_at?: Timestamp | null
+  }
+
+  export interface SkippedChapter {
+    index: number
+    title: string
+    reason: string
+  }
+
+  export interface ImportDiagnostic {
+    code: string
+    message: string
+    detail: string
+    severity: string
+  }
+
+  export interface ImportWarning {
+    code: string
+    message: string
+    detail: string
+  }
+
+  export interface ImportRecoveryStatus {
+    pending_runs: ImportRun[]
+    blocked_runs: ImportRun[]
+    checked_at: Timestamp
+  }
+
+  export interface ImportReconciliationResult {
+    reconciled_runs: ImportRun[]
+    blocked_runs: ImportRun[]
+    diagnostics: ImportDiagnostic[]
+    reconciled_at: Timestamp
+  }
+}
+
+export namespace styleSample {
+  export interface StyleSampleSourceMetadata {
+    source_type: string
+    source_id: string
+    source_hash: string
+  }
+
+  export interface StyleSampleStats {
+    character_count: number
+    sentence_count: number
+    average_sentence_chars: number
+    dialogue_ratio: number
+    interiority_ratio: number
+    sensory_ratio: number
+    punctuation_per_100_chars: number
+  }
+
+  export interface CreateStyleSampleInput {
+    novel_id?: number | null
+    is_global: boolean
+    name: string
+    content: string
+    tags: string[]
+    source_metadata?: StyleSampleSourceMetadata | null
+  }
+
+  export interface UpdateStyleSampleInput extends CreateStyleSampleInput {
+    sample_id: number
+  }
+
+  export interface DeleteStyleSampleInput {
+    sample_id: number
+  }
+
+  export interface GetStyleSampleInput {
+    sample_id: number
+  }
+
+  export interface SearchStyleSamplesInput {
+    novel_id?: number | null
+    include_global: boolean
+    query: string
+    tags: string[]
+    page: number
+    size: number
+  }
+
+  export interface StyleSample {
+    sample_id: number
+    novel_id?: number | null
+    is_global: boolean
+    name: string
+    preview: string
+    tags: string[]
+    stats_schema_version: string
+    stats: StyleSampleStats
+    source_metadata?: StyleSampleSourceMetadata | null
+    created_at: Timestamp
+    updated_at: Timestamp
+  }
+
+  export interface StyleSampleDetail extends StyleSample {
+    content: string
+  }
+
+  export interface StartStyleSkillExtractionInput {
+    task_id: string
+    novel_id?: number | null
+    sample_ids: number[]
+    provider_name: string
+    model_id: string
+    reasoning_effort: string
+    skill_name: string
+  }
+
+  export interface CancelStyleSkillExtractionInput {
+    task_id: string
+    reason: string
+  }
+
+  export interface StyleSkillExtractionRun {
+    task_id: string
+    status: string
+    stage: string
+    progress_completed: number
+    progress_total: number
+    sample_ids: number[]
+    skill_name: string
+    skill_preview: string
+    diagnostics: diagnostics.CopyableDiagnostic[]
+    created_at: Timestamp
+    updated_at: Timestamp
+    completed_at?: Timestamp | null
+  }
+}
+
+export namespace pattern {
+  export interface ChapterRange {
+    start_chapter: number
+    end_chapter: number
+  }
+
+  export interface StartNarrativePatternExtractionInput {
+    task_id: string
+    novel_id: number
+    chapter_ranges: ChapterRange[]
+    provider_name: string
+    model_id: string
+    reasoning_effort: string
+    skill_name: string
+  }
+
+  export interface CancelNarrativePatternExtractionInput {
+    task_id: string
+    reason: string
+  }
+
+  export interface GetNarrativePatternRunInput {
+    task_id: string
+  }
+
+  export interface NarrativePatternRun {
+    task_id: string
+    novel_id: number
+    status: string
+    stage: string
+    progress_completed: number
+    progress_total: number
+    chapter_ranges: ChapterRange[]
+    skill_name: string
+    skill_preview: string
+    diagnostics: diagnostics.CopyableDiagnostic[]
+    created_at: Timestamp
+    updated_at: Timestamp
+    completed_at?: Timestamp | null
+  }
+
+  export interface NarrativePatternTrace {
+    task_id: string
+    entries: NarrativePatternTraceEntry[]
+  }
+
+  export interface NarrativePatternTraceEntry {
+    trace_id: string
+    stage: string
+    input_hash: string
+    output_hash: string
+    diagnostics: diagnostics.CopyableDiagnostic[]
+    created_at: Timestamp
+  }
+}
+
+export namespace git {
+  export interface GetGitCommitsInput {
+    novel_id: number
+    page: number
+    size: number
+  }
+
+  export interface GetGitCommitFilesInput {
+    novel_id: number
+    commit_id: string
+  }
+
+  export interface GetGitFileDiffInput extends GetGitCommitFilesInput {
+    path: string
+  }
+
+  export interface GitCommitSummary {
+    commit_id: string
+    short_commit_id: string
+    author_name: string
+    author_email: string
+    message: string
+    committed_at: Timestamp
+    changed_file_count: number
+  }
+
+  export interface GitCommitFile {
+    path: string
+    old_path?: string | null
+    change_type: string
+    additions: number
+    deletions: number
+    binary: boolean
+  }
+
+  export interface GitFileDiff {
+    commit_id: string
+    path: string
+    old_path?: string | null
+    change_type: string
+    diff_text: string
+    truncated: boolean
+    binary: boolean
+  }
+
+  export interface GitAuthorSettings {
+    name: string
+    email: string
+    scope: string
+  }
+
+  export interface SaveGitAuthorSettingsInput {
+    name: string
+    email: string
+  }
+}
+
+export namespace update {
+  export interface CheckForUpdatesInput {
+    task_id: string
+    manual: boolean
+  }
+
+  export interface UpdateCheckResult {
+    task_id: string
+    status: string
+    current_version: string
+    latest_version?: string | null
+    release_url?: string | null
+    checked_at: Timestamp
+    error_code?: string | null
+    error_message?: string | null
+  }
+
+  export interface UpdateCheckSettings {
+    enabled: boolean
+    endpoint_url: string
+    dismissed_version: string
+    last_checked_at?: Timestamp | null
+  }
+
+  export interface SaveUpdateCheckSettingsInput {
+    enabled: boolean
+    endpoint_url: string
+    dismissed_version: string
+  }
+}
+
+export namespace layout {
+  export interface LayoutSettings {
+    sidebar_width: number
+    chat_panel_width: number
+    metadata_panel_width: number
+  }
+
+  export type SaveLayoutSettingsInput = LayoutSettings
+
+  export interface WindowSettings {
+    x?: number | null
+    y?: number | null
+    width: number
+    height: number
+    maximized: boolean
+  }
+
+  export type SaveWindowSettingsInput = WindowSettings
+}
+
 export namespace reader {
   export interface ReaderPerspective {
     id: number
@@ -1332,6 +1686,14 @@ export namespace skill {
 }
 
 export namespace storage {
+  export interface PageResult_git_GitCommitSummary_ {
+    items: git.GitCommitSummary[]
+    total: number
+    page: number
+    size: number
+    total_pages: number
+  }
+
   export interface PageResult_novel_app_SessionMeta_ {
     items: app.SessionMeta[]
     total: number
@@ -1342,6 +1704,14 @@ export namespace storage {
 
   export interface PageResult_reference_Material_ {
     items: reference.Material[]
+    total: number
+    page: number
+    size: number
+    total_pages: number
+  }
+
+  export interface PageResult_styleSample_StyleSample_ {
+    items: styleSample.StyleSample[]
     total: number
     page: number
     size: number

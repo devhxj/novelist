@@ -4,9 +4,9 @@
 
 ## Status
 
-Phases 0-13 are complete at the current implementation boundary. Phase 14 is open and tracked in `tasks-and-verification.md` as the advanced style anchoring and high-fidelity imitation phase. Phase 15 is proposed as the `goink-master` feature merge plan for import, style material library, narrative pattern extraction, Git history visualization, desktop UX persistence/update checks, and error-feedback hardening.
+Phases 0-14 are complete at the current implementation boundary. Phase 15 is open and tracked in `tasks-and-verification.md` as the `goink-master` feature merge plan for import, style material library, narrative pattern extraction, Git history visualization, desktop UX persistence/update checks, and error-feedback hardening.
 
-This plan is still the source of truth for the target design. Treat Phase 14 as the open style-anchoring implementation-plan phase and Phase 15 as the open product-merge planning phase unless contracts, storage, bridge, agent, or frontend behavior regresses.
+This plan is still the source of truth for the target design. Treat Phase 15 as the open product-merge implementation phase unless contracts, storage, bridge, agent, or frontend behavior regresses.
 
 ## Date
 
