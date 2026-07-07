@@ -4,7 +4,7 @@
 
 ## Phase 14: Advanced Style Anchoring and High-Fidelity Imitation
 
-**Status:** Open as of 2026-07-07.
+**Status:** Final verification as of 2026-07-07. Core implementation and regression gates are green; the main remaining implementation gap is Task 10's full style-quality taxonomy and broader style-intensity evaluation.
 
 **Description:** Phase 14 upgrades the reference-anchor layer from rule-based material extraction into an advanced style anchoring system. The target is a robust, auditable imitation engine that understands source material at multiple scales, extracts high-quality style features, retrieves materials by story purpose and style fit, generates beat-scoped candidates under explicit style contracts, and audits outputs for provenance, factual safety, POV safety, style quality, and unsafe source-text proximity.
 
@@ -91,7 +91,7 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 3: Deterministic Style Baseline Extractor
 
-**Status:** Partially complete. The deterministic baseline builder exists, is covered by pure feature tests, persists profile features, and search can consume baseline profile evidence for style-fit ranking; style audit consumers remain open.
+**Status:** Complete for the deterministic baseline boundary. The deterministic baseline builder exists, is covered by pure feature tests, persists profile features, search can consume baseline profile evidence for style-fit ranking, and anchored draft audit can read persisted profile feature vectors for supported deterministic style-distance checks. Broader generic style-quality taxonomy coverage remains tracked under Task 10.
 
 **Description:** Add deterministic style features that do not require a model: sentence length distribution, paragraph length distribution, punctuation rhythm, dialogue ratio, narration/dialogue alternation, sensory-channel counts, interiority ratio, action-afterbeat ratio, transition frequency, and hook/cliffhanger markers.
 
@@ -368,7 +368,7 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 14: Performance, Robustness, and Phase 14 Playwright Gate
 
-**Status:** Partially complete for the backend robustness, frontend progress/cancel boundary, dedicated browser stress gate, and default style-assisted orchestration path. A 10MB user-provided source now imports through the real anchor service, produces more than 500 segments/materials, builds a deterministic style profile, records bounded evidence/provenance metadata, and keeps source phrases out of persisted feature vectors and deterministic analysis diagnostics. Style profile builds now create source-text-free persisted build-status rows with stage/progress metadata, bridge-readable status, explicit cancel marking, cancellation-token persistence, failed-build recovery inspection, and rebuild-after-failure coverage. The frontend `风格画像库` now generates safe build ids, displays persisted build progress/diagnostics/errors, can cancel running builds, and can refresh failed/cancelled status for recovery inspection. The default orchestration flow now carries selected style profiles, intensity, fit/closeness, evidence, and risk policy into reviewed beat-level style contracts, and high-risk material-gap/source-leak stops now show concrete recovery guidance. The dedicated style stress gate now drives a mocked 10MB workspace corpus source through style-profile build progress, LLM-analysis-stage metadata, profile detail inspection, paged material-library search, screenshots, bridge-call assertions, and metrics under `output/playwright/phase14/reference-style-stress/`. Full Phase 13 regression rerun and full .NET style-related suite verification remain open.
+**Status:** Complete for the Phase 14 performance, robustness, browser, and regression gate. A 10MB user-provided source now imports through the real anchor service, produces more than 500 segments/materials, builds a deterministic style profile, records bounded evidence/provenance metadata, and keeps source phrases out of persisted feature vectors and deterministic analysis diagnostics. Style profile builds now create source-text-free persisted build-status rows with stage/progress metadata, bridge-readable status, explicit cancel marking, cancellation-token persistence, failed-build recovery inspection, and rebuild-after-failure coverage. The frontend `风格画像库` now generates safe build ids, displays persisted build progress/diagnostics/errors, can cancel running builds, and can refresh failed/cancelled status for recovery inspection. The default orchestration flow now carries selected style profiles, intensity, fit/closeness, evidence, and risk policy into reviewed beat-level style contracts, and high-risk material-gap/source-leak stops now show concrete recovery guidance. The dedicated style stress gate now drives a mocked 10MB workspace corpus source through style-profile build progress, LLM-analysis-stage metadata, profile detail inspection, paged material-library search, screenshots, bridge-call assertions, and metrics under `output/playwright/phase14/reference-style-stress/`. The full Phase 13 frontend matrix, Phase 14 style Playwright gates, and both .NET test projects now pass.
 
 **Description:** Add stress and regression coverage for large style corpora and high-fidelity style workflows.
 
@@ -387,8 +387,8 @@ The current extractor is deterministic and robust, but limited:
 - [x] `dotnet test tests\Novelist.IntegrationTests\Novelist.IntegrationTests.csproj --no-restore -v minimal -p:UseSharedCompilation=false --filter 'FailedStyleProfileBuildPersistsRecoverableBuildStatusWithoutSourceText|CancelledStyleProfileBuildPersistsCancelledStatusWithoutActiveProfile'`
 - [x] `npm --prefix frontend run test:reference-style`
 - [x] `npm --prefix frontend run test:reference-style:stress`
-- [ ] Existing Phase 13 matrix remains green.
-- [ ] Full .NET tests pass for style-related services and contracts.
+- [x] Existing Phase 13 matrix remains green. Verified with `npm --prefix frontend run build`, `npm --prefix frontend run lint`, `npm --prefix frontend run test:reference-anchor`, `npm --prefix frontend run test:app`, `npm --prefix frontend run test:app:full`, `npm --prefix frontend run test:app:stress`, and `npm --prefix frontend run test:app:usability`.
+- [x] Full .NET tests pass for style-related services and contracts. Verified with `dotnet test tests\Novelist.Tests\Novelist.Tests.csproj --no-restore -v minimal -p:UseSharedCompilation=false` and `dotnet test tests\Novelist.IntegrationTests\Novelist.IntegrationTests.csproj --no-restore -v minimal -p:UseSharedCompilation=false`.
 
 **Dependencies:** Tasks 1-13.
 
@@ -398,42 +398,42 @@ The current extractor is deterministic and robust, but limited:
 
 ### Checkpoint A: Contracts and Storage
 
-- [ ] Tasks 1-3 complete.
-- [ ] Existing Phase 0-13 tests still pass.
-- [ ] Deterministic style profile can be built without model configuration.
+- [x] Tasks 1-3 complete.
+- [x] Existing Phase 0-13 tests still pass.
+- [x] Deterministic style profile can be built without model configuration.
 
 ### Checkpoint B: Advanced Understanding
 
-- [ ] Tasks 4-7 complete.
-- [ ] LLM-assisted labels are grounded, validated, and optional.
-- [ ] Retrieval uses style fit without weakening license, fact, or POV boundaries.
+- [x] Tasks 4-7 complete.
+- [x] LLM-assisted labels are grounded, validated, and optional.
+- [x] Retrieval uses style fit without weakening license, fact, or POV boundaries.
 
 ### Checkpoint C: Imitation and Audit
 
 - [ ] Tasks 8-11 complete.
-- [ ] Candidate generation is style-guided and beat-scoped.
-- [ ] Style/source-leak audit can fail unsafe candidates.
+- [x] Candidate generation is style-guided and beat-scoped.
+- [x] Style/source-leak audit can fail unsafe candidates.
 
 ### Checkpoint D: Product Gate
 
 - [ ] Tasks 12-14 complete.
-- [ ] Playwright style workflows and stress tests pass.
+- [x] Playwright style workflows and stress tests pass.
 - [x] Usability report shows no high-severity style workflow issues.
 
 ## Definition of Done
 
 Phase 14 is complete only when all of the following are true:
 
-- [ ] Advanced style profiles are stored, searchable, inspectable, and auditable.
-- [ ] Multi-scale materials include scene/beat/dialogue/hook/payoff/style-evidence records, not only sentence and paragraph materials.
-- [ ] Optional LLM-assisted analysis is schema-validated, source-grounded, and safe to disable.
-- [ ] Style-aware retrieval works with current story context and does not require manual per-novel binding.
-- [ ] Beat-level style contracts are reviewed, approved, hash-guarded, and invalidated by edits.
-- [ ] Candidate generation respects style contracts while preserving fact, POV, provenance, and rewrite limits.
-- [ ] Style/source-leak audit prevents near-copy outputs and records readable findings.
-- [ ] UI supports profile build/inspect/compare/select, intensity controls, evidence inspection, and failure recovery.
-- [ ] Agent tools remain read/search/inspect oriented and cannot import, approve, or insert.
-- [ ] Full regression matrix passes:
+- [x] Advanced style profiles are stored, searchable, inspectable, and auditable.
+- [x] Multi-scale materials include scene/beat/dialogue/hook/payoff materials plus source-text-free style-evidence records, not only sentence and paragraph materials.
+- [x] Optional LLM-assisted analysis is schema-validated, source-grounded, and safe to disable.
+- [x] Style-aware retrieval works with current story context and does not require manual per-novel binding.
+- [x] Beat-level style contracts are reviewed, approved, hash-guarded, and invalidated by edits.
+- [x] Candidate generation respects style contracts while preserving fact, POV, provenance, and rewrite limits.
+- [ ] Style/source-leak audit prevents near-copy outputs and records readable findings. Current implementation covers deterministic source-leak, style-distance, selected-link style fit, candidate/source similarity, and readable report persistence; the broader generic style-quality taxonomy remains open under Task 10.
+- [x] UI supports profile build/inspect/compare/select, intensity controls, evidence inspection, and failure recovery.
+- [x] Agent tools remain read/search/inspect oriented and cannot import, approve, or insert.
+- [x] Full regression matrix passes:
 
 ```text
 npm --prefix frontend run build
