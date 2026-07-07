@@ -161,21 +161,27 @@ The current extractor is deterministic and robust, but limited:
 
 ## Task 6: Style Profile Builder and Library UI
 
-**Status:** Partially complete. The backend bridge/service boundary now supports profile build, list, detail, archive, restore, and deterministic profile comparison. Archived profiles are hidden from default profile lists and still readable when `include_archived` is requested or a known profile id is inspected. Profile comparison returns structured numeric, distribution, and categorical feature deltas without source text. The product UI and Playwright coverage remain open.
+**Status:** Complete for the first product profile-library boundary. The backend bridge/service boundary supports profile build, list, detail, archive, restore, and deterministic profile comparison. The frontend `风格画像库` surface lets users build profiles from selected corpus anchors, inspect feature/evidence metadata, compare two profiles, and archive/restore profiles without exposing source text or mutating chapter prose. Archived profiles are hidden from default profile lists and remain visible when `include_archived` is requested. Profile comparison returns structured numeric, distribution, and categorical feature deltas without source text. Broader style-assisted default workflow polish remains tracked under Tasks 12 and 14.
 
 **Description:** Add a product surface for building, inspecting, comparing, archiving, and reusing style profiles.
 
 **Acceptance criteria:**
 
-- [ ] Users can build a style profile from selected workspace corpus sources.
-- [ ] Profile detail view shows feature distributions, evidence spans, confidence, analyzer version, and license/source-trust status.
-- [ ] Users can compare two profiles and see where rhythm, dialogue, narration distance, and hook mechanics differ.
-- [ ] Archived profiles disappear from default selection but remain available for audit history.
+- [x] Users can build a style profile from selected workspace corpus sources.
+- [x] Profile detail view shows feature distributions, evidence spans, confidence, analyzer version, and license/source-trust status.
+- [x] Users can compare two profiles and see where rhythm, dialogue, narration distance, and hook mechanics differ.
+- [x] Archived profiles disappear from default selection but remain available for audit history.
 
 **Verification:**
 
-- [ ] Playwright coverage for profile build, inspect, compare, archive, and restore.
-- [ ] Bridge tests for profile CRUD and profile-source visibility filters.
+- [x] Playwright coverage for profile build, inspect, compare, archive, and restore through `npm --prefix frontend run test:reference-style`.
+- [x] Bridge tests for profile CRUD and profile-source visibility filters.
+
+**Implementation notes:**
+
+- `frontend/src/components/reference-anchor/StyleProfileLibraryPanel.tsx` is mounted under `语料库管理` and uses only the owned Photino bridge adapter methods for style profile operations.
+- The browser workflow extends `frontend/scripts/reference-anchor-mock-workflow.mjs` with style-profile mock bridge handlers and assertions for build payload policy defaults, detail inspection, comparison ids, archive/restore payloads, and no `SaveContent` calls.
+- The detail panel displays provenance ids, offsets, text hashes, analyzer source, confidence, and feature summaries, but not source text.
 
 **Dependencies:** Tasks 1-5.
 

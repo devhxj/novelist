@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:reference-anchor": "node scripts/reference-anchor-mock-workflow.mjs",
+    "test:reference-style": "node scripts/reference-anchor-mock-workflow.mjs",
     "test:app": "node scripts/app-mock-workflow.mjs --suite=smoke --target=vite",
     "test:app:full": "node scripts/app-mock-workflow.mjs --suite=full --target=vite",
     "test:app:stress": "node scripts/app-mock-workflow.mjs --suite=stress --target=vite",

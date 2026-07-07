@@ -48,6 +48,7 @@ async function main() {
     await expectVisible(page.getByRole('heading', { name: '语料库管理' }), 'corpus library management heading')
     await expectVisible(page.getByRole('heading', { name: '导入语料来源' }), 'corpus source import heading')
     await expectVisible(page.getByRole('heading', { name: '库条目' }), 'corpus library entries heading')
+    await expectVisible(page.getByRole('heading', { name: '风格画像库' }), 'style profile library heading')
     await expectVisible(page.getByRole('heading', { name: '参考写作检索' }), 'reference drafting retrieval heading')
     await page.screenshot({ path: path.join(outputDir, 'reference-anchor-01-initial.png'), fullPage: true })
 
@@ -281,6 +282,8 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectVisible(batchAnchorRow.getByText('workspace · imported · workspace_corpus'), 'bulk promoted row metadata')
   assert.equal(await batchAnchorRow.getByRole('checkbox').isChecked(), false, 'bulk promote clears processed selection')
 
+  await buildInspectArchiveRestoreAndCompareStyleProfiles(page)
+
   await page.getByRole('button', { name: '选择当前筛选' }).click()
   await expectVisible(page.getByText('已选 2 项'), 'selected all visible corpus rows count')
   await page.getByRole('button', { name: '批量归档选中工作区' }).click()
@@ -324,6 +327,56 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectVisible(page.getByText('已导入库包 2 个语料来源'), 'library pack import message')
   await expectVisible(page.getByText('库包显式标题'), 'library pack explicit title')
   await expectVisible(page.getByText('库包默认标题 2'), 'library pack derived title')
+}
+
+async function buildInspectArchiveRestoreAndCompareStyleProfiles(page) {
+  const stylePanel = page.getByTestId('reference-style-profile-library')
+  await expectVisible(stylePanel.getByRole('heading', { name: '风格画像库' }), 'style profile library heading')
+
+  const firstAnchorRow = page.getByTestId('reference-anchor-row').filter({ hasText: '雨夜动作语料库' }).first()
+  const secondAnchorRow = page.getByTestId('reference-anchor-row').filter({ hasText: '批量动作参考' }).first()
+
+  await firstAnchorRow.locator('input[type="checkbox"]').first().check()
+  await expectVisible(stylePanel.getByText(/已选 1 个来源：雨夜动作语料库/), 'style profile selected first source')
+  await stylePanel.getByLabel('风格画像标题').fill('雨夜克制画像')
+  await stylePanel.getByLabel('风格画像说明').fill('近距离 POV、克制动作和雨声压力')
+  await stylePanel.getByRole('button', { name: /^构建风格画像$/ }).click()
+  await expectVisible(stylePanel.getByText('风格画像已构建'), 'style profile built message')
+  await expectVisible(stylePanel.getByTestId('reference-style-profile-row').filter({ hasText: '雨夜克制画像' }), 'first style profile row')
+  await expectVisible(stylePanel.getByTestId('reference-style-profile-detail').getByText(/dialogue_ratio/).first(), 'first style profile numeric feature')
+  await expectVisible(stylePanel.getByTestId('reference-style-profile-detail').getByText(/证据 1/).first(), 'first style profile evidence count')
+
+  await firstAnchorRow.locator('input[type="checkbox"]').first().uncheck()
+  await secondAnchorRow.locator('input[type="checkbox"]').first().check()
+  await expectVisible(stylePanel.getByText(/已选 1 个来源：批量动作参考/), 'style profile selected second source')
+  await stylePanel.getByLabel('风格画像标题').fill('批量动作画像')
+  await stylePanel.getByLabel('风格画像说明').fill('动作后拍和中等句长')
+  await stylePanel.getByRole('button', { name: /^构建风格画像$/ }).click()
+  await expectVisible(stylePanel.getByText('风格画像已构建'), 'second style profile built message')
+  await expectVisible(stylePanel.getByTestId('reference-style-profile-row').filter({ hasText: '批量动作画像' }), 'second style profile row')
+
+  await stylePanel.getByRole('button', { name: /查看风格画像 雨夜克制画像/ }).click()
+  await expectVisible(stylePanel.getByTestId('reference-style-profile-detail').getByRole('heading', { name: '雨夜克制画像' }), 'style profile detail title')
+  await expectVisible(stylePanel.getByTestId('reference-style-profile-detail').getByText(/来源 101/), 'style profile detail provenance')
+
+  await stylePanel.getByLabel('左侧风格画像').selectOption('301')
+  await stylePanel.getByLabel('右侧风格画像').selectOption('302')
+  await stylePanel.getByRole('button', { name: /^比较$/ }).click()
+  await expectVisible(stylePanel.getByText('风格画像比较已生成'), 'style profile comparison message')
+  await expectVisible(stylePanel.getByTestId('reference-style-profile-comparison').getByText(/dialogue_ratio/), 'style profile comparison numeric delta')
+  await expectVisible(stylePanel.getByTestId('reference-style-profile-comparison').getByText(/dominant_technique/).first(), 'style profile comparison categorical delta')
+
+  await stylePanel.getByRole('button', { name: /归档风格画像 雨夜克制画像/ }).click()
+  await expectVisible(stylePanel.getByText('风格画像已归档'), 'style profile archived message')
+  await expectHidden(stylePanel.getByTestId('reference-style-profile-row').filter({ hasText: '雨夜克制画像' }), 'archived style profile hidden from default list')
+  await stylePanel.getByText('显示归档画像').click()
+  await expectVisible(stylePanel.getByTestId('reference-style-profile-row').filter({ hasText: '雨夜克制画像' }), 'archived style profile visible when included')
+  await expectVisible(stylePanel.getByTestId('reference-style-profile-row').filter({ hasText: '雨夜克制画像' }).getByText('archived'), 'archived style profile status')
+  await stylePanel.getByRole('button', { name: /恢复风格画像 雨夜克制画像/ }).click()
+  await expectVisible(stylePanel.getByText('风格画像已恢复'), 'style profile restored message')
+  await expectVisible(stylePanel.getByTestId('reference-style-profile-row').filter({ hasText: '雨夜克制画像' }).getByText('active'), 'restored style profile status')
+
+  await secondAnchorRow.locator('input[type="checkbox"]').first().uncheck()
 }
 
 async function generateReviseApproveBindAndDraft(page) {
@@ -477,6 +530,12 @@ async function verifyBridgeCalls(page) {
     'RestoreReferenceMaterials',
     'RebuildReferenceAnchor',
     'SearchReferenceMaterials',
+    'BuildReferenceStyleProfile',
+    'GetReferenceStyleProfiles',
+    'GetReferenceStyleProfile',
+    'ArchiveReferenceStyleProfile',
+    'RestoreReferenceStyleProfile',
+    'CompareReferenceStyleProfiles',
     'GenerateReferenceChapterBlueprint',
     'ReviseReferenceChapterBlueprint',
     'ReviewReferenceChapterBlueprint',
@@ -630,6 +689,36 @@ async function verifyBridgeCalls(page) {
   assert(libraryRestoreMaterialsCall, 'missing corpus material library RestoreReferenceMaterials call')
   assert.equal(libraryRestoreMaterialsCall.args[0].novel_id, 42, 'corpus material library restore payload must include novel id')
   assert.deepEqual(libraryRestoreMaterialsCall.args[0].material_ids, ['mat-001'], 'corpus material library restore payload must include selected archived material ids')
+
+  const styleBuildCalls = calls.filter((call) => call.method === 'BuildReferenceStyleProfile')
+  assert.equal(styleBuildCalls.length, 2, 'style profile workflow must build two profiles for comparison')
+  assert.equal(styleBuildCalls[0].args[0].novel_id, 42, 'style profile build payload must include novel id')
+  assert.equal(styleBuildCalls[0].args[0].title, '雨夜克制画像', 'first style profile build payload must include title')
+  assert.deepEqual(styleBuildCalls[0].args[0].anchor_ids, [101], 'first style profile build payload must use selected first anchor')
+  assert.deepEqual(styleBuildCalls[0].args[0].allowed_license_statuses, ['user_provided', 'licensed', 'public_domain'], 'style profile build payload must include license policy')
+  assert.deepEqual(styleBuildCalls[0].args[0].allowed_source_trust_levels, ['user_verified', 'imported'], 'style profile build payload must include source-trust policy')
+  assert.equal(styleBuildCalls[1].args[0].title, '批量动作画像', 'second style profile build payload must include title')
+  assert.deepEqual(styleBuildCalls[1].args[0].anchor_ids, [102], 'second style profile build payload must use selected second anchor')
+
+  const styleDetailCall = calls.find((call) => call.method === 'GetReferenceStyleProfile' && call.args[1] === 301)
+  assert(styleDetailCall, 'missing GetReferenceStyleProfile call')
+  assert.equal(styleDetailCall.args[0], 42, 'style profile detail call must include novel id')
+
+  const styleCompareCall = calls.find((call) => call.method === 'CompareReferenceStyleProfiles')
+  assert(styleCompareCall, 'missing CompareReferenceStyleProfiles call')
+  assert.deepEqual(styleCompareCall.args[0], {
+    novel_id: 42,
+    left_profile_id: 301,
+    right_profile_id: 302,
+  }, 'style profile comparison payload must include two same-novel profile ids')
+
+  const styleArchiveCall = calls.find((call) => call.method === 'ArchiveReferenceStyleProfile')
+  assert(styleArchiveCall, 'missing ArchiveReferenceStyleProfile call')
+  assert.deepEqual(styleArchiveCall.args[0], { novel_id: 42, profile_id: 301 }, 'style profile archive payload must include novel and profile id')
+
+  const styleRestoreCall = calls.find((call) => call.method === 'RestoreReferenceStyleProfile')
+  assert(styleRestoreCall, 'missing RestoreReferenceStyleProfile call')
+  assert.deepEqual(styleRestoreCall.args[0], { novel_id: 42, profile_id: 301 }, 'style profile restore payload must include novel and profile id')
 
   const startCall = calls.find((call) => call.method === 'StartReferenceOrchestrationRun')
   assert(startCall, 'missing StartReferenceOrchestrationRun call')
@@ -806,7 +895,9 @@ function installReferenceAnchorMockBridge() {
     nextAnchorId: 101,
     nextBlueprintId: 501,
     nextEventId: 1,
+    nextStyleProfileId: 301,
     anchors: [],
+    styleProfiles: [],
     blueprints: {},
     runs: [],
     events: {},
@@ -906,6 +997,12 @@ function installReferenceAnchorMockBridge() {
       case 'UpdateReferenceMaterialsTags': return updateReferenceMaterialsTags(args[0])
       case 'RebuildReferenceAnchor': return rebuildReferenceAnchor(args[1])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
+      case 'BuildReferenceStyleProfile': return buildReferenceStyleProfile(args[0])
+      case 'GetReferenceStyleProfiles': return getReferenceStyleProfiles(args[0])
+      case 'GetReferenceStyleProfile': return getReferenceStyleProfile(args[0], args[1])
+      case 'ArchiveReferenceStyleProfile': return archiveReferenceStyleProfile(args[0])
+      case 'RestoreReferenceStyleProfile': return restoreReferenceStyleProfile(args[0])
+      case 'CompareReferenceStyleProfiles': return compareReferenceStyleProfiles(args[0])
       case 'GetReferenceChapterBlueprints': return Object.values(state.blueprints).map(toBlueprintSummary)
       case 'GetReferenceChapterBlueprint': return state.blueprints[String(args[1])] ?? null
       case 'GenerateReferenceChapterBlueprint': return generateBlueprint(args[0])
@@ -1127,6 +1224,124 @@ function installReferenceAnchorMockBridge() {
     return pagedResult([1, 2, 3, 4, 5].map(material), page, size, 6)
   }
 
+  function buildReferenceStyleProfile(input) {
+    const profileId = state.nextStyleProfileId++
+    const sourceAnchors = input.anchor_ids.map((anchorId) => {
+      const anchor = state.anchors.find((item) => item.anchor_id === anchorId)
+      if (!anchor) throw new Error(`Unknown reference anchor ${anchorId}`)
+      return anchor
+    })
+    const profile = makeStyleProfile(profileId, {
+      novel_id: input.novel_id,
+      title: input.title,
+      description: input.description ?? '',
+      source_anchor_ids: input.anchor_ids,
+      source_hashes: sourceAnchors.map((anchor) => anchor.source_file_hash),
+      allowed_license_statuses: input.allowed_license_statuses ?? ['user_provided'],
+      allowed_source_trust_levels: input.allowed_source_trust_levels ?? ['user_verified'],
+      average_sentence_chars: profileId % 2 === 0 ? 24.5 : 16.25,
+      dialogue_ratio: profileId % 2 === 0 ? 0.18 : 0.42,
+      dominant_technique: profileId % 2 === 0 ? 'sensory_detail' : 'dialogue_exchange',
+    })
+    state.styleProfiles = [profile, ...state.styleProfiles]
+    return profile
+  }
+
+  function getReferenceStyleProfiles(input) {
+    return state.styleProfiles
+      .filter((profile) => input?.include_archived || profile.archived_at === null)
+      .map(toStyleProfileSummary)
+  }
+
+  function getReferenceStyleProfile(novelId, profileId) {
+    return state.styleProfiles.find((profile) => profile.novel_id === novelId && profile.profile_id === profileId) ?? null
+  }
+
+  function archiveReferenceStyleProfile(input) {
+    const profile = getMutableStyleProfile(input.novel_id, input.profile_id)
+    profile.status = 'archived'
+    profile.archived_at = now
+    profile.updated_at = now
+    return profile
+  }
+
+  function restoreReferenceStyleProfile(input) {
+    const profile = getMutableStyleProfile(input.novel_id, input.profile_id)
+    profile.status = 'active'
+    profile.archived_at = null
+    profile.updated_at = now
+    return profile
+  }
+
+  function compareReferenceStyleProfiles(input) {
+    const left = getMutableStyleProfile(input.novel_id, input.left_profile_id)
+    const right = getMutableStyleProfile(input.novel_id, input.right_profile_id)
+    const leftNumeric = numericByKey(left)
+    const rightNumeric = numericByKey(right)
+    return {
+      novel_id: input.novel_id,
+      left_profile: toStyleProfileSummary(left),
+      right_profile: toStyleProfileSummary(right),
+      numeric_differences: ['average_sentence_chars', 'dialogue_ratio'].map((featureKey) => {
+        const leftFeature = leftNumeric.get(featureKey)
+        const rightFeature = rightNumeric.get(featureKey)
+        return {
+          feature_key: featureKey,
+          unit: leftFeature?.unit ?? rightFeature?.unit ?? '',
+          left_value: leftFeature?.value ?? null,
+          right_value: rightFeature?.value ?? null,
+          absolute_delta: Math.abs((leftFeature?.value ?? 0) - (rightFeature?.value ?? 0)),
+          relative_delta: leftFeature?.value ? Math.abs((rightFeature?.value ?? 0) - leftFeature.value) / Math.abs(leftFeature.value) : null,
+          left_confidence: leftFeature?.confidence ?? null,
+          right_confidence: rightFeature?.confidence ?? null,
+        }
+      }),
+      distribution_differences: [
+        {
+          feature_key: 'sentence_length_distribution',
+          unit: 'chars',
+          buckets: [
+            { label: 'short', left_min: 0, left_max: 20, left_weight: 0.55, right_min: 0, right_max: 20, right_weight: 0.34, absolute_delta: 0.21 },
+            { label: 'medium', left_min: 21, left_max: 60, left_weight: 0.45, right_min: 21, right_max: 60, right_weight: 0.66, absolute_delta: 0.21 },
+          ],
+          left_confidence: 0.84,
+          right_confidence: 0.82,
+        },
+      ],
+      categorical_differences: [
+        {
+          feature_key: 'dominant_technique',
+          label: left.features.categorical_features[0]?.label ?? 'unknown',
+          left_weight: 0.72,
+          right_weight: null,
+          absolute_delta: 0.72,
+          left_confidence: 0.86,
+          right_confidence: null,
+        },
+        {
+          feature_key: 'dominant_technique',
+          label: right.features.categorical_features[0]?.label ?? 'unknown',
+          left_weight: null,
+          right_weight: 0.68,
+          absolute_delta: 0.68,
+          left_confidence: null,
+          right_confidence: 0.84,
+        },
+      ],
+      compared_at: now,
+    }
+  }
+
+  function getMutableStyleProfile(novelId, profileId) {
+    const profile = state.styleProfiles.find((item) => item.novel_id === novelId && item.profile_id === profileId)
+    if (!profile) throw new Error(`Unknown style profile ${profileId}`)
+    return profile
+  }
+
+  function numericByKey(profile) {
+    return new Map(profile.features.numeric_features.map((feature) => [feature.feature_key, feature]))
+  }
+
   function updateReferenceMaterialTags(input) {
     return {
       ...materialById(input.material_id),
@@ -1188,6 +1403,105 @@ function installReferenceAnchorMockBridge() {
     if (index === 1) return '把杯子推远，杯底在木桌上留下半圈水痕。'
     if (index === 6) return '雨水从伞沿断续落下，像有人在门外迟疑。'
     return `第 ${index} 条克制动作材料。`
+  }
+
+  function makeStyleProfile(profileId, overrides = {}) {
+    const evidenceId = `style-evidence-${profileId}`
+    const dialogueRatio = overrides.dialogue_ratio ?? 0.35
+    const averageSentenceChars = overrides.average_sentence_chars ?? 18.5
+    const technique = overrides.dominant_technique ?? 'dialogue_exchange'
+    return {
+      profile_id: profileId,
+      novel_id: overrides.novel_id ?? 42,
+      title: overrides.title ?? `风格画像 ${profileId}`,
+      description: overrides.description ?? '',
+      status: 'active',
+      analyzer_version: 'reference-style-deterministic-v1',
+      feature_schema_version: 'style-profile-v1',
+      analyzer_source: 'deterministic_baseline',
+      source_anchor_ids: overrides.source_anchor_ids ?? [101],
+      source_hashes: overrides.source_hashes ?? ['hash-anchor-001'],
+      allowed_license_statuses: overrides.allowed_license_statuses ?? ['user_provided', 'licensed', 'public_domain'],
+      allowed_source_trust_levels: overrides.allowed_source_trust_levels ?? ['user_verified', 'imported'],
+      aggregate_confidence: 0.87,
+      features: {
+        numeric_features: [
+          {
+            feature_key: 'dialogue_ratio',
+            value: dialogueRatio,
+            unit: 'ratio',
+            confidence: 0.86,
+            evidence_ids: [evidenceId],
+          },
+          {
+            feature_key: 'average_sentence_chars',
+            value: averageSentenceChars,
+            unit: 'chars',
+            confidence: 0.84,
+            evidence_ids: [evidenceId],
+          },
+        ],
+        distribution_features: [
+          {
+            feature_key: 'sentence_length_distribution',
+            unit: 'chars',
+            buckets: [
+              { label: 'short', min: 0, max: 20, weight: profileId % 2 === 0 ? 0.34 : 0.55 },
+              { label: 'medium', min: 21, max: 60, weight: profileId % 2 === 0 ? 0.66 : 0.45 },
+            ],
+            confidence: 0.83,
+            evidence_ids: [evidenceId],
+          },
+        ],
+        categorical_features: [
+          {
+            feature_key: 'dominant_technique',
+            label: technique,
+            weight: 0.7,
+            confidence: 0.85,
+            evidence_ids: [evidenceId],
+          },
+        ],
+      },
+      evidence_spans: [
+        {
+          evidence_id: evidenceId,
+          profile_id: profileId,
+          anchor_id: overrides.source_anchor_ids?.[0] ?? 101,
+          source_segment_id: 'seg-001',
+          material_id: 'mat-001',
+          feature_key: 'dialogue_ratio',
+          label: 'dialogue_exchange',
+          start_offset: 0,
+          end_offset: 12,
+          text_hash: 'hash-material-001',
+          confidence: 0.86,
+          analyzer_source: 'deterministic_baseline',
+        },
+      ],
+      created_at: now,
+      updated_at: now,
+      archived_at: null,
+    }
+  }
+
+  function toStyleProfileSummary(profile) {
+    return {
+      profile_id: profile.profile_id,
+      novel_id: profile.novel_id,
+      title: profile.title,
+      description: profile.description,
+      status: profile.status,
+      analyzer_version: profile.analyzer_version,
+      feature_schema_version: profile.feature_schema_version,
+      analyzer_source: profile.analyzer_source,
+      source_anchor_ids: profile.source_anchor_ids,
+      source_hashes: profile.source_hashes,
+      aggregate_confidence: profile.aggregate_confidence,
+      created_at: profile.created_at,
+      updated_at: profile.updated_at,
+      archived_at: profile.archived_at,
+    }
   }
 
   function generateBlueprint(input) {

@@ -22,6 +22,7 @@ import { useApp } from '@/hooks/useApp'
 import type { reference } from '@/lib/novelist/types'
 import { BlueprintDetail } from './BlueprintDetail'
 import { OrchestrationPanel } from './OrchestrationPanel'
+import { StyleProfileLibraryPanel } from './StyleProfileLibraryPanel'
 import {
   EMPTY_REVISION_FORM,
   addListChange,
@@ -2229,6 +2230,12 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                 <p className="mt-3 text-[11px] text-muted-foreground">输入检索条件后查看可访问材料；默认不需要先选择库条目。</p>
               )}
             </div>
+
+            <StyleProfileLibraryPanel
+              novelId={novelId}
+              anchors={anchors}
+              selectedAnchorIds={selectedAnchorIds}
+            />
           </section>
 
           <section className="min-w-0 space-y-4" aria-labelledby="reference-retrieval-heading">
