@@ -59,6 +59,22 @@ public sealed class ReferenceSourceLeakAuditorTests
     }
 
     [Fact]
+    public void AnalyzeFlagsHighCandidateSourceSimilarityWithoutLeakingText()
+    {
+        const string copiedShape = "雨声压低了整条街的呼吸，林岚在门口停住，指尖慢慢发紧";
+        var result = ReferenceSourceLeakAuditor.Analyze(
+            "雨声压低了整条街的呼吸，林岚在门口停住，指尖慢慢发紧，仍把钥匙压回掌心，灯影从窗边退开，杯沿留着一圈冷水。",
+            "雨声放低了整片街的呼吸，林岚于门前停住，指尖缓缓发紧，仍将钥匙压回掌中，灯影从窗侧退开，杯沿留下一圈凉水。",
+            ReferenceRewriteLevels.L2);
+
+        Assert.True(result.ShouldFail);
+        Assert.True(result.CandidateSourceSimilarityRatio >= 0.72);
+        Assert.True(result.LongestExactPhraseChars < copiedShape.Length);
+        Assert.Contains(result.Findings, finding => finding.Contains("candidate/source similarity", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Findings, finding => finding.Contains(copiedShape, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void AnalyzeUsesStricterThresholdsForStrongImitation()
     {
         const string source = "雨声压低了整条街的呼吸，林岚在门口停住，指节慢慢发紧，心里一紧。";

@@ -199,6 +199,41 @@ public sealed class ReferenceAnchoredDraftAuditorTests
     }
 
     [Fact]
+    public void BuildDraftAuditFailsForHighCandidateSourceSimilarityWithoutLeakingSourceText()
+    {
+        const string sourceText = "雨声压低了整条街的呼吸，林岚在门口停住，指尖慢慢发紧，仍把钥匙压回掌心，灯影从窗边退开，杯沿留着一圈冷水。";
+        const string copiedShape = "雨声压低了整条街的呼吸，林岚在门口停住，指尖慢慢发紧";
+        const string candidateText = "雨声放低了整片街的呼吸，林岚于门前停住，指尖缓缓发紧，仍将钥匙压回掌中，灯影从窗侧退开，杯沿留下一圈凉水。";
+        var blueprint = Blueprint(beat => beat);
+        var candidate = Candidate(blueprint, candidateText) with
+        {
+            RewriteLevel = ReferenceRewriteLevels.L2,
+            AuditStatus = "passed"
+        };
+
+        var audit = ReferenceAnchoredDraftAuditor.BuildDraftAudit(
+            blueprint,
+            [candidate],
+            DateTimeOffset.UnixEpoch,
+            new Dictionary<string, ReferenceBlueprintMaterialLinkPayload>(StringComparer.Ordinal)
+            {
+                [blueprint.Beats[0].BeatId] = SelectedLink(blueprint, candidate, ReferenceRewriteLevels.L2)
+            },
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [candidate.MaterialId] = sourceText
+            });
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("candidate/source similarity", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(audit.ReadableReport);
+        var report = audit.ReadableReport!;
+        Assert.Contains(report.Findings, finding => finding.Message.Contains("candidate/source similarity", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(report.Findings, finding => finding.Message.Contains(copiedShape, StringComparison.Ordinal));
+        Assert.DoesNotContain(report.Findings, finding => finding.RequiredAction.Contains(copiedShape, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BuildDraftAuditUsesStrongStyleContractSourceLeakThresholds()
     {
         const string sourceText = "雨声压低了整条街的呼吸，林岚在门口停住，指节慢慢发紧，心里一紧。";

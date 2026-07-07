@@ -7,6 +7,7 @@ internal static class ReferenceSourceLeakAuditor
     private const int NGramSize = 4;
     private const int MinCandidateChars = 12;
     private const int SourceSpanMinChars = 18;
+    private const int MaxEditSimilarityChars = 2_000;
 
     public static ReferenceSourceLeakAuditResult Analyze(
         string sourceText,
@@ -61,6 +62,8 @@ internal static class ReferenceSourceLeakAuditor
         var longestSourceSpanRatio = longestSourceSpanChars / (double)candidate.Length;
         var longestExactPhraseChars = LongestCommonSubstringLength(source, candidate);
         var longestExactPhraseRatio = longestExactPhraseChars / (double)candidate.Length;
+        var candidateSourceSimilarity = CandidateSourceSimilarityRatio(source, candidate);
+        var lengthRatio = Math.Min(source.Length, candidate.Length) / (double)Math.Max(source.Length, candidate.Length);
         var findings = new List<string>();
 
         if (longestExactPhraseChars >= thresholds.ExactPhraseMinChars)
@@ -88,6 +91,13 @@ internal static class ReferenceSourceLeakAuditor
             findings.Add($"{thresholds.Label}source coverage {coverage:P0}: candidate is mostly covered by source phrasing.");
         }
 
+        if (candidateSourceSimilarity >= thresholds.CandidateSourceSimilarityRatio &&
+            lengthRatio >= thresholds.CandidateSourceSimilarityMinLengthRatio)
+        {
+            findings.Add(
+                $"{thresholds.Label}candidate/source similarity {candidateSourceSimilarity:P0}: normalized edit similarity exceeds threshold {thresholds.CandidateSourceSimilarityRatio:P0}.");
+        }
+
         return findings.Count == 0
             ? new ReferenceSourceLeakAuditResult(
                 ngramOverlap,
@@ -96,6 +106,7 @@ internal static class ReferenceSourceLeakAuditor
                 longestSourceSpanChars,
                 longestExactPhraseRatio,
                 longestExactPhraseChars,
+                Math.Round(candidateSourceSimilarity, 4),
                 [],
                 ShouldFail: false)
             : new ReferenceSourceLeakAuditResult(
@@ -105,6 +116,7 @@ internal static class ReferenceSourceLeakAuditor
                 longestSourceSpanChars,
                 Math.Round(longestExactPhraseRatio, 4),
                 longestExactPhraseChars,
+                Math.Round(candidateSourceSimilarity, 4),
                 findings,
                 ShouldFail: true);
     }
@@ -221,6 +233,58 @@ internal static class ReferenceSourceLeakAuditor
         return best;
     }
 
+    private static double CandidateSourceSimilarityRatio(string source, string candidate)
+    {
+        if (source.Length == 0 && candidate.Length == 0)
+        {
+            return 1;
+        }
+
+        if (source.Length == 0 || candidate.Length == 0)
+        {
+            return 0;
+        }
+
+        if (Math.Max(source.Length, candidate.Length) > MaxEditSimilarityChars)
+        {
+            return 0;
+        }
+
+        var distance = LevenshteinDistance(source, candidate);
+        return 1 - distance / (double)Math.Max(source.Length, candidate.Length);
+    }
+
+    private static int LevenshteinDistance(string first, string second)
+    {
+        if (first.Length < second.Length)
+        {
+            (first, second) = (second, first);
+        }
+
+        var previous = new int[second.Length + 1];
+        var current = new int[second.Length + 1];
+        for (var index = 0; index <= second.Length; index++)
+        {
+            previous[index] = index;
+        }
+
+        for (var firstIndex = 1; firstIndex <= first.Length; firstIndex++)
+        {
+            current[0] = firstIndex;
+            for (var secondIndex = 1; secondIndex <= second.Length; secondIndex++)
+            {
+                var cost = first[firstIndex - 1] == second[secondIndex - 1] ? 0 : 1;
+                current[secondIndex] = Math.Min(
+                    Math.Min(current[secondIndex - 1] + 1, previous[secondIndex] + 1),
+                    previous[secondIndex - 1] + cost);
+            }
+
+            (previous, current) = (current, previous);
+        }
+
+        return previous[second.Length];
+    }
+
     private static string Normalize(string value)
     {
         return new string((value ?? string.Empty)
@@ -235,7 +299,9 @@ internal static class ReferenceSourceLeakAuditor
         double SourceSpanRatio,
         double NGramOverlapRatio,
         double CoverageRatio,
-        double HighCoverageRatio)
+        double HighCoverageRatio,
+        double CandidateSourceSimilarityRatio,
+        double CandidateSourceSimilarityMinLengthRatio)
     {
         public static SourceLeakThresholds Default { get; } = new(
             string.Empty,
@@ -244,7 +310,9 @@ internal static class ReferenceSourceLeakAuditor
             SourceSpanRatio: 0.45,
             NGramOverlapRatio: 0.55,
             CoverageRatio: 0.55,
-            HighCoverageRatio: 0.82);
+            HighCoverageRatio: 0.82,
+            CandidateSourceSimilarityRatio: 0.72,
+            CandidateSourceSimilarityMinLengthRatio: 0.55);
 
         public static SourceLeakThresholds Strong { get; } = new(
             "strong style ",
@@ -253,7 +321,9 @@ internal static class ReferenceSourceLeakAuditor
             SourceSpanRatio: 0.35,
             NGramOverlapRatio: 0.30,
             CoverageRatio: 0.60,
-            HighCoverageRatio: 0.70);
+            HighCoverageRatio: 0.70,
+            CandidateSourceSimilarityRatio: 0.62,
+            CandidateSourceSimilarityMinLengthRatio: 0.55);
     }
 
     private sealed class SuffixAutomatonState
@@ -273,10 +343,12 @@ internal sealed record ReferenceSourceLeakAuditResult(
     int LongestSourceSpanChars,
     double LongestExactPhraseRatio,
     int LongestExactPhraseChars,
+    double CandidateSourceSimilarityRatio,
     IReadOnlyList<string> Findings,
     bool ShouldFail)
 {
     public static ReferenceSourceLeakAuditResult Empty { get; } = new(
+        0,
         0,
         0,
         0,

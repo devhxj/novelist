@@ -3087,6 +3087,51 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AuditCandidateFailsHighCandidateSourceSimilarityWithoutLeakingSourceText()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("整体相似度审计测试", "", ""), CancellationToken.None);
+        const string sourceText = "雨声压低了整条街的呼吸，林岚在门口停住，指尖慢慢发紧，仍把钥匙压回掌心，灯影从窗边退开，杯沿留着一圈冷水。";
+        const string copiedShape = "雨声压低了整条街的呼吸，林岚在门口停住，指尖慢慢发紧";
+        const string candidateText = "雨声放低了整片街的呼吸，林岚于门前停住，指尖缓缓发紧，仍将钥匙压回掌中，灯影从窗侧退开，杯沿留下一圈凉水。";
+        var sourcePath = CreateSourceFile("candidate-source-similarity.md", sourceText);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "整体相似度参考", null, sourcePath, "text", "user_provided"),
+            CancellationToken.None);
+        var materials = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "林岚",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        var material = Assert.Single(materials.Items);
+
+        var audit = await service.AuditCandidateAsync(
+            new AuditReferenceReusePayload(
+                novel.Id,
+                material.MaterialId,
+                candidateText,
+                ReferenceRewriteLevels.L3,
+                SceneFacts: ["钥匙"]),
+            CancellationToken.None);
+
+        Assert.Equal("failed", audit.Status);
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("source-leak", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(audit.RequiredFixes, item => item.Contains("candidate/source similarity", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(audit.RequiredFixes, item => item.Contains(copiedShape, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task AuditCandidateFailsL4EvenWhenMaximumAllowsL4()
     {
         var options = CreateOptions();
