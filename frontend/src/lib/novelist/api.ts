@@ -140,6 +140,7 @@ export interface NovelistAppApi {
   GetReferenceOrchestrationRun: AppMethod<[number, string], reference.OrchestrationRun | null>
   GetReferenceOrchestrationRunEvents: AppMethod<[number, string], reference.OrchestrationRunEvent[]>
   GetReferenceOrchestrationRuns: AppMethod<[number, number | null], reference.OrchestrationRun[]>
+  GetReferenceStyleAuditFindings: AppMethod<[reference.GetStyleAuditFindingsInput], reference.StyleAuditFinding[]>
   GetReferenceStyleProfile: AppMethod<[number, number], reference.StyleProfile | null>
   GetReferenceStyleProfiles: AppMethod<[reference.GetStyleProfilesInput], reference.StyleProfileSummary[]>
   GetReferenceUserFeedback: AppMethod<[reference.GetUserFeedbackInput], reference.UserFeedback[]>
@@ -297,6 +298,7 @@ export const appApi: NovelistAppApi = {
   GetReferenceOrchestrationRun: appMethod<NovelistAppApi['GetReferenceOrchestrationRun']>('GetReferenceOrchestrationRun'),
   GetReferenceOrchestrationRunEvents: appMethod<NovelistAppApi['GetReferenceOrchestrationRunEvents']>('GetReferenceOrchestrationRunEvents'),
   GetReferenceOrchestrationRuns: appMethod<NovelistAppApi['GetReferenceOrchestrationRuns']>('GetReferenceOrchestrationRuns'),
+  GetReferenceStyleAuditFindings: appMethod<NovelistAppApi['GetReferenceStyleAuditFindings']>('GetReferenceStyleAuditFindings'),
   GetReferenceStyleProfile: appMethod<NovelistAppApi['GetReferenceStyleProfile']>('GetReferenceStyleProfile'),
   GetReferenceStyleProfiles: appMethod<NovelistAppApi['GetReferenceStyleProfiles']>('GetReferenceStyleProfiles'),
   GetReferenceUserFeedback: appMethod<NovelistAppApi['GetReferenceUserFeedback']>('GetReferenceUserFeedback'),

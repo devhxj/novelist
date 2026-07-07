@@ -1347,6 +1347,53 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void ReferenceStyleAuditFindingPayloadUsesStableSnakeCaseWithoutTextFields()
+    {
+        var input = new GetReferenceStyleAuditFindingsPayload(
+            NovelId: 42,
+            BlueprintId: 501,
+            CandidateIds: ["candidate-1"],
+            RiskTypes: ["source_leak", "style_distance"],
+            Limit: 25);
+        var finding = new ReferenceStyleAuditFindingPayload(
+            AuditId: "draft-audit-1",
+            BlueprintId: 501,
+            Status: "failed",
+            RewriteLevel: ReferenceRewriteLevels.L2,
+            CandidateIds: ["candidate-1"],
+            RiskType: "source_leak",
+            Category: "required_fix",
+            Severity: "action",
+            Message: "Source-leak risk for candidate candidate-1: longest exact shared phrase length 20 exceeded threshold.",
+            RequiredAction: "Resolve source-leak risk before insertion.",
+            AuditedAt: DateTimeOffset.Parse("2026-07-05T00:00:00Z"));
+
+        var inputJson = JsonSerializer.Serialize(input, BridgeJson.SerializerOptions);
+        using var inputDocument = JsonDocument.Parse(inputJson);
+        var inputRoot = inputDocument.RootElement;
+        Assert.Equal(42, inputRoot.GetProperty("novel_id").GetInt64());
+        Assert.Equal(501, inputRoot.GetProperty("blueprint_id").GetInt64());
+        Assert.Equal("candidate-1", inputRoot.GetProperty("candidate_ids")[0].GetString());
+        Assert.Equal("source_leak", inputRoot.GetProperty("risk_types")[0].GetString());
+        Assert.Equal("style_distance", inputRoot.GetProperty("risk_types")[1].GetString());
+        Assert.Equal(25, inputRoot.GetProperty("limit").GetInt32());
+
+        var findingJson = JsonSerializer.Serialize(finding, BridgeJson.SerializerOptions);
+        using var findingDocument = JsonDocument.Parse(findingJson);
+        var root = findingDocument.RootElement;
+        Assert.Equal("draft-audit-1", root.GetProperty("audit_id").GetString());
+        Assert.Equal(501, root.GetProperty("blueprint_id").GetInt64());
+        Assert.Equal("source_leak", root.GetProperty("risk_type").GetString());
+        Assert.Equal("candidate-1", root.GetProperty("candidate_ids")[0].GetString());
+        Assert.Equal("Resolve source-leak risk before insertion.", root.GetProperty("required_action").GetString());
+        Assert.False(root.TryGetProperty("candidate_text", out _));
+        Assert.False(root.TryGetProperty("source_text", out _));
+        Assert.False(root.TryGetProperty("prompt", out _));
+        Assert.False(root.TryGetProperty("path", out _));
+        Assert.False(root.TryGetProperty("content", out _));
+    }
+
+    [Fact]
     public void CompatibilityRegistryIncludesReferenceAnchorMethods()
     {
         string[] expected =
@@ -1380,6 +1427,7 @@ public sealed class ReferenceAnchorContractTests
             "GenerateReferenceAnchoredDraft",
             "AuditReferenceAnchoredDraft",
             "GetReferenceAnchoredDraftAudits",
+            "GetReferenceStyleAuditFindings",
             "ArchiveReferenceStyleProfile",
             "BuildReferenceStyleProfile",
             "CompareReferenceStyleProfiles",

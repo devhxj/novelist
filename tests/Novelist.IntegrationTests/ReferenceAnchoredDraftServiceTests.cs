@@ -2449,6 +2449,29 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             audit.RequiredFixes,
             item => item.Contains("n-gram", StringComparison.OrdinalIgnoreCase) ||
                 item.Contains("source-span", StringComparison.OrdinalIgnoreCase));
+
+        var findings = await service.GetStyleAuditFindingsAsync(
+            new GetReferenceStyleAuditFindingsPayload(
+                novel.Id,
+                blueprint.BlueprintId,
+                [candidate.CandidateId],
+                ["source_leak"],
+                10),
+            CancellationToken.None);
+
+        Assert.NotEmpty(findings);
+        Assert.All(findings, finding =>
+        {
+            Assert.Equal(audit.AuditId, finding.AuditId);
+            Assert.Equal("source_leak", finding.RiskType);
+            Assert.Equal([candidate.CandidateId], finding.CandidateIds);
+            var findingJson = JsonSerializer.Serialize(finding, BridgeJson.SerializerOptions);
+            Assert.DoesNotContain(sourceText, findingJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("candidate_text", findingJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("source_text", findingJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("prompt", findingJson, StringComparison.OrdinalIgnoreCase);
+        });
+        Assert.Contains(findings, finding => finding.Message.Contains("source-leak", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -2598,6 +2621,29 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.Equal("failed", audit.Status);
         Assert.Contains(audit.RequiredFixes, item => item.Contains("style-distance", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(audit.RequiredFixes, item => item.Contains("dialogue_ratio", StringComparison.OrdinalIgnoreCase));
+
+        var findings = await service.GetStyleAuditFindingsAsync(
+            new GetReferenceStyleAuditFindingsPayload(
+                novel.Id,
+                approved.BlueprintId,
+                [candidate.CandidateId],
+                ["style_distance"],
+                10),
+            CancellationToken.None);
+
+        Assert.NotEmpty(findings);
+        Assert.All(findings, finding =>
+        {
+            Assert.Equal(audit.AuditId, finding.AuditId);
+            Assert.Equal("style_distance", finding.RiskType);
+            Assert.Equal([candidate.CandidateId], finding.CandidateIds);
+            var findingJson = JsonSerializer.Serialize(finding, BridgeJson.SerializerOptions);
+            Assert.DoesNotContain(candidate.Text, findingJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("candidate_text", findingJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("source_text", findingJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("prompt", findingJson, StringComparison.OrdinalIgnoreCase);
+        });
+        Assert.Contains(findings, finding => finding.Message.Contains("dialogue_ratio", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

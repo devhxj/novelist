@@ -72,6 +72,7 @@ public static class BridgeCompatibilityAppMethods
         "GetReferenceOrchestrationRun",
         "GetReferenceOrchestrationRunEvents",
         "GetReferenceOrchestrationRuns",
+        "GetReferenceStyleAuditFindings",
         "GetReferenceStyleProfile",
         "GetReferenceStyleProfiles",
         "GetReferenceUserFeedback",

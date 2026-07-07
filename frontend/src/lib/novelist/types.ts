@@ -1092,6 +1092,28 @@ export namespace reference {
     limit?: number
   }
 
+  export interface GetStyleAuditFindingsInput {
+    novel_id: number
+    blueprint_id: number
+    candidate_ids?: string[] | null
+    risk_types?: string[] | null
+    limit?: number
+  }
+
+  export interface StyleAuditFinding {
+    audit_id: string
+    blueprint_id: number
+    status: string
+    rewrite_level: string
+    candidate_ids: string[]
+    risk_type: string
+    category: string
+    severity: string
+    message: string
+    required_action: string
+    audited_at: Timestamp
+  }
+
   export interface AnchoredDraftAudit {
     audit_id: string
     blueprint_id: number

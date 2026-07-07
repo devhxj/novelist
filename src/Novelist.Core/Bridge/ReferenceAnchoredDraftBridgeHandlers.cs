@@ -66,6 +66,11 @@ public static class ReferenceAnchoredDraftBridgeHandlers
                 ReadObjectArg<GetReferenceAnchoredDraftAuditsPayload>(context.Payload, 0, "input"),
                 cancellationToken));
 
+        dispatcher.Register("GetReferenceStyleAuditFindings", async (context, cancellationToken) =>
+            await service.GetStyleAuditFindingsAsync(
+                ReadObjectArg<GetReferenceStyleAuditFindingsPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
         dispatcher.Register("StartReferenceOrchestrationRun", async (context, cancellationToken) =>
             await service.StartOrchestrationRunAsync(
                 ReadObjectArg<StartReferenceOrchestrationRunPayload>(context.Payload, 0, "input"),

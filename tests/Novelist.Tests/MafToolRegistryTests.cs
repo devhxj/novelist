@@ -204,6 +204,7 @@ public sealed class MafToolRegistryTests
         Assert.Contains("generate_reference_chapter_blueprint", draftToolNames);
         Assert.Contains("generate_reference_anchored_draft", draftToolNames);
         Assert.Contains("get_reference_draft_audits", draftToolNames);
+        Assert.Contains("get_reference_style_audit_findings", draftToolNames);
 
         var withOnlyStyleProfiles = new NovelistMafToolRegistry(
             new RecordingStoryMemorySearchService(),
@@ -261,6 +262,7 @@ public sealed class MafToolRegistryTests
         Assert.Contains("generate_reference_anchored_draft", names);
         Assert.Contains("audit_reference_anchored_draft", names);
         Assert.Contains("get_reference_draft_audits", names);
+        Assert.Contains("get_reference_style_audit_findings", names);
         Assert.Contains("start_reference_orchestration_run", names);
         Assert.Contains("get_reference_orchestration_runs", names);
         Assert.Contains("get_reference_orchestration_run", names);
@@ -320,6 +322,21 @@ public sealed class MafToolRegistryTests
         Assert.False(getDraftAuditsProperties.TryGetProperty("source_text", out _));
         Assert.False(getDraftAuditsProperties.TryGetProperty("prompt", out _));
         Assert.False(getDraftAuditsProperties.TryGetProperty("path", out _));
+
+        var getStyleAuditFindings = tools.Single(tool => tool.Name == "get_reference_style_audit_findings");
+        AssertToolDescriptionContains(getStyleAuditFindings, "只读", "style/source-leak", "不返回候选正文", "不返回源文本", "不能批准", "不能写章节");
+        Assert.True(getStyleAuditFindings.JsonSchema.TryGetProperty("properties", out var getStyleAuditProperties));
+        Assert.True(getStyleAuditProperties.TryGetProperty("blueprint_id", out _));
+        Assert.True(getStyleAuditProperties.TryGetProperty("candidate_ids", out _));
+        Assert.True(getStyleAuditProperties.TryGetProperty("risk_types", out _));
+        Assert.True(getStyleAuditProperties.TryGetProperty("limit", out _));
+        Assert.False(getStyleAuditProperties.TryGetProperty("novel_id", out _));
+        Assert.False(getStyleAuditProperties.TryGetProperty("content", out _));
+        Assert.False(getStyleAuditProperties.TryGetProperty("text", out _));
+        Assert.False(getStyleAuditProperties.TryGetProperty("candidate_text", out _));
+        Assert.False(getStyleAuditProperties.TryGetProperty("source_text", out _));
+        Assert.False(getStyleAuditProperties.TryGetProperty("prompt", out _));
+        Assert.False(getStyleAuditProperties.TryGetProperty("path", out _));
 
         var searchMaterials = tools.Single(tool => tool.Name == "search_reference_materials");
         AssertToolDescriptionContains(searchMaterials, "story context", "license", "score_components", "不直接写章节");
@@ -686,6 +703,53 @@ public sealed class MafToolRegistryTests
         Assert.False(audit.TryGetProperty("prompt", out _));
         Assert.False(audit.TryGetProperty("content", out _));
         Assert.False(audit.TryGetProperty("path", out _));
+    }
+
+    [Fact]
+    public async Task ReferenceStyleAuditInspectionToolInjectsNovelContextAndReturnsOnlyStyleFindings()
+    {
+        var drafts = new RecordingReferenceAnchoredDraftService();
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors: null,
+            referenceDrafts: drafts));
+
+        var result = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 1),
+            new ChatToolCall(
+                "call_reference_get_style_audit_findings",
+                "get_reference_style_audit_findings",
+                """{"blueprint_id":501,"candidate_ids":["candidate-1"],"risk_types":["source_leak"],"limit":2}"""),
+            CancellationToken.None);
+
+        Assert.True(result.Success, result.Error);
+        Assert.NotNull(drafts.LastGetStyleAuditFindings);
+        Assert.Equal(23, drafts.LastGetStyleAuditFindings.NovelId);
+        Assert.Equal(501, drafts.LastGetStyleAuditFindings.BlueprintId);
+        Assert.Equal(["candidate-1"], drafts.LastGetStyleAuditFindings.CandidateIds);
+        Assert.Equal(["source_leak"], drafts.LastGetStyleAuditFindings.RiskTypes);
+        Assert.Equal(2, drafts.LastGetStyleAuditFindings.Limit);
+
+        var findings = result.Data!.Value.EnumerateArray().ToArray();
+        var finding = Assert.Single(findings);
+        Assert.Equal("draft-audit-1", finding.GetProperty("audit_id").GetString());
+        Assert.Equal("source_leak", finding.GetProperty("risk_type").GetString());
+        Assert.Equal("candidate-1", finding.GetProperty("candidate_ids")[0].GetString());
+        Assert.Contains("Source-leak risk", finding.GetProperty("message").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(finding.TryGetProperty("candidate_text", out _));
+        Assert.False(finding.TryGetProperty("source_text", out _));
+        Assert.False(finding.TryGetProperty("prompt", out _));
+        Assert.False(finding.TryGetProperty("content", out _));
+        Assert.False(finding.TryGetProperty("path", out _));
     }
 
     [Fact]
@@ -1536,6 +1600,8 @@ public sealed class MafToolRegistryTests
 
         public GetReferenceAnchoredDraftAuditsPayload? LastGetAudits { get; private set; }
 
+        public GetReferenceStyleAuditFindingsPayload? LastGetStyleAuditFindings { get; private set; }
+
         public StartReferenceOrchestrationRunPayload? LastStart { get; private set; }
 
         public long LastGetEventsNovelId { get; private set; }
@@ -1709,6 +1775,29 @@ public sealed class MafToolRegistryTests
                         ]))
             ];
             return ValueTask.FromResult(audits);
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceStyleAuditFindingPayload>> GetStyleAuditFindingsAsync(
+            GetReferenceStyleAuditFindingsPayload input,
+            CancellationToken cancellationToken)
+        {
+            LastGetStyleAuditFindings = input;
+            IReadOnlyList<ReferenceStyleAuditFindingPayload> findings =
+            [
+                new ReferenceStyleAuditFindingPayload(
+                    "draft-audit-1",
+                    input.BlueprintId,
+                    "failed",
+                    ReferenceRewriteLevels.L2,
+                    ["candidate-1"],
+                    "source_leak",
+                    "required_fix",
+                    "action",
+                    "Source-leak risk for candidate candidate-1: longest exact shared phrase length 20 exceeded threshold.",
+                    "Resolve source-leak risk before insertion.",
+                    DateTimeOffset.UtcNow)
+            ];
+            return ValueTask.FromResult(findings);
         }
 
         public ValueTask<ReferenceOrchestrationRunPayload> StartOrchestrationRunAsync(

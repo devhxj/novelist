@@ -16,6 +16,9 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
     private const long WorkspaceCorpusNovelId = 0;
     private const int DefaultDraftAuditLimit = 20;
     private const int MaxDraftAuditLimit = 100;
+    private static readonly HashSet<string> DefaultStyleAuditRiskTypes = new(
+        ["source_leak", "style_distance", "style_fit"],
+        StringComparer.Ordinal);
     private static readonly HashSet<string> AllowedStyleImitationIntensities = new(ReferenceStyleImitationIntensities.All, StringComparer.Ordinal);
     private const string ProseLikePlanNotice = "provided source text appears to be final prose; convert it into structured causality, emotion, POV, and prose duties before drafting";
     private static readonly JsonSerializerOptions JsonOptions = BridgeJson.SerializerOptions;
@@ -650,6 +653,45 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
                 requestedLimit,
                 cancellationToken);
             return audits;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<IReadOnlyList<ReferenceStyleAuditFindingPayload>> GetStyleAuditFindingsAsync(
+        GetReferenceStyleAuditFindingsPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateNovelId(input.NovelId);
+        ValidateBlueprintId(input.BlueprintId);
+        var blueprint = await GetChapterBlueprintAsync(input.NovelId, input.BlueprintId, cancellationToken)
+            ?? throw new ArgumentException("Blueprint does not exist.", nameof(input));
+        var candidateIds = NormalizeList(input.CandidateIds);
+        var riskTypes = NormalizeStyleAuditRiskTypes(input.RiskTypes);
+        var requestedLimit = Math.Clamp(
+            input.Limit <= 0 ? DefaultDraftAuditLimit : input.Limit,
+            1,
+            MaxDraftAuditLimit);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var audits = await ReadDraftAuditsAsync(
+                connection,
+                blueprint.BlueprintId,
+                candidateIds,
+                requestedLimit,
+                cancellationToken);
+            return ExtractStyleAuditFindings(audits, riskTypes)
+                .Take(requestedLimit)
+                .ToArray();
         }
         finally
         {
@@ -2821,6 +2863,86 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         }
 
         return audits;
+    }
+
+    private static IReadOnlyList<ReferenceStyleAuditFindingPayload> ExtractStyleAuditFindings(
+        IReadOnlyList<ReferenceAnchoredDraftAuditPayload> audits,
+        IReadOnlySet<string> riskTypes)
+    {
+        var findings = new List<ReferenceStyleAuditFindingPayload>();
+        foreach (var audit in audits)
+        {
+            var report = audit.ReadableReport ?? BuildFallbackReadableDraftAuditReport(audit);
+            foreach (var finding in report.Findings)
+            {
+                var riskType = ClassifyStyleAuditRisk(finding);
+                if (riskType is null || !riskTypes.Contains(riskType))
+                {
+                    continue;
+                }
+
+                findings.Add(new ReferenceStyleAuditFindingPayload(
+                    audit.AuditId,
+                    audit.BlueprintId,
+                    audit.Status,
+                    audit.RewriteLevel,
+                    finding.CandidateIds.Count > 0 ? finding.CandidateIds : audit.CandidateIds ?? [],
+                    riskType,
+                    finding.Category,
+                    finding.Severity,
+                    finding.Message,
+                    finding.RequiredAction,
+                    audit.AuditedAt));
+            }
+        }
+
+        return findings;
+    }
+
+    private static string? ClassifyStyleAuditRisk(ReferenceDraftAuditReadableFindingPayload finding)
+    {
+        var text = string.Join(
+            " ",
+            finding.Category ?? string.Empty,
+            finding.Message ?? string.Empty,
+            finding.RequiredAction ?? string.Empty);
+        if (text.Contains("source-leak", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("source leak", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("exact shared phrase", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("n-gram", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("source-span", StringComparison.OrdinalIgnoreCase))
+        {
+            return "source_leak";
+        }
+
+        if (text.Contains("style-distance", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("style distance", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("violates style contract", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("tolerance", StringComparison.OrdinalIgnoreCase))
+        {
+            return "style_distance";
+        }
+
+        if (text.Contains("style_fit", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("style fit", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("min_style_fit", StringComparison.OrdinalIgnoreCase))
+        {
+            return "style_fit";
+        }
+
+        return null;
+    }
+
+    private static IReadOnlySet<string> NormalizeStyleAuditRiskTypes(IReadOnlyList<string>? values)
+    {
+        var normalized = NormalizeList(values)
+            .Select(value => value.Replace('-', '_').ToLowerInvariant())
+            .Where(value => DefaultStyleAuditRiskTypes.Contains(value))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return normalized.Length == 0
+            ? DefaultStyleAuditRiskTypes
+            : new HashSet<string>(normalized, StringComparer.Ordinal);
     }
 
     private static async ValueTask<IReadOnlyList<ReferenceDraftParagraphCandidatePayload>> ReadDraftCandidatesAsync(

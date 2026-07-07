@@ -418,6 +418,32 @@ public sealed record GetReferenceAnchoredDraftAuditsPayload(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     int Limit = 0);
 
+public sealed record GetReferenceStyleAuditFindingsPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("candidate_ids")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? CandidateIds = null,
+    [property: JsonPropertyName("risk_types")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? RiskTypes = null,
+    [property: JsonPropertyName("limit")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    int Limit = 0);
+
+public sealed record ReferenceStyleAuditFindingPayload(
+    [property: JsonPropertyName("audit_id")] string AuditId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("rewrite_level")] string RewriteLevel,
+    [property: JsonPropertyName("candidate_ids")] IReadOnlyList<string> CandidateIds,
+    [property: JsonPropertyName("risk_type")] string RiskType,
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("severity")] string Severity,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("required_action")] string RequiredAction,
+    [property: JsonPropertyName("audited_at")] DateTimeOffset AuditedAt);
+
 public sealed record ReferenceAnchoredDraftAuditPayload(
     [property: JsonPropertyName("audit_id")] string AuditId,
     [property: JsonPropertyName("blueprint_id")] long BlueprintId,

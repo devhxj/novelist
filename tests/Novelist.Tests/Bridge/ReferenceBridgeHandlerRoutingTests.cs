@@ -179,6 +179,12 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         await AssertOkAsync(dispatcher, "GenerateReferenceAnchoredDraft", new GenerateReferenceAnchoredDraftPayload(42, 501, ["beat-1", "beat-2"]));
         await AssertOkAsync(dispatcher, "AuditReferenceAnchoredDraft", new AuditReferenceAnchoredDraftPayload(42, 501, ["candidate-1"]));
         await AssertOkAsync(dispatcher, "GetReferenceAnchoredDraftAudits", new GetReferenceAnchoredDraftAuditsPayload(42, 501, ["candidate-1"], 10));
+        await AssertOkAsync(dispatcher, "GetReferenceStyleAuditFindings", new GetReferenceStyleAuditFindingsPayload(
+            42,
+            501,
+            ["candidate-1"],
+            ["source_leak"],
+            10));
         await AssertOkAsync(dispatcher, "StartReferenceOrchestrationRun", new StartReferenceOrchestrationRunPayload(
             42,
             7,
@@ -213,6 +219,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "GenerateDraftFromBlueprint:42:501:beat-1,beat-2",
                 "AuditDraftAgainstBlueprint:42:501:candidate-1",
                 "GetDraftAudits:42:501:candidate-1:10",
+                "GetStyleAuditFindings:42:501:candidate-1:source_leak:10",
                 "StartOrchestrationRun:42:7:tighten the reveal:known clue:culprit identity:<null>:story_context:3:user_provided:99::<false>",
                 "GetOrchestrationRuns:42:7",
                 "GetOrchestrationRun:42:run-1",
@@ -678,6 +685,16 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             Calls.Add($"GetDraftAudits:{input.NovelId}:{input.BlueprintId}:{string.Join(',', input.CandidateIds ?? [])}:{input.Limit}");
             IReadOnlyList<ReferenceAnchoredDraftAuditPayload> audits = [];
             return ValueTask.FromResult(audits);
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceStyleAuditFindingPayload>> GetStyleAuditFindingsAsync(
+            GetReferenceStyleAuditFindingsPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"GetStyleAuditFindings:{input.NovelId}:{input.BlueprintId}:{string.Join(',', input.CandidateIds ?? [])}:{string.Join(',', input.RiskTypes ?? [])}:{input.Limit}");
+            IReadOnlyList<ReferenceStyleAuditFindingPayload> findings = [];
+            return ValueTask.FromResult(findings);
         }
 
         public ValueTask<ReferenceOrchestrationRunPayload> StartOrchestrationRunAsync(
