@@ -965,6 +965,7 @@ export function installConfigurableAppMockBridge(options = {}) {
       case 'RebuildReferenceAnchor': return rebuildReferenceAnchor(args[1])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
       case 'GetReferenceMaterialDetail': return getReferenceMaterialDetail(args[0])
+      case 'GetReferenceSourceProcessingDetail': return getReferenceSourceProcessingDetail(args[0])
       case 'AdaptReferenceMaterial': return adaptReferenceMaterial(args[0])
       case 'BuildReferenceStyleProfile': return buildReferenceStyleProfile(args[0])
       case 'GetReferenceStyleProfileBuildStatus': return referenceStyleProfileBuildStatus(args[0])
@@ -3336,7 +3337,7 @@ export function installConfigurableAppMockBridge(options = {}) {
     const anchor = referenceAnchors().find((item) => Number(item.anchor_id) === Number(material.anchor_id))
     if (!anchor) return null
 
-    const preview = boundedPreview(material.text, 88)
+    const preview = boundedPreview(material.text, 32)
     return {
       material: {
         material_id: material.material_id,
@@ -3407,6 +3408,58 @@ export function installConfigurableAppMockBridge(options = {}) {
         affected_segment_id: material.source_segment_id,
         affected_slot_id: 'object',
       }],
+    }
+  }
+
+  function getReferenceSourceProcessingDetail(input = {}) {
+    const anchorId = Number(input?.anchor_id ?? 0)
+    const anchor = referenceAnchors().find((item) => Number(item.anchor_id) === anchorId)
+    if (!anchor) return null
+
+    return {
+      source: {
+        anchor_id: anchor.anchor_id,
+        novel_id: anchor.novel_id ?? 0,
+        title: anchor.title,
+        author: anchor.author,
+        source_kind: anchor.source_kind,
+        license_status: anchor.license_status,
+        source_file_hash: anchor.source_file_hash,
+        build_version: anchor.build_version,
+        status: anchor.status,
+        visibility: anchor.visibility,
+        source_trust: anchor.source_trust,
+        user_tags: anchor.user_tags,
+        owner_scope: anchor.owner_scope ?? (Number(anchor.novel_id ?? 0) === 0 ? 'workspace_corpus' : 'novel'),
+        owner_novel_id: anchor.owner_novel_id ?? (Number(anchor.novel_id ?? 0) === 0 ? null : Number(anchor.novel_id)),
+      },
+      current_status: {
+        stage: 'embedding',
+        status: 'ready',
+        diagnostic: 'segments=3; materials=2; slots=1; vectors=2',
+        updated_at: now,
+        source_segment_count: 3,
+        material_count: 2,
+        slot_count: 1,
+        vector_count: 2,
+      },
+      events: [{
+        event_id: 'event-1',
+        stage: 'embedding',
+        status: 'ready',
+        message: 'segments=3; materials=2; slots=1; vectors=2',
+        created_at: now,
+        source_segment_count: 3,
+        material_count: 2,
+        slot_count: 1,
+        vector_count: 2,
+        affected_source_id: String(anchor.anchor_id),
+        affected_material_id: 'mock-mat-rain-001',
+        affected_segment_id: 'mock-seg-rain-001',
+        affected_slot_id: 'object',
+      }],
+      retry_available: false,
+      rebuild_available: true,
     }
   }
 

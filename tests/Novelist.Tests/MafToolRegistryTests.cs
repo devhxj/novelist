@@ -175,6 +175,8 @@ public sealed class MafToolRegistryTests
             .ToArray();
         Assert.Contains("get_reference_anchors", materialToolNames);
         Assert.Contains("search_reference_materials", materialToolNames);
+        Assert.Contains("get_reference_material_detail", materialToolNames);
+        Assert.Contains("get_reference_source_processing_detail", materialToolNames);
         Assert.Contains("adapt_reference_material", materialToolNames);
         Assert.Contains("audit_reference_reuse", materialToolNames);
         Assert.DoesNotContain("get_reference_style_profiles", materialToolNames);
@@ -252,6 +254,8 @@ public sealed class MafToolRegistryTests
 
         Assert.Contains("get_reference_anchors", names);
         Assert.Contains("search_reference_materials", names);
+        Assert.Contains("get_reference_material_detail", names);
+        Assert.Contains("get_reference_source_processing_detail", names);
         Assert.Contains("adapt_reference_material", names);
         Assert.Contains("audit_reference_reuse", names);
         Assert.Contains("generate_reference_chapter_blueprint", names);
@@ -347,6 +351,28 @@ public sealed class MafToolRegistryTests
         Assert.True(searchMaterialsProperties.TryGetProperty("style_profile_ids", out _));
         Assert.True(searchMaterialsProperties.TryGetProperty("style_dimensions", out _));
         Assert.True(searchMaterialsProperties.TryGetProperty("imitation_intensity", out _));
+
+        var getMaterialDetail = tools.Single(tool => tool.Name == "get_reference_material_detail");
+        AssertToolDescriptionContains(getMaterialDetail, "只读", "bounded previews", "不返回 source_path", "不返回 source_text", "不能写章节");
+        Assert.True(getMaterialDetail.JsonSchema.TryGetProperty("properties", out var getMaterialDetailProperties));
+        Assert.True(getMaterialDetailProperties.TryGetProperty("material_id", out _));
+        Assert.False(getMaterialDetailProperties.TryGetProperty("novel_id", out _));
+        Assert.False(getMaterialDetailProperties.TryGetProperty("source_path", out _));
+        Assert.False(getMaterialDetailProperties.TryGetProperty("source_text", out _));
+        Assert.False(getMaterialDetailProperties.TryGetProperty("candidate_text", out _));
+        Assert.False(getMaterialDetailProperties.TryGetProperty("prompt", out _));
+        Assert.False(getMaterialDetailProperties.TryGetProperty("path", out _));
+
+        var getSourceProcessingDetail = tools.Single(tool => tool.Name == "get_reference_source_processing_detail");
+        AssertToolDescriptionContains(getSourceProcessingDetail, "只读", "已脱敏 diagnostics", "不返回 source_path", "不返回 source_text", "不能写章节");
+        Assert.True(getSourceProcessingDetail.JsonSchema.TryGetProperty("properties", out var getSourceProcessingDetailProperties));
+        Assert.True(getSourceProcessingDetailProperties.TryGetProperty("anchor_id", out _));
+        Assert.False(getSourceProcessingDetailProperties.TryGetProperty("novel_id", out _));
+        Assert.False(getSourceProcessingDetailProperties.TryGetProperty("source_path", out _));
+        Assert.False(getSourceProcessingDetailProperties.TryGetProperty("source_text", out _));
+        Assert.False(getSourceProcessingDetailProperties.TryGetProperty("candidate_text", out _));
+        Assert.False(getSourceProcessingDetailProperties.TryGetProperty("prompt", out _));
+        Assert.False(getSourceProcessingDetailProperties.TryGetProperty("path", out _));
 
         var listStyleProfiles = tools.Single(tool => tool.Name == "get_reference_style_profiles");
         AssertToolDescriptionContains(listStyleProfiles, "只读", "不能构建", "不能导入", "不能审批", "不能写章节");
@@ -453,6 +479,7 @@ public sealed class MafToolRegistryTests
         AssertToolDescriptionContains(
             referenceTools.Single(tool => tool.Name == "get_reference_anchors"),
             "已导入",
+            "不返回 source_path",
             "不能导入",
             "不能读取任意文件");
         AssertToolDescriptionContains(
@@ -685,6 +712,23 @@ public sealed class MafToolRegistryTests
             webSearch: null,
             referenceAnchors: anchors));
 
+        var anchorsResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 0),
+            new ChatToolCall(
+                "call_reference_anchors",
+                "get_reference_anchors",
+                "{}"),
+            CancellationToken.None);
+
+        Assert.True(anchorsResult.Success, anchorsResult.Error);
+        var anchorSummary = Assert.Single(anchorsResult.Data!.Value.EnumerateArray());
+        Assert.Equal(7, anchorSummary.GetProperty("anchor_id").GetInt64());
+        Assert.Equal(23, anchorSummary.GetProperty("novel_id").GetInt64());
+        Assert.Equal("参考书", anchorSummary.GetProperty("title").GetString());
+        Assert.True(anchorSummary.TryGetProperty("source_file_hash", out _));
+        Assert.False(anchorSummary.TryGetProperty("source_path", out _));
+        Assert.DoesNotContain("source_path", anchorSummary.GetRawText(), StringComparison.OrdinalIgnoreCase);
+
         var result = await executor.ExecuteAsync(
             new ChatToolExecutionContext(23, "sess_reference", 1),
             new ChatToolCall(
@@ -710,6 +754,48 @@ public sealed class MafToolRegistryTests
         var components = material.GetProperty("score_components");
         Assert.Equal(2.5, components.GetProperty("story_context").GetDouble());
         Assert.Equal(1.25, components.GetProperty("prose_duty").GetDouble());
+
+        var materialDetailResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 2),
+            new ChatToolCall(
+                "call_reference_material_detail",
+                "get_reference_material_detail",
+                """{"material_id":"mat-1"}"""),
+            CancellationToken.None);
+
+        Assert.True(materialDetailResult.Success, materialDetailResult.Error);
+        Assert.NotNull(anchors.LastMaterialDetail);
+        Assert.Equal(23, anchors.LastMaterialDetail.NovelId);
+        Assert.Equal("mat-1", anchors.LastMaterialDetail.MaterialId);
+        var materialDetail = materialDetailResult.Data!.Value;
+        Assert.Equal("mat-1", materialDetail.GetProperty("material").GetProperty("material_id").GetString());
+        Assert.True(materialDetail.TryGetProperty("processing_notes", out _));
+        Assert.False(materialDetail.TryGetProperty("source_path", out _));
+        Assert.DoesNotContain("source_path", materialDetail.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", materialDetail.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", materialDetail.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", materialDetail.GetRawText(), StringComparison.OrdinalIgnoreCase);
+
+        var sourceProcessingResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 3),
+            new ChatToolCall(
+                "call_reference_source_processing",
+                "get_reference_source_processing_detail",
+                """{"anchor_id":7}"""),
+            CancellationToken.None);
+
+        Assert.True(sourceProcessingResult.Success, sourceProcessingResult.Error);
+        Assert.NotNull(anchors.LastSourceProcessingDetail);
+        Assert.Equal(23, anchors.LastSourceProcessingDetail.NovelId);
+        Assert.Equal(7, anchors.LastSourceProcessingDetail.AnchorId);
+        var sourceProcessing = sourceProcessingResult.Data!.Value;
+        Assert.Equal(7, sourceProcessing.GetProperty("source").GetProperty("anchor_id").GetInt64());
+        Assert.True(sourceProcessing.TryGetProperty("events", out _));
+        Assert.False(sourceProcessing.TryGetProperty("source_path", out _));
+        Assert.DoesNotContain("source_path", sourceProcessing.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", sourceProcessing.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", sourceProcessing.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", sourceProcessing.GetRawText(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1494,6 +1580,8 @@ public sealed class MafToolRegistryTests
     private sealed class RecordingReferenceAnchorService : IReferenceAnchorService
     {
         public SearchReferenceMaterialsPayload? LastSearch { get; private set; }
+        public GetReferenceMaterialDetailPayload? LastMaterialDetail { get; private set; }
+        public GetReferenceSourceProcessingDetailPayload? LastSourceProcessingDetail { get; private set; }
 
         public ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(
             CreateReferenceAnchorPayload input,
@@ -1693,7 +1781,124 @@ public sealed class MafToolRegistryTests
             GetReferenceMaterialDetailPayload input,
             CancellationToken cancellationToken)
         {
-            return ValueTask.FromResult<ReferenceMaterialDetailPayload?>(null);
+            LastMaterialDetail = input;
+            return ValueTask.FromResult<ReferenceMaterialDetailPayload?>(new ReferenceMaterialDetailPayload(
+                new ReferenceMaterialSummaryPayload(
+                    input.MaterialId,
+                    7,
+                    "seg-1",
+                    ReferenceMaterialTypes.Sentence,
+                    "environment",
+                    "pressure",
+                    "rain",
+                    "close",
+                    "sensory",
+                    1,
+                    1,
+                    1,
+                    "雨声压低了整条街的呼吸。",
+                    false,
+                    "hash",
+                    "test",
+                    false,
+                    DateTimeOffset.UtcNow,
+                    ScoreComponents: new Dictionary<string, double>(StringComparer.Ordinal)
+                    {
+                        ["story_context"] = 2.5
+                    }),
+                new ReferenceMaterialSourceSummaryPayload(
+                    7,
+                    input.NovelId,
+                    "参考书",
+                    "作者",
+                    "markdown",
+                    "user_provided",
+                    "hash",
+                    "test",
+                    ReferenceAnchorBuildStates.Ready,
+                    ReferenceCorpusVisibilities.Private,
+                    ReferenceSourceTrustLevels.UserVerified,
+                    [],
+                    ReferenceAnchorOwnerScopes.Novel,
+                    input.NovelId),
+                [
+                    new ReferenceMaterialSegmentPreviewPayload(
+                        "seg-1",
+                        "paragraph",
+                        1,
+                        "第一章",
+                        0,
+                        "雨声压低了整条街的呼吸。",
+                        false,
+                        "seg-hash")
+                ],
+                [
+                    new ReferenceMaterialSlotPreviewPayload("object", "雨声", 0, 2)
+                ],
+                [
+                    new ReferenceMaterialProcessingNotePayload(
+                        "completed",
+                        ReferenceAnchorBuildStates.Ready,
+                        "segments=1; materials=1; slots=1; vectors=0",
+                        DateTimeOffset.UtcNow,
+                        SourceSegmentCount: 1,
+                        MaterialCount: 1,
+                        SlotCount: 1,
+                        AffectedSourceId: "7",
+                        AffectedMaterialId: input.MaterialId,
+                        AffectedSegmentId: "seg-1",
+                        AffectedSlotId: "object")
+                ]));
+        }
+
+        public ValueTask<ReferenceSourceProcessingDetailPayload?> GetSourceProcessingDetailAsync(
+            GetReferenceSourceProcessingDetailPayload input,
+            CancellationToken cancellationToken)
+        {
+            LastSourceProcessingDetail = input;
+            return ValueTask.FromResult<ReferenceSourceProcessingDetailPayload?>(new ReferenceSourceProcessingDetailPayload(
+                new ReferenceMaterialSourceSummaryPayload(
+                    input.AnchorId,
+                    input.NovelId,
+                    "参考书",
+                    "作者",
+                    "markdown",
+                    "user_provided",
+                    "hash",
+                    "test",
+                    ReferenceAnchorBuildStates.Ready,
+                    ReferenceCorpusVisibilities.Private,
+                    ReferenceSourceTrustLevels.UserVerified,
+                    [],
+                    ReferenceAnchorOwnerScopes.Novel,
+                    input.NovelId),
+                new ReferenceSourceProcessingStatusPayload(
+                    "embedding",
+                    ReferenceAnchorBuildStates.Ready,
+                    "segments=1; materials=1; slots=1; vectors=0",
+                    DateTimeOffset.UtcNow,
+                    SourceSegmentCount: 1,
+                    MaterialCount: 1,
+                    SlotCount: 1,
+                    VectorCount: 0),
+                [
+                    new ReferenceSourceProcessingEventPayload(
+                        "event-1",
+                        "embedding",
+                        ReferenceAnchorBuildStates.Ready,
+                        "segments=1; materials=1; slots=1; vectors=0",
+                        DateTimeOffset.UtcNow,
+                        SourceSegmentCount: 1,
+                        MaterialCount: 1,
+                        SlotCount: 1,
+                        VectorCount: 0,
+                        AffectedSourceId: input.AnchorId.ToString(),
+                        AffectedMaterialId: "mat-1",
+                        AffectedSegmentId: "seg-1",
+                        AffectedSlotId: "object")
+                ],
+                RetryAvailable: false,
+                RebuildAvailable: true));
         }
 
         public ValueTask<ReferenceMaterialPayload> UpdateMaterialTagsAsync(

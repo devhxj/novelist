@@ -164,6 +164,7 @@ export interface NovelistAppApi {
   GetReferenceOrchestrationRun: AppMethod<[number, string], reference.OrchestrationRun | null>
   GetReferenceOrchestrationRunEvents: AppMethod<[number, string], reference.OrchestrationRunEvent[]>
   GetReferenceOrchestrationRuns: AppMethod<[number, number | null], reference.OrchestrationRun[]>
+  GetReferenceSourceProcessingDetail: AppMethod<[reference.GetSourceProcessingDetailInput], reference.SourceProcessingDetail | null>
   GetReferenceStyleAuditFindings: AppMethod<[reference.GetStyleAuditFindingsInput], reference.StyleAuditFinding[]>
   GetReferenceStyleProfileBuildStatus: AppMethod<[reference.GetStyleProfileBuildStatusInput], reference.StyleProfileBuildStatus | null>
   GetReferenceStyleProfile: AppMethod<[number, number], reference.StyleProfile | null>
@@ -355,6 +356,7 @@ export const appApi: NovelistAppApi = {
   GetReferenceOrchestrationRun: appMethod<NovelistAppApi['GetReferenceOrchestrationRun']>('GetReferenceOrchestrationRun'),
   GetReferenceOrchestrationRunEvents: appMethod<NovelistAppApi['GetReferenceOrchestrationRunEvents']>('GetReferenceOrchestrationRunEvents'),
   GetReferenceOrchestrationRuns: appMethod<NovelistAppApi['GetReferenceOrchestrationRuns']>('GetReferenceOrchestrationRuns'),
+  GetReferenceSourceProcessingDetail: appMethod<NovelistAppApi['GetReferenceSourceProcessingDetail']>('GetReferenceSourceProcessingDetail'),
   GetReferenceStyleAuditFindings: appMethod<NovelistAppApi['GetReferenceStyleAuditFindings']>('GetReferenceStyleAuditFindings'),
   GetReferenceStyleProfileBuildStatus: appMethod<NovelistAppApi['GetReferenceStyleProfileBuildStatus']>('GetReferenceStyleProfileBuildStatus'),
   GetReferenceStyleProfile: appMethod<NovelistAppApi['GetReferenceStyleProfile']>('GetReferenceStyleProfile'),

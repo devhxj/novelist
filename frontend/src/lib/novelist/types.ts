@@ -1021,6 +1021,46 @@ export namespace reference {
     processing_notes: MaterialProcessingNote[]
   }
 
+  export interface GetSourceProcessingDetailInput {
+    novel_id: number
+    anchor_id: number
+  }
+
+  export interface SourceProcessingStatus {
+    stage: string
+    status: string
+    diagnostic: string
+    updated_at: Timestamp
+    source_segment_count: number
+    material_count: number
+    slot_count: number
+    vector_count: number
+  }
+
+  export interface SourceProcessingEvent {
+    event_id: string
+    stage: string
+    status: string
+    message: string
+    created_at: Timestamp
+    source_segment_count: number
+    material_count: number
+    slot_count: number
+    vector_count: number
+    affected_source_id: string
+    affected_material_id: string
+    affected_segment_id: string
+    affected_slot_id: string
+  }
+
+  export interface SourceProcessingDetail {
+    source: MaterialSourceSummary
+    current_status: SourceProcessingStatus | null
+    events: SourceProcessingEvent[]
+    retry_available: boolean
+    rebuild_available: boolean
+  }
+
   export interface UpdateMaterialTagsInput {
     novel_id: number
     material_id: string

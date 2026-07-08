@@ -463,7 +463,9 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.True(note.VectorCount >= 0);
         Assert.Equal(anchor.AnchorId.ToString(), note.AffectedSourceId);
 
-        var sensitiveBuildError = $"Failed to open {Path.GetFullPath(sourcePath)} with authorization: Bearer live-error-token-abcdefghijklmnopqrstuvwxyz; source_text: {longSentence}; api_key: sk-proj-errorabcdefghijklmnopqrstuvwxyz1234567890";
+        var uncPath = @"\\server\share\reference\material-detail.md";
+        var fileUri = "file://server/share/reference/material-detail.md";
+        var sensitiveBuildError = $"Failed to open {Path.GetFullPath(sourcePath)} and {uncPath} from {fileUri} with authorization: Bearer live-error-token-abcdefghijklmnopqrstuvwxyz; source_text: {longSentence}; api_key: sk-proj-errorabcdefghijklmnopqrstuvwxyz1234567890";
         await UpdateBuildStateErrorAsync(options, anchor.AnchorId, sensitiveBuildError);
         var failedDetail = await service.GetMaterialDetailAsync(
             new GetReferenceMaterialDetailPayload(novel.Id, material.MaterialId),
@@ -475,14 +477,22 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.Contains("[REDACTED", failedNote.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(sourcePath, failedNote.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(Path.GetFullPath(sourcePath), failedNote.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(uncPath, failedNote.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(fileUri, failedNote.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Bearer live-error-token", failedNote.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("sk-proj-error", failedNote.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", failedNote.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("api_key", failedNote.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(longSentence, failedNote.Message, StringComparison.Ordinal);
         var failedSerialized = JsonSerializer.Serialize(failedDetail, BridgeJson.SerializerOptions);
         Assert.DoesNotContain(sourcePath, failedSerialized, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(Path.GetFullPath(sourcePath), failedSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(uncPath, failedSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(fileUri, failedSerialized, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Bearer live-error-token", failedSerialized, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("sk-proj-error", failedSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", failedSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("api_key", failedSerialized, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(longSentence, failedSerialized, StringComparison.Ordinal);
 
         var serialized = JsonSerializer.Serialize(detail, BridgeJson.SerializerOptions);
@@ -593,6 +603,79 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
             Assert.True(note.MaterialCount > 0);
             Assert.DoesNotContain(sourcePath, note.Message, StringComparison.OrdinalIgnoreCase);
         });
+    }
+
+    [Fact]
+    public async Task SourceProcessingDetailReturnsRedactedHistoryAndAccessScopedSourceSummary()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("来源处理记录", "", ""), CancellationToken.None);
+        var otherNovel = await novels.CreateNovelAsync(new CreateNovelPayload("其他来源处理记录", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "source-processing-detail.md",
+            """
+            雨声压住门口，林岚停了一下。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "来源处理参考", "作者", sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        await service.RebuildAnchorAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+        var uncPath = @"\\server\share\reference\source-processing-detail.md";
+        var fileUri = "file://server/share/reference/source-processing-detail.md";
+        var sensitiveBuildError = $"Failed {Path.GetFullPath(sourcePath)} via {uncPath} and {fileUri} authorization=Bearer source-processing-token-abcdefghijklmnopqrstuvwxyz; prompt: hidden; candidate_text: forbidden; api_key: sk-procabcdefghijklmnopqrstuvwxyz1234567890";
+        await UpdateBuildStateErrorAsync(options, anchor.AnchorId, sensitiveBuildError);
+
+        var detail = await service.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, anchor.AnchorId),
+            CancellationToken.None);
+
+        Assert.NotNull(detail);
+        Assert.Equal(anchor.AnchorId, detail.Source.AnchorId);
+        Assert.Equal("来源处理参考", detail.Source.Title);
+        Assert.Equal(ReferenceAnchorOwnerScopes.Novel, detail.Source.OwnerScope);
+        Assert.Equal(novel.Id, detail.Source.OwnerNovelId);
+        Assert.True(detail.RetryAvailable);
+        Assert.True(detail.RebuildAvailable);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, detail.CurrentStatus.Status);
+        Assert.Contains("[REDACTED", detail.CurrentStatus.Diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain(sourcePath, detail.CurrentStatus.Diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), detail.CurrentStatus.Diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(uncPath, detail.CurrentStatus.Diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(fileUri, detail.CurrentStatus.Diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Bearer source-processing-token", detail.CurrentStatus.Diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sk-proc", detail.CurrentStatus.Diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", detail.CurrentStatus.Diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", detail.CurrentStatus.Diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.True(detail.Events.Count >= 2);
+        Assert.All(detail.Events, item =>
+        {
+            Assert.Equal(anchor.AnchorId.ToString(), item.AffectedSourceId);
+            Assert.True(item.SourceSegmentCount >= 0);
+            Assert.True(item.MaterialCount >= 0);
+            Assert.DoesNotContain(sourcePath, item.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(Path.GetFullPath(sourcePath), item.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(uncPath, item.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(fileUri, item.Message, StringComparison.OrdinalIgnoreCase);
+        });
+
+        var serialized = JsonSerializer.Serialize(detail, BridgeJson.SerializerOptions);
+        Assert.DoesNotContain("source_path", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(sourcePath, serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(uncPath, serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(fileUri, serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", serialized, StringComparison.OrdinalIgnoreCase);
+
+        var inaccessible = await service.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(otherNovel.Id, anchor.AnchorId),
+            CancellationToken.None);
+        Assert.Null(inaccessible);
     }
 
     [Fact]

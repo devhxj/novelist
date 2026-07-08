@@ -336,7 +336,6 @@ function anchorMatchesQuery(anchor: reference.Anchor, query: string): boolean {
   return [
     anchor.title,
     anchor.author,
-    anchor.source_path,
     anchor.source_kind,
     anchor.license_status,
     anchor.visibility,
@@ -400,6 +399,10 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   const [materialDetail, setMaterialDetail] = useState<reference.MaterialDetail | null>(null)
   const [materialDetailLoading, setMaterialDetailLoading] = useState(false)
   const [materialDetailError, setMaterialDetailError] = useState<Exclude<ReferenceErrorState, string> | null>(null)
+  const [sourceProcessingAnchorId, setSourceProcessingAnchorId] = useState<number | null>(null)
+  const [sourceProcessingDetail, setSourceProcessingDetail] = useState<reference.SourceProcessingDetail | null>(null)
+  const [sourceProcessingLoading, setSourceProcessingLoading] = useState(false)
+  const [sourceProcessingError, setSourceProcessingError] = useState<Exclude<ReferenceErrorState, string> | null>(null)
   const [blueprintForm, setBlueprintForm] = useState<BlueprintForm>(EMPTY_BLUEPRINT_FORM)
   const [revisionForm, setRevisionForm] = useState<BlueprintRevisionForm>(EMPTY_REVISION_FORM)
   const [materialFilters, setMaterialFilters] = useState<MaterialSearchFilters>(EMPTY_MATERIAL_FILTERS)
@@ -1229,6 +1232,43 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     setMaterialDetail(null)
     setMaterialDetailError(null)
     setMaterialDetailLoading(false)
+  }
+
+  async function openSourceProcessingDetail(anchorId: number) {
+    setSourceProcessingAnchorId(anchorId)
+    setSourceProcessingDetail(null)
+    setSourceProcessingError(null)
+    setSourceProcessingLoading(true)
+    try {
+      const detail = await app.GetReferenceSourceProcessingDetail({
+        novel_id: novelId,
+        anchor_id: anchorId,
+      })
+      setSourceProcessingDetail(detail ?? null)
+      if (!detail) {
+        setSourceProcessingError({
+          title: '处理记录不可用',
+          message: '来源不存在，或当前作品无权访问。',
+          diagnostic: null,
+        })
+      }
+    } catch (err) {
+      setSourceProcessingError(referenceError(err, {
+        fallbackMessage: '处理记录加载失败',
+        operation: 'GetReferenceSourceProcessingDetail',
+        bridgeMethod: 'GetReferenceSourceProcessingDetail',
+        detail: { anchor_id: anchorId },
+      }))
+    } finally {
+      setSourceProcessingLoading(false)
+    }
+  }
+
+  function closeSourceProcessingDetail() {
+    setSourceProcessingAnchorId(null)
+    setSourceProcessingDetail(null)
+    setSourceProcessingError(null)
+    setSourceProcessingLoading(false)
   }
 
   async function saveBulkLibraryMaterialTags() {
@@ -2192,6 +2232,19 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                             </button>
                             <button
                               type="button"
+                              data-testid="reference-source-processing-button"
+                              onClick={() => {
+                                void openSourceProcessingDetail(anchor.anchor_id)
+                              }}
+                              disabled={loading}
+                              className="rounded px-1.5 py-1 text-[11px] leading-none text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-50"
+                              title="处理记录"
+                              aria-label={`查看 ${anchor.title} 的处理记录`}
+                            >
+                              记录
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => beginEditAnchor(anchor)}
                               disabled={loading}
                               className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-50"
@@ -2964,8 +3017,165 @@ export default function ReferenceAnchorView({ novelId }: Props) {
             }}
           />
         )}
+        {sourceProcessingAnchorId !== null && (
+          <SourceProcessingDrawer
+            anchorId={sourceProcessingAnchorId}
+            detail={sourceProcessingDetail}
+            loading={sourceProcessingLoading}
+            error={sourceProcessingError}
+            onClose={closeSourceProcessingDetail}
+            onRetry={() => {
+              void openSourceProcessingDetail(sourceProcessingAnchorId)
+            }}
+            onRebuild={() => {
+              void (async () => {
+                await rebuildAnchor(sourceProcessingAnchorId)
+                await openSourceProcessingDetail(sourceProcessingAnchorId)
+              })()
+            }}
+          />
+        )}
       </div>
     </main>
+  )
+}
+
+function SourceProcessingDrawer({
+  anchorId,
+  detail,
+  loading,
+  error,
+  onClose,
+  onRetry,
+  onRebuild,
+}: {
+  anchorId: number
+  detail: reference.SourceProcessingDetail | null
+  loading: boolean
+  error: Exclude<ReferenceErrorState, string> | null
+  onClose: () => void
+  onRetry: () => void
+  onRebuild: () => void
+}) {
+  const source = detail?.source
+  const status = detail?.current_status
+
+  return (
+    <aside
+      role="dialog"
+      aria-modal="false"
+      aria-label="处理记录"
+      data-testid="reference-source-processing-drawer"
+      className="fixed inset-y-0 right-0 z-40 flex w-[420px] max-w-[calc(100vw-3rem)] flex-col border-l border-border bg-card shadow-xl"
+    >
+      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-foreground">处理记录</h3>
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{source?.title ?? `anchor ${anchorId}`}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          aria-label="关闭处理记录"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3">
+        {loading && (
+          <div className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            正在加载处理记录...
+          </div>
+        )}
+
+        {error && (
+          <ErrorCallout
+            compact
+            title={error.title}
+            message={error.message}
+            diagnostic={error.diagnostic}
+            className="rounded-md"
+            onRetry={onRetry}
+            retryLabel="重试加载"
+            onClose={onClose}
+          />
+        )}
+
+        {detail && (
+          <>
+            <section className="space-y-2">
+              <h4 className="text-xs font-semibold text-foreground">来源</h4>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <DetailKeyValue label="标题" value={detail.source.title} />
+                <DetailKeyValue label="归属" value={detail.source.owner_scope === 'workspace_corpus' ? '工作区语料' : `小说 ${detail.source.owner_novel_id ?? detail.source.novel_id}`} />
+                <DetailKeyValue label="可见性" value={`${detail.source.visibility} · ${detail.source.source_trust}`} />
+                <DetailKeyValue label="操作" value={`${detail.rebuild_available ? '可重建' : '不可重建'} · ${detail.retry_available ? '可重试' : '不可重试'}`} />
+              </div>
+              {detail.rebuild_available && (
+                <button
+                  type="button"
+                  onClick={onRebuild}
+                  disabled={loading}
+                  className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-medium text-foreground hover:bg-secondary disabled:opacity-50"
+                  aria-label={`重新处理 ${detail.source.title}`}
+                >
+                  <RefreshCcw className="h-3.5 w-3.5" />
+                  重新处理
+                </button>
+              )}
+            </section>
+
+            <section className="space-y-2">
+              <h4 className="text-xs font-semibold text-foreground">当前状态</h4>
+              {status ? (
+                <div className="rounded-md border border-border bg-background px-3 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span>{status.stage} · {status.status}</span>
+                    <span>{String(status.updated_at ?? '')}</span>
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-foreground">{status.diagnostic || '无诊断信息'}</p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    segments={status.source_segment_count} · materials={status.material_count} · slots={status.slot_count} · vectors={status.vector_count}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">暂无当前状态</p>
+              )}
+            </section>
+
+            <section className="space-y-2">
+              <h4 className="text-xs font-semibold text-foreground">历史事件</h4>
+              {detail.events.length === 0 ? (
+                <p className="text-xs text-muted-foreground">暂无处理记录</p>
+              ) : (
+                <div className="space-y-2">
+                  {detail.events.map(event => (
+                    <div key={event.event_id} className="rounded-md border border-border bg-background px-3 py-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                        <span>{event.event_id} · {event.stage} · {event.status}</span>
+                        <span>{String(event.created_at ?? '')}</span>
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-foreground">{event.message || '无诊断信息'}</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        segments={event.source_segment_count} · materials={event.material_count} · slots={event.slot_count} · vectors={event.vector_count}
+                      </p>
+                      {(event.affected_source_id || event.affected_material_id || event.affected_segment_id || event.affected_slot_id) && (
+                        <p className="mt-1 break-all text-[11px] text-muted-foreground">
+                          affected: {[event.affected_source_id, event.affected_material_id, event.affected_segment_id, event.affected_slot_id].filter(Boolean).join(' · ')}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        )}
+      </div>
+    </aside>
   )
 }
 
@@ -3055,6 +3265,7 @@ function MaterialDetailDrawer({
               <p className="rounded-md border border-border bg-background px-3 py-2 text-xs leading-relaxed text-foreground">
                 {material.text_preview || '无预览'}
               </p>
+              <PreviewBoundary truncated={material.text_truncated} />
             </section>
 
             <section className="space-y-2">
@@ -3086,6 +3297,7 @@ function MaterialDetailDrawer({
                       <p className="mt-1 text-xs leading-relaxed text-foreground">
                         {segment.text_preview || '无预览'}
                       </p>
+                      <PreviewBoundary truncated={segment.text_truncated} compact />
                       <p className="mt-1 break-all text-[11px] text-muted-foreground">hash {segment.text_hash}</p>
                     </div>
                   ))}
@@ -3140,6 +3352,14 @@ function MaterialDetailDrawer({
         )}
       </div>
     </aside>
+  )
+}
+
+function PreviewBoundary({ truncated, compact = false }: { truncated: boolean; compact?: boolean }) {
+  return (
+    <p className={`${compact ? 'mt-1' : ''} text-[11px] text-muted-foreground`}>
+      {truncated ? '预览已截断，不显示全文' : '完整预览'}
+    </p>
   )
 }
 

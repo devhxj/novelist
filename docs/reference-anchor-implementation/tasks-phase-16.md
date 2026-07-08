@@ -4,7 +4,7 @@
 
 ## Phase 16: Corpus Library and Chapter Reference-Use Separation
 
-**Status:** Proposed. This phase corrects the product information architecture of the current reference-anchor surface. It separates the shared corpus-library processing workflow from current-chapter reference use, while preserving the existing strict reference-anchor implementation: auditable source provenance, deterministic material extraction, style profiles, reviewed blueprints, material binding, draft audit, source-leak checks, and explicit user approval before any chapter content is inserted or saved.
+**Status:** In progress. This phase corrects the product information architecture of the current reference-anchor surface. It separates the shared corpus-library processing workflow from current-chapter reference use, while preserving the existing strict reference-anchor implementation: auditable source provenance, deterministic material extraction, style profiles, reviewed blueprints, material binding, draft audit, source-leak checks, and explicit user approval before any chapter content is inserted or saved.
 
 ## Problem Statement
 
@@ -114,7 +114,7 @@ The corpus page should be organized as task-oriented tabs:
    - Browse processed materials across accessible corpus sources.
    - Filter by source, owner scope, archive state, material type, function tag, emotion tag, scene tag, POV tag, technique tag, narrative duty, prose duty, source trust, license, and keyword.
    - Show material preview, material id, source segment id, source hash, score components when available, tag confidence/user-verified state, and archive state.
-   - Open a read-only material detail drawer for every material row. The detail must show provenance, tags/confidence, verification state, score components, extractor/build metadata, bounded source/material preview, detected slots/placeholders, source segment metadata, archive state, and processing notes where available.
+   - Open a read-only material detail drawer for every material row through a visible row action, not an advanced/debug-only control. The detail must show provenance, tags/confidence, verification state, score components, extractor/build metadata, bounded source/material preview, detected slots/placeholders, source segment metadata, archive state, and processing notes where available.
    - Keep list and detail previews bounded. The UI must never expose full source files, local source paths, prompts, candidate text, or full chapter text through material detail.
    - Support current-page and cross-page selected material tag correction.
    - Support archive/restore of materials without deleting provenance.
@@ -132,7 +132,7 @@ The corpus page should be organized as task-oriented tabs:
 
 5. **处理记录**
    - Show source build/rebuild status, stage history, material/segment/slot/vector counts, failures, warnings, recovered processing state, and copyable diagnostics.
-   - Provide a per-source processing detail view that lets users inspect which stages succeeded, which stages produced partial output, and which material/detail records are affected by a warning or failure.
+   - Provide a per-source processing detail view from each source row so users can inspect processing details without switching to advanced mode or reading logs. It must show which stages succeeded, which stages produced partial output, and which material/detail records are affected by a warning or failure.
    - Link or filter from a warning/failure to affected source, material, segment, or slot ids when those ids are available.
    - Copyable diagnostics must be redacted before display/copy; they must not include absolute local paths, usernames, environment variables, tokens, API keys, prompts, full source text, candidate text, or full chapter text.
    - Include retry and rebuild actions where safe.
@@ -319,6 +319,7 @@ Potential new bridge helpers should be added only where existing payloads cannot
 - `GetReferenceSourceMaterials`: thin wrapper over `SearchReferenceMaterials` for a single source if the UI would otherwise duplicate complex filter payload construction.
 - `GetReferenceMaterialDetail`: required read-only material detail unless `ReferenceMaterialPayload` is safely extended to carry equivalent bounded detail fields without bloating browse/search results.
 - `GetReferenceSourceProcessingDetail`: read-only source processing stage history and diagnostics if `GetReferenceAnchorBuildStatus` cannot explain parse/segment/extract/index failures and affected output counts.
+- Agent-facing material/source-processing inspection tools may wrap those two read-only helpers so AI can diagnose corpus state without asking the user to manually copy details. Such tools must keep `novel_id` runtime-injected, accept only stable ids such as `material_id` or `anchor_id`, and must not expose `source_path`, arbitrary file paths, full source text, prompt, candidate text, corpus import, rebuild, delete/archive, or final insertion controls.
 - `GetReferenceSourceSegments`: read-only source segmentation view only if processing diagnostics require below-material inspection; keep previews bounded and path-free.
 - `GetReferenceBlueprintMaterialLinks`: read-only recovery of existing blueprint-material links after reload.
 - `SelectReferenceBlueprintMaterialLinks`: explicit manual beat-to-material selection if advanced chapter use needs user-directed binding.
@@ -643,6 +644,7 @@ Backend/contract coverage to keep or add:
 - `ReferenceAnchoredDraftServiceTests.GenerateDraftFromBlueprintReturnsCandidatesWithoutMutatingChapterContent` and `ReferenceOrchestrationRunRejectsFinalInsertionResumeAndKeepsManualInsertionBoundary` must remain green.
 - `WorkspaceUtilityServiceTests.SearchAllLeavesReferenceMaterialsInDedicatedSearch` must remain green so corpus material search does not leak into ordinary workspace search.
 - `MafToolRegistryTests` must continue proving agent tools cannot import sources, read arbitrary local files, or approve final insertion.
+- Agent read-only material/source-processing detail tools, if present, must inject `novel_id`, expose only id parameters, and carry negative assertions for `source_path`, `source_text`, `candidate_text`, `prompt`, arbitrary path fields, and write/approval actions.
 
 ## Risks and Mitigations
 
@@ -681,6 +683,7 @@ Phase 16 is complete when:
 - [ ] Corpus processing is idempotent and resumable across duplicate import, retry, rebuild, and app restart without duplicating materials or losing provenance/user corrections.
 - [ ] Processed corpus materials are directly browsable, inspectable in read-only detail, and correctable through dedicated tabs.
 - [ ] Processing records let users inspect parse/segment/extract/tag/index/build outcomes, failures, warnings, affected output counts, retry/rebuild state, and redacted copyable diagnostics.
+- [ ] AI tools can inspect bounded material detail and source processing detail by stable ids without importing sources, reading arbitrary files, exposing paths/full text/prompts/candidates, or mutating corpus/chapter state.
 - [ ] Current-chapter reference use is embedded in the chapter editor.
 - [ ] Chapter reference use consumes the shared corpus by default and can run without selecting anchors.
 - [ ] Chapter reference use derives or explicitly confirms chapter context before generation/insertion and suggests relevant corpus materials without manual anchor setup.

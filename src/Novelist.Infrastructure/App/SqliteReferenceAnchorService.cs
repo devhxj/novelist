@@ -33,6 +33,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private static readonly Regex BlankLinePattern = new(@"\n\s*\n", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex RiskTokenPattern = new(@"[A-Za-z][A-Za-z0-9_]{1,}|\d+(?:\.\d+)?", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex SecretPattern = new(@"\b(?:sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._~+/=-]{8,})\b", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex FileUriPattern = new(@"\bfile://[^\s;'""]+", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex UncPathPattern = new(@"\\\\[^\\/:*?""<>|\r\n;]+\\[^\\/:*?""<>|\r\n;]+(?:\\[^\\/:*?""<>|\r\n;]+)*", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex WindowsPathPattern = new(@"[A-Za-z]:[\\/](?:[^\\/:*?""<>|\r\n]+[\\/])*[^\\/:*?""<>|\r\n]*", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex UnixPathPattern = new(@"(?<![\w])/(?:Users|home|var|tmp|private|Volumes|mnt|opt|etc|root)/[^\s:'""]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex SensitiveFieldPattern = new(@"(?i)\b(source_text|prompt|candidate_text|api_key|authorization|password|token)\b\s*[:=]\s*[^\r\n;]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -636,6 +638,52 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 segments,
                 slots,
                 notes);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<ReferenceSourceProcessingDetailPayload?> GetSourceProcessingDetailAsync(
+        GetReferenceSourceProcessingDetailPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        ValidateAnchorId(input.AnchorId);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var anchor = await TryReadAnchorAsync(connection, input.NovelId, input.AnchorId, cancellationToken);
+            if (anchor is null)
+            {
+                return null;
+            }
+
+            var currentStatus = await ReadBuildStatusAsync(connection, input.NovelId, input.AnchorId, cancellationToken);
+            var events = await ReadSourceProcessingEventsAsync(connection, input.AnchorId, cancellationToken);
+            if (events.Count == 0 && currentStatus is not null)
+            {
+                events =
+                [
+                    BuildSourceProcessingEventFromStatus(
+                        "current",
+                        input.AnchorId,
+                        currentStatus)
+                ];
+            }
+
+            return new ReferenceSourceProcessingDetailPayload(
+                ToSourceSummary(anchor),
+                currentStatus is null ? null : ToSourceProcessingStatus(currentStatus),
+                events,
+                RetryAvailable: currentStatus is not null && IsFailedBuildStatus(currentStatus.Status),
+                RebuildAvailable: true);
         }
         finally
         {
@@ -2702,6 +2750,91 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         return notes;
     }
 
+    private static async ValueTask<IReadOnlyList<ReferenceSourceProcessingEventPayload>> ReadSourceProcessingEventsAsync(
+        SqliteConnection connection,
+        long anchorId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT event_id, stage, status, source_segment_count, material_count, slot_count,
+                   vector_count, last_error, affected_source_id, affected_material_id,
+                   affected_segment_id, affected_slot_id, created_at
+            FROM reference_anchor_processing_events
+            WHERE anchor_id = $anchor_id
+            ORDER BY created_at DESC, event_id DESC
+            LIMIT 100;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+
+        var events = new List<ReferenceSourceProcessingEventPayload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            events.Add(new ReferenceSourceProcessingEventPayload(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                BuildProcessingNoteMessage(
+                    reader.GetInt32(3),
+                    reader.GetInt32(4),
+                    reader.GetInt32(5),
+                    reader.GetInt32(6),
+                    reader.GetString(7)),
+                ParseTimestamp(reader.GetString(12)),
+                reader.GetInt32(3),
+                reader.GetInt32(4),
+                reader.GetInt32(5),
+                reader.GetInt32(6),
+                reader.GetString(8),
+                reader.GetString(9),
+                reader.GetString(10),
+                reader.GetString(11)));
+        }
+
+        return events;
+    }
+
+    private static ReferenceSourceProcessingEventPayload BuildSourceProcessingEventFromStatus(
+        string eventId,
+        long anchorId,
+        ReferenceAnchorBuildStatusPayload status)
+    {
+        return new ReferenceSourceProcessingEventPayload(
+            eventId,
+            status.Stage,
+            status.Status,
+            BuildProcessingNoteMessage(status),
+            status.UpdatedAt,
+            status.SourceSegmentCount,
+            status.MaterialCount,
+            status.SlotCount,
+            status.VectorCount,
+            anchorId.ToString(CultureInfo.InvariantCulture),
+            string.Empty,
+            string.Empty,
+            string.Empty);
+    }
+
+    private static ReferenceSourceProcessingStatusPayload ToSourceProcessingStatus(
+        ReferenceAnchorBuildStatusPayload status)
+    {
+        return new ReferenceSourceProcessingStatusPayload(
+            status.Stage,
+            status.Status,
+            BuildProcessingNoteMessage(status),
+            status.UpdatedAt,
+            status.SourceSegmentCount,
+            status.MaterialCount,
+            status.SlotCount,
+            status.VectorCount);
+    }
+
+    private static bool IsFailedBuildStatus(string status)
+    {
+        return status.StartsWith("failed_", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static async ValueTask<ReferenceAnchorBuildStatusPayload?> ReadBuildStatusAsync(
         SqliteConnection connection,
         long novelId,
@@ -2955,6 +3088,29 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
 
         return ReadAnchor(reader);
+    }
+
+    private async ValueTask<ReferenceAnchorPayload?> TryReadAnchorAsync(
+        SqliteConnection connection,
+        long novelId,
+        long anchorId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $$"""
+            SELECT anchor_id, novel_id, title, author, source_path, source_kind, license_status,
+                   source_file_hash, build_version, status, created_at, updated_at,
+                   corpus_visibility, source_trust, user_tags_json
+            FROM reference_anchors
+            WHERE {{NovelOrVisibleWorkspaceCorpusPredicate}}
+              AND anchor_id = $anchor_id;
+            """;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+        command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadAnchor(reader) : null;
     }
 
     private async ValueTask EnsureSchemaAsync(string databasePath, CancellationToken cancellationToken)
@@ -5187,19 +5343,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
 
         var redacted = value.Trim();
-        redacted = SensitiveFieldPattern.Replace(redacted, match =>
-        {
-            var separatorIndex = match.Value.IndexOf(':');
-            if (separatorIndex < 0)
-            {
-                separatorIndex = match.Value.IndexOf('=');
-            }
-
-            return separatorIndex < 0
-                ? "[REDACTED_FIELD]"
-                : match.Value[..(separatorIndex + 1)] + " [REDACTED]";
-        });
+        redacted = SensitiveFieldPattern.Replace(redacted, "[REDACTED_FIELD]");
         redacted = SecretPattern.Replace(redacted, "[REDACTED_SECRET]");
+        redacted = FileUriPattern.Replace(redacted, "[REDACTED_PATH]");
+        redacted = UncPathPattern.Replace(redacted, "[REDACTED_PATH]");
         redacted = WindowsPathPattern.Replace(redacted, "[REDACTED_PATH]");
         redacted = UnixPathPattern.Replace(redacted, "[REDACTED_PATH]");
         return redacted.Length <= 1_000 ? redacted : redacted[..1_000].TrimEnd() + "...";

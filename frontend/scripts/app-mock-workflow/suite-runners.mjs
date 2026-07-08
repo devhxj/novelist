@@ -303,11 +303,41 @@ async function verifyCorpusLibraryWorkflow(page) {
   await expectVisible(drawer.getByText('工作区语料'), 'corpus material detail owner scope')
   await expectVisible(drawer.getByText('活跃'), 'corpus material detail archive state')
   await expectVisible(drawer.getByText(/lexical 0\.92/), 'corpus material detail score components')
+  await expectVisible(drawer.getByText('预览已截断，不显示全文').first(), 'corpus material detail bounded preview marker')
   await expectVisible(drawer.getByText(/segments=3 · materials=2 · slots=2 · vectors=0/), 'corpus material detail structured counts')
   await expectVisible(drawer.getByText(/affected: 101 · mock-mat-rain-001 · mock-seg-rain-001 · object/), 'corpus material detail affected ids')
   await waitForBridgeCall(page, 'GetReferenceMaterialDetail')
   const drawerText = await drawer.innerText()
   assert(!drawerText.includes('D:\\books'), 'material detail drawer must not render local source paths')
+
+  await page.getByRole('button', { name: /查看 全局雨夜参考 的处理记录/ }).click()
+  await waitForBridgeCall(page, 'GetReferenceSourceProcessingDetail')
+  const processingDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(processingDrawer, 'corpus source processing drawer')
+  const processingDrawerText = await processingDrawer.innerText()
+  for (const expectedText of [
+    '处理记录',
+    '全局雨夜参考',
+    '当前状态',
+    'embedding · ready',
+    'segments=3 · materials=2 · slots=1 · vectors=2',
+    '历史事件',
+    'event-1',
+    'affected: 101 · mock-mat-rain-001 · mock-seg-rain-001 · object',
+    '可重建',
+    '不可重试',
+    '重新处理',
+  ]) {
+    assert(processingDrawerText.includes(expectedText), `source processing drawer must render ${expectedText}`)
+  }
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text']) {
+    assert(!processingDrawerText.includes(sensitiveText), `source processing drawer must not render ${sensitiveText}`)
+  }
+  const rebuildCountBefore = await bridgeCallCount(page, 'RebuildReferenceAnchor')
+  const processingDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await processingDrawer.getByRole('button', { name: /重新处理 全局雨夜参考/ }).click()
+  await waitForBridgeCallCountAfter(page, 'RebuildReferenceAnchor', rebuildCountBefore)
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', processingDetailCountBefore)
 
   const legacyRetrievalVisible = await page.getByText('参考写作检索', { exact: true }).isVisible().catch(() => false)
   assert.equal(legacyRetrievalVisible, false, 'corpus library activity must not render the retired reference-writing retrieval section')

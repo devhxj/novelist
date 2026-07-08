@@ -127,7 +127,7 @@ export async function verifyReferenceBridgeCalls(page) {
 export async function verifyCorpusLibraryBridgeCalls(page) {
   const calls = await page.evaluate(() => window.__appMockState.calls)
   const methods = calls.map((call) => call.method)
-  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetReferenceAnchors']
+  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetReferenceAnchors', 'GetReferenceSourceProcessingDetail', 'RebuildReferenceAnchor']
 
   for (const method of requiredMethods) {
     assert(methods.includes(method), `Expected corpus library bridge method ${method} to be called.`)
