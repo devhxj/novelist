@@ -190,3 +190,29 @@ The most important Phase 15 safety boundaries are:
 - Git history is read-only visualization in this phase; mutation operations such as reset, checkout, revert, and restore are not included.
 - Update checks are timeout-bounded and non-blocking, with explicit user action required before opening release URLs.
 - Copyable diagnostics must redact secrets and long source text.
+
+## 2026-07-08 Planning Update: Phase 16 Corpus/Chapter UI Separation
+
+Phase 16 opens a product information-architecture correction for reference anchoring. The issue is not that the backend lacks reference-anchor capability; the issue is that the current UI mixes shared corpus-library processing with current-chapter reference use.
+
+The new product boundary is:
+
+```text
+素材库
+  -> import/reference source management
+  -> processed material browsing
+  -> tag correction
+  -> archive/restore
+  -> style profile management
+
+chapter editor 参考素材 drawer
+  -> derive current chapter context
+  -> search relevant shared corpus materials
+  -> start or resume chapter orchestration
+  -> review blueprint/material/candidate/audit state
+  -> explicit editor-buffer insertion only
+```
+
+This phase must not reduce the strict reference-anchor model into ordinary RAG. Corpus import must not trigger chapter orchestration or prose generation. Chapter reference use must not mutate corpus metadata, tags, visibility, archive state, or source indexes. Candidate insertion remains a user-confirmed editor-buffer operation and must not become a backend or agent tool that writes chapter files.
+
+Existing backend boundaries already mostly support this split: corpus-library methods live under `ReferenceAnchorBridgeHandlers`, style-profile methods under `ReferenceStyleProfileBridgeHandlers`, and chapter-use methods under `ReferenceAnchoredDraftBridgeHandlers`. Phase 16 should therefore prioritize frontend extraction, workflow placement, focused mock coverage, and only minimal read-only bridge helpers where a usable drawer or processed-material detail view cannot be built from existing payloads.

@@ -1689,6 +1689,13 @@ public sealed class MafToolRegistryTests
                 TotalPages: 1));
         }
 
+        public ValueTask<ReferenceMaterialDetailPayload?> GetMaterialDetailAsync(
+            GetReferenceMaterialDetailPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<ReferenceMaterialDetailPayload?>(null);
+        }
+
         public ValueTask<ReferenceMaterialPayload> UpdateMaterialTagsAsync(
             UpdateReferenceMaterialTagsPayload input,
             CancellationToken cancellationToken)

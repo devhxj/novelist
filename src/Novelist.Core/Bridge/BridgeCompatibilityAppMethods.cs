@@ -86,6 +86,8 @@ public static class BridgeCompatibilityAppMethods
         "GetReferenceAnchoredDraftAudits",
         "GetReferenceChapterBlueprint",
         "GetReferenceChapterBlueprints",
+        "GetReferenceMaterialDetail",
+        "GetReferenceSourceProcessingDetail",
         "GetReferenceOrchestrationRun",
         "GetReferenceOrchestrationRunEvents",
         "GetReferenceOrchestrationRuns",

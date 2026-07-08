@@ -1,7 +1,10 @@
 import fs from 'node:fs/promises'
+import assert from 'node:assert/strict'
 import path from 'node:path'
 import {
+  verifyChapterReferenceBridgeCalls,
   verifyBridgeCalls,
+  verifyCorpusLibraryBridgeCalls,
   verifyDiagnosticsBridgeCalls,
   verifyErrorBridgeCalls,
   verifyGitBridgeCalls,
@@ -47,6 +50,7 @@ import { verifyPhase15StressWorkflow } from './phase15-stress-workflows.mjs'
 import { verifyReferenceErrorFeedbackWorkflow } from './reference-error-feedback.mjs'
 import {
   assertBridgeCallCount,
+  assertEditorContains,
   bridgeCallCount,
   clickCardAction,
   dispatchNovelImportDrop,
@@ -117,6 +121,10 @@ export async function runSmokeSuite(browser, url) {
 }
 
 function fullSuiteBridgeOptions() {
+  if (runConfig.grep === '@chapter-reference') {
+    return { initialized: true, allowSaveContent: true }
+  }
+
   if (runConfig.grep === '@update') {
     return {
       initialized: true,
@@ -280,6 +288,122 @@ function errorFeedbackFaults() {
   }
 }
 
+async function verifyCorpusLibraryWorkflow(page) {
+  await clickActivity(page, '素材库')
+  await expectVisible(page.getByRole('heading', { name: /素材库|语料库管理/ }).first(), 'corpus library heading')
+  await expectVisible(page.getByLabel('材料库结果').or(page.getByLabel('材料库搜索')).first(), 'corpus library material area')
+
+  await page.getByRole('button', { name: '检索材料库' }).click()
+  await expectVisible(page.getByTestId('reference-material-library-card').first(), 'corpus library material card')
+  await page.getByRole('button', { name: /查看 .* 的材料明细/ }).first().click()
+  const drawer = page.getByTestId('reference-material-detail-drawer')
+  await expectVisible(drawer, 'corpus material detail drawer')
+  await expectVisible(drawer.getByText('来源片段'), 'corpus material detail segments')
+  await expectVisible(drawer.getByText('处理记录'), 'corpus material detail processing notes')
+  await expectVisible(drawer.getByText('工作区语料'), 'corpus material detail owner scope')
+  await expectVisible(drawer.getByText('活跃'), 'corpus material detail archive state')
+  await expectVisible(drawer.getByText(/lexical 0\.92/), 'corpus material detail score components')
+  await expectVisible(drawer.getByText(/segments=3 · materials=2 · slots=2 · vectors=0/), 'corpus material detail structured counts')
+  await expectVisible(drawer.getByText(/affected: 101 · mock-mat-rain-001 · mock-seg-rain-001 · object/), 'corpus material detail affected ids')
+  await waitForBridgeCall(page, 'GetReferenceMaterialDetail')
+  const drawerText = await drawer.innerText()
+  assert(!drawerText.includes('D:\\books'), 'material detail drawer must not render local source paths')
+
+  const legacyRetrievalVisible = await page.getByText('参考写作检索', { exact: true }).isVisible().catch(() => false)
+  assert.equal(legacyRetrievalVisible, false, 'corpus library activity must not render the retired reference-writing retrieval section')
+}
+
+async function verifyChapterReferenceWorkflow(page) {
+  await clickActivity(page, '章节')
+  await ensureChapterBlockExpanded(page)
+  await chapterButton(page, '雨夜线索').click()
+  await expectVisible(page.locator('.monaco-editor').first(), 'chapter editor')
+  await waitForBridgeCallArg(page, 'GetContent', 1, 'chapters/1.md')
+
+  await page.getByRole('button', { name: /参考素材/ }).click()
+  const drawer = page.getByTestId('chapter-reference-panel')
+  await expectVisible(drawer, 'chapter reference drawer')
+  await expectVisible(drawer.getByText('推荐素材'), 'chapter reference recommendations heading')
+  await expectVisible(drawer.getByTestId('chapter-reference-material-card').first(), 'chapter reference recommendation card')
+  await waitForBridgeCall(page, 'SearchReferenceMaterials')
+  await waitForBridgeCall(page, 'GetReferenceOrchestrationRuns')
+
+  await drawer.getByRole('button', { name: '启动参考流程' }).click()
+  await waitForBridgeCall(page, 'StartReferenceOrchestrationRun')
+  await expectVisible(drawer.getByTestId('chapter-reference-orchestration-run'), 'chapter reference orchestration status')
+  await expectVisible(drawer.getByText('请确认本章来源和事实边界后继续。'), 'chapter reference orchestration decision')
+
+  await drawer.getByRole('button', { name: '确认并继续' }).click()
+  await waitForBridgeCall(page, 'ResumeReferenceOrchestrationRun')
+  await expectVisible(drawer.getByText('来源和事实边界已确认，请审批自动蓝图。'), 'chapter reference resumed decision')
+
+  const saveCountBeforeCandidate = await bridgeCallCount(page, 'SaveContent')
+  await drawer.getByRole('button', { name: '生成候选' }).first().click()
+  await waitForBridgeCall(page, 'AdaptReferenceMaterial')
+  const candidatePreview = drawer.getByTestId('chapter-reference-candidate-preview')
+  await expectVisible(candidatePreview, 'chapter reference candidate preview')
+  await expectVisible(candidatePreview.getByText('林岚把雨声和杯底半圈水痕'), 'chapter reference candidate text')
+  await candidatePreview.getByRole('button', { name: '复制' }).click()
+  await page.waitForFunction(() => window.__appMockClipboardText?.includes('杯底半圈水痕'), null, { timeout: 12_000 })
+  assert.equal(await bridgeCallCount(page, 'SaveContent'), saveCountBeforeCandidate, 'copying a candidate must not save chapter content')
+
+  await candidatePreview.getByRole('button', { name: '追加末尾' }).click()
+  await assertEditorContains(page, '林岚把雨声和杯底半圈水痕重新放回眼前')
+  await waitForBridgeCallCountAfter(page, 'SaveContent', saveCountBeforeCandidate)
+
+  const adaptCountBeforeFailed = await bridgeCallCount(page, 'AdaptReferenceMaterial')
+  const saveCountBeforeFailed = await bridgeCallCount(page, 'SaveContent')
+  await drawer.getByLabel('已知事实').fill('mock_failed_audit')
+  await drawer.getByRole('button', { name: '生成候选' }).first().click()
+  await waitForBridgeCallCountAfter(page, 'AdaptReferenceMaterial', adaptCountBeforeFailed)
+  await expectVisible(candidatePreview.getByText('L2 · failed'), 'failed audit candidate status')
+  await expectVisible(drawer.getByTestId('chapter-reference-candidate-blocked'), 'failed audit insertion block')
+  assert.equal(await candidatePreview.getByRole('button', { name: '插入光标' }).isDisabled(), true, 'failed audit candidate must not allow cursor insertion')
+  assert.equal(await candidatePreview.getByRole('button', { name: '追加末尾' }).isDisabled(), true, 'failed audit candidate must not allow append insertion')
+  assert.equal(await candidatePreview.getByRole('button', { name: '替换选区' }).isDisabled(), true, 'failed audit candidate must not allow selection replacement')
+  assert.equal(await bridgeCallCount(page, 'SaveContent'), saveCountBeforeFailed, 'failed audit candidate must not save chapter content')
+
+  await drawer.getByRole('button', { name: '取消流程' }).click()
+  await waitForBridgeCall(page, 'CancelReferenceOrchestrationRun')
+  await expectVisible(drawer.getByText('cancelled · blueprint_approval'), 'chapter reference cancelled run status')
+
+  const firstSearchInput = await page.evaluate(() => {
+    const call = window.__appMockState.calls.find((item) => item.method === 'SearchReferenceMaterials')
+    return call?.args?.[0] ?? null
+  })
+  assert(firstSearchInput, 'chapter reference drawer must call SearchReferenceMaterials')
+  assert.deepEqual(firstSearchInput.anchor_ids, [], 'chapter reference drawer must search all accessible corpus materials by default')
+
+  const startInput = await page.evaluate(() => {
+    const call = window.__appMockState.calls.find((item) => item.method === 'StartReferenceOrchestrationRun')
+    return call?.args?.[0] ?? null
+  })
+  assert(startInput, 'chapter reference drawer must call StartReferenceOrchestrationRun')
+  assert.equal(startInput.chapter_number, 1, 'chapter reference drawer must derive chapter number from active tab')
+  assert.equal(startInput.anchor_ids, null, 'chapter reference drawer must not require selected anchors')
+
+  const resumeInput = await page.evaluate(() => {
+    const call = window.__appMockState.calls.find((item) => item.method === 'ResumeReferenceOrchestrationRun')
+    return call?.args?.[0] ?? null
+  })
+  assert(resumeInput, 'chapter reference drawer must support in-place orchestration resume')
+  assert.equal(resumeInput.decision_type, 'confirm_source_and_facts', 'chapter reference resume must use the backend decision type')
+
+  const adaptInput = await page.evaluate(() => {
+    const call = window.__appMockState.calls.find((item) => item.method === 'AdaptReferenceMaterial')
+    return call?.args?.[0] ?? null
+  })
+  assert(adaptInput, 'chapter reference drawer must generate a candidate from an existing material')
+  assert.equal(adaptInput.max_rewrite_level, 'L2', 'chapter reference candidate generation must use an explicit rewrite budget')
+
+  await page.getByRole('button', { name: '大纲' }).click()
+  await expectHidden(drawer, 'chapter reference drawer after switching to outline view')
+
+  await page.getByRole('button', { name: /故事状态/ }).click()
+  await waitForBridgeCallArg(page, 'GetContent', 1, 'novelist.md')
+  await expectHidden(drawer, 'chapter reference drawer after switching to non-chapter file')
+}
+
 export async function runFullSuite(browser, url) {
   const { consoleErrors, pageErrors } = diagnostics
 
@@ -310,13 +434,25 @@ export async function runFullSuite(browser, url) {
 
   logStep('loading workspace')
   const page = await newAppPage(browser, consoleErrors, pageErrors, fullSuiteBridgeOptions(), undefined, 'full-shell')
-  if (runConfig.grep === '@error' || runConfig.grep === '@update') {
+  if (runConfig.grep === '@error' || runConfig.grep === '@update' || runConfig.grep === '@chapter-reference') {
     await installClipboardSpy(page)
   }
   await page.goto(url, { waitUntil: 'domcontentloaded' })
   await expectVisible(page.getByText('全局回归小说'), 'workspace title')
   await expectVisible(page.getByText('AI 对话'), 'chat panel')
   await page.screenshot({ path: path.join(outputDir, 'app-01-shell.png'), fullPage: true })
+
+  if (runConfig.grep === '@corpus-library') {
+    logStep('checking Phase 16 corpus library split')
+    await verifyCorpusLibraryWorkflow(page)
+    await page.screenshot({ path: path.join(outputDir, 'app-phase16-corpus-library.png'), fullPage: true })
+  }
+
+  if (runConfig.grep === '@chapter-reference') {
+    logStep('checking Phase 16 chapter reference drawer')
+    await verifyChapterReferenceWorkflow(page)
+    await page.screenshot({ path: path.join(outputDir, 'app-phase16-chapter-reference.png'), fullPage: true })
+  }
 
   if (shouldRun('@surface')) {
     logStep('checking shell navigation')
@@ -448,6 +584,10 @@ export async function runFullSuite(browser, url) {
     await verifyWritingBridgeCalls(page)
   } else if (runConfig.grep === '@reference-anchor') {
     await verifyReferenceBridgeCalls(page)
+  } else if (runConfig.grep === '@corpus-library') {
+    await verifyCorpusLibraryBridgeCalls(page)
+  } else if (runConfig.grep === '@chapter-reference') {
+    await verifyChapterReferenceBridgeCalls(page)
   } else if (runConfig.grep === '@pattern') {
     await verifyPatternBridgeCalls(page)
   } else if (runConfig.grep === '@git') {

@@ -12,7 +12,7 @@ const activities: Activity[] = [
   { id: 'search', icon: Search, label: '搜索' },
   { id: 'novels', icon: Library, label: '书架' },
   { id: 'chapters', icon: List, label: '章节' },
-  { id: 'reference', icon: BookMarked, label: '参考锚定' },
+  { id: 'reference', icon: BookMarked, label: '素材库' },
   { id: 'style-samples', icon: Palette, label: '风格素材' },
   { id: 'patterns', icon: Boxes, label: '叙事模式' },
   { id: 'git-history', icon: GitCommitHorizontal, label: 'Git 历史' },

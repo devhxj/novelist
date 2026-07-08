@@ -11,19 +11,34 @@ public sealed class PhotinoDesktopHostTests
     [Fact]
     public void LaunchSettingsUseStubUrlByDefault()
     {
-        var settings = PhotinoLaunchMode.CreateSettings([PhotinoLaunchMode.DesktopFlag]);
+        var root = Path.Combine(Path.GetTempPath(), "novelist-desktop-default-" + Guid.NewGuid().ToString("N"));
+        var options = new AppInitializationOptions
+        {
+            ConfigDirectory = Path.Combine(root, "config"),
+            DefaultDataDirectory = Path.Combine(root, "data"),
+            EnableLegacyMigration = false
+        };
 
-        Assert.Equal("novelist", settings.Title);
-        Assert.Null(settings.X);
-        Assert.Null(settings.Y);
-        Assert.Equal(1280, settings.Width);
-        Assert.Equal(840, settings.Height);
-        Assert.False(settings.Maximized);
-        Assert.Equal("about:blank", settings.StartUrl);
-        Assert.NotNull(settings.AppOptions);
-        Assert.True(settings.AppOptions.EnableLegacyMigration);
-        Assert.Equal("", settings.AppOptions.UpdateCheckEndpointUrl);
-        Assert.False(settings.AppOptions.UpdateChecksEnabledByDefault);
+        try
+        {
+            var settings = PhotinoLaunchMode.CreateSettings([PhotinoLaunchMode.DesktopFlag], appOptions: options);
+
+            Assert.Equal("novelist", settings.Title);
+            Assert.Null(settings.X);
+            Assert.Null(settings.Y);
+            Assert.Equal(1280, settings.Width);
+            Assert.Equal(840, settings.Height);
+            Assert.False(settings.Maximized);
+            Assert.Equal("about:blank", settings.StartUrl);
+            Assert.Same(options, settings.AppOptions);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     [Fact]
@@ -133,6 +148,54 @@ public sealed class PhotinoDesktopHostTests
             ]);
 
         Assert.Equal(new Point(2050, 100), location);
+    }
+
+    [Fact]
+    public void WindowPlacementUsesEightyPercentOfWorkAreaForDefaultLaunchSize()
+    {
+        var size = PhotinoWindowPlacement.ResolveDefaultLaunchSize(
+            [new Rectangle(0, 0, 1920, 1040)],
+            new Size(1280, 840));
+
+        Assert.Equal(new Size(1536, 832), size);
+    }
+
+    [Fact]
+    public void WindowPlacementUsesPreferredMonitorForDefaultLaunchSize()
+    {
+        var size = PhotinoWindowPlacement.ResolveDefaultLaunchSize(
+            [
+                new Rectangle(0, 0, 1920, 1040),
+                new Rectangle(1920, 0, 1280, 984)
+            ],
+            new Size(1280, 840),
+            new Point(2100, 100));
+
+        Assert.Equal(new Size(1024, 787), size);
+    }
+
+    [Fact]
+    public void WindowPlacementKeepsDefaultLaunchSizeWithinSmallWorkArea()
+    {
+        var size = PhotinoWindowPlacement.ResolveDefaultLaunchSize(
+            [new Rectangle(0, 0, 760, 560)],
+            new Size(1280, 840));
+
+        Assert.Equal(new Size(760, 560), size);
+    }
+
+    [Fact]
+    public void WindowPlacementCentersLaunchSizeOnPreferredMonitor()
+    {
+        var location = PhotinoWindowPlacement.CenterInVisibleWorkArea(
+            new Size(1024, 787),
+            [
+                new Rectangle(0, 0, 1920, 1040),
+                new Rectangle(1920, 0, 1280, 984)
+            ],
+            new Point(2100, 100));
+
+        Assert.Equal(new Point(2048, 98), location);
     }
 
     [Fact]

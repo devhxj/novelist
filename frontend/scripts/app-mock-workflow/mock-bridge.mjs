@@ -407,6 +407,56 @@ export function installConfigurableAppMockBridge(options = {}) {
       updated_at: now,
     },
   ]
+  const defaultReferenceMaterials = [
+    {
+      material_id: 'mock-mat-rain-001',
+      anchor_id: 101,
+      source_segment_id: 'mock-seg-rain-001',
+      material_type: 'sentence',
+      function_tag: 'environment',
+      emotion_tag: 'restrained',
+      scene_tag: 'rain_threshold',
+      pov_tag: 'close',
+      technique_tag: 'delayed_reaction',
+      function_confidence: 0.91,
+      emotion_confidence: 0.88,
+      pov_confidence: 0.9,
+      text: '雨夜线索从旧城门开始，雨声压着门槛，林岚只看见杯底半圈水痕，没有急着给出判断。',
+      source_hash: 'hash-mock-material-001',
+      extractor_version: 'mock-reference-v1',
+      user_verified: true,
+      created_at: now,
+      score_components: {
+        lexical: 0.92,
+        function: 0.9,
+        prose_duty: 0.86,
+      },
+    },
+    {
+      material_id: 'mock-mat-rain-002',
+      anchor_id: 101,
+      source_segment_id: 'mock-seg-rain-002',
+      material_type: 'passage',
+      function_tag: 'emotion_evidence',
+      emotion_tag: 'suspense',
+      scene_tag: 'interior',
+      pov_tag: 'close',
+      technique_tag: 'subtext',
+      function_confidence: 0.87,
+      emotion_confidence: 0.84,
+      pov_confidence: 0.89,
+      text: '灯影在门缝里停了一瞬，她把袖口往下拉，只把这处停顿记进本子。',
+      source_hash: 'hash-mock-material-002',
+      extractor_version: 'mock-reference-v1',
+      user_verified: false,
+      created_at: now,
+      score_components: {
+        lexical: 0.84,
+        function: 0.86,
+        prose_duty: 0.82,
+      },
+    },
+  ]
   const defaultGitFixtures = createDefaultGitMockFixtures()
   const state = {
     calls: [],
@@ -449,12 +499,15 @@ export function installConfigurableAppMockBridge(options = {}) {
     cancelledNovelImportTaskIds: [],
     createdReferenceAnchors: [],
     referenceAnchors: options.referenceAnchors ?? defaultReferenceAnchors,
+    referenceMaterials: options.referenceMaterials ?? defaultReferenceMaterials,
     referenceBuildStatuses: options.referenceBuildStatuses ?? {},
     referenceStyleProfiles: options.referenceStyleProfiles ?? [],
     referenceStyleProfileBuildStatuses: options.referenceStyleProfileBuildStatuses ?? {},
     nextReferenceStyleProfileId: 301,
     referenceBlueprints: {},
     nextReferenceBlueprintId: 701,
+    referenceOrchestrationRuns: [],
+    nextReferenceOrchestrationRunId: 1,
     contentByPath: options.contentByPath ?? defaultContentByPath,
     initialized: options.initialized ?? true,
     novels: options.novels ?? [defaultNovel],
@@ -911,6 +964,8 @@ export function installConfigurableAppMockBridge(options = {}) {
       case 'CreateReferenceAnchor': return createReferenceAnchor(args[0])
       case 'RebuildReferenceAnchor': return rebuildReferenceAnchor(args[1])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
+      case 'GetReferenceMaterialDetail': return getReferenceMaterialDetail(args[0])
+      case 'AdaptReferenceMaterial': return adaptReferenceMaterial(args[0])
       case 'BuildReferenceStyleProfile': return buildReferenceStyleProfile(args[0])
       case 'GetReferenceStyleProfileBuildStatus': return referenceStyleProfileBuildStatus(args[0])
       case 'GetReferenceChapterBlueprints': return Object.values(state.referenceBlueprints).map(toReferenceBlueprintSummary)
@@ -919,8 +974,12 @@ export function installConfigurableAppMockBridge(options = {}) {
       case 'ReviewReferenceChapterBlueprint': return reviewReferenceBlueprint(args[0])
       case 'ApproveReferenceChapterBlueprint': return approveReferenceBlueprint(args[0])
       case 'BindReferenceBlueprintMaterials': return bindReferenceBlueprintMaterials(args[0])
-      case 'GetReferenceOrchestrationRuns': return []
-      case 'GetReferenceOrchestrationRunEvents': return []
+      case 'StartReferenceOrchestrationRun': return startReferenceOrchestrationRun(args[0])
+      case 'GetReferenceOrchestrationRuns': return referenceOrchestrationRuns(args[0], args[1])
+      case 'GetReferenceOrchestrationRun': return referenceOrchestrationRun(args[1])
+      case 'GetReferenceOrchestrationRunEvents': return referenceOrchestrationRunEvents(args[1])
+      case 'ResumeReferenceOrchestrationRun': return resumeReferenceOrchestrationRun(args[0])
+      case 'CancelReferenceOrchestrationRun': return cancelReferenceOrchestrationRun(args[0])
       default:
         return defaultValueFor(method)
     }
@@ -3240,7 +3299,152 @@ export function installConfigurableAppMockBridge(options = {}) {
       return searchStressReferenceMaterials(input)
     }
 
-    return pageResult([])
+    const page = Math.max(1, Number(input.page ?? 1))
+    const size = Math.max(1, Number(input.size ?? 10))
+    const anchorIds = Array.isArray(input.anchor_ids)
+      ? input.anchor_ids.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0)
+      : []
+    const queryTerms = String(input.query ?? '')
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((term) => term && !/^第\d+章$/.test(term))
+    const source = Array.isArray(state.referenceMaterials) ? state.referenceMaterials : []
+    const filtered = source.filter((material) => {
+      if (anchorIds.length > 0 && !anchorIds.includes(Number(material.anchor_id))) return false
+      if (queryTerms.length === 0) return true
+      const searchable = [
+        material.text,
+        material.material_id,
+        material.function_tag,
+        material.emotion_tag,
+        material.scene_tag,
+        material.pov_tag,
+        material.technique_tag,
+      ].map((value) => String(value ?? '').toLowerCase()).join('\n')
+      return queryTerms.some((term) => searchable.includes(term))
+    })
+    const startIndex = (page - 1) * size
+    return pagedResult(filtered.slice(startIndex, startIndex + size), page, size, filtered.length)
+  }
+
+  function getReferenceMaterialDetail(input = {}) {
+    const materialId = String(input?.material_id ?? '')
+    const material = state.referenceMaterials.find((item) => item.material_id === materialId)
+    if (!material) return null
+
+    const anchor = referenceAnchors().find((item) => Number(item.anchor_id) === Number(material.anchor_id))
+    if (!anchor) return null
+
+    const preview = boundedPreview(material.text, 88)
+    return {
+      material: {
+        material_id: material.material_id,
+        anchor_id: material.anchor_id,
+        source_segment_id: material.source_segment_id,
+        material_type: material.material_type,
+        function_tag: material.function_tag,
+        emotion_tag: material.emotion_tag,
+        scene_tag: material.scene_tag,
+        pov_tag: material.pov_tag,
+        technique_tag: material.technique_tag,
+        function_confidence: material.function_confidence,
+        emotion_confidence: material.emotion_confidence,
+        pov_confidence: material.pov_confidence,
+        text_preview: preview.text,
+        text_truncated: preview.truncated,
+        source_hash: material.source_hash,
+        extractor_version: material.extractor_version,
+        user_verified: material.user_verified,
+        created_at: material.created_at,
+        archive_state: material.archived_at ? 'archived' : 'active',
+        archived_at: material.archived_at ?? null,
+        score_components: material.score_components ?? null,
+      },
+      source: {
+        anchor_id: anchor.anchor_id,
+        novel_id: anchor.novel_id ?? 0,
+        title: anchor.title,
+        author: anchor.author,
+        source_kind: anchor.source_kind,
+        license_status: anchor.license_status,
+        source_file_hash: anchor.source_file_hash,
+        build_version: anchor.build_version,
+        status: anchor.status,
+        visibility: anchor.visibility,
+        source_trust: anchor.source_trust,
+        user_tags: anchor.user_tags,
+        owner_scope: anchor.owner_scope ?? (Number(anchor.novel_id ?? 0) === 0 ? 'workspace_corpus' : 'novel'),
+        owner_novel_id: anchor.owner_novel_id ?? (Number(anchor.novel_id ?? 0) === 0 ? null : Number(anchor.novel_id)),
+      },
+      segments: [{
+        segment_id: material.source_segment_id,
+        segment_type: material.material_type === 'passage' ? 'paragraph' : 'sentence',
+        chapter_index: 1,
+        chapter_title: '雨夜参考',
+        segment_index: 1,
+        text_preview: preview.text,
+        text_truncated: preview.truncated,
+        text_hash: `hash-segment-${material.material_id}`,
+      }],
+      slots: [{
+        slot_name: 'object',
+        placeholder: '杯底水痕',
+        start_offset: 12,
+        end_offset: 16,
+      }],
+      processing_notes: [{
+        stage: 'completed',
+        status: 'ready',
+        message: 'segments=3; materials=2; slots=2; vectors=0',
+        updated_at: now,
+        source_segment_count: 3,
+        material_count: 2,
+        slot_count: 2,
+        vector_count: 0,
+        affected_source_id: String(anchor.anchor_id),
+        affected_material_id: material.material_id,
+        affected_segment_id: material.source_segment_id,
+        affected_slot_id: 'object',
+      }],
+    }
+  }
+
+  function adaptReferenceMaterial(input = {}) {
+    const materialId = String(input?.material_id ?? '')
+    const material = state.referenceMaterials.find((item) => item.material_id === materialId)
+    if (!material) throw new Error(`Unknown reference material ${materialId}`)
+    const candidateText = `林岚把雨声和杯底半圈水痕重新放回眼前，只写下门缝里那一下停顿，没有替任何人提前下结论。`
+    const facts = Array.isArray(input?.scene_facts) ? input.scene_facts.map((item) => String(item)) : []
+    const shouldFailAudit = facts.some((item) => item.includes('mock_failed_audit'))
+    return {
+      candidate_id: `mock-adapt-${material.material_id}`,
+      material_id: material.material_id,
+      rewrite_level: String(input?.max_rewrite_level ?? 'L2'),
+      text: candidateText,
+      changed_slots: Array.isArray(input?.slot_values) ? input.slot_values : [],
+      non_slot_edits: [],
+      audit: {
+        audit_id: `mock-audit-${material.material_id}`,
+        status: shouldFailAudit ? 'failed' : 'passed',
+        rewrite_level: String(input?.max_rewrite_level ?? 'L2'),
+        provenance_errors: shouldFailAudit ? ['mock source-leak risk'] : [],
+        unsupported_fact_errors: [],
+        ai_prose_risks: [],
+        non_slot_edits: [],
+        required_fixes: shouldFailAudit ? ['mock_failed_audit requires revision before insertion'] : [],
+        audited_at: now,
+      },
+    }
+  }
+
+  function boundedPreview(text, maxLength) {
+    const normalized = String(text ?? '').trim().replace(/\s+/g, ' ')
+    if (normalized.length <= maxLength) {
+      return { text: normalized, truncated: false }
+    }
+
+    return { text: `${normalized.slice(0, maxLength).trimEnd()}...`, truncated: true }
   }
 
   function searchStressReferenceMaterials(input = {}) {
@@ -3348,6 +3552,173 @@ export function installConfigurableAppMockBridge(options = {}) {
         created_at: now,
       }],
     }
+  }
+
+  function startReferenceOrchestrationRun(input = {}) {
+    const runId = `mock-orch-${String(state.nextReferenceOrchestrationRunId++).padStart(3, '0')}`
+    const chapterNumber = Number(input?.chapter_number ?? 1)
+    const run = {
+      run_id: runId,
+      novel_id: Number(input?.novel_id ?? state.activeNovelId),
+      chapter_number: chapterNumber,
+      status: 'waiting_for_user',
+      stage: 'source_confirmation',
+      chapter_goal: String(input?.chapter_goal ?? ''),
+      known_facts: Array.isArray(input?.known_facts) ? input.known_facts : [],
+      forbidden_facts: Array.isArray(input?.forbidden_facts) ? input.forbidden_facts : [],
+      anchor_ids: Array.isArray(input?.anchor_ids) ? input.anchor_ids : [],
+      corpus_search_policy: input?.corpus_search_policy ?? {
+        mode: 'story_context',
+        max_results_per_beat: 3,
+        license_statuses: ['user_provided'],
+        include_anchor_ids: [],
+        exclude_anchor_ids: [],
+      },
+      style_policy: input?.style_policy ?? null,
+      blueprint_id: 0,
+      review_id: '',
+      candidate_ids: [],
+      current_decision: {
+        decision_type: 'confirm_source_and_facts',
+        stop_reason: 'source_confirmation_required',
+        summary: '请确认本章来源和事实边界后继续。',
+        required_actions: ['检查推荐素材', '确认禁止事实没有被突破'],
+        approval_summary: {
+          chapter_function: '用共享语料支撑当前章节。',
+          pov: 'close',
+          fact_boundary_changes: [],
+          emotional_trajectory: 'restrained -> pressure',
+          material_use_plan: '按章节上下文检索共享素材，不要求手动选择 anchor。',
+          rewrite_budget: 'L0-L2',
+          high_risk_findings: [],
+        },
+        proposed_blueprint_revision: null,
+      },
+      last_stop_reason: 'source_confirmation_required',
+      error_message: '',
+      created_at: now,
+      updated_at: now,
+    }
+    state.referenceOrchestrationRuns = [run, ...state.referenceOrchestrationRuns]
+    return run
+  }
+
+  function resumeReferenceOrchestrationRun(input = {}) {
+    const run = referenceOrchestrationRun(input?.run_id)
+    if (!run) throw new Error(`Unknown reference orchestration run ${input?.run_id}`)
+    const decisionType = String(input?.decision_type ?? '')
+    if (run.current_decision?.decision_type !== decisionType) {
+      throw new Error(`Decision type does not match pending decision ${run.current_decision?.decision_type ?? ''}`)
+    }
+
+    let updated
+    if (decisionType === 'confirm_source_and_facts') {
+      updated = {
+        ...run,
+        status: 'waiting_for_user',
+        stage: 'blueprint_approval',
+        blueprint_id: run.blueprint_id || 701,
+        review_id: run.review_id || 'review-mock-001',
+        current_decision: {
+          decision_type: 'approve_blueprint',
+          stop_reason: 'blueprint_approval_required',
+          summary: '来源和事实边界已确认，请审批自动蓝图。',
+          required_actions: ['检查章节功能', '确认事实边界'],
+          approval_summary: {
+            chapter_function: '用共享语料支撑雨夜线索。',
+            pov: 'close',
+            fact_boundary_changes: ['known: 杯底半圈水痕', 'forbidden: 门外身份'],
+            emotional_trajectory: 'restrained -> pressure',
+            material_use_plan: '继续使用自动推荐素材，不要求手动绑定 anchor。',
+            rewrite_budget: 'L0-L2',
+            high_risk_findings: [],
+          },
+          proposed_blueprint_revision: null,
+        },
+        last_stop_reason: 'blueprint_approval_required',
+        updated_at: now,
+      }
+    } else if (decisionType === 'approve_blueprint') {
+      updated = {
+        ...run,
+        status: 'waiting_for_user',
+        stage: 'final_insertion',
+        candidate_ids: ['mock-candidate-001'],
+        current_decision: {
+          decision_type: 'approve_final_insertion',
+          stop_reason: 'final_insertion_required',
+          summary: '候选已通过审计，请在正文中显式插入。',
+          required_actions: ['预览候选', '选择插入方式'],
+          approval_summary: {
+            chapter_function: '保留受限视角并承接雨夜线索。',
+            pov: 'close',
+            fact_boundary_changes: [],
+            emotional_trajectory: 'pressure -> restraint',
+            material_use_plan: '候选已改写并通过素材来源审计。',
+            rewrite_budget: 'L0-L2',
+            high_risk_findings: [],
+          },
+          proposed_blueprint_revision: null,
+        },
+        last_stop_reason: 'final_insertion_required',
+        updated_at: now,
+      }
+    } else {
+      updated = {
+        ...run,
+        status: 'waiting_for_user',
+        updated_at: now,
+      }
+    }
+
+    state.referenceOrchestrationRuns = state.referenceOrchestrationRuns.map((item) =>
+      item.run_id === run.run_id ? updated : item)
+    return updated
+  }
+
+  function cancelReferenceOrchestrationRun(input = {}) {
+    const run = referenceOrchestrationRun(input?.run_id)
+    if (!run) throw new Error(`Unknown reference orchestration run ${input?.run_id}`)
+    const updated = {
+      ...run,
+      status: 'cancelled',
+      current_decision: null,
+      last_stop_reason: 'cancelled',
+      error_message: String(input?.reason ?? 'cancelled'),
+      updated_at: now,
+    }
+    state.referenceOrchestrationRuns = state.referenceOrchestrationRuns.map((item) =>
+      item.run_id === run.run_id ? updated : item)
+    return updated
+  }
+
+  function referenceOrchestrationRuns(novelId, chapterNumber) {
+    return state.referenceOrchestrationRuns.filter((run) => {
+      if (Number(run.novel_id) !== Number(novelId ?? state.activeNovelId)) return false
+      if (chapterNumber == null) return true
+      return Number(run.chapter_number) === Number(chapterNumber)
+    })
+  }
+
+  function referenceOrchestrationRun(runId) {
+    return state.referenceOrchestrationRuns.find((run) => run.run_id === String(runId ?? '')) ?? null
+  }
+
+  function referenceOrchestrationRunEvents(runId) {
+    const run = referenceOrchestrationRun(runId)
+    if (!run) return []
+    return [{
+      event_id: 1,
+      run_id: run.run_id,
+      novel_id: run.novel_id,
+      event_type: 'run_started',
+      stage: run.stage,
+      status: run.status,
+      stop_reason: run.last_stop_reason,
+      decision_type: run.current_decision?.decision_type ?? '',
+      summary: run.current_decision?.summary ?? '参考流程已启动。',
+      created_at: run.created_at,
+    }]
   }
 
   function makeReferenceBlueprint(blueprintId, overrides = {}) {

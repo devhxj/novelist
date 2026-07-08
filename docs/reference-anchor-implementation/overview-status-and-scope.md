@@ -4,13 +4,13 @@
 
 ## Status
 
-Phases 0-14 are complete at the current implementation boundary. Phase 15 is open and tracked in `tasks-and-verification.md` as the `goink-master` feature merge plan for import, style material library, narrative pattern extraction, Git history visualization, desktop UX persistence/update checks, and error-feedback hardening. Phase 15 Task 1 is complete at the contract/compatibility boundary; storage and implementation services start from Task 2.
+Phases 0-15 are complete at the current implementation boundary. Phase 16 is proposed and tracked in `tasks-and-verification.md` as the reference-anchor product information-architecture correction for separating shared corpus-library processing from current-chapter reference use.
 
-This plan is still the source of truth for the target design. Treat Phase 15 as the open product-merge implementation phase unless contracts, storage, bridge, agent, or frontend behavior regresses.
+This plan is still the source of truth for the target design. Treat Phase 16 as the proposed usability and information-architecture phase unless contracts, storage, bridge, agent, or frontend behavior regresses.
 
 ## Date
 
-2026-07-07
+2026-07-08
 
 ## Scope
 
@@ -34,3 +34,9 @@ The implementation must preserve the full design constraints from the design pla
 - evaluation fixtures and regression tests before broad agent integration
 
 This is not a simplification into plain RAG or a style prompt.
+
+Phase 16 does not weaken those constraints. It changes where workflows live:
+
+- corpus-library processing belongs to a shared `素材库` surface;
+- current-chapter reference use belongs inside the chapter editor;
+- advanced blueprint/material-binding controls remain available only where they support strict review or debugging, not as the default corpus-library experience.

@@ -27,35 +27,73 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
         var bridge = DesktopBridgeComposition.CreateBridge(adapter, settings.AppOptions);
 
         var hasStoredLocation = settings.X.HasValue && settings.Y.HasValue;
+        var workAreas = SafeMonitorWorkAreas(window).ToArray();
+        var launchSize = ResolveLaunchSize(settings, workAreas, hasStoredLocation);
+        var restoreStoredLocation = hasStoredLocation && !settings.Maximized;
         window
             .SetTitle(settings.Title)
+            .SetChromeless(!OperatingSystem.IsMacOS())
             .SetUseOsDefaultSize(false)
-            .SetSize(new Size(settings.Width, settings.Height))
-            .SetUseOsDefaultLocation(!hasStoredLocation)
+            .SetSize(launchSize)
+            .SetUseOsDefaultLocation(!restoreStoredLocation)
             .SetResizable(true)
             .RegisterWebMessageReceivedHandler((_, message) => bridge.Post(message));
-        if (hasStoredLocation)
+        if (restoreStoredLocation)
         {
-            window.MoveTo(ResolveLaunchLocation(window, settings), allowOutsideWorkArea: false);
+            window.MoveTo(ResolveLaunchLocation(settings, launchSize, workAreas), allowOutsideWorkArea: false);
+        }
+        else if (hasStoredLocation && settings.Maximized)
+        {
+            var centeredLocation = PhotinoWindowPlacement.CenterInVisibleWorkArea(
+                launchSize,
+                workAreas,
+                new Point(settings.X!.Value, settings.Y!.Value));
+            if (centeredLocation is { } location)
+            {
+                window.MoveTo(location, allowOutsideWorkArea: false);
+            }
+            else
+            {
+                window.Center();
+            }
         }
         else
         {
             window.Center();
         }
         window.Load(settings.StartUrl);
-        window.Maximized = settings.Maximized;
+        window.Maximized = false;
 
         return adapter;
     }
 
-    private static Point ResolveLaunchLocation(PhotinoWindow window, PhotinoWindowSettings settings)
+    private static Size ResolveLaunchSize(
+        PhotinoWindowSettings settings,
+        IReadOnlyList<Rectangle> workAreas,
+        bool hasStoredLocation)
+    {
+        var fallback = new Size(settings.Width, settings.Height);
+        if (hasStoredLocation && !settings.Maximized)
+        {
+            return fallback;
+        }
+
+        var preferredLocation = hasStoredLocation
+            ? new Point(settings.X!.Value, settings.Y!.Value)
+            : (Point?)null;
+        return PhotinoWindowPlacement.ResolveDefaultLaunchSize(workAreas, fallback, preferredLocation);
+    }
+
+    private static Point ResolveLaunchLocation(
+        PhotinoWindowSettings settings,
+        Size launchSize,
+        IReadOnlyList<Rectangle> workAreas)
     {
         var requested = new Point(settings.X!.Value, settings.Y!.Value);
-        var size = new Size(settings.Width, settings.Height);
         return PhotinoWindowPlacement.ClampLocationToVisibleWorkArea(
             requested,
-            size,
-            SafeMonitorWorkAreas(window).ToArray());
+            launchSize,
+            workAreas);
     }
 
     private static IEnumerable<Rectangle> SafeMonitorWorkAreas(PhotinoWindow window)

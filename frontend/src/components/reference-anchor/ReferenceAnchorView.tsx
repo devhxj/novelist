@@ -300,10 +300,14 @@ function parseLibraryPackManifest(
   })
 }
 
-function materialScoreComponents(material: reference.Material): Array<[string, number]> {
-  return Object.entries(material.score_components ?? {})
+function scoreComponentEntries(scoreComponents?: Record<string, number> | null): Array<[string, number]> {
+  return Object.entries(scoreComponents ?? {})
     .filter(([, value]) => Number.isFinite(value) && value > 0)
     .sort(([, left], [, right]) => right - left)
+}
+
+function materialScoreComponents(material: reference.Material): Array<[string, number]> {
+  return scoreComponentEntries(material.score_components)
 }
 
 function materialBestScore(material: reference.Material): number {
@@ -392,6 +396,10 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   const [materialLibraryArchiveFilter, setMaterialLibraryArchiveFilter] = useState<MaterialArchiveFilter>('active')
   const [selectedLibraryMaterialIds, setSelectedLibraryMaterialIds] = useState<string[]>([])
   const [bulkLibraryMaterialTagForm, setBulkLibraryMaterialTagForm] = useState<MaterialTagForm>(EMPTY_MATERIAL_TAG_FORM)
+  const [materialDetailId, setMaterialDetailId] = useState<string | null>(null)
+  const [materialDetail, setMaterialDetail] = useState<reference.MaterialDetail | null>(null)
+  const [materialDetailLoading, setMaterialDetailLoading] = useState(false)
+  const [materialDetailError, setMaterialDetailError] = useState<Exclude<ReferenceErrorState, string> | null>(null)
   const [blueprintForm, setBlueprintForm] = useState<BlueprintForm>(EMPTY_BLUEPRINT_FORM)
   const [revisionForm, setRevisionForm] = useState<BlueprintRevisionForm>(EMPTY_REVISION_FORM)
   const [materialFilters, setMaterialFilters] = useState<MaterialSearchFilters>(EMPTY_MATERIAL_FILTERS)
@@ -598,7 +606,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     void (async () => {
       setLoading(true)
       try {
-        await Promise.all([loadAnchors(), loadBlueprints(), loadOrchestrationRuns(), loadStyleProfiles()])
+        await Promise.all([loadAnchors(), loadStyleProfiles()])
       } catch (err) {
         if (!cancelled) {
           setError(referenceError(err, {
@@ -613,7 +621,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       }
     })()
     return () => { cancelled = true }
-  }, [loadAnchors, loadBlueprints, loadOrchestrationRuns, loadStyleProfiles, referenceError])
+  }, [loadAnchors, loadStyleProfiles, referenceError])
 
   useEffect(() => {
     let cancelled = false
@@ -1184,6 +1192,43 @@ export default function ReferenceAnchorView({ novelId }: Props) {
         setMaterialLibrarySort('default')
       }
     }
+  }
+
+  async function openMaterialDetail(materialId: string) {
+    setMaterialDetailId(materialId)
+    setMaterialDetail(null)
+    setMaterialDetailError(null)
+    setMaterialDetailLoading(true)
+    try {
+      const detail = await app.GetReferenceMaterialDetail({
+        novel_id: novelId,
+        material_id: materialId,
+      })
+      setMaterialDetail(detail ?? null)
+      if (!detail) {
+        setMaterialDetailError({
+          title: '材料明细不可用',
+          message: '材料不存在、已归档，或当前作品无权访问。',
+          diagnostic: null,
+        })
+      }
+    } catch (err) {
+      setMaterialDetailError(referenceError(err, {
+        fallbackMessage: '材料明细加载失败',
+        operation: 'GetReferenceMaterialDetail',
+        bridgeMethod: 'GetReferenceMaterialDetail',
+        detail: { material_id: materialId },
+      }))
+    } finally {
+      setMaterialDetailLoading(false)
+    }
+  }
+
+  function closeMaterialDetail() {
+    setMaterialDetailId(null)
+    setMaterialDetail(null)
+    setMaterialDetailError(null)
+    setMaterialDetailLoading(false)
   }
 
   async function saveBulkLibraryMaterialTags() {
@@ -1763,6 +1808,8 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     }
   }
 
+  const showLegacyChapterReference = false
+
   return (
     <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-background">
       <div className="mx-auto max-w-6xl px-5 py-6 space-y-5">
@@ -1770,13 +1817,13 @@ export default function ReferenceAnchorView({ novelId }: Props) {
           <div className="flex items-center gap-2">
             <BookMarked className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold text-foreground">
-              参考锚定
+              素材库
               <span className="ml-2 text-xs font-normal text-muted-foreground">{anchors.length} 个锚点</span>
             </h2>
           </div>
           <div className="flex items-center gap-2">
             {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-            <button onClick={() => { void loadAnchors(); void loadBlueprints(); void loadOrchestrationRuns() }} className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+            <button onClick={() => { void loadAnchors(); void loadStyleProfiles() }} className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
               <RefreshCcw className="h-3 w-3" />刷新
             </button>
           </div>
@@ -1805,7 +1852,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
         )}
         {message && <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">{message}</div>}
 
-        <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-4">
+        <div className={showLegacyChapterReference ? 'grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-4' : 'space-y-4'}>
           <section className="space-y-4" aria-labelledby="corpus-library-heading">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
@@ -1813,7 +1860,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                 <h3 id="corpus-library-heading" className="text-xs font-semibold text-foreground">语料库管理</h3>
               </div>
               <p className="text-xs leading-relaxed text-muted-foreground">
-                管理可检索来源、库条目元数据、可见性和材料预览；写作时默认由右侧流程按故事上下文自动检索。
+                管理可检索来源、库条目元数据、可见性和材料预览；写作时会在章节正文的“参考素材”面板按上下文自动推荐。
               </p>
             </div>
 
@@ -2341,6 +2388,17 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                                             {material.user_verified && <span className="text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
                                             <button
                                               type="button"
+                                              onClick={() => {
+                                                void openMaterialDetail(material.material_id)
+                                              }}
+                                              disabled={materialDetailLoading && materialDetailId === material.material_id}
+                                              className="rounded px-1.5 py-1 text-[11px] leading-none text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                                              aria-label={`查看 ${material.material_id} 的材料明细`}
+                                            >
+                                              明细
+                                            </button>
+                                            <button
+                                              type="button"
                                               onClick={() => beginEditMaterialTags(material)}
                                               disabled={loading}
                                               className="rounded px-1.5 py-1 text-[11px] leading-none text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
@@ -2618,7 +2676,20 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                                 {material.material_id} · {material.material_type} · {material.function_tag || 'untagged'} · {material.pov_tag || 'unknown'}
                               </span>
                             </label>
-                            {material.user_verified && <span className="text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
+                            <span className="flex shrink-0 items-center gap-1">
+                              {material.user_verified && <span className="text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void openMaterialDetail(material.material_id)
+                                }}
+                                disabled={materialDetailLoading && materialDetailId === material.material_id}
+                                className="rounded px-1.5 py-1 text-[11px] leading-none text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                                aria-label={`查看 ${material.material_id} 的材料明细`}
+                              >
+                                明细
+                              </button>
+                            </span>
                           </div>
                           <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-foreground">{material.text}</p>
                           <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">
@@ -2673,6 +2744,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
             />
           </section>
 
+          {showLegacyChapterReference && (
           <section className="min-w-0 space-y-4" aria-labelledby="reference-retrieval-heading">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
@@ -2878,10 +2950,210 @@ export default function ReferenceAnchorView({ novelId }: Props) {
               )}
             </div>
           </section>
+          )}
         </div>
+        {materialDetailId && (
+          <MaterialDetailDrawer
+            materialId={materialDetailId}
+            detail={materialDetail}
+            loading={materialDetailLoading}
+            error={materialDetailError}
+            onClose={closeMaterialDetail}
+            onRetry={() => {
+              void openMaterialDetail(materialDetailId)
+            }}
+          />
+        )}
       </div>
     </main>
   )
+}
+
+function MaterialDetailDrawer({
+  materialId,
+  detail,
+  loading,
+  error,
+  onClose,
+  onRetry,
+}: {
+  materialId: string
+  detail: reference.MaterialDetail | null
+  loading: boolean
+  error: Exclude<ReferenceErrorState, string> | null
+  onClose: () => void
+  onRetry: () => void
+}) {
+  const material = detail?.material
+  const source = detail?.source
+  const materialScores = material ? scoreComponentEntries(material.score_components) : []
+
+  return (
+    <aside
+      role="dialog"
+      aria-modal="false"
+      aria-label="材料明细"
+      data-testid="reference-material-detail-drawer"
+      className="fixed inset-y-0 right-0 z-40 flex w-[420px] max-w-[calc(100vw-3rem)] flex-col border-l border-border bg-card shadow-xl"
+    >
+      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-foreground">材料明细</h3>
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{materialId}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          aria-label="关闭材料明细"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3">
+        {loading && (
+          <div className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            正在加载材料明细...
+          </div>
+        )}
+
+        {error && (
+          <ErrorCallout
+            compact
+            title={error.title}
+            message={error.message}
+            diagnostic={error.diagnostic}
+            className="rounded-md"
+            onRetry={onRetry}
+            retryLabel="重试加载"
+            onClose={onClose}
+          />
+        )}
+
+        {material && source && (
+          <>
+            <section className="space-y-2">
+              <h4 className="text-xs font-semibold text-foreground">材料</h4>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <DetailKeyValue label="类型" value={`${material.material_type} · ${material.function_tag || 'untagged'} · ${material.emotion_tag || 'neutral'}`} />
+                <DetailKeyValue label="POV/技法" value={`${material.pov_tag || 'unknown'} · ${material.technique_tag || 'none'}`} />
+                <DetailKeyValue label="置信度" value={`功能 ${formatConfidence(material.function_confidence)} · 情绪 ${formatConfidence(material.emotion_confidence)} · POV ${formatConfidence(material.pov_confidence)}`} />
+                <DetailKeyValue label="来源段落" value={material.source_segment_id} />
+                <DetailKeyValue label="来源哈希" value={material.source_hash} />
+                <DetailKeyValue label="抽取器" value={material.extractor_version} />
+                <DetailKeyValue label="校正状态" value={material.user_verified ? '已人工校正' : '未人工校正'} />
+                <DetailKeyValue label="归档状态" value={material.archive_state === 'archived' ? `已归档${material.archived_at ? ` · ${String(material.archived_at)}` : ''}` : '活跃'} />
+                <DetailKeyValue
+                  label="评分明细"
+                  value={materialScores.length > 0
+                    ? materialScores.map(([name, value]) => `${name} ${value.toFixed(2)}`).join(' · ')
+                    : '暂无评分明细'}
+                />
+              </div>
+              <p className="rounded-md border border-border bg-background px-3 py-2 text-xs leading-relaxed text-foreground">
+                {material.text_preview || '无预览'}
+              </p>
+            </section>
+
+            <section className="space-y-2">
+              <h4 className="text-xs font-semibold text-foreground">来源</h4>
+              <div className="space-y-1 text-xs text-muted-foreground">
+                <DetailKeyValue label="标题" value={source.title} />
+                <DetailKeyValue label="作者" value={source.author || '未填写'} />
+                <DetailKeyValue label="格式/授权" value={`${source.source_kind} · ${source.license_status}`} />
+                <DetailKeyValue label="归属" value={source.owner_scope === 'workspace_corpus' ? '工作区语料' : `小说 ${source.owner_novel_id ?? source.novel_id}`} />
+                <DetailKeyValue label="可见性/可信度" value={`${source.visibility} · ${source.source_trust}`} />
+                <DetailKeyValue label="状态/版本" value={`${source.status} · ${source.build_version}`} />
+                <DetailKeyValue label="文件哈希" value={source.source_file_hash} />
+                {source.user_tags.length > 0 && <DetailKeyValue label="标签" value={source.user_tags.join('；')} />}
+              </div>
+            </section>
+
+            <section className="space-y-2">
+              <h4 className="text-xs font-semibold text-foreground">来源片段</h4>
+              {detail.segments.length === 0 ? (
+                <p className="text-xs text-muted-foreground">暂无片段预览</p>
+              ) : (
+                <div className="space-y-2">
+                  {detail.segments.map(segment => (
+                    <div key={segment.segment_id} className="rounded-md border border-border bg-background px-3 py-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                        <span className="min-w-0 truncate">{segment.segment_id} · {segment.segment_type}</span>
+                        <span>第 {segment.chapter_index} 章 · #{segment.segment_index}</span>
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-foreground">
+                        {segment.text_preview || '无预览'}
+                      </p>
+                      <p className="mt-1 break-all text-[11px] text-muted-foreground">hash {segment.text_hash}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-2">
+              <h4 className="text-xs font-semibold text-foreground">占位槽</h4>
+              {detail.slots.length === 0 ? (
+                <p className="text-xs text-muted-foreground">未检测到占位槽</p>
+              ) : (
+                <div className="space-y-1">
+                  {detail.slots.map((slot, index) => (
+                    <DetailKeyValue
+                      key={`${slot.slot_name}-${slot.start_offset}-${index}`}
+                      label={slot.slot_name}
+                      value={`${slot.placeholder} · ${slot.start_offset}-${slot.end_offset}`}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-2">
+              <h4 className="text-xs font-semibold text-foreground">处理记录</h4>
+              {detail.processing_notes.length === 0 ? (
+                <p className="text-xs text-muted-foreground">暂无处理记录</p>
+              ) : (
+                <div className="space-y-2">
+                  {detail.processing_notes.map((note, index) => (
+                    <div key={`${note.stage}-${note.updated_at}-${index}`} className="rounded-md border border-border bg-background px-3 py-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                        <span>{note.stage} · {note.status}</span>
+                        <span>{String(note.updated_at ?? '')}</span>
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-foreground">{note.message}</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        segments={note.source_segment_count} · materials={note.material_count} · slots={note.slot_count} · vectors={note.vector_count}
+                      </p>
+                      {(note.affected_source_id || note.affected_material_id || note.affected_segment_id || note.affected_slot_id) && (
+                        <p className="mt-1 break-all text-[11px] text-muted-foreground">
+                          affected: {[note.affected_source_id, note.affected_material_id, note.affected_segment_id, note.affected_slot_id].filter(Boolean).join(' · ')}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        )}
+      </div>
+    </aside>
+  )
+}
+
+function DetailKeyValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-2">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="min-w-0 break-all text-foreground">{value}</span>
+    </div>
+  )
+}
+
+function formatConfidence(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(2) : '0.00'
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

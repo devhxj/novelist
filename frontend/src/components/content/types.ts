@@ -32,11 +32,15 @@ export function novelistPath(): string {
 }
 
 export function isContentPath(p: string): boolean {
-  return p.startsWith('chapters/') || p === 'novelist.md'
+  return isChapterPath(p) || p === 'novelist.md'
+}
+
+export function isChapterPath(p: string): boolean {
+  return /^chapters\/\d+\.md$/.test(p)
 }
 
 export function isOutlinePath(p: string): boolean {
-  return p.startsWith('outlines/')
+  return /^outlines\/\d+\.md$/.test(p)
 }
 
 export function isSkillPath(p: string): boolean {
@@ -69,13 +73,7 @@ export function splitFrontmatter(content: string): { meta: Record<string, string
 }
 
 export function chapterNumFromPath(p: string): number {
-  let n = 0
-  if (p.startsWith('chapters/')) {
-    const s = p.replace('chapters/', '').replace('.md', '')
-    n = parseInt(s, 10)
-  } else if (p.startsWith('outlines/')) {
-    const s = p.replace('outlines/', '').replace('.md', '')
-    n = parseInt(s, 10)
-  }
-  return n || 0
+  const match = /^(?:chapters|outlines)\/(\d+)\.md$/.exec(p)
+  if (!match) return 0
+  return parseInt(match[1], 10) || 0
 }

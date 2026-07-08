@@ -155,6 +155,16 @@ body {
   overscroll-behavior: none;
 }
 
+.app-window-drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.app-window-no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
 #root {
   min-height: 100vh;
   overflow: hidden;

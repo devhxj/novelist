@@ -28,7 +28,7 @@ export default function SettingsDialog({ open, onClose, onSaved, initialTab = 'm
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
       {/* 弹窗 */}
-      <div className="relative bg-background rounded-xl shadow-2xl border flex w-[800px] h-[580px] max-w-[95vw] max-h-[90vh]">
+      <div className="relative flex h-[760px] max-h-[calc(100vh-32px)] w-[920px] max-w-[95vw] overflow-hidden rounded-xl border bg-background shadow-2xl">
         {/* 左侧导航 */}
         <nav className="w-[160px] border-r py-4 px-2 flex flex-col gap-1 shrink-0">
           <div className="text-sm font-medium px-3 pb-3 text-foreground">设置</div>
@@ -49,7 +49,7 @@ export default function SettingsDialog({ open, onClose, onSaved, initialTab = 'm
         </nav>
 
         {/* 右侧内容区 */}
-        <div className="flex-1 p-5 flex flex-col min-w-0">
+        <div className="min-h-0 flex-1 overflow-y-auto p-5 pr-6 flex flex-col min-w-0">
           {/* 关闭按钮 */}
           <button
             onClick={onClose}

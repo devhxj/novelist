@@ -255,6 +255,200 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void ReferenceMaterialDetailPayloadUsesBoundedSnakeCaseFieldsWithoutSensitiveText()
+    {
+        var input = new GetReferenceMaterialDetailPayload(
+            NovelId: 42,
+            MaterialId: "material-1");
+
+        using var inputJson = JsonDocument.Parse(JsonSerializer.Serialize(input, BridgeJson.SerializerOptions));
+        var inputRoot = inputJson.RootElement;
+        Assert.Equal(42, inputRoot.GetProperty("novel_id").GetInt64());
+        Assert.Equal("material-1", inputRoot.GetProperty("material_id").GetString());
+        Assert.False(inputRoot.TryGetProperty("NovelId", out _));
+
+        var detail = new ReferenceMaterialDetailPayload(
+            Material: new ReferenceMaterialSummaryPayload(
+                MaterialId: "material-1",
+                AnchorId: 7,
+                SourceSegmentId: "segment-1",
+                MaterialType: ReferenceMaterialTypes.Sentence,
+                FunctionTag: "environment",
+                EmotionTag: "reflective",
+                SceneTag: "threshold",
+                PovTag: "close",
+                TechniqueTag: "sensory_detail",
+                FunctionConfidence: 0.8,
+                EmotionConfidence: 0.7,
+                PovConfidence: 0.6,
+                TextPreview: "雨声压低了门口。",
+                TextTruncated: true,
+                SourceHash: "material-hash",
+                ExtractorVersion: "deterministic-v1",
+                UserVerified: false,
+                CreatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
+                ArchiveState: ReferenceMaterialArchiveFilters.Archived,
+                ArchivedAt: DateTimeOffset.Parse("2026-07-04T01:00:00Z"),
+                ScoreComponents: new Dictionary<string, double>
+                {
+                    ["lexical"] = 0.7,
+                    ["function"] = 0.5
+                }),
+            Source: new ReferenceMaterialSourceSummaryPayload(
+                AnchorId: 7,
+                NovelId: 42,
+                Title: "Shared Anchor",
+                Author: "Reference Author",
+                SourceKind: "markdown",
+                LicenseStatus: "user_provided",
+                SourceFileHash: "source-hash",
+                BuildVersion: "reference-anchor-v1",
+                Status: ReferenceAnchorBuildStates.Ready,
+                Visibility: ReferenceCorpusVisibilities.Workspace,
+                SourceTrust: ReferenceSourceTrustLevels.UserVerified,
+                UserTags: ["rain"],
+                OwnerScope: ReferenceAnchorOwnerScopes.WorkspaceCorpus,
+                OwnerNovelId: null),
+            Segments:
+            [
+                new ReferenceMaterialSegmentPreviewPayload(
+                    SegmentId: "segment-1",
+                    SegmentType: "paragraph",
+                    ChapterIndex: 1,
+                    ChapterTitle: "雨夜",
+                    SegmentIndex: 2,
+                    TextPreview: "片段预览",
+                    TextTruncated: false,
+                    TextHash: "segment-hash")
+            ],
+            Slots:
+            [
+                new ReferenceMaterialSlotPreviewPayload(
+                    SlotName: "object",
+                    Placeholder: "门",
+                    StartOffset: 1,
+                    EndOffset: 2)
+            ],
+            ProcessingNotes:
+            [
+                new ReferenceMaterialProcessingNotePayload(
+                    Stage: "completed",
+                    Status: ReferenceAnchorBuildStates.Ready,
+                    Message: "segments=1; materials=1; slots=1; vectors=0",
+                    UpdatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
+                    SourceSegmentCount: 1,
+                    MaterialCount: 1,
+                    SlotCount: 1,
+                    VectorCount: 0,
+                    AffectedSourceId: "7",
+                    AffectedMaterialId: "material-1",
+                    AffectedSegmentId: "segment-1",
+                    AffectedSlotId: "object")
+            ]);
+
+        var serialized = JsonSerializer.Serialize(detail, BridgeJson.SerializerOptions);
+        using var json = JsonDocument.Parse(serialized);
+        var root = json.RootElement;
+
+        Assert.Equal("material-1", root.GetProperty("material").GetProperty("material_id").GetString());
+        Assert.Equal("雨声压低了门口。", root.GetProperty("material").GetProperty("text_preview").GetString());
+        Assert.True(root.GetProperty("material").GetProperty("text_truncated").GetBoolean());
+        Assert.Equal("archived", root.GetProperty("material").GetProperty("archive_state").GetString());
+        Assert.Equal(0.7, root.GetProperty("material").GetProperty("score_components").GetProperty("lexical").GetDouble());
+        Assert.Equal("Shared Anchor", root.GetProperty("source").GetProperty("title").GetString());
+        Assert.Equal("workspace_corpus", root.GetProperty("source").GetProperty("owner_scope").GetString());
+        Assert.False(root.GetProperty("source").TryGetProperty("owner_novel_id", out _));
+        Assert.Equal("segment-1", root.GetProperty("segments")[0].GetProperty("segment_id").GetString());
+        Assert.Equal("object", root.GetProperty("slots")[0].GetProperty("slot_name").GetString());
+        Assert.Equal("completed", root.GetProperty("processing_notes")[0].GetProperty("stage").GetString());
+        Assert.Equal(1, root.GetProperty("processing_notes")[0].GetProperty("source_segment_count").GetInt32());
+        Assert.Equal(1, root.GetProperty("processing_notes")[0].GetProperty("material_count").GetInt32());
+        Assert.Equal(1, root.GetProperty("processing_notes")[0].GetProperty("slot_count").GetInt32());
+        Assert.Equal("7", root.GetProperty("processing_notes")[0].GetProperty("affected_source_id").GetString());
+        Assert.Equal("material-1", root.GetProperty("processing_notes")[0].GetProperty("affected_material_id").GetString());
+        Assert.Equal("segment-1", root.GetProperty("processing_notes")[0].GetProperty("affected_segment_id").GetString());
+        Assert.False(root.GetProperty("material").TryGetProperty("text", out _));
+        Assert.False(root.GetProperty("source").TryGetProperty("source_path", out _));
+        Assert.DoesNotContain("source_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(@"D:\books", serialized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ReferenceSourceProcessingDetailPayloadUsesStableSnakeCaseWithoutSensitiveText()
+    {
+        var input = new GetReferenceSourceProcessingDetailPayload(
+            NovelId: 42,
+            AnchorId: 7);
+        var detail = new ReferenceSourceProcessingDetailPayload(
+            Source: new ReferenceMaterialSourceSummaryPayload(
+                AnchorId: 7,
+                NovelId: 0,
+                Title: "Shared Anchor",
+                Author: "Reference Author",
+                SourceKind: "markdown",
+                LicenseStatus: "user_provided",
+                SourceFileHash: "source-hash",
+                BuildVersion: "reference-anchor-v1",
+                Status: ReferenceAnchorBuildStates.Ready,
+                Visibility: ReferenceCorpusVisibilities.Workspace,
+                SourceTrust: ReferenceSourceTrustLevels.UserVerified,
+                UserTags: ["rain"],
+                OwnerScope: ReferenceAnchorOwnerScopes.WorkspaceCorpus,
+                OwnerNovelId: null),
+            CurrentStatus: new ReferenceSourceProcessingStatusPayload(
+                Stage: "embedding",
+                Status: ReferenceAnchorBuildStates.Ready,
+                Diagnostic: "segments=3; materials=2; slots=1; vectors=2",
+                UpdatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
+                SourceSegmentCount: 3,
+                MaterialCount: 2,
+                SlotCount: 1,
+                VectorCount: 2),
+            Events:
+            [
+                new ReferenceSourceProcessingEventPayload(
+                    EventId: "event-1",
+                    Stage: "embedding",
+                    Status: ReferenceAnchorBuildStates.Ready,
+                    Message: "segments=3; materials=2; slots=1; vectors=2",
+                    CreatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
+                    SourceSegmentCount: 3,
+                    MaterialCount: 2,
+                    SlotCount: 1,
+                    VectorCount: 2,
+                    AffectedSourceId: "7",
+                    AffectedMaterialId: "material-1",
+                    AffectedSegmentId: "segment-1",
+                    AffectedSlotId: "slot-1")
+            ],
+            RetryAvailable: false,
+            RebuildAvailable: true);
+
+        using var inputJson = JsonDocument.Parse(JsonSerializer.Serialize(input, BridgeJson.SerializerOptions));
+        Assert.Equal(42, inputJson.RootElement.GetProperty("novel_id").GetInt64());
+        Assert.Equal(7, inputJson.RootElement.GetProperty("anchor_id").GetInt64());
+
+        var serialized = JsonSerializer.Serialize(detail, BridgeJson.SerializerOptions);
+        using var json = JsonDocument.Parse(serialized);
+        var root = json.RootElement;
+        Assert.Equal("Shared Anchor", root.GetProperty("source").GetProperty("title").GetString());
+        Assert.Equal("workspace_corpus", root.GetProperty("source").GetProperty("owner_scope").GetString());
+        Assert.Equal("embedding", root.GetProperty("current_status").GetProperty("stage").GetString());
+        Assert.Equal(3, root.GetProperty("current_status").GetProperty("source_segment_count").GetInt32());
+        Assert.Equal("event-1", root.GetProperty("events")[0].GetProperty("event_id").GetString());
+        Assert.Equal("material-1", root.GetProperty("events")[0].GetProperty("affected_material_id").GetString());
+        Assert.True(root.GetProperty("rebuild_available").GetBoolean());
+        Assert.False(root.GetProperty("retry_available").GetBoolean());
+        Assert.False(root.TryGetProperty("source_path", out _));
+        Assert.DoesNotContain("source_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(@"D:\books", serialized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ReferenceStyleProfilePayloadsUseStableSnakeCaseJsonNamesWithoutSourceText()
     {
         var build = new BuildReferenceStyleProfilePayload(
@@ -1519,6 +1713,8 @@ public sealed class ReferenceAnchorContractTests
             "RebuildReferenceAnchor",
             "GetReferenceAnchorBuildStatus",
             "SearchReferenceMaterials",
+            "GetReferenceMaterialDetail",
+            "GetReferenceSourceProcessingDetail",
             "AdaptReferenceMaterial",
             "AuditReferenceReuse",
             "RecordReferenceUserFeedback",

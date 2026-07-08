@@ -114,7 +114,7 @@ export async function verifyWritingBridgeCalls(page) {
 export async function verifyReferenceBridgeCalls(page) {
   const calls = await page.evaluate(() => window.__appMockState.calls)
   const methods = calls.map((call) => call.method)
-  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetReferenceAnchors']
+  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetReferenceAnchors', 'SearchReferenceMaterials', 'GetReferenceMaterialDetail']
 
   for (const method of requiredMethods) {
     assert(methods.includes(method), `Expected reference bridge method ${method} to be called.`)
@@ -122,6 +122,110 @@ export async function verifyReferenceBridgeCalls(page) {
 
   assert(!methods.includes('SaveContent'), 'reference entry workflow must not save chapter content implicitly')
   assert(!methods.includes('runtime.shell.openExternal'), 'reference entry workflow must not open external URLs')
+}
+
+export async function verifyCorpusLibraryBridgeCalls(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const methods = calls.map((call) => call.method)
+  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetReferenceAnchors']
+
+  for (const method of requiredMethods) {
+    assert(methods.includes(method), `Expected corpus library bridge method ${method} to be called.`)
+  }
+
+  const forbiddenMethods = [
+    'SaveContent',
+    'StartReferenceOrchestrationRun',
+    'GenerateReferenceChapterBlueprint',
+    'ReviewReferenceChapterBlueprint',
+    'ApproveReferenceChapterBlueprint',
+    'BindReferenceBlueprintMaterials',
+    'GetReferenceChapterBlueprint',
+    'GetReferenceChapterBlueprints',
+    'GetReferenceOrchestrationRuns',
+    'GetReferenceOrchestrationRunEvents',
+    'AdaptReferenceMaterial',
+    'GenerateReferenceAnchoredDraft',
+    'AuditReferenceAnchoredDraft',
+    'GetReferenceAnchoredDraftAudits',
+  ]
+  const unexpected = methods.filter((method) => forbiddenMethods.includes(method))
+  assert.deepEqual(unexpected, [], `corpus library workflow must not trigger chapter-writing bridge calls: ${unexpected.join(', ')}`)
+  assert(!methods.includes('runtime.shell.openExternal'), 'corpus library workflow must not open external URLs')
+}
+
+export async function verifyChapterReferenceBridgeCalls(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const methods = calls.map((call) => call.method)
+  const requiredMethods = [
+    'IsInitialized',
+    'GetSettings',
+    'GetNovels',
+    'GetChapters',
+    'GetContent',
+    'SearchReferenceMaterials',
+    'GetReferenceOrchestrationRuns',
+    'StartReferenceOrchestrationRun',
+    'ResumeReferenceOrchestrationRun',
+    'AdaptReferenceMaterial',
+    'CancelReferenceOrchestrationRun',
+  ]
+
+  for (const method of requiredMethods) {
+    assert(methods.includes(method), `Expected chapter reference bridge method ${method} to be called.`)
+  }
+
+  const searchCall = calls.find((call) => call.method === 'SearchReferenceMaterials')
+  assert(searchCall, 'chapter reference drawer must search reference materials')
+  assert.deepEqual(searchCall.args?.[0]?.anchor_ids, [], 'chapter reference drawer must search without manual anchor binding')
+  const startCall = calls.find((call) => call.method === 'StartReferenceOrchestrationRun')
+  assert(startCall, 'chapter reference drawer must start orchestration from the chapter surface')
+  assert.equal(startCall.args?.[0]?.chapter_number, 1, 'chapter reference drawer must derive the active chapter number')
+  assert.equal(startCall.args?.[0]?.anchor_ids, null, 'chapter reference orchestration must not require manual anchor selection')
+  assert.equal(startCall.args?.[0]?.corpus_search_policy?.mode, 'story_context', 'chapter reference orchestration must use story-context corpus search')
+  assert.deepEqual(startCall.args?.[0]?.corpus_search_policy?.include_anchor_ids, [], 'chapter reference orchestration must search accessible corpus by default')
+  assert.equal(startCall.args?.[0]?.source_confirmed, false, 'chapter reference orchestration must preserve the source confirmation stop')
+
+  const resumeCall = calls.find((call) => call.method === 'ResumeReferenceOrchestrationRun')
+  assert(resumeCall, 'chapter reference drawer must resume the current orchestration decision in place')
+  assert.equal(resumeCall.args?.[0]?.decision_type, 'confirm_source_and_facts', 'chapter reference resume must use stable backend decision type')
+
+  const adaptIndex = calls.findIndex((call) => call.method === 'AdaptReferenceMaterial')
+  const saveContentCalls = calls.filter((call) => call.method === 'SaveContent')
+  for (const saveCall of saveContentCalls) {
+    const path = String(saveCall.args?.[0]?.path ?? '')
+    assert(path.startsWith('chapters/'), 'chapter reference explicit candidate insertion may only save chapter content through the editor')
+    assert(String(saveCall.args?.[0]?.content ?? '').includes('杯底半圈水痕'), 'chapter reference chapter save must come from explicit candidate insertion')
+    assert(adaptIndex >= 0 && calls.indexOf(saveCall) > adaptIndex, 'chapter reference must not save before a candidate is generated and explicitly inserted')
+  }
+
+  const forbiddenMethods = [
+    'CreateReferenceAnchor',
+    'CreateReferenceAnchors',
+    'UpdateReferenceAnchor',
+    'UpdateReferenceAnchorMetadata',
+    'DeleteReferenceAnchor',
+    'DeleteReferenceAnchors',
+    'ArchiveReferenceAnchor',
+    'PromoteReferenceAnchorToWorkspaceCorpus',
+    'PromoteReferenceAnchorsToWorkspaceCorpus',
+    'RebuildReferenceAnchor',
+    'CorrectReferenceMaterialTags',
+    'BulkCorrectReferenceMaterialTags',
+    'UpdateReferenceMaterialTags',
+    'UpdateReferenceMaterialsTags',
+    'DeleteReferenceMaterials',
+    'RestoreReferenceMaterials',
+    'GenerateReferenceChapterBlueprint',
+    'ReviewReferenceChapterBlueprint',
+    'ApproveReferenceChapterBlueprint',
+    'BindReferenceBlueprintMaterials',
+    'GenerateReferenceAnchoredDraft',
+    'AuditReferenceAnchoredDraft',
+  ]
+  const unexpected = methods.filter((method) => forbiddenMethods.includes(method))
+  assert.deepEqual(unexpected, [], `chapter reference drawer must not mutate materials or save content: ${unexpected.join(', ')}`)
+  assert(!methods.includes('runtime.shell.openExternal'), 'chapter reference drawer workflow must not open external URLs')
 }
 
 export async function verifyPatternBridgeCalls(page) {

@@ -94,6 +94,16 @@ public static class ReferenceAnchorBridgeHandlers
                 ReadObjectArg<SearchReferenceMaterialsPayload>(context.Payload, 0, "input"),
                 cancellationToken));
 
+        dispatcher.Register("GetReferenceMaterialDetail", async (context, cancellationToken) =>
+            await service.GetMaterialDetailAsync(
+                ReadObjectArg<GetReferenceMaterialDetailPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
+        dispatcher.Register("GetReferenceSourceProcessingDetail", async (context, cancellationToken) =>
+            await service.GetSourceProcessingDetailAsync(
+                ReadObjectArg<GetReferenceSourceProcessingDetailPayload>(context.Payload, 0, "input"),
+                cancellationToken));
+
         dispatcher.Register("UpdateReferenceMaterialTags", async (context, cancellationToken) =>
             await service.UpdateMaterialTagsAsync(
                 ReadObjectArg<UpdateReferenceMaterialTagsPayload>(context.Payload, 0, "input"),

@@ -4,7 +4,7 @@ This implementation plan has been split into focused companion documents so each
 
 ## Status
 
-Core implementation phases 0-14 are complete at the current implementation boundary. Phase 15 is now open as the `goink-master` feature-merge plan for import, style material library, narrative pattern extraction, Git history visualization, desktop UX hardening, and error-feedback fixes in the current Novelist architecture. Phase 15 Task 1 is complete at the contract/compatibility boundary; Task 2 is the next storage and migration slice.
+Core implementation phases 0-15 are complete at the current implementation boundary. Phase 16 is proposed as the reference-anchor product information-architecture correction: split shared corpus-library processing from current-chapter reference use, move chapter use into the chapter editor surface, and preserve the existing provenance, blueprint, material binding, draft audit, and no-implicit-save guardrails.
 
 ## Date
 
@@ -36,6 +36,7 @@ Core implementation phases 0-14 are complete at the current implementation bound
 - [Tasks phase 13](reference-anchor-implementation/tasks-phase-13.md)
 - [Tasks phase 14](reference-anchor-implementation/tasks-phase-14.md)
 - [Tasks phase 15](reference-anchor-implementation/tasks-phase-15.md)
+- [Tasks phase 16](reference-anchor-implementation/tasks-phase-16.md)
 - [Verification and guardrails](reference-anchor-implementation/tasks-verification-and-guardrails.md)
 
 ## Reading Order

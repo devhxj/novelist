@@ -306,6 +306,126 @@ public sealed record ReferenceMaterialPayload(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyDictionary<string, double>? ScoreComponents = null);
 
+public sealed record GetReferenceMaterialDetailPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("material_id")] string MaterialId);
+
+public sealed record ReferenceMaterialSummaryPayload(
+    [property: JsonPropertyName("material_id")] string MaterialId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("source_segment_id")] string SourceSegmentId,
+    [property: JsonPropertyName("material_type")] string MaterialType,
+    [property: JsonPropertyName("function_tag")] string FunctionTag,
+    [property: JsonPropertyName("emotion_tag")] string EmotionTag,
+    [property: JsonPropertyName("scene_tag")] string SceneTag,
+    [property: JsonPropertyName("pov_tag")] string PovTag,
+    [property: JsonPropertyName("technique_tag")] string TechniqueTag,
+    [property: JsonPropertyName("function_confidence")] double FunctionConfidence,
+    [property: JsonPropertyName("emotion_confidence")] double EmotionConfidence,
+    [property: JsonPropertyName("pov_confidence")] double PovConfidence,
+    [property: JsonPropertyName("text_preview")] string TextPreview,
+    [property: JsonPropertyName("text_truncated")] bool TextTruncated,
+    [property: JsonPropertyName("source_hash")] string SourceHash,
+    [property: JsonPropertyName("extractor_version")] string ExtractorVersion,
+    [property: JsonPropertyName("user_verified")] bool UserVerified,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
+    [property: JsonPropertyName("archive_state")] string ArchiveState = ReferenceMaterialArchiveFilters.Active,
+    [property: JsonPropertyName("archived_at")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    DateTimeOffset? ArchivedAt = null,
+    [property: JsonPropertyName("score_components")] IReadOnlyDictionary<string, double>? ScoreComponents = null);
+
+public sealed record ReferenceMaterialSourceSummaryPayload(
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("author")] string Author,
+    [property: JsonPropertyName("source_kind")] string SourceKind,
+    [property: JsonPropertyName("license_status")] string LicenseStatus,
+    [property: JsonPropertyName("source_file_hash")] string SourceFileHash,
+    [property: JsonPropertyName("build_version")] string BuildVersion,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("visibility")] string Visibility,
+    [property: JsonPropertyName("source_trust")] string SourceTrust,
+    [property: JsonPropertyName("user_tags")] IReadOnlyList<string> UserTags,
+    [property: JsonPropertyName("owner_scope")] string OwnerScope = ReferenceAnchorOwnerScopes.Novel,
+    [property: JsonPropertyName("owner_novel_id")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    long? OwnerNovelId = null);
+
+public sealed record ReferenceMaterialSegmentPreviewPayload(
+    [property: JsonPropertyName("segment_id")] string SegmentId,
+    [property: JsonPropertyName("segment_type")] string SegmentType,
+    [property: JsonPropertyName("chapter_index")] int ChapterIndex,
+    [property: JsonPropertyName("chapter_title")] string ChapterTitle,
+    [property: JsonPropertyName("segment_index")] int SegmentIndex,
+    [property: JsonPropertyName("text_preview")] string TextPreview,
+    [property: JsonPropertyName("text_truncated")] bool TextTruncated,
+    [property: JsonPropertyName("text_hash")] string TextHash);
+
+public sealed record ReferenceMaterialSlotPreviewPayload(
+    [property: JsonPropertyName("slot_name")] string SlotName,
+    [property: JsonPropertyName("placeholder")] string Placeholder,
+    [property: JsonPropertyName("start_offset")] int StartOffset,
+    [property: JsonPropertyName("end_offset")] int EndOffset);
+
+public sealed record ReferenceMaterialProcessingNotePayload(
+    [property: JsonPropertyName("stage")] string Stage,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt,
+    [property: JsonPropertyName("source_segment_count")] int SourceSegmentCount = 0,
+    [property: JsonPropertyName("material_count")] int MaterialCount = 0,
+    [property: JsonPropertyName("slot_count")] int SlotCount = 0,
+    [property: JsonPropertyName("vector_count")] int VectorCount = 0,
+    [property: JsonPropertyName("affected_source_id")] string AffectedSourceId = "",
+    [property: JsonPropertyName("affected_material_id")] string AffectedMaterialId = "",
+    [property: JsonPropertyName("affected_segment_id")] string AffectedSegmentId = "",
+    [property: JsonPropertyName("affected_slot_id")] string AffectedSlotId = "");
+
+public sealed record ReferenceMaterialDetailPayload(
+    [property: JsonPropertyName("material")] ReferenceMaterialSummaryPayload Material,
+    [property: JsonPropertyName("source")] ReferenceMaterialSourceSummaryPayload Source,
+    [property: JsonPropertyName("segments")] IReadOnlyList<ReferenceMaterialSegmentPreviewPayload> Segments,
+    [property: JsonPropertyName("slots")] IReadOnlyList<ReferenceMaterialSlotPreviewPayload> Slots,
+    [property: JsonPropertyName("processing_notes")] IReadOnlyList<ReferenceMaterialProcessingNotePayload> ProcessingNotes);
+
+public sealed record GetReferenceSourceProcessingDetailPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId);
+
+public sealed record ReferenceSourceProcessingStatusPayload(
+    [property: JsonPropertyName("stage")] string Stage,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("diagnostic")] string Diagnostic,
+    [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt,
+    [property: JsonPropertyName("source_segment_count")] int SourceSegmentCount,
+    [property: JsonPropertyName("material_count")] int MaterialCount,
+    [property: JsonPropertyName("slot_count")] int SlotCount,
+    [property: JsonPropertyName("vector_count")] int VectorCount);
+
+public sealed record ReferenceSourceProcessingEventPayload(
+    [property: JsonPropertyName("event_id")] string EventId,
+    [property: JsonPropertyName("stage")] string Stage,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
+    [property: JsonPropertyName("source_segment_count")] int SourceSegmentCount,
+    [property: JsonPropertyName("material_count")] int MaterialCount,
+    [property: JsonPropertyName("slot_count")] int SlotCount,
+    [property: JsonPropertyName("vector_count")] int VectorCount,
+    [property: JsonPropertyName("affected_source_id")] string AffectedSourceId,
+    [property: JsonPropertyName("affected_material_id")] string AffectedMaterialId,
+    [property: JsonPropertyName("affected_segment_id")] string AffectedSegmentId,
+    [property: JsonPropertyName("affected_slot_id")] string AffectedSlotId);
+
+public sealed record ReferenceSourceProcessingDetailPayload(
+    [property: JsonPropertyName("source")] ReferenceMaterialSourceSummaryPayload Source,
+    [property: JsonPropertyName("current_status")] ReferenceSourceProcessingStatusPayload? CurrentStatus,
+    [property: JsonPropertyName("events")] IReadOnlyList<ReferenceSourceProcessingEventPayload> Events,
+    [property: JsonPropertyName("retry_available")] bool RetryAvailable,
+    [property: JsonPropertyName("rebuild_available")] bool RebuildAvailable);
+
 public sealed record UpdateReferenceMaterialTagsPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("material_id")] string MaterialId,

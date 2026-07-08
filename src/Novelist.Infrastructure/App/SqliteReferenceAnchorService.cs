@@ -21,6 +21,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private const long MaxSourceBytes = 20L * 1024L * 1024L;
     private const int EmbeddingBatchSize = 64;
     private const int UnknownLicensePreviewMaxChars = 48;
+    private const int MaterialDetailTextPreviewMaxChars = 240;
+    private const int MaterialDetailSegmentPreviewMaxChars = 240;
+    private const int MaterialDetailMaxSegments = 3;
+    private const int MaterialDetailMaxSlots = 20;
     private const int AdvancedSceneMaxParagraphs = 8;
     private const int AdvancedEvidenceWindowChars = 480;
     private const int MaxStyleProfileFilters = 8;
@@ -28,6 +32,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private static readonly Regex MarkdownHeadingPattern = new(@"^\s{0,3}#{1,6}\s+(.+?)\s*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex BlankLinePattern = new(@"\n\s*\n", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex RiskTokenPattern = new(@"[A-Za-z][A-Za-z0-9_]{1,}|\d+(?:\.\d+)?", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex SecretPattern = new(@"\b(?:sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._~+/=-]{8,})\b", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex WindowsPathPattern = new(@"[A-Za-z]:[\\/](?:[^\\/:*?""<>|\r\n]+[\\/])*[^\\/:*?""<>|\r\n]*", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex UnixPathPattern = new(@"(?<![\w])/(?:Users|home|var|tmp|private|Volumes|mnt|opt|etc|root)/[^\s:'""]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex SensitiveFieldPattern = new(@"(?i)\b(source_text|prompt|candidate_text|api_key|authorization|password|token)\b\s*[:=]\s*[^\r\n;]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly JsonSerializerOptions JsonOptions = BridgeJson.SerializerOptions;
     private static readonly string[] DialogueMarkers = ["“", "”", "「", "」", "『", "』", "\"", "说：", "道：", "问：", "答："];
     private static readonly string[] SensoryMarkers = ["雨", "风", "雪", "光", "声", "呼吸", "气味", "冷", "热", "疼", "黑", "亮"];
@@ -134,6 +142,21 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
+            var existing = await FindExistingAnchorForImportAsync(
+                connection,
+                transaction,
+                storedNovelId,
+                visibility,
+                sourcePath,
+                sourceKind,
+                source.Hash,
+                cancellationToken);
+            if (existing is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+                return existing;
+            }
+
             var anchor = await InsertAnchorAsync(
                 connection,
                 transaction,
@@ -230,6 +253,47 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
 
         return anchors;
+    }
+
+    private static async ValueTask<ReferenceAnchorPayload?> FindExistingAnchorForImportAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long? storedNovelId,
+        string visibility,
+        string sourcePath,
+        string sourceKind,
+        string sourceFileHash,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT anchor_id, novel_id, title, author, source_path, source_kind, license_status,
+                   source_file_hash, build_version, status, created_at, updated_at,
+                   corpus_visibility, source_trust, user_tags_json
+            FROM reference_anchors
+            WHERE corpus_visibility = $corpus_visibility
+              AND source_kind = $source_kind
+              AND (
+                    ($novel_id_is_null = 1 AND (novel_id IS NULL OR novel_id = $workspace_corpus_novel_id)) OR
+                    ($novel_id_is_null = 0 AND novel_id = $novel_id)
+                  )
+              AND source_path = $source_path
+              AND source_file_hash = $source_file_hash
+            ORDER BY created_at ASC,
+                     anchor_id ASC
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$corpus_visibility", visibility);
+        command.Parameters.AddWithValue("$source_kind", sourceKind);
+        command.Parameters.AddWithValue("$novel_id_is_null", storedNovelId.HasValue ? 0 : 1);
+        command.Parameters.AddWithValue("$novel_id", storedNovelId.HasValue ? storedNovelId.Value : DBNull.Value);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+        command.Parameters.AddWithValue("$source_path", sourcePath);
+        command.Parameters.AddWithValue("$source_file_hash", sourceFileHash);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadAnchor(reader) : null;
     }
 
     public async ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(
@@ -520,6 +584,58 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 })
                 .ToArray();
             return new PageResultPayload<ReferenceMaterialPayload>(items, total, page, size, totalPages);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<ReferenceMaterialDetailPayload?> GetMaterialDetailAsync(
+        GetReferenceMaterialDetailPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        var materialId = NormalizeRequiredText(input.MaterialId, nameof(input.MaterialId), maxLength: 256);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var row = await ReadMaterialDetailRowAsync(connection, input.NovelId, materialId, cancellationToken);
+            if (row is null)
+            {
+                return null;
+            }
+
+            var previewMaxChars = IsUnknownLicense(row.Anchor.LicenseStatus)
+                ? UnknownLicensePreviewMaxChars
+                : MaterialDetailTextPreviewMaxChars;
+            var segmentPreviewMaxChars = IsUnknownLicense(row.Anchor.LicenseStatus)
+                ? UnknownLicensePreviewMaxChars
+                : MaterialDetailSegmentPreviewMaxChars;
+            var segments = await ReadMaterialDetailSegmentsAsync(
+                connection,
+                row.Material.AnchorId,
+                row.Material.SourceSegmentId,
+                segmentPreviewMaxChars,
+                cancellationToken);
+            var slots = await ReadMaterialDetailSlotsAsync(connection, materialId, cancellationToken);
+            var notes = await ReadMaterialDetailProcessingNotesAsync(
+                connection,
+                input.NovelId,
+                row.Material.AnchorId,
+                cancellationToken);
+
+            return new ReferenceMaterialDetailPayload(
+                ToMaterialSummary(row.Material, previewMaxChars, row.ArchivedAt),
+                ToSourceSummary(row.Anchor),
+                segments,
+                slots,
+                notes);
         }
         finally
         {
@@ -1369,16 +1485,38 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         IReadOnlyList<ReferenceSourceSegment> segments,
         CancellationToken cancellationToken)
     {
-        await using (var delete = connection.CreateCommand())
+        await using (var createKeep = connection.CreateCommand())
         {
-            delete.Transaction = transaction;
-            delete.CommandText = "DELETE FROM reference_source_segments WHERE anchor_id = $anchor_id;";
-            delete.Parameters.AddWithValue("$anchor_id", anchorId);
-            await delete.ExecuteNonQueryAsync(cancellationToken);
+            createKeep.Transaction = transaction;
+            createKeep.CommandText = """
+                CREATE TEMP TABLE IF NOT EXISTS temp_reference_source_segment_keep (
+                  segment_id TEXT PRIMARY KEY
+                );
+                """;
+            await createKeep.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var clearKeep = connection.CreateCommand())
+        {
+            clearKeep.Transaction = transaction;
+            clearKeep.CommandText = "DELETE FROM temp_reference_source_segment_keep;";
+            await clearKeep.ExecuteNonQueryAsync(cancellationToken);
         }
 
         foreach (var segment in segments)
         {
+            await using (var keep = connection.CreateCommand())
+            {
+                keep.Transaction = transaction;
+                keep.CommandText = """
+                    INSERT INTO temp_reference_source_segment_keep (segment_id)
+                    VALUES ($segment_id)
+                    ON CONFLICT(segment_id) DO NOTHING;
+                    """;
+                keep.Parameters.AddWithValue("$segment_id", segment.SegmentId);
+                await keep.ExecuteNonQueryAsync(cancellationToken);
+            }
+
             await using var insert = connection.CreateCommand();
             insert.Transaction = transaction;
             insert.CommandText = """
@@ -1387,7 +1525,18 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                    segment_index, parent_segment_id, start_offset, end_offset, text, text_hash)
                 VALUES
                   ($segment_id, $anchor_id, $chapter_index, $chapter_title, $segment_type,
-                   $segment_index, $parent_segment_id, $start_offset, $end_offset, $text, $text_hash);
+                   $segment_index, $parent_segment_id, $start_offset, $end_offset, $text, $text_hash)
+                ON CONFLICT(segment_id) DO UPDATE SET
+                  anchor_id = excluded.anchor_id,
+                  chapter_index = excluded.chapter_index,
+                  chapter_title = excluded.chapter_title,
+                  segment_type = excluded.segment_type,
+                  segment_index = excluded.segment_index,
+                  parent_segment_id = excluded.parent_segment_id,
+                  start_offset = excluded.start_offset,
+                  end_offset = excluded.end_offset,
+                  text = excluded.text,
+                  text_hash = excluded.text_hash;
                 """;
             insert.Parameters.AddWithValue("$segment_id", segment.SegmentId);
             insert.Parameters.AddWithValue("$anchor_id", anchorId);
@@ -1401,6 +1550,25 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             insert.Parameters.AddWithValue("$text", segment.Text);
             insert.Parameters.AddWithValue("$text_hash", segment.TextHash);
             await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var deleteStale = connection.CreateCommand())
+        {
+            deleteStale.Transaction = transaction;
+            deleteStale.CommandText = """
+                DELETE FROM reference_source_segments
+                WHERE anchor_id = $anchor_id
+                  AND segment_id NOT IN (SELECT segment_id FROM temp_reference_source_segment_keep);
+                """;
+            deleteStale.Parameters.AddWithValue("$anchor_id", anchorId);
+            await deleteStale.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var clearKeep = connection.CreateCommand())
+        {
+            clearKeep.Transaction = transaction;
+            clearKeep.CommandText = "DELETE FROM temp_reference_source_segment_keep;";
+            await clearKeep.ExecuteNonQueryAsync(cancellationToken);
         }
     }
 
@@ -1465,6 +1633,34 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         upsert.Parameters.AddWithValue("$last_error", lastError);
         upsert.Parameters.AddWithValue("$updated_at", FormatTimestamp(updatedAt));
         await upsert.ExecuteNonQueryAsync(cancellationToken);
+
+        await using var history = connection.CreateCommand();
+        history.Transaction = transaction;
+        history.CommandText = """
+            INSERT INTO reference_anchor_processing_events
+              (event_id, anchor_id, stage, status, source_segment_count, material_count,
+               slot_count, vector_count, last_error, affected_source_id, affected_material_id,
+               affected_segment_id, affected_slot_id, created_at)
+            VALUES
+              ($event_id, $anchor_id, $stage, $status, $source_segment_count, $material_count,
+               $slot_count, $vector_count, $last_error, $affected_source_id, $affected_material_id,
+               $affected_segment_id, $affected_slot_id, $created_at);
+            """;
+        history.Parameters.AddWithValue("$event_id", Guid.NewGuid().ToString("N"));
+        history.Parameters.AddWithValue("$anchor_id", anchor.AnchorId);
+        history.Parameters.AddWithValue("$stage", stage);
+        history.Parameters.AddWithValue("$status", status);
+        history.Parameters.AddWithValue("$source_segment_count", sourceSegmentCount);
+        history.Parameters.AddWithValue("$material_count", materialCount);
+        history.Parameters.AddWithValue("$slot_count", slotCount);
+        history.Parameters.AddWithValue("$vector_count", vectorCount);
+        history.Parameters.AddWithValue("$last_error", lastError);
+        history.Parameters.AddWithValue("$affected_source_id", anchor.AnchorId.ToString(CultureInfo.InvariantCulture));
+        history.Parameters.AddWithValue("$affected_material_id", string.Empty);
+        history.Parameters.AddWithValue("$affected_segment_id", string.Empty);
+        history.Parameters.AddWithValue("$affected_slot_id", string.Empty);
+        history.Parameters.AddWithValue("$created_at", FormatTimestamp(updatedAt));
+        await history.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private async ValueTask<ReferenceAnchorBuildCompletion> CompleteEmbeddingStageAsync(
@@ -1659,12 +1855,37 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         CancellationToken cancellationToken,
         IReadOnlyDictionary<string, string>? archivedMaterialTimestamps = null)
     {
-        await using (var delete = connection.CreateCommand())
+        await using (var createKeep = connection.CreateCommand())
         {
-            delete.Transaction = transaction;
-            delete.CommandText = "DELETE FROM reference_materials WHERE anchor_id = $anchor_id;";
-            delete.Parameters.AddWithValue("$anchor_id", anchorId);
-            await delete.ExecuteNonQueryAsync(cancellationToken);
+            createKeep.Transaction = transaction;
+            createKeep.CommandText = """
+                CREATE TEMP TABLE IF NOT EXISTS temp_reference_material_keep (
+                  material_id TEXT PRIMARY KEY
+                );
+                """;
+            await createKeep.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var clearKeep = connection.CreateCommand())
+        {
+            clearKeep.Transaction = transaction;
+            clearKeep.CommandText = "DELETE FROM temp_reference_material_keep;";
+            await clearKeep.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var deleteSlots = connection.CreateCommand())
+        {
+            deleteSlots.Transaction = transaction;
+            deleteSlots.CommandText = """
+                DELETE FROM reference_material_slots
+                WHERE material_id IN (
+                  SELECT material_id
+                  FROM reference_materials
+                  WHERE anchor_id = $anchor_id
+                );
+                """;
+            deleteSlots.Parameters.AddWithValue("$anchor_id", anchorId);
+            await deleteSlots.ExecuteNonQueryAsync(cancellationToken);
         }
 
         foreach (var material in materials)
@@ -1673,6 +1894,18 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 archivedMaterialTimestamps.TryGetValue(material.MaterialId, out var timestamp)
                 ? timestamp
                 : null;
+            await using (var keep = connection.CreateCommand())
+            {
+                keep.Transaction = transaction;
+                keep.CommandText = """
+                    INSERT INTO temp_reference_material_keep (material_id)
+                    VALUES ($material_id)
+                    ON CONFLICT(material_id) DO NOTHING;
+                    """;
+                keep.Parameters.AddWithValue("$material_id", material.MaterialId);
+                await keep.ExecuteNonQueryAsync(cancellationToken);
+            }
+
             await using var insert = connection.CreateCommand();
             insert.Transaction = transaction;
             insert.CommandText = """
@@ -1685,7 +1918,25 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                   ($material_id, $anchor_id, $source_segment_id, $material_type, $function_tag,
                    $emotion_tag, $scene_tag, $pov_tag, $technique_tag, $function_confidence,
                    $emotion_confidence, $pov_confidence, $text, $source_hash, $extractor_version,
-                   $user_verified, $created_at, $archived_at);
+                   $user_verified, $created_at, $archived_at)
+                ON CONFLICT(material_id) DO UPDATE SET
+                  anchor_id = excluded.anchor_id,
+                  source_segment_id = excluded.source_segment_id,
+                  material_type = excluded.material_type,
+                  function_tag = excluded.function_tag,
+                  emotion_tag = excluded.emotion_tag,
+                  scene_tag = excluded.scene_tag,
+                  pov_tag = excluded.pov_tag,
+                  technique_tag = excluded.technique_tag,
+                  function_confidence = excluded.function_confidence,
+                  emotion_confidence = excluded.emotion_confidence,
+                  pov_confidence = excluded.pov_confidence,
+                  text = excluded.text,
+                  source_hash = excluded.source_hash,
+                  extractor_version = excluded.extractor_version,
+                  user_verified = excluded.user_verified,
+                  created_at = excluded.created_at,
+                  archived_at = excluded.archived_at;
                 """;
             insert.Parameters.AddWithValue("$material_id", material.MaterialId);
             insert.Parameters.AddWithValue("$anchor_id", anchorId);
@@ -1726,6 +1977,25 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 slotInsert.Parameters.AddWithValue("$created_at", FormatTimestamp(material.CreatedAt));
                 await slotInsert.ExecuteNonQueryAsync(cancellationToken);
             }
+        }
+
+        await using (var deleteStale = connection.CreateCommand())
+        {
+            deleteStale.Transaction = transaction;
+            deleteStale.CommandText = """
+                DELETE FROM reference_materials
+                WHERE anchor_id = $anchor_id
+                  AND material_id NOT IN (SELECT material_id FROM temp_reference_material_keep);
+                """;
+            deleteStale.Parameters.AddWithValue("$anchor_id", anchorId);
+            await deleteStale.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var clearKeep = connection.CreateCommand())
+        {
+            clearKeep.Transaction = transaction;
+            clearKeep.CommandText = "DELETE FROM temp_reference_material_keep;";
+            await clearKeep.ExecuteNonQueryAsync(cancellationToken);
         }
     }
 
@@ -1984,6 +2254,99 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         return await reader.ReadAsync(cancellationToken) ? ReadMaterial(reader) : null;
     }
 
+    private static async ValueTask<ReferenceMaterialDetailRow?> ReadMaterialDetailRowAsync(
+        SqliteConnection connection,
+        long novelId,
+        string materialId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $$"""
+            SELECT m.material_id, m.anchor_id, m.source_segment_id, m.material_type,
+                   m.function_tag, m.emotion_tag, m.scene_tag, m.pov_tag, m.technique_tag,
+                   m.function_confidence, m.emotion_confidence, m.pov_confidence,
+                   m.text, m.source_hash, m.extractor_version, m.user_verified, m.created_at,
+                   m.archived_at,
+                   a.anchor_id, a.novel_id, a.title, a.author, '' AS source_path, a.source_kind,
+                   a.license_status, a.source_file_hash, a.build_version, a.status,
+                   a.created_at, a.updated_at, a.corpus_visibility, a.source_trust, a.user_tags_json
+            FROM reference_materials m
+            INNER JOIN reference_anchors a ON a.anchor_id = m.anchor_id
+            WHERE {{AnchorAliasNovelOrVisibleWorkspaceCorpusPredicate}}
+              AND m.material_id = $material_id;
+            """;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+        command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
+        command.Parameters.AddWithValue("$material_id", materialId);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        var material = ReadMaterial(reader);
+        var archivedAt = reader.IsDBNull(17) ? (DateTimeOffset?)null : ParseTimestamp(reader.GetString(17));
+        var anchor = new ReferenceAnchorPayload(
+            reader.GetInt64(18),
+            reader.IsDBNull(19) ? WorkspaceCorpusNovelId : reader.GetInt64(19),
+            reader.GetString(20),
+            reader.GetString(21),
+            reader.GetString(22),
+            reader.GetString(23),
+            reader.GetString(24),
+            reader.GetString(25),
+            reader.GetString(26),
+            reader.GetString(27),
+            ParseTimestamp(reader.GetString(28)),
+            ParseTimestamp(reader.GetString(29)),
+            reader.GetString(30),
+            reader.GetString(31),
+            ReadStringList(reader.GetString(32)));
+        return new ReferenceMaterialDetailRow(material, anchor, archivedAt);
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceMaterialSegmentPreviewPayload>> ReadMaterialDetailSegmentsAsync(
+        SqliteConnection connection,
+        long anchorId,
+        string sourceSegmentId,
+        int previewMaxChars,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT segment_id, segment_type, chapter_index, chapter_title, segment_index, text, text_hash
+            FROM reference_source_segments
+            WHERE anchor_id = $anchor_id
+              AND (segment_id = $source_segment_id OR parent_segment_id = $source_segment_id)
+            ORDER BY CASE WHEN segment_id = $source_segment_id THEN 0 ELSE 1 END,
+                     segment_index ASC, segment_id ASC
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        command.Parameters.AddWithValue("$source_segment_id", sourceSegmentId);
+        command.Parameters.AddWithValue("$limit", MaterialDetailMaxSegments);
+
+        var segments = new List<ReferenceMaterialSegmentPreviewPayload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var preview = BuildPreview(reader.GetString(5), previewMaxChars);
+            segments.Add(new ReferenceMaterialSegmentPreviewPayload(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetInt32(2),
+                reader.GetString(3),
+                reader.GetInt32(4),
+                preview.Text,
+                preview.Truncated,
+                reader.GetString(6)));
+        }
+
+        return segments;
+    }
+
     private static async ValueTask<IReadOnlyList<ReferenceMaterialPayload>> ReadUserVerifiedMaterialsAsync(
         SqliteConnection connection,
         long anchorId,
@@ -1998,7 +2361,6 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             FROM reference_materials
             WHERE anchor_id = $anchor_id
               AND user_verified != 0
-              AND archived_at IS NULL
             ORDER BY material_id ASC;
             """;
         command.Parameters.AddWithValue("$anchor_id", anchorId);
@@ -2055,12 +2417,18 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             .GroupBy(marker => marker.HashKey)
             .Where(group => group.Count() == 1)
             .ToDictionary(group => group.Key, group => group.Single().ArchivedAt);
+        var uniqueNewHashKeys = materials
+            .GroupBy(material => new ReferenceMaterialHashKey(material.MaterialType, material.SourceHash))
+            .Where(group => group.Count() == 1)
+            .Select(group => group.Key)
+            .ToHashSet();
 
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var material in materials)
         {
+            var hashKey = new ReferenceMaterialHashKey(material.MaterialType, material.SourceHash);
             if (byMaterialId.TryGetValue(material.MaterialId, out var archivedAt) ||
-                byHash.TryGetValue(new ReferenceMaterialHashKey(material.MaterialType, material.SourceHash), out archivedAt))
+                (uniqueNewHashKeys.Contains(hashKey) && byHash.TryGetValue(hashKey, out archivedAt)))
             {
                 result[material.MaterialId] = archivedAt;
             }
@@ -2231,6 +2599,131 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
 
         return slots;
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceMaterialSlotPreviewPayload>> ReadMaterialDetailSlotsAsync(
+        SqliteConnection connection,
+        string materialId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT slot_name, placeholder, start_offset, end_offset
+            FROM reference_material_slots
+            WHERE material_id = $material_id
+            ORDER BY start_offset ASC, slot_name ASC
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$material_id", materialId);
+        command.Parameters.AddWithValue("$limit", MaterialDetailMaxSlots);
+
+        var slots = new List<ReferenceMaterialSlotPreviewPayload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            slots.Add(new ReferenceMaterialSlotPreviewPayload(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetInt32(2),
+                reader.GetInt32(3)));
+        }
+
+        return slots;
+    }
+
+    private async ValueTask<IReadOnlyList<ReferenceMaterialProcessingNotePayload>> ReadMaterialDetailProcessingNotesAsync(
+        SqliteConnection connection,
+        long novelId,
+        long anchorId,
+        CancellationToken cancellationToken)
+    {
+        var notes = new List<ReferenceMaterialProcessingNotePayload>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT stage, status, source_segment_count, material_count, slot_count, vector_count,
+                       last_error, affected_source_id, affected_material_id, affected_segment_id,
+                       affected_slot_id, created_at
+                FROM reference_anchor_processing_events
+                WHERE anchor_id = $anchor_id
+                ORDER BY created_at DESC, event_id DESC
+                LIMIT 20;
+                """;
+            command.Parameters.AddWithValue("$anchor_id", anchorId);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var lastError = reader.GetString(6);
+                var updatedAt = ParseTimestamp(reader.GetString(11));
+                notes.Add(new ReferenceMaterialProcessingNotePayload(
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    BuildProcessingNoteMessage(
+                        reader.GetInt32(2),
+                        reader.GetInt32(3),
+                        reader.GetInt32(4),
+                        reader.GetInt32(5),
+                        lastError),
+                    updatedAt,
+                    reader.GetInt32(2),
+                    reader.GetInt32(3),
+                    reader.GetInt32(4),
+                    reader.GetInt32(5),
+                    reader.GetString(7),
+                    reader.GetString(8),
+                    reader.GetString(9),
+                    reader.GetString(10)));
+            }
+        }
+
+        var buildStatus = await ReadBuildStatusAsync(connection, novelId, anchorId, cancellationToken);
+        if (buildStatus is not null)
+        {
+            var current = new ReferenceMaterialProcessingNotePayload(
+                buildStatus.Stage,
+                buildStatus.Status,
+                BuildProcessingNoteMessage(buildStatus),
+                buildStatus.UpdatedAt,
+                buildStatus.SourceSegmentCount,
+                buildStatus.MaterialCount,
+                buildStatus.SlotCount,
+                buildStatus.VectorCount,
+                anchorId.ToString(CultureInfo.InvariantCulture));
+            if (notes.Count == 0 ||
+                !string.Equals(notes[0].Stage, current.Stage, StringComparison.Ordinal) ||
+                !string.Equals(notes[0].Status, current.Status, StringComparison.Ordinal) ||
+                !string.Equals(notes[0].Message, current.Message, StringComparison.Ordinal))
+            {
+                notes.Insert(0, current);
+            }
+        }
+
+        return notes;
+    }
+
+    private static async ValueTask<ReferenceAnchorBuildStatusPayload?> ReadBuildStatusAsync(
+        SqliteConnection connection,
+        long novelId,
+        long anchorId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT a.novel_id, s.anchor_id, s.status, s.stage, s.source_segment_count,
+                   s.material_count, s.slot_count, s.vector_count, s.last_error, s.updated_at
+            FROM reference_anchor_build_state s
+            INNER JOIN reference_anchors a ON a.anchor_id = s.anchor_id
+            WHERE (a.novel_id = $novel_id OR
+                   ((a.novel_id IS NULL OR a.novel_id = $workspace_corpus_novel_id) AND a.corpus_visibility = $workspace_corpus_visibility))
+              AND s.anchor_id = $anchor_id;
+            """;
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+        command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadBuildStatus(reader) : null;
     }
 
     private static async ValueTask PersistReuseCandidateAsync(
@@ -2501,6 +2994,24 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS reference_anchor_processing_events (
+              event_id TEXT PRIMARY KEY,
+              anchor_id INTEGER NOT NULL,
+              stage TEXT NOT NULL,
+              status TEXT NOT NULL,
+              source_segment_count INTEGER NOT NULL,
+              material_count INTEGER NOT NULL,
+              slot_count INTEGER NOT NULL,
+              vector_count INTEGER NOT NULL,
+              last_error TEXT NOT NULL,
+              affected_source_id TEXT NOT NULL,
+              affected_material_id TEXT NOT NULL,
+              affected_segment_id TEXT NOT NULL,
+              affected_slot_id TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS reference_source_segments (
               segment_id TEXT PRIMARY KEY,
               anchor_id INTEGER NOT NULL,
@@ -2616,6 +3127,9 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
 
             CREATE INDEX IF NOT EXISTS idx_reference_feedback_material
               ON reference_user_feedback(material_id, created_at);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_processing_events_anchor
+              ON reference_anchor_processing_events(anchor_id, created_at);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         var addedCorpusVisibilityColumn = await EnsureColumnAsync(
@@ -4125,6 +4639,106 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             : normalized[..UnknownLicensePreviewMaxChars].TrimEnd() + "...";
     }
 
+    private static bool IsUnknownLicense(string licenseStatus)
+    {
+        return string.Equals(licenseStatus, "unknown", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static ReferenceMaterialSummaryPayload ToMaterialSummary(
+        ReferenceMaterialPayload material,
+        int previewMaxChars,
+        DateTimeOffset? archivedAt)
+    {
+        var preview = BuildPreview(material.Text, previewMaxChars);
+        var archiveState = archivedAt.HasValue
+            ? ReferenceMaterialArchiveFilters.Archived
+            : ReferenceMaterialArchiveFilters.Active;
+        return new ReferenceMaterialSummaryPayload(
+            material.MaterialId,
+            material.AnchorId,
+            material.SourceSegmentId,
+            material.MaterialType,
+            material.FunctionTag,
+            material.EmotionTag,
+            material.SceneTag,
+            material.PovTag,
+            material.TechniqueTag,
+            material.FunctionConfidence,
+            material.EmotionConfidence,
+            material.PovConfidence,
+            preview.Text,
+            preview.Truncated,
+            material.SourceHash,
+            material.ExtractorVersion,
+            material.UserVerified,
+            material.CreatedAt,
+            archiveState,
+            archivedAt,
+            material.ScoreComponents);
+    }
+
+    private static ReferenceMaterialSourceSummaryPayload ToSourceSummary(ReferenceAnchorPayload anchor)
+    {
+        return new ReferenceMaterialSourceSummaryPayload(
+            anchor.AnchorId,
+            anchor.NovelId,
+            anchor.Title,
+            anchor.Author,
+            anchor.SourceKind,
+            anchor.LicenseStatus,
+            anchor.SourceFileHash,
+            anchor.BuildVersion,
+            anchor.Status,
+            anchor.Visibility,
+            anchor.SourceTrust,
+            anchor.UserTags,
+            anchor.OwnerScope,
+            anchor.OwnerNovelId);
+    }
+
+    private static string BuildProcessingNoteMessage(ReferenceAnchorBuildStatusPayload status)
+    {
+        return BuildProcessingNoteMessage(
+            status.SourceSegmentCount,
+            status.MaterialCount,
+            status.SlotCount,
+            status.VectorCount,
+            status.LastError);
+    }
+
+    private static string BuildProcessingNoteMessage(
+        int sourceSegmentCount,
+        int materialCount,
+        int slotCount,
+        int vectorCount,
+        string lastError)
+    {
+        if (!string.IsNullOrWhiteSpace(lastError))
+        {
+            return RedactError(lastError);
+        }
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"segments={sourceSegmentCount}; materials={materialCount}; slots={slotCount}; vectors={vectorCount}");
+    }
+
+    private static TextPreview BuildPreview(string? text, int maxLength)
+    {
+        var normalized = NormalizePreviewText(text);
+        if (normalized.Length <= maxLength)
+        {
+            return new TextPreview(normalized, false);
+        }
+
+        return new TextPreview(normalized[..maxLength].TrimEnd() + "...", true);
+    }
+
+    private static string NormalizePreviewText(string? text)
+    {
+        return Regex.Replace((text ?? string.Empty).Trim(), @"\s+", " ");
+    }
+
     private static AdaptedMaterial ApplySlotValues(
         string sourceText,
         IReadOnlyList<ReferenceMaterialSlot> declaredSlots,
@@ -4567,7 +5181,28 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
 
     private static string RedactError(string value)
     {
-        return string.IsNullOrWhiteSpace(value) ? "Reference anchor import failed." : value.Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "Reference anchor import failed.";
+        }
+
+        var redacted = value.Trim();
+        redacted = SensitiveFieldPattern.Replace(redacted, match =>
+        {
+            var separatorIndex = match.Value.IndexOf(':');
+            if (separatorIndex < 0)
+            {
+                separatorIndex = match.Value.IndexOf('=');
+            }
+
+            return separatorIndex < 0
+                ? "[REDACTED_FIELD]"
+                : match.Value[..(separatorIndex + 1)] + " [REDACTED]";
+        });
+        redacted = SecretPattern.Replace(redacted, "[REDACTED_SECRET]");
+        redacted = WindowsPathPattern.Replace(redacted, "[REDACTED_PATH]");
+        redacted = UnixPathPattern.Replace(redacted, "[REDACTED_PATH]");
+        return redacted.Length <= 1_000 ? redacted : redacted[..1_000].TrimEnd() + "...";
     }
 
     private static void ValidateNovelId(long novelId)
@@ -4630,6 +5265,15 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private sealed record ReferenceMaterialEmbedding(
         ReferenceMaterialPayload Material,
         IReadOnlyList<float> Vector);
+
+    private sealed record ReferenceMaterialDetailRow(
+        ReferenceMaterialPayload Material,
+        ReferenceAnchorPayload Anchor,
+        DateTimeOffset? ArchivedAt);
+
+    private sealed record TextPreview(
+        string Text,
+        bool Truncated);
 
     private sealed record AdaptedMaterial(
         string Text,

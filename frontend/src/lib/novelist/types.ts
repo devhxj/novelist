@@ -934,6 +934,93 @@ export namespace reference {
     score_components?: Record<string, number> | null
   }
 
+  export interface GetMaterialDetailInput {
+    novel_id: number
+    material_id: string
+  }
+
+  export interface MaterialSummary {
+    material_id: string
+    anchor_id: number
+    source_segment_id: string
+    material_type: string
+    function_tag: string
+    emotion_tag: string
+    scene_tag: string
+    pov_tag: string
+    technique_tag: string
+    function_confidence: number
+    emotion_confidence: number
+    pov_confidence: number
+    text_preview: string
+    text_truncated: boolean
+    source_hash: string
+    extractor_version: string
+    user_verified: boolean
+    created_at: Timestamp
+    archive_state: 'active' | 'archived' | string
+    archived_at?: Timestamp | null
+    score_components?: Record<string, number> | null
+  }
+
+  export interface MaterialSourceSummary {
+    anchor_id: number
+    novel_id: number
+    title: string
+    author: string
+    source_kind: string
+    license_status: string
+    source_file_hash: string
+    build_version: string
+    status: string
+    visibility: string
+    source_trust: string
+    user_tags: string[]
+    owner_scope: string
+    owner_novel_id?: number | null
+  }
+
+  export interface MaterialSegmentPreview {
+    segment_id: string
+    segment_type: string
+    chapter_index: number
+    chapter_title: string
+    segment_index: number
+    text_preview: string
+    text_truncated: boolean
+    text_hash: string
+  }
+
+  export interface MaterialSlotPreview {
+    slot_name: string
+    placeholder: string
+    start_offset: number
+    end_offset: number
+  }
+
+  export interface MaterialProcessingNote {
+    stage: string
+    status: string
+    message: string
+    updated_at: Timestamp
+    source_segment_count: number
+    material_count: number
+    slot_count: number
+    vector_count: number
+    affected_source_id: string
+    affected_material_id: string
+    affected_segment_id: string
+    affected_slot_id: string
+  }
+
+  export interface MaterialDetail {
+    material: MaterialSummary
+    source: MaterialSourceSummary
+    segments: MaterialSegmentPreview[]
+    slots: MaterialSlotPreview[]
+    processing_notes: MaterialProcessingNote[]
+  }
+
   export interface UpdateMaterialTagsInput {
     novel_id: number
     material_id: string

@@ -75,6 +75,12 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             10,
             ProseDuties: ["source_backed_detail"],
             ArchiveFilter: ReferenceMaterialArchiveFilters.Archived));
+        await AssertOkAsync(dispatcher, "GetReferenceMaterialDetail", new GetReferenceMaterialDetailPayload(
+            42,
+            "material-1"));
+        await AssertOkAsync(dispatcher, "GetReferenceSourceProcessingDetail", new GetReferenceSourceProcessingDetailPayload(
+            42,
+            99));
         await AssertOkAsync(dispatcher, "UpdateReferenceMaterialTags", new UpdateReferenceMaterialTagsPayload(
             42,
             "material-1",
@@ -141,6 +147,8 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "RebuildAnchor:42:99",
                 "GetBuildStatus:42:99",
                 "SearchMaterials:42:99:fog:passage:unease:interiority:close:afterbeat:2:10:source_backed_detail:archived",
+                "GetMaterialDetail:42:material-1",
+                "GetSourceProcessingDetail:42:99",
                 "UpdateMaterialTags:42:material-1:interiority:unease:threshold:close:afterbeat:user:verified",
                 "UpdateMaterialsTags:42:material-2,material-3:object_subtext:contained_tension:rain_threshold:limited_close:delayed_reaction:ui:bulk verified",
                 "AdaptMaterial:42:material-1:object=door:L2:door exists",
@@ -486,6 +494,24 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             Calls.Add(
                 $"SearchMaterials:{input.NovelId}:{string.Join(',', input.AnchorIds)}:{input.Query}:{string.Join(',', input.MaterialTypes)}:{string.Join(',', input.EmotionTags)}:{string.Join(',', input.FunctionTags)}:{string.Join(',', input.PovTags)}:{string.Join(',', input.TechniqueTags)}:{input.Page}:{input.Size}:{string.Join(',', input.ProseDuties ?? [])}:{input.ArchiveFilter}");
             return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialPayload>([], 0, input.Page, input.Size, 0));
+        }
+
+        public ValueTask<ReferenceMaterialDetailPayload?> GetMaterialDetailAsync(
+            GetReferenceMaterialDetailPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"GetMaterialDetail:{input.NovelId}:{input.MaterialId}");
+            return ValueTask.FromResult<ReferenceMaterialDetailPayload?>(null);
+        }
+
+        public ValueTask<ReferenceSourceProcessingDetailPayload?> GetSourceProcessingDetailAsync(
+            GetReferenceSourceProcessingDetailPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"GetSourceProcessingDetail:{input.NovelId}:{input.AnchorId}");
+            return ValueTask.FromResult<ReferenceSourceProcessingDetailPayload?>(null);
         }
 
         public ValueTask<ReferenceMaterialPayload> UpdateMaterialTagsAsync(

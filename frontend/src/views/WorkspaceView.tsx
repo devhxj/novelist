@@ -347,14 +347,14 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       <header
-        className="h-11 flex items-center border-b bg-sidebar shrink-0 select-none cursor-default"
+        className="app-window-drag h-11 flex items-center border-b bg-sidebar shrink-0 select-none cursor-default"
         onDoubleClick={() => { void toggleMaximise() }}
       >
         <Logo className="h-7 w-7 ml-3" />
         <span className="text-sm font-medium pl-2 flex-1">
           {activeNovel?.title ?? 'Novelist'}
         </span>
-        <div className="flex items-center h-full">
+        <div className="app-window-no-drag flex items-center h-full">
           <GitHubLink />
           <button
             onClick={() => setActivePanel('profile')}

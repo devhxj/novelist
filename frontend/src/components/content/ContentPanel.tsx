@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle } from 'react'
 import { type OnMount, DiffEditor } from '@monaco-editor/react'
 import '@/monacoSetup'
-import { FileText, Loader2 } from 'lucide-react'
+import { BookMarked, FileText, Loader2 } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import { useEditorTabs } from '@/hooks/useEditorTabs'
 import { useTheme, type Theme } from '@/hooks/useTheme'
@@ -14,8 +14,9 @@ import ContentEditor from './ContentEditor'
 import OutlineViewer from './OutlineViewer'
 import SkillPreview from './SkillPreview'
 import SkillEditForm from '@/components/skill/SkillEditForm'
+import ChapterReferencePanel from '@/components/reference-use/ChapterReferencePanel'
 import Markdown from '@/components/Markdown'
-import { outlinePath, isContentPath, isOutlinePath, isSkillPath, skillNameFromPath } from './types'
+import { outlinePath, isChapterPath, isContentPath, isOutlinePath, isSkillPath, skillNameFromPath } from './types'
 import type { EditorTab } from './types'
 import './ContentPanel.css'
 
@@ -24,6 +25,7 @@ const MONACO_THEME: Record<Theme, string> = { light: 'novelist-light', dark: 'vs
 type MonacoEditor = Parameters<OnMount>[0]
 type MonacoApi = Parameters<OnMount>[1]
 type SearchDecorations = ReturnType<MonacoEditor['createDecorationsCollection']>
+type ReferenceCandidateUseMode = 'insert' | 'append' | 'replace'
 
 interface FileChangedEvent {
   novel_id?: number
@@ -73,6 +75,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   const { theme } = useTheme()
   const [isLoading, setIsLoading] = useState(false)
   const [saveError, setSaveError] = useState<SaveErrorState | null>(null)
+  const [referencePanelOpen, setReferencePanelOpen] = useState(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
@@ -107,6 +110,12 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       onActiveFileChange?.(null)
     }
   }, [activeTab?.path, activeTab?.title, activeTab?.type, onActiveFileChange])
+
+  useEffect(() => {
+    if (!activeTab || activeTab.type !== 'file' || !isChapterPath(activeTab.path) || activeTab.viewMode === 'outline') {
+      setReferencePanelOpen(false)
+    }
+  }, [activeTab])
 
   // 从 localStorage 恢复 tab 后，自动加载文件内容
   const loadedRef = useRef<Set<string>>(new Set())
@@ -423,6 +432,52 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     searchDecorationsRef.current = null
   }, [activeTab?.id, activeTab?.content, doHighlight])
 
+  const applyReferenceCandidate = useCallback((text: string, mode: ReferenceCandidateUseMode): { ok: boolean; message: string } => {
+    const editor = editorRef.current
+    const monaco = monacoRef.current
+    const model = editor?.getModel()
+    if (!editor || !monaco || !model || activeTab?.type !== 'file' || !isChapterPath(activeTab.path) || activeTab.viewMode === 'outline') {
+      return { ok: false, message: '请先切回章节正文编辑器。' }
+    }
+
+    const candidateText = text.trim()
+    if (!candidateText) {
+      return { ok: false, message: '候选为空，无法插入。' }
+    }
+
+    let range
+    let insertedText = candidateText
+    if (mode === 'replace') {
+      const selection = editor.getSelection()
+      if (!selection || selection.isEmpty()) {
+        return { ok: false, message: '请先在正文中选择要替换的片段。' }
+      }
+      range = selection
+    } else if (mode === 'append') {
+      const lastLine = model.getLineCount()
+      const lastColumn = model.getLineMaxColumn(lastLine)
+      const current = model.getValue()
+      const prefix = current.length === 0 || current.endsWith('\n\n')
+        ? ''
+        : current.endsWith('\n') ? '\n' : '\n\n'
+      insertedText = `${prefix}${candidateText}`
+      range = new monaco.Range(lastLine, lastColumn, lastLine, lastColumn)
+    } else {
+      const position = editor.getPosition() ?? { lineNumber: model.getLineCount(), column: model.getLineMaxColumn(model.getLineCount()) }
+      range = new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column)
+    }
+
+    editor.focus()
+    editor.pushUndoStop()
+    editor.executeEdits('reference-candidate', [{
+      range,
+      text: insertedText,
+      forceMoveMarkers: true,
+    }])
+    editor.pushUndoStop()
+    return { ok: true, message: mode === 'append' ? '已追加到正文末尾。' : mode === 'replace' ? '已替换选区。' : '已插入到光标处。' }
+  }, [activeTab])
+
   function filePathFromDiff(diffPath: string): { filePath: string; viewMode: 'content' | 'outline' } {
     if (isOutlinePath(diffPath)) {
       return { filePath: diffPath.replace('outlines/', 'chapters/'), viewMode: 'outline' }
@@ -564,12 +619,27 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
 
   // File tab
   const viewMode = activeTab.viewMode || 'content'
+  const activeChapter = activeTab.type === 'file' && isChapterPath(activeTab.path) && viewMode === 'content'
+    ? { path: activeTab.path, title: activeTab.title, viewMode }
+    : null
   return (
     <main className="flex-1 bg-background flex flex-col min-w-0 min-h-0 border-r overflow-hidden">
       <TabBar tabs={tabs} activeTabId={activeTabId} onSelect={setActiveTabId} onClose={closeTab} />
       <div className="flex items-center justify-between px-4 py-2 border-b shrink-0 select-none">
         <span className="text-sm font-medium truncate">{activeTab.title}</span>
         <div className="flex items-center gap-0.5 shrink-0">
+          {activeChapter && (
+            <button
+              type="button"
+              onClick={() => setReferencePanelOpen(value => !value)}
+              className={tabBtnClass(referencePanelOpen)}
+              aria-pressed={referencePanelOpen}
+              title="打开章节参考素材"
+            >
+              <BookMarked className="mr-1 inline h-3.5 w-3.5" />
+              参考素材
+            </button>
+          )}
           {activeTab.path === 'novelist.md' ? (
             <button
               onClick={() => updateTab(activeTab.id, { viewMode: viewMode === 'preview' ? 'content' : 'preview' })}
@@ -622,34 +692,44 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
         />
       )}
 
-      <div className="flex-1 min-h-0">
-        {isLoading ? (
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : viewMode === 'preview' ? (
-          <SkillPreview content={activeTab.content ?? ''} />
-        ) : viewMode === 'edit' ? (
-          <SkillEditForm
-            content={activeTab.content ?? ''}
+      <div className="flex-1 min-h-0 flex">
+        <div className="min-w-0 flex-1">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-full">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : viewMode === 'preview' ? (
+            <SkillPreview content={activeTab.content ?? ''} />
+          ) : viewMode === 'edit' ? (
+            <SkillEditForm
+              content={activeTab.content ?? ''}
+              novelId={novelId}
+              filePath={activeTab.path}
+              readOnly={activeTab.readOnly}
+              onSave={async (newContent) => {
+                await doSave(activeTab.id, activeTab.path, newContent as string)
+                updateTab(activeTab.id, { viewMode: 'preview' })
+              }}
+              onCancel={() => updateTab(activeTab.id, { viewMode: 'preview' })}
+            />
+          ) : viewMode === 'content' ? (
+            <ContentEditor
+              value={activeTab.content ?? ''}
+              onChange={v => handleEditorChange(activeTab.id, v)}
+              onMount={handleEditorMount}
+              editorTheme={MONACO_THEME[theme]}
+            />
+          ) : (
+            <OutlineViewer content={activeTab.outlineContent ?? ''} />
+          )}
+        </div>
+        {referencePanelOpen && activeChapter && (
+          <ChapterReferencePanel
             novelId={novelId}
-            filePath={activeTab.path}
-            readOnly={activeTab.readOnly}
-            onSave={async (newContent) => {
-              await doSave(activeTab.id, activeTab.path, newContent as string)
-              updateTab(activeTab.id, { viewMode: 'preview' })
-            }}
-            onCancel={() => updateTab(activeTab.id, { viewMode: 'preview' })}
+            activeChapter={activeChapter}
+            onApplyCandidate={applyReferenceCandidate}
+            onClose={() => setReferencePanelOpen(false)}
           />
-        ) : viewMode === 'content' ? (
-          <ContentEditor
-            value={activeTab.content ?? ''}
-            onChange={v => handleEditorChange(activeTab.id, v)}
-            onMount={handleEditorMount}
-            editorTheme={MONACO_THEME[theme]}
-          />
-        ) : (
-          <OutlineViewer content={activeTab.outlineContent ?? ''} />
         )}
       </div>
     </main>
