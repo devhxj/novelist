@@ -18,8 +18,10 @@ import {
   Wand2,
   X,
 } from 'lucide-react'
+import ErrorCallout from '@/components/shared/ErrorCallout'
 import { useApp } from '@/hooks/useApp'
-import type { reference } from '@/lib/novelist/types'
+import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
+import type { diagnostics, reference } from '@/lib/novelist/types'
 import { BlueprintDetail } from './BlueprintDetail'
 import { OrchestrationPanel } from './OrchestrationPanel'
 import { StyleProfileLibraryPanel } from './StyleProfileLibraryPanel'
@@ -95,6 +97,21 @@ type MaterialTagForm = {
   sceneTag: string
   povTag: string
   techniqueTag: string
+}
+
+type ReferenceErrorState =
+  | string
+  | {
+    title: string
+    message: string
+    diagnostic: diagnostics.CopyableDiagnostic | null
+  }
+
+type ReferenceRunOptions = {
+  fallbackMessage?: string
+  operation?: string
+  bridgeMethod?: string | null
+  detail?: Record<string, unknown>
 }
 
 const EMPTY_MATERIAL_TAG_FORM: MaterialTagForm = {
@@ -395,7 +412,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   const [anchorVisibilityFilter, setAnchorVisibilityFilter] = useState('all')
   const [anchorSourceTrustFilter, setAnchorSourceTrustFilter] = useState('all')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<ReferenceErrorState | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
   const selectedAnchorSet = useMemo(() => new Set(selectedAnchorIds), [selectedAnchorIds])
@@ -584,7 +601,36 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     return () => { cancelled = true }
   }, [app, novelId, activeOrchestrationRun])
 
-  async function run<T>(task: () => Promise<T>, success?: string): Promise<T | null> {
+  function referenceError(
+    errorValue: unknown,
+    {
+      fallbackMessage = '操作失败',
+      operation = 'ReferenceAnchorOperation',
+      bridgeMethod = null,
+      detail = {},
+    }: ReferenceRunOptions = {},
+  ): Exclude<ReferenceErrorState, string> {
+    return {
+      title: fallbackMessage,
+      message: diagnosticMessage(errorValue, fallbackMessage),
+      diagnostic: buildCopyableDiagnostic({
+        error: errorValue,
+        fallbackMessage,
+        operation,
+        bridgeMethod,
+        detail: {
+          novel_id: novelId,
+          ...detail,
+        },
+      }),
+    }
+  }
+
+  async function run<T>(
+    task: () => Promise<T>,
+    success?: string,
+    options?: ReferenceRunOptions,
+  ): Promise<T | null> {
     setLoading(true)
     setError(null)
     setMessage(null)
@@ -593,7 +639,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       if (success) setMessage(success)
       return result
     } catch (err) {
-      setError(err instanceof Error ? err.message : '操作失败')
+      setError(referenceError(err, options))
       return null
     } finally {
       setLoading(false)
@@ -616,7 +662,18 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       visibility: anchorForm.visibility,
       source_trust: anchorForm.sourceTrust,
       user_tags: lines(anchorForm.userTags),
-    }), '参考锚点已创建')
+    }), '参考锚点已创建', {
+      fallbackMessage: '参考锚点创建失败',
+      operation: 'CreateReferenceAnchor',
+      bridgeMethod: 'CreateReferenceAnchor',
+      detail: {
+        title: anchorForm.title.trim(),
+        source_kind: anchorForm.sourceKind,
+        visibility: anchorForm.visibility,
+        source_trust: anchorForm.sourceTrust,
+        source_path_present: anchorForm.sourcePath.trim().length > 0,
+      },
+    })
     if (created) {
       setAnchorForm(EMPTY_ANCHOR_FORM)
       await loadAnchors()
@@ -648,7 +705,17 @@ export default function ReferenceAnchorView({ novelId }: Props) {
         source_trust: anchorForm.sourceTrust,
         user_tags: userTags,
       })),
-    }), `已批量导入 ${sourcePaths.length} 个语料来源`)
+    }), `已批量导入 ${sourcePaths.length} 个语料来源`, {
+      fallbackMessage: '批量导入语料来源失败',
+      operation: 'CreateReferenceAnchors',
+      bridgeMethod: 'CreateReferenceAnchors',
+      detail: {
+        source_count: sourcePaths.length,
+        source_kind: anchorForm.sourceKind,
+        visibility: anchorForm.visibility,
+        source_trust: anchorForm.sourceTrust,
+      },
+    })
     if (created) {
       setAnchorForm(EMPTY_ANCHOR_FORM)
       await loadAnchors()
@@ -669,7 +736,15 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       return
     }
 
-    const created = await run(() => app.CreateReferenceAnchors({ anchors }), `已导入库包 ${anchors.length} 个语料来源`)
+    const created = await run(() => app.CreateReferenceAnchors({ anchors }), `已导入库包 ${anchors.length} 个语料来源`, {
+      fallbackMessage: '库包导入失败',
+      operation: 'CreateReferenceAnchors',
+      bridgeMethod: 'CreateReferenceAnchors',
+      detail: {
+        source_count: anchors.length,
+        manifest_present: anchorForm.libraryPackManifest.trim().length > 0,
+      },
+    })
     if (created) {
       setAnchorForm(EMPTY_ANCHOR_FORM)
       await loadAnchors()
@@ -677,7 +752,14 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   }
 
   async function pickReferenceSourceFile() {
-    const pickedPath = await run(() => app.PickReferenceSourceFile())
+    const pickedPath = await run(() => app.PickReferenceSourceFile(), undefined, {
+      fallbackMessage: '选择参考源文件失败',
+      operation: 'PickReferenceSourceFile',
+      bridgeMethod: 'PickReferenceSourceFile',
+      detail: {
+        phase: 'pick_reference_source_file',
+      },
+    })
     if (!pickedPath?.trim()) {
       return
     }
@@ -690,7 +772,14 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   }
 
   async function rebuildAnchor(anchorId: number) {
-    await run(() => app.RebuildReferenceAnchor(novelId, anchorId), '锚点已重建')
+    await run(() => app.RebuildReferenceAnchor(novelId, anchorId), '锚点已重建', {
+      fallbackMessage: '锚点重建失败',
+      operation: 'RebuildReferenceAnchor',
+      bridgeMethod: 'RebuildReferenceAnchor',
+      detail: {
+        anchor_id: anchorId,
+      },
+    })
     await loadAnchors()
   }
 
@@ -698,7 +787,15 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     const promoted = await run(() => app.PromoteReferenceAnchorToWorkspaceCorpus({
       novel_id: novelId,
       anchor_id: anchor.anchor_id,
-    }), '已提升为工作区语料')
+    }), '已提升为工作区语料', {
+      fallbackMessage: '提升为工作区语料失败',
+      operation: 'PromoteReferenceAnchorToWorkspaceCorpus',
+      bridgeMethod: 'PromoteReferenceAnchorToWorkspaceCorpus',
+      detail: {
+        anchor_id: anchor.anchor_id,
+        title: anchor.title,
+      },
+    })
     if (promoted) {
       await loadAnchors()
     }
@@ -828,7 +925,17 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       visibility: anchorEditForm.visibility,
       source_trust: anchorEditForm.sourceTrust,
       user_tags: lines(anchorEditForm.userTags),
-    }), '参考元数据已更新')
+    }), '参考元数据已更新', {
+      fallbackMessage: '参考元数据更新失败',
+      operation: 'UpdateReferenceAnchorMetadata',
+      bridgeMethod: 'UpdateReferenceAnchorMetadata',
+      detail: {
+        anchor_id: anchor.anchor_id,
+        title: anchorEditForm.title.trim(),
+        visibility: anchorEditForm.visibility,
+        source_trust: anchorEditForm.sourceTrust,
+      },
+    })
     if (updated) {
       cancelEditAnchor()
       await loadAnchors()
@@ -868,7 +975,17 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       narrative_duties: [],
       emotion_transitions: [],
       prose_duties: [],
-    }))
+    }), undefined, {
+      fallbackMessage: '锚点材料加载失败',
+      operation: 'SearchReferenceMaterials',
+      bridgeMethod: 'SearchReferenceMaterials',
+      detail: {
+        anchor_id: anchor.anchor_id,
+        page,
+        size: 5,
+        scope: 'anchor_preview',
+      },
+    })
     if (result) {
       setExpandedAnchorMaterialId(anchor.anchor_id)
       setEditingMaterialId(null)
@@ -918,7 +1035,16 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       technique_tag: materialTagForm.techniqueTag.trim() || null,
       origin: 'ui',
       note: 'corpus material browser correction',
-    }), '材料标签已校正')
+    }), '材料标签已校正', {
+      fallbackMessage: '材料标签更新失败',
+      operation: 'UpdateReferenceMaterialTags',
+      bridgeMethod: 'UpdateReferenceMaterialTags',
+      detail: {
+        material_id: material.material_id,
+        source_segment_id: material.source_segment_id,
+        anchor_id: material.anchor_id,
+      },
+    })
     if (updated) {
       setAnchorMaterialPreview(current => ({
         ...current,
@@ -940,7 +1066,15 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       technique_tag: bulkMaterialTagForm.techniqueTag.trim() || null,
       origin: 'ui',
       note: 'corpus material browser bulk correction',
-    }), `已批量校正 ${selectedMaterialIds.length} 条材料标签`)
+    }), `已批量校正 ${selectedMaterialIds.length} 条材料标签`, {
+      fallbackMessage: '批量材料标签更新失败',
+      operation: 'UpdateReferenceMaterialsTags',
+      bridgeMethod: 'UpdateReferenceMaterialsTags',
+      detail: {
+        material_count: selectedMaterialIds.length,
+        scope: 'anchor_preview',
+      },
+    })
 
     if (updated) {
       const updatedById = new Map(updated.map(material => [material.material_id, material]))
@@ -989,7 +1123,18 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       emotion_transitions: lines(materialLibraryFilters.emotionTransitions),
       prose_duties: lines(materialLibraryFilters.proseDuties),
       archive_filter: materialLibraryArchiveFilter,
-    }))
+    }), undefined, {
+      fallbackMessage: '材料库搜索失败',
+      operation: 'SearchReferenceMaterials',
+      bridgeMethod: 'SearchReferenceMaterials',
+      detail: {
+        query: materialLibraryQuery.trim(),
+        page,
+        size: 10,
+        archive_filter: materialLibraryArchiveFilter,
+        scope: 'material_library',
+      },
+    })
     if (result) {
       setMaterialLibrary({
         items: result.items ?? [],
@@ -1019,7 +1164,15 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       technique_tag: bulkLibraryMaterialTagForm.techniqueTag.trim() || null,
       origin: 'ui',
       note: 'corpus material library bulk correction',
-    }), `材料库已批量校正 ${selectedLibraryMaterialIds.length} 条材料标签`)
+    }), `材料库已批量校正 ${selectedLibraryMaterialIds.length} 条材料标签`, {
+      fallbackMessage: '材料库批量标签更新失败',
+      operation: 'UpdateReferenceMaterialsTags',
+      bridgeMethod: 'UpdateReferenceMaterialsTags',
+      detail: {
+        material_count: selectedLibraryMaterialIds.length,
+        scope: 'material_library',
+      },
+    })
 
     if (updated) {
       const updatedById = new Map(updated.map(material => [material.material_id, material]))
@@ -1107,7 +1260,16 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       narrative_duties: lines(materialFilters.narrativeDuties),
       emotion_transitions: lines(materialFilters.emotionTransitions),
       prose_duties: lines(materialFilters.proseDuties),
-    }))
+    }), undefined, {
+      fallbackMessage: '参考材料搜索失败',
+      operation: 'SearchReferenceMaterials',
+      bridgeMethod: 'SearchReferenceMaterials',
+      detail: {
+        anchor_count: selectedAnchorIds.length,
+        query: materialQuery.trim(),
+        scope: 'manual_material_search',
+      },
+    })
     if (result) setMaterials(result.items ?? [])
   }
 
@@ -1126,7 +1288,18 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       anchor_ids: selectedAnchorIds,
       known_facts: lines(blueprintForm.knownFacts),
       forbidden_facts: lines(blueprintForm.forbiddenFacts),
-    }), '章节蓝图已生成')
+    }), '章节蓝图已生成', {
+      fallbackMessage: '章节蓝图生成失败',
+      operation: 'GenerateReferenceChapterBlueprint',
+      bridgeMethod: 'GenerateReferenceChapterBlueprint',
+      detail: {
+        chapter_number: chapterNumber,
+        title: blueprintForm.title.trim(),
+        anchor_count: selectedAnchorIds.length,
+        known_fact_count: lines(blueprintForm.knownFacts).length,
+        forbidden_fact_count: lines(blueprintForm.forbiddenFacts).length,
+      },
+    })
     if (blueprint) {
       setActiveBlueprint(blueprint)
       setRevisionForm(formFromBlueprint(blueprint))
@@ -1217,7 +1390,17 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       },
       source_confirmed: false,
       style_policy: stylePolicy,
-    }), '编排已启动，等待确认来源与事实边界')
+    }), '编排已启动，等待确认来源与事实边界', {
+      fallbackMessage: '参考编排启动失败',
+      operation: 'StartReferenceOrchestrationRun',
+      bridgeMethod: 'StartReferenceOrchestrationRun',
+      detail: {
+        chapter_number: chapterNumber,
+        use_selected_anchors: orchestrationUseSelectedAnchors,
+        selected_anchor_count: selectedAnchorIds.length,
+        style_profile_id: orchestrationEffectiveStyleProfileId,
+      },
+    })
     if (started) {
       setActiveOrchestrationRun(started)
       await loadOrchestrationRuns()
@@ -1225,7 +1408,12 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   }
 
   async function selectOrchestrationRun(runId: string) {
-    const selected = await run(() => app.GetReferenceOrchestrationRun(novelId, runId))
+    const selected = await run(() => app.GetReferenceOrchestrationRun(novelId, runId), undefined, {
+      fallbackMessage: '加载参考编排失败',
+      operation: 'GetReferenceOrchestrationRun',
+      bridgeMethod: 'GetReferenceOrchestrationRun',
+      detail: { run_id: runId },
+    })
     if (selected) {
       setActiveOrchestrationRun(selected)
       await syncBlueprintFromRun(selected)
@@ -1240,7 +1428,16 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       run_id: runId,
       decision_type: decisionType,
       decision_payload: decisionPayload,
-    }), '编排已继续')
+    }), '编排已继续', {
+      fallbackMessage: '参考编排继续失败',
+      operation: 'ResumeReferenceOrchestrationRun',
+      bridgeMethod: 'ResumeReferenceOrchestrationRun',
+      detail: {
+        run_id: runId,
+        decision_type: decisionType,
+        decision_payload_present: decisionPayload.trim().length > 0,
+      },
+    })
     if (resumed) {
       setActiveOrchestrationRun(resumed)
       await syncBlueprintFromRun(resumed)
@@ -1259,7 +1456,12 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       novel_id: novelId,
       run_id: runId,
       reason: 'cancelled from reference orchestration panel',
-    }), '编排已取消')
+    }), '编排已取消', {
+      fallbackMessage: '取消参考编排失败',
+      operation: 'CancelReferenceOrchestrationRun',
+      bridgeMethod: 'CancelReferenceOrchestrationRun',
+      detail: { run_id: runId },
+    })
     if (cancelled) {
       setActiveOrchestrationRun(cancelled)
       await loadOrchestrationRuns()
@@ -1273,7 +1475,12 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   }
 
   async function selectBlueprint(blueprintId: number) {
-    const blueprint = await run(() => app.GetReferenceChapterBlueprint(novelId, blueprintId))
+    const blueprint = await run(() => app.GetReferenceChapterBlueprint(novelId, blueprintId), undefined, {
+      fallbackMessage: '加载章节蓝图失败',
+      operation: 'GetReferenceChapterBlueprint',
+      bridgeMethod: 'GetReferenceChapterBlueprint',
+      detail: { blueprint_id: blueprintId },
+    })
     if (blueprint) {
       setActiveBlueprint(blueprint)
       setRevisionForm(formFromBlueprint(blueprint))
@@ -1287,7 +1494,15 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     const review = await run(() => app.ReviewReferenceChapterBlueprint({
       novel_id: novelId,
       blueprint_id: activeBlueprint.blueprint_id,
-    }), '蓝图评审已完成')
+    }), '蓝图评审已完成', {
+      fallbackMessage: '蓝图评审失败',
+      operation: 'ReviewReferenceChapterBlueprint',
+      bridgeMethod: 'ReviewReferenceChapterBlueprint',
+      detail: {
+        blueprint_id: activeBlueprint.blueprint_id,
+        chapter_number: activeBlueprint.chapter_number,
+      },
+    })
     if (review) {
       const refreshed = await app.GetReferenceChapterBlueprint(novelId, activeBlueprint.blueprint_id)
       setActiveBlueprint(refreshed)
@@ -1303,7 +1518,15 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       blueprint_id: activeBlueprint.blueprint_id,
       review_id: activeBlueprint.latest_review!.review_id,
       approver_origin: 'user',
-    }), '蓝图已批准')
+    }), '蓝图已批准', {
+      fallbackMessage: '蓝图批准失败',
+      operation: 'ApproveReferenceChapterBlueprint',
+      bridgeMethod: 'ApproveReferenceChapterBlueprint',
+      detail: {
+        blueprint_id: activeBlueprint.blueprint_id,
+        review_id: activeBlueprint.latest_review!.review_id,
+      },
+    })
     if (approved) {
       setActiveBlueprint(approved)
       setRevisionForm(formFromBlueprint(approved))
@@ -1318,7 +1541,16 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       blueprint_id: activeBlueprint.blueprint_id,
       max_results_per_beat: 3,
       select_top_candidate: true,
-    }), '材料已绑定到蓝图')
+    }), '材料已绑定到蓝图', {
+      fallbackMessage: '蓝图材料绑定失败',
+      operation: 'BindReferenceBlueprintMaterials',
+      bridgeMethod: 'BindReferenceBlueprintMaterials',
+      detail: {
+        blueprint_id: activeBlueprint.blueprint_id,
+        beat_count: activeBlueprint.beats.length,
+        max_results_per_beat: 3,
+      },
+    })
     if (result) {
       setBinding(result)
       const refreshed = await app.GetReferenceChapterBlueprint(novelId, activeBlueprint.blueprint_id)
@@ -1341,7 +1573,15 @@ export default function ReferenceAnchorView({ novelId }: Props) {
             candidates_per_beat: 3,
           } as const
         : {}),
-    }), '候选段落已生成')
+    }), '候选段落已生成', {
+      fallbackMessage: '参考候选段落生成失败',
+      operation: 'GenerateReferenceAnchoredDraft',
+      bridgeMethod: 'GenerateReferenceAnchoredDraft',
+      detail: {
+        blueprint_id: activeBlueprint.blueprint_id,
+        has_style_contract: hasStyleContract,
+      },
+    })
     if (result) setDraft(result)
   }
 
@@ -1450,7 +1690,16 @@ export default function ReferenceAnchorView({ novelId }: Props) {
       changes,
       origin: 'ui',
       revision_reason: 'field-level blueprint edit',
-    }), '蓝图已修订，需要重新评审和批准')
+    }), '蓝图已修订，需要重新评审和批准', {
+      fallbackMessage: '蓝图修订保存失败',
+      operation: 'ReviseReferenceChapterBlueprint',
+      bridgeMethod: 'ReviseReferenceChapterBlueprint',
+      detail: {
+        blueprint_id: activeBlueprint.blueprint_id,
+        change_count: changes.length,
+        beat_id: beat.beat_id,
+      },
+    })
     if (revised) {
       setActiveBlueprint(revised)
       setRevisionForm(formFromBlueprint(revised))
@@ -1479,7 +1728,27 @@ export default function ReferenceAnchorView({ novelId }: Props) {
           </div>
         </div>
 
-        {error && <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</div>}
+        {error && (
+          typeof error === 'string' ? (
+            <ErrorCallout
+              compact
+              title="操作失败"
+              message={error}
+              diagnostic={null}
+              className="rounded-md"
+              onClose={() => setError(null)}
+            />
+          ) : (
+            <ErrorCallout
+              compact
+              title={error.title}
+              message={error.message}
+              diagnostic={error.diagnostic}
+              className="rounded-md"
+              onClose={() => setError(null)}
+            />
+          )
+        )}
         {message && <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">{message}</div>}
 
         <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-4">
