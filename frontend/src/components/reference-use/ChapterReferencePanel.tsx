@@ -38,10 +38,21 @@ function materialTags(material: reference.Material): string {
   ].join(' · ')
 }
 
-function boundedPreview(value: string, limit = 160): string {
+type BoundedPreview = {
+  text: string
+  truncated: boolean
+}
+
+function boundedPreview(value: string, limit = 160): BoundedPreview {
   const normalized = value.trim().replace(/\s+/g, ' ')
-  if (normalized.length <= limit) return normalized
-  return `${normalized.slice(0, limit).trimEnd()}...`
+  if (normalized.length <= limit) {
+    return { text: normalized, truncated: false }
+  }
+
+  return {
+    text: `${normalized.slice(0, limit).trimEnd()}...`,
+    truncated: true,
+  }
 }
 
 function inputLines(value: string): string[] {
@@ -512,31 +523,40 @@ export default function ChapterReferencePanel({ novelId, activeChapter, onApplyC
             </div>
           ) : visibleMaterials.length > 0 ? (
             <div className="space-y-2" aria-label="章节推荐素材结果">
-              {visibleMaterials.map(material => (
-                <article key={material.material_id} data-testid="chapter-reference-material-card" className="rounded border border-border bg-background px-2.5 py-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-                      {material.material_id} · {materialTags(material)}
-                    </span>
-                    {material.user_verified && <span className="shrink-0 text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
-                  </div>
-                  <p className="mt-1 text-xs leading-relaxed text-foreground">{boundedPreview(material.text)}</p>
-                  <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">
-                    来源 {material.source_segment_id} · {material.source_hash}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void generateCandidate(material)
-                    }}
-                    disabled={candidateLoadingId !== null}
-                    className="mt-2 inline-flex items-center gap-1 rounded bg-secondary px-2 py-1 text-xs text-foreground hover:bg-secondary/80 disabled:opacity-50"
-                  >
-                    {candidateLoadingId === material.material_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-                    生成候选
-                  </button>
-                </article>
-              ))}
+              {visibleMaterials.map(material => {
+                const preview = boundedPreview(material.text)
+
+                return (
+                  <article key={material.material_id} data-testid="chapter-reference-material-card" className="rounded border border-border bg-background px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                        {material.material_id} · {materialTags(material)}
+                      </span>
+                      {material.user_verified && <span className="shrink-0 text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
+                    </div>
+                    <p className="mt-1 text-xs leading-relaxed text-foreground">{preview.text}</p>
+                    {preview.truncated && (
+                      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                        预览已截断，不显示全文
+                      </p>
+                    )}
+                    <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">
+                      来源 {material.source_segment_id} · {material.source_hash}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void generateCandidate(material)
+                      }}
+                      disabled={candidateLoadingId !== null}
+                      className="mt-2 inline-flex items-center gap-1 rounded bg-secondary px-2 py-1 text-xs text-foreground hover:bg-secondary/80 disabled:opacity-50"
+                    >
+                      {candidateLoadingId === material.material_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                      生成候选
+                    </button>
+                  </article>
+                )
+              })}
             </div>
           ) : visibleHasSearched ? (
             <div className="rounded border border-dashed border-border bg-background px-3 py-4 text-xs leading-relaxed text-muted-foreground">

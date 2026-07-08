@@ -9,6 +9,8 @@ namespace Novelist.Tests;
 
 public sealed class MafToolRegistryTests
 {
+    private const string FullReferenceMaterialLeakSentinel = "__FULL_REFERENCE_MATERIAL_SHOULD_NOT_REACH_AGENT__";
+
     [Fact]
     public void CreateToolsIncludesSearchStoryMemoryWithFlatSchema()
     {
@@ -751,6 +753,10 @@ public sealed class MafToolRegistryTests
         Assert.Equal(ReferenceStyleImitationIntensities.Strong, anchors.LastSearch.ImitationIntensity);
         var material = result.Data!.Value.GetProperty("items")[0];
         Assert.Equal("mat-1", material.GetProperty("material_id").GetString());
+        Assert.False(material.TryGetProperty("text", out _));
+        Assert.True(material.GetProperty("text_truncated").GetBoolean());
+        Assert.Contains("雨声压低了整条街的呼吸", material.GetProperty("text_preview").GetString());
+        Assert.DoesNotContain(FullReferenceMaterialLeakSentinel, material.GetRawText(), StringComparison.Ordinal);
         var components = material.GetProperty("score_components");
         Assert.Equal(2.5, components.GetProperty("story_context").GetDouble());
         Assert.Equal(1.25, components.GetProperty("prose_duty").GetDouble());
@@ -1760,7 +1766,10 @@ public sealed class MafToolRegistryTests
                         1,
                         1,
                         1,
-                        "雨声压低了整条街的呼吸。",
+                        "雨声压低了整条街的呼吸，林岚在门口停住，先把杯底水痕记下。" +
+                            "这是一段用于验证 agent 搜索工具只能看到有界预览的完整素材正文。" +
+                            "它继续补充窗台潮气、墙根泥点、杯沿缺口和门后停顿，让正文长度超过列表预览上限。" +
+                            FullReferenceMaterialLeakSentinel,
                         "hash",
                         "test",
                         false,

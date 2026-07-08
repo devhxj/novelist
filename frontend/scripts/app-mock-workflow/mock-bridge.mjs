@@ -407,6 +407,13 @@ export function installConfigurableAppMockBridge(options = {}) {
       updated_at: now,
     },
   ]
+  const longMaterialLeakSentinel = '__FULL_MATERIAL_SHOULD_NOT_RENDER__'
+  const longRainMaterialText = [
+    '雨夜线索从旧城门开始，雨声压着门槛，林岚只看见杯底半圈水痕，没有急着给出判断。',
+    '她先把杯沿的缺口、窗台的潮气、墙根一串被踩乱的泥点按时间顺序记下，又故意把最像答案的那一项留到最后。',
+    '这段素材用于验证列表和明细只展示有界预览，完整素材正文不应直接进入任何可见 DOM。',
+    longMaterialLeakSentinel,
+  ].join('')
   const defaultReferenceMaterials = [
     {
       material_id: 'mock-mat-rain-001',
@@ -421,7 +428,7 @@ export function installConfigurableAppMockBridge(options = {}) {
       function_confidence: 0.91,
       emotion_confidence: 0.88,
       pov_confidence: 0.9,
-      text: '雨夜线索从旧城门开始，雨声压着门槛，林岚只看见杯底半圈水痕，没有急着给出判断。',
+      text: longRainMaterialText,
       source_hash: 'hash-mock-material-001',
       extractor_version: 'mock-reference-v1',
       user_verified: true,
@@ -3238,7 +3245,14 @@ export function installConfigurableAppMockBridge(options = {}) {
     return [
       ...state.referenceAnchors,
       ...state.createdReferenceAnchors,
-    ]
+    ].map(sanitizeReferenceAnchor)
+  }
+
+  function sanitizeReferenceAnchor(anchor) {
+    return {
+      ...anchor,
+      source_path: '',
+    }
   }
 
   function createReferenceAnchor(input) {
@@ -3262,7 +3276,7 @@ export function installConfigurableAppMockBridge(options = {}) {
       updated_at: now,
     }
     state.createdReferenceAnchors.push(anchor)
-    return anchor
+    return sanitizeReferenceAnchor(anchor)
   }
 
   function referenceBuildStatus(anchorId) {

@@ -132,6 +132,7 @@ export async function verifyCorpusLibraryBridgeCalls(page) {
   for (const method of requiredMethods) {
     assert(methods.includes(method), `Expected corpus library bridge method ${method} to be called.`)
   }
+  assertReferenceAnchorResultsArePathFree(calls)
 
   const forbiddenMethods = [
     'SaveContent',
@@ -152,6 +153,18 @@ export async function verifyCorpusLibraryBridgeCalls(page) {
   const unexpected = methods.filter((method) => forbiddenMethods.includes(method))
   assert.deepEqual(unexpected, [], `corpus library workflow must not trigger chapter-writing bridge calls: ${unexpected.join(', ')}`)
   assert(!methods.includes('runtime.shell.openExternal'), 'corpus library workflow must not open external URLs')
+}
+
+function assertReferenceAnchorResultsArePathFree(calls) {
+  const anchorResults = calls
+    .filter((call) => call.method === 'GetReferenceAnchors')
+    .flatMap((call) => Array.isArray(call.result) ? call.result : [])
+
+  assert(anchorResults.length > 0, 'reference anchor calls must return at least one anchor fixture')
+  for (const anchor of anchorResults) {
+    assert.equal(anchor.source_path ?? '', '', 'reference anchor bridge results must not expose local source_path values')
+    assert(!JSON.stringify(anchor).includes('D:\\books'), 'reference anchor bridge results must not include local filesystem paths')
+  }
 }
 
 export async function verifyChapterReferenceBridgeCalls(page) {

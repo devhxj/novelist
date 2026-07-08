@@ -8,6 +8,8 @@ namespace Novelist.Tests.Bridge;
 
 public sealed class ReferenceBridgeHandlerRoutingTests
 {
+    private const string FullMaterialLeakSentinel = "__FULL_MATERIAL_SHOULD_NOT_LEAVE_SERVICE__";
+
     [Fact]
     public async Task ReferenceAnchorHandlersRouteEveryMethodToServiceOperations()
     {
@@ -157,6 +159,110 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "GetUserFeedback:42:reuse_candidate:candidate-1:5"
             ],
             service.Calls);
+    }
+
+    [Fact]
+    public async Task ReferenceAnchorHandlersRedactSourcePathsFromBridgeResults()
+    {
+        var service = new RecordingReferenceAnchorService();
+        var dispatcher = new BridgeDispatcher().RegisterReferenceAnchorHandlers(service);
+
+        using var created = await AssertOkJsonAsync(dispatcher, "CreateReferenceAnchor", new CreateReferenceAnchorPayload(
+            42,
+            "Anchor",
+            "Author",
+            @"D:\private\reference.md",
+            "markdown",
+            "user_provided"));
+        AssertPathRedacted(created.RootElement.GetProperty("result"), @"D:\private\reference.md");
+
+        using var bulk = await AssertOkJsonAsync(dispatcher, "CreateReferenceAnchors", new CreateReferenceAnchorsPayload(
+            [
+                new CreateReferenceAnchorPayload(42, "Bulk One", null, @"D:\private\bulk-one.md", "markdown", "user_provided"),
+                new CreateReferenceAnchorPayload(42, "Bulk Two", null, @"D:\private\bulk-two.md", "markdown", "user_provided")
+            ]));
+        var bulkItems = bulk.RootElement.GetProperty("result").EnumerateArray().ToArray();
+        Assert.Equal(2, bulkItems.Length);
+        AssertPathRedacted(bulkItems[0], @"D:\private\bulk-one.md");
+        AssertPathRedacted(bulkItems[1], @"D:\private\bulk-two.md");
+
+        using var anchors = await AssertOkJsonAsync(dispatcher, "GetReferenceAnchors", 42L);
+        var listed = Assert.Single(anchors.RootElement.GetProperty("result").EnumerateArray());
+        AssertPathRedacted(listed, @"D:\private\listed.md");
+
+        using var promoted = await AssertOkJsonAsync(dispatcher, "PromoteReferenceAnchorToWorkspaceCorpus", new PromoteReferenceAnchorToWorkspaceCorpusPayload(42, 99));
+        AssertPathRedacted(promoted.RootElement.GetProperty("result"), @"D:\private\promoted.md");
+
+        using var promotedBulk = await AssertOkJsonAsync(dispatcher, "PromoteReferenceAnchorsToWorkspaceCorpus", new PromoteReferenceAnchorsToWorkspaceCorpusPayload(42, [100, 101]));
+        foreach (var item in promotedBulk.RootElement.GetProperty("result").EnumerateArray())
+        {
+            AssertPathRedacted(item, @"D:\private\promoted-bulk.md");
+        }
+
+        using var updated = await AssertOkJsonAsync(dispatcher, "UpdateReferenceAnchorMetadata", new UpdateReferenceAnchorMetadataPayload(
+            42,
+            99,
+            "Updated",
+            "Author",
+            "licensed",
+            ReferenceCorpusVisibilities.Private,
+            ReferenceSourceTrustLevels.UserVerified,
+            []));
+        AssertPathRedacted(updated.RootElement.GetProperty("result"), @"D:\private\updated.md");
+    }
+
+    [Fact]
+    public async Task SearchReferenceMaterialsReturnsBoundedPreviewWithoutFullText()
+    {
+        var service = new RecordingReferenceAnchorService();
+        var dispatcher = new BridgeDispatcher().RegisterReferenceAnchorHandlers(service);
+
+        using var search = await AssertOkJsonAsync(dispatcher, "SearchReferenceMaterials", new SearchReferenceMaterialsPayload(
+            42,
+            [99],
+            "rain",
+            [],
+            [],
+            [],
+            [],
+            [],
+            1,
+            10));
+
+        var item = Assert.Single(search.RootElement.GetProperty("result").GetProperty("items").EnumerateArray());
+        var raw = item.GetRawText();
+        Assert.False(item.TryGetProperty("text", out _), "Search results must not expose full material text.");
+        Assert.Equal("material-1", item.GetProperty("material_id").GetString());
+        Assert.True(item.GetProperty("text_truncated").GetBoolean());
+        Assert.Contains("雨声压低了门口", item.GetProperty("text_preview").GetString());
+        Assert.DoesNotContain(FullMaterialLeakSentinel, raw, StringComparison.Ordinal);
+
+        using var updated = await AssertOkJsonAsync(dispatcher, "UpdateReferenceMaterialTags", new UpdateReferenceMaterialTagsPayload(
+            42,
+            "material-1",
+            "environment",
+            null,
+            null,
+            null,
+            null,
+            "ui",
+            "verified"));
+        AssertMaterialSummaryDoesNotExposeFullText(updated.RootElement.GetProperty("result"));
+
+        using var updatedBulk = await AssertOkJsonAsync(dispatcher, "UpdateReferenceMaterialsTags", new UpdateReferenceMaterialsTagsPayload(
+            42,
+            ["material-1", "material-2"],
+            "environment",
+            null,
+            null,
+            null,
+            null,
+            "ui",
+            "bulk verified"));
+        foreach (var updatedItem in updatedBulk.RootElement.GetProperty("result").EnumerateArray())
+        {
+            AssertMaterialSummaryDoesNotExposeFullText(updatedItem);
+        }
     }
 
     [Fact]
@@ -321,13 +427,35 @@ public sealed class ReferenceBridgeHandlerRoutingTests
 
     private static async Task AssertOkAsync(BridgeDispatcher dispatcher, string method, params object?[] args)
     {
+        using var json = await AssertOkJsonAsync(dispatcher, method, args);
+    }
+
+    private static async Task<JsonDocument> AssertOkJsonAsync(BridgeDispatcher dispatcher, string method, params object?[] args)
+    {
         var result = await dispatcher.DispatchAsync(Request(method, args));
         Assert.Null(result.CancelRequestId);
         Assert.False(string.IsNullOrWhiteSpace(result.OutboundJson));
 
-        using var json = JsonDocument.Parse(result.OutboundJson);
+        var json = JsonDocument.Parse(result.OutboundJson);
         Assert.Equal("response", json.RootElement.GetProperty("kind").GetString());
         Assert.True(json.RootElement.GetProperty("ok").GetBoolean());
+        return json;
+    }
+
+    private static void AssertPathRedacted(JsonElement anchor, string originalPath)
+    {
+        Assert.True(anchor.TryGetProperty("source_path", out var sourcePath), "Anchor payload must preserve the compatibility field.");
+        Assert.Equal(string.Empty, sourcePath.GetString());
+        Assert.DoesNotContain(originalPath, anchor.GetRawText(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AssertMaterialSummaryDoesNotExposeFullText(JsonElement material)
+    {
+        var raw = material.GetRawText();
+        Assert.False(material.TryGetProperty("text", out _), "Material summary responses must not expose full material text.");
+        Assert.True(material.TryGetProperty("text_preview", out _), "Material summary responses must expose bounded text_preview.");
+        Assert.True(material.TryGetProperty("text_truncated", out _), "Material summary responses must expose text_truncated.");
+        Assert.DoesNotContain(FullMaterialLeakSentinel, raw, StringComparison.Ordinal);
     }
 
     private static async Task<JsonDocument> AssertErrorAsync(
@@ -368,6 +496,36 @@ public sealed class ReferenceBridgeHandlerRoutingTests
 
         public Exception? CreateAnchorException { get; set; }
 
+        private static ReferenceAnchorPayload CreateAnchorPayload(
+            long anchorId,
+            long novelId,
+            string title,
+            string author,
+            string sourcePath,
+            string sourceKind,
+            string licenseStatus,
+            string visibility = ReferenceCorpusVisibilities.Private,
+            string sourceTrust = ReferenceSourceTrustLevels.UserVerified,
+            IReadOnlyList<string>? userTags = null)
+        {
+            return new ReferenceAnchorPayload(
+                anchorId,
+                novelId,
+                title,
+                author,
+                sourcePath,
+                sourceKind,
+                licenseStatus,
+                "hash",
+                "test",
+                ReferenceAnchorBuildStates.Ready,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                visibility,
+                sourceTrust,
+                userTags ?? []);
+        }
+
         public ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(
             CreateReferenceAnchorPayload input,
             CancellationToken cancellationToken)
@@ -380,7 +538,17 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             }
 
             Calls.Add($"CreateAnchor:{input.NovelId}:{input.Title}:{input.Author}:{input.SourcePath}:{input.SourceKind}:{input.LicenseStatus}:{input.Visibility}:{input.SourceTrust}:{string.Join(",", input.UserTags ?? [])}");
-            return ValueTask.FromResult<ReferenceAnchorPayload>(null!);
+            return ValueTask.FromResult(CreateAnchorPayload(
+                anchorId: 99,
+                novelId: input.NovelId,
+                title: input.Title,
+                author: input.Author ?? string.Empty,
+                sourcePath: input.SourcePath,
+                sourceKind: input.SourceKind,
+                licenseStatus: input.LicenseStatus,
+                visibility: input.Visibility ?? ReferenceCorpusVisibilities.Private,
+                sourceTrust: input.SourceTrust ?? ReferenceSourceTrustLevels.UserVerified,
+                userTags: input.UserTags ?? []));
         }
 
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync(
@@ -389,7 +557,20 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"CreateAnchors:{string.Join(",", input.Anchors.Select(anchor => anchor.Title))}");
-            return ValueTask.FromResult<IReadOnlyList<ReferenceAnchorPayload>>([]);
+            return ValueTask.FromResult<IReadOnlyList<ReferenceAnchorPayload>>(
+                input.Anchors
+                    .Select((anchor, index) => CreateAnchorPayload(
+                        100 + index,
+                        anchor.NovelId,
+                        anchor.Title,
+                        anchor.Author ?? string.Empty,
+                        anchor.SourcePath,
+                        anchor.SourceKind,
+                        anchor.LicenseStatus,
+                        anchor.Visibility ?? ReferenceCorpusVisibilities.Private,
+                        anchor.SourceTrust ?? ReferenceSourceTrustLevels.UserVerified,
+                        anchor.UserTags ?? []))
+                    .ToArray());
         }
 
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(
@@ -398,7 +579,17 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"GetAnchors:{novelId}");
-            IReadOnlyList<ReferenceAnchorPayload> anchors = [];
+            IReadOnlyList<ReferenceAnchorPayload> anchors =
+            [
+                CreateAnchorPayload(
+                    99,
+                    novelId,
+                    "Listed Anchor",
+                    "Author",
+                    @"D:\private\listed.md",
+                    "markdown",
+                    "user_provided")
+            ];
             return ValueTask.FromResult(anchors);
         }
 
@@ -445,7 +636,17 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"PromoteAnchorToWorkspaceCorpus:{input.NovelId}:{input.AnchorId}:{input.SourceTrust}:{string.Join(",", input.UserTags ?? [])}");
-            return ValueTask.FromResult<ReferenceAnchorPayload>(null!);
+            return ValueTask.FromResult(CreateAnchorPayload(
+                input.AnchorId,
+                0,
+                "Promoted Anchor",
+                "Author",
+                @"D:\private\promoted.md",
+                "markdown",
+                "user_provided",
+                ReferenceCorpusVisibilities.Workspace,
+                input.SourceTrust ?? ReferenceSourceTrustLevels.UserVerified,
+                input.UserTags ?? []));
         }
 
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> PromoteAnchorsToWorkspaceCorpusAsync(
@@ -454,7 +655,20 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"PromoteAnchorsToWorkspaceCorpus:{input.NovelId}:{string.Join(",", input.AnchorIds)}:{input.SourceTrust}:{string.Join(",", input.UserTags ?? [])}");
-            return ValueTask.FromResult<IReadOnlyList<ReferenceAnchorPayload>>([]);
+            return ValueTask.FromResult<IReadOnlyList<ReferenceAnchorPayload>>(
+                input.AnchorIds
+                    .Select(anchorId => CreateAnchorPayload(
+                        anchorId,
+                        0,
+                        "Promoted Bulk Anchor",
+                        "Author",
+                        @"D:\private\promoted-bulk.md",
+                        "markdown",
+                        "user_provided",
+                        ReferenceCorpusVisibilities.Workspace,
+                        input.SourceTrust ?? ReferenceSourceTrustLevels.UserVerified,
+                        input.UserTags ?? []))
+                    .ToArray());
         }
 
         public ValueTask<ReferenceAnchorPayload> UpdateAnchorMetadataAsync(
@@ -463,7 +677,17 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"UpdateAnchorMetadata:{input.NovelId}:{input.AnchorId}:{input.Title}:{input.Author}:{input.LicenseStatus}:{input.Visibility}:{input.SourceTrust}:{string.Join(",", input.UserTags)}");
-            return ValueTask.FromResult<ReferenceAnchorPayload>(null!);
+            return ValueTask.FromResult(CreateAnchorPayload(
+                input.AnchorId,
+                input.NovelId,
+                input.Title,
+                input.Author ?? string.Empty,
+                @"D:\private\updated.md",
+                "markdown",
+                input.LicenseStatus,
+                input.Visibility,
+                input.SourceTrust,
+                input.UserTags));
         }
 
         public ValueTask<ReferenceAnchorBuildStatusPayload> RebuildAnchorAsync(
@@ -493,7 +717,39 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add(
                 $"SearchMaterials:{input.NovelId}:{string.Join(',', input.AnchorIds)}:{input.Query}:{string.Join(',', input.MaterialTypes)}:{string.Join(',', input.EmotionTags)}:{string.Join(',', input.FunctionTags)}:{string.Join(',', input.PovTags)}:{string.Join(',', input.TechniqueTags)}:{input.Page}:{input.Size}:{string.Join(',', input.ProseDuties ?? [])}:{input.ArchiveFilter}");
-            return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialPayload>([], 0, input.Page, input.Size, 0));
+            return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialPayload>(
+                [
+                    new ReferenceMaterialPayload(
+                        "material-1",
+                        99,
+                        "segment-1",
+                        ReferenceMaterialTypes.Passage,
+                        "environment",
+                        "restrained",
+                        "rain_threshold",
+                        "close",
+                        "delayed_reaction",
+                        0.91,
+                        0.88,
+                        0.9,
+                        "雨声压低了门口，林岚只看见杯底半圈水痕，没有急着给出判断。" +
+                            "这是一段用于验证 bridge 列表响应必须截断的完整素材正文，不能透出到 UI 或 agent 搜索结果。" +
+                            "它继续补充窗台潮气、墙根泥点、杯沿缺口和门后停顿，让正文长度超过列表预览上限。" +
+                            FullMaterialLeakSentinel,
+                        "hash-material-1",
+                        "test-extractor",
+                        false,
+                        DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
+                        new Dictionary<string, double>(StringComparer.Ordinal)
+                        {
+                            ["lexical"] = 0.92,
+                            ["prose_duty"] = 0.86
+                        })
+                ],
+                1,
+                input.Page,
+                input.Size,
+                1));
         }
 
         public ValueTask<ReferenceMaterialDetailPayload?> GetMaterialDetailAsync(
@@ -520,7 +776,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"UpdateMaterialTags:{input.NovelId}:{input.MaterialId}:{input.FunctionTag}:{input.EmotionTag}:{input.SceneTag}:{input.PovTag}:{input.TechniqueTag}:{input.Origin}:{input.Note}");
-            return ValueTask.FromResult<ReferenceMaterialPayload>(null!);
+            return ValueTask.FromResult(CreateMaterialPayload(input.MaterialId));
         }
 
         public ValueTask<IReadOnlyList<ReferenceMaterialPayload>> UpdateMaterialsTagsAsync(
@@ -529,7 +785,8 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"UpdateMaterialsTags:{input.NovelId}:{string.Join(',', input.MaterialIds)}:{input.FunctionTag}:{input.EmotionTag}:{input.SceneTag}:{input.PovTag}:{input.TechniqueTag}:{input.Origin}:{input.Note}");
-            return ValueTask.FromResult<IReadOnlyList<ReferenceMaterialPayload>>([]);
+            return ValueTask.FromResult<IReadOnlyList<ReferenceMaterialPayload>>(
+                input.MaterialIds.Select(CreateMaterialPayload).ToArray());
         }
 
         public ValueTask<AdaptReferenceMaterialResultPayload> AdaptMaterialAsync(

@@ -83,6 +83,7 @@ If no accessible corpus material exists, the chapter panel must show a corpus-im
 - Chapter-reference UI must not call `UpdateReferenceMaterialTags`, `UpdateReferenceMaterialsTags`, `UpdateReferenceAnchorMetadata`, `DeleteReferenceMaterials`, `RestoreReferenceMaterials`, `DeleteReferenceAnchor`, or `RebuildReferenceAnchor`.
 - Corpus import, retry, rebuild, and processing resume must preserve source hashes, material ids where possible, source segment ids, archive state, user-verified tag corrections, and audit provenance; they must not create duplicate searchable materials for the same source/build state.
 - Keep source text, candidate text, prompts, local source paths, and sensitive diagnostics out of agent-exposed tools unless an existing read boundary explicitly allows a bounded preview.
+- Local source paths are allowed only as explicit import inputs or internal rebuild state. Bridge/UI/agent responses for already imported sources must be path-free; if a compatibility `source_path` field remains, it must be empty or otherwise redacted.
 - Preserve owner scope, visibility, license status, source trust, material ids, source hashes, and audit provenance when moving UI components.
 - Preserve advanced blueprint/material-binding/debug workflows, but move them behind an explicit advanced mode in the chapter-use context.
 - Preserve the existing final-insertion stop: orchestration resume must not auto-approve final insertion.
@@ -167,7 +168,7 @@ The drawer should provide:
    - Automatically suggest relevant materials from the current chapter context when the panel opens on a valid chapter.
    - Provide one-click/manual search as a supplement, not a prerequisite for the default path.
    - Material results from accessible corpus library.
-   - Read-only material preview with provenance, tags, and fit explanation.
+   - Read-only bounded material preview with provenance, tags, and fit explanation; recommendation cards must not render full material text, full source text, local source paths, prompts, candidate text, or full chapter text.
    - No corpus tag editing in this panel; provide a navigation link back to the corpus library row if needed.
 
 3. **Candidate Workflow**
@@ -609,6 +610,7 @@ Corpus-library browser coverage must include:
 - Promote a private source to workspace corpus and keep the action explicit.
 - Open a source detail and view its processed material rows with `material_id`, `anchor_id`, `source_segment_id`, `source_hash`, material type, tags, confidence, verification state, and bounded preview.
 - Open a material detail drawer and assert provenance, source identity, source segment metadata, source hash, bounded preview, slots/placeholders, extractor/build metadata, score components, archive state, and processing notes are visible.
+- Assert processed-material list cards render bounded previews and do not expose full material text, full source text, local source paths, prompts, candidate text, or full chapter text.
 - Assert material detail payloads and UI never expose full source text, local source paths, prompts, candidate text, or full chapter text.
 - Correct one material tag and multiple selected material tags; verify `user_verified` state updates.
 - Archive selected materials, confirm they disappear from active browse, switch to archived view, restore them, and confirm selection is not lost after recoverable failure.
@@ -621,6 +623,7 @@ Chapter-reference browser coverage must include:
 - Switch to another chapter and assert chapter number, run list filtering, and candidate target context update.
 - Switch to `novelist.md`, a skill tab, a diff tab, or an empty state and assert the chapter-use actions are disabled or hidden.
 - Assert the drawer prepares chapter context and suggests accessible materials without requiring manual anchor selection.
+- Assert chapter recommendation cards render bounded previews and do not expose full material text, full source text, local source paths, prompts, candidate text, or full chapter text.
 - Assert chapter goal, known facts, and forbidden facts can be empty in the default path.
 - Assert empty corpus state shows an import-corpus call to action and recovers after corpus processing completes.
 - Start an orchestration run from chapter goal and fact boundaries without selecting corpus anchors.

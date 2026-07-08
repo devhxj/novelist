@@ -92,6 +92,8 @@ import {
 } from './settings-workflows.mjs'
 import { usabilityObservation, writeUsabilityReport } from './usability-report.mjs'
 
+const FULL_MATERIAL_LEAK_SENTINEL = '__FULL_MATERIAL_SHOULD_NOT_RENDER__'
+
 export async function runSmokeSuite(browser, url) {
   const { consoleErrors, pageErrors } = diagnostics
 
@@ -294,7 +296,11 @@ async function verifyCorpusLibraryWorkflow(page) {
   await expectVisible(page.getByLabel('材料库结果').or(page.getByLabel('材料库搜索')).first(), 'corpus library material area')
 
   await page.getByRole('button', { name: '检索材料库' }).click()
-  await expectVisible(page.getByTestId('reference-material-library-card').first(), 'corpus library material card')
+  const materialLibraryCard = page.getByTestId('reference-material-library-card').first()
+  await expectVisible(materialLibraryCard, 'corpus library material card')
+  const materialLibraryCardText = await materialLibraryCard.innerText()
+  assert(!materialLibraryCardText.includes(FULL_MATERIAL_LEAK_SENTINEL), 'corpus library material card must render bounded preview only')
+  assert(materialLibraryCardText.includes('预览已截断，不显示全文'), 'corpus library material card must mark bounded preview')
   await page.getByRole('button', { name: /查看 .* 的材料明细/ }).first().click()
   const drawer = page.getByTestId('reference-material-detail-drawer')
   await expectVisible(drawer, 'corpus material detail drawer')
@@ -309,6 +315,7 @@ async function verifyCorpusLibraryWorkflow(page) {
   await waitForBridgeCall(page, 'GetReferenceMaterialDetail')
   const drawerText = await drawer.innerText()
   assert(!drawerText.includes('D:\\books'), 'material detail drawer must not render local source paths')
+  assert(!drawerText.includes(FULL_MATERIAL_LEAK_SENTINEL), 'material detail drawer must not render full material text')
 
   await page.getByRole('button', { name: /查看 全局雨夜参考 的处理记录/ }).click()
   await waitForBridgeCall(page, 'GetReferenceSourceProcessingDetail')
@@ -354,7 +361,11 @@ async function verifyChapterReferenceWorkflow(page) {
   const drawer = page.getByTestId('chapter-reference-panel')
   await expectVisible(drawer, 'chapter reference drawer')
   await expectVisible(drawer.getByText('推荐素材'), 'chapter reference recommendations heading')
-  await expectVisible(drawer.getByTestId('chapter-reference-material-card').first(), 'chapter reference recommendation card')
+  const chapterMaterialCard = drawer.getByTestId('chapter-reference-material-card').first()
+  await expectVisible(chapterMaterialCard, 'chapter reference recommendation card')
+  const chapterMaterialCardText = await chapterMaterialCard.innerText()
+  assert(!chapterMaterialCardText.includes(FULL_MATERIAL_LEAK_SENTINEL), 'chapter reference material card must render bounded preview only')
+  assert(chapterMaterialCardText.includes('预览已截断，不显示全文'), 'chapter reference material card must mark bounded preview')
   await waitForBridgeCall(page, 'SearchReferenceMaterials')
   await waitForBridgeCall(page, 'GetReferenceOrchestrationRuns')
 

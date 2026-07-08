@@ -839,6 +839,7 @@ export namespace reference {
     novel_id: number
     title: string
     author: string
+    /** Compatibility field. Imported-source bridge responses return an empty value; use source_file_hash/title for identity. */
     source_path: string
     source_kind: string
     license_status: string

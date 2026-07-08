@@ -362,6 +362,33 @@ function materialMatchesQuery(material: reference.Material, query: string): bool
   ].some(value => normalized(value).includes(needle))
 }
 
+const MATERIAL_LIST_PREVIEW_LIMIT = 160
+
+function boundedMaterialPreview(text: string, limit = MATERIAL_LIST_PREVIEW_LIMIT): { text: string; truncated: boolean } {
+  const normalizedText = text.trim().replace(/\s+/g, ' ')
+  if (normalizedText.length <= limit) {
+    return { text: normalizedText, truncated: false }
+  }
+
+  return {
+    text: `${normalizedText.slice(0, limit).trimEnd()}...`,
+    truncated: true,
+  }
+}
+
+function MaterialListPreview({ text }: { text: string }) {
+  const preview = boundedMaterialPreview(text)
+
+  return (
+    <>
+      <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-foreground">{preview.text || '无预览'}</p>
+      {preview.truncated && (
+        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">预览已截断，不显示全文</p>
+      )}
+    </>
+  )
+}
+
 export default function ReferenceAnchorView({ novelId }: Props) {
   const app = useApp()
 
@@ -2461,7 +2488,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                                             </button>
                                           </span>
                                         </div>
-                                        <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-foreground">{material.text}</p>
+                                        <MaterialListPreview text={material.text} />
                                         <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">
                                           来源 {material.source_segment_id} · {material.source_hash}
                                         </p>
@@ -2744,7 +2771,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                               </button>
                             </span>
                           </div>
-                          <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-foreground">{material.text}</p>
+                          <MaterialListPreview text={material.text} />
                           <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">
                             来源 {material.source_segment_id} · {material.source_hash}
                           </p>
@@ -2924,7 +2951,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
                                 <span key={tag} className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">{tag}</span>
                               ))}
                             </div>
-                            <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-foreground">{material.text}</p>
+                            <MaterialListPreview text={material.text} />
                             {materialScoreComponents(material).length > 0 && (
                               <div className="mt-2 flex flex-wrap gap-1">
                                 {materialScoreComponents(material).map(([name, value]) => (

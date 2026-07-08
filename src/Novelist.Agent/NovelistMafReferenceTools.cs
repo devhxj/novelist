@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
@@ -32,8 +33,9 @@ public sealed partial class NovelistMafToolRegistry
 
     private sealed class ReferenceMafTools
     {
+        private const int MaterialListPreviewMaxChars = 160;
         private const string GetAnchorsDescription = "列出当前小说可访问的已导入参考锚定书籍。返回 path-free 来源摘要，不返回 source_path；novel_id 由运行时注入，不需要也不能传入；不能导入新来源，不能读取任意文件。";
-        private const string SearchMaterialsDescription = "按 story context 和可选 style filters 搜索已导入且受 license/visibility 过滤的参考语料库。返回材料 id、标签、来源、文本和 score_components；style_profile_ids 只影响受授权材料排序和 style-risk 解释，不能绕过来源/许可边界。用于给蓝图 beat 绑定材料，不直接写章节，不能导入新来源，不能读取任意文件。";
+        private const string SearchMaterialsDescription = "按 story context 和可选 style filters 搜索已导入且受 license/visibility 过滤的参考语料库。返回材料 id、标签、来源、bounded text_preview 和 score_components，不返回完整材料文本；style_profile_ids 只影响受授权材料排序和 style-risk 解释，不能绕过来源/许可边界。用于给蓝图 beat 绑定材料，不直接写章节，不能导入新来源，不能读取任意文件。";
         private const string GetMaterialDetailDescription = "只读查看已导入参考材料的结构化明细。返回 provenance、tags/confidence、bounded previews、slots、score_components 和 processing_notes；不返回 source_path，不返回 source_text，不返回 candidate_text，不返回 prompt，不返回完整来源或完整章节，不能导入新来源，不能读取任意文件，不能写章节。";
         private const string GetSourceProcessingDetailDescription = "只读查看已导入参考来源的处理记录。返回 parse/segment/extract/index 状态、counts、affected ids 和已脱敏 diagnostics；不返回 source_path，不返回 source_text，不返回 candidate_text，不返回 prompt，不返回完整来源或完整章节，不能导入新来源，不能读取任意文件，不能写章节。";
         private const string AdaptMaterialDescription = "预览参考材料改写。只允许基于 material_id、slot_values、scene_facts 和 max_rewrite_level 生成候选，不直接写章节。";
@@ -102,7 +104,7 @@ public sealed partial class NovelistMafToolRegistry
         }
 
         [Description(SearchMaterialsDescription)]
-        private ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchReferenceMaterialsAsync(
+        private async ValueTask<PageResultPayload<ReferenceMaterialSummaryPayload>> SearchReferenceMaterialsAsync(
             [Description("参考锚定 id 列表。空数组表示搜索当前小说下全部参考锚定")]
             long[]? anchor_ids = null,
             [Description("搜索查询，描述需要的情绪、叙事功能、场景压力或句料特征")]
@@ -135,7 +137,7 @@ public sealed partial class NovelistMafToolRegistry
             int size = 0,
             CancellationToken cancellationToken = default)
         {
-            return _referenceAnchors.SearchMaterialsAsync(
+            var result = await _referenceAnchors.SearchMaterialsAsync(
                 new SearchReferenceMaterialsPayload(
                     _context.NovelId,
                     anchor_ids ?? [],
@@ -155,6 +157,54 @@ public sealed partial class NovelistMafToolRegistry
                     StyleDimensions: style_dimensions,
                     ImitationIntensity: imitation_intensity),
                 cancellationToken);
+            return ToMaterialSummaryPage(result);
+        }
+
+        private static PageResultPayload<ReferenceMaterialSummaryPayload> ToMaterialSummaryPage(
+            PageResultPayload<ReferenceMaterialPayload> result)
+        {
+            return new PageResultPayload<ReferenceMaterialSummaryPayload>(
+                result.Items.Select(ToMaterialSummary).ToArray(),
+                result.Total,
+                result.Page,
+                result.Size,
+                result.TotalPages);
+        }
+
+        private static ReferenceMaterialSummaryPayload ToMaterialSummary(ReferenceMaterialPayload material)
+        {
+            var preview = BuildPreview(material.Text, MaterialListPreviewMaxChars);
+            return new ReferenceMaterialSummaryPayload(
+                material.MaterialId,
+                material.AnchorId,
+                material.SourceSegmentId,
+                material.MaterialType,
+                material.FunctionTag,
+                material.EmotionTag,
+                material.SceneTag,
+                material.PovTag,
+                material.TechniqueTag,
+                material.FunctionConfidence,
+                material.EmotionConfidence,
+                material.PovConfidence,
+                preview.Text,
+                preview.Truncated,
+                material.SourceHash,
+                material.ExtractorVersion,
+                material.UserVerified,
+                material.CreatedAt,
+                ScoreComponents: material.ScoreComponents);
+        }
+
+        private static TextPreview BuildPreview(string? text, int maxLength)
+        {
+            var normalized = Regex.Replace((text ?? string.Empty).Trim(), @"\s+", " ");
+            if (normalized.Length <= maxLength)
+            {
+                return new TextPreview(normalized, false);
+            }
+
+            return new TextPreview(normalized[..maxLength].TrimEnd() + "...", true);
         }
 
         [Description(GetMaterialDetailDescription)]
@@ -232,6 +282,8 @@ public sealed partial class NovelistMafToolRegistry
                     scene_facts ?? []),
                 cancellationToken);
         }
+
+        private readonly record struct TextPreview(string Text, bool Truncated);
     }
 
     private sealed class ReferenceStyleProfileMafTools
