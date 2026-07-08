@@ -303,6 +303,7 @@ export namespace config {
     initialized: boolean
     data_dir?: string | null
     update_check: UpdateCheckConfiguration
+    import_recovery?: novelImport.ImportReconciliationResult | null
   }
 
   export interface AppSettings {
@@ -466,6 +467,8 @@ export namespace novelImport {
     progress_total: number
     message: string
     created_novel_id?: number | null
+    current_chapter_index?: number | null
+    current_chapter_title?: string | null
     updated_at: Timestamp
   }
 
@@ -528,13 +531,20 @@ export namespace styleSample {
   }
 
   export interface StyleSampleStats {
+    schema_version: string
     character_count: number
+    word_count: number
     sentence_count: number
+    sentence_length_distribution: number[]
     average_sentence_chars: number
+    sentence_length_std_dev: number
+    punctuation_per_100_chars: number
+    quote_density: number
+    paragraph_count: number
+    average_paragraph_chars: number
     dialogue_ratio: number
     interiority_ratio: number
     sensory_ratio: number
-    punctuation_per_100_chars: number
   }
 
   export interface CreateStyleSampleInput {
@@ -609,6 +619,7 @@ export namespace styleSample {
     sample_ids: number[]
     skill_name: string
     skill_preview: string
+    skill_file_path: string
     diagnostics: diagnostics.CopyableDiagnostic[]
     created_at: Timestamp
     updated_at: Timestamp
@@ -630,6 +641,7 @@ export namespace pattern {
     model_id: string
     reasoning_effort: string
     skill_name: string
+    selected_chapter_ids?: number[] | null
   }
 
   export interface CancelNarrativePatternExtractionInput {
@@ -649,12 +661,31 @@ export namespace pattern {
     progress_completed: number
     progress_total: number
     chapter_ranges: ChapterRange[]
+    selected_chapter_ids: number[]
     skill_name: string
     skill_preview: string
     diagnostics: diagnostics.CopyableDiagnostic[]
     created_at: Timestamp
     updated_at: Timestamp
     completed_at?: Timestamp | null
+  }
+
+  export interface NarrativePatternProgress {
+    task_id: string
+    status: string
+    stage: string
+    progress_completed: number
+    progress_total: number
+    message: string
+    updated_at: Timestamp
+    llm_status: string
+    round?: number | null
+    batch_index?: number | null
+    batch_total?: number | null
+    token_estimate?: number | null
+    boundary_count?: number | null
+    summary_count?: number | null
+    phase_count?: number | null
   }
 
   export interface NarrativePatternTrace {
@@ -677,6 +708,7 @@ export namespace git {
     novel_id: number
     page: number
     size: number
+    cursor_commit_id?: string | null
   }
 
   export interface GetGitCommitFilesInput {
@@ -696,6 +728,8 @@ export namespace git {
     message: string
     committed_at: Timestamp
     changed_file_count: number
+    insertions: number
+    deletions: number
   }
 
   export interface GitCommitFile {
@@ -715,6 +749,8 @@ export namespace git {
     diff_text: string
     truncated: boolean
     binary: boolean
+    original_content?: string | null
+    modified_content?: string | null
   }
 
   export interface GitAuthorSettings {
@@ -744,6 +780,10 @@ export namespace update {
     checked_at: Timestamp
     error_code?: string | null
     error_message?: string | null
+    release_name?: string | null
+    release_notes?: string | null
+    download_url?: string | null
+    dismissed: boolean
   }
 
   export interface UpdateCheckSettings {
@@ -1048,6 +1088,7 @@ export namespace reference {
     allowed_license_statuses: string[]
     allowed_source_trust_levels: string[]
     build_id?: string | null
+    style_sample_ids?: number[] | null
   }
 
   export interface GetStyleProfileBuildStatusInput {
@@ -1071,6 +1112,7 @@ export namespace reference {
     progress_total: number
     anchor_ids: number[]
     source_hashes: string[]
+    style_sample_ids?: number[] | null
     diagnostics: string[]
     error_code?: string | null
     error_message?: string | null
@@ -1112,6 +1154,7 @@ export namespace reference {
     analyzer_source: string
     source_anchor_ids: number[]
     source_hashes: string[]
+    source_style_sample_ids?: number[] | null
     aggregate_confidence: number
     created_at: Timestamp
     updated_at: Timestamp
@@ -1225,6 +1268,8 @@ export namespace reference {
     text_hash: string
     confidence: number
     analyzer_source: string
+    source_type?: string | null
+    style_sample_id?: number | null
   }
 
   export interface GenerateChapterBlueprintInput {

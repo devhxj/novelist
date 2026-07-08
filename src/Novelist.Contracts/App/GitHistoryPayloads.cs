@@ -5,7 +5,8 @@ namespace Novelist.Contracts.App;
 public sealed record GetGitCommitsPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("page")] int Page,
-    [property: JsonPropertyName("size")] int Size);
+    [property: JsonPropertyName("size")] int Size,
+    [property: JsonPropertyName("cursor_commit_id")] string? CursorCommitId = null);
 
 public sealed record GetGitCommitFilesPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
@@ -23,7 +24,9 @@ public sealed record GitCommitSummaryPayload(
     [property: JsonPropertyName("author_email")] string AuthorEmail,
     [property: JsonPropertyName("message")] string Message,
     [property: JsonPropertyName("committed_at")] DateTimeOffset CommittedAt,
-    [property: JsonPropertyName("changed_file_count")] int ChangedFileCount);
+    [property: JsonPropertyName("changed_file_count")] int ChangedFileCount,
+    [property: JsonPropertyName("insertions")] int Insertions = 0,
+    [property: JsonPropertyName("deletions")] int Deletions = 0);
 
 public sealed record GitCommitFilePayload(
     [property: JsonPropertyName("path")] string Path,
@@ -42,7 +45,9 @@ public sealed record GitFileDiffPayload(
     [property: JsonPropertyName("change_type")] string ChangeType,
     [property: JsonPropertyName("diff_text")] string DiffText,
     [property: JsonPropertyName("truncated")] bool Truncated,
-    [property: JsonPropertyName("binary")] bool Binary);
+    [property: JsonPropertyName("binary")] bool Binary,
+    [property: JsonPropertyName("original_content")] string? OriginalContent = null,
+    [property: JsonPropertyName("modified_content")] string? ModifiedContent = null);
 
 public sealed record GitAuthorSettingsPayload(
     [property: JsonPropertyName("name")] string Name,

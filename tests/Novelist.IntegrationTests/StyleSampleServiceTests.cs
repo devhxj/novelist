@@ -24,7 +24,7 @@ public sealed class StyleSampleServiceTests : IDisposable
                 IsGlobal: true,
                 Name: "冷雨对白",
                 Content: "“你听见雨了吗？”她想，门外的潮气像铁锈。\n灯光很冷，风声贴着窗。",
-                Tags: ["雨夜", "对白", "雨夜 "],
+                Tags: ["雨夜;对白\n克制", "雨夜 ", "English, tag"],
                 SourceMetadata: new StyleSampleSourceMetadataPayload("chapter", "42:1", "hash-global-001")),
             CancellationToken.None);
         var local = await service.CreateSampleAsync(
@@ -40,12 +40,19 @@ public sealed class StyleSampleServiceTests : IDisposable
         Assert.True(global.SampleId > 0);
         Assert.Null(global.NovelId);
         Assert.True(global.IsGlobal);
-        Assert.Equal(["雨夜", "对白"], global.Tags);
+        Assert.Equal(["雨夜", "对白", "克制", "English", "tag"], global.Tags);
         Assert.DoesNotContain('\n', global.Preview);
         Assert.True(global.Preview.Length <= 120);
-        Assert.Equal("style_sample_stats_v1", global.StatsSchemaVersion);
+        Assert.Equal("style_sample_stats_v2", global.StatsSchemaVersion);
+        Assert.Equal("style_sample_stats_v2", global.Stats.SchemaVersion);
         Assert.True(global.Stats.CharacterCount > 0);
+        Assert.True(global.Stats.WordCount > 0);
         Assert.True(global.Stats.SentenceCount >= 2);
+        Assert.Equal(global.Stats.SentenceCount, global.Stats.SentenceLengthDistribution.Count);
+        Assert.True(global.Stats.SentenceLengthStdDev >= 0);
+        Assert.True(global.Stats.ParagraphCount >= 2);
+        Assert.True(global.Stats.AverageParagraphChars > 0);
+        Assert.True(global.Stats.QuoteDensity > 0);
         Assert.True(global.Stats.DialogueRatio > 0);
         Assert.True(global.Stats.InteriorityRatio > 0);
         Assert.True(global.Stats.SensoryRatio > 0);
@@ -57,7 +64,9 @@ public sealed class StyleSampleServiceTests : IDisposable
         Assert.NotNull(detail);
         Assert.Equal("冷雨对白", detail.Name);
         Assert.Equal("“你听见雨了吗？”她想，门外的潮气像铁锈。\n灯光很冷，风声贴着窗。", detail.Content);
-        Assert.Equal(global.Stats, detail.Stats);
+        Assert.Equal(global.Stats.CharacterCount, detail.Stats.CharacterCount);
+        Assert.Equal(global.Stats.WordCount, detail.Stats.WordCount);
+        Assert.Equal(global.Stats.SentenceLengthDistribution, detail.Stats.SentenceLengthDistribution);
         Assert.Equal("hash-global-001", detail.SourceMetadata?.SourceHash);
 
         var novelAndGlobal = await reloaded.SearchSamplesAsync(
@@ -67,6 +76,13 @@ public sealed class StyleSampleServiceTests : IDisposable
         Assert.Contains(novelAndGlobal.Items, item => item.SampleId == global.SampleId);
         Assert.Contains(novelAndGlobal.Items, item => item.SampleId == local.SampleId);
         Assert.All(novelAndGlobal.Items, item => Assert.IsType<StyleSamplePayload>(item));
+
+        var paged = await reloaded.SearchSamplesAsync(
+            new SearchStyleSamplesPayload(novel.Id, IncludeGlobal: true, Query: "", Tags: [], Page: 1, Size: 1),
+            CancellationToken.None);
+        Assert.Equal(2, paged.Total);
+        Assert.Equal(2, paged.TotalPages);
+        Assert.Single(paged.Items);
 
         var novelOnly = await reloaded.SearchSamplesAsync(
             new SearchStyleSamplesPayload(novel.Id, IncludeGlobal: false, Query: "", Tags: [], Page: 1, Size: 10),
@@ -91,6 +107,8 @@ public sealed class StyleSampleServiceTests : IDisposable
         Assert.Equal(local.CreatedAt, updated.CreatedAt);
         Assert.True(updated.UpdatedAt >= local.CreatedAt);
         Assert.Equal(["内心", "克制"], updated.Tags);
+        Assert.Equal("style_sample_stats_v2", updated.Stats.SchemaVersion);
+        Assert.True(updated.Stats.WordCount > 0);
         Assert.NotEqual(local.Stats, updated.Stats);
 
         await reloaded.DeleteSampleAsync(new DeleteStyleSamplePayload(updated.SampleId), CancellationToken.None);
@@ -100,6 +118,64 @@ public sealed class StyleSampleServiceTests : IDisposable
             new SearchStyleSamplesPayload(novel.Id, IncludeGlobal: true, Query: "", Tags: [], Page: 1, Size: 10),
             CancellationToken.None);
         Assert.DoesNotContain(afterDelete.Items, item => item.SampleId == updated.SampleId);
+    }
+
+    [Fact]
+    public async Task StyleSampleStoreRecalculatesStaleStatsSchemaOnRead()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var storeDirectory = Path.Combine(options.DefaultDataDirectory, "style_samples");
+        Directory.CreateDirectory(storeDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(storeDirectory, "index.json"),
+            """
+            {
+              "version": 1,
+              "next_id": 2,
+              "items": [
+                {
+                  "sample_id": 1,
+                  "novel_id": null,
+                  "is_global": true,
+                  "name": "旧统计样本",
+                  "content": "雨停了。He waited.\n\n风很冷！She left?",
+                  "preview": "stale preview",
+                  "tags": ["legacy"],
+                  "stats_schema_version": "style_sample_stats_v1",
+                  "stats": {
+                    "character_count": 0,
+                    "sentence_count": 0,
+                    "average_sentence_chars": 0,
+                    "dialogue_ratio": 0,
+                    "interiority_ratio": 0,
+                    "sensory_ratio": 0,
+                    "punctuation_per_100_chars": 0
+                  },
+                  "source_metadata": null,
+                  "created_at": "2026-07-07T00:00:00Z",
+                  "updated_at": "2026-07-07T00:00:00Z"
+                }
+              ]
+            }
+            """);
+
+        var service = new FileSystemStyleSampleService(options, new FileSystemNovelService(options));
+        var detail = await service.GetSampleAsync(new GetStyleSamplePayload(1), CancellationToken.None);
+
+        Assert.NotNull(detail);
+        Assert.Equal("style_sample_stats_v2", detail.StatsSchemaVersion);
+        Assert.Equal("style_sample_stats_v2", detail.Stats.SchemaVersion);
+        Assert.Equal(25, detail.Stats.CharacterCount);
+        Assert.Equal(10, detail.Stats.WordCount);
+        Assert.Equal([4, 9, 4, 8], detail.Stats.SentenceLengthDistribution);
+
+        using var persistedJson = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(storeDirectory, "index.json")));
+        var persisted = persistedJson.RootElement.GetProperty("items")[0];
+        Assert.NotEqual("stale preview", persisted.GetProperty("preview").GetString());
+        Assert.Equal("style_sample_stats_v2", persisted.GetProperty("stats_schema_version").GetString());
+        Assert.Equal("style_sample_stats_v2", persisted.GetProperty("stats").GetProperty("schema_version").GetString());
+        Assert.Equal(10, persisted.GetProperty("stats").GetProperty("word_count").GetInt32());
     }
 
     [Fact]

@@ -15,13 +15,13 @@ Run these whenever bridge methods, frontend DTOs, desktop runtime startup, packa
 
 | Check | Verification |
 | --- | --- |
-| No retired Wails surface returns to active code | `rg -n 'wailsjs|@wailsapp|wails build|wails dev|frontend/src/lib/wailsjs' frontend/src src tests scripts build .github Makefile --glob '!**/bin/**' --glob '!**/obj/**' --glob '!build/bin/**'` returns no matches |
+| No retired Wails surface returns to active code | `rg -n 'wailsjs|@wailsapp|wails build|wails dev|frontend/src/lib/wailsjs' frontend/src src tests scripts build .github --glob '!**/bin/**' --glob '!**/obj/**' --glob '!build/bin/**'` returns no matches |
 | No Go runtime source returns to mainline | `rg --files | rg '(^|/)(main\.go|go\.mod|go\.sum|wails\.json)$|^app/|^internal/|frontend/src/lib/wailsjs|download-onnx'` returns no tracked active source files |
 | Every frontend bridge method has a backend registration | `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter Bridge -v minimal` |
 | Frontend DTOs compile against the owned bridge adapter | `npm --prefix frontend run build` |
 | Packaged desktop path stays Photino-only | `rg -n 'Microsoft\.AspNetCore|WebApplication|MapGet|MapHub|SignalR|HealthResponse|WebApplicationFactory|Mvc\.Testing' src tests --glob '!**/bin/**' --glob '!**/obj/**'` returns no matches |
 | Local frontend assets remain file-loadable | `npm --prefix frontend run build` and confirm `frontend/dist/index.html` references `./assets/` |
-| Runtime documentation matches build scripts | Review `README.md`, `README_EN.md`, `docs/build-setup.md`, and `docs/build/cross-platform-build.md` when `Makefile`, package scripts, or launch arguments change |
+| Runtime documentation matches build scripts | Review `README.md`, `README_EN.md`, `docs/build-setup.md`, and `docs/build/cross-platform-build.md` when package scripts, workflows, or launch arguments change |
 
 ## Golden Fixture Checks
 

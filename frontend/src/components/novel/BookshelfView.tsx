@@ -2,8 +2,8 @@ import { useMemo, useState, useRef } from 'react'
 import { Plus, Pencil, Trash2, BookOpen, Camera, Download, Search, Upload, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
 import BookCover from '@/components/sidebar/BookCover'
 import type { novel } from '@/hooks/useApp'
-import type { novelImport } from '@/lib/novelist/types'
-import { parseNovelImportDrop, titleFromDisplayName } from '@/lib/novelist/importBoundary'
+import { parseNovelImportDrop } from '@/lib/novelist/importBoundary'
+import type { NovelImportUiState } from '@/hooks/useNovelImport'
 
 interface Props {
   novels: novel.Novel[]
@@ -15,21 +15,27 @@ interface Props {
   onSaveCover: (novelID: number, file: File) => Promise<void>
   onExportNovel: (n: novel.Novel) => void
   onPickNovelImportFile: () => Promise<string | null>
-  onStartNovelImport: (sourcePath: string) => Promise<novelImport.ImportRun>
+  novelImportState: NovelImportUiState
+  onBeginNovelImportSelection: () => void
+  onCancelNovelImportSelection: () => void
+  onStartNovelImportFromPath: (sourcePath: string) => Promise<unknown>
 }
 
 export default function BookshelfView({
   novels, activeNovelId,
   onSelectNovel, onEditNovel, onDeleteNovel, onCreateNovel,
-  onSaveCover, onExportNovel, onPickNovelImportFile, onStartNovelImport,
+  onSaveCover, onExportNovel, onPickNovelImportFile,
+  novelImportState, onBeginNovelImportSelection, onCancelNovelImportSelection, onStartNovelImportFromPath,
 }: Props) {
   const [coverKeys, setCoverKeys] = useState<Record<number, number>>({})
   const [searchQuery, setSearchQuery] = useState('')
   const [dragActive, setDragActive] = useState(false)
-  const [importing, setImporting] = useState(false)
-  const [importFeedback, setImportFeedback] = useState<{ tone: 'info' | 'success' | 'error'; message: string } | null>(null)
+  const [dropFeedback, setDropFeedback] = useState<{ tone: 'info' | 'error'; message: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadingRef = useRef<number | null>(null)
+  const importBusy = novelImportState.status === 'selecting' ||
+    novelImportState.status === 'running' ||
+    novelImportState.status === 'cancelling'
   const filteredNovels = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
     if (!query) return novels
@@ -58,40 +64,21 @@ export default function BookshelfView({
     setCoverKeys(prev => ({ ...prev, [novelID]: (prev[novelID] ?? 0) + 1 }))
   }
 
-  async function startImport(sourcePath: string) {
-    setImporting(true)
-    setImportFeedback({ tone: 'info', message: '正在创建导入任务...' })
-    try {
-      const run = await onStartNovelImport(sourcePath)
-      const title = titleFromDisplayName(run.source_display_name)
-      const done = run.state === 'completed' || run.state === 'completed_with_warning' || !!run.created_novel_id
-      setImportFeedback({
-        tone: 'success',
-        message: `${done ? '已导入' : '已开始导入'}：${title}`,
-      })
-    } catch (error) {
-      setImportFeedback({
-        tone: 'error',
-        message: error instanceof Error ? error.message : '导入失败，请重试',
-      })
-    } finally {
-      setImporting(false)
-    }
-  }
-
   async function handlePickImportFile() {
-    if (importing) return
-    setImportFeedback(null)
+    if (importBusy) return
+    setDropFeedback(null)
+    onBeginNovelImportSelection()
     try {
       const sourcePath = await onPickNovelImportFile()
       if (!sourcePath) {
-        setImportFeedback({ tone: 'info', message: '已取消选择' })
+        onCancelNovelImportSelection()
         return
       }
 
-      await startImport(sourcePath)
+      await onStartNovelImportFromPath(sourcePath)
     } catch (error) {
-      setImportFeedback({
+      onCancelNovelImportSelection()
+      setDropFeedback({
         tone: 'error',
         message: error instanceof Error ? error.message : '无法打开文件选择器',
       })
@@ -114,18 +101,19 @@ export default function BookshelfView({
   async function handleDrop(event: React.DragEvent<HTMLDivElement>) {
     event.preventDefault()
     setDragActive(false)
-    if (importing) {
-      setImportFeedback({ tone: 'info', message: '已有导入任务正在处理' })
+    if (importBusy) {
+      setDropFeedback({ tone: 'info', message: '已有导入任务正在处理' })
       return
     }
 
     const result = parseNovelImportDrop(event.dataTransfer)
     if (!result.ok) {
-      setImportFeedback({ tone: 'error', message: result.message })
+      setDropFeedback({ tone: 'error', message: result.message })
       return
     }
 
-    await startImport(result.sourcePath)
+    setDropFeedback(null)
+    await onStartNovelImportFromPath(result.sourcePath)
   }
 
   return (
@@ -168,10 +156,10 @@ export default function BookshelfView({
           <button
             type="button"
             onClick={handlePickImportFile}
-            disabled={importing}
+            disabled={importBusy}
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-sm text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            {importBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
             导入小说
           </button>
           <button
@@ -184,26 +172,22 @@ export default function BookshelfView({
         </div>
       </div>
 
-      {importFeedback && (
+      {dropFeedback && (
         <div
-          role={importFeedback.tone === 'error' ? 'alert' : 'status'}
+          role={dropFeedback.tone === 'error' ? 'alert' : 'status'}
           aria-live="polite"
           className={`mx-6 mt-3 flex min-h-9 items-center gap-2 rounded-md border px-3 py-2 text-sm ${
-            importFeedback.tone === 'error'
+            dropFeedback.tone === 'error'
               ? 'border-danger-border bg-danger-bg text-destructive'
-              : importFeedback.tone === 'success'
-                ? 'border-primary/25 bg-primary/8 text-foreground'
-                : 'border-border bg-muted/45 text-muted-foreground'
+              : 'border-border bg-muted/45 text-muted-foreground'
           }`}
         >
-          {importFeedback.tone === 'error' ? (
+          {dropFeedback.tone === 'error' ? (
             <AlertCircle className="h-4 w-4 shrink-0" />
-          ) : importFeedback.tone === 'success' ? (
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />
           ) : (
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />
           )}
-          <span className="min-w-0 break-words">{importFeedback.message}</span>
+          <span className="min-w-0 break-words">{dropFeedback.message}</span>
         </div>
       )}
 
@@ -302,6 +286,7 @@ export default function BookshelfView({
           释放以导入小说
         </div>
       )}
+
     </div>
   )
 }

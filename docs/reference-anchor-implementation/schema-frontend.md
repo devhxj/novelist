@@ -113,7 +113,7 @@ The direct reference source file picker is implemented as a desktop runtime capa
 
 The reference-anchor feature should not change the desktop launch contract. If Photino reports that `frontend/dist/index.html` cannot be found, fix the frontend asset workflow:
 
-- run `npm --prefix frontend run build` before `make dev` when loading local built assets;
+- run `npm --prefix frontend run build` before launching the Photino host when loading local built assets;
 - or start Vite and launch the app with the existing `--start-url=` development path;
 - improve the launch error message if needed so it points to the missing frontend build;
 - do not add ASP.NET Core/Kestrel merely to mask a missing local asset;

@@ -17,6 +17,7 @@ models/
 /build/runtime/
 !/build/runtime/models/vocab.txt
 /build/dist/
+/build/version/
 /build/*.AppDir/
 /frontend/dist/
 /novelist

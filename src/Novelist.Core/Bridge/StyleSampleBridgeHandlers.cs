@@ -9,7 +9,8 @@ public static class StyleSampleBridgeHandlers
 {
     public static BridgeDispatcher RegisterStyleSampleHandlers(
         this BridgeDispatcher dispatcher,
-        IStyleSampleService service)
+        IStyleSampleService service,
+        IStyleSkillExtractionService? extraction = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(service);
@@ -41,6 +42,24 @@ public static class StyleSampleBridgeHandlers
             await service.SearchSamplesAsync(
                 ReadObjectArg<SearchStyleSamplesPayload>(context.Payload, 0, "input"),
                 cancellationToken));
+
+        if (extraction is not null)
+        {
+            dispatcher.Register("ExtractStyleSkillFromSamples", async (context, cancellationToken) =>
+                await extraction.StartExtractionAsync(
+                    ReadObjectArg<StartStyleSkillExtractionPayload>(context.Payload, 0, "input"),
+                    cancellationToken));
+
+            dispatcher.Register("CancelStyleSkillExtraction", async (context, cancellationToken) =>
+                await extraction.CancelExtractionAsync(
+                    ReadObjectArg<CancelStyleSkillExtractionPayload>(context.Payload, 0, "input"),
+                    cancellationToken));
+
+            dispatcher.Register("GetStyleSkillExtractionRun", async (context, cancellationToken) =>
+                await extraction.GetRunAsync(
+                    ReadObjectArg<GetNovelImportRunPayload>(context.Payload, 0, "input"),
+                    cancellationToken));
+        }
 
         return dispatcher;
     }

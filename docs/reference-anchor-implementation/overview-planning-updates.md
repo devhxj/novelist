@@ -51,7 +51,7 @@ Phase 10 follow-up areas:
 - continue broadening deterministic Chinese narration, emotion, POV, and unsupported-fact fixtures while keeping current material tagging and adaptation deterministic-only;
 - keep reference-anchor search in the dedicated reference panel/API for now; any global search integration should be a later staged opt-in design;
 - keep full-chapter assembly deferred until every beat candidate can prove passing audit/provenance and a separate insertion-confirmation design exists;
-- keep the desktop development loop explicit: prebuild `frontend/dist` for `make dev`, or run Vite and launch with `--start-url`.
+- keep the desktop development loop explicit: prebuild `frontend/dist` before launching the Photino host, or run Vite and launch with `--start-url`.
 
 Phase 10 verification policy: do not require a human to click the complete workflow in the real Photino shell before closing Phase 10. The complete UI state matrix should be automated in Playwright with a mocked bridge because it is stable, repeatable, and can assert screenshots, disabled controls, required decisions, candidate/audit visibility, and no automatic insertion. Real Photino remains necessary only for the runtime boundary: asset loading, production bridge wiring, representative bridge calls, and absence of automatic chapter mutation.
 

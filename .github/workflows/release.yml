@@ -4,15 +4,38 @@ on:
   push:
     tags:
       - 'v*'
-    branches:
-      - 'ci-*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version, for example v1.2.3 or 1.2.3'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark the GitHub Release as a prerelease'
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: 'Create the GitHub Release as a draft'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
   build-windows:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      draft: ${{ steps.version.outputs.draft }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -24,17 +47,70 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Cache Git runtime
-        id: cache-runtime
-        uses: actions/cache@v4
-        with:
-          path: build/runtime
-          key: git-runtime-${{ runner.os }}-${{ hashFiles('scripts/download-git.sh') }}
+      - name: Restore .NET dependencies
+        run: dotnet restore Novelist.slnx
 
-      - name: Download Git runtime
-        if: steps.cache-runtime.outputs.cache-hit != 'true'
+      - name: Resolve MinVer version
+        id: version
         shell: bash
-        run: bash scripts/download-git.sh
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_PRERELEASE: ${{ github.event.inputs.prerelease }}
+          INPUT_DRAFT: ${{ github.event.inputs.draft }}
+        run: |
+          set -euo pipefail
+
+          semver='^[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z-]+([.][0-9A-Za-z-]+)*)?$'
+          prerelease="${INPUT_PRERELEASE:-false}"
+          draft="${INPUT_DRAFT:-false}"
+          tag=""
+          version=""
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            version="${INPUT_VERSION#v}"
+            tag="v${version}"
+
+            if [[ ! "$version" =~ $semver ]]; then
+              echo "::error::Release version must use MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-prerelease. Got ${INPUT_VERSION}."
+              exit 1
+            fi
+
+            dotnet msbuild src/Novelist.App/Novelist.App.csproj -nologo -v:minimal -t:WriteNovelistVersion -p:Configuration=Release -p:MinVerVersionOverride="$version"
+          fi
+
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+
+            if [[ ! "$tag_version" =~ $semver ]]; then
+              echo "::error::Release tags must use vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-prerelease. Got $GITHUB_REF_NAME."
+              exit 1
+            fi
+
+            dotnet msbuild src/Novelist.App/Novelist.App.csproj -nologo -v:minimal -t:WriteNovelistVersion -p:Configuration=Release
+            version="$(tr -d '\r\n' < build/version/novelist.version)"
+            tag="$GITHUB_REF_NAME"
+
+            if [ "$version" != "$tag_version" ]; then
+              echo "::error::MinVer resolved $version but release tag is $GITHUB_REF_NAME."
+              exit 1
+            fi
+          fi
+
+          if [ -z "$version" ] || [ -z "$tag" ]; then
+            echo "::error::Unable to resolve release version."
+            exit 1
+          fi
+
+          if [[ "$version" == *-* ]]; then
+            prerelease="true"
+          fi
+
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "draft=$draft" >> "$GITHUB_OUTPUT"
+          echo "Release/build version: $tag"
 
       - name: Build frontend
         run: npm --prefix frontend ci && npm --prefix frontend run build
@@ -46,117 +122,75 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup -y --limit-output
 
-      - name: Package installer
+      - name: Package Windows installer
         shell: bash
         run: |
           export PATH="/c/Program Files (x86)/Inno Setup 6:$PATH"
-          export VERSION="${GITHUB_REF_NAME#v}"
           iscc build/package/windows/setup.iss
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: build/dist/*
-
-  build-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Cache Git runtime
-        id: cache-runtime
-        uses: actions/cache@v4
-        with:
-          path: build/runtime
-          key: git-runtime-${{ runner.os }}-${{ hashFiles('scripts/download-git.sh') }}
-
-      - name: Download Git runtime
-        if: steps.cache-runtime.outputs.cache-hit != 'true'
-        run: bash scripts/download-git.sh
-
-      - name: Build frontend
-        run: npm --prefix frontend ci && npm --prefix frontend run build
-
-      - name: Publish Novelist
-        run: bash scripts/novelist-publish.sh linux-x64
-
-      - name: Package AppImage
-        run: bash build/package/linux/build-appimage.sh ${GITHUB_REF_NAME#v}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux
-          path: build/dist/*
-
-  build-macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Cache Git runtime
-        id: cache-runtime
-        uses: actions/cache@v4
-        with:
-          path: build/runtime
-          key: git-runtime-${{ runner.os }}-${{ hashFiles('scripts/download-git.sh') }}
-
-      - name: Download Git runtime
-        if: steps.cache-runtime.outputs.cache-hit != 'true'
-        run: bash scripts/download-git.sh
-
-      - name: Build frontend
-        run: npm --prefix frontend ci && npm --prefix frontend run build
-
-      - name: Publish Novelist
-        run: bash scripts/novelist-publish.sh osx-arm64
-
-      - name: Package DMG
-        run: bash build/package/macos/build-dmg.sh ${GITHUB_REF_NAME#v}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos
-          path: build/dist/*
+          path: build/dist/*.exe
 
   release:
-    needs: [build-windows, build-linux, build-macos]
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-windows]
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
-
-      - name: Collect artifacts
-        run: |
-          mkdir dist
-          cp windows/* dist/ 2>/dev/null || true
-          cp linux/* dist/ 2>/dev/null || true
-          cp macos/* dist/ 2>/dev/null || true
-          cd dist && sha256sum *.{exe,AppImage,dmg} > sha256sums.txt
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/checkout@v4
         with:
-          files: dist/*
-          generate_release_notes: true
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows
+          path: dist
+
+      - name: Ensure release tag
+        env:
+          TAG: ${{ needs.build-windows.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          git fetch --tags --force
+          current_commit="$(git rev-parse HEAD)"
+
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            tag_commit="$(git rev-list -n 1 "$TAG")"
+            if [ "$tag_commit" != "$current_commit" ]; then
+              echo "::error::Tag $TAG already exists at $tag_commit, but this workflow is building $current_commit."
+              exit 1
+            fi
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "release: $TAG"
+            git push origin "$TAG"
+          fi
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum *.exe > sha256sums.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build-windows.outputs.tag }}
+          PRERELEASE: ${{ needs.build-windows.outputs.prerelease }}
+          DRAFT: ${{ needs.build-windows.outputs.draft }}
+        run: |
+          set -euo pipefail
+
+          args=(release create "$TAG" dist/* --title "$TAG" --generate-notes --verify-tag)
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+          if [ "$DRAFT" = "true" ]; then
+            args+=(--draft)
+          fi
+
+          gh "${args[@]}"

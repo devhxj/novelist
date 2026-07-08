@@ -4,7 +4,7 @@
 
 ## Phase 15: Goink-Master Feature Merge, Import Pipeline, Style Library, Narrative Pattern Extraction, Git History UI, and Product Robustness
 
-**Status:** Open as of 2026-07-07. Task 1 is complete: Phase 15 payload contracts, compatibility method names, owned frontend adapter method declarations, representative serialization/front-back registry tests, long-running `task_id` coverage, and app/build update-check endpoint configuration are in place. Task 2 is complete for the storage and migration model: app-settings persistence, style-sample storage, narrative pattern run storage, import-run storage/state-machine behavior, and copy-first/additive migration preservation are implemented and covered. Task 3 is complete for the safe import boundary: the dedicated novel-import picker is registered in the Photino bridge, supported import extensions are filtered at picker level, `StartNovelImport` validates real readable local files, extension/kind matching, traversal/device/URI rejection, and default size limits before storing a run, and the bookshelf import UI rejects unsafe drag/drop payloads with visible feedback while routing accepted paths only to `StartNovelImport`. Remaining Phase 15 bridge methods intentionally stay at the compatibility boundary until their corresponding service tasks land.
+**Status:** Open as of 2026-07-07. Task 1 is complete: Phase 15 payload contracts, compatibility method names, owned frontend adapter method declarations, representative serialization/front-back registry tests, long-running `task_id` coverage, and app/build update-check endpoint configuration are in place. Task 2 is complete for the storage and migration model: app-settings persistence, style-sample storage, narrative pattern run storage, import-run storage/state-machine behavior, and copy-first/additive migration preservation are implemented and covered. Task 3 is complete for the safe import boundary: the dedicated novel-import picker is registered in the Photino bridge, supported import extensions are filtered at picker level, `StartNovelImport` validates real readable local files, extension/kind matching, traversal/device/URI rejection, and default size limits before storing a run, and the bookshelf import UI rejects unsafe drag/drop payloads with visible feedback while routing accepted paths only to `StartNovelImport`. Task 4 is complete for deterministic TXT/MD parsing: strict encoding detection, conservative UTF-16 no-BOM heuristics, GB18030 fallback, robust chapter splitting, structured diagnostics, and large fixture coverage are implemented and tested. Task 5 is complete for EPUB parsing: container/OPF/spine traversal, safe internal path resolution, readable XHTML extraction, skipped-chapter diagnostics, no-readable-chapter failure, and zip-slip/absolute-path guardrails are implemented and tested. Task 6 is complete for the backend transaction-like import workflow: TXT/MD/EPUB imports create novels and chapters, defer per-chapter Git commits into one import commit, apply configured Git author identity, preserve data on final Git commit failure, coordinate `CancelNovelImport` with active task cancellation and cleanup, clean caught pre-completion metadata/write/cancel failures, normalize cross-platform import-run path separators, queue RAG stale state only after the indexing stage, and rely on Task 7 startup recovery to close process-death cleanup gaps. Task 7 is complete for startup import recovery and reconciliation: app initialization runs import recovery before normal workspace use, `ReconcileNovelImportRuns` is registered, `GetAppConfig.import_recovery` exposes startup results, safe partial workspaces are cleaned idempotently, pending RAG/reference build side effects for the recovered import novel are removed without touching other novels, corrupted cleanup paths are blocked with diagnostics, durable indexing/Git-commit interruptions are preserved as warnings, unknown/manual-review states are blocked instead of guessed, the simulated process-death matrix is covered, and the workspace shows copyable startup diagnostics for repaired/blocked runs. Task 8 is complete for import progress and frontend experience: backend imports emit typed `novel_import:progress` events with task ids, stages, counts, current-chapter metadata, warning/error/cleanup states, and no source-path exposure; the workspace-level import controller ignores stale task events, supports cancellation, keeps cleanup states visible, refreshes successful imports, opens the first imported chapter, and avoids selecting failed or cleaned-up phantom novels; mocked app workflow coverage exercises success, cancel, parser failure, write cleanup, Git warning, skipped EPUB chapters, and drag/drop rejection. Task 9 is complete for style sample storage and deterministic statistics: style samples can be created/updated/deleted/searched through bridge handlers, support global and per-novel scopes, normalize pasted tag delimiters, return paged summaries without full content, expose detail content only through `GetStyleSample`, compute schema-versioned v2 deterministic stats including word count, sentence distributions, standard deviation, quote and paragraph metrics, and automatically recalculate stale v1 rows on read. Task 10 is complete for the style material library UI: the workspace exposes a coherent style-sample surface with list/detail/create/edit/delete, tag and scope filtering, search, pagination, selected sample state, deterministic stats display, non-optimistic delete failure recovery, empty/loading/error states, compact viewport coverage, and mocked bridge workflow coverage. Task 11 is complete for style-sample based skill extraction: authorized selected samples can be extracted with provider/model/reasoning settings, prompts use deterministic stats and bounded sample text only, generated skills are strictly validated, filename collisions are handled, previews record source sample ids/hashes, saving uses the existing skill content boundary, cancellation avoids partial saves, and mocked workflow coverage proves validation/save failures and no chapter mutation. Task 12 is complete for Phase 14 style-profile integration: selected style samples can build sample-backed Reference Style Profiles through explicit `style_sample` provenance, overlapping deterministic stats map into the style feature vocabulary, sample evidence stores ids/hashes/offsets without duplicated text, global/per-novel sample scope is enforced, style-skill extraction remains independently usable, and mocked workflow guardrails prove no chapter mutation or reference blueprint approval/binding bypass. Task 13 is complete for the reusable multi-range chapter selector: range normalization/merge/rejection helpers produce backend `chapter_ranges`, selection summaries remain compact, the UI supports all/custom ranges, search, individual toggles, invert/clear, lock/disabled state, and mocked browser coverage verifies multi-range and compact viewport behavior without starting narrative extraction. Task 14 is complete for the narrative pattern extraction backend pipeline: selected chapters are loaded and validated, all/range/id selection is supported, model boundary/summary/phase JSON is strictly validated with content-hash freshness, recursive compression is bounded and context-window aware, progress events carry LLM/batch/round/token/count details, cancellation is wired through active task tokens, and final skill Markdown is validated before preview persistence. Task 15 is complete for the narrative pattern extraction UI: the workspace surface starts/cancels extraction with model settings, shows ordered progress and trace inspection, previews and saves validated skills through the skill catalog path, exposes copyable diagnostics for failures, and mocked workflow coverage proves happy path, insufficient chapters, invalid model output, cancellation, progress ordering, preview/save, and no chapter mutation. Task 16 is complete for the backend Git history service and read-only bridge boundary: detailed commit summaries, cursor paging, changed-file lists, original/modified diff content, rename/delete/binary handling, empty and partially initialized repositories, configured Git author identity, command timeouts, stable Git bridge errors, and Windows/macOS/Linux Git candidate resolution are implemented and covered. Task 17 is complete for the read-only Git history UI: the workspace exposes a Git history activity panel with first-page loading, cursor paging, lazy changed-file expansion, lazy read-only diffs for added/modified/deleted/renamed/binary files, rename markers, truncated-diff messaging, empty repo state, Git failure and retry states, compact viewport coverage, and mocked bridge guardrails proving only read-only Git history methods are called. Remaining Phase 15 bridge/UI methods intentionally stay at the compatibility boundary until their corresponding service tasks land.
 
 **Description:** Phase 15 merges the latest user-facing product capabilities from the legacy `goink-master` snapshot into the current Novelist .NET 10 + Photino.NET + React/Vite architecture. The source snapshot is useful as a behavior reference, not as an implementation target. The merge must port product semantics, data contracts, progress reporting, edge-case handling, and regression coverage into Novelist modules without reviving legacy Go/Wails/Python runtime paths.
 
@@ -217,20 +217,20 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 **Acceptance criteria:**
 
-- [ ] UTF-8 BOM, UTF-16 LE/BE BOM, valid UTF-8, UTF-16 LE/BE no-BOM heuristic, GB18030/GBK-family Chinese text, CRLF/LF/CR newlines, and markdown headings parse correctly.
-- [ ] .NET code-page provider registration for GB18030 is explicit, test-covered, and safe when unavailable.
-- [ ] Decoder returns encoding name, confidence, BOM/heuristic source, replacement-character count, and binary/low-confidence diagnostics.
-- [ ] Low-confidence decoding and binary-looking files fail rather than importing corrupted text.
-- [ ] Chapter headers support `第N章`, Chinese numerals, `第N卷/部`, `Chapter N`, and optional markdown `#` prefixes.
-- [ ] False positives are reduced by title-length limits, line-start anchoring, and body-line heuristics.
-- [ ] Files without chapter headers import as a single chapter with a derived title.
-- [ ] Empty files, undecodable files, binary-looking files, and huge malformed files fail with structured errors.
-- [ ] Parser returns skipped/diagnostic items without losing valid chapters.
+- [x] UTF-8 BOM, UTF-16 LE/BE BOM, valid UTF-8, UTF-16 LE/BE no-BOM heuristic, GB18030/GBK-family Chinese text, CRLF/LF/CR newlines, and markdown headings parse correctly.
+- [x] .NET code-page provider registration for GB18030 is explicit, test-covered, and safe when unavailable.
+- [x] Decoder returns encoding name, confidence, BOM/heuristic source, replacement-character count, and binary/low-confidence diagnostics.
+- [x] Low-confidence decoding and binary-looking files fail rather than importing corrupted text.
+- [x] Chapter headers support `第N章`, Chinese numerals, `第N卷/部`, `Chapter N`, and optional markdown `#` prefixes.
+- [x] False positives are reduced by title-length limits, line-start anchoring, and body-line heuristics.
+- [x] Files without chapter headers import as a single chapter with a derived title.
+- [x] Empty files, undecodable files, binary-looking files, and huge malformed files fail with structured errors.
+- [x] Parser returns skipped/diagnostic items without losing valid chapters.
 
 **Verification:**
 
-- [ ] Unit tests for UTF-8, UTF-8 BOM, UTF-16 LE/BE BOM, UTF-16 no-BOM heuristic, GB18030, mixed punctuation, markdown headings, no-header single chapter, false-positive body lines, empty file, binary-like bytes, low-confidence decode, and invalid bytes.
-- [ ] Stress test for large TXT/MD fixture without unbounded memory growth.
+- [x] Parser tests for UTF-8, UTF-8 BOM, UTF-16 LE/BE BOM, UTF-16 no-BOM heuristic, GB18030, mixed punctuation, markdown headings, no-header single chapter, false-positive body lines, empty file, binary-like bytes, low-confidence decode, and invalid bytes.
+- [x] Stress test for large TXT/MD fixture without unbounded memory growth.
 
 **Dependencies:** Tasks 1-3.
 
@@ -247,17 +247,17 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 **Acceptance criteria:**
 
-- [ ] Parser locates `META-INF/container.xml`, resolves the OPF rootfile, reads metadata title, manifest, and spine order.
-- [ ] Internal hrefs handle URL escaping, spaces, relative paths, and case mismatch fallback within the zip only.
-- [ ] XHTML/HTML text extraction ignores `script`, `style`, and `head`, preserves paragraph/headings/list line breaks, normalizes whitespace, and produces readable chapter text.
-- [ ] Missing spine items, missing files, invalid HTML, and empty chapters are skipped with reasons when other valid chapters exist.
-- [ ] EPUB with no readable chapters fails with a clear structured error.
-- [ ] Zip-slip and absolute internal path tricks cannot escape the archive.
+- [x] Parser locates `META-INF/container.xml`, resolves the OPF rootfile, reads metadata title, manifest, and spine order.
+- [x] Internal hrefs handle URL escaping, spaces, relative paths, and case mismatch fallback within the zip only.
+- [x] XHTML/HTML text extraction ignores `script`, `style`, and `head`, preserves paragraph/headings/list line breaks, normalizes whitespace, and produces readable chapter text.
+- [x] Missing spine items, missing files, invalid HTML, and empty chapters are skipped with reasons when other valid chapters exist.
+- [x] EPUB with no readable chapters fails with a clear structured error.
+- [x] Zip-slip and absolute internal path tricks cannot escape the archive.
 
 **Verification:**
 
-- [ ] Unit tests with minimal generated EPUB fixtures for title/spine order, nested OPF paths, URL-escaped hrefs, missing chapters, empty chapters, invalid container, and no readable chapters.
-- [ ] Security tests for zip-slip-like internal names.
+- [x] Parser tests with minimal generated EPUB fixtures for title/spine order, nested OPF paths, URL-escaped hrefs, missing chapters, empty chapters, invalid container, and no readable chapters.
+- [x] Security tests for zip-slip-like internal names.
 
 **Dependencies:** Tasks 1-3.
 
@@ -270,28 +270,30 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 ## Task 6: Transaction-Like Novel Import Workflow with Cleanup
 
+**Status:** Complete for the backend transaction-like import workflow. The current service parses TXT/MD/EPUB, creates novels and chapter files, computes chapter metadata, initializes Git through existing repository services, batches import changes into a single final commit, delays RAG stale notifications until the indexing stage, reports post-import index/Git warnings without deleting user data, coordinates running-task cancellation through `CancelNovelImport`, normalizes cross-platform import-run path separators, cleans caught metadata/write/cancellation failures, and is covered by Task 7 startup reconciliation for process-death cleanup.
+
 **Description:** Build the full import workflow: parse file, create novel, write chapter files, persist metadata, update indexes, initialize Git, and report durable completion or cleanup.
 
 **Acceptance criteria:**
 
-- [ ] Import creates a novel with title, description/source note, chapter metadata, chapter files, and initial `novelist.md`/workspace files consistent with current Novelist conventions.
-- [ ] Word counts are computed using current text-stat logic and stored consistently with manually created chapters.
-- [ ] Repository is initialized with configured Git author identity and a meaningful import commit when changes exist.
-- [ ] If failure occurs before metadata/file workflow is complete, the service removes the created novel row, chapter rows, files, repo, import run side effects, pending RAG/reference build state, and temporary data.
-- [ ] If Git commit fails after successful import, imported user data remains and a warning is returned with recovery instructions.
-- [ ] Successful import queues/runs the same search/RAG indexing behavior used by normal chapter writes and records index warnings separately from import failure.
-- [ ] Successful import does not automatically add the imported novel as reference corpus/style material.
-- [ ] Import is cancellable before durable commit; cancellation performs the same cleanup as failure.
-- [ ] Concurrent imports cannot corrupt the same app data directory and have independent progress task ids.
+- [x] Import creates a novel with title, description/source note, chapter metadata, chapter files, and initial `novelist.md`/workspace files consistent with current Novelist conventions.
+- [x] Word counts are computed using current text-stat logic and stored consistently with manually created chapters.
+- [x] Repository is initialized with configured Git author identity and a meaningful import commit when changes exist.
+- [x] If failure occurs before metadata/file workflow is complete, the service removes the created novel row, chapter rows, files, repo, import run side effects, pending RAG/reference build state, and temporary data.
+- [x] If Git commit fails after successful import, imported user data remains and a warning is returned with recovery instructions.
+- [x] Successful import queues/runs the same search/RAG indexing behavior used by normal chapter writes and records index warnings separately from import failure.
+- [x] Successful import does not automatically add the imported novel as reference corpus/style material.
+- [x] Import is cancellable before durable commit; cancellation performs the same cleanup as failure.
+- [x] Concurrent imports cannot corrupt the same app data directory and have independent progress task ids.
 
 **Verification:**
 
-- [ ] Integration tests for successful TXT, MD, EPUB imports.
-- [ ] Fault-injection tests for parse failure, novel-create failure, chapter-write failure, metadata failure, index failure, Git init failure, Git commit failure, and cancellation.
-- [ ] Cleanup tests assert no orphaned rows/files remain after pre-completion failures.
-- [ ] Tests prove post-import index failure produces warning/retry state, not import data deletion.
-- [ ] Tests prove successful import does not create reference anchors, style samples, or reference style profiles without explicit user action.
-- [ ] Cross-platform path tests for Windows/macOS/Linux path separators.
+- [x] Integration tests for successful TXT, MD, EPUB imports.
+- [x] Fault-injection tests for parse failure, novel-create failure, chapter-write failure, metadata failure, index failure, Git init failure, Git commit failure, and cancellation.
+- [x] Cleanup tests assert no orphaned rows/files remain after pre-completion failures.
+- [x] Tests prove post-import index failure produces warning/retry state, not import data deletion.
+- [x] Tests prove successful import does not create reference anchors, style samples, or reference style profiles without explicit user action.
+- [x] Cross-platform path tests for Windows/macOS/Linux path separators.
 
 **Dependencies:** Tasks 1-5.
 
@@ -308,24 +310,26 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 ## Task 7: Startup Import Recovery and Reconciliation
 
+**Status:** Complete for startup import recovery and reconciliation. `FileSystemNovelImportRecoveryService` reads the import-run store tolerantly enough to block unsafe corrupted roots, validates cleanup paths against both app data and the recorded novel workspace, deletes known partial novel rows/workspaces idempotently, removes pending RAG/reference build side effects only for the recovered import novel, preserves durable imports interrupted during indexing/Git commit as `completed_with_warning`, blocks unknown/manual-review states instead of guessing, runs from app initialization before normal workspace use, and exposes results through both `ReconcileNovelImportRuns` and `GetAppConfig.import_recovery`. The workspace shows startup recovery results with copyable diagnostics.
+
 **Description:** Add crash-safe reconciliation for incomplete import runs before normal workspace use. This closes the gap between caught exceptions and process death during import.
 
 **Acceptance criteria:**
 
-- [ ] Startup scans import runs in non-terminal states and classifies each as safe-to-clean, completed-with-warning, cleanup-blocked, or unknown/manual-review.
-- [ ] Safe-to-clean runs remove created novel rows, chapter rows, known created file roots, Git repositories, pending index/reference state, temporary directories, and import-run side effects.
-- [ ] Cleanup is idempotent: running reconciliation multiple times produces the same final state and does not delete unrelated novels or user files.
-- [ ] Cleanup path validation verifies every resolved path remains inside the app data directory and the recorded novel workspace before deletion.
-- [ ] If cleanup cannot safely prove ownership of a path or row, reconciliation marks `cleanup_blocked`, shows a startup recovery message, and exposes copyable diagnostics instead of guessing.
-- [ ] Runs already past the durable completion boundary are never deleted by startup recovery; Git/index warnings remain recoverable.
-- [ ] Recovery emits a bridge/startup result so the frontend can show repaired, blocked, or warning states before the user edits the workspace.
+- [x] Startup scans import runs in non-terminal states and classifies each as safe-to-clean, completed-with-warning, cleanup-blocked, or unknown/manual-review.
+- [x] Safe-to-clean runs remove created novel rows, chapter rows, known created file roots, Git repositories, pending index/reference state, temporary directories, and import-run side effects.
+- [x] Cleanup is idempotent: running reconciliation multiple times produces the same final state and does not delete unrelated novels or user files.
+- [x] Cleanup path validation verifies every resolved path remains inside the app data directory and the recorded novel workspace before deletion.
+- [x] If cleanup cannot safely prove ownership of a path or row, reconciliation marks `cleanup_blocked`, shows a startup recovery message, and exposes copyable diagnostics instead of guessing.
+- [x] Runs already past the durable completion boundary are never deleted by startup recovery; Git/index warnings remain recoverable.
+- [x] Recovery emits a bridge/startup result so the frontend can show repaired, blocked, or warning states before the user edits the workspace.
 
 **Verification:**
 
-- [ ] Integration tests simulate process death after novel row creation, after directory creation, after partial chapter file writes, after metadata writes, during index update, and during Git commit.
-- [ ] Idempotency tests run reconciliation twice against the same partial state.
-- [ ] Path-safety tests prove corrupted import-run paths outside the workspace are not deleted and become `cleanup_blocked`.
-- [ ] Playwright startup test shows cleanup-completed and cleanup-blocked states with copyable diagnostics.
+- [x] Integration tests simulate process death after novel row creation, after directory creation, after partial chapter file writes, after metadata writes, during index update, and during Git commit.
+- [x] Idempotency tests run reconciliation twice against the same partial state.
+- [x] Path-safety tests prove corrupted import-run paths outside the workspace are not deleted and become `cleanup_blocked`.
+- [x] Playwright startup test shows cleanup-completed and cleanup-blocked states with copyable diagnostics.
 
 **Dependencies:** Tasks 1-2 and Task 6.
 
@@ -346,17 +350,17 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 **Acceptance criteria:**
 
-- [ ] Progress stages cover selecting, parsing, creating novel, writing chapters, saving metadata, indexing/reference follow-up if applicable, Git staging/commit, done, warning, error, cleanup.
-- [ ] UI shows percent, current/total counts, stage text, current chapter when available, skipped chapter count/details, and final imported novel summary.
-- [ ] Stale progress events from old task ids are ignored.
-- [ ] User can close completed dialogs, but cannot accidentally hide an in-progress destructive cleanup state without a clear status.
-- [ ] After success, novel/chapter lists refresh and the first imported chapter can open without manual reload.
-- [ ] After failure, no phantom novel remains selected.
+- [x] Progress stages cover selecting, parsing, creating novel, writing chapters, saving metadata, indexing/reference follow-up if applicable, Git staging/commit, done, warning, error, cleanup.
+- [x] UI shows percent, current/total counts, stage text, current chapter when available, skipped chapter count/details, and final imported novel summary.
+- [x] Stale progress events from old task ids are ignored.
+- [x] User can close completed dialogs, but cannot accidentally hide an in-progress destructive cleanup state without a clear status.
+- [x] After success, novel/chapter lists refresh and the first imported chapter can open without manual reload.
+- [x] After failure, no phantom novel remains selected.
 
 **Verification:**
 
-- [ ] Playwright import tests for success, user cancel, parser failure, write failure with cleanup, Git warning, skipped EPUB chapters, and drag/drop rejection.
-- [ ] Bridge-call guardrail test proves no arbitrary file read method is exposed.
+- [x] Playwright import tests for success, user cancel, parser failure, write failure with cleanup, Git warning, skipped EPUB chapters, and drag/drop rejection.
+- [x] Bridge-call guardrail test proves no arbitrary file read method is exposed.
 
 **Dependencies:** Tasks 6-7.
 
@@ -376,17 +380,17 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 **Acceptance criteria:**
 
-- [ ] Users can create style samples from pasted text, selected editor text if available, or manual entry.
-- [ ] Samples support global scope and per-novel scope; per-novel views can include global samples by default and filter to current novel only.
-- [ ] Tags support create/edit/remove and semicolon/comma/newline paste normalization.
-- [ ] List calls are paginated and do not load full sample content unless detail is requested.
-- [ ] Stats include total characters/words, sentence count, sentence-length distribution, average sentence length, sentence-length standard deviation, punctuation density, quote density, paragraph count, average paragraph length, and analyzer/stat schema version.
-- [ ] Statistics are recomputed on content update and can be recalculated for older rows after schema upgrades.
+- [x] Users can create style samples from pasted text, selected editor text if available, or manual entry.
+- [x] Samples support global scope and per-novel scope; per-novel views can include global samples by default and filter to current novel only.
+- [x] Tags support create/edit/remove and semicolon/comma/newline paste normalization.
+- [x] List calls are paginated and do not load full sample content unless detail is requested.
+- [x] Stats include total characters/words, sentence count, sentence-length distribution, average sentence length, sentence-length standard deviation, punctuation density, quote density, paragraph count, average paragraph length, and analyzer/stat schema version.
+- [x] Statistics are recomputed on content update and can be recalculated for older rows after schema upgrades.
 
 **Verification:**
 
-- [ ] Unit tests for sentence splitting, punctuation density, paragraph rhythm, Chinese/English mixed text, empty/short text, and deterministic output.
-- [ ] Integration tests for CRUD, pagination, global/per-novel filters, tag search, and stats persistence.
+- [x] Unit tests for sentence splitting, punctuation density, paragraph rhythm, Chinese/English mixed text, empty/short text, and deterministic output.
+- [x] Integration tests for CRUD, pagination, global/per-novel filters, tag search, and stats persistence.
 
 **Dependencies:** Tasks 1-2.
 
@@ -403,21 +407,23 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 ## Task 10: Style Sample Library UI and Filtering
 
+**Status:** Complete for the style sample library UI. The style material surface is reachable from the workspace activity bar, preserves existing Skills and Reference Anchor flows, supports list/detail/create/edit/delete, selected samples, scope toggles, search, tag filters, pagination, deterministic statistics, compact layout, and visible backend failure recovery through mocked Photino bridge coverage.
+
 **Description:** Add a production-quality style material library surface consistent with current Novelist UI patterns.
 
 **Acceptance criteria:**
 
-- [ ] UI supports sample list, detail preview, create, edit, delete, tag editing, scope toggle, search, pagination, and selected-sample state.
-- [ ] Cards display preview, tags, scope, word count, updated time, and key stats without overcrowding.
-- [ ] Detail view shows full deterministic statistics with readable distributions.
-- [ ] Delete failures are visible and do not remove the card optimistically unless backend confirms.
-- [ ] Empty, loading, error, and compact viewport states are covered.
-- [ ] Style library is reachable from a coherent app location without hiding existing Skills or Reference Anchor workflows.
+- [x] UI supports sample list, detail preview, create, edit, delete, tag editing, scope toggle, search, pagination, and selected-sample state.
+- [x] Cards display preview, tags, scope, word count, updated time, and key stats without overcrowding.
+- [x] Detail view shows full deterministic statistics with readable distributions.
+- [x] Delete failures are visible and do not remove the card optimistically unless backend confirms.
+- [x] Empty, loading, error, and compact viewport states are covered.
+- [x] Style library is reachable from a coherent app location without hiding existing Skills or Reference Anchor workflows.
 
 **Verification:**
 
-- [ ] Playwright tests for create/edit/delete, filter by global/current novel, tag search, stats display, pagination, backend failure recovery, and compact viewport.
-- [ ] Frontend build and lint.
+- [x] Playwright tests for create/edit/delete, filter by global/current novel, tag search, stats display, pagination, backend failure recovery, and compact viewport.
+- [x] Frontend build and lint.
 
 **Dependencies:** Task 9.
 
@@ -433,23 +439,25 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 ## Task 11: Style Extraction to Validated Reusable Skills
 
+**Status:** Complete. `ExtractStyleSkillFromSamples`, `CancelStyleSkillExtraction`, and `GetStyleSkillExtractionRun` now route to a durable style-skill extraction service; the style material library exposes a production UI for selected-sample extraction, preview, cancellation, validation failures, save failures, and saving through the existing skill content boundary. Backend and mocked browser workflows prove source-scope authorization, bounded prompt construction, strict frontmatter validation, safe filename collision handling, source sample provenance in previews, cancellation without partial writes, and no chapter mutation.
+
 **Description:** Generate imitation skills from selected style samples using deterministic stats plus configured LLM analysis, while validating output and preserving safety boundaries.
 
 **Acceptance criteria:**
 
-- [ ] User selects one or more authorized style samples and starts extraction with provider/model/reasoning settings.
-- [ ] Extraction prompt includes deterministic stats and bounded sample text; it does not include unrelated novel files or hidden source text.
-- [ ] LLM output must be a valid skill markdown file with required frontmatter: name, description, category, mode, author, version.
-- [ ] Skill filename is sanitized and collision-handled.
-- [ ] User can preview generated skill before saving; saving uses existing skill catalog service and records source sample ids.
-- [ ] Cancellation stops the model call and marks the run cancelled without saving partial output.
-- [ ] Failed validation surfaces precise errors and copyable diagnostics.
+- [x] User selects one or more authorized style samples and starts extraction with provider/model/reasoning settings.
+- [x] Extraction prompt includes deterministic stats and bounded sample text; it does not include unrelated novel files or hidden source text.
+- [x] LLM output must be a valid skill markdown file with required frontmatter: name, description, category, mode, author, version.
+- [x] Skill filename is sanitized and collision-handled.
+- [x] User can preview generated skill before saving; saving uses existing skill catalog service and records source sample ids.
+- [x] Cancellation stops the model call and marks the run cancelled without saving partial output.
+- [x] Failed validation surfaces precise errors and copyable diagnostics.
 
 **Verification:**
 
-- [ ] Unit tests for skill parsing, filename sanitization, collision behavior, and invalid frontmatter rejection.
-- [ ] Integration tests with fake LLM provider for success, empty output, invalid markdown, invalid frontmatter, cancellation, and save failure.
-- [ ] Playwright tests for extract, cancel, preview, save, validation failure, and no chapter mutation.
+- [x] Unit tests for skill parsing, filename sanitization, collision behavior, and invalid frontmatter rejection.
+- [x] Integration tests with fake LLM provider for success, empty output, invalid markdown, invalid frontmatter, cancellation, and save failure.
+- [x] Playwright tests for extract, cancel, preview, save, validation failure, and no chapter mutation.
 
 **Dependencies:** Tasks 9-10 and Phase 14 style-audit foundations where applicable.
 
@@ -466,21 +474,23 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 ## Task 12: Style Library Integration with Phase 14 Reference Style Profiles
 
+**Status:** Complete. Selected style samples now flow through the existing Reference Style Profile service boundary as explicit `style_sample` sources rather than a parallel style system. Sample-backed profiles preserve `style_sample_ids`/`source_style_sample_ids`, map overlapping deterministic statistics into the Phase 14 style feature schema, persist sample source/evidence metadata without copying full sample text, enforce global/per-novel access scope, and expose a style-library UI/mock workflow path that proves generated skills do not bypass chapter mutation or reference blueprint approval gates.
+
 **Description:** Connect user-curated style samples to the Phase 14 style anchoring model without creating parallel incompatible style systems.
 
 **Acceptance criteria:**
 
-- [ ] Style sample stats can be mapped to the current style feature vocabulary where dimensions overlap.
-- [ ] Users can build a Reference Style Profile from selected style samples only after the samples are converted into controlled reference-style evidence records or an explicitly documented sample-profile source type.
-- [ ] Profile evidence does not duplicate full sample text outside the approved storage boundary.
-- [ ] Style samples can be used for skill extraction even when no reference style profile is built.
-- [ ] Reference-anchored drafting still requires approved style contracts and audit; a generated imitation skill alone cannot bypass those gates.
+- [x] Style sample stats can be mapped to the current style feature vocabulary where dimensions overlap.
+- [x] Users can build a Reference Style Profile from selected style samples only after the samples are converted into controlled reference-style evidence records or an explicitly documented sample-profile source type.
+- [x] Profile evidence does not duplicate full sample text outside the approved storage boundary.
+- [x] Style samples can be used for skill extraction even when no reference style profile is built.
+- [x] Reference-anchored drafting still requires approved style contracts and audit; a generated imitation skill alone cannot bypass those gates.
 
 **Verification:**
 
-- [ ] Contract tests for sample-backed style profile payloads if a new source type is introduced.
-- [ ] Integration tests proving sample profile access respects global/per-novel scope.
-- [ ] Guardrail tests proving style sample extraction cannot call `SaveContent` or approve reference blueprints.
+- [x] Contract tests for sample-backed style profile payloads if a new source type is introduced.
+- [x] Integration tests proving sample profile access respects global/per-novel scope.
+- [x] Guardrail tests proving style sample extraction cannot call `SaveContent` or approve reference blueprints.
 
 **Dependencies:** Tasks 9-11 and Phase 14 profile contracts.
 
@@ -495,20 +505,22 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 ## Task 13: Multi-Range Chapter Selector Component
 
+**Status:** Complete. `MultiRangeChapterSelector` is available from the Narrative Pattern surface and backed by reusable `chapterRange` helpers that normalize and merge ranges, reject invalid bounds, convert selection state to backend `chapter_ranges`, expand ranges to ids, invert selections, and produce compact summaries. Mocked browser coverage exercises all/custom selection, overlapping range merge, search, individual toggles, invert/clear, disabled lock state, and verifies the selector alone does not start narrative extraction.
+
 **Description:** Build a reusable chapter selection component for narrative pattern extraction and future analysis workflows.
 
 **Acceptance criteria:**
 
-- [ ] Supports all chapters, single range, multiple ranges, individual chapter toggles, invert/clear, and search by chapter title/number.
-- [ ] Ranges normalize, merge overlaps, reject out-of-bounds values, and preserve deterministic ordering.
-- [ ] Selection summary is compact and readable for hundreds of chapters.
-- [ ] Component works with keyboard and screen-reader accessible labels.
-- [ ] Contract helper converts selected ranges to explicit chapter ids or range payloads accepted by backend.
+- [x] Supports all chapters, single range, multiple ranges, individual chapter toggles, invert/clear, and search by chapter title/number.
+- [x] Ranges normalize, merge overlaps, reject out-of-bounds values, and preserve deterministic ordering.
+- [x] Selection summary is compact and readable for hundreds of chapters.
+- [x] Component works with keyboard and screen-reader accessible labels.
+- [x] Contract helper converts selected ranges to explicit chapter ids or range payloads accepted by backend.
 
 **Verification:**
 
-- [ ] Unit tests for range normalization.
-- [ ] Playwright tests for selecting multiple ranges, overlapping ranges, clearing, all-chapter mode, compact viewport, and disabled state.
+- [x] Unit tests for range normalization.
+- [x] Playwright tests for selecting multiple ranges, overlapping ranges, clearing, all-chapter mode, compact viewport, and disabled state.
 
 **Dependencies:** Task 1.
 
@@ -522,24 +534,26 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 ## Task 14: Narrative Pattern Extraction Pipeline Contracts and Backend
 
+**Status:** Complete for the backend pipeline. `StartNarrativePatternExtraction` now runs load/validate, boundary detection, per-chapter summary extraction, recursive phase compression, and final skill preview generation through the current .NET/Photino service stack with fake-LLM regression coverage and no live network dependency in default tests.
+
 **Description:** Implement the four-stage narrative pattern extraction pipeline in .NET with visible progress and robust LLM JSON validation.
 
 **Acceptance criteria:**
 
-- [ ] Pipeline stages are: load/validate chapters, identify structure boundaries, extract per-chapter summaries, recursively compress into narrative phases, generate final narrative guidance skill.
-- [ ] Supports all chapters or selected chapter ids/ranges.
-- [ ] Requires a minimum viable chapter count/content size and returns clear validation errors when insufficient.
-- [ ] Boundary, summary, and phase outputs are parsed from structured tool/function JSON and validated for chapter ranges, non-empty text, ordering, and source coverage.
-- [ ] Existing chapter summaries may be reused only when tied to the same content hash or a clearly documented freshness policy.
-- [ ] Recursive compression has bounded retries, convergence checks, maximum rounds, context-window-aware batching, and cancellation checks.
-- [ ] Final skill output is parsed and validated before save/preview.
-- [ ] Progress events include current stage, message, LLM status, round, batch index/total, token estimate, boundary count, summary count, and phase count.
+- [x] Pipeline stages are: load/validate chapters, identify structure boundaries, extract per-chapter summaries, recursively compress into narrative phases, generate final narrative guidance skill.
+- [x] Supports all chapters or selected chapter ids/ranges.
+- [x] Requires a minimum viable chapter count/content size and returns clear validation errors when insufficient.
+- [x] Boundary, summary, and phase outputs are parsed from structured tool/function JSON and validated for chapter ranges, non-empty text, ordering, and source coverage.
+- [x] Existing chapter summaries may be reused only when tied to the same content hash or a clearly documented freshness policy.
+- [x] Recursive compression has bounded retries, convergence checks, maximum rounds, context-window-aware batching, and cancellation checks.
+- [x] Final skill output is parsed and validated before save/preview.
+- [x] Progress events include current stage, message, LLM status, round, batch index/total, token estimate, boundary count, summary count, and phase count.
 
 **Verification:**
 
-- [ ] Unit tests for batching, range normalization, boundary normalization, phase normalization, token budget logic, convergence/stall behavior, and invalid JSON rejection.
-- [ ] Integration tests with fake LLM provider for success, invalid boundary JSON, invalid summary JSON, empty phase output retry, compression stall, cancellation, and final skill validation failure.
-- [ ] No-live-network default tests.
+- [x] Unit tests for batching, range normalization, boundary normalization, phase normalization, token budget logic, convergence/stall behavior, and invalid JSON rejection.
+- [x] Integration tests with fake LLM provider for success, invalid boundary JSON, invalid summary JSON, empty phase output retry, compression stall, cancellation, and final skill validation failure.
+- [x] No-live-network default tests.
 
 **Dependencies:** Tasks 1, 2, 13.
 
@@ -555,22 +569,24 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 ## Task 15: Narrative Pattern Extraction UI
 
+**Status:** Complete. The Narrative Pattern workspace surface now combines the reusable multi-range chapter selector with provider/model/reasoning settings, `StartNarrativePatternExtraction`/`CancelNarrativePatternExtraction`, live `narrative_pattern_extraction:progress` timeline handling, trace inspection grouped by boundary/summary/phase stages, validated skill preview/save through the existing `SaveContent` skill path, and copyable run/trace diagnostics for failure states.
+
 **Description:** Add a user-facing pattern extraction surface with chapter selection, live pipeline progress, trace inspection, cancellation, preview, and skill save.
 
 **Acceptance criteria:**
 
-- [ ] UI allows selecting chapter ranges, provider/model/reasoning options, and starting extraction.
-- [ ] Progress timeline shows each stage and current batch/round details.
-- [ ] Boundary hints, summaries, and phase chunks are inspectable without overwhelming the default view.
-- [ ] User can cancel extraction and see cancelled state.
-- [ ] Generated skill can be previewed and saved through existing skill catalog flow.
-- [ ] Errors expose clear messages plus copyable diagnostics.
-- [ ] No generated pattern output mutates chapter files.
+- [x] UI allows selecting chapter ranges, provider/model/reasoning options, and starting extraction.
+- [x] Progress timeline shows each stage and current batch/round details.
+- [x] Boundary hints, summaries, and phase chunks are inspectable without overwhelming the default view.
+- [x] User can cancel extraction and see cancelled state.
+- [x] Generated skill can be previewed and saved through existing skill catalog flow.
+- [x] Errors expose clear messages plus copyable diagnostics.
+- [x] No generated pattern output mutates chapter files.
 
 **Verification:**
 
-- [ ] Playwright tests for happy path, insufficient chapters, invalid model output, cancellation, progress event ordering, preview/save, and no `SaveContent` call.
-- [ ] Frontend build and lint.
+- [x] Playwright tests for happy path, insufficient chapters, invalid model output, cancellation, progress event ordering, preview/save, and no chapter `SaveContent` call.
+- [x] Frontend build and lint.
 
 **Dependencies:** Task 14.
 
@@ -585,23 +601,25 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 ## Task 16: Git Service Expansion for Detailed Log, File Lists, Diffs, Renames, and Empty Repos
 
+**Status:** Complete for the backend Git history service and read-only bridge boundary. `IVersionControlService` now exposes paged detailed commit summaries, changed-file lists, and file diffs with original/modified content. `GitVersionControlService` handles empty history without creating baseline commits on read-only calls, repairs partially initialized repositories through normal `EnsureRepositoryAsync`, applies configured author identity before commits, resolves Git from compatible app/runtime candidates and system PATH, runs Git through argument lists with bounded timeouts and stable environment variables, and registers read-only Git history bridge handlers. Frontend bridge types are synced for cursor paging, insertion/deletion counts, and diff content fields. The Git history UI itself remains Task 17.
+
 **Description:** Expand the current `IVersionControlService` from simple log support to detailed commit-history inspection.
 
 **Acceptance criteria:**
 
-- [ ] `EnsureRepositoryAsync` works on Windows, macOS, and Linux, including empty or partially initialized repositories.
-- [ ] Repository-level Git author name/email are configurable and applied before commits.
-- [ ] Detailed log supports paging by cursor hash, latest-first ordering, author name/email, short hash, message, commit time, file count, insertions, and deletions.
-- [ ] Commit file list supports added, modified, deleted, renamed entries and old path for renames.
-- [ ] File diff returns original and modified content for added/modified/deleted/renamed files.
-- [ ] All Git commands use argument lists, safe working directory, timeout, hidden windows on Windows, `LC_ALL=C` where useful, and sanitized error messages.
-- [ ] Empty repos return an empty log instead of throwing unhandled errors.
+- [x] `EnsureRepositoryAsync` works on Windows, macOS, and Linux, including empty or partially initialized repositories.
+- [x] Repository-level Git author name/email are configurable and applied before commits.
+- [x] Detailed log supports paging by cursor hash, latest-first ordering, author name/email, short hash, message, commit time, file count, insertions, and deletions.
+- [x] Commit file list supports added, modified, deleted, renamed entries and old path for renames.
+- [x] File diff returns original and modified content for added/modified/deleted/renamed files.
+- [x] All Git commands use argument lists, safe working directory, timeout, hidden windows on Windows, `LC_ALL=C` where useful, and sanitized error messages.
+- [x] Empty repos return an empty log instead of throwing unhandled errors.
 
 **Verification:**
 
-- [ ] Unit tests for log/diff parsers.
-- [ ] Integration tests with temporary repos for empty repo, initial commit, normal modifications, deletion, rename, paging, custom author identity, missing Git, and command timeout.
-- [ ] macOS Git resolution is covered by path-candidate tests or CI-compatible abstraction tests.
+- [x] Unit tests for log/diff parsers.
+- [x] Integration tests with temporary repos for empty repo, initial commit, normal modifications, deletion, rename, paging, custom author identity, missing Git, and command timeout.
+- [x] macOS Git resolution is covered by path-candidate tests or CI-compatible abstraction tests.
 
 **Dependencies:** Tasks 1-2.
 
@@ -617,23 +635,25 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 ## Task 17: Git History Bridge and Read-Only UI
 
+**Status:** Complete. `GitHistoryView` is reachable from the workspace activity bar and uses only `GetGitCommits`, `GetGitCommitFiles`, and `GetGitFileDiff`. The UI supports first-page loading, cursor-based older-page loading, lazy commit file expansion, lazy read-only diff loading, added/modified/deleted/renamed/binary states, old-to-new rename markers, truncated-diff messaging, empty history, Git failure retry, diagnostics copy, and compact viewport rendering. The app mock workflow now includes deterministic Git fixtures plus `npm --prefix frontend run test:git` coverage for the Git history path.
+
 **Description:** Add a left-side Git history panel and diff view using the expanded Git service.
 
 **Acceptance criteria:**
 
-- [ ] User can open commit history for the active novel from the sidebar/activity layout.
-- [ ] History list loads first page quickly and infinite-scrolls older commits.
-- [ ] Expanding a commit lazy-loads changed files.
-- [ ] Selecting a file lazy-loads a read-only diff view.
-- [ ] Renamed files show old path to new path and a distinct marker.
-- [ ] Loading, empty repo, Git unavailable, command failure, and retry states are visible.
-- [ ] Diff viewer handles large files by truncating or paging with a clear message instead of freezing.
-- [ ] No Git mutation commands are exposed by this UI.
+- [x] User can open commit history for the active novel from the sidebar/activity layout.
+- [x] History list loads first page quickly and infinite-scrolls older commits.
+- [x] Expanding a commit lazy-loads changed files.
+- [x] Selecting a file lazy-loads a read-only diff view.
+- [x] Renamed files show old path to new path and a distinct marker.
+- [x] Loading, empty repo, Git unavailable, command failure, and retry states are visible.
+- [x] Diff viewer handles large files by truncating or paging with a clear message instead of freezing.
+- [x] No Git mutation commands are exposed by this UI.
 
 **Verification:**
 
-- [ ] Playwright tests for history paging, expand commit, select added/modified/deleted/renamed file, empty repo, Git failure, retry, and compact viewport.
-- [ ] Bridge guardrail tests prove only read-only Git history methods are called.
+- [x] Playwright tests for history paging, expand commit, select added/modified/deleted/renamed file, empty repo, Git failure, retry, and compact viewport.
+- [x] Bridge guardrail tests prove only read-only Git history methods are called.
 
 **Dependencies:** Task 16.
 
@@ -813,8 +833,8 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 **Acceptance criteria:**
 
-- [ ] macOS app bundle runtime Git candidate paths are checked before PATH fallback.
-- [ ] Windows bundled Git and Linux runtime Git candidates keep working.
+- [ ] macOS app bundle Git candidate paths are checked before PATH fallback.
+- [ ] Windows and Linux system Git resolution keeps working; optional runtime Git candidates remain compatible but are not part of the current Windows package.
 - [ ] Empty repository initialization creates a valid first commit or a documented empty history state without downstream crashes.
 - [ ] Read-only file attributes and stale lock files are handled conservatively with visible errors when automatic recovery is unsafe.
 - [ ] Git command stderr is normalized enough for error classification without relying on localized output.
@@ -896,7 +916,7 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 **Acceptance criteria:**
 
 - [ ] Import parsers and workflow have unit/integration coverage for malformed EPUB, malformed encodings, large TXT/MD, chapter-boundary edge cases, write failure, DB failure, Git failure, and cleanup.
-- [ ] Startup import recovery has integration coverage for simulated process death after each durable import phase, idempotent cleanup, and cleanup-blocked path corruption.
+- [x] Startup import recovery has integration coverage for simulated process death after each durable import phase, idempotent cleanup, and cleanup-blocked path corruption.
 - [ ] Encoding tests include UTF-16 LE/BE with BOM, conservative UTF-16 no-BOM detection, GB18030 provider availability, binary-looking files, low-confidence decode failure, and visible diagnostics.
 - [ ] Size-limit tests cover TXT/MD source limits, compressed EPUB limits, and uncompressed EPUB expansion limits.
 - [ ] Style stats/extraction tests cover malformed model output, cancellation, invalid skill output, and scoped authorization.
@@ -960,16 +980,16 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 ### Checkpoint B: Import Pipeline
 
-- [ ] Tasks 4-8 complete.
-- [ ] TXT/MD/EPUB import works with progress, cancellation, caught-failure cleanup, crash recovery, size-limit rejection, encoding diagnostics, and Git warning behavior.
-- [ ] Import tests prove no orphaned DB/files remain after pre-completion failures or simulated process death.
+- [x] Tasks 4-8 complete.
+- [x] TXT/MD/EPUB import works with progress, cancellation, caught-failure cleanup, crash recovery, size-limit rejection, encoding diagnostics, and Git warning behavior.
+- [x] Import tests prove no orphaned DB/files remain after pre-completion failures or simulated process death.
 
 ### Checkpoint C: Style and Pattern Workflows
 
-- [ ] Tasks 9-15 complete.
-- [ ] Style samples are durable, searchable, statistically inspectable, and can produce validated skills.
-- [ ] Pattern extraction supports selected chapter ranges, progress, cancellation, trace inspection, and validated skill generation.
-- [ ] Neither workflow mutates chapter content.
+- [x] Tasks 9-15 complete.
+- [x] Style samples are durable, searchable, statistically inspectable, and can produce validated skills.
+- [x] Pattern extraction supports selected chapter ranges, progress, cancellation, trace inspection, and validated skill generation.
+- [x] Neither workflow mutates chapter content.
 
 ### Checkpoint D: Git, Settings, Update, and Layout UX
 

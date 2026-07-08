@@ -3,6 +3,7 @@ import { useApp } from '@/hooks/useApp'
 import InitView from '@/views/InitView'
 import { Button } from '@/components/ui/button'
 import { AlertTriangle } from 'lucide-react'
+import type { novelImport } from '@/lib/novelist/types'
 
 type View = 'loading' | 'init' | 'workspace' | 'error'
 
@@ -19,6 +20,7 @@ export default function App() {
   const [initialNovelId, setInitialNovelId] = useState(0)
   const [fromInit, setFromInit] = useState(false)
   const [startupError, setStartupError] = useState<StartupError | null>(null)
+  const [startupRecovery, setStartupRecovery] = useState<novelImport.ImportReconciliationResult | null>(null)
   const app = useApp()
 
   const checkStartup = useCallback(async () => {
@@ -27,10 +29,13 @@ export default function App() {
     try {
       const ok = await app.IsInitialized()
       if (ok) {
+        const config = await app.GetAppConfig()
         const settings = await app.GetSettings()
+        setStartupRecovery(config?.import_recovery ?? null)
         setInitialNovelId(settings?.last_novel_id ?? 0)
         setView('workspace')
       } else {
+        setStartupRecovery(null)
         setView('init')
       }
     } catch (error) {
@@ -45,11 +50,15 @@ export default function App() {
     app.IsInitialized().then(async (ok) => {
       if (cancelled) return
       if (ok) {
+        const config = await app.GetAppConfig()
+        if (cancelled) return
         const settings = await app.GetSettings()
         if (cancelled) return
+        setStartupRecovery(config?.import_recovery ?? null)
         setInitialNovelId(settings?.last_novel_id ?? 0)
         setView('workspace')
       } else {
+        setStartupRecovery(null)
         setView('init')
       }
     }).catch((error) => {
@@ -99,7 +108,9 @@ export default function App() {
     <div className="min-h-screen bg-background text-foreground">
       {view === 'init' && (
         <InitView onInitialized={async () => {
+          const config = await app.GetAppConfig()
           const settings = await app.GetSettings()
+          setStartupRecovery(config?.import_recovery ?? null)
           setInitialNovelId(settings?.last_novel_id ?? 0)
           setFromInit(true)
           setView('workspace')
@@ -107,7 +118,11 @@ export default function App() {
       )}
       {view === 'workspace' && (
         <Suspense fallback={<LoadingScreen />}>
-          <WorkspaceView initialNovelId={initialNovelId} initialShowHelp={fromInit} />
+          <WorkspaceView
+            initialNovelId={initialNovelId}
+            initialShowHelp={fromInit}
+            startupRecovery={startupRecovery}
+          />
         </Suspense>
       )}
     </div>

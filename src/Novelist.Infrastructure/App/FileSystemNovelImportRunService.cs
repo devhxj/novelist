@@ -505,8 +505,8 @@ public sealed class FileSystemNovelImportRunService : INovelImportRunService
     {
         var displayName = NormalizeRequiredText(value, nameof(value), MaxSourceDisplayNameLength, allowLineBreaks: false);
         if (displayName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
-            displayName.Contains(Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
-            displayName.Contains(Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
+            displayName.Contains('/', StringComparison.Ordinal) ||
+            displayName.Contains('\\', StringComparison.Ordinal))
         {
             throw new ArgumentException("Source display name must be a file name, not a path.", nameof(value));
         }
@@ -548,10 +548,11 @@ public sealed class FileSystemNovelImportRunService : INovelImportRunService
         var normalized = new List<string>();
         foreach (var root in roots)
         {
-            var value = NormalizeRequiredText(root, nameof(roots), MaxCreatedFileRootLength, allowLineBreaks: false)
-                .Replace('\\', '/');
-            if (Path.IsPathRooted(value) ||
-                LooksLikeWindowsRootedPath(value) ||
+            var rawValue = NormalizeRequiredText(root, nameof(roots), MaxCreatedFileRootLength, allowLineBreaks: false);
+            var value = rawValue.Replace('\\', '/').Trim('/');
+            if (Path.IsPathRooted(rawValue) ||
+                LooksLikeWindowsRootedPath(rawValue) ||
+                string.IsNullOrWhiteSpace(value) ||
                 value.Split('/', StringSplitOptions.RemoveEmptyEntries).Any(segment => segment is "." or ".."))
             {
                 throw new ArgumentException("Created file roots must be safe relative paths.", nameof(roots));

@@ -1,0 +1,14 @@
+<Project>
+  <Target Name="WriteNovelistVersion" DependsOnTargets="MinVer">
+    <PropertyGroup>
+      <NovelistVersionFile Condition="'$(NovelistVersionFile)' == ''">$(MSBuildThisFileDirectory)build/version/novelist.version</NovelistVersionFile>
+      <NovelistResolvedVersion>$(Version)</NovelistResolvedVersion>
+      <NovelistResolvedVersion Condition="'$(NovelistResolvedVersion)' == ''">$(MinVerVersion)</NovelistResolvedVersion>
+    </PropertyGroup>
+
+    <Error Condition="'$(NovelistResolvedVersion)' == ''" Text="MinVer did not calculate a version." />
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(NovelistVersionFile)'))" />
+    <WriteLinesToFile File="$(NovelistVersionFile)" Lines="$(NovelistResolvedVersion)" Overwrite="true" />
+    <Message Importance="high" Text="Novelist version: $(NovelistResolvedVersion)" />
+  </Target>
+</Project>

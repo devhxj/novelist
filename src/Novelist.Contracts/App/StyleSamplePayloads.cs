@@ -69,13 +69,21 @@ public sealed record StyleSampleDetailPayload(
     [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt);
 
 public sealed record StyleSampleStatsPayload(
+    [property: JsonPropertyName("schema_version")] string SchemaVersion,
     [property: JsonPropertyName("character_count")] int CharacterCount,
+    [property: JsonPropertyName("word_count")] int WordCount,
     [property: JsonPropertyName("sentence_count")] int SentenceCount,
+    [property: JsonPropertyName("sentence_length_distribution")]
+    IReadOnlyList<int> SentenceLengthDistribution,
     [property: JsonPropertyName("average_sentence_chars")] double AverageSentenceChars,
+    [property: JsonPropertyName("sentence_length_std_dev")] double SentenceLengthStdDev,
+    [property: JsonPropertyName("punctuation_per_100_chars")] double PunctuationPer100Chars,
+    [property: JsonPropertyName("quote_density")] double QuoteDensity,
+    [property: JsonPropertyName("paragraph_count")] int ParagraphCount,
+    [property: JsonPropertyName("average_paragraph_chars")] double AverageParagraphChars,
     [property: JsonPropertyName("dialogue_ratio")] double DialogueRatio,
     [property: JsonPropertyName("interiority_ratio")] double InteriorityRatio,
-    [property: JsonPropertyName("sensory_ratio")] double SensoryRatio,
-    [property: JsonPropertyName("punctuation_per_100_chars")] double PunctuationPer100Chars);
+    [property: JsonPropertyName("sensory_ratio")] double SensoryRatio);
 
 public sealed record StyleSampleSourceMetadataPayload(
     [property: JsonPropertyName("source_type")] string SourceType,
@@ -105,6 +113,7 @@ public sealed record StyleSkillExtractionRunPayload(
     [property: JsonPropertyName("sample_ids")] IReadOnlyList<long> SampleIds,
     [property: JsonPropertyName("skill_name")] string SkillName,
     [property: JsonPropertyName("skill_preview")] string SkillPreview,
+    [property: JsonPropertyName("skill_file_path")] string SkillFilePath,
     [property: JsonPropertyName("diagnostics")] IReadOnlyList<CopyableDiagnosticPayload> Diagnostics,
     [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
     [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt,

@@ -30,6 +30,12 @@ cleanup() {
 trap cleanup EXIT
 
 publish_args=(publish "$PROJECT" -c "$CONFIGURATION" -o "$STAGING_DIR" -p:PublishSingleFile=false -p:UseAppHost=true)
+if [ -n "${VERSION:-}" ]; then
+    publish_args+=(-p:MinVerVersionOverride="$VERSION")
+fi
+if [ "${CI:-}" = "true" ]; then
+    publish_args+=(-p:ContinuousIntegrationBuild=true)
+fi
 if [ "${NO_RESTORE:-}" = "1" ]; then
     publish_args+=(--no-restore)
 fi
@@ -48,11 +54,6 @@ if [ ! -f frontend/dist/index.html ]; then
 fi
 mkdir -p "$STAGING_DIR/frontend"
 cp -a frontend/dist "$STAGING_DIR/frontend/"
-
-if [ -d build/runtime/git ]; then
-    mkdir -p "$STAGING_DIR/runtime"
-    cp -a build/runtime/git "$STAGING_DIR/runtime/"
-fi
 
 if [ -d build/runtime/onnx ]; then
     mkdir -p "$STAGING_DIR/runtime"

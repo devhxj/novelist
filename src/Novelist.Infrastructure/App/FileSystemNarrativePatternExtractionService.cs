@@ -1,12 +1,17 @@
+using System.Collections.Concurrent;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
+using Novelist.Core.Bridge;
 
 namespace Novelist.Infrastructure.App;
 
 public sealed class FileSystemNarrativePatternExtractionService : INarrativePatternExtractionService
 {
+    private const string ProgressEventName = "narrative_pattern_extraction:progress";
     private const int MaxTaskIdLength = 160;
     private const int MaxProviderNameLength = 128;
     private const int MaxModelIdLength = 160;
@@ -38,14 +43,27 @@ public sealed class FileSystemNarrativePatternExtractionService : INarrativePatt
 
     private readonly AppInitializationOptions _options;
     private readonly INovelService _novels;
+    private readonly IChapterContentService _chapters;
+    private readonly IChatCompletionClient _chat;
+    private readonly ILlmConfigurationService _llmConfiguration;
+    private readonly IBridgeEventSink _events;
     private readonly SemaphoreSlim _mutex = new(1, 1);
+    private readonly ConcurrentDictionary<string, ActiveNarrativePatternExtraction> _active = new(StringComparer.Ordinal);
 
     public FileSystemNarrativePatternExtractionService(
         AppInitializationOptions? options = null,
-        INovelService? novels = null)
+        INovelService? novels = null,
+        IChapterContentService? chapters = null,
+        IChatCompletionClient? chat = null,
+        ILlmConfigurationService? llmConfiguration = null,
+        IBridgeEventSink? events = null)
     {
         _options = options ?? new AppInitializationOptions();
         _novels = novels ?? new FileSystemNovelService(_options);
+        _llmConfiguration = llmConfiguration ?? new FileSystemLlmConfigurationService(_options);
+        _chapters = chapters ?? new FileSystemChapterContentService(_options, _novels);
+        _chat = chat ?? new StandardChatCompletionClient(_llmConfiguration);
+        _events = events ?? new NullBridgeEventSink();
     }
 
     public async ValueTask<NarrativePatternRunPayload> StartExtractionAsync(
@@ -56,62 +74,118 @@ public sealed class FileSystemNarrativePatternExtractionService : INarrativePatt
 
         var taskId = NormalizeRequiredText(input.TaskId, nameof(input.TaskId), MaxTaskIdLength, allowLineBreaks: false);
         var novelId = await NormalizeNovelIdAsync(input.NovelId, cancellationToken);
-        var ranges = NormalizeChapterRanges(input.ChapterRanges);
         var providerName = NormalizeRequiredText(input.ProviderName, nameof(input.ProviderName), MaxProviderNameLength, allowLineBreaks: false);
         var modelId = NormalizeRequiredText(input.ModelId, nameof(input.ModelId), MaxModelIdLength, allowLineBreaks: false);
         var reasoningEffort = NormalizeOptionalText(input.ReasoningEffort, nameof(input.ReasoningEffort), MaxReasoningEffortLength, allowLineBreaks: false);
-        var skillName = NormalizeRequiredText(input.SkillName, nameof(input.SkillName), MaxSkillNameLength, allowLineBreaks: false);
-        var progressTotal = CountSelectedChapters(ranges);
+        var skillName = StyleSkillDocument.NormalizeSkillName(
+            NormalizeRequiredText(input.SkillName, nameof(input.SkillName), MaxSkillNameLength, allowLineBreaks: false));
+        var selectedChapterIds = NormalizeSelectedChapterIds(input.SelectedChapterIds);
+        var allChapters = await _chapters.GetChaptersAsync(novelId, cancellationToken);
+        var selection = NarrativePatternPipeline.ResolveChapterSelection(
+            allChapters,
+            input.ChapterRanges,
+            selectedChapterIds);
 
-        await _mutex.WaitAsync(cancellationToken);
+        var run = await CreateRunAsync(
+            taskId,
+            novelId,
+            selection.ChapterRanges,
+            selection.SelectedChapterIds,
+            providerName,
+            modelId,
+            reasoningEffort,
+            skillName,
+            cancellationToken);
+        await EmitProgressAsync(run, "叙事模式抽取已排队。");
+
+        var activeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var active = new ActiveNarrativePatternExtraction(activeCancellation);
+        if (!_active.TryAdd(taskId, active))
+        {
+            activeCancellation.Dispose();
+            throw new ArgumentException($"Narrative pattern run '{taskId}' is already active.", nameof(input.TaskId));
+        }
+
         try
         {
-            var store = await LoadOrCreateAsync(cancellationToken);
-            if (store.Runs.Any(run => string.Equals(run.TaskId, taskId, StringComparison.Ordinal)))
+            return await RunPipelineAsync(
+                run,
+                providerName,
+                modelId,
+                reasoningEffort,
+                skillName,
+                selection,
+                activeCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            var cancelled = await MarkCancelledAsync(
+                taskId,
+                "叙事模式抽取已取消。",
+                "StartNarrativePatternExtraction",
+                CancellationToken.None);
+            await EmitProgressAsync(cancelled, "叙事模式抽取已取消。");
+            return cancelled;
+        }
+        catch (NarrativePatternValidationException ex)
+        {
+            var failed = await FailRunAsync(
+                new NarrativePatternRunFailure(
+                    taskId,
+                    "model_json_validation",
+                    Diagnostic(
+                        ex.Code,
+                        "叙事模式抽取输出未通过校验。",
+                        ex.Message,
+                        "StartNarrativePatternExtraction",
+                        taskId)),
+                CancellationToken.None);
+            await EmitProgressAsync(failed, "叙事模式抽取输出未通过校验。");
+            return failed;
+        }
+        catch (StyleSkillValidationException ex)
+        {
+            var failed = await FailRunAsync(
+                new NarrativePatternRunFailure(
+                    taskId,
+                    "skill_validation",
+                    Diagnostic(
+                        "pattern.invalid_skill",
+                        "模型返回的叙事模式技能 Markdown 未通过校验。",
+                        ex.Message,
+                        "StartNarrativePatternExtraction",
+                        taskId)),
+                CancellationToken.None);
+            await EmitProgressAsync(failed, "模型返回的叙事模式技能 Markdown 未通过校验。");
+            return failed;
+        }
+        catch
+        {
+            if (await TryGetRunAsync(taskId, CancellationToken.None) is { Status: StatusRunning } running)
             {
-                throw new ArgumentException($"Narrative pattern run '{taskId}' already exists.", nameof(input.TaskId));
+                var failed = await FailRunAsync(
+                    new NarrativePatternRunFailure(
+                        running.TaskId,
+                        "failed",
+                        Diagnostic(
+                            "pattern.extraction_failed",
+                            "叙事模式抽取失败。",
+                            "抽取流程在章节读取、模型调用或持久化阶段失败。",
+                            "StartNarrativePatternExtraction",
+                            running.TaskId)),
+                    CancellationToken.None);
+                await EmitProgressAsync(failed, "叙事模式抽取失败。");
+                return failed;
             }
 
-            var now = DateTimeOffset.UtcNow;
-            var run = new NarrativePatternRunStoreItem
-            {
-                TaskId = taskId,
-                NovelId = novelId,
-                Status = StatusRunning,
-                Stage = InitialStage,
-                ProgressCompleted = 0,
-                ProgressTotal = progressTotal,
-                ChapterRanges = ranges.Select(ToStoreRange).ToList(),
-                SelectedChapterIds = [],
-                ProviderName = providerName,
-                ModelId = modelId,
-                ReasoningEffort = reasoningEffort,
-                SkillName = skillName,
-                SkillPreview = string.Empty,
-                GeneratedSkill = new NarrativePatternGeneratedSkillStoreItem
-                {
-                    Name = skillName,
-                    Preview = string.Empty,
-                    Status = "pending",
-                    UpdatedAt = now
-                },
-                Diagnostics = [],
-                Trace = [],
-                CreatedAt = now,
-                UpdatedAt = now,
-                CompletedAt = null,
-                CancelledAt = null,
-                FailedAt = null,
-                Error = null
-            };
-
-            store.Runs.Add(run);
-            await SaveAsync(store, cancellationToken);
-            return ToPayload(run);
+            throw;
         }
         finally
         {
-            _mutex.Release();
+            if (_active.TryRemove(taskId, out var removed))
+            {
+                removed.Cancellation.Dispose();
+            }
         }
     }
 
@@ -123,42 +197,18 @@ public sealed class FileSystemNarrativePatternExtractionService : INarrativePatt
         var taskId = NormalizeRequiredText(input.TaskId, nameof(input.TaskId), MaxTaskIdLength, allowLineBreaks: false);
         var reason = NormalizeRequiredText(input.Reason, nameof(input.Reason), MaxReasonLength, allowLineBreaks: true);
 
-        await _mutex.WaitAsync(cancellationToken);
-        try
+        if (_active.TryGetValue(taskId, out var active))
         {
-            var store = await LoadOrCreateAsync(cancellationToken);
-            var run = FindRun(store, taskId);
-            if (run.Status == StatusCancelled)
-            {
-                return ToPayload(run);
-            }
-
-            EnsureNotTerminal(run);
-            var now = DateTimeOffset.UtcNow;
-            var diagnostic = new CopyableDiagnosticPayload(
-                Code: "pattern.cancelled",
-                Message: "叙事模式抽取已取消。",
-                Detail: reason,
-                Operation: "CancelNarrativePatternExtraction",
-                TaskId: taskId,
-                RunId: null,
-                BridgeMethod: "CancelNarrativePatternExtraction",
-                Timestamp: now);
-
-            run.Status = StatusCancelled;
-            run.Stage = CancelledStage;
-            run.Diagnostics = AppendDiagnostic(run.Diagnostics, diagnostic, taskId);
-            run.Error = diagnostic;
-            run.CompletedAt = now;
-            run.CancelledAt = now;
-            run.UpdatedAt = now;
-            await SaveAsync(store, cancellationToken);
-            return ToPayload(run);
+            active.Cancellation.Cancel();
         }
-        finally
-        {
-            _mutex.Release();
-        }
+
+        var run = await MarkCancelledAsync(
+            taskId,
+            reason,
+            "CancelNarrativePatternExtraction",
+            cancellationToken);
+        await EmitProgressAsync(run, "叙事模式抽取已取消。");
+        return run;
     }
 
     public async ValueTask<NarrativePatternRunPayload?> GetRunAsync(
@@ -349,6 +399,991 @@ public sealed class FileSystemNarrativePatternExtractionService : INarrativePatt
         }
     }
 
+    private async ValueTask<NarrativePatternRunPayload> CreateRunAsync(
+        string taskId,
+        long novelId,
+        IReadOnlyList<ChapterRangePayload> ranges,
+        IReadOnlyList<long> selectedChapterIds,
+        string providerName,
+        string modelId,
+        string reasoningEffort,
+        string skillName,
+        CancellationToken cancellationToken)
+    {
+        var normalizedRanges = NormalizeChapterRanges(ranges);
+        var normalizedChapterIds = NormalizeSelectedChapterIds(selectedChapterIds);
+        var progressTotal = CountSelectedChapters(normalizedRanges) + 4;
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            if (store.Runs.Any(run => string.Equals(run.TaskId, taskId, StringComparison.Ordinal)))
+            {
+                throw new ArgumentException($"Narrative pattern run '{taskId}' already exists.", nameof(taskId));
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var run = new NarrativePatternRunStoreItem
+            {
+                TaskId = taskId,
+                NovelId = novelId,
+                Status = StatusRunning,
+                Stage = InitialStage,
+                ProgressCompleted = 0,
+                ProgressTotal = progressTotal,
+                ChapterRanges = normalizedRanges.Select(ToStoreRange).ToList(),
+                SelectedChapterIds = normalizedChapterIds.ToList(),
+                ProviderName = providerName,
+                ModelId = modelId,
+                ReasoningEffort = reasoningEffort,
+                SkillName = skillName,
+                SkillPreview = string.Empty,
+                GeneratedSkill = new NarrativePatternGeneratedSkillStoreItem
+                {
+                    Name = skillName,
+                    Preview = string.Empty,
+                    Status = "pending",
+                    UpdatedAt = now
+                },
+                Diagnostics = [],
+                Trace = [],
+                CreatedAt = now,
+                UpdatedAt = now,
+                CompletedAt = null,
+                CancelledAt = null,
+                FailedAt = null,
+                Error = null
+            };
+
+            store.Runs.Add(run);
+            await SaveAsync(store, cancellationToken);
+            return ToPayload(run);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private async ValueTask<NarrativePatternRunPayload> RunPipelineAsync(
+        NarrativePatternRunPayload run,
+        string providerName,
+        string modelId,
+        string reasoningEffort,
+        string requestedSkillName,
+        NarrativePatternChapterSelection selection,
+        CancellationToken cancellationToken)
+    {
+        var taskId = run.TaskId;
+        var contextWindowTokens = await ResolveContextWindowTokensAsync(providerName, modelId, cancellationToken);
+
+        cancellationToken.ThrowIfCancellationRequested();
+        run = await UpdateRunningRunAsync(
+            taskId,
+            "chapter_loading",
+            0,
+            run.ProgressTotal,
+            cancellationToken);
+        await EmitProgressAsync(
+            run,
+            "正在读取并校验章节内容。",
+            llmStatus: "idle",
+            tokenEstimate: selection.Chapters.Sum(chapter => Math.Max(1, chapter.WordCount)));
+        var documents = await LoadChapterDocumentsAsync(selection, cancellationToken);
+        await AppendTraceForOutputAsync(
+            taskId,
+            "chapter_loading",
+            string.Join('|', documents.Select(item => item.ContentHash)),
+            JsonSerializer.Serialize(documents.Select(item => new
+            {
+                item.ChapterNumber,
+                item.Title,
+                item.ContentHash,
+                item.EstimatedTokens
+            }), JsonOptions),
+            []);
+
+        cancellationToken.ThrowIfCancellationRequested();
+        run = await UpdateRunningRunAsync(taskId, "boundary_detection", 1, run.ProgressTotal, cancellationToken);
+        await EmitProgressAsync(
+            run,
+            "正在识别叙事结构边界。",
+            llmStatus: "calling",
+            tokenEstimate: documents.Sum(item => item.EstimatedTokens));
+        var boundaryPrompt = BuildBoundaryMessages(documents, contextWindowTokens);
+        var boundaryJson = await InvokeStructuredJsonAsync(
+            providerName,
+            modelId,
+            reasoningEffort,
+            boundaryPrompt,
+            BoundaryToolDefinition(),
+            cancellationToken);
+        var boundaries = NarrativePatternPipeline.ParseBoundaries(boundaryJson, documents);
+        await AppendTraceForOutputAsync(taskId, "boundary_detection", PromptHash(boundaryPrompt), boundaryJson, []);
+        await EmitProgressAsync(
+            run,
+            "叙事结构边界已生成。",
+            llmStatus: "completed",
+            tokenEstimate: NarrativePatternPipeline.EstimateTokens(boundaryJson),
+            boundaryCount: boundaries.Count);
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var summaryBatches = NarrativePatternPipeline.CreateTokenBatches(
+            documents,
+            item => item.EstimatedTokens,
+            contextWindowTokens);
+        var summaries = new List<NarrativePatternChapterSummary>();
+        for (var batchIndex = 0; batchIndex < summaryBatches.Count; batchIndex++)
+        {
+            var batch = summaryBatches[batchIndex];
+            run = await UpdateRunningRunAsync(
+                taskId,
+                "chapter_summary",
+                Math.Min(run.ProgressTotal - 3, 2 + summaries.Count),
+                run.ProgressTotal,
+                cancellationToken);
+            await EmitProgressAsync(
+                run,
+                $"正在提取章节摘要：批次 {(batchIndex + 1).ToString(CultureInfo.InvariantCulture)}/{summaryBatches.Count.ToString(CultureInfo.InvariantCulture)}。",
+                llmStatus: "calling",
+                batchIndex: batchIndex + 1,
+                batchTotal: summaryBatches.Count,
+                tokenEstimate: batch.EstimatedTokens,
+                boundaryCount: boundaries.Count,
+                summaryCount: summaries.Count);
+
+            var summaryPrompt = BuildSummaryMessages(batch.Items);
+            var summaryJson = await InvokeStructuredJsonAsync(
+                providerName,
+                modelId,
+                reasoningEffort,
+                summaryPrompt,
+                SummaryToolDefinition(),
+                cancellationToken);
+            var parsed = NarrativePatternPipeline.ParseChapterSummaries(summaryJson, batch.Items);
+            summaries.AddRange(parsed);
+            await AppendTraceForOutputAsync(taskId, "chapter_summary", PromptHash(summaryPrompt), summaryJson, []);
+        }
+
+        summaries = summaries.OrderBy(item => item.ChapterNumber).ToList();
+        run = await UpdateRunningRunAsync(
+            taskId,
+            "chapter_summary",
+            Math.Min(run.ProgressTotal - 2, 2 + summaries.Count),
+            run.ProgressTotal,
+            cancellationToken);
+        await EmitProgressAsync(
+            run,
+            "章节摘要已生成。",
+            llmStatus: "completed",
+            boundaryCount: boundaries.Count,
+            summaryCount: summaries.Count);
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var phases = await CompressPhasesAsync(
+            run,
+            providerName,
+            modelId,
+            reasoningEffort,
+            boundaries,
+            summaries,
+            contextWindowTokens,
+            cancellationToken);
+
+        cancellationToken.ThrowIfCancellationRequested();
+        run = await UpdateRunningRunAsync(
+            taskId,
+            "skill_generation",
+            run.ProgressTotal - 1,
+            run.ProgressTotal,
+            cancellationToken);
+        await EmitProgressAsync(
+            run,
+            "正在生成叙事模式技能预览。",
+            llmStatus: "calling",
+            boundaryCount: boundaries.Count,
+            summaryCount: summaries.Count,
+            phaseCount: phases.Count);
+        var skillPrompt = BuildSkillMessages(requestedSkillName, documents, boundaries, summaries, phases);
+        var rawSkill = await InvokeTextAsync(
+            providerName,
+            modelId,
+            reasoningEffort,
+            skillPrompt,
+            cancellationToken);
+        var skill = StyleSkillDocument.ParseStrict(rawSkill);
+        var preview = BuildNarrativeSkillPreview(skill, requestedSkillName, selection, documents);
+        await AppendTraceForOutputAsync(taskId, "skill_generation", PromptHash(skillPrompt), rawSkill, []);
+
+        var completed = await CompleteRunAsync(
+            new NarrativePatternRunCompletion(
+                taskId,
+                "skill_preview",
+                preview,
+                [
+                    Diagnostic(
+                        "pattern.skill.preview_ready",
+                        "叙事模式技能预览已生成。",
+                        $"chapters={documents.Count.ToString(CultureInfo.InvariantCulture)}; boundaries={boundaries.Count.ToString(CultureInfo.InvariantCulture)}; summaries={summaries.Count.ToString(CultureInfo.InvariantCulture)}; phases={phases.Count.ToString(CultureInfo.InvariantCulture)}",
+                        "StartNarrativePatternExtraction",
+                        taskId)
+                ]),
+            cancellationToken);
+        await EmitProgressAsync(
+            completed,
+            "叙事模式技能预览已生成。",
+            llmStatus: "completed",
+            boundaryCount: boundaries.Count,
+            summaryCount: summaries.Count,
+            phaseCount: phases.Count);
+        return completed;
+    }
+
+    private async ValueTask<IReadOnlyList<NarrativePatternChapterDocument>> LoadChapterDocumentsAsync(
+        NarrativePatternChapterSelection selection,
+        CancellationToken cancellationToken)
+    {
+        var contentByPath = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var chapter in selection.Chapters)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            contentByPath[chapter.FilePath] = await _chapters.GetContentAsync(
+                chapter.NovelId,
+                chapter.FilePath,
+                cancellationToken);
+        }
+
+        return NarrativePatternPipeline.BuildChapterDocuments(selection, contentByPath);
+    }
+
+    private async ValueTask<IReadOnlyList<NarrativePatternPhase>> CompressPhasesAsync(
+        NarrativePatternRunPayload run,
+        string providerName,
+        string modelId,
+        string reasoningEffort,
+        IReadOnlyList<NarrativePatternBoundary> boundaries,
+        IReadOnlyList<NarrativePatternChapterSummary> summaries,
+        int contextWindowTokens,
+        CancellationToken cancellationToken)
+    {
+        var taskId = run.TaskId;
+        var targetPhaseCount = Math.Max(1, Math.Min(8, boundaries.Count));
+        var previousPhaseCount = summaries.Count;
+        IReadOnlyList<NarrativePatternPhase> current = [];
+
+        for (var round = 1; round <= NarrativePatternPipeline.MaxCompressionRounds; round++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            run = await UpdateRunningRunAsync(
+                taskId,
+                "phase_compression",
+                Math.Max(0, run.ProgressTotal - 2),
+                run.ProgressTotal,
+                cancellationToken);
+            var compressionInput = current.Count == 0
+                ? summaries.Select(summary => new NarrativePatternCompressionInput(
+                    summary.ChapterNumber,
+                    summary.ChapterNumber,
+                    $"第{summary.ChapterNumber.ToString(CultureInfo.InvariantCulture)}章",
+                    summary.Summary,
+                    summary.TurningPoints)).ToArray()
+                : current.Select(phase => new NarrativePatternCompressionInput(
+                    phase.StartChapter,
+                    phase.EndChapter,
+                    phase.PhaseName,
+                    phase.NarrativeFunction,
+                    [phase.Guidance])).ToArray();
+
+            var batches = NarrativePatternPipeline.CreateTokenBatches(
+                compressionInput,
+                item => NarrativePatternPipeline.EstimateTokens(item.Summary) +
+                    item.Points.Sum(NarrativePatternPipeline.EstimateTokens),
+                contextWindowTokens);
+            var next = new List<NarrativePatternPhase>();
+            for (var batchIndex = 0; batchIndex < batches.Count; batchIndex++)
+            {
+                var batch = batches[batchIndex];
+                await EmitProgressAsync(
+                    run,
+                    $"正在递归压缩叙事阶段：第 {round.ToString(CultureInfo.InvariantCulture)} 轮，批次 {(batchIndex + 1).ToString(CultureInfo.InvariantCulture)}/{batches.Count.ToString(CultureInfo.InvariantCulture)}。",
+                    llmStatus: "calling",
+                    round: round,
+                    batchIndex: batchIndex + 1,
+                    batchTotal: batches.Count,
+                    tokenEstimate: batch.EstimatedTokens,
+                    boundaryCount: boundaries.Count,
+                    summaryCount: summaries.Count,
+                    phaseCount: current.Count);
+
+                var prompt = BuildPhaseCompressionMessages(boundaries, summaries, batch.Items, targetPhaseCount);
+                var phaseJson = await InvokePhaseJsonWithRetryAsync(
+                    providerName,
+                    modelId,
+                    reasoningEffort,
+                    prompt,
+                    cancellationToken);
+                var coveredSummaries = summaries
+                    .Where(summary => batch.Items.Any(item =>
+                        summary.ChapterNumber >= item.StartChapter &&
+                        summary.ChapterNumber <= item.EndChapter))
+                    .ToArray();
+                next.AddRange(NarrativePatternPipeline.ParsePhases(phaseJson, coveredSummaries));
+                await AppendTraceForOutputAsync(taskId, "phase_compression", PromptHash(prompt), phaseJson, []);
+            }
+
+            current = next.OrderBy(item => item.StartChapter).ThenBy(item => item.EndChapter).ToArray();
+            var decision = NarrativePatternPipeline.EvaluateCompressionProgress(
+                round,
+                previousPhaseCount,
+                current.Count,
+                targetPhaseCount);
+            await EmitProgressAsync(
+                run,
+                $"叙事阶段压缩第 {round.ToString(CultureInfo.InvariantCulture)} 轮完成。",
+                llmStatus: "completed",
+                round: round,
+                boundaryCount: boundaries.Count,
+                summaryCount: summaries.Count,
+                phaseCount: current.Count);
+
+            if (decision.Stalled)
+            {
+                throw new NarrativePatternValidationException(
+                    "pattern.compression_stalled",
+                    $"Narrative phase compression stopped without convergence: {decision.Reason}.");
+            }
+
+            if (decision.Stop)
+            {
+                return current;
+            }
+
+            previousPhaseCount = current.Count;
+        }
+
+        throw new NarrativePatternValidationException(
+            "pattern.compression_stalled",
+            "Narrative phase compression exceeded the maximum round limit.");
+    }
+
+    private async ValueTask<string> InvokePhaseJsonWithRetryAsync(
+        string providerName,
+        string modelId,
+        string reasoningEffort,
+        IReadOnlyList<ChatCompletionMessage> messages,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt <= NarrativePatternPipeline.MaxEmptyPhaseRetries; attempt++)
+        {
+            var output = await InvokeStructuredJsonAsync(
+                providerName,
+                modelId,
+                reasoningEffort,
+                messages,
+                PhaseToolDefinition(),
+                cancellationToken);
+            try
+            {
+                _ = NarrativePatternPipeline.ParsePhases(
+                    output,
+                    [new NarrativePatternChapterSummary(1, 1, "sha256:placeholder", "placeholder", ["placeholder"])]);
+            }
+            catch (NarrativePatternValidationException ex) when (ex.Code == "pattern.empty_phase_output" &&
+                attempt < NarrativePatternPipeline.MaxEmptyPhaseRetries)
+            {
+                continue;
+            }
+            catch (NarrativePatternValidationException ex) when (ex.Code != "pattern.empty_phase_output")
+            {
+                // The real caller validates against its covered chapter set; only empty output is retried here.
+            }
+
+            return output;
+        }
+
+        throw new NarrativePatternValidationException(
+            "pattern.empty_phase_output",
+            "Model returned no narrative phases after bounded retries.");
+    }
+
+    private async ValueTask<string> InvokeStructuredJsonAsync(
+        string providerName,
+        string modelId,
+        string reasoningEffort,
+        IReadOnlyList<ChatCompletionMessage> messages,
+        ChatToolDefinition toolDefinition,
+        CancellationToken cancellationToken)
+    {
+        var request = new ChatCompletionRequest(
+            providerName,
+            modelId,
+            reasoningEffort,
+            messages,
+            [toolDefinition]);
+        var content = new StringBuilder();
+        var toolArguments = new StringBuilder();
+
+        try
+        {
+            await foreach (var item in _chat.StreamChatAsync(request, cancellationToken))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (item.Kind == ChatCompletionStreamEventKind.Content && !string.IsNullOrEmpty(item.Data))
+                {
+                    content.Append(item.Data);
+                }
+
+                if (item.Kind == ChatCompletionStreamEventKind.ToolCall &&
+                    item.ToolCall is not null &&
+                    string.Equals(item.ToolCall.Name, toolDefinition.Name, StringComparison.Ordinal))
+                {
+                    toolArguments.Append(item.ToolCall.ArgumentsJson);
+                }
+            }
+        }
+        catch (NotSupportedException)
+        {
+            return await _chat.GenerateTextAsync(request, cancellationToken);
+        }
+
+        return toolArguments.Length > 0 ? toolArguments.ToString() : content.ToString();
+    }
+
+    private async ValueTask<string> InvokeTextAsync(
+        string providerName,
+        string modelId,
+        string reasoningEffort,
+        IReadOnlyList<ChatCompletionMessage> messages,
+        CancellationToken cancellationToken)
+    {
+        var request = new ChatCompletionRequest(providerName, modelId, reasoningEffort, messages);
+        var content = new StringBuilder();
+        try
+        {
+            await foreach (var item in _chat.StreamChatAsync(request, cancellationToken))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (item.Kind == ChatCompletionStreamEventKind.Content && !string.IsNullOrEmpty(item.Data))
+                {
+                    content.Append(item.Data);
+                }
+            }
+        }
+        catch (NotSupportedException)
+        {
+            return await _chat.GenerateTextAsync(request, cancellationToken);
+        }
+
+        return content.ToString();
+    }
+
+    private async ValueTask<NarrativePatternRunPayload> UpdateRunningRunAsync(
+        string taskId,
+        string stage,
+        int progressCompleted,
+        int progressTotal,
+        CancellationToken cancellationToken)
+    {
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            var run = FindRun(store, taskId);
+            if (run.Status != StatusRunning)
+            {
+                return ToPayload(run);
+            }
+
+            run.Stage = NormalizeRequiredText(stage, nameof(stage), MaxStageLength, allowLineBreaks: false);
+            run.ProgressCompleted = Math.Clamp(progressCompleted, 0, progressTotal);
+            run.ProgressTotal = progressTotal;
+            run.UpdatedAt = DateTimeOffset.UtcNow;
+            await SaveAsync(store, cancellationToken);
+            return ToPayload(run);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private async ValueTask<NarrativePatternRunPayload?> TryGetRunAsync(
+        string taskId,
+        CancellationToken cancellationToken)
+    {
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            var run = store.Runs.FirstOrDefault(item => string.Equals(item.TaskId, taskId, StringComparison.Ordinal));
+            return run is null ? null : ToPayload(run);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private async ValueTask<NarrativePatternRunPayload> MarkCancelledAsync(
+        string taskId,
+        string reason,
+        string bridgeMethod,
+        CancellationToken cancellationToken)
+    {
+        var normalizedReason = NormalizeOptionalText(reason, nameof(reason), MaxReasonLength, allowLineBreaks: true);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var store = await LoadOrCreateAsync(cancellationToken);
+            var run = FindRun(store, taskId);
+            if (run.Status == StatusCancelled)
+            {
+                return ToPayload(run);
+            }
+
+            if (run.Status != StatusRunning)
+            {
+                return ToPayload(run);
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var diagnostic = Diagnostic(
+                "pattern.cancelled",
+                "叙事模式抽取已取消。",
+                normalizedReason,
+                bridgeMethod,
+                taskId);
+
+            run.Status = StatusCancelled;
+            run.Stage = CancelledStage;
+            run.Diagnostics = AppendDiagnostic(run.Diagnostics, diagnostic, taskId);
+            run.Error = diagnostic;
+            run.CompletedAt = now;
+            run.CancelledAt = now;
+            run.UpdatedAt = now;
+            await SaveAsync(store, cancellationToken);
+            return ToPayload(run);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private async ValueTask AppendTraceForOutputAsync(
+        string taskId,
+        string stage,
+        string input,
+        string output,
+        IReadOnlyList<CopyableDiagnosticPayload> diagnostics)
+    {
+        await AppendTraceAsync(
+            new NarrativePatternTraceAppend(
+                taskId,
+                new NarrativePatternTraceEntryPayload(
+                    TraceId: $"{stage}-{Guid.NewGuid():N}",
+                    Stage: stage,
+                    InputHash: NarrativePatternPipeline.Sha256Hex(input),
+                    OutputHash: NarrativePatternPipeline.Sha256Hex(output),
+                    Diagnostics: diagnostics,
+                    CreatedAt: DateTimeOffset.UtcNow)),
+            CancellationToken.None);
+    }
+
+    private async ValueTask EmitProgressAsync(
+        NarrativePatternRunPayload run,
+        string message,
+        string llmStatus = "",
+        int? round = null,
+        int? batchIndex = null,
+        int? batchTotal = null,
+        int? tokenEstimate = null,
+        int? boundaryCount = null,
+        int? summaryCount = null,
+        int? phaseCount = null)
+    {
+        var payload = new NarrativePatternProgressPayload(
+            run.TaskId,
+            run.Status,
+            run.Stage,
+            run.ProgressCompleted,
+            run.ProgressTotal,
+            message,
+            DateTimeOffset.UtcNow,
+            llmStatus,
+            round,
+            batchIndex,
+            batchTotal,
+            tokenEstimate,
+            boundaryCount,
+            summaryCount,
+            phaseCount);
+
+        try
+        {
+            await _events.EmitAsync(ProgressEventName, payload, CancellationToken.None);
+        }
+        catch
+        {
+            // Progress delivery must not make a finished extraction fail.
+        }
+    }
+
+    private async ValueTask<int> ResolveContextWindowTokensAsync(
+        string providerName,
+        string modelId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var config = await _llmConfiguration.GetConfigAsync(cancellationToken);
+            var provider = config.Providers.FirstOrDefault(item =>
+                string.Equals(item.Key, providerName, StringComparison.OrdinalIgnoreCase));
+            var model = provider?.BuiltinModels.Concat(provider.CustomModels).FirstOrDefault(item =>
+                string.Equals(item.Id, modelId, StringComparison.Ordinal));
+            return model is { ContextWindow: > 0 }
+                ? model.ContextWindow
+                : NarrativePatternPipeline.DefaultContextWindowTokens;
+        }
+        catch
+        {
+            return NarrativePatternPipeline.DefaultContextWindowTokens;
+        }
+    }
+
+    private static IReadOnlyList<ChatCompletionMessage> BuildBoundaryMessages(
+        IReadOnlyList<NarrativePatternChapterDocument> chapters,
+        int contextWindowTokens)
+    {
+        var prompt = new StringBuilder();
+        prompt.AppendLine("请识别所选章节的叙事结构边界。");
+        prompt.AppendLine("必须调用工具或返回严格 JSON；不得输出解释性前言。");
+        prompt.AppendLine("JSON schema_version 必须为 narrative-pattern-v1。");
+        prompt.AppendLine("boundaries 必须覆盖全部所选章节，按章节升序且不得重叠。");
+        prompt.AppendLine();
+        AppendChapterCapsules(prompt, chapters, contextWindowTokens);
+
+        return
+        [
+            new ChatCompletionMessage("system", NarrativePatternSystemPrompt),
+            new ChatCompletionMessage("user", prompt.ToString())
+        ];
+    }
+
+    private static IReadOnlyList<ChatCompletionMessage> BuildSummaryMessages(
+        IReadOnlyList<NarrativePatternChapterDocument> chapters)
+    {
+        var prompt = new StringBuilder();
+        prompt.AppendLine("请为下列章节分别提取叙事摘要。");
+        prompt.AppendLine("必须调用工具或返回严格 JSON；summaries 必须逐章覆盖输入章节。");
+        prompt.AppendLine("每条 summary 必须携带原样 content_hash，用于证明摘要新鲜度。");
+        prompt.AppendLine();
+        foreach (var chapter in chapters)
+        {
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"## chapter_number={chapter.ChapterNumber}");
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"title: {chapter.Title}");
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"content_hash: {chapter.ContentHash}");
+            prompt.AppendLine("content:");
+            prompt.AppendLine("```text");
+            prompt.AppendLine(LimitText(chapter.Content, 12_000));
+            prompt.AppendLine("```");
+        }
+
+        return
+        [
+            new ChatCompletionMessage("system", NarrativePatternSystemPrompt),
+            new ChatCompletionMessage("user", prompt.ToString())
+        ];
+    }
+
+    private static IReadOnlyList<ChatCompletionMessage> BuildPhaseCompressionMessages(
+        IReadOnlyList<NarrativePatternBoundary> boundaries,
+        IReadOnlyList<NarrativePatternChapterSummary> summaries,
+        IReadOnlyList<NarrativePatternCompressionInput> input,
+        int targetPhaseCount)
+    {
+        var prompt = new StringBuilder();
+        prompt.AppendLine("请把输入叙事单元递归压缩成更少的叙事阶段。");
+        prompt.AppendLine("必须调用工具或返回严格 JSON；phases 必须覆盖输入单元涉及的全部章节，按升序且不得重叠。");
+        prompt.AppendLine(CultureInfo.InvariantCulture, $"目标阶段数上限：{targetPhaseCount}");
+        prompt.AppendLine();
+        prompt.AppendLine("结构边界参考：");
+        foreach (var boundary in boundaries)
+        {
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"- {boundary.StartChapter}-{boundary.EndChapter}: {boundary.Label}; {boundary.Function}");
+        }
+
+        prompt.AppendLine();
+        prompt.AppendLine("输入单元：");
+        foreach (var item in input)
+        {
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"## unit chapters={item.StartChapter}-{item.EndChapter}");
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"name: {item.Name}");
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"summary: {item.Summary}");
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"points: {string.Join(" / ", item.Points)}");
+        }
+
+        prompt.AppendLine();
+        prompt.AppendLine("原始章节摘要索引：");
+        foreach (var summary in summaries)
+        {
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"- chapter {summary.ChapterNumber}: {summary.Summary}");
+        }
+
+        return
+        [
+            new ChatCompletionMessage("system", NarrativePatternSystemPrompt),
+            new ChatCompletionMessage("user", prompt.ToString())
+        ];
+    }
+
+    private static IReadOnlyList<ChatCompletionMessage> BuildSkillMessages(
+        string requestedSkillName,
+        IReadOnlyList<NarrativePatternChapterDocument> chapters,
+        IReadOnlyList<NarrativePatternBoundary> boundaries,
+        IReadOnlyList<NarrativePatternChapterSummary> summaries,
+        IReadOnlyList<NarrativePatternPhase> phases)
+    {
+        var prompt = new StringBuilder();
+        prompt.AppendLine("请根据叙事结构边界、章节摘要和压缩阶段，生成一个可复用的 Novelist 技能 Markdown。");
+        prompt.AppendLine("输出必须是完整 Markdown，开头必须包含 YAML frontmatter。");
+        prompt.AppendLine("frontmatter 必须包含且只能使用单行值：name, description, category, mode, author, version。");
+        prompt.AppendLine("mode 只能是 auto、manual 或 always；version 必须是正整数。");
+        prompt.AppendLine("技能正文只能给出抽象叙事指导，不得复制章节原文。");
+        prompt.AppendLine(CultureInfo.InvariantCulture, $"建议技能名称：{requestedSkillName}");
+        prompt.AppendLine();
+        prompt.AppendLine("章节来源：");
+        foreach (var chapter in chapters)
+        {
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"- chapter {chapter.ChapterNumber}: {chapter.Title}; hash={chapter.ContentHash}");
+        }
+
+        prompt.AppendLine();
+        prompt.AppendLine("结构边界：");
+        foreach (var boundary in boundaries)
+        {
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"- {boundary.StartChapter}-{boundary.EndChapter}: {boundary.Label}; {boundary.Function}; evidence={boundary.Evidence}");
+        }
+
+        prompt.AppendLine();
+        prompt.AppendLine("章节摘要：");
+        foreach (var summary in summaries)
+        {
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"- chapter {summary.ChapterNumber}: {summary.Summary}; turning_points={string.Join(" / ", summary.TurningPoints)}");
+        }
+
+        prompt.AppendLine();
+        prompt.AppendLine("最终阶段：");
+        foreach (var phase in phases)
+        {
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"- {phase.StartChapter}-{phase.EndChapter}: {phase.PhaseName}; {phase.NarrativeFunction}; guidance={phase.Guidance}");
+        }
+
+        return
+        [
+            new ChatCompletionMessage("system", NarrativePatternSkillSystemPrompt),
+            new ChatCompletionMessage("user", prompt.ToString())
+        ];
+    }
+
+    private static string BuildNarrativeSkillPreview(
+        StyleSkillDocument skill,
+        string requestedSkillName,
+        NarrativePatternChapterSelection selection,
+        IReadOnlyList<NarrativePatternChapterDocument> documents)
+    {
+        var finalName = StyleSkillDocument.NormalizeSkillName(
+            string.IsNullOrWhiteSpace(skill.Name) ? requestedSkillName : skill.Name);
+        var ranges = string.Join(",", selection.ChapterRanges.Select(range =>
+            $"{range.StartChapter.ToString(CultureInfo.InvariantCulture)}-{range.EndChapter.ToString(CultureInfo.InvariantCulture)}"));
+        var hashes = string.Join(",", documents.Select(document => document.ContentHash));
+        var lines = new List<string>
+        {
+            "---",
+            $"name: {finalName}",
+            $"description: {skill.Description}",
+            $"category: {skill.Category}",
+            $"mode: {skill.Mode}",
+            $"author: {skill.Author}",
+            $"version: {skill.Version.ToString(CultureInfo.InvariantCulture)}",
+            "generated_by: narrative_pattern_extraction",
+            $"source_chapter_ranges: {ranges}",
+            $"source_chapter_hashes: {hashes}",
+            "---",
+            string.Empty,
+            skill.Body.Trim()
+        };
+
+        var preview = string.Join('\n', lines).TrimEnd() + "\n";
+        _ = StyleSkillDocument.ParseStrict(preview);
+        return preview;
+    }
+
+    private static void AppendChapterCapsules(
+        StringBuilder prompt,
+        IReadOnlyList<NarrativePatternChapterDocument> chapters,
+        int contextWindowTokens)
+    {
+        var maxChars = Math.Max(1_200, (contextWindowTokens - NarrativePatternPipeline.ReservedOutputTokens) * 3 / Math.Max(1, chapters.Count));
+        maxChars = Math.Min(maxChars, 6_000);
+        foreach (var chapter in chapters)
+        {
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"## chapter_number={chapter.ChapterNumber}");
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"title: {chapter.Title}");
+            prompt.AppendLine(CultureInfo.InvariantCulture, $"content_hash: {chapter.ContentHash}");
+            prompt.AppendLine("bounded_excerpt:");
+            prompt.AppendLine("```text");
+            prompt.AppendLine(LimitText(chapter.Content, maxChars));
+            prompt.AppendLine("```");
+        }
+    }
+
+    private static ChatToolDefinition BoundaryToolDefinition()
+    {
+        return new ChatToolDefinition(
+            "submit_narrative_boundaries",
+            "Return validated narrative structure boundaries for selected chapters.",
+            JsonSerializer.SerializeToElement(new
+            {
+                type = "object",
+                required = new[] { "schema_version", "boundaries" },
+                additionalProperties = false,
+                properties = new
+                {
+                    schema_version = new { type = "string" },
+                    boundaries = new
+                    {
+                        type = "array",
+                        items = new
+                        {
+                            type = "object",
+                            required = new[] { "start_chapter", "end_chapter", "label", "function", "evidence" },
+                            additionalProperties = false,
+                            properties = new
+                            {
+                                start_chapter = new { type = "integer", minimum = 1 },
+                                end_chapter = new { type = "integer", minimum = 1 },
+                                label = new { type = "string" },
+                                function = new { type = "string" },
+                                evidence = new { type = "string" }
+                            }
+                        }
+                    }
+                }
+            }, JsonOptions));
+    }
+
+    private static ChatToolDefinition SummaryToolDefinition()
+    {
+        return new ChatToolDefinition(
+            "submit_chapter_summaries",
+            "Return content-hash-bound chapter summaries for selected chapters.",
+            JsonSerializer.SerializeToElement(new
+            {
+                type = "object",
+                required = new[] { "schema_version", "summaries" },
+                additionalProperties = false,
+                properties = new
+                {
+                    schema_version = new { type = "string" },
+                    summaries = new
+                    {
+                        type = "array",
+                        items = new
+                        {
+                            type = "object",
+                            required = new[] { "chapter_number", "content_hash", "summary", "turning_points" },
+                            additionalProperties = false,
+                            properties = new
+                            {
+                                chapter_number = new { type = "integer", minimum = 1 },
+                                content_hash = new { type = "string" },
+                                summary = new { type = "string" },
+                                turning_points = new { type = "array", items = new { type = "string" } }
+                            }
+                        }
+                    }
+                }
+            }, JsonOptions));
+    }
+
+    private static ChatToolDefinition PhaseToolDefinition()
+    {
+        return new ChatToolDefinition(
+            "submit_narrative_phases",
+            "Return compressed narrative phases covering all source chapters.",
+            JsonSerializer.SerializeToElement(new
+            {
+                type = "object",
+                required = new[] { "schema_version", "phases" },
+                additionalProperties = false,
+                properties = new
+                {
+                    schema_version = new { type = "string" },
+                    phases = new
+                    {
+                        type = "array",
+                        items = new
+                        {
+                            type = "object",
+                            required = new[] { "start_chapter", "end_chapter", "phase_name", "narrative_function", "guidance" },
+                            additionalProperties = false,
+                            properties = new
+                            {
+                                start_chapter = new { type = "integer", minimum = 1 },
+                                end_chapter = new { type = "integer", minimum = 1 },
+                                phase_name = new { type = "string" },
+                                narrative_function = new { type = "string" },
+                                guidance = new { type = "string" }
+                            }
+                        }
+                    }
+                }
+            }, JsonOptions));
+    }
+
+    private static string PromptHash(IReadOnlyList<ChatCompletionMessage> messages)
+    {
+        return string.Join('\n', messages.Select(message => $"{message.Role}:{message.Content}"));
+    }
+
+    private static string LimitText(string content, int maxChars)
+    {
+        var normalized = (content ?? string.Empty).Trim();
+        if (normalized.Length <= maxChars)
+        {
+            return normalized;
+        }
+
+        var headLength = Math.Max(1, maxChars / 2);
+        var tailLength = Math.Max(1, maxChars - headLength);
+        return normalized[..headLength] +
+            "\n[content truncated for context-window budget]\n" +
+            normalized[^tailLength..];
+    }
+
+    private static CopyableDiagnosticPayload Diagnostic(
+        string code,
+        string message,
+        string detail,
+        string operation,
+        string taskId)
+    {
+        return new CopyableDiagnosticPayload(
+            Code: code,
+            Message: message,
+            Detail: detail.Length > MaxDiagnosticDetailLength
+                ? detail[..MaxDiagnosticDetailLength] + "\n[diagnostic truncated]"
+                : detail,
+            Operation: operation,
+            TaskId: taskId,
+            RunId: null,
+            BridgeMethod: operation,
+            Timestamp: DateTimeOffset.UtcNow);
+    }
+
     private async ValueTask<long> NormalizeNovelIdAsync(long novelId, CancellationToken cancellationToken)
     {
         if (novelId <= 0)
@@ -455,6 +1490,35 @@ public sealed class FileSystemNarrativePatternExtractionService : INarrativePatt
 
             normalized.Add(range);
             previousEnd = range.EndChapter;
+        }
+
+        return normalized;
+    }
+
+    private static IReadOnlyList<long> NormalizeSelectedChapterIds(IReadOnlyList<long>? selectedChapterIds)
+    {
+        if (selectedChapterIds is null || selectedChapterIds.Count == 0)
+        {
+            return [];
+        }
+
+        if (selectedChapterIds.Count > MaxRangeCount * 2)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(selectedChapterIds),
+                selectedChapterIds.Count,
+                $"At most {(MaxRangeCount * 2).ToString(CultureInfo.InvariantCulture)} selected chapter ids are allowed.");
+        }
+
+        if (selectedChapterIds.Any(id => id <= 0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(selectedChapterIds), "Selected chapter ids must be positive.");
+        }
+
+        var normalized = selectedChapterIds.ToArray();
+        if (normalized.Distinct().Count() != normalized.Length)
+        {
+            throw new ArgumentException("Selected chapter ids must be unique.", nameof(selectedChapterIds));
         }
 
         return normalized;
@@ -683,6 +1747,7 @@ public sealed class FileSystemNarrativePatternExtractionService : INarrativePatt
             ProgressCompleted: run.ProgressCompleted,
             ProgressTotal: run.ProgressTotal,
             ChapterRanges: run.ChapterRanges.Select(ToPayloadRange).ToArray(),
+            SelectedChapterIds: run.SelectedChapterIds.ToArray(),
             SkillName: run.SkillName,
             SkillPreview: run.SkillPreview,
             Diagnostics: run.Diagnostics.ToArray(),
@@ -862,4 +1927,28 @@ public sealed class FileSystemNarrativePatternExtractionService : INarrativePatt
         [JsonPropertyName("created_at")]
         public DateTimeOffset CreatedAt { get; set; }
     }
+
+    private sealed record ActiveNarrativePatternExtraction(CancellationTokenSource Cancellation);
+
+    private sealed record NarrativePatternCompressionInput(
+        int StartChapter,
+        int EndChapter,
+        string Name,
+        string Summary,
+        IReadOnlyList<string> Points);
+
+    private const string NarrativePatternSystemPrompt = """
+        你是一位叙事结构分析器。
+        你只能依据用户提供的章节摘录、章节号、标题和内容哈希进行分析。
+        不要引入未提供的设定、角色关系或外部资料。
+        输出必须是严格 JSON 或工具调用参数，schema_version 必须为 narrative-pattern-v1。
+        范围必须覆盖输入章节，且按章节升序排列，不得重叠或跳章。
+        """;
+
+    private const string NarrativePatternSkillSystemPrompt = """
+        你是一位负责创建 Novelist 叙事模式技能文档的写作结构分析师。
+        你只能基于用户提供的边界、摘要和阶段压缩结果生成抽象叙事指导。
+        不要复制章节原文，不要生成可直接插入章节的正文。
+        不要输出解释性前言；只输出一个可保存的 Markdown 技能文档。
+        """;
 }

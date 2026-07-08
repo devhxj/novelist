@@ -106,7 +106,16 @@ async function runFullSuite(browser, url) {
   }
 
   logStep('loading workspace')
-  const page = await newAppPage(browser, consoleErrors, pageErrors, { initialized: true }, undefined, 'full-shell')
+  const page = await newAppPage(browser, consoleErrors, pageErrors, runConfig.grep === '@update'
+    ? {
+        initialized: true,
+        settings: {
+          ...settingsFixture(42),
+          update_check_enabled: true,
+          update_check_endpoint_url: 'https://updates.example.test/latest',
+        },
+      }
+    : { initialized: true }, undefined, 'full-shell')
   await page.goto(url, { waitUntil: 'domcontentloaded' })
   await expectVisible(page.getByText('全局回归小说'), 'workspace title')
   await expectVisible(page.getByText('AI 对话'), 'chat panel')
@@ -184,6 +193,30 @@ async function runFullSuite(browser, url) {
   }
 
   if (shouldRun('@surface')) {
+    logStep('checking style sample library')
+    await verifyStyleSampleWorkflow(page)
+    await page.screenshot({ path: path.join(outputDir, 'app-08-style-samples.png'), fullPage: true })
+  }
+
+  if (shouldRun('@surface') || shouldRun('@pattern')) {
+    logStep('checking multi-range chapter selector')
+    await verifyChapterRangeSelectorWorkflow(page)
+    await page.screenshot({ path: path.join(outputDir, 'app-09-chapter-ranges.png'), fullPage: true })
+  }
+
+  if (shouldRun('@surface') || shouldRun('@git')) {
+    logStep('checking Git history workflow')
+    await verifyGitHistoryWorkflow(page, browser, url, consoleErrors, pageErrors)
+    await page.screenshot({ path: path.join(outputDir, 'app-10-git-history.png'), fullPage: true })
+  }
+
+  if (runConfig.grep === '@update') {
+    logStep('checking update workflow')
+    await verifyUpdateWorkflow(page, browser, url, consoleErrors, pageErrors)
+    await page.screenshot({ path: path.join(outputDir, 'app-11-update.png'), fullPage: true })
+  }
+
+  if (shouldRun('@surface')) {
     logStep('checking compact viewport layout')
     await verifyCompactViewportSmoke(browser, url, consoleErrors, pageErrors)
   }
@@ -197,6 +230,12 @@ async function runFullSuite(browser, url) {
     await verifyWritingBridgeCalls(page)
   } else if (runConfig.grep === '@reference-anchor') {
     await verifyReferenceBridgeCalls(page)
+  } else if (runConfig.grep === '@pattern') {
+    await verifyPatternBridgeCalls(page)
+  } else if (runConfig.grep === '@git') {
+    await verifyGitBridgeCalls(page)
+  } else if (runConfig.grep === '@update') {
+    await verifyUpdateBridgeCalls(page)
   } else {
     await verifyBridgeCalls(page)
   }
@@ -333,7 +372,7 @@ async function runUsabilitySuite(browser, url) {
   }))
 
   await clickActivity(page, '章节')
-  await expectVisible(page.getByText('章节 (2)'), 'usability chapter panel')
+  await expectVisible(page.getByText('章节 (6)'), 'usability chapter panel')
   await expectVisible(page.getByRole('button', { name: /故事状态/ }), 'usability story state control')
   await page.getByRole('button', { name: /故事状态/ }).click()
   await waitForBridgeCallArg(page, 'GetContent', 1, 'novelist.md')
@@ -467,7 +506,7 @@ async function runUsabilitySuite(browser, url) {
   await compactPage.goto(url, { waitUntil: 'domcontentloaded' })
   await clickActivity(compactPage, '章节')
   await expectVisible(compactPage.getByPlaceholder('输入消息，按 / 调用技能...'), 'usability compact chat input')
-  await expectVisible(compactPage.getByText('章节 (2)'), 'usability compact chapter side panel')
+  await expectVisible(compactPage.getByText('章节 (6)'), 'usability compact chapter side panel')
   await compactPage.screenshot({ path: path.join(outputDir, 'usability-10-compact.png'), fullPage: true })
   observations.push(usabilityObservation({
     surface: 'Compact Desktop Layout',
@@ -514,6 +553,20 @@ async function verifyBootstrapStates(browser, url, consoleErrors, pageErrors) {
   await expectVisible(emptyPage.getByText('还没有作品，创建第一部吧'), 'empty workspace bookshelf')
   await expectVisible(emptyPage.getByText('选择作品开始对话'), 'chat empty novel state')
   await emptyPage.close()
+
+  const startupRecoveryPage = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    importRecovery: mockImportRecoveryResult(),
+  }, undefined, 'bootstrap-import-recovery')
+  await startupRecoveryPage.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(startupRecoveryPage.getByRole('heading', { name: '导入恢复已处理' }), 'startup import recovery heading')
+  await expectVisible(startupRecoveryPage.getByText('已清理 1 个未完成导入'), 'startup import recovery cleaned count')
+  await expectVisible(startupRecoveryPage.getByText('1 个导入需要手动处理'), 'startup import recovery blocked count')
+  await expectVisible(startupRecoveryPage.getByText('startup-blocked-import'), 'startup import recovery blocked task id')
+  await startupRecoveryPage.getByRole('button', { name: '复制诊断' }).click()
+  await expectVisible(startupRecoveryPage.getByRole('button', { name: '已复制' }), 'startup import recovery copied state')
+  await startupRecoveryPage.screenshot({ path: path.join(outputDir, 'app-00-import-recovery.png'), fullPage: true })
+  await startupRecoveryPage.close()
 
   const startupErrorPage = await newAppPage(browser, consoleErrors, pageErrors, {
     failIsInitialized: true,
@@ -766,7 +819,7 @@ async function verifyShellNavigation(page) {
   await expectVisible(page.getByText('全局回归小说').first(), 'bookshelf novel')
 
   await clickActivity(page, '章节')
-  await expectVisible(page.getByText('章节 (2)'), 'chapter count')
+  await expectVisible(page.getByText('章节 (6)'), 'chapter count')
   await expectVisible(page.getByRole('button', { name: /故事状态/ }), 'novelist entry')
   await ensureChapterBlockExpanded(page)
   await chapterButton(page, '雨夜线索').click()
@@ -783,6 +836,14 @@ async function verifyShellNavigation(page) {
   await clickActivity(page, '参考锚定')
   await expectVisible(page.locator('aside').getByText('即将推出'), 'reference sidebar placeholder from shell navigation')
   await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'reference panel from shell navigation')
+
+  await clickActivity(page, '风格素材')
+  await expectVisible(page.getByRole('heading', { name: /风格素材/ }), 'style sample panel from shell navigation')
+  await expectVisible(page.getByText('全局雨夜节奏').first(), 'style sample fixture from shell navigation')
+
+  await clickActivity(page, 'Git 历史')
+  await expectVisible(page.getByRole('heading', { name: 'Git 历史' }), 'Git history panel from shell navigation')
+  await expectVisible(page.getByText('rename rain clue chapter').first(), 'Git history fixture from shell navigation')
 
   await clickActivity(page, '角色')
   await expectVisible(page.locator('aside').getByText(/角色 \(\d+\)/), 'characters sidebar from shell navigation')
@@ -827,7 +888,7 @@ async function verifyShellNavigation(page) {
   await expectVisible(page.getByText('累计字数'), 'profile stats from shell navigation')
 
   await clickActivity(page, '章节')
-  await expectVisible(page.getByText('章节 (2)'), 'chapter sidebar restored after profile navigation')
+  await expectVisible(page.getByText('章节 (6)'), 'chapter sidebar restored after profile navigation')
   await ensureChapterBlockExpanded(page)
   await assertSelectedChapterPath(page, 'chapters/1.md')
   await assertActiveTabTitle(page, '第1章 雨夜线索')
@@ -1010,7 +1071,7 @@ async function verifyNovelChapterWorkflow(browser, url, consoleErrors, pageError
 
   await page.locator('aside').getByRole('button', { name: '全局回归小说', exact: true }).click()
   await waitForBridgeCallArg(page, 'SetActiveNovel', 0, { novel_id: 42 })
-  await expectVisible(page.getByText('章节 (2)'), 'original novel chapter count restored')
+  await expectVisible(page.getByText('章节 (6)'), 'original novel chapter count restored')
   await assertActiveNovelId(page, 42)
 
   await clickActivity(page, '书架')
@@ -1054,7 +1115,7 @@ async function verifyNovelChapterWorkflow(browser, url, consoleErrors, pageError
   await assertActiveNovelId(page, 42)
 
   await clickActivity(page, '章节')
-  await expectVisible(page.getByText('章节 (2)'), 'updated novel chapter count')
+  await expectVisible(page.getByText('章节 (6)'), 'updated novel chapter count')
   await ensureChapterBlockExpanded(page)
   await chapterButton(page, '雨夜线索').click()
   await expectVisible(page.getByText('第1章 雨夜线索').first(), 'first chapter tab before second tab')
@@ -1069,21 +1130,21 @@ async function verifyNovelChapterWorkflow(browser, url, consoleErrors, pageError
   await page.getByPlaceholder('章节标题').fill('新章验收')
   await page.getByRole('button', { name: '添加' }).click()
   await waitForBridgeCall(page, 'CreateChapter')
-  await expectVisible(page.getByText('章节 (3)'), 'chapter count after create')
-  await ensureChapterBlockExpanded(page)
+  await expectVisible(page.getByText('章节 (7)'), 'chapter count after create')
+  await ensureChapterBlockForTitleExpanded(page, '新章验收')
   await expectVisible(chapterButton(page, '新章验收'), 'created chapter visible')
 
   await page.getByRole('button', { name: '编辑章节 新章验收' }).click({ force: true })
-  await page.locator('aside input[value="新章验收"]').fill('新章验收-改名')
+  await page.locator('aside input').first().fill('新章验收-改名')
   await page.keyboard.press('Enter')
   await waitForBridgeCall(page, 'UpdateChapterTitle')
   await expectVisible(chapterButton(page, '新章验收-改名'), 'renamed chapter visible')
 
   await chapterButton(page, '新章验收-改名').click()
-  await expectVisible(page.getByText('第3章 新章验收-改名').first(), 'renamed chapter tab')
-  await waitForBridgeCallArg(page, 'GetContent', 1, 'chapters/3.md')
-  await assertSelectedChapterPath(page, 'chapters/3.md')
-  await assertChapterTitle(page, 42, 3, '新章验收-改名')
+  await expectVisible(page.getByText('第7章 新章验收-改名').first(), 'renamed chapter tab')
+  await waitForBridgeCallArg(page, 'GetContent', 1, 'chapters/7.md')
+  await assertSelectedChapterPath(page, 'chapters/7.md')
+  await assertChapterTitle(page, 42, 7, '新章验收-改名')
 
   await assertBridgeCallCount(page, 'DeleteNovel', 1)
   await assertBridgeCallCount(page, 'SaveCover', 1)
@@ -1098,6 +1159,11 @@ async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors,
   const pickedNovelImportFile = path.join(fixtureDir, 'picker-import.txt')
   const droppedNovelImportFile = path.join(fixtureDir, 'drop-import.md')
   const droppedNovelImportUriFile = path.join(fixtureDir, 'drop-import-uri.markdown')
+  const cancelNovelImportFile = path.join(fixtureDir, 'cancel-import.txt')
+  const parserFailureImportFile = path.join(fixtureDir, 'parser-failure.txt')
+  const writeFailureImportFile = path.join(fixtureDir, 'write-failure.md')
+  const gitWarningImportFile = path.join(fixtureDir, 'git-warning.txt')
+  const skippedEpubImportFile = path.join(fixtureDir, 'skipped-chapters.epub')
   await fs.writeFile(
     pickedReferenceSourceFile,
     '# Phase 13 import/export fixture\n\n雨夜参考源只用于文件选择 mock，不读取真实用户项目。\n',
@@ -1106,6 +1172,11 @@ async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors,
   await fs.writeFile(pickedNovelImportFile, '第一章\n通过文件选择导入。', 'utf8')
   await fs.writeFile(droppedNovelImportFile, '# 第一章\n\n通过拖放导入。', 'utf8')
   await fs.writeFile(droppedNovelImportUriFile, '# 第一章\n\n通过 file URI 拖放导入。', 'utf8')
+  await fs.writeFile(cancelNovelImportFile, '第一章\n取消导入。', 'utf8')
+  await fs.writeFile(parserFailureImportFile, '这份 fixture 由 mock 模拟解析失败。', 'utf8')
+  await fs.writeFile(writeFailureImportFile, '# 第一章\n\n这份 fixture 由 mock 模拟写入失败并清理。', 'utf8')
+  await fs.writeFile(gitWarningImportFile, '第一章\n这份 fixture 由 mock 模拟 Git 警告。', 'utf8')
+  await fs.writeFile(skippedEpubImportFile, 'mock epub bytes', 'utf8')
 
   const page = await newAppPage(browser, consoleErrors, pageErrors, {
     initialized: true,
@@ -1140,22 +1211,25 @@ async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors,
 
   const pickImportBefore = await bridgeCallCount(page, 'PickNovelImportFile')
   const startImportBefore = await bridgeCallCount(page, 'StartNovelImport')
-  const getContentBeforeImport = await bridgeCallCount(page, 'GetContent')
   await page.getByRole('button', { name: '导入小说' }).click()
   await waitForBridgeCallCountAfter(page, 'PickNovelImportFile', pickImportBefore)
   await waitForBridgeCallCountAfter(page, 'StartNovelImport', startImportBefore)
+  await expectVisible(page.getByRole('dialog', { name: '小说导入完成' }), 'file-picker novel import dialog')
+  await expectVisible(page.getByText('100%'), 'file-picker novel import percent')
+  await expectVisible(page.getByText('当前章节'), 'file-picker novel import current chapter label')
+  await expectVisible(page.getByText('导入开篇').first(), 'file-picker novel import current chapter')
   await expectVisible(page.getByText('已导入：picker-import'), 'file-picker novel import success')
+  await expectHidden(page.getByText('旧导入不应显示'), 'stale novel import progress ignored')
+  await page.getByRole('button', { name: '完成' }).click()
+  await expectVisible(page.getByText('导入开篇').first(), 'first imported chapter opens after file-picker import')
+  await clickActivity(page, '书架')
   await expectVisible(novelCard(page, 'picker-import'), 'file-picker imported novel card')
   await assertLastBridgeCallInput(page, 'StartNovelImport', {
     source_path: pickedNovelImportFile,
     source_display_name: 'picker-import.txt',
     import_kind: 'txt',
   })
-  assert.equal(
-    await bridgeCallCount(page, 'GetContent'),
-    getContentBeforeImport,
-    'Novel import picker must not route source paths through generic content reads.',
-  )
+  await assertNoBridgeCallArgValue(page, 'GetContent', pickedNovelImportFile, 'Novel import picker must not route source paths through generic content reads.')
 
   const importDropzone = page.getByTestId('novel-import-dropzone')
   const dropImportBefore = await bridgeCallCount(page, 'StartNovelImport')
@@ -1179,26 +1253,23 @@ async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors,
     'Rejected novel import drops must not call StartNovelImport.',
   )
 
-  const getContentBeforeUriDrop = await bridgeCallCount(page, 'GetContent')
   await dispatchNovelImportDrop(page, {
     kind: 'fileUriText',
     uri: pathToFileURL(droppedNovelImportUriFile).href,
   })
   await waitForBridgeCallCountAfter(page, 'StartNovelImport', dropImportBefore)
+  await expectVisible(page.getByRole('dialog', { name: '小说导入完成' }), 'file URI novel import dialog')
   await expectVisible(page.getByText('已导入：drop-import-uri'), 'file URI novel import drop success')
+  await page.getByRole('button', { name: '完成' }).click()
+  await clickActivity(page, '书架')
   await expectVisible(novelCard(page, 'drop-import-uri'), 'file URI imported novel card')
   await assertLastBridgeCallInput(page, 'StartNovelImport', {
     source_path: droppedNovelImportUriFile,
     source_display_name: 'drop-import-uri.markdown',
     import_kind: 'markdown',
   })
-  assert.equal(
-    await bridgeCallCount(page, 'GetContent'),
-    getContentBeforeUriDrop,
-    'Dropped file URI novel import paths must not route through generic content reads.',
-  )
+  await assertNoBridgeCallArgValue(page, 'GetContent', droppedNovelImportUriFile, 'Dropped file URI novel import paths must not route through generic content reads.')
 
-  const getContentBeforeDrop = await bridgeCallCount(page, 'GetContent')
   const fileDropImportBefore = await bridgeCallCount(page, 'StartNovelImport')
   await importDropzone.hover()
   await dispatchNovelImportDrop(page, {
@@ -1206,18 +1277,92 @@ async function verifyImportExportFilePickerWorkflow(browser, url, consoleErrors,
     files: [{ name: 'drop-import.md', path: droppedNovelImportFile, type: 'text/markdown' }],
   })
   await waitForBridgeCallCountAfter(page, 'StartNovelImport', fileDropImportBefore)
+  await expectVisible(page.getByRole('dialog', { name: '小说导入完成' }), 'drag-drop novel import dialog')
   await expectVisible(page.getByText('已导入：drop-import'), 'drag-drop novel import success')
+  await page.getByRole('button', { name: '完成' }).click()
+  await clickActivity(page, '书架')
   await expectVisible(novelCard(page, 'drop-import'), 'drag-drop imported novel card')
   await assertLastBridgeCallInput(page, 'StartNovelImport', {
     source_path: droppedNovelImportFile,
     source_display_name: 'drop-import.md',
     import_kind: 'markdown',
   })
-  assert.equal(
-    await bridgeCallCount(page, 'GetContent'),
-    getContentBeforeDrop,
-    'Dropped novel import paths must not route through generic content reads.',
-  )
+  await assertNoBridgeCallArgValue(page, 'GetContent', droppedNovelImportFile, 'Dropped novel import paths must not route through generic content reads.')
+
+  const cancelImportBefore = await bridgeCallCount(page, 'StartNovelImport')
+  const cancelCallBefore = await bridgeCallCount(page, 'CancelNovelImport')
+  await dispatchNovelImportDrop(page, {
+    kind: 'files',
+    files: [{ name: 'cancel-import.txt', path: cancelNovelImportFile, type: 'text/plain' }],
+  })
+  await waitForBridgeCallCountAfter(page, 'StartNovelImport', cancelImportBefore)
+  await expectVisible(page.getByRole('dialog', { name: '正在导入小说' }), 'cancel import in-progress dialog')
+  await page.getByRole('button', { name: '取消导入' }).click()
+  await waitForBridgeCallCountAfter(page, 'CancelNovelImport', cancelCallBefore)
+  await expectVisible(page.getByRole('dialog', { name: '小说导入已取消' }), 'user cancel import terminal dialog')
+  await expectVisible(page.getByText('导入已取消').nth(1), 'user cancel import message')
+  await page.getByRole('button', { name: '完成' }).click()
+  await clickActivity(page, '书架')
+  await expectHidden(novelCard(page, 'cancel-import'), 'cancelled import must not leave a novel card')
+  await assertNoBridgeCallArgValue(page, 'GetContent', cancelNovelImportFile, 'Cancelled novel import paths must not route through generic content reads.')
+
+  const parserFailureBefore = await bridgeCallCount(page, 'StartNovelImport')
+  await dispatchNovelImportDrop(page, {
+    kind: 'files',
+    files: [{ name: 'parser-failure.txt', path: parserFailureImportFile, type: 'text/plain' }],
+  })
+  await waitForBridgeCallCountAfter(page, 'StartNovelImport', parserFailureBefore)
+  await expectVisible(page.getByRole('dialog', { name: '小说导入失败' }), 'parser failure import dialog')
+  await expectVisible(page.getByText('解析失败', { exact: true }), 'parser failure stage')
+  await expectVisible(page.getByText('源文件解析失败').first(), 'parser failure message')
+  await page.getByRole('button', { name: '完成' }).click()
+  await clickActivity(page, '书架')
+  await expectHidden(novelCard(page, 'parser-failure'), 'parser failure must not leave a novel card')
+  await assertNoBridgeCallArgValue(page, 'GetContent', parserFailureImportFile, 'Parser failure import paths must not route through generic content reads.')
+
+  const writeFailureBefore = await bridgeCallCount(page, 'StartNovelImport')
+  await dispatchNovelImportDrop(page, {
+    kind: 'files',
+    files: [{ name: 'write-failure.md', path: writeFailureImportFile, type: 'text/markdown' }],
+  })
+  await waitForBridgeCallCountAfter(page, 'StartNovelImport', writeFailureBefore)
+  await expectVisible(page.getByRole('dialog', { name: '小说导入失败' }), 'write failure cleanup dialog')
+  await expectVisible(page.getByText('清理完成', { exact: true }), 'write failure cleanup stage')
+  await expectVisible(page.getByText('导入写入失败，已清理未完成数据。').first(), 'write failure cleanup message')
+  await page.getByRole('button', { name: '完成' }).click()
+  await clickActivity(page, '书架')
+  await expectHidden(novelCard(page, 'write-failure'), 'write failure cleanup must not leave a novel card')
+  await assertNoBridgeCallArgValue(page, 'GetContent', writeFailureImportFile, 'Write failure import paths must not route through generic content reads.')
+
+  const gitWarningBefore = await bridgeCallCount(page, 'StartNovelImport')
+  await dispatchNovelImportDrop(page, {
+    kind: 'files',
+    files: [{ name: 'git-warning.txt', path: gitWarningImportFile, type: 'text/plain' }],
+  })
+  await waitForBridgeCallCountAfter(page, 'StartNovelImport', gitWarningBefore)
+  await expectVisible(page.getByRole('dialog', { name: '小说导入完成，有警告' }), 'git warning import dialog')
+  await expectVisible(page.getByText('导入警告'), 'git warning section')
+  await expectVisible(page.getByText('导入已完成，但 Git 提交失败。'), 'git warning message')
+  await page.getByRole('button', { name: '完成' }).click()
+  await expectVisible(page.getByText('导入开篇').first(), 'git warning import opens first chapter')
+  await clickActivity(page, '书架')
+  await expectVisible(novelCard(page, 'git-warning'), 'git warning import keeps imported novel card')
+  await assertNoBridgeCallArgValue(page, 'GetContent', gitWarningImportFile, 'Git warning import paths must not route through generic content reads.')
+
+  const skippedEpubBefore = await bridgeCallCount(page, 'StartNovelImport')
+  await dispatchNovelImportDrop(page, {
+    kind: 'files',
+    files: [{ name: 'skipped-chapters.epub', path: skippedEpubImportFile, type: 'application/epub+zip' }],
+  })
+  await waitForBridgeCallCountAfter(page, 'StartNovelImport', skippedEpubBefore)
+  await expectVisible(page.getByRole('dialog', { name: '小说导入完成' }), 'skipped EPUB import dialog')
+  await expectVisible(page.getByText('跳过 2 章'), 'skipped EPUB chapter count')
+  await expectVisible(page.getByText(/#2 空白章节 · empty_content/), 'skipped EPUB empty chapter detail')
+  await expectVisible(page.getByText(/#3 缺失章节 · missing_spine_item/), 'skipped EPUB missing chapter detail')
+  await page.getByRole('button', { name: '完成' }).click()
+  await clickActivity(page, '书架')
+  await expectVisible(novelCard(page, 'skipped-chapters'), 'skipped EPUB import keeps imported novel card')
+  await assertNoBridgeCallArgValue(page, 'GetContent', skippedEpubImportFile, 'Skipped EPUB import paths must not route through generic content reads.')
 
   await page.getByRole('button', { name: '更换封面 全局回归小说' }).click({ force: true })
   const coverInput = page.locator('input[type="file"][accept="image/*"]').first()
@@ -1269,11 +1414,25 @@ async function ensureChapterBlockExpanded(page) {
   const firstChapter = chapterButton(page, '雨夜线索')
   if (await firstChapter.isVisible()) return
 
-  const chapterBlock = page.getByRole('button', { name: /第 1 - 2 章/ })
+  const chapterBlock = page.getByRole('button', { name: /第 1 - \d+ 章/ })
   if (await chapterBlock.isVisible()) {
     await chapterBlock.click()
   }
   await expectVisible(firstChapter, 'expanded first chapter')
+}
+
+async function ensureChapterBlockForTitleExpanded(page, title) {
+  const target = chapterButton(page, title)
+  if (await target.isVisible()) return
+
+  const blocks = page.locator('aside').getByRole('button', { name: /第 \d+( - \d+)? 章/ })
+  const count = await blocks.count()
+  for (let index = 0; index < count; index += 1) {
+    await blocks.nth(index).click()
+    if (await target.isVisible()) return
+  }
+
+  await expectVisible(target, `expanded chapter ${title}`)
 }
 
 function chapterButton(page, title) {
@@ -1404,9 +1563,13 @@ async function verifySettingsWorkflow(page) {
   await expectVisible(page.getByText('设置').first(), 'settings dialog')
   await expectVisible(page.getByText('基础设置'), 'general tab')
   await expectVisible(page.locator('input[value="D:\\\\NovelistData"]'), 'data directory')
+  const dialog = settingsDialog(page)
+  await expectVisible(dialog.getByText('Git 提交作者'), 'git author settings section')
+  await expectVisible(dialog.getByLabel('作者名称'), 'git author name input')
+  await expectVisible(dialog.getByLabel('作者邮箱'), 'git author email input')
+  await expectVisible(dialog.getByRole('button', { name: '保存 Git 作者' }), 'git author save button')
 
   await page.getByRole('button', { name: /模型配置/ }).click()
-  const dialog = settingsDialog(page)
   await expectVisible(page.getByText('内置服务商'), 'builtin model config')
   await expectVisible(dialog.getByText('Mock Provider'), 'builtin provider name')
   await expectVisible(dialog.getByText('Mock GPT'), 'builtin model name')
@@ -1422,8 +1585,55 @@ async function verifySettingsPersistenceWorkflow(browser, url, consoleErrors, pa
   await expectVisible(page.getByText('全局回归小说'), 'settings persistence workspace')
 
   await page.locator('header').getByTitle('设置').click()
-  const dialog = settingsDialog(page)
+  let dialog = settingsDialog(page)
   await expectVisible(dialog.getByText('基础设置'), 'settings persistence dialog')
+
+  await expectVisible(dialog.getByText('Git 提交作者'), 'git author settings pane')
+  const authorName = dialog.getByLabel('作者名称')
+  const authorEmail = dialog.getByLabel('作者邮箱')
+  await expectInputValue(authorName, '', 'default git author name')
+  await expectInputValue(authorEmail, '', 'default git author email')
+
+  const initialGitAuthorSaveCount = await bridgeCallCount(page, 'SaveGitAuthorSettings')
+  await authorName.fill('Mock Git Author')
+  await dialog.getByRole('button', { name: '保存 Git 作者' }).click()
+  await expectVisible(dialog.getByText('Git 作者名称和邮箱必须同时填写'), 'git author paired validation')
+  await assertBridgeCallCount(page, 'SaveGitAuthorSettings', initialGitAuthorSaveCount)
+
+  await authorEmail.fill('not an email')
+  await dialog.getByRole('button', { name: '保存 Git 作者' }).click()
+  await expectVisible(dialog.getByText('请输入有效的 Git 作者邮箱'), 'git author email validation')
+  await assertBridgeCallCount(page, 'SaveGitAuthorSettings', initialGitAuthorSaveCount)
+
+  await authorEmail.fill('mock.git@example.com')
+  await dialog.getByRole('button', { name: '保存 Git 作者' }).click()
+  await waitForBridgeCallCountAfter(page, 'SaveGitAuthorSettings', initialGitAuthorSaveCount)
+  await expectVisible(dialog.getByText('Git 作者设置已保存'), 'git author settings saved')
+  await assertLastBridgeCallInput(page, 'SaveGitAuthorSettings', {
+    name: 'Mock Git Author',
+    email: 'mock.git@example.com',
+  })
+
+  await page.locator('.fixed').getByRole('button', { name: '✕' }).click()
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await expectVisible(page.getByText('全局回归小说'), 'settings persistence workspace after reload')
+  await page.locator('header').getByTitle('设置').click()
+  dialog = settingsDialog(page)
+  await expectVisible(dialog.getByText('基础设置'), 'settings dialog after reload')
+  await expectInputValue(dialog.getByLabel('作者名称'), 'Mock Git Author', 'persisted git author name')
+  await expectInputValue(dialog.getByLabel('作者邮箱'), 'mock.git@example.com', 'persisted git author email')
+
+  const clearGitAuthorSaveCount = await bridgeCallCount(page, 'SaveGitAuthorSettings')
+  await dialog.getByLabel('作者名称').fill('')
+  await dialog.getByLabel('作者邮箱').fill('')
+  await dialog.getByRole('button', { name: '保存 Git 作者' }).click()
+  await waitForBridgeCallCountAfter(page, 'SaveGitAuthorSettings', clearGitAuthorSaveCount)
+  await expectVisible(dialog.getByText('Git 作者设置已清空，将使用默认身份'), 'git author settings cleared')
+  await assertLastBridgeCallInput(page, 'SaveGitAuthorSettings', {
+    name: '',
+    email: '',
+  })
+
   await dialog.getByRole('button', { name: /模型配置/ }).click()
   await expectVisible(dialog.getByText('内置服务商'), 'model settings pane')
 
@@ -1532,6 +1742,7 @@ async function verifySettingsFailureWorkflow(browser, url, consoleErrors, pageEr
     faults: {
       TestConnection: { mode: 'validation', message: '模拟模型连通失败' },
       SaveEmbeddingConfig: { mode: 'storage', message: '模拟 Embedding 保存失败' },
+      SaveGitAuthorSettings: { mode: 'storage', message: '模拟 Git 作者保存失败' },
     },
   }, undefined, 'settings-failures')
   await page.goto(url, { waitUntil: 'domcontentloaded' })
@@ -1540,6 +1751,12 @@ async function verifySettingsFailureWorkflow(browser, url, consoleErrors, pageEr
   await page.locator('header').getByTitle('设置').click()
   const dialog = settingsDialog(page)
   await expectVisible(dialog.getByText('基础设置'), 'settings failure dialog')
+  await dialog.getByLabel('作者名称').fill('Failed Git Author')
+  await dialog.getByLabel('作者邮箱').fill('failed.git@example.com')
+  await dialog.getByRole('button', { name: '保存 Git 作者' }).click()
+  await waitForBridgeCall(page, 'SaveGitAuthorSettings')
+  await expectVisible(dialog.getByText('模拟 Git 作者保存失败'), 'git author save failure message')
+
   await dialog.getByRole('button', { name: /模型配置/ }).click()
 
   await dialog.getByPlaceholder('输入 API Key').first().fill('mock-settings-key')
@@ -1561,6 +1778,79 @@ async function verifySettingsFailureWorkflow(browser, url, consoleErrors, pageEr
   await assertBridgeCallCount(page, 'SaveContent', 0)
   await assertSettingsCallsUseMockCredentials(page)
   await page.close()
+}
+
+async function verifyUpdateWorkflow(page, browser, url, consoleErrors, pageErrors) {
+  await expectVisible(page.getByRole('heading', { name: '发现新版本 v2.0.0' }), 'automatic update dialog')
+  await assertLastBridgeCallInput(page, 'CheckForUpdates', {
+    manual: false,
+  })
+  const dismissCount = await bridgeCallCount(page, 'SaveUpdateCheckSettings')
+  await page.getByRole('button', { name: '忽略此版本' }).click()
+  await waitForBridgeCallCountAfter(page, 'SaveUpdateCheckSettings', dismissCount)
+  await assertLastBridgeCallInput(page, 'SaveUpdateCheckSettings', {
+    enabled: true,
+    endpoint_url: 'https://updates.example.test/latest',
+    dismissed_version: 'v2.0.0',
+  })
+  await expectHidden(page.getByRole('heading', { name: '发现新版本 v2.0.0' }), 'dismissed automatic update dialog')
+
+  await page.locator('header').getByTitle('设置').click()
+  const dialog = settingsDialog(page)
+  await expectVisible(dialog.getByText('更新检查'), 'update settings section')
+  await expectInputValue(dialog.locator('#update-check-endpoint'), 'https://updates.example.test/latest', 'persisted update endpoint')
+
+  await dialog.locator('#update-check-endpoint').fill('file:///tmp/latest.json')
+  await dialog.getByRole('button', { name: '立即检查' }).click()
+  await expectVisible(dialog.getByText('更新检查 endpoint 必须是 HTTPS 地址'), 'update endpoint validation')
+
+  await dialog.locator('#update-check-endpoint').fill('https://updates.example.test/latest')
+  await page.evaluate(() => { window.__appMockState.nextUpdateCheckMode = 'no_update' })
+  const manualNoUpdateCount = await bridgeCallCount(page, 'CheckForUpdates')
+  await dialog.getByRole('button', { name: '立即检查' }).click()
+  await waitForBridgeCallCountAfter(page, 'CheckForUpdates', manualNoUpdateCount)
+  await expectVisible(dialog.getByText('当前已是最新版本'), 'manual no-update result')
+  await assertLastBridgeCallInput(page, 'CheckForUpdates', {
+    manual: true,
+  })
+
+  await page.evaluate(() => { window.__appMockState.nextUpdateCheckMode = 'failed' })
+  const manualFailureCount = await bridgeCallCount(page, 'CheckForUpdates')
+  await dialog.getByRole('button', { name: '立即检查' }).click()
+  await waitForBridgeCallCountAfter(page, 'CheckForUpdates', manualFailureCount)
+  await expectVisible(dialog.getByText('模拟更新检查失败'), 'manual update failure result')
+
+  await page.evaluate(() => { window.__appMockState.nextUpdateCheckMode = 'available' })
+  const manualAvailableCount = await bridgeCallCount(page, 'CheckForUpdates')
+  await dialog.getByRole('button', { name: '立即检查' }).click()
+  await waitForBridgeCallCountAfter(page, 'CheckForUpdates', manualAvailableCount)
+  await expectVisible(page.getByRole('heading', { name: '发现新版本 v2.0.0' }), 'manual update dialog')
+  await expectVisible(page.getByText('安全更新'), 'release notes rendered as markdown text')
+  const openCount = await bridgeCallCount(page, 'runtime.shell.openExternal')
+  await page.getByRole('button', { name: '查看发布页' }).click()
+  await waitForBridgeCallCountAfter(page, 'runtime.shell.openExternal', openCount)
+  const openedRelease = await page.evaluate(() => {
+    const calls = window.__appMockState.calls.filter((call) => call.method === 'runtime.shell.openExternal')
+    return calls.at(-1)?.payload?.url ?? null
+  })
+  assert.equal(openedRelease, 'https://updates.example.test/releases/v2.0.0')
+  await page.getByRole('button', { name: '关闭更新提示' }).click()
+  await page.locator('.fixed').getByRole('button', { name: '✕' }).click()
+
+  const noUpdatePage = await newAppPage(browser, consoleErrors, pageErrors, {
+    initialized: true,
+    settings: {
+      ...settingsFixture(42),
+      update_check_enabled: true,
+      update_check_endpoint_url: 'https://updates.example.test/latest',
+    },
+    updateCheckMode: 'no_update',
+  }, undefined, 'update-auto-no-update')
+  await noUpdatePage.goto(url, { waitUntil: 'domcontentloaded' })
+  await expectVisible(noUpdatePage.getByText('全局回归小说'), 'no-update workspace')
+  await expectHidden(noUpdatePage.getByText('发现新版本'), 'no automatic dialog when current version is latest')
+  await assertBridgeCallCount(noUpdatePage, 'runtime.shell.openExternal', 0)
+  await noUpdatePage.close()
 }
 
 async function verifyMetadataPanels(page) {
@@ -1614,8 +1904,16 @@ async function verifyCompactViewportSmoke(browser, url, consoleErrors, pageError
   await expectVisible(page.locator('aside').getByText('即将推出'), 'compact reference sidebar placeholder')
   await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'compact reference surface')
 
+  await clickActivity(page, '风格素材')
+  await expectVisible(page.getByRole('heading', { name: /风格素材/ }), 'compact style sample surface')
+  await expectVisible(page.getByText('全局雨夜节奏').first(), 'compact style sample card')
+
+  await clickActivity(page, 'Git 历史')
+  await expectVisible(page.getByRole('heading', { name: 'Git 历史' }), 'compact Git history surface')
+  await expectVisible(page.getByText('rename rain clue chapter').first(), 'compact Git history fixture')
+
   await clickActivity(page, '章节')
-  await expectVisible(page.getByText('章节 (2)'), 'compact chapter sidebar restored')
+  await expectVisible(page.getByText('章节 (6)'), 'compact chapter sidebar restored')
   await ensureChapterBlockExpanded(page)
   await assertSelectedChapterPath(page, 'chapters/1.md')
   await assertActiveTabTitle(page, '第1章 雨夜线索')
@@ -1623,7 +1921,7 @@ async function verifyCompactViewportSmoke(browser, url, consoleErrors, pageError
   await expectVisible(page.getByPlaceholder('输入消息，按 / 调用技能...'), 'compact chat restored after activity transitions')
 
   await assertBridgeCallCount(page, 'SaveContent', 0)
-  await page.screenshot({ path: path.join(outputDir, 'app-08-compact.png'), fullPage: true })
+  await page.screenshot({ path: path.join(outputDir, 'app-09-compact.png'), fullPage: true })
   await page.close()
 }
 
@@ -1932,6 +2230,384 @@ async function verifyReferenceSmoke(page) {
   await expectVisible(page.getByText('默认编排').first(), 'orchestration panel')
 }
 
+async function verifyStyleSampleWorkflow(page) {
+  await clickActivity(page, '风格素材')
+  await expectVisible(page.getByRole('heading', { name: /风格素材/ }), 'style sample heading')
+  await expectVisible(page.getByText('全局雨夜节奏').first(), 'global style sample card')
+  await expectVisible(page.getByText('词数').first(), 'style sample word count label')
+  await expectVisible(page.getByText('26').first(), 'style sample word count value')
+  await expectVisible(page.getByText('句长分布').first(), 'style sample distribution label')
+
+  await page.getByRole('checkbox', { name: '选择样本 全局雨夜节奏' }).check()
+  await expectVisible(page.getByText('已选 1 个样本').first(), 'style sample selected state')
+
+  await page.getByRole('button', { name: '仅当前作品' }).click()
+  await expectHidden(page.getByText('全局雨夜节奏').first(), 'global style sample hidden by novel-only filter')
+  await expectVisible(page.getByText('近身内心动作').first(), 'local style sample remains visible')
+
+  await page.getByRole('button', { name: '包含全局' }).click()
+  await page.getByPlaceholder('搜索样本...').fill('对白')
+  await expectVisible(page.getByText('全局雨夜节奏').first(), 'style sample search result')
+  await expectHidden(page.getByText('近身内心动作').first(), 'style sample query hides nonmatching local sample')
+
+  await page.getByPlaceholder('标签过滤...').fill('克制')
+  await expectVisible(page.getByText('全局雨夜节奏').first(), 'style sample tag filter result')
+
+  await page.getByRole('button', { name: '清除筛选' }).click()
+  await expectVisible(page.getByText('第 1 / 2 页').first(), 'style sample first page status')
+  await page.getByRole('button', { name: '下一页' }).click()
+  await expectVisible(page.getByText('段落留白记录').first(), 'style sample second page item')
+  await expectVisible(page.getByText('第 2 / 2 页').first(), 'style sample second page status')
+  await page.getByRole('button', { name: '上一页' }).click()
+
+  await page.getByRole('button', { name: '新建样本' }).click()
+  await page.locator('form').getByLabel('样本名称').fill('新建雨声样本')
+  await page.locator('form').getByLabel('样本内容').fill('雨落在窗上。她没有解释。')
+  await page.locator('form').getByLabel('标签').fill('雨夜;新建')
+  await page.getByRole('button', { name: '保存样本' }).click()
+  await expectVisible(page.getByText('新建雨声样本').first(), 'created style sample card')
+
+  await page.getByRole('button', { name: '编辑 新建雨声样本' }).click()
+  await page.locator('form').getByLabel('样本名称').fill('新建雨声样本修订')
+  await page.getByRole('button', { name: '保存样本' }).click()
+  await expectVisible(page.getByText('新建雨声样本修订').first(), 'updated style sample card')
+
+  await page.evaluate(() => { window.__appMockState.failNextStyleSampleDelete = true })
+  await page.getByRole('button', { name: '删除 新建雨声样本修订' }).click()
+  await expectVisible(page.getByText('模拟样本删除失败'), 'style sample delete failure message')
+  await expectVisible(page.getByText('新建雨声样本修订').first(), 'style sample remains after delete failure')
+
+  await page.getByRole('button', { name: '删除 新建雨声样本修订' }).click()
+  await expectHidden(page.getByText('新建雨声样本修订').first(), 'style sample removed after confirmed delete')
+
+  await page.getByRole('button', { name: '查看样本 全局雨夜节奏' }).click()
+  await expectVisible(page.getByText('完整统计'), 'style sample detail stats section')
+  await expectVisible(page.getByText('引号密度'), 'style sample quote density stat')
+  await expectVisible(page.getByText('段落均长'), 'style sample paragraph stat')
+
+  await expectVisible(page.getByRole('heading', { name: '风格技能抽取' }), 'style extraction panel')
+  await page.getByLabel('技能名称').fill('全局雨夜技能')
+  await page.getByRole('button', { name: '开始抽取' }).click()
+  await expectVisible(page.getByRole('heading', { name: '技能预览' }), 'style skill preview')
+  await expectVisible(page.getByText('source_sample_ids: 1'), 'style skill source sample ids')
+  await expectVisible(page.getByText('短句推进，动作留白。'), 'style skill generated guidance')
+  await page.getByRole('button', { name: '保存技能' }).click()
+  await waitForSaveContent(page, 'skills/全局雨夜技能.md', 'source_sample_ids: 1')
+  await expectVisible(page.getByText('技能已保存').first(), 'style skill saved state')
+
+  await page.getByLabel('画像标题').fill('样本风格画像')
+  await page.getByRole('button', { name: '构建画像' }).click()
+  await expectVisible(page.getByText('风格画像已构建').first(), 'style sample profile built state')
+
+  const profileBuildCall = await page.evaluate(() =>
+    window.__appMockState.calls.find((call) => call.method === 'BuildReferenceStyleProfile'))
+  assert(profileBuildCall, 'style sample workflow must build a reference style profile from selected samples')
+  assert.deepEqual(profileBuildCall.args?.[0]?.style_sample_ids, [1], 'style sample profile build must pass selected style_sample_ids')
+  assert.deepEqual(profileBuildCall.args?.[0]?.anchor_ids, [], 'style sample profile build must not fabricate reference anchors')
+  const sampleProfile = await page.evaluate(() =>
+    window.__appMockState.referenceStyleProfiles?.find((profile) =>
+      Array.isArray(profile.source_style_sample_ids) &&
+      profile.source_style_sample_ids.includes(1)))
+  assert(sampleProfile, 'style sample workflow must persist a mock reference style profile payload')
+  assert.deepEqual(sampleProfile.source_anchor_ids, [], 'sample-backed profile payload must not contain fabricated anchors')
+  assert.deepEqual(sampleProfile.source_style_sample_ids, [1], 'sample-backed profile payload must preserve source style sample ids')
+  assert(sampleProfile.evidence_spans?.length > 0, 'sample-backed profile payload must include source evidence')
+  assert(
+    sampleProfile.evidence_spans.every((evidence) =>
+      evidence.source_type === 'style_sample' &&
+      evidence.style_sample_id === 1 &&
+      !Object.prototype.hasOwnProperty.call(evidence, 'text') &&
+      !Object.prototype.hasOwnProperty.call(evidence, 'content')),
+    'sample-backed profile evidence must use sample source metadata without copied text')
+
+  await page.evaluate(() => { window.__appMockState.nextStyleSkillExtractionDelayMs = 900 })
+  await page.getByLabel('技能名称').fill('取消风格技能')
+  await page.getByRole('button', { name: '开始抽取' }).click()
+  await expectVisible(page.getByRole('button', { name: '取消抽取' }), 'style extraction cancel button')
+  await page.getByRole('button', { name: '取消抽取' }).click()
+  await expectVisible(page.getByText('抽取已取消').first(), 'style extraction cancelled state')
+
+  await page.evaluate(() => { window.__appMockState.nextStyleSkillExtractionMode = 'invalid_frontmatter' })
+  await page.getByLabel('技能名称').fill('坏格式风格')
+  await page.getByRole('button', { name: '开始抽取' }).click()
+  await expectVisible(page.getByText('模型返回的技能 Markdown 未通过校验').first(), 'style extraction validation failure')
+
+  await page.getByLabel('技能名称').fill('保存失败风格')
+  await page.getByRole('button', { name: '开始抽取' }).click()
+  await expectVisible(page.getByRole('heading', { name: '技能预览' }), 'style skill preview before save failure')
+  await page.evaluate(() => { window.__appMockState.failNextSaveContent = true })
+  await page.getByRole('button', { name: '保存技能' }).click()
+  await expectVisible(page.getByText('模拟保存失败，请重试').first(), 'style skill save failure message')
+
+  const chapterSaves = await page.evaluate(() =>
+    window.__appMockState.calls
+      .filter((call) => call.method === 'SaveContent')
+      .map((call) => String(call.args?.[0]?.path ?? ''))
+      .filter((path) => path.startsWith('chapters/')))
+  assert.deepEqual(chapterSaves, [], 'style sample workflow must not mutate chapter content')
+
+  const bypassMethods = await page.evaluate(() =>
+    window.__appMockState.calls
+      .map((call) => call.method)
+      .filter((method) => method === 'ApproveReferenceChapterBlueprint' || method === 'BindReferenceBlueprintMaterials'))
+  assert.deepEqual(bypassMethods, [], 'style sample workflow must not approve or bind reference blueprints')
+}
+
+async function verifyChapterRangeSelectorWorkflow(page) {
+  await clickActivity(page, '叙事模式')
+  await expectVisible(page.getByRole('heading', { name: '叙事模式' }), 'narrative pattern heading')
+  await expectVisible(page.getByRole('heading', { name: '章节范围' }), 'chapter range selector heading')
+  await expectVisible(page.getByText('全部 6 章'), 'initial all chapter summary')
+  await expectVisible(page.getByText('chapter_ranges=1-6'), 'initial backend range payload')
+
+  await page.getByRole('button', { name: '清空' }).click()
+  await expectVisible(page.getByText('未选择章节 / 共 6 章'), 'cleared chapter range summary')
+  await expectVisible(page.getByText('未选择章节').first(), 'cleared backend range status')
+
+  await page.getByLabel('起始').fill('2')
+  await page.getByLabel('结束').fill('4')
+  await page.getByRole('button', { name: '添加范围' }).click()
+  await expectVisible(page.getByText('已选 3 / 6 章：第 2-4 章'), 'single chapter range summary')
+  await expectVisible(page.getByText('chapter_ranges=2-4'), 'single backend range payload')
+
+  await page.getByLabel('起始').fill('4')
+  await page.getByLabel('结束').fill('6')
+  await page.getByRole('button', { name: '添加范围' }).click()
+  await expectVisible(page.getByText('已选 5 / 6 章：第 2-6 章'), 'merged overlapping chapter range summary')
+  await expectVisible(page.getByText('chapter_ranges=2-6'), 'merged backend range payload')
+
+  await page.getByLabel('搜索章节').fill('钟楼')
+  const selector = page.locator('main').getByRole('region', { name: '章节范围' })
+  await expectVisible(selector.getByText('钟楼回声').first(), 'chapter range search result')
+  await expectHidden(selector.getByText('雨夜线索').first(), 'chapter range search hides unmatched chapter')
+  await page.getByLabel('搜索章节').fill('')
+
+  await page.getByLabel('选择章节 3 钟楼回声').uncheck()
+  await expectVisible(page.getByText('已选 4 / 6 章：第 2、4-6 章'), 'individual chapter toggle splits range')
+  await expectVisible(page.getByText('chapter_ranges=2-2,4-6'), 'split backend range payload')
+
+  await page.getByRole('button', { name: '反选' }).click()
+  await expectVisible(page.getByText('已选 2 / 6 章：第 1、3 章'), 'inverted range summary')
+  await expectVisible(page.getByText('chapter_ranges=1-1,3-3'), 'inverted backend range payload')
+
+  await page.getByRole('button', { name: '全部' }).click()
+  await expectVisible(page.getByText('全部 6 章'), 'all-chapter range summary after button')
+  await expectVisible(page.getByText('chapter_ranges=1-6'), 'all backend range payload')
+
+  await page.getByRole('button', { name: '锁定选择' }).click()
+  await expectVisible(page.getByRole('button', { name: '已锁定' }), 'locked selector state')
+  await assertDisabled(page.getByRole('button', { name: '清空' }), 'clear button disabled while selector locked')
+  await assertDisabled(page.getByLabel('搜索章节'), 'search disabled while selector locked')
+  await assertDisabled(page.getByLabel('选择章节 1 雨夜线索'), 'chapter checkbox disabled while selector locked')
+
+  const patternCalls = await page.evaluate(() =>
+    window.__appMockState.calls
+      .map((call) => call.method)
+      .filter((method) => method === 'StartNarrativePatternExtraction'))
+  assert.deepEqual(patternCalls, [], 'chapter selector task must not start narrative extraction')
+
+  await page.getByRole('button', { name: '已锁定' }).click()
+  await page.getByLabel('技能名称').fill('雨夜结构技能')
+  await page.getByRole('button', { name: '开始抽取' }).click()
+  await expectVisible(page.getByText('正在识别叙事边界。'), 'narrative pattern boundary progress')
+  await expectVisible(page.getByText('章节摘要已完成。'), 'narrative pattern summary progress')
+  await expectVisible(page.getByText('正在压缩叙事阶段：轮次 1，批次 1/1。'), 'narrative pattern phase progress')
+  await expectVisible(page.getByRole('heading', { name: '技能预览' }), 'narrative pattern skill preview panel')
+  await expectVisible(page.getByText('generated_by: narrative_pattern_extraction'), 'narrative pattern skill provenance')
+  await expectVisible(page.getByText('## 边界提示'), 'narrative pattern boundary inspectable preview')
+  await expectVisible(page.getByText('## 章节摘要'), 'narrative pattern summary inspectable preview')
+  await expectVisible(page.getByText('## 阶段压缩'), 'narrative pattern phase inspectable preview')
+  await expectVisible(page.getByText('Trace entries (5)'), 'narrative pattern trace entries')
+
+  await page.getByRole('button', { name: '保存技能' }).click()
+  await waitForSaveContent(page, 'skills/雨夜结构技能.md', 'generated_by: narrative_pattern_extraction')
+  await expectVisible(page.getByText('技能已保存。').first(), 'narrative pattern saved state')
+
+  const successfulStart = await page.evaluate(() =>
+    window.__appMockState.calls
+      .filter((call) => call.method === 'StartNarrativePatternExtraction')
+      .at(-1))
+  assert(successfulStart, 'narrative pattern workflow must call StartNarrativePatternExtraction')
+  assert.deepEqual(successfulStart.args?.[0]?.chapter_ranges, [{ start_chapter: 1, end_chapter: 6 }], 'narrative pattern start must pass normalized chapter_ranges')
+  assert.equal(successfulStart.args?.[0]?.selected_chapter_ids, null, 'narrative pattern start should let backend derive ids from chapter_ranges for large selections')
+  assert.equal(successfulStart.args?.[0]?.provider_name, 'mock', 'narrative pattern start must pass provider')
+  assert.equal(successfulStart.args?.[0]?.model_id, 'gpt', 'narrative pattern start must pass model id')
+
+  const progressStages = await page.evaluate(() =>
+    window.__appMockState.emittedEvents
+      .filter((event) => event.name === 'narrative_pattern_extraction:progress')
+      .map((event) => event.payload.stage))
+  assert.deepEqual(
+    progressStages.slice(0, 6),
+    ['load_chapters', 'boundary_detection', 'chapter_summary', 'chapter_summary', 'phase_compression', 'skill_generation'],
+    'narrative pattern progress events must keep pipeline ordering')
+
+  await page.getByRole('button', { name: '清空' }).click()
+  await page.getByLabel('选择章节 1 雨夜线索').check()
+  await page.getByLabel('技能名称').fill('章节不足技能')
+  await page.getByRole('button', { name: '开始抽取' }).click()
+  await expectVisible(page.getByText('可用章节不足，无法抽取叙事模式。').first(), 'narrative pattern insufficient chapters error')
+  await page.getByRole('button', { name: /复制诊断|已复制|复制失败/ }).first().click()
+
+  await page.getByRole('button', { name: '全部' }).click()
+  await page.evaluate(() => { window.__appMockState.nextNarrativePatternMode = 'invalid_model' })
+  await page.getByLabel('技能名称').fill('坏输出技能')
+  await page.getByRole('button', { name: '开始抽取' }).click()
+  await expectVisible(page.getByText('模型返回的边界 JSON 无法解析。').first(), 'narrative pattern invalid model output error')
+
+  await page.evaluate(() => { window.__appMockState.nextNarrativePatternDelayMs = 900 })
+  await page.getByLabel('技能名称').fill('取消叙事技能')
+  await page.getByRole('button', { name: '开始抽取' }).click()
+  await expectVisible(page.getByRole('button', { name: '取消抽取' }), 'narrative pattern cancel button')
+  await page.getByRole('button', { name: '取消抽取' }).click()
+  await expectVisible(page.getByText('叙事模式抽取已取消。').first(), 'narrative pattern cancelled state')
+
+  const chapterSaves = await page.evaluate(() =>
+    window.__appMockState.calls
+      .filter((call) => call.method === 'SaveContent')
+      .map((call) => String(call.args?.[0]?.path ?? ''))
+      .filter((path) => path.startsWith('chapters/')))
+  assert.deepEqual(chapterSaves, [], 'narrative pattern workflow must not mutate chapter content')
+}
+
+async function verifyGitHistoryWorkflow(page, browser, url, consoleErrors, pageErrors) {
+  await clickActivity(page, 'Git 历史')
+  await expectVisible(page.getByRole('heading', { name: 'Git 历史' }), 'Git history heading')
+  await expectVisible(page.getByText('4 个提交'), 'Git history total count')
+  await expectVisible(page.getByText('rename rain clue chapter').first(), 'Git history first commit')
+  await expectVisible(page.getByText('delete obsolete note').first(), 'Git history second commit')
+  await expectVisible(page.getByText('add outline seed').first(), 'Git history third commit')
+
+  await page.getByRole('button', { name: /rename rain clue chapter/ }).click()
+  await expectVisible(page.getByText('chapters/renamed-rain.md').first(), 'renamed file entry')
+  await expectVisible(page.getByText('chapters/rain.md -> chapters/renamed-rain.md').first(), 'renamed file old path marker')
+  await expectVisible(page.getByText('covers/rain.bin').first(), 'binary file entry')
+
+  await page.getByRole('button', { name: /chapters\/renamed-rain\.md/ }).click()
+  await expectVisible(page.getByRole('heading', { name: 'chapters/renamed-rain.md' }), 'renamed diff heading')
+  await expectVisible(page.getByText('重命名').first(), 'renamed diff badge')
+  await expectVisible(page.getByText('chapters/rain.md -> chapters/renamed-rain.md').first(), 'renamed diff path')
+  await expectVisible(page.getByText('old rain clue').first(), 'renamed original content')
+  await expectVisible(page.getByText('new rain clue').first(), 'renamed modified content')
+
+  await page.getByRole('button', { name: /notes\/rhythm\.md/ }).click()
+  await expectVisible(page.getByRole('heading', { name: 'notes/rhythm.md' }), 'modified diff heading')
+  await expectVisible(page.getByText('内容已截断'), 'truncated diff state')
+
+  await page.getByRole('button', { name: /covers\/rain\.bin/ }).click()
+  await expectVisible(page.getByRole('heading', { name: 'covers/rain.bin' }), 'binary diff heading')
+  await expectVisible(page.getByText('二进制文件不展示文本 diff'), 'binary diff state')
+
+  await page.getByRole('button', { name: /delete obsolete note/ }).click()
+  await expectVisible(page.getByText('notes/deleted.md').first(), 'deleted file entry')
+  await page.getByRole('button', { name: /notes\/deleted\.md/ }).click()
+  await expectVisible(page.getByRole('heading', { name: 'notes/deleted.md' }), 'deleted diff heading')
+  await expectVisible(page.getByText('旧笔记将被删除。').first(), 'deleted original content')
+  await expectVisible(page.getByText('无修改后内容'), 'deleted modified content empty state')
+
+  await page.getByRole('button', { name: /add outline seed/ }).click()
+  await expectVisible(page.getByText('chapters/new-outline.md').first(), 'added file entry')
+  await page.getByRole('button', { name: /chapters\/new-outline\.md/ }).click()
+  await expectVisible(page.getByRole('heading', { name: 'chapters/new-outline.md' }), 'added diff heading')
+  await expectVisible(page.getByText('新增').first(), 'added diff badge')
+  await expectVisible(page.getByText('无原始内容'), 'added original content empty state')
+  await expectVisible(page.getByText('新的章节纲要。').first(), 'added modified content')
+
+  const olderCommit = page.getByText('initial import').first()
+  if (!(await olderCommit.isVisible().catch(() => false))) {
+    const loadOlder = page.getByRole('button', { name: '加载更早提交' })
+    if (await loadOlder.isVisible().catch(() => false)) {
+      await loadOlder.click()
+    }
+  }
+  await expectVisible(olderCommit, 'older Git commit after cursor paging')
+  await expectVisible(page.getByText('已到最早提交'), 'Git history end marker')
+
+  const gitCalls = await page.evaluate(() =>
+    window.__appMockState.calls
+      .filter((call) => call.method === 'GetGitCommits')
+      .map((call) => call.args?.[0] ?? null))
+  assert(gitCalls.length >= 2, 'Git history workflow must request at least two commit pages')
+  assert(
+    gitCalls.some((input) => input?.cursor_commit_id === 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+    'Git history paging must send the previous page cursor_commit_id')
+
+  await page.getByRole('button', { name: /复制诊断|已复制|复制失败/ }).click()
+
+  await verifyGitHistoryEmptyRepo(browser, url, consoleErrors, pageErrors)
+  await verifyGitHistoryFailureRecovery(browser, url, consoleErrors, pageErrors)
+  await verifyGitHistoryCompactViewport(browser, url, consoleErrors, pageErrors)
+}
+
+async function verifyGitHistoryEmptyRepo(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(
+    browser,
+    consoleErrors,
+    pageErrors,
+    {
+      initialized: true,
+      gitCommits: [],
+      gitCommitFilesByCommitId: {},
+      gitDiffsByCommitAndPath: {},
+    },
+    { width: 1100, height: 780 },
+    'git-empty-repo',
+  )
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await clickActivity(page, 'Git 历史')
+  await expectVisible(page.getByText('0 个提交'), 'empty Git history count')
+  await expectVisible(page.getByText('暂无 Git 提交'), 'empty Git history state')
+  await assertGitHistoryReadOnlyCalls(page)
+  await page.close()
+}
+
+async function verifyGitHistoryFailureRecovery(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(
+    browser,
+    consoleErrors,
+    pageErrors,
+    {
+      initialized: true,
+      faults: {
+        GetGitCommits: {
+          mode: 'error',
+          code: 'VERSION_CONTROL_ERROR',
+          message: 'Git executable not found',
+          retryable: true,
+        },
+      },
+    },
+    { width: 1100, height: 780 },
+    'git-failure-retry',
+  )
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await clickActivity(page, 'Git 历史')
+  await expectVisible(page.getByText('Git executable not found'), 'Git history failure message')
+  await page.getByRole('button', { name: '重试' }).first().click()
+  await expectVisible(page.getByText('rename rain clue chapter').first(), 'Git history retry recovery')
+  await assertGitHistoryReadOnlyCalls(page)
+  await page.close()
+}
+
+async function verifyGitHistoryCompactViewport(browser, url, consoleErrors, pageErrors) {
+  const page = await newAppPage(
+    browser,
+    consoleErrors,
+    pageErrors,
+    { initialized: true },
+    { width: 900, height: 720 },
+    'git-compact',
+  )
+  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await clickActivity(page, 'Git 历史')
+  await expectVisible(page.getByRole('heading', { name: 'Git 历史' }), 'compact Git history heading')
+  await expectVisible(page.getByText('rename rain clue chapter').first(), 'compact Git history first commit')
+  await page.getByRole('button', { name: /rename rain clue chapter/ }).click()
+  await expectVisible(page.getByText('chapters/renamed-rain.md').first(), 'compact Git changed file list')
+  await assertGitHistoryReadOnlyCalls(page)
+  await page.close()
+}
+
 async function verifyBridgeCalls(page) {
   const calls = await page.evaluate(() => window.__appMockState.calls)
   const methods = calls.map((call) => call.method)
@@ -1959,6 +2635,21 @@ async function verifyBridgeCalls(page) {
     'GetWritingStats',
     'ListSkills',
     'GetReferenceAnchors',
+    'SearchStyleSamples',
+    'GetStyleSample',
+    'CreateStyleSample',
+    'UpdateStyleSample',
+    'DeleteStyleSample',
+    'ExtractStyleSkillFromSamples',
+    'CancelStyleSkillExtraction',
+    'BuildReferenceStyleProfile',
+    'StartNarrativePatternExtraction',
+    'CancelNarrativePatternExtraction',
+    'GetNarrativePatternTrace',
+    'GetGitCommits',
+    'GetGitCommitFiles',
+    'GetGitFileDiff',
+    'SaveContent',
     'CancelChat',
   ]
 
@@ -1966,12 +2657,34 @@ async function verifyBridgeCalls(page) {
     assert(methods.includes(method), `Expected bridge method ${method} to be called.`)
   }
 
-  assert(!methods.includes('SaveContent'), 'app-wide smoke must not save chapter content implicitly')
+  const chapterSaves = calls.filter((call) =>
+    call.method === 'SaveContent' &&
+    String(call.args?.[0]?.path ?? '').startsWith('chapters/'))
+  assert.deepEqual(chapterSaves, [], 'app-wide smoke must not save chapter content implicitly')
   assert(!methods.includes('runtime.shell.openExternal'), 'app-wide smoke must not open external URLs')
   assert(!methods.includes('PickReferenceSourceFile'), 'app-wide smoke must not open arbitrary file pickers')
 
-  const saveCandidates = methods.filter(method => method.startsWith('Save') || method.startsWith('Update') || method.startsWith('Delete'))
-  assert.deepEqual(saveCandidates, [], `Unexpected mutating bridge calls:\n${saveCandidates.join('\n')}`)
+  const saveCandidates = calls.filter((call) =>
+    (call.method.startsWith('Save') || call.method.startsWith('Update') || call.method.startsWith('Delete')) &&
+    !isAllowedSurfaceMutation(call))
+  assert.deepEqual(
+    saveCandidates.map((call) => `${call.method}:${JSON.stringify(call.args)}`),
+    [],
+    `Unexpected mutating bridge calls:\n${saveCandidates.map((call) => call.method).join('\n')}`)
+  await assertGitHistoryReadOnlyCalls(page)
+}
+
+function isAllowedSurfaceMutation(call) {
+  if (call.method === 'UpdateStyleSample' || call.method === 'DeleteStyleSample') {
+    return true
+  }
+
+  if (call.method === 'SaveContent') {
+    const path = String(call.args?.[0]?.path ?? '')
+    return path.startsWith('skills/') || path.startsWith('~/.novelist/skills/')
+  }
+
+  return false
 }
 
 async function verifyStartupBridgeCalls(page) {
@@ -1979,6 +2692,7 @@ async function verifyStartupBridgeCalls(page) {
   const methods = calls.map((call) => call.method)
 
   assert(methods.includes('IsInitialized'), 'startup workflow must check initialization state')
+  assert(methods.includes('GetAppConfig'), 'startup workflow must load startup recovery status')
   assert(methods.includes('GetSettings'), 'startup workflow must load settings after successful initialization')
   assert(!methods.includes('SaveContent'), 'startup workflow must not save chapter content implicitly')
   assert(!methods.includes('runtime.shell.openExternal'), 'startup workflow must not open external URLs')
@@ -2016,6 +2730,97 @@ async function verifyReferenceBridgeCalls(page) {
 
   assert(!methods.includes('SaveContent'), 'reference entry workflow must not save chapter content implicitly')
   assert(!methods.includes('runtime.shell.openExternal'), 'reference entry workflow must not open external URLs')
+}
+
+async function verifyPatternBridgeCalls(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const methods = calls.map((call) => call.method)
+  const requiredMethods = [
+    'IsInitialized',
+    'GetSettings',
+    'GetNovels',
+    'GetChapters',
+    'GetModels',
+    'StartNarrativePatternExtraction',
+    'GetNarrativePatternTrace',
+    'CancelNarrativePatternExtraction',
+    'SaveContent',
+  ]
+
+  for (const method of requiredMethods) {
+    assert(methods.includes(method), `Expected pattern bridge method ${method} to be called.`)
+  }
+
+  const chapterSaves = calls.filter((call) =>
+    call.method === 'SaveContent' &&
+    String(call.args?.[0]?.path ?? '').startsWith('chapters/'))
+  assert.deepEqual(chapterSaves, [], 'pattern workflow must not save chapter content')
+
+  const skillSaves = calls.filter((call) =>
+    call.method === 'SaveContent' &&
+    String(call.args?.[0]?.path ?? '').startsWith('skills/'))
+  assert(skillSaves.length >= 1, 'pattern workflow must save generated skills through the skill catalog path')
+  assert(!methods.includes('runtime.shell.openExternal'), 'pattern workflow must not open external URLs')
+  assert(!methods.includes('ApproveReferenceChapterBlueprint'), 'pattern workflow must not approve reference blueprints')
+  assert(!methods.includes('BindReferenceBlueprintMaterials'), 'pattern workflow must not bind reference materials')
+}
+
+async function verifyGitBridgeCalls(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const methods = calls.map((call) => call.method)
+  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetGitCommits', 'GetGitCommitFiles', 'GetGitFileDiff']
+
+  for (const method of requiredMethods) {
+    assert(methods.includes(method), `Expected Git history bridge method ${method} to be called.`)
+  }
+
+  const pagedCall = calls.find((call) =>
+    call.method === 'GetGitCommits' &&
+    call.args?.[0]?.cursor_commit_id === 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+  assert(pagedCall, 'Git history bridge calls must include cursor-based paging')
+  await assertGitHistoryReadOnlyCalls(page)
+}
+
+async function verifyUpdateBridgeCalls(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const methods = calls.map((call) => call.method)
+  const requiredMethods = [
+    'IsInitialized',
+    'GetSettings',
+    'GetNovels',
+    'GetUpdateCheckSettings',
+    'CheckForUpdates',
+    'SaveUpdateCheckSettings',
+    'runtime.shell.openExternal',
+  ]
+
+  for (const method of requiredMethods) {
+    assert(methods.includes(method), `Expected update workflow bridge method ${method} to be called.`)
+  }
+
+  const opened = calls.filter((call) => call.method === 'runtime.shell.openExternal')
+  assert.equal(opened.length, 1, 'update workflow must open exactly one external URL after explicit user action')
+  assert.equal(opened[0].payload?.url, 'https://updates.example.test/releases/v2.0.0')
+  assert(!methods.includes('SaveContent'), 'update workflow must not save chapter content')
+  assert(!methods.includes('PickNovelImportFile'), 'update workflow must not open file pickers')
+  assert(!methods.includes('GetGitCommits'), 'update workflow must not load Git history')
+  assert(!methods.includes('GetGitCommitFiles'), 'update workflow must not load Git changed files')
+  assert(!methods.includes('GetGitFileDiff'), 'update workflow must not load Git diffs')
+}
+
+async function assertGitHistoryReadOnlyCalls(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const gitMethods = calls
+    .map((call) => call.method)
+    .filter((method) => /^Git|^GetGit|^SaveGit|^SetGit|^DeleteGit|^CreateGit|^UpdateGit|^RevertGit|^ResetGit|^CheckoutGit|^RestoreGit|^CommitGit/.test(method))
+  const unexpected = gitMethods.filter((method) =>
+    !['GetGitCommits', 'GetGitCommitFiles', 'GetGitFileDiff'].includes(method))
+  assert.deepEqual(unexpected, [], `Git history UI must call only read-only Git methods, got ${unexpected.join(', ')}`)
+
+  const chapterSaves = calls.filter((call) =>
+    call.method === 'SaveContent' &&
+    String(call.args?.[0]?.path ?? '').startsWith('chapters/'))
+  assert.deepEqual(chapterSaves, [], 'Git history workflow must not save chapter content')
 }
 
 async function verifySmokeBridgeCalls(page) {
@@ -2446,6 +3251,16 @@ async function assertBridgeCallCount(page, method, expectedCount) {
   assert.equal(actual, expectedCount, `Expected ${expectedCount} ${method} calls, got ${actual}.`)
 }
 
+async function assertNoBridgeCallArgValue(page, method, unexpectedValue, message) {
+  const found = await page.evaluate(
+    ({ method, unexpectedValue }) => window.__appMockState.calls.some((call) =>
+      call.method === method &&
+      (call.args ?? []).some((arg) => JSON.stringify(arg) === JSON.stringify(unexpectedValue))),
+    { method, unexpectedValue },
+  )
+  assert.equal(found, false, message)
+}
+
 async function bridgeCallCount(page, method) {
   return await page.evaluate(
     (method) => window.__appMockState.calls.filter((call) => call.method === method).length,
@@ -2536,6 +3351,14 @@ async function expectHidden(locator, description) {
   })
 }
 
+async function assertDisabled(locator, description) {
+  await locator.waitFor({ state: 'attached', timeout: 12_000 }).catch((error) => {
+    throw new Error(`Expected attached before disabled check: ${description}`, { cause: error })
+  })
+  const disabled = await locator.isDisabled()
+  assert.equal(disabled, true, `Expected disabled: ${description}`)
+}
+
 async function waitForBridgeCallArg(page, method, argIndex, expectedValue) {
   await page.waitForFunction(
     ({ method, argIndex, expectedValue }) => {
@@ -2577,7 +3400,7 @@ async function assertNovelDeleted(page, novelId) {
 }
 
 async function assertSelectedChapterPath(page, expectedPath) {
-  const expectedTitle = expectedPath.endsWith('3.md')
+  const expectedTitle = expectedPath.endsWith('7.md')
     ? '新章验收-改名'
     : expectedPath.endsWith('2.md')
       ? '旧城门'
@@ -2925,7 +3748,7 @@ function parseRunConfig(args) {
     throw new Error(`Unsupported app mock target: ${config.target}`)
   }
   config.grep = normalizeGrepTag(config.grep)
-  if (config.grep && !['@startup', '@diagnostics', '@surface', '@writing', '@reference-anchor'].includes(config.grep)) {
+  if (config.grep && !['@startup', '@diagnostics', '@surface', '@writing', '@reference-anchor', '@pattern', '@git', '@update'].includes(config.grep)) {
     throw new Error(`Unsupported app mock grep: ${config.grep}`)
   }
   if (!Number.isFinite(config.stressSizeBytes) || config.stressSizeBytes <= 0) {
@@ -2951,6 +3774,77 @@ function normalizeGrepTag(value) {
 function artifactRunName(config) {
   const grepSuffix = config.grep ? `-${sanitizeArtifactName(config.grep.replace(/^@/, ''))}` : ''
   return `${config.suite}-${config.target}${grepSuffix}`
+}
+
+function mockImportRecoveryResult() {
+  const now = '2026-07-05T12:00:00.000Z'
+  return {
+    reconciled_runs: [
+      {
+        task_id: 'startup-cleaned-import',
+        state: 'cleanup_completed',
+        stage: 'cleanup_completed',
+        source_display_name: '半截导入.txt',
+        source_path_hash: 'sha256:startup-cleaned',
+        parser_type: 'txt',
+        created_novel_id: 77,
+        created_file_roots: ['novels/77'],
+        skipped_chapters: [],
+        diagnostics: [],
+        warnings: [],
+        error: {
+          code: 'import.recovered_cleanup',
+          message: '启动恢复已清理未完成的导入。',
+          detail: 'Created rows and files were removed.',
+          operation: 'ReconcileNovelImportRuns',
+          task_id: 'startup-cleaned-import',
+          run_id: null,
+          bridge_method: 'ReconcileNovelImportRuns',
+          timestamp: now,
+        },
+        started_at: now,
+        updated_at: now,
+        completed_at: now,
+      },
+    ],
+    blocked_runs: [
+      {
+        task_id: 'startup-blocked-import',
+        state: 'cleanup_blocked',
+        stage: 'cleanup_blocked',
+        source_display_name: '越界导入.txt',
+        source_path_hash: 'sha256:startup-blocked',
+        parser_type: 'txt',
+        created_novel_id: 88,
+        created_file_roots: ['novels/88'],
+        skipped_chapters: [],
+        diagnostics: [],
+        warnings: [],
+        error: {
+          code: 'import.cleanup_blocked',
+          message: '导入恢复清理被阻止。',
+          detail: 'Created file root resolves outside the allowed cleanup boundary.',
+          operation: 'ReconcileNovelImportRuns',
+          task_id: 'startup-blocked-import',
+          run_id: null,
+          bridge_method: 'ReconcileNovelImportRuns',
+          timestamp: now,
+        },
+        started_at: now,
+        updated_at: now,
+        completed_at: now,
+      },
+    ],
+    diagnostics: [
+      {
+        code: 'import.cleanup_blocked',
+        message: '导入恢复清理被阻止。',
+        detail: 'startup-blocked-import requires manual review.',
+        severity: 'warning',
+      },
+    ],
+    reconciled_at: now,
+  }
 }
 
 async function writeRunDiagnostics() {
@@ -3038,6 +3932,7 @@ function installConfigurableAppMockBridge(options = {}) {
     window_height: 840,
     window_maximized: false,
   }
+  const persistedSettings = readPersistedMockSettings()
   const defaultNovel = {
     id: 42,
     title: '全局回归小说',
@@ -3066,6 +3961,50 @@ function installConfigurableAppMockBridge(options = {}) {
       summary: '暗号被雨水冲淡。',
       word_count: 980,
       file_path: 'chapters/2.md',
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      id: 3,
+      novel_id: 42,
+      chapter_number: 3,
+      title: '钟楼回声',
+      summary: '钟楼里的回声指向旧门后的脚印。',
+      word_count: 1120,
+      file_path: 'chapters/3.md',
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      id: 4,
+      novel_id: 42,
+      chapter_number: 4,
+      title: '暗号复盘',
+      summary: '林岚复盘暗号和水痕之间的关系。',
+      word_count: 1050,
+      file_path: 'chapters/4.md',
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      id: 5,
+      novel_id: 42,
+      chapter_number: 5,
+      title: '雨线尽头',
+      summary: '雨线尽头出现新的目击证词。',
+      word_count: 990,
+      file_path: 'chapters/5.md',
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      id: 6,
+      novel_id: 42,
+      chapter_number: 6,
+      title: '门后停顿',
+      summary: '门后的停顿让线索重新排序。',
+      word_count: 1180,
+      file_path: 'chapters/6.md',
       created_at: now,
       updated_at: now,
     },
@@ -3223,10 +4162,100 @@ function installConfigurableAppMockBridge(options = {}) {
       source: 'builtin',
     },
   ]
+  const defaultStyleSamples = [
+    {
+      sample_id: 1,
+      novel_id: null,
+      is_global: true,
+      name: '全局雨夜节奏',
+      content: '“别回头。”雨声压着窗沿。她想了想，只把灯关掉。\n\n脚步声停在门外。',
+      preview: '“别回头。”雨声压着窗沿。她想了想，只把灯关掉。 脚步声停在门外。',
+      tags: ['雨夜', '克制', '对白'],
+      stats_schema_version: 'style_sample_stats_v2',
+      stats: styleSampleStats({
+        characterCount: 46,
+        wordCount: 26,
+        sentenceCount: 4,
+        sentenceLengths: [5, 9, 12, 8],
+        averageSentenceChars: 11.5,
+        sentenceLengthStdDev: 2.6926,
+        punctuationPer100Chars: 17.3913,
+        quoteDensity: 4.3478,
+        paragraphCount: 2,
+        averageParagraphChars: 23,
+        dialogueRatio: 0.1739,
+        interiorityRatio: 0.4565,
+        sensoryRatio: 0.7826,
+      }),
+      source_metadata: { source_type: 'manual', source_id: 'global-rain', source_hash: 'hash-style-001' },
+      created_at: '2026-07-05T11:58:00.000Z',
+      updated_at: '2026-07-05T12:03:00.000Z',
+    },
+    {
+      sample_id: 2,
+      novel_id: 42,
+      is_global: false,
+      name: '近身内心动作',
+      content: '他没有回头，只把手按在门把上。心里那点犹豫，像潮湿木头里没灭的火。',
+      preview: '他没有回头，只把手按在门把上。心里那点犹豫，像潮湿木头里没灭的火。',
+      tags: ['内心', '克制'],
+      stats_schema_version: 'style_sample_stats_v2',
+      stats: styleSampleStats({
+        characterCount: 35,
+        wordCount: 31,
+        sentenceCount: 2,
+        sentenceLengths: [15, 19],
+        averageSentenceChars: 17.5,
+        sentenceLengthStdDev: 2,
+        punctuationPer100Chars: 8.5714,
+        quoteDensity: 0,
+        paragraphCount: 1,
+        averageParagraphChars: 35,
+        dialogueRatio: 0,
+        interiorityRatio: 0.5429,
+        sensoryRatio: 0.5429,
+      }),
+      source_metadata: { source_type: 'chapter_selection', source_id: '42:1', source_hash: 'hash-style-002' },
+      created_at: '2026-07-05T11:57:00.000Z',
+      updated_at: '2026-07-05T12:02:00.000Z',
+    },
+    {
+      sample_id: 3,
+      novel_id: 42,
+      is_global: false,
+      name: '段落留白记录',
+      content: '桌上的水痕还在。\n\n林岚没有碰杯子。她只是把袖口往下拉。',
+      preview: '桌上的水痕还在。 林岚没有碰杯子。她只是把袖口往下拉。',
+      tags: ['留白', '动作'],
+      stats_schema_version: 'style_sample_stats_v2',
+      stats: styleSampleStats({
+        characterCount: 29,
+        wordCount: 24,
+        sentenceCount: 3,
+        sentenceLengths: [8, 8, 11],
+        averageSentenceChars: 9.6667,
+        sentenceLengthStdDev: 1.4142,
+        punctuationPer100Chars: 10.3448,
+        quoteDensity: 0,
+        paragraphCount: 2,
+        averageParagraphChars: 14.5,
+        dialogueRatio: 0,
+        interiorityRatio: 0,
+        sensoryRatio: 0.2759,
+      }),
+      source_metadata: { source_type: 'manual', source_id: 'paragraph-gap', source_hash: 'hash-style-003' },
+      created_at: '2026-07-05T11:56:00.000Z',
+      updated_at: '2026-07-05T12:01:00.000Z',
+    },
+  ]
   const defaultContentByPath = {
     'novelist.md': '## 当前状态\n林岚正在调查旧城门。',
     'chapters/1.md': '林岚在雨夜旧宅门前停住。\n\n她看见桌上的水痕。',
     'chapters/2.md': '旧城门下，暗号被雨水冲淡。',
+    'chapters/3.md': '钟楼里的回声很轻，脚印停在旧门背后。',
+    'chapters/4.md': '林岚重新排列暗号、杯底水痕和钟楼时间。',
+    'chapters/5.md': '雨线尽头的目击者只说自己看见了灯。',
+    'chapters/6.md': '门后的停顿被记录下来，没有人提前下结论。',
     'skills/rhythm.md': '---\nname: 节奏控制\n---\n保持停顿和动作之间的张力。',
     'skills/节奏控制.md': '---\nname: 节奏控制\n---\n保持停顿和动作之间的张力。',
     '/builtin/skills/dialogue.md': '---\nname: 对话潜台词\n---\n用话外之意推动场景。',
@@ -3252,13 +4281,191 @@ function installConfigurableAppMockBridge(options = {}) {
       updated_at: now,
     },
   ]
+  const gitCommitIds = {
+    rename: 'cccccccccccccccccccccccccccccccccccccccc',
+    delete: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    add: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    initial: '9999999999999999999999999999999999999999',
+  }
+  const defaultGitCommits = [
+    {
+      commit_id: gitCommitIds.rename,
+      short_commit_id: 'ccccccc',
+      author_name: 'Mock Author',
+      author_email: 'mock@example.com',
+      message: 'rename rain clue chapter',
+      committed_at: '2026-07-05T12:10:00.000Z',
+      changed_file_count: 3,
+      insertions: 6,
+      deletions: 2,
+    },
+    {
+      commit_id: gitCommitIds.delete,
+      short_commit_id: 'bbbbbbb',
+      author_name: 'Mock Author',
+      author_email: 'mock@example.com',
+      message: 'delete obsolete note',
+      committed_at: '2026-07-05T12:08:00.000Z',
+      changed_file_count: 1,
+      insertions: 0,
+      deletions: 2,
+    },
+    {
+      commit_id: gitCommitIds.add,
+      short_commit_id: 'aaaaaaa',
+      author_name: 'Mock Author',
+      author_email: 'mock@example.com',
+      message: 'add outline seed',
+      committed_at: '2026-07-05T12:06:00.000Z',
+      changed_file_count: 1,
+      insertions: 5,
+      deletions: 0,
+    },
+    {
+      commit_id: gitCommitIds.initial,
+      short_commit_id: '9999999',
+      author_name: 'Mock Author',
+      author_email: 'mock@example.com',
+      message: 'initial import',
+      committed_at: '2026-07-05T12:00:00.000Z',
+      changed_file_count: 1,
+      insertions: 12,
+      deletions: 0,
+    },
+  ]
+  const defaultGitCommitFilesByCommitId = {
+    [gitCommitIds.rename]: [
+      {
+        path: 'chapters/renamed-rain.md',
+        old_path: 'chapters/rain.md',
+        change_type: 'renamed',
+        additions: 3,
+        deletions: 1,
+        binary: false,
+      },
+      {
+        path: 'notes/rhythm.md',
+        old_path: null,
+        change_type: 'modified',
+        additions: 3,
+        deletions: 1,
+        binary: false,
+      },
+      {
+        path: 'covers/rain.bin',
+        old_path: null,
+        change_type: 'modified',
+        additions: 0,
+        deletions: 0,
+        binary: true,
+      },
+    ],
+    [gitCommitIds.delete]: [
+      {
+        path: 'notes/deleted.md',
+        old_path: null,
+        change_type: 'deleted',
+        additions: 0,
+        deletions: 2,
+        binary: false,
+      },
+    ],
+    [gitCommitIds.add]: [
+      {
+        path: 'chapters/new-outline.md',
+        old_path: null,
+        change_type: 'added',
+        additions: 5,
+        deletions: 0,
+        binary: false,
+      },
+    ],
+    [gitCommitIds.initial]: [
+      {
+        path: 'novelist.md',
+        old_path: null,
+        change_type: 'modified',
+        additions: 12,
+        deletions: 0,
+        binary: false,
+      },
+    ],
+  }
+  const defaultGitDiffsByCommitAndPath = {
+    [`${gitCommitIds.rename}:chapters/renamed-rain.md`]: {
+      commit_id: gitCommitIds.rename,
+      path: 'chapters/renamed-rain.md',
+      old_path: 'chapters/rain.md',
+      change_type: 'renamed',
+      diff_text: 'diff --git a/chapters/rain.md b/chapters/renamed-rain.md\nsimilarity index 78%\nrename from chapters/rain.md\nrename to chapters/renamed-rain.md\n@@\n-old rain clue\n+new rain clue',
+      truncated: false,
+      binary: false,
+      original_content: 'old rain clue\n桌面水痕仍未解释。',
+      modified_content: 'new rain clue\n桌面水痕被重新排列。',
+    },
+    [`${gitCommitIds.rename}:notes/rhythm.md`]: {
+      commit_id: gitCommitIds.rename,
+      path: 'notes/rhythm.md',
+      old_path: null,
+      change_type: 'modified',
+      diff_text: 'diff --git a/notes/rhythm.md b/notes/rhythm.md\n@@\n-短句。\n+短句推进，动作留白。',
+      truncated: true,
+      binary: false,
+      original_content: '短句。\n雨声停在窗外。',
+      modified_content: '短句推进，动作留白。\n雨声停在窗外。',
+    },
+    [`${gitCommitIds.rename}:covers/rain.bin`]: {
+      commit_id: gitCommitIds.rename,
+      path: 'covers/rain.bin',
+      old_path: null,
+      change_type: 'modified',
+      diff_text: '',
+      truncated: false,
+      binary: true,
+      original_content: null,
+      modified_content: null,
+    },
+    [`${gitCommitIds.delete}:notes/deleted.md`]: {
+      commit_id: gitCommitIds.delete,
+      path: 'notes/deleted.md',
+      old_path: null,
+      change_type: 'deleted',
+      diff_text: 'diff --git a/notes/deleted.md b/notes/deleted.md\ndeleted file mode 100644\n@@\n-旧笔记将被删除。\n-它不再参与线索。',
+      truncated: false,
+      binary: false,
+      original_content: '旧笔记将被删除。\n它不再参与线索。',
+      modified_content: null,
+    },
+    [`${gitCommitIds.add}:chapters/new-outline.md`]: {
+      commit_id: gitCommitIds.add,
+      path: 'chapters/new-outline.md',
+      old_path: null,
+      change_type: 'added',
+      diff_text: 'diff --git a/chapters/new-outline.md b/chapters/new-outline.md\nnew file mode 100644\n@@\n+新的章节纲要。\n+保留水痕、门缝和停顿。',
+      truncated: false,
+      binary: false,
+      original_content: null,
+      modified_content: '新的章节纲要。\n保留水痕、门缝和停顿。',
+    },
+    [`${gitCommitIds.initial}:novelist.md`]: {
+      commit_id: gitCommitIds.initial,
+      path: 'novelist.md',
+      old_path: null,
+      change_type: 'modified',
+      diff_text: 'diff --git a/novelist.md b/novelist.md\n@@\n+## 当前状态\n+林岚正在调查旧城门。',
+      truncated: false,
+      binary: false,
+      original_content: null,
+      modified_content: '## 当前状态\n林岚正在调查旧城门。',
+    },
+  }
   const state = {
     calls: [],
     emittedEvents: [],
     appliedFaults: [],
     activeNovelId: options.settings?.last_novel_id ?? defaultSettings.last_novel_id,
     nextNovelId: 43,
-    nextChapterId: 3,
+    nextChapterId: 7,
     nextCharacterId: 3,
     nextLocationId: 2,
     nextStoryArcId: 2,
@@ -3266,6 +4473,12 @@ function installConfigurableAppMockBridge(options = {}) {
     nextTimelineEntryId: 2,
     nextReaderPerspectiveId: 2,
     nextPreferenceId: 3,
+    nextStyleSampleId: 4,
+    nextStyleSkillExtractionDelayMs: 0,
+    nextStyleSkillExtractionMode: 'success',
+    nextNarrativePatternDelayMs: 0,
+    nextNarrativePatternMode: 'success',
+    nextUpdateCheckMode: options.updateCheckMode ?? 'available',
     nextSessionId: 1,
     nextTurnId: 101,
     searchFailureRecovered: false,
@@ -3276,17 +4489,28 @@ function installConfigurableAppMockBridge(options = {}) {
     exportedNovels: [],
     savedCovers: [],
     savedAvatars: [],
+    failNextStyleSampleDelete: false,
+    cancelledStyleSkillExtractionTaskIds: [],
+    styleSkillExtractionRuns: [],
+    cancelledNarrativePatternTaskIds: [],
+    narrativePatternRuns: [],
+    narrativePatternTraces: {},
     novelImportRuns: [],
+    activeNovelImports: {},
+    cancelledNovelImportTaskIds: [],
     createdReferenceAnchors: [],
     referenceAnchors: options.referenceAnchors ?? defaultReferenceAnchors,
     referenceBuildStatuses: options.referenceBuildStatuses ?? {},
+    referenceStyleProfiles: options.referenceStyleProfiles ?? [],
+    referenceStyleProfileBuildStatuses: options.referenceStyleProfileBuildStatuses ?? {},
+    nextReferenceStyleProfileId: 301,
     referenceBlueprints: {},
     nextReferenceBlueprintId: 701,
     contentByPath: options.contentByPath ?? defaultContentByPath,
     initialized: options.initialized ?? true,
     novels: options.novels ?? [defaultNovel],
     chaptersByNovelId: options.chaptersByNovelId ?? { 42: defaultChapters },
-    settings: options.settings ?? defaultSettings,
+    settings: options.settings ?? persistedSettings ?? defaultSettings,
     characters: options.characters ?? defaultCharacters,
     locations: options.locations ?? defaultLocations,
     storyArcs: options.storyArcs ?? defaultStoryArcs,
@@ -3295,9 +4519,14 @@ function installConfigurableAppMockBridge(options = {}) {
     timelineEntries: options.timelineEntries ?? defaultTimelineEntries,
     readerPerspectives: options.readerPerspectives ?? defaultReaderPerspectives,
     preferences: options.preferences ?? defaultPreferences,
+    styleSamples: options.styleSamples ?? defaultStyleSamples,
+    gitCommits: options.gitCommits ?? defaultGitCommits,
+    gitCommitFilesByCommitId: options.gitCommitFilesByCommitId ?? defaultGitCommitFilesByCommitId,
+    gitDiffsByCommitAndPath: options.gitDiffsByCommitAndPath ?? defaultGitDiffsByCommitAndPath,
     writingActivity: options.writingActivity ?? defaultWritingActivity,
     writingStats: options.writingStats ?? defaultWritingStats,
     skills: options.skills ?? defaultSkills,
+    importRecovery: options.importRecovery ?? null,
   }
   const faultQueues = normalizeFaultQueues(options.faults ?? {})
   Object.defineProperty(state, 'clearFaultQueue', {
@@ -3339,7 +4568,7 @@ function installConfigurableAppMockBridge(options = {}) {
   async function handleRequest(envelope) {
     try {
       const args = Array.isArray(envelope.payload?.args) ? envelope.payload.args : []
-      state.calls.push({ method: envelope.method, args })
+      state.calls.push({ method: envelope.method, args, payload: envelope.payload })
       const fault = nextFault(envelope.method)
 
       if (fault?.delayMs) {
@@ -3365,7 +4594,7 @@ function installConfigurableAppMockBridge(options = {}) {
         return
       }
 
-      if (envelope.method === 'SaveContent' && !options.allowSaveContent) {
+      if (envelope.method === 'SaveContent' && !options.allowSaveContent && !isSkillSaveInput(args[0])) {
         throw new Error('SaveContent is forbidden in the app-wide smoke unless the test explicitly edits content.')
       }
 
@@ -3487,14 +4716,7 @@ function installConfigurableAppMockBridge(options = {}) {
         email: state.settings.git_author_email ?? '',
         scope: 'app',
       }
-      case 'SaveGitAuthorSettings':
-        state.settings.git_author_name = String(args[0]?.name ?? '')
-        state.settings.git_author_email = String(args[0]?.email ?? '')
-        return {
-          name: state.settings.git_author_name,
-          email: state.settings.git_author_email,
-          scope: 'app',
-        }
+      case 'SaveGitAuthorSettings': return saveGitAuthorSettings(args[0])
       case 'GetUpdateCheckSettings': return {
         enabled: state.settings.update_check_enabled === true,
         endpoint_url: state.settings.update_check_endpoint_url ?? '',
@@ -3505,12 +4727,14 @@ function installConfigurableAppMockBridge(options = {}) {
         state.settings.update_check_enabled = args[0]?.enabled === true
         state.settings.update_check_endpoint_url = String(args[0]?.endpoint_url ?? '')
         state.settings.update_check_dismissed_version = String(args[0]?.dismissed_version ?? '')
+        persistMockSettings()
         return {
           enabled: state.settings.update_check_enabled,
           endpoint_url: state.settings.update_check_endpoint_url,
           dismissed_version: state.settings.update_check_dismissed_version,
           last_checked_at: state.settings.update_check_last_checked_at ?? null,
         }
+      case 'CheckForUpdates': return checkForUpdates(args[0])
       case 'GetLayoutSettings': return {
         sidebar_width: state.settings.sidebar_width ?? 280,
         chat_panel_width: state.settings.chat_panel_width ?? 360,
@@ -3582,10 +4806,11 @@ function installConfigurableAppMockBridge(options = {}) {
         initialized: state.initialized,
         data_dir: options.platformDefaultPath ?? 'D:\\NovelistData',
         update_check: {
-          endpoint_url: '',
-          default_enabled: false,
+          endpoint_url: state.settings.update_check_endpoint_url ?? '',
+          default_enabled: state.settings.update_check_enabled === true,
           timeout_ms: 5000,
         },
+        import_recovery: state.importRecovery,
       }
       case 'SetActiveNovel':
         state.activeNovelId = args[0]?.novel_id ?? state.activeNovelId
@@ -3609,12 +4834,16 @@ function installConfigurableAppMockBridge(options = {}) {
         return null
       case 'PickNovelImportFile': return options.pickedNovelImportFile ?? null
       case 'StartNovelImport': return startNovelImport(args[0])
+      case 'CancelNovelImport': return cancelNovelImport(args[0])
       case 'GetNovelImportRun': return state.novelImportRuns.find((run) => run.task_id === args[0]?.task_id) ?? null
       case 'GetNovelImportRecoveryStatus': return {
         pending_runs: state.novelImportRuns.filter((run) => !['completed', 'completed_with_warning', 'failed', 'cancelled'].includes(run.state)),
         blocked_runs: state.novelImportRuns.filter((run) => run.state === 'cleanup_blocked'),
         checked_at: now,
       }
+      case 'GetGitCommits': return getGitCommits(args[0])
+      case 'GetGitCommitFiles': return getGitCommitFiles(args[0])
+      case 'GetGitFileDiff': return getGitFileDiff(args[0])
       case 'GetChapters': return chapters(args[0])
       case 'CreateChapter': return createChapter(args[0])
       case 'UpdateChapterTitle':
@@ -3664,7 +4893,7 @@ function installConfigurableAppMockBridge(options = {}) {
       case 'DeleteArcNode':
         deleteArcNode(args[0], args[1])
         return null
-      case 'GetMaxChapterNumber': return 2
+      case 'GetMaxChapterNumber': return maxChapterNumber(args[0])
       case 'GetChapterPlans': return chapterPlans(args[0])
       case 'UpdateChapterPlan':
         updateChapterPlan(args[0], args[1])
@@ -3698,6 +4927,20 @@ function installConfigurableAppMockBridge(options = {}) {
         deleteSkill(args[0])
         return null
       case 'ExtractStyle': return extractStyle(args[0])
+      case 'ExtractStyleSkillFromSamples': return extractStyleSkillFromSamples(args[0])
+      case 'CancelStyleSkillExtraction': return cancelStyleSkillExtraction(args[0])
+      case 'GetStyleSkillExtractionRun': return state.styleSkillExtractionRuns.find((run) => run.task_id === args[0]?.task_id) ?? null
+      case 'StartNarrativePatternExtraction': return startNarrativePatternExtraction(args[0])
+      case 'CancelNarrativePatternExtraction': return cancelNarrativePatternExtraction(args[0])
+      case 'GetNarrativePatternRun': return state.narrativePatternRuns.find((run) => run.task_id === args[0]?.task_id) ?? null
+      case 'GetNarrativePatternTrace': return state.narrativePatternTraces[String(args[0]?.task_id ?? '')] ?? null
+      case 'SearchStyleSamples': return searchStyleSamples(args[0])
+      case 'GetStyleSample': return getStyleSample(args[0])
+      case 'CreateStyleSample': return createStyleSample(args[0])
+      case 'UpdateStyleSample': return updateStyleSample(args[0])
+      case 'DeleteStyleSample':
+        deleteStyleSample(args[0])
+        return null
       case 'SaveUserName':
         state.settings.user_name = String(args[0] ?? '')
         return null
@@ -3710,6 +4953,8 @@ function installConfigurableAppMockBridge(options = {}) {
       case 'CreateReferenceAnchor': return createReferenceAnchor(args[0])
       case 'RebuildReferenceAnchor': return rebuildReferenceAnchor(args[1])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
+      case 'BuildReferenceStyleProfile': return buildReferenceStyleProfile(args[0])
+      case 'GetReferenceStyleProfileBuildStatus': return referenceStyleProfileBuildStatus(args[0])
       case 'GetReferenceChapterBlueprints': return Object.values(state.referenceBlueprints).map(toReferenceBlueprintSummary)
       case 'GetReferenceChapterBlueprint': return state.referenceBlueprints[String(args[1])] ?? null
       case 'GenerateReferenceChapterBlueprint': return generateReferenceBlueprint(args[0])
@@ -3760,13 +5005,358 @@ function installConfigurableAppMockBridge(options = {}) {
     }
   }
 
-  function startNovelImport(input) {
+  function saveGitAuthorSettings(input = {}) {
+    const name = String(input?.name ?? '').trim()
+    const email = String(input?.email ?? '').trim()
+
+    if (name.length === 0 && email.length === 0) {
+      state.settings.git_author_name = ''
+      state.settings.git_author_email = ''
+      persistMockSettings()
+      return { name: '', email: '', scope: 'app' }
+    }
+
+    if (name.length === 0 || email.length === 0 || !isValidMockGitEmail(email)) {
+      throw new Error('Git author name and a valid email must be provided together.')
+    }
+
+    state.settings.git_author_name = name
+    state.settings.git_author_email = email
+    persistMockSettings()
+    return {
+      name: state.settings.git_author_name,
+      email: state.settings.git_author_email,
+      scope: 'app',
+    }
+  }
+
+  function checkForUpdates(input = {}) {
+    const taskId = String(input?.task_id ?? `update-${Date.now()}`)
+    const manual = input?.manual === true
+    const mode = state.nextUpdateCheckMode || 'available'
+    state.settings.update_check_last_checked_at = now
+    state.nextUpdateCheckMode = options.updateCheckMode ?? 'available'
+
+    if (mode === 'failed') {
+      return {
+        task_id: taskId,
+        status: 'failed',
+        current_version: '1.0.0',
+        latest_version: null,
+        release_url: null,
+        checked_at: now,
+        error_code: 'update.mock_failure',
+        error_message: '模拟更新检查失败',
+        release_name: null,
+        release_notes: null,
+        download_url: null,
+        dismissed: false,
+      }
+    }
+
+    if (mode === 'no_update') {
+      return {
+        task_id: taskId,
+        status: 'no_update',
+        current_version: '2.0.0',
+        latest_version: 'v2.0.0',
+        release_url: 'https://updates.example.test/releases/v2.0.0',
+        checked_at: now,
+        error_code: null,
+        error_message: null,
+        release_name: 'Novelist 2.0',
+        release_notes: '## 安全更新\n\n- 当前已是最新版本。',
+        download_url: 'https://updates.example.test/downloads/novelist-2.0.zip',
+        dismissed: false,
+      }
+    }
+
+    const dismissed = !manual && state.settings.update_check_dismissed_version === 'v2.0.0'
+    return {
+      task_id: taskId,
+      status: dismissed ? 'dismissed' : 'update_available',
+      current_version: '1.0.0',
+      latest_version: 'v2.0.0',
+      release_url: 'https://updates.example.test/releases/v2.0.0',
+      checked_at: now,
+      error_code: null,
+      error_message: null,
+      release_name: 'Novelist 2.0',
+      release_notes: '## 安全更新\n\n- 改进导入恢复与错误提示。',
+      download_url: 'https://updates.example.test/downloads/novelist-2.0.zip',
+      dismissed,
+    }
+  }
+
+  function persistMockSettings() {
+    window.localStorage.setItem('novelist_app_mock_settings', JSON.stringify(state.settings))
+  }
+
+  function readPersistedMockSettings() {
+    try {
+      const raw = window.localStorage.getItem('novelist_app_mock_settings')
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+      return { ...defaultSettings, ...parsed }
+    } catch {
+      return null
+    }
+  }
+
+  function isValidMockGitEmail(email) {
+    return email.length > 2 &&
+      email.length <= 320 &&
+      !/\s/.test(email) &&
+      email.indexOf('@') > 0 &&
+      email.lastIndexOf('@') === email.indexOf('@') &&
+      email.indexOf('@') < email.length - 1
+  }
+
+  function getGitCommits(input = {}) {
+    const page = Math.max(1, Number(input?.page ?? 1))
+    const size = Math.max(1, Math.min(100, Number(input?.size ?? 20)))
+    const cursorCommitId = String(input?.cursor_commit_id ?? '')
+    const commits = state.gitCommits.map(cloneJson)
+    const startIndex = cursorCommitId
+      ? Math.max(0, commits.findIndex((commit) => commit.commit_id === cursorCommitId) + 1)
+      : (page - 1) * size
+    const items = commits.slice(startIndex, startIndex + size)
+    return pagedResult(items, page, size, commits.length)
+  }
+
+  function getGitCommitFiles(input = {}) {
+    const commitId = String(input?.commit_id ?? '')
+    return (state.gitCommitFilesByCommitId[commitId] ?? []).map(cloneJson)
+  }
+
+  function getGitFileDiff(input = {}) {
+    const commitId = String(input?.commit_id ?? '')
+    const filePath = String(input?.path ?? '')
+    const diff = state.gitDiffsByCommitAndPath[`${commitId}:${filePath}`]
+    if (!diff) {
+      throw new Error(`Unknown Git diff fixture for ${commitId}:${filePath}`)
+    }
+    return cloneJson(diff)
+  }
+
+  async function startNovelImport(input) {
     const sourcePath = String(input?.source_path ?? '')
     const sourceDisplayName = String(input?.source_display_name ?? fileNameFromPath(sourcePath) ?? '导入小说.txt')
     const importKind = String(input?.import_kind ?? importKindFromFileName(sourceDisplayName) ?? 'txt')
+    const taskId = String(input?.task_id ?? `import-${state.novelImportRuns.length + 1}`)
+    const scenario = novelImportScenario(sourceDisplayName)
+    const progressTotal = 7
     const title = sourceDisplayName
       .replace(/\.(epub|txt|md|markdown)$/i, '')
       .trim() || '导入小说'
+
+    emit('novel_import:progress', {
+      task_id: 'stale-import-task',
+      state: 'writing_files',
+      stage: 'write_chapter',
+      progress_completed: 3,
+      progress_total: progressTotal,
+      message: '旧导入不应显示',
+      current_chapter_index: 99,
+      current_chapter_title: '旧导入章节',
+      created_novel_id: 999,
+      updated_at: now,
+    })
+
+    emitNovelImportProgress(taskId, 'created', 'created', 0, progressTotal, '导入任务已创建', null)
+    await wait(10)
+    emitNovelImportProgress(taskId, 'parsing', 'parse_source', 1, progressTotal, '正在解析源文件', null)
+
+    if (scenario === 'parser_failure') {
+      await wait(10)
+      const run = pushNovelImportRun(makeNovelImportRun({
+        taskId,
+        stateValue: 'failed',
+        stage: 'parse_failed',
+        sourceDisplayName,
+        importKind,
+        error: importDiagnostic('import.parse_failed', '源文件解析失败', 'mock parser rejected this source'),
+        diagnostics: [{
+          code: 'import.parse_failed',
+          message: '源文件解析失败',
+          detail: 'mock parser rejected this source',
+          severity: 'error',
+        }],
+      }))
+      emitNovelImportProgress(taskId, 'failed', 'parse_failed', progressTotal, progressTotal, '源文件解析失败', null)
+      return run
+    }
+
+    await wait(10)
+    const novel = createImportedNovel(title, importKind)
+    state.activeNovelImports[taskId] = {
+      sourceDisplayName,
+      importKind,
+      createdNovelId: novel.id,
+    }
+    emitNovelImportProgress(taskId, 'creating_novel', 'create_novel', 2, progressTotal, '正在创建作品', novel.id)
+    await wait(10)
+    const importedChapter = createImportedChapter(novel.id, sourceDisplayName, title)
+    emitNovelImportProgress(taskId, 'writing_files', 'write_chapters', 2, progressTotal, '正在写入章节', novel.id)
+    await wait(10)
+    emitNovelImportProgress(
+      taskId,
+      'writing_files',
+      'write_chapter',
+      3,
+      progressTotal,
+      '正在写入章节 1/1',
+      novel.id,
+      1,
+      importedChapter.title,
+    )
+
+    if (scenario === 'cancel') {
+      const cancelled = await waitForNovelImportCancellation(taskId, 900)
+      if (cancelled) {
+        return finalizeCancelledNovelImport(taskId, sourceDisplayName, importKind, novel.id)
+      }
+    }
+
+    if (scenario === 'write_failure') {
+      await wait(10)
+      emitNovelImportProgress(taskId, 'cleanup_pending', 'cleanup_created_files', 4, progressTotal, '正在清理未完成导入', novel.id)
+      deleteNovel(novel.id)
+      delete state.activeNovelImports[taskId]
+      const run = pushNovelImportRun(makeNovelImportRun({
+        taskId,
+        stateValue: 'cleanup_completed',
+        stage: 'cleanup_completed',
+        sourceDisplayName,
+        importKind,
+        createdNovelId: novel.id,
+        createdFileRoots: [`novels/${novel.id}`],
+        error: importDiagnostic('import.write_failed', '导入写入失败，已清理未完成数据。', 'mock write failure after first chapter'),
+        diagnostics: [{
+          code: 'import.cleanup_completed',
+          message: '失败导入已清理',
+          detail: 'mock cleanup removed created novel and chapter files',
+          severity: 'info',
+        }],
+      }))
+      emitNovelImportProgress(taskId, 'cleanup_completed', 'cleanup_completed', progressTotal, progressTotal, '导入写入失败，已清理未完成数据。', novel.id)
+      return run
+    }
+
+    await wait(10)
+    emitNovelImportProgress(taskId, 'saving_metadata', 'saving_metadata', 4, progressTotal, '正在保存元数据', novel.id)
+    await wait(10)
+    emitNovelImportProgress(taskId, 'indexing', 'indexing', 5, progressTotal, '正在刷新搜索索引', novel.id)
+    await wait(10)
+    emitNovelImportProgress(taskId, 'git_commit', 'git_commit', 6, progressTotal, '正在创建 Git 导入提交', novel.id)
+    await wait(10)
+
+    const warnings = scenario === 'git_warning'
+      ? [{
+        code: 'git.commit_failed',
+        message: '导入已完成，但 Git 提交失败。',
+        detail: 'mock git commit failure; imported files remain in the workspace',
+      }]
+      : []
+    const skippedChapters = scenario === 'skipped_epub'
+      ? [
+        { index: 2, title: '空白章节', reason: 'empty_content' },
+        { index: 3, title: '缺失章节', reason: 'missing_spine_item' },
+      ]
+      : []
+    const finalState = warnings.length > 0 ? 'completed_with_warning' : 'completed'
+    const run = pushNovelImportRun(makeNovelImportRun({
+      taskId,
+      stateValue: finalState,
+      stage: 'done',
+      sourceDisplayName,
+      importKind,
+      createdNovelId: novel.id,
+      createdFileRoots: [`novels/${novel.id}`],
+      skippedChapters,
+      warnings,
+    }))
+    delete state.activeNovelImports[taskId]
+    emitNovelImportProgress(
+      taskId,
+      finalState,
+      'done',
+      progressTotal,
+      progressTotal,
+      finalState === 'completed_with_warning' ? '导入完成，但有警告' : '导入完成',
+      novel.id,
+    )
+    return run
+  }
+
+  function cancelNovelImport(input) {
+    const taskId = String(input?.task_id ?? '')
+    if (!taskId) throw new Error('CancelNovelImport requires task_id.')
+    if (!state.cancelledNovelImportTaskIds.includes(taskId)) {
+      state.cancelledNovelImportTaskIds.push(taskId)
+    }
+
+    const active = state.activeNovelImports[taskId]
+    if (active?.createdNovelId) {
+      deleteNovel(active.createdNovelId)
+    }
+
+    const existing = state.novelImportRuns.find((run) => run.task_id === taskId)
+    if (existing) return existing
+
+    return finalizeCancelledNovelImport(
+      taskId,
+      active?.sourceDisplayName ?? 'cancelled-import.txt',
+      active?.importKind ?? 'txt',
+      active?.createdNovelId ?? null,
+    )
+  }
+
+  function finalizeCancelledNovelImport(taskId, sourceDisplayName, importKind, createdNovelId) {
+    if (createdNovelId) {
+      deleteNovel(createdNovelId)
+    }
+    delete state.activeNovelImports[taskId]
+    const run = pushNovelImportRun(makeNovelImportRun({
+      taskId,
+      stateValue: createdNovelId ? 'cleanup_completed' : 'cancelled',
+      stage: createdNovelId ? 'cleanup_completed' : 'cancelled',
+      sourceDisplayName,
+      importKind,
+      createdNovelId,
+      createdFileRoots: createdNovelId ? [`novels/${createdNovelId}`] : [],
+      error: importDiagnostic('import.cancelled', '导入已取消', 'user cancelled the mocked import'),
+      diagnostics: createdNovelId ? [{
+        code: 'import.cleanup_completed',
+        message: '取消导入已清理',
+        detail: 'mock cleanup removed created novel and chapter files',
+        severity: 'info',
+      }] : [],
+    }))
+    emitNovelImportProgress(
+      taskId,
+      run.state,
+      run.stage,
+      7,
+      7,
+      '导入已取消',
+      createdNovelId,
+    )
+    return run
+  }
+
+  function novelImportScenario(sourceDisplayName) {
+    const lower = String(sourceDisplayName).toLowerCase()
+    if (lower.includes('cancel-import')) return 'cancel'
+    if (lower.includes('parser-failure')) return 'parser_failure'
+    if (lower.includes('write-failure')) return 'write_failure'
+    if (lower.includes('git-warning')) return 'git_warning'
+    if (lower.includes('skipped-chapters')) return 'skipped_epub'
+    return 'success'
+  }
+
+  function createImportedNovel(title, importKind) {
     const novel = {
       id: state.nextNovelId++,
       title,
@@ -3777,26 +5367,113 @@ function installConfigurableAppMockBridge(options = {}) {
     }
     state.novels = [...state.novels, novel]
     state.chaptersByNovelId[novel.id] = []
+    return novel
+  }
 
-    const run = {
-      task_id: String(input?.task_id ?? `import-${state.novelImportRuns.length + 1}`),
-      state: 'completed',
-      stage: 'completed',
+  function createImportedChapter(novelId, sourceDisplayName, title) {
+    const importedChapter = {
+      id: state.nextChapterId++,
+      novel_id: novelId,
+      chapter_number: 1,
+      title: '导入开篇',
+      summary: '',
+      word_count: 12,
+      file_path: `chapters/import-${novelId}-001.md`,
+      created_at: now,
+      updated_at: now,
+    }
+    state.chaptersByNovelId[novelId] = [importedChapter]
+    state.contentByPath[importedChapter.file_path] = `# ${title}\n\n这是 ${sourceDisplayName} 的导入正文。`
+    return importedChapter
+  }
+
+  function makeNovelImportRun({
+    taskId,
+    stateValue,
+    stage,
+    sourceDisplayName,
+    importKind,
+    createdNovelId = null,
+    createdFileRoots = [],
+    skippedChapters = [],
+    diagnostics = [],
+    warnings = [],
+    error = null,
+  }) {
+    return {
+      task_id: taskId,
+      state: stateValue,
+      stage,
       source_display_name: sourceDisplayName,
       source_path_hash: `sha256:mock-import-${state.novelImportRuns.length + 1}`,
       parser_type: importKind,
-      created_novel_id: novel.id,
-      created_file_roots: [`novels/${novel.id}`],
-      skipped_chapters: [],
-      diagnostics: [],
-      warnings: [],
-      error: null,
+      created_novel_id: createdNovelId,
+      created_file_roots: createdFileRoots,
+      skipped_chapters: skippedChapters,
+      diagnostics,
+      warnings,
+      error,
       started_at: now,
       updated_at: now,
       completed_at: now,
     }
-    state.novelImportRuns = [...state.novelImportRuns, run]
+  }
+
+  function pushNovelImportRun(run) {
+    const existingIndex = state.novelImportRuns.findIndex((item) => item.task_id === run.task_id)
+    if (existingIndex >= 0) {
+      state.novelImportRuns = state.novelImportRuns.map((item, index) => index === existingIndex ? run : item)
+    } else {
+      state.novelImportRuns = [...state.novelImportRuns, run]
+    }
     return run
+  }
+
+  function importDiagnostic(code, message, detail) {
+    return {
+      code,
+      message,
+      detail,
+      operation: 'StartNovelImport',
+      task_id: null,
+      run_id: null,
+      bridge_method: 'StartNovelImport',
+      timestamp: now,
+    }
+  }
+
+  async function waitForNovelImportCancellation(taskId, timeoutMs) {
+    const startedAt = Date.now()
+    while (Date.now() - startedAt < timeoutMs) {
+      if (state.cancelledNovelImportTaskIds.includes(taskId)) return true
+      await wait(25)
+    }
+    return state.cancelledNovelImportTaskIds.includes(taskId)
+  }
+
+  function emitNovelImportProgress(
+    taskId,
+    stateValue,
+    stage,
+    completed,
+    total,
+    message,
+    createdNovelId,
+    currentChapterIndex = null,
+    currentChapterTitle = null,
+  ) {
+    emit('novel_import:progress', {
+      task_id: taskId,
+      state: stateValue,
+      stage,
+      progress_completed: completed,
+      progress_total: total,
+      message,
+      created_novel_id: createdNovelId,
+      current_chapter_index: currentChapterIndex,
+      current_chapter_title: currentChapterTitle,
+      updated_at: now,
+    })
   }
 
   function fileNameFromPath(value) {
@@ -3816,6 +5493,10 @@ function installConfigurableAppMockBridge(options = {}) {
 
   function chapters(novelId = state.activeNovelId) {
     return [...(state.chaptersByNovelId[String(novelId)] ?? [])]
+  }
+
+  function maxChapterNumber(novelId = state.activeNovelId) {
+    return chapters(novelId).reduce((max, chapter) => Math.max(max, Number(chapter.chapter_number) || 0), 0)
   }
 
   function createChapter(input) {
@@ -3853,7 +5534,7 @@ function installConfigurableAppMockBridge(options = {}) {
   }
 
   function saveContent(input) {
-    if (!options.allowSaveContent) {
+    if (!options.allowSaveContent && !isSkillSaveInput(input)) {
       throw new Error('SaveContent is forbidden in the app-wide smoke unless the test explicitly edits content.')
     }
     if (state.failNextSaveContent) {
@@ -3865,6 +5546,11 @@ function installConfigurableAppMockBridge(options = {}) {
     }
     state.contentByPath[input.path] = String(input.content ?? '')
     return null
+  }
+
+  function isSkillSaveInput(input) {
+    const path = String(input?.path ?? '')
+    return path.startsWith('skills/') || path.startsWith('~/.novelist/skills/')
   }
 
   function availableModel() {
@@ -4551,6 +6237,747 @@ function installConfigurableAppMockBridge(options = {}) {
     }
   }
 
+  async function extractStyleSkillFromSamples(input = {}) {
+    const taskId = String(input?.task_id ?? `style-skill-${state.styleSkillExtractionRuns.length + 1}`)
+    const sampleIds = Array.isArray(input?.sample_ids) ? input.sample_ids.map(Number) : []
+    const skillName = String(input?.skill_name ?? '').trim() || '未命名风格技能'
+    const delayMs = Math.max(0, Number(state.nextStyleSkillExtractionDelayMs ?? 0))
+    const mode = String(state.nextStyleSkillExtractionMode ?? 'success')
+    state.nextStyleSkillExtractionDelayMs = 0
+    state.nextStyleSkillExtractionMode = 'success'
+
+    let run = styleSkillRun({
+      taskId,
+      status: 'running',
+      stage: 'model_call',
+      progressCompleted: 0,
+      progressTotal: Math.max(sampleIds.length, 1),
+      sampleIds,
+      skillName,
+      skillPreview: '',
+      skillFilePath: '',
+      diagnostics: [],
+      completedAt: null,
+    })
+    upsertStyleSkillRun(run)
+    emit('style_skill_extraction:progress', {
+      task_id: run.task_id,
+      status: run.status,
+      stage: run.stage,
+      progress_completed: run.progress_completed,
+      progress_total: run.progress_total,
+      message: '正在抽取风格技能。',
+      updated_at: now,
+    })
+
+    if (delayMs > 0) {
+      await wait(delayMs)
+    }
+
+    if (state.cancelledStyleSkillExtractionTaskIds.includes(taskId)) {
+      run = styleSkillRun({
+        taskId,
+        status: 'cancelled',
+        stage: 'cancelled',
+        progressCompleted: 0,
+        progressTotal: Math.max(sampleIds.length, 1),
+        sampleIds,
+        skillName,
+        skillPreview: '',
+        skillFilePath: '',
+        diagnostics: [copyableDiagnostic('style_skill.cancelled', '抽取已取消', '用户取消', 'CancelStyleSkillExtraction', taskId)],
+        completedAt: now,
+      })
+      upsertStyleSkillRun(run)
+      emit('style_skill_extraction:progress', {
+        task_id: run.task_id,
+        status: run.status,
+        stage: run.stage,
+        progress_completed: run.progress_completed,
+        progress_total: run.progress_total,
+        message: '抽取已取消。',
+        updated_at: now,
+      })
+      return run
+    }
+
+    if (mode === 'invalid_frontmatter') {
+      run = styleSkillRun({
+        taskId,
+        status: 'failed',
+        stage: 'skill_validation',
+        progressCompleted: Math.max(sampleIds.length, 1),
+        progressTotal: Math.max(sampleIds.length, 1),
+        sampleIds,
+        skillName,
+        skillPreview: '',
+        skillFilePath: '',
+        diagnostics: [
+          copyableDiagnostic(
+            'style_skill.invalid_frontmatter',
+            '模型返回的技能 Markdown 未通过校验。',
+            'Missing required frontmatter fields: category, author, version.',
+            'ExtractStyleSkillFromSamples',
+            taskId),
+        ],
+        completedAt: now,
+      })
+      upsertStyleSkillRun(run)
+      return run
+    }
+
+    const selected = sampleIds
+      .map((sampleId) => state.styleSamples.find((sample) => sample.sample_id === sampleId))
+      .filter(Boolean)
+    const hashes = selected.map((sample) => sample.source_metadata?.source_hash || `style-sample:${sample.sample_id}`)
+    const skillPreview = [
+      '---',
+      `name: ${skillName}`,
+      'description: 从风格素材抽取的可复用文风技能。',
+      'category: 风格仿写',
+      'mode: auto',
+      'author: ai',
+      'version: 1',
+      `source_sample_ids: ${sampleIds.join(',')}`,
+      `source_sample_hashes: ${hashes.join(',')}`,
+      'generated_by: style_sample_extraction',
+      '---',
+      '',
+      `# ${skillName}`,
+      '',
+      '## 仿写要点',
+      '- 短句推进，动作留白。',
+      '- 让对白承担转折，不解释人物心情。',
+    ].join('\n')
+    run = styleSkillRun({
+      taskId,
+      status: 'completed',
+      stage: 'skill_preview',
+      progressCompleted: Math.max(sampleIds.length, 1),
+      progressTotal: Math.max(sampleIds.length, 1),
+      sampleIds,
+      skillName,
+      skillPreview,
+      skillFilePath: `skills/${skillName}.md`,
+      diagnostics: [copyableDiagnostic('style_skill.preview_ready', '风格技能预览已生成。', `skill_file_path=skills/${skillName}.md`, 'ExtractStyleSkillFromSamples', taskId)],
+      completedAt: now,
+    })
+    upsertStyleSkillRun(run)
+    emit('style_skill_extraction:progress', {
+      task_id: run.task_id,
+      status: run.status,
+      stage: run.stage,
+      progress_completed: run.progress_completed,
+      progress_total: run.progress_total,
+      message: '风格技能预览已生成。',
+      updated_at: now,
+    })
+    return run
+  }
+
+  function cancelStyleSkillExtraction(input = {}) {
+    const taskId = String(input?.task_id ?? '')
+    if (!state.cancelledStyleSkillExtractionTaskIds.includes(taskId)) {
+      state.cancelledStyleSkillExtractionTaskIds.push(taskId)
+    }
+
+    const existing = state.styleSkillExtractionRuns.find((run) => run.task_id === taskId)
+    const run = styleSkillRun({
+      taskId,
+      status: 'cancelled',
+      stage: 'cancelled',
+      progressCompleted: existing?.progress_completed ?? 0,
+      progressTotal: existing?.progress_total ?? 1,
+      sampleIds: existing?.sample_ids ?? [],
+      skillName: existing?.skill_name ?? '',
+      skillPreview: '',
+      skillFilePath: '',
+      diagnostics: [copyableDiagnostic('style_skill.cancelled', '抽取已取消', String(input?.reason ?? ''), 'CancelStyleSkillExtraction', taskId)],
+      completedAt: now,
+    })
+    upsertStyleSkillRun(run)
+    return run
+  }
+
+  async function startNarrativePatternExtraction(input = {}) {
+    const taskId = String(input?.task_id ?? `narrative-pattern-${state.narrativePatternRuns.length + 1}`)
+    const chapterRanges = Array.isArray(input?.chapter_ranges) ? input.chapter_ranges.map(normalizeChapterRange) : []
+    const selectedChapterIds = Array.isArray(input?.selected_chapter_ids)
+      ? input.selected_chapter_ids.map(Number).filter(Number.isFinite)
+      : chapterRangesToMockChapterIds(chapterRanges, Number(input?.novel_id ?? state.activeNovelId))
+    const skillName = String(input?.skill_name ?? '').trim() || '叙事模式技能'
+    const delayMs = Math.max(0, Number(state.nextNarrativePatternDelayMs ?? 0))
+    const mode = String(state.nextNarrativePatternMode ?? 'success')
+    state.nextNarrativePatternDelayMs = 0
+    state.nextNarrativePatternMode = 'success'
+
+    let run = narrativePatternRun({
+      taskId,
+      status: 'running',
+      stage: 'load_chapters',
+      progressCompleted: 0,
+      progressTotal: 6,
+      chapterRanges,
+      selectedChapterIds,
+      skillName,
+      skillPreview: '',
+      diagnostics: [],
+      completedAt: null,
+    })
+    upsertNarrativePatternRun(run)
+    state.narrativePatternTraces[taskId] = { task_id: taskId, entries: [] }
+    emitNarrativePatternProgress(run, '正在加载并校验章节。', {
+      llmStatus: 'idle',
+    })
+
+    if (delayMs > 0) {
+      await wait(delayMs)
+    }
+
+    if (state.cancelledNarrativePatternTaskIds.includes(taskId)) {
+      run = narrativePatternRun({
+        taskId,
+        status: 'cancelled',
+        stage: 'cancelled',
+        progressCompleted: run.progress_completed,
+        progressTotal: run.progress_total,
+        chapterRanges,
+        selectedChapterIds,
+        skillName,
+        skillPreview: '',
+        diagnostics: [copyableDiagnostic('pattern.cancelled', '叙事模式抽取已取消。', '用户取消', 'CancelNarrativePatternExtraction', taskId)],
+        completedAt: now,
+      })
+      upsertNarrativePatternRun(run)
+      emitNarrativePatternProgress(run, '叙事模式抽取已取消。', { llmStatus: 'cancelled' })
+      return run
+    }
+
+    if (selectedChapterIds.length > 0 && selectedChapterIds.length < 3) {
+      const diagnostic = copyableDiagnostic('pattern.insufficient_chapters', '可用章节不足，无法抽取叙事模式。', '至少需要 3 章且正文长度达到最低阈值。', 'StartNarrativePatternExtraction', taskId)
+      run = narrativePatternRun({
+        taskId,
+        status: 'failed',
+        stage: 'load_chapters',
+        progressCompleted: 1,
+        progressTotal: 6,
+        chapterRanges,
+        selectedChapterIds,
+        skillName,
+        skillPreview: '',
+        diagnostics: [diagnostic],
+        completedAt: now,
+      })
+      upsertNarrativePatternRun(run)
+      appendNarrativePatternTrace(taskId, 'load_chapters', [diagnostic])
+      emitNarrativePatternProgress(run, diagnostic.message, { llmStatus: 'failed' })
+      return run
+    }
+
+    run = updateNarrativePatternRunProgress(run, 'boundary_detection', 1)
+    appendNarrativePatternTrace(taskId, 'boundary_detection', [])
+    emitNarrativePatternProgress(run, '正在识别叙事边界。', {
+      llmStatus: 'calling',
+      tokenEstimate: 1800,
+      boundaryCount: 2,
+    })
+
+    if (mode === 'invalid_model') {
+      const diagnostic = copyableDiagnostic('pattern.invalid_boundary_json', '模型返回的边界 JSON 无法解析。', 'Expected valid narrative boundary JSON.', 'StartNarrativePatternExtraction', taskId)
+      run = narrativePatternRun({
+        taskId,
+        status: 'failed',
+        stage: 'boundary_detection',
+        progressCompleted: 1,
+        progressTotal: 6,
+        chapterRanges,
+        selectedChapterIds,
+        skillName,
+        skillPreview: '',
+        diagnostics: [diagnostic],
+        completedAt: now,
+      })
+      upsertNarrativePatternRun(run)
+      appendNarrativePatternTrace(taskId, 'boundary_detection', [diagnostic])
+      emitNarrativePatternProgress(run, diagnostic.message, {
+        llmStatus: 'failed',
+        boundaryCount: 0,
+      })
+      return run
+    }
+
+    run = updateNarrativePatternRunProgress(run, 'chapter_summary', 2)
+    appendNarrativePatternTrace(taskId, 'chapter_summary', [])
+    emitNarrativePatternProgress(run, '正在提取章节摘要：批次 1/2。', {
+      llmStatus: 'calling',
+      batchIndex: 1,
+      batchTotal: 2,
+      tokenEstimate: 2200,
+      boundaryCount: 2,
+      summaryCount: Math.max(1, Math.floor(selectedChapterIds.length / 2)),
+    })
+
+    run = updateNarrativePatternRunProgress(run, 'chapter_summary', 3)
+    appendNarrativePatternTrace(taskId, 'chapter_summary', [])
+    emitNarrativePatternProgress(run, '章节摘要已完成。', {
+      llmStatus: 'completed',
+      batchIndex: 2,
+      batchTotal: 2,
+      tokenEstimate: 2400,
+      boundaryCount: 2,
+      summaryCount: Math.max(selectedChapterIds.length, 1),
+    })
+
+    run = updateNarrativePatternRunProgress(run, 'phase_compression', 4)
+    appendNarrativePatternTrace(taskId, 'phase_compression', [])
+    emitNarrativePatternProgress(run, '正在压缩叙事阶段：轮次 1，批次 1/1。', {
+      llmStatus: 'calling',
+      round: 1,
+      batchIndex: 1,
+      batchTotal: 1,
+      tokenEstimate: 2600,
+      boundaryCount: 2,
+      summaryCount: Math.max(selectedChapterIds.length, 1),
+      phaseCount: 2,
+    })
+
+    run = updateNarrativePatternRunProgress(run, 'skill_generation', 5)
+    appendNarrativePatternTrace(taskId, 'skill_generation', [])
+    emitNarrativePatternProgress(run, '正在生成叙事模式技能。', {
+      llmStatus: 'calling',
+      boundaryCount: 2,
+      summaryCount: Math.max(selectedChapterIds.length, 1),
+      phaseCount: 2,
+    })
+
+    const rangeText = chapterRanges.map((range) => `${range.start_chapter}-${range.end_chapter}`).join(',')
+    const skillPreview = [
+      '---',
+      `name: ${skillName}`,
+      'description: 从章节结构抽取的叙事模式技能。',
+      'category: 叙事结构',
+      'mode: auto',
+      'author: ai',
+      'version: 1',
+      'generated_by: narrative_pattern_extraction',
+      `source_chapter_ranges: ${rangeText}`,
+      `source_chapter_ids: ${selectedChapterIds.join(',')}`,
+      '---',
+      '',
+      `# ${skillName}`,
+      '',
+      '## 边界提示',
+      '- 1-3：雨夜线索压低信息量。',
+      '- 4-6：证词冲突推动反转。',
+      '',
+      '## 章节摘要',
+      '- 第1章以桌面水痕触发调查。',
+      '- 第3章用钟楼回声制造误导。',
+      '',
+      '## 阶段压缩',
+      '- 雨夜压迫到证据反转：让证词冲突逐步重组线索。',
+    ].join('\n')
+
+    run = narrativePatternRun({
+      taskId,
+      status: 'completed',
+      stage: 'completed',
+      progressCompleted: 6,
+      progressTotal: 6,
+      chapterRanges,
+      selectedChapterIds,
+      skillName,
+      skillPreview,
+      diagnostics: [copyableDiagnostic('pattern.preview_ready', '叙事模式技能预览已生成。', `skill_name=${skillName}`, 'StartNarrativePatternExtraction', taskId)],
+      completedAt: now,
+    })
+    upsertNarrativePatternRun(run)
+    emitNarrativePatternProgress(run, '叙事模式技能预览已生成。', {
+      llmStatus: 'completed',
+      boundaryCount: 2,
+      summaryCount: Math.max(selectedChapterIds.length, 1),
+      phaseCount: 2,
+    })
+    return run
+  }
+
+  function cancelNarrativePatternExtraction(input = {}) {
+    const taskId = String(input?.task_id ?? '')
+    if (!state.cancelledNarrativePatternTaskIds.includes(taskId)) {
+      state.cancelledNarrativePatternTaskIds.push(taskId)
+    }
+
+    const existing = state.narrativePatternRuns.find((run) => run.task_id === taskId)
+    const run = narrativePatternRun({
+      taskId,
+      status: 'cancelled',
+      stage: 'cancelled',
+      progressCompleted: existing?.progress_completed ?? 0,
+      progressTotal: existing?.progress_total ?? 6,
+      chapterRanges: existing?.chapter_ranges ?? [],
+      selectedChapterIds: existing?.selected_chapter_ids ?? [],
+      skillName: existing?.skill_name ?? '',
+      skillPreview: '',
+      diagnostics: [copyableDiagnostic('pattern.cancelled', '叙事模式抽取已取消。', String(input?.reason ?? ''), 'CancelNarrativePatternExtraction', taskId)],
+      completedAt: now,
+    })
+    upsertNarrativePatternRun(run)
+    appendNarrativePatternTrace(taskId, 'cancelled', run.diagnostics)
+    emitNarrativePatternProgress(run, '叙事模式抽取已取消。', { llmStatus: 'cancelled' })
+    return run
+  }
+
+  function narrativePatternRun({
+    taskId,
+    status,
+    stage,
+    progressCompleted,
+    progressTotal,
+    chapterRanges,
+    selectedChapterIds,
+    skillName,
+    skillPreview,
+    diagnostics,
+    completedAt,
+  }) {
+    return {
+      task_id: taskId,
+      novel_id: state.activeNovelId,
+      status,
+      stage,
+      progress_completed: progressCompleted,
+      progress_total: progressTotal,
+      chapter_ranges: chapterRanges,
+      selected_chapter_ids: selectedChapterIds,
+      skill_name: skillName,
+      skill_preview: skillPreview,
+      diagnostics,
+      created_at: now,
+      updated_at: now,
+      completed_at: completedAt,
+    }
+  }
+
+  function updateNarrativePatternRunProgress(run, stage, progressCompleted) {
+    const updated = { ...run, stage, progress_completed: progressCompleted, updated_at: now }
+    upsertNarrativePatternRun(updated)
+    return updated
+  }
+
+  function upsertNarrativePatternRun(run) {
+    state.narrativePatternRuns = [
+      run,
+      ...state.narrativePatternRuns.filter((item) => item.task_id !== run.task_id),
+    ]
+  }
+
+  function appendNarrativePatternTrace(taskId, stage, diagnostics) {
+    const trace = state.narrativePatternTraces[taskId] ?? { task_id: taskId, entries: [] }
+    const nextIndex = trace.entries.length + 1
+    trace.entries = [
+      ...trace.entries,
+      {
+        trace_id: `${taskId}-trace-${String(nextIndex).padStart(2, '0')}`,
+        stage,
+        input_hash: `sha256:mock-${stage}-input-${nextIndex}`,
+        output_hash: `sha256:mock-${stage}-output-${nextIndex}`,
+        diagnostics,
+        created_at: now,
+      },
+    ]
+    state.narrativePatternTraces[taskId] = trace
+  }
+
+  function emitNarrativePatternProgress(run, message, options = {}) {
+    emit('narrative_pattern_extraction:progress', {
+      task_id: run.task_id,
+      status: run.status,
+      stage: run.stage,
+      progress_completed: run.progress_completed,
+      progress_total: run.progress_total,
+      message,
+      updated_at: now,
+      llm_status: options.llmStatus ?? '',
+      round: options.round ?? null,
+      batch_index: options.batchIndex ?? null,
+      batch_total: options.batchTotal ?? null,
+      token_estimate: options.tokenEstimate ?? null,
+      boundary_count: options.boundaryCount ?? null,
+      summary_count: options.summaryCount ?? null,
+      phase_count: options.phaseCount ?? null,
+    })
+  }
+
+  function normalizeChapterRange(range = {}) {
+    return {
+      start_chapter: Number(range.start_chapter ?? 0),
+      end_chapter: Number(range.end_chapter ?? 0),
+    }
+  }
+
+  function chapterRangesToMockChapterIds(ranges, novelId = state.activeNovelId) {
+    const byNumber = new Map(chapters(novelId).map((chapter) => [chapter.chapter_number, chapter.id]))
+    const ids = []
+    for (const range of ranges) {
+      for (let chapterNumber = range.start_chapter; chapterNumber <= range.end_chapter; chapterNumber += 1) {
+        const id = byNumber.get(chapterNumber)
+        if (id != null) ids.push(id)
+      }
+    }
+    return ids
+  }
+
+  function searchStyleSamples(input = {}) {
+    const novelId = input?.novel_id == null ? null : Number(input.novel_id)
+    const includeGlobal = Boolean(input?.include_global)
+    const query = normalizeSearchText(input?.query)
+    const tags = normalizeStyleTags(input?.tags)
+    const page = Math.max(1, Number(input?.page ?? 1))
+    const size = Math.max(1, Math.min(100, Number(input?.size ?? 10)))
+    const filtered = state.styleSamples
+      .filter((sample) => matchesStyleScope(sample, novelId, includeGlobal))
+      .filter((sample) => matchesStyleQuery(sample, query))
+      .filter((sample) => matchesStyleTags(sample, tags))
+      .sort((left, right) => {
+        const timeDelta = Date.parse(right.updated_at) - Date.parse(left.updated_at)
+        return timeDelta || right.sample_id - left.sample_id
+      })
+    const total = filtered.length
+    const items = filtered
+      .slice((page - 1) * size, page * size)
+      .map(styleSampleSummary)
+    return pagedResult(items, page, size, total)
+  }
+
+  function getStyleSample(input = {}) {
+    const sampleId = Number(input?.sample_id ?? 0)
+    return state.styleSamples.find((sample) => sample.sample_id === sampleId) ?? null
+  }
+
+  function createStyleSample(input = {}) {
+    const sampleId = state.nextStyleSampleId++
+    const timestamp = styleSampleTimestamp(sampleId)
+    const sample = normalizeStyleSampleInput({
+      ...input,
+      sample_id: sampleId,
+      created_at: timestamp,
+      updated_at: timestamp,
+    })
+    state.styleSamples = [sample, ...state.styleSamples]
+    return styleSampleSummary(sample)
+  }
+
+  function updateStyleSample(input = {}) {
+    const sampleId = Number(input?.sample_id ?? 0)
+    const current = state.styleSamples.find((sample) => sample.sample_id === sampleId)
+    if (!current) throw new Error(`Unknown style sample ${sampleId}`)
+    const updated = normalizeStyleSampleInput({
+      ...input,
+      sample_id: sampleId,
+      created_at: current.created_at,
+      updated_at: styleSampleTimestamp(sampleId + 10),
+    })
+    state.styleSamples = state.styleSamples.map((sample) => sample.sample_id === sampleId ? updated : sample)
+    return styleSampleSummary(updated)
+  }
+
+  function deleteStyleSample(input = {}) {
+    if (state.failNextStyleSampleDelete) {
+      state.failNextStyleSampleDelete = false
+      throw new Error('模拟样本删除失败')
+    }
+
+    const sampleId = Number(input?.sample_id ?? 0)
+    state.styleSamples = state.styleSamples.filter((sample) => sample.sample_id !== sampleId)
+  }
+
+  function styleSkillRun({
+    taskId,
+    status,
+    stage,
+    progressCompleted,
+    progressTotal,
+    sampleIds,
+    skillName,
+    skillPreview,
+    skillFilePath,
+    diagnostics,
+    completedAt,
+  }) {
+    return {
+      task_id: taskId,
+      status,
+      stage,
+      progress_completed: progressCompleted,
+      progress_total: progressTotal,
+      sample_ids: sampleIds,
+      skill_name: skillName,
+      skill_preview: skillPreview,
+      skill_file_path: skillFilePath,
+      diagnostics,
+      created_at: now,
+      updated_at: now,
+      completed_at: completedAt,
+    }
+  }
+
+  function upsertStyleSkillRun(run) {
+    state.styleSkillExtractionRuns = [
+      run,
+      ...state.styleSkillExtractionRuns.filter((item) => item.task_id !== run.task_id),
+    ]
+  }
+
+  function copyableDiagnostic(code, message, detail, operation, taskId) {
+    return {
+      code,
+      message,
+      detail,
+      operation,
+      task_id: taskId,
+      run_id: null,
+      bridge_method: operation,
+      timestamp: now,
+    }
+  }
+
+  function normalizeStyleSampleInput(input) {
+    const isGlobal = Boolean(input?.is_global)
+    const novelId = isGlobal ? null : Number(input?.novel_id ?? state.activeNovelId)
+    const content = String(input?.content ?? '').trim()
+    const name = String(input?.name ?? '').trim() || '未命名样本'
+    const tags = normalizeStyleTags(input?.tags)
+    return {
+      sample_id: Number(input.sample_id),
+      novel_id: novelId,
+      is_global: isGlobal,
+      name,
+      content,
+      preview: buildStylePreview(content),
+      tags,
+      stats_schema_version: 'style_sample_stats_v2',
+      stats: deriveStyleStats(content),
+      source_metadata: input?.source_metadata ?? null,
+      created_at: input.created_at,
+      updated_at: input.updated_at,
+    }
+  }
+
+  function styleSampleSummary(sample) {
+    const summary = { ...sample }
+    delete summary.content
+    return summary
+  }
+
+  function matchesStyleScope(sample, novelId, includeGlobal) {
+    if (sample.is_global) return includeGlobal
+    return novelId != null && sample.novel_id === novelId
+  }
+
+  function matchesStyleQuery(sample, query) {
+    if (!query) return true
+    return [
+      sample.name,
+      sample.content,
+      sample.preview,
+      ...sample.tags,
+    ].some((value) => normalizeSearchText(value).includes(query))
+  }
+
+  function matchesStyleTags(sample, tags) {
+    return tags.length === 0 ||
+      tags.every((required) => sample.tags.some((tag) => normalizeSearchText(tag) === normalizeSearchText(required)))
+  }
+
+  function normalizeSearchText(value) {
+    return String(value ?? '').trim().toLowerCase()
+  }
+
+  function normalizeStyleTags(value) {
+    const raw = Array.isArray(value) ? value : [value]
+    const tags = []
+    const seen = new Set()
+    for (const item of raw) {
+      for (const part of String(item ?? '').split(/[;；,，\r\n]+/)) {
+        const tag = part.trim()
+        const key = tag.toLowerCase()
+        if (tag && !seen.has(key)) {
+          seen.add(key)
+          tags.push(tag)
+        }
+      }
+    }
+
+    return tags
+  }
+
+  function buildStylePreview(content) {
+    return content.replace(/\s+/g, ' ').trim().slice(0, 120)
+  }
+
+  function deriveStyleStats(content) {
+    const compact = content.replace(/\s+/g, '')
+    const sentenceLengths = content
+      .split(/[。！？!?；;\n]+/)
+      .map((part) => part.replace(/\s+/g, '').length)
+      .filter(Boolean)
+    const characterCount = compact.length
+    const punctuationCount = Array.from(content).filter((ch) => /\p{P}/u.test(ch)).length
+    const quoteCount = Array.from(content).filter((ch) => /[“”「」『』"']/u.test(ch)).length
+    return styleSampleStats({
+      characterCount,
+      wordCount: Math.max(0, compact.length - punctuationCount),
+      sentenceCount: sentenceLengths.length,
+      sentenceLengths,
+      averageSentenceChars: averageNumber(sentenceLengths),
+      sentenceLengthStdDev: standardDeviation(sentenceLengths),
+      punctuationPer100Chars: characterCount ? roundNumber((punctuationCount / characterCount) * 100) : 0,
+      quoteDensity: characterCount ? roundNumber((quoteCount / characterCount) * 100) : 0,
+      paragraphCount: content.split(/\n+/).filter((part) => part.trim()).length,
+      averageParagraphChars: averageNumber(content.split(/\n+/).map((part) => part.replace(/\s+/g, '').length).filter(Boolean)),
+      dialogueRatio: characterCount ? roundNumber((quoteCount / characterCount)) : 0,
+      interiorityRatio: /想|心里|知道|觉得|犹豫/.test(content) ? 0.35 : 0,
+      sensoryRatio: /雨|风|声|光|冷|潮|窗/.test(content) ? 0.45 : 0,
+    })
+  }
+
+  function styleSampleStats(overrides = {}) {
+    return {
+      schema_version: 'style_sample_stats_v2',
+      character_count: overrides.characterCount ?? 0,
+      word_count: overrides.wordCount ?? 0,
+      sentence_count: overrides.sentenceCount ?? 0,
+      sentence_length_distribution: overrides.sentenceLengths ?? [],
+      average_sentence_chars: overrides.averageSentenceChars ?? 0,
+      sentence_length_std_dev: overrides.sentenceLengthStdDev ?? 0,
+      punctuation_per_100_chars: overrides.punctuationPer100Chars ?? 0,
+      quote_density: overrides.quoteDensity ?? 0,
+      paragraph_count: overrides.paragraphCount ?? 0,
+      average_paragraph_chars: overrides.averageParagraphChars ?? 0,
+      dialogue_ratio: overrides.dialogueRatio ?? 0,
+      interiority_ratio: overrides.interiorityRatio ?? 0,
+      sensory_ratio: overrides.sensoryRatio ?? 0,
+    }
+  }
+
+  function styleSampleTimestamp(seed) {
+    return `2026-07-05T12:${String(Math.min(59, 10 + seed)).padStart(2, '0')}:00.000Z`
+  }
+
+  function averageNumber(values) {
+    return values.length ? roundNumber(values.reduce((total, value) => total + value, 0) / values.length) : 0
+  }
+
+  function standardDeviation(values) {
+    if (!values.length) return 0
+    const average = values.reduce((total, value) => total + value, 0) / values.length
+    return roundNumber(Math.sqrt(values.reduce((total, value) => total + ((value - average) ** 2), 0) / values.length))
+  }
+
+  function roundNumber(value) {
+    return Math.round(value * 10000) / 10000
+  }
+
   function llmConfig() {
     return {
       providers: [
@@ -4606,6 +7033,180 @@ function installConfigurableAppMockBridge(options = {}) {
       file_name: 'sqlite_vec_mock.dll',
       error: '',
     }
+  }
+
+  function buildReferenceStyleProfile(input = {}) {
+    const novelId = Number(input?.novel_id ?? state.activeNovelId)
+    const anchorIds = normalizeNumericIds(input?.anchor_ids)
+    const styleSampleIds = normalizeNumericIds(input?.style_sample_ids)
+    if (anchorIds.length === 0 && styleSampleIds.length === 0) {
+      throw new Error('BuildReferenceStyleProfile requires at least one anchor or style sample.')
+    }
+
+    const anchors = anchorIds.map((anchorId) => {
+      const anchor = referenceAnchors().find((item) => item.anchor_id === anchorId)
+      if (!anchor) throw new Error(`Reference anchor ${anchorId} is not available.`)
+      return anchor
+    })
+    const samples = styleSampleIds.map((sampleId) => {
+      const sample = state.styleSamples.find((item) => item.sample_id === sampleId)
+      if (!sample) throw new Error(`Style sample ${sampleId} is not available.`)
+      if (!sample.is_global && Number(sample.novel_id) !== novelId) {
+        throw new Error(`Style sample ${sampleId} is not available for this novel.`)
+      }
+      return sample
+    })
+
+    const profileId = state.nextReferenceStyleProfileId++
+    const sourceHashes = [
+      ...anchors.map((anchor) => anchor.source_file_hash || `reference-anchor:${anchor.anchor_id}`),
+      ...samples.map((sample) => sample.source_metadata?.source_hash || `style-sample:${sample.sample_id}`),
+    ]
+    const sampleEvidence = samples.map((sample, index) => {
+      const contentLength = String(sample.content ?? '').length
+      return {
+        evidence_id: `mock-style-profile-${profileId}-sample-${sample.sample_id}-${index + 1}`,
+        profile_id: profileId,
+        anchor_id: 0,
+        source_segment_id: `style-sample:${sample.sample_id}:stats`,
+        material_id: `style-sample-material:${sample.sample_id}:stats`,
+        feature_key: 'dialogue_ratio',
+        label: 'style_sample_stats',
+        start_offset: 0,
+        end_offset: Math.max(1, Math.min(contentLength, 120)),
+        text_hash: sample.source_metadata?.source_hash || `style-sample:${sample.sample_id}:content-hash`,
+        confidence: 0.82,
+        analyzer_source: 'deterministic_baseline',
+        source_type: 'style_sample',
+        style_sample_id: sample.sample_id,
+      }
+    })
+    const anchorEvidence = anchors.map((anchor, index) => ({
+      evidence_id: `mock-style-profile-${profileId}-anchor-${anchor.anchor_id}-${index + 1}`,
+      profile_id: profileId,
+      anchor_id: anchor.anchor_id,
+      source_segment_id: `reference-anchor:${anchor.anchor_id}:summary`,
+      material_id: `reference-material:${anchor.anchor_id}:summary`,
+      feature_key: 'rhythm',
+      label: 'reference_anchor_baseline',
+      start_offset: 0,
+      end_offset: 1,
+      text_hash: anchor.source_file_hash || `reference-anchor:${anchor.anchor_id}:hash`,
+      confidence: 0.78,
+      analyzer_source: 'deterministic_baseline',
+      source_type: 'reference_anchor',
+      style_sample_id: null,
+    }))
+    const evidenceSpans = [...sampleEvidence, ...anchorEvidence]
+    const profile = {
+      profile_id: profileId,
+      novel_id: novelId,
+      title: String(input?.title ?? '').trim() || '样本风格画像',
+      description: String(input?.description ?? ''),
+      status: 'active',
+      analyzer_version: 'reference-style-deterministic-v1',
+      feature_schema_version: 'style-profile-v1',
+      analyzer_source: 'deterministic_baseline',
+      source_anchor_ids: anchorIds,
+      source_hashes: sourceHashes,
+      source_style_sample_ids: styleSampleIds,
+      allowed_license_statuses: Array.isArray(input?.allowed_license_statuses) ? input.allowed_license_statuses : [],
+      allowed_source_trust_levels: Array.isArray(input?.allowed_source_trust_levels) ? input.allowed_source_trust_levels : [],
+      aggregate_confidence: samples.length > 0 ? 0.82 : 0.78,
+      features: styleProfileFeatures(samples, evidenceSpans),
+      evidence_spans: evidenceSpans,
+      created_at: now,
+      updated_at: now,
+      archived_at: null,
+    }
+
+    state.referenceStyleProfiles = [
+      profile,
+      ...state.referenceStyleProfiles.filter((item) => item.profile_id !== profile.profile_id),
+    ]
+    const buildId = String(input?.build_id ?? `mock-style-build-${profileId}`)
+    state.referenceStyleProfileBuildStatuses[buildId] = {
+      build_id: buildId,
+      novel_id: novelId,
+      profile_id: profileId,
+      title: profile.title,
+      status: 'completed',
+      stage: 'completed',
+      progress_completed: 7,
+      progress_total: 7,
+      anchor_ids: anchorIds,
+      source_hashes: sourceHashes,
+      style_sample_ids: styleSampleIds,
+      diagnostics: [],
+      error_code: null,
+      error_message: null,
+      created_at: now,
+      updated_at: now,
+      completed_at: now,
+      cancelled_at: null,
+    }
+    return profile
+  }
+
+  function referenceStyleProfileBuildStatus(input = {}) {
+    return state.referenceStyleProfileBuildStatuses[String(input?.build_id ?? '')] ?? null
+  }
+
+  function styleProfileFeatures(samples, evidenceSpans) {
+    const sampleEvidenceIds = evidenceSpans
+      .filter((evidence) => evidence.source_type === 'style_sample')
+      .map((evidence) => evidence.evidence_id)
+    const evidenceIds = sampleEvidenceIds.length > 0
+      ? sampleEvidenceIds
+      : evidenceSpans.map((evidence) => evidence.evidence_id)
+    const numericKeys = [
+      ['average_sentence_chars', 'chars'],
+      ['sentence_length_std_dev', 'chars'],
+      ['punctuation_per_100_chars', 'per_100_chars'],
+      ['quote_density', 'ratio'],
+      ['average_paragraph_chars', 'chars'],
+      ['dialogue_ratio', 'ratio'],
+      ['interiority_ratio', 'ratio'],
+      ['sensory_ratio', 'ratio'],
+    ]
+    return {
+      numeric_features: numericKeys
+        .map(([key, unit]) => ({
+          feature_key: key,
+          value: averageStyleSampleStat(samples, key),
+          unit,
+          confidence: samples.length > 0 ? 0.82 : 0.65,
+          evidence_ids: evidenceIds,
+        }))
+        .filter((feature) => feature.value > 0 || samples.length > 0),
+      distribution_features: [],
+      categorical_features: samples.length > 0 ? [{
+        feature_key: 'rhythm',
+        label: averageStyleSampleStat(samples, 'average_sentence_chars') <= 16 ? 'short_direct' : 'balanced',
+        weight: 0.72,
+        confidence: 0.78,
+        evidence_ids: evidenceIds,
+      }] : [],
+    }
+  }
+
+  function averageStyleSampleStat(samples, key) {
+    if (samples.length === 0) return 0
+    return roundNumber(samples.reduce((total, sample) => total + Number(sample.stats?.[key] ?? 0), 0) / samples.length)
+  }
+
+  function normalizeNumericIds(value) {
+    if (!Array.isArray(value)) return []
+    const seen = new Set()
+    const ids = []
+    for (const item of value) {
+      const id = Number(item)
+      if (Number.isInteger(id) && id > 0 && !seen.has(id)) {
+        seen.add(id)
+        ids.push(id)
+      }
+    }
+    return ids
   }
 
   function referenceAnchors() {
@@ -4931,6 +7532,10 @@ function installConfigurableAppMockBridge(options = {}) {
     const blueprint = state.referenceBlueprints[String(blueprintId)]
     if (!blueprint) throw new Error(`Unknown reference blueprint ${blueprintId}`)
     return JSON.parse(JSON.stringify(blueprint))
+  }
+
+  function cloneJson(value) {
+    return JSON.parse(JSON.stringify(value))
   }
 
   function toReferenceBlueprintSummary(blueprint) {

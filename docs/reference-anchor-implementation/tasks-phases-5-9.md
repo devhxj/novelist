@@ -121,7 +121,7 @@ Recommended implementation slices:
 - [x] Reference material tools are absent when service is null and present when configured.
 - [x] Reference draft tools are absent when draft service is null and present when configured.
 - [x] Agent tools enforce blueprint workflow order and cannot call `SaveContent`.
-- [x] `make dev` or documented dev workflow clearly requires built frontend assets or a Vite `--start-url`; missing `frontend/dist/index.html` reports a direct asset-build error.
+- [x] Documented dev workflow clearly requires built frontend assets or a Vite `--start-url`; missing `frontend/dist/index.html` reports a direct asset-build error.
 
 **Verification:**
 

@@ -41,7 +41,7 @@ git merge --no-ff dev -m "merge: <subject>
 git push origin master
 ```
 
-## 4. Tag And Push
+## 4. Choose Release Version
 
 - Check recent tags:
 
@@ -49,25 +49,34 @@ git push origin master
 git tag --sort=-v:refname | head -5
 ```
 
-- Follow the existing tag format and increment the version, for example `v0.5.0` to `v0.6.0`.
-- Use an English annotated tag message matching the merge commit summary.
+- Follow the MinVer release tag format and increment the version, for example `v0.5.0` to `v0.6.0`.
+- Release tags must be `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-prerelease`; the Windows installer version drops the leading `v`.
+- Preferred path: run the `Release` workflow manually from GitHub Actions, enter the version, and choose `draft` / `prerelease` as needed. The workflow builds the Windows installer, creates the tag when missing, and creates the GitHub Release.
+
+Manual workflow input accepts either `vX.Y.Z` or `X.Y.Z`.
+
+## 5. Optional Local Tag Path
+
+If releasing by local tag instead of manual workflow, use an English annotated tag message matching the merge commit summary:
 
 ```bash
 git tag -a vX.Y.Z -m "<English summary>"
 git push origin vX.Y.Z
 ```
 
-## 5. Create The GitHub Release
+Pushing the tag starts `.github/workflows/release.yml`. The workflow fetches full Git history/tags, resolves the version with MinVer, and fails if the tag and MinVer version do not match.
 
-- Write release notes manually in Chinese. Do not use `--generate-notes`.
-- Use two sections: `新增功能` and `问题修复`.
-- The `release.yml` workflow builds platform packages after the tag push and attaches artifacts to the release.
+## 6. Review The GitHub Release
+
+The workflow currently builds only the Windows installer and attaches the `.exe` plus `sha256sums.txt` to the GitHub Release.
+
+Review the generated GitHub Release notes after the workflow finishes. If publishing public release notes, rewrite them manually in Chinese with `新增功能` and `问题修复` sections.
 
 ```bash
-gh release create vX.Y.Z --title "vX.Y.Z" --notes "中文 release notes"
+gh release view vX.Y.Z --web
 ```
 
-## 6. Return To Dev
+## 7. Return To Dev
 
 ```bash
 git checkout dev

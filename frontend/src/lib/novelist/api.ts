@@ -105,7 +105,7 @@ export interface NovelistAppApi {
   CreateReaderPerspective: AppMethod<[number, app.CreateReaderPerspectiveInput], reader.ReaderPerspective>
   CreateReferenceAnchor: AppMethod<[reference.CreateAnchorInput], reference.Anchor>
   CreateReferenceAnchors: AppMethod<[reference.CreateAnchorsInput], reference.Anchor[]>
-  CreateStyleSample: AppMethod<[styleSample.CreateStyleSampleInput], styleSample.StyleSampleDetail>
+  CreateStyleSample: AppMethod<[styleSample.CreateStyleSampleInput], styleSample.StyleSample>
   CreateStoryArc: AppMethod<[number, app.CreateStoryArcInput], storyarc.StoryArc>
   CreateTimelineEntry: AppMethod<[number, app.CreateTimelineEntryInput], timeline.TimelineEntry>
   DeleteArcNode: AppMethod<[number, number], void>
@@ -222,7 +222,7 @@ export interface NovelistAppApi {
   StartNarrativePatternExtraction: AppMethod<[pattern.StartNarrativePatternExtractionInput], pattern.NarrativePatternRun>
   StartNovelImport: AppMethod<[novelImport.StartNovelImportInput], novelImport.ImportRun>
   StartReferenceOrchestrationRun: AppMethod<[reference.StartOrchestrationRunInput], reference.OrchestrationRun>
-  UpdateStyleSample: AppMethod<[styleSample.UpdateStyleSampleInput], styleSample.StyleSampleDetail>
+  UpdateStyleSample: AppMethod<[styleSample.UpdateStyleSampleInput], styleSample.StyleSample>
   TestEmbeddingConnection: AppMethod<[EmbeddingConfigView], void>
   TestConnection: AppMethod<[app.TestConnectionInput], void>
   UpdateArcNode: AppMethod<[number, number, app.UpdateArcNodeInput], void>

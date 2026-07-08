@@ -53,6 +53,10 @@ public sealed record NovelImportProgressPayload(
     [property: JsonPropertyName("message")] string Message,
     [property: JsonPropertyName("created_novel_id")]
     long? CreatedNovelId,
+    [property: JsonPropertyName("current_chapter_index")]
+    int? CurrentChapterIndex,
+    [property: JsonPropertyName("current_chapter_title")]
+    string? CurrentChapterTitle,
     [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt);
 
 public sealed record NovelImportRunPayload(

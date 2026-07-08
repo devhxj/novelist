@@ -23,7 +23,14 @@ public sealed record UpdateCheckResultPayload(
     [property: JsonPropertyName("error_code")]
     string? ErrorCode,
     [property: JsonPropertyName("error_message")]
-    string? ErrorMessage);
+    string? ErrorMessage,
+    [property: JsonPropertyName("release_name")]
+    string? ReleaseName = null,
+    [property: JsonPropertyName("release_notes")]
+    string? ReleaseNotes = null,
+    [property: JsonPropertyName("download_url")]
+    string? DownloadUrl = null,
+    [property: JsonPropertyName("dismissed")] bool Dismissed = false);
 
 public sealed record UpdateCheckSettingsPayload(
     [property: JsonPropertyName("enabled")] bool Enabled,

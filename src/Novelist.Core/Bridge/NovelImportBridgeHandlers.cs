@@ -10,7 +10,8 @@ public static class NovelImportBridgeHandlers
     public static BridgeDispatcher RegisterNovelImportHandlers(
         this BridgeDispatcher dispatcher,
         INovelImportRunService service,
-        INovelImportFilePicker? filePicker = null)
+        INovelImportFilePicker? filePicker = null,
+        INovelImportRecoveryService? recoveryService = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(service);
@@ -38,6 +39,12 @@ public static class NovelImportBridgeHandlers
 
         dispatcher.Register("GetNovelImportRecoveryStatus", async (_, cancellationToken) =>
             await service.GetRecoveryStatusAsync(cancellationToken));
+
+        if (recoveryService is not null)
+        {
+            dispatcher.Register("ReconcileNovelImportRuns", async (_, cancellationToken) =>
+                await recoveryService.ReconcileAsync(cancellationToken));
+        }
 
         return dispatcher;
     }

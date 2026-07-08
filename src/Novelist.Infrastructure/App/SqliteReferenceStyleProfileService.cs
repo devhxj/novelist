@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
@@ -12,6 +14,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
 {
     private const long WorkspaceCorpusNovelId = 0;
     private const int MaxAnchorCount = 50;
+    private const int MaxStyleSampleCount = 50;
     private const int MaxBuildIdLength = 128;
     private const int StyleProfileBuildProgressTotal = 7;
     private const int MaxLlmAnalysisWindows = 64;
@@ -33,17 +36,20 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
     private readonly AppInitializationOptions _options;
     private readonly INovelService _novels;
     private readonly IReferenceStyleLlmAnalyzer? _llmAnalyzer;
+    private readonly IStyleSampleService _styleSamples;
     private readonly SemaphoreSlim _mutex = new(1, 1);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeBuildCancellations = new(StringComparer.Ordinal);
 
     public SqliteReferenceStyleProfileService(
         AppInitializationOptions? options = null,
         INovelService? novels = null,
-        IReferenceStyleLlmAnalyzer? llmAnalyzer = null)
+        IReferenceStyleLlmAnalyzer? llmAnalyzer = null,
+        IStyleSampleService? styleSamples = null)
     {
         _options = options ?? new AppInitializationOptions();
         _novels = novels ?? new FileSystemNovelService(_options);
         _llmAnalyzer = llmAnalyzer;
+        _styleSamples = styleSamples ?? new FileSystemStyleSampleService(_options, _novels);
     }
 
     public async ValueTask<ReferenceStyleProfilePayload> BuildStyleProfileAsync(
@@ -55,10 +61,12 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         var databasePath = await DatabasePathAsync(cancellationToken);
         var titleForFailure = NormalizeBestEffortTitle(input.Title);
         var anchorIdsForFailure = NormalizeBestEffortAnchorIds(input.AnchorIds);
+        var styleSampleIdsForFailure = NormalizeBestEffortStyleSampleIds(input.StyleSampleIds);
 
         long novelIdForFailure = Math.Max(0, input.NovelId);
         string title = titleForFailure;
         IReadOnlyList<long> anchorIds = anchorIdsForFailure;
+        IReadOnlyList<long> styleSampleIds = styleSampleIdsForFailure;
         IReadOnlyList<string> sourceHashesForFailure = [];
         var mutexAcquired = false;
         using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -84,6 +92,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                 StyleProfileBuildProgressTotal,
                 anchorIdsForFailure,
                 [],
+                styleSampleIdsForFailure,
                 [],
                 errorCode: null,
                 errorMessage: null,
@@ -102,6 +111,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                 progressCompleted: 1,
                 anchorIds,
                 sourceHashesForFailure,
+                styleSampleIds,
                 buildCancellationToken);
             ValidateNovelId(input.NovelId);
             novelIdForFailure = input.NovelId;
@@ -109,7 +119,12 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
 
             title = NormalizeRequiredText(input.Title, nameof(input.Title), maxLength: 200);
             var description = NormalizeOptionalText(input.Description, nameof(input.Description), maxLength: 1000);
-            anchorIds = NormalizeAnchorIds(input.AnchorIds);
+            styleSampleIds = NormalizeStyleSampleIds(input.StyleSampleIds);
+            anchorIds = NormalizeAnchorIds(input.AnchorIds, allowEmpty: styleSampleIds.Count > 0);
+            if (anchorIds.Count == 0 && styleSampleIds.Count == 0)
+            {
+                throw new ArgumentException("At least one source anchor or style sample is required.", nameof(input.AnchorIds));
+            }
             var allowedLicenseStatuses = NormalizeAllowedList(
                 input.AllowedLicenseStatuses,
                 DefaultAllowedLicenseStatuses,
@@ -134,6 +149,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                 progressCompleted: 2,
                 anchorIds,
                 sourceHashesForFailure,
+                styleSampleIds,
                 buildCancellationToken);
             var sources = await ReadAccessibleSourcesAsync(
                 connection,
@@ -142,7 +158,11 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                 allowedLicenseStatuses,
                 allowedSourceTrustLevels,
                 buildCancellationToken);
-            sourceHashesForFailure = sources.Select(source => source.SourceFileHash).ToArray();
+            var sampleSources = await ReadAccessibleStyleSamplesAsync(input.NovelId, styleSampleIds, buildCancellationToken);
+            sourceHashesForFailure = sources
+                .Select(source => source.SourceFileHash)
+                .Concat(sampleSources.Select(source => source.SourceHash))
+                .ToArray();
             await ThrowIfStyleBuildCancelledAsync(connection, transaction: null, buildId, buildCancellationToken);
             await UpdateStyleBuildProgressAsync(
                 databasePath,
@@ -153,11 +173,14 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                 progressCompleted: 3,
                 anchorIds,
                 sourceHashesForFailure,
+                styleSampleIds,
                 buildCancellationToken);
             var materials = await ReadActiveMaterialsAsync(connection, anchorIds, buildCancellationToken);
-            if (materials.Count == 0)
+            var sampleMaterials = BuildStyleSampleMaterials(sampleSources);
+            var allMaterials = materials.Concat(sampleMaterials).ToArray();
+            if (allMaterials.Length == 0)
             {
-                throw new ArgumentException("Style profile requires at least one active reference material.", nameof(input.AnchorIds));
+                throw new ArgumentException("Style profile requires at least one active reference material or style sample.", nameof(input.AnchorIds));
             }
 
             var sourceHashes = sourceHashesForFailure;
@@ -171,6 +194,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                 progressCompleted: 4,
                 anchorIds,
                 sourceHashes,
+                styleSampleIds,
                 buildCancellationToken);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(buildCancellationToken);
             try
@@ -183,6 +207,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                     description,
                     anchorIds,
                     sourceHashes,
+                    styleSampleIds,
                     allowedLicenseStatuses,
                     allowedSourceTrustLevels,
                     now,
@@ -202,6 +227,13 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                     sources,
                     materials,
                     buildCancellationToken);
+                await InsertSampleProfileSourcesAsync(
+                    connection,
+                    transaction,
+                    profileId,
+                    sampleSources,
+                    sampleMaterials,
+                    buildCancellationToken);
 
                 await ThrowIfStyleBuildCancelledAsync(connection, transaction, buildId, buildCancellationToken);
                 await UpdateStyleBuildProgressAsync(
@@ -217,6 +249,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                     StyleProfileBuildProgressTotal,
                     anchorIds,
                     sourceHashes,
+                    styleSampleIds,
                     [],
                     errorCode: null,
                     errorMessage: null,
@@ -224,17 +257,29 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                     cancelledAt: null,
                     now,
                     buildCancellationToken);
-                var baseline = ReferenceStyleDeterministicBaselineExtractor.Build(profileId, materials);
+                var baseline = ReferenceStyleDeterministicBaselineExtractor.Build(profileId, allMaterials);
+                var anchorEvidence = baseline.EvidenceSpans
+                    .Where(evidence => !string.Equals(evidence.SourceType, ReferenceStyleProfileSourceTypes.StyleSample, StringComparison.Ordinal))
+                    .ToArray();
+                var sampleEvidence = baseline.EvidenceSpans
+                    .Where(evidence => string.Equals(evidence.SourceType, ReferenceStyleProfileSourceTypes.StyleSample, StringComparison.Ordinal))
+                    .ToArray();
                 await InsertEvidenceAsync(
                     connection,
                     transaction,
-                    baseline.EvidenceSpans,
+                    anchorEvidence,
+                    now,
+                    buildCancellationToken);
+                await InsertSampleEvidenceAsync(
+                    connection,
+                    transaction,
+                    sampleEvidence,
                     now,
                     buildCancellationToken);
                 await InsertMaterialStyleTagsAsync(
                     connection,
                     transaction,
-                    baseline.EvidenceSpans,
+                    anchorEvidence,
                     ReferenceStyleAnalyzerVersions.DeterministicV1,
                     now,
                     buildCancellationToken);
@@ -253,7 +298,11 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
 
                 var analyzerVersion = ReferenceStyleAnalyzerVersions.DeterministicV1;
                 var analyzerSource = ReferenceStyleAnalyzerSources.DeterministicBaseline;
-                var features = baseline.Features;
+                var features = MergeStyleSampleStatsFeatures(
+                    baseline.Features,
+                    sampleSources,
+                    sampleEvidence,
+                    replaceExisting: materials.Count == 0);
                 var evidenceSpans = baseline.EvidenceSpans;
                 if (_llmAnalyzer is not null)
                 {
@@ -271,6 +320,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                         StyleProfileBuildProgressTotal,
                         anchorIds,
                         sourceHashes,
+                        styleSampleIds,
                         [],
                         errorCode: null,
                         errorMessage: null,
@@ -278,7 +328,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                         cancelledAt: null,
                         now,
                         buildCancellationToken);
-                    var windows = BuildLlmAnalysisWindows(materials);
+                    var windows = BuildLlmAnalysisWindows(allMaterials);
                     var validation = await RunLlmAnalysisAsync(profileId, windows, buildCancellationToken);
                     if (validation is not null)
                     {
@@ -341,6 +391,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                     StyleProfileBuildProgressTotal,
                     anchorIds,
                     sourceHashes,
+                    styleSampleIds,
                     [],
                     errorCode: null,
                     errorMessage: null,
@@ -369,7 +420,8 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
                     evidenceSpans,
                     now,
                     now,
-                    ArchivedAt: null);
+                    ArchivedAt: null,
+                    SourceStyleSampleIds: styleSampleIds);
             }
             catch
             {
@@ -379,12 +431,12 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         }
         catch (OperationCanceledException)
         {
-            await MarkStyleBuildCancelledAsync(databasePath, buildId, novelIdForFailure, title, anchorIds, sourceHashesForFailure, CancellationToken.None);
+            await MarkStyleBuildCancelledAsync(databasePath, buildId, novelIdForFailure, title, anchorIds, sourceHashesForFailure, styleSampleIds, CancellationToken.None);
             throw;
         }
         catch (Exception exception)
         {
-            await MarkStyleBuildFailedAsync(databasePath, buildId, novelIdForFailure, title, anchorIds, sourceHashesForFailure, exception, CancellationToken.None);
+            await MarkStyleBuildFailedAsync(databasePath, buildId, novelIdForFailure, title, anchorIds, sourceHashesForFailure, styleSampleIds, exception, CancellationToken.None);
             throw;
         }
         finally
@@ -415,7 +467,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             command.CommandText = """
                 SELECT profile_id, novel_id, title, description, status, analyzer_version,
                        feature_schema_version, analyzer_source, anchor_ids_json, source_hashes_json,
-                       aggregate_confidence, created_at, updated_at, archived_at
+                       style_sample_ids_json, aggregate_confidence, created_at, updated_at, archived_at
                 FROM reference_style_profiles
                 WHERE novel_id = $novel_id
                   AND ($include_archived = 1 OR archived_at IS NULL)
@@ -520,6 +572,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             existing.ProgressTotal,
             existing.AnchorIds,
             existing.SourceHashes,
+            existing.StyleSampleIds ?? [],
             ["cancel_requested"],
             errorCode: null,
             errorMessage: null,
@@ -707,6 +760,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
               analyzer_source TEXT NOT NULL,
               anchor_ids_json TEXT NOT NULL,
               source_hashes_json TEXT NOT NULL,
+              style_sample_ids_json TEXT NOT NULL DEFAULT '[]',
               allowed_license_statuses_json TEXT NOT NULL,
               allowed_source_trust_levels_json TEXT NOT NULL,
               feature_vector_json TEXT NOT NULL,
@@ -727,6 +781,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
               progress_total INTEGER NOT NULL,
               anchor_ids_json TEXT NOT NULL,
               source_hashes_json TEXT NOT NULL,
+              style_sample_ids_json TEXT NOT NULL DEFAULT '[]',
               diagnostics_json TEXT NOT NULL,
               error_code TEXT,
               error_message TEXT,
@@ -751,6 +806,19 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE RESTRICT
             );
 
+            CREATE TABLE IF NOT EXISTS reference_style_profile_sample_sources (
+              profile_id INTEGER NOT NULL,
+              sample_id INTEGER NOT NULL,
+              novel_id INTEGER,
+              is_global INTEGER NOT NULL,
+              source_hash TEXT NOT NULL,
+              stats_schema_version TEXT NOT NULL,
+              material_count INTEGER NOT NULL,
+              segment_count INTEGER NOT NULL,
+              PRIMARY KEY(profile_id, sample_id),
+              FOREIGN KEY(profile_id) REFERENCES reference_style_profiles(profile_id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS reference_style_profile_evidence (
               evidence_id TEXT PRIMARY KEY,
               profile_id INTEGER NOT NULL,
@@ -769,6 +837,23 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE RESTRICT,
               FOREIGN KEY(source_segment_id) REFERENCES reference_source_segments(segment_id) ON DELETE RESTRICT,
               FOREIGN KEY(material_id) REFERENCES reference_materials(material_id) ON DELETE RESTRICT
+            );
+
+            CREATE TABLE IF NOT EXISTS reference_style_profile_sample_evidence (
+              evidence_id TEXT PRIMARY KEY,
+              profile_id INTEGER NOT NULL,
+              sample_id INTEGER NOT NULL,
+              source_segment_id TEXT NOT NULL,
+              material_id TEXT,
+              feature_key TEXT NOT NULL,
+              label TEXT NOT NULL,
+              start_offset INTEGER NOT NULL,
+              end_offset INTEGER NOT NULL,
+              text_hash TEXT NOT NULL,
+              confidence REAL NOT NULL,
+              analyzer_source TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(profile_id) REFERENCES reference_style_profiles(profile_id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS reference_style_analysis_runs (
@@ -810,8 +895,14 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             CREATE INDEX IF NOT EXISTS idx_reference_style_profile_sources_anchor
               ON reference_style_profile_sources(anchor_id);
 
+            CREATE INDEX IF NOT EXISTS idx_reference_style_profile_sample_sources_sample
+              ON reference_style_profile_sample_sources(sample_id);
+
             CREATE INDEX IF NOT EXISTS idx_reference_style_evidence_profile_feature
               ON reference_style_profile_evidence(profile_id, feature_key);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_style_sample_evidence_profile_feature
+              ON reference_style_profile_sample_evidence(profile_id, feature_key);
 
             CREATE INDEX IF NOT EXISTS idx_reference_material_style_tags_material
               ON reference_material_style_tags(material_id, tag_key);
@@ -828,6 +919,18 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             await PromoteLegacyWorkspaceCorpusVisibilityAsync(connection, cancellationToken);
         }
 
+        await EnsureColumnAsync(
+            connection,
+            "reference_style_profiles",
+            "style_sample_ids_json",
+            "ALTER TABLE reference_style_profiles ADD COLUMN style_sample_ids_json TEXT NOT NULL DEFAULT '[]';",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_style_profile_builds",
+            "style_sample_ids_json",
+            "ALTER TABLE reference_style_profile_builds ADD COLUMN style_sample_ids_json TEXT NOT NULL DEFAULT '[]';",
+            cancellationToken);
         await EnsureColumnAsync(
             connection,
             "reference_anchors",
@@ -922,6 +1025,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         int progressCompleted,
         IReadOnlyList<long> anchorIds,
         IReadOnlyList<string> sourceHashes,
+        IReadOnlyList<long> styleSampleIds,
         CancellationToken cancellationToken)
     {
         await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
@@ -938,6 +1042,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             StyleProfileBuildProgressTotal,
             anchorIds,
             sourceHashes,
+            styleSampleIds,
             [],
             errorCode: null,
             errorMessage: null,
@@ -961,6 +1066,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         int progressTotal,
         IReadOnlyList<long> anchorIds,
         IReadOnlyList<string> sourceHashes,
+        IReadOnlyList<long> styleSampleIds,
         IReadOnlyList<string> diagnostics,
         string? errorCode,
         string? errorMessage,
@@ -982,6 +1088,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             progressTotal,
             anchorIds,
             sourceHashes,
+            styleSampleIds,
             diagnostics,
             errorCode,
             errorMessage,
@@ -1004,6 +1111,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         int progressTotal,
         IReadOnlyList<long> anchorIds,
         IReadOnlyList<string> sourceHashes,
+        IReadOnlyList<long> styleSampleIds,
         IReadOnlyList<string> diagnostics,
         string? errorCode,
         string? errorMessage,
@@ -1026,6 +1134,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             progressTotal,
             anchorIds,
             sourceHashes,
+            styleSampleIds,
             diagnostics,
             errorCode,
             errorMessage,
@@ -1049,6 +1158,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         int progressTotal,
         IReadOnlyList<long> anchorIds,
         IReadOnlyList<string> sourceHashes,
+        IReadOnlyList<long> styleSampleIds,
         IReadOnlyList<string> diagnostics,
         string? errorCode,
         string? errorMessage,
@@ -1064,12 +1174,12 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             INSERT INTO reference_style_profile_builds
               (build_id, novel_id, profile_id, title, status, stage,
                progress_completed, progress_total, anchor_ids_json, source_hashes_json,
-               diagnostics_json, error_code, error_message, created_at, updated_at,
+               style_sample_ids_json, diagnostics_json, error_code, error_message, created_at, updated_at,
                completed_at, cancelled_at)
             VALUES
               ($build_id, $novel_id, $profile_id, $title, $status, $stage,
                $progress_completed, $progress_total, $anchor_ids_json, $source_hashes_json,
-               $diagnostics_json, $error_code, $error_message, $created_at, $updated_at,
+               $style_sample_ids_json, $diagnostics_json, $error_code, $error_message, $created_at, $updated_at,
                $completed_at, $cancelled_at)
             ON CONFLICT(build_id) DO UPDATE SET
               novel_id = excluded.novel_id,
@@ -1081,6 +1191,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
               progress_total = excluded.progress_total,
               anchor_ids_json = excluded.anchor_ids_json,
               source_hashes_json = excluded.source_hashes_json,
+              style_sample_ids_json = excluded.style_sample_ids_json,
               diagnostics_json = excluded.diagnostics_json,
               error_code = excluded.error_code,
               error_message = excluded.error_message,
@@ -1098,6 +1209,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         command.Parameters.AddWithValue("$progress_total", Math.Max(0, progressTotal));
         command.Parameters.AddWithValue("$anchor_ids_json", JsonSerializer.Serialize(anchorIds, JsonOptions));
         command.Parameters.AddWithValue("$source_hashes_json", JsonSerializer.Serialize(sourceHashes, JsonOptions));
+        command.Parameters.AddWithValue("$style_sample_ids_json", JsonSerializer.Serialize(styleSampleIds, JsonOptions));
         command.Parameters.AddWithValue("$diagnostics_json", JsonSerializer.Serialize(SanitizeDiagnostics(diagnostics), JsonOptions));
         command.Parameters.AddWithValue("$error_code", (object?)NormalizeOptionalErrorField(errorCode, maxLength: 128) ?? DBNull.Value);
         command.Parameters.AddWithValue("$error_message", (object?)NormalizeOptionalErrorField(errorMessage, maxLength: 512) ?? DBNull.Value);
@@ -1118,7 +1230,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         command.CommandText = """
             SELECT build_id, novel_id, profile_id, title, status, stage,
                    progress_completed, progress_total, anchor_ids_json, source_hashes_json,
-                   diagnostics_json, error_code, error_message, created_at, updated_at,
+                   style_sample_ids_json, diagnostics_json, error_code, error_message, created_at, updated_at,
                    completed_at, cancelled_at
             FROM reference_style_profile_builds
             WHERE novel_id = $novel_id
@@ -1158,6 +1270,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         string title,
         IReadOnlyList<long> anchorIds,
         IReadOnlyList<string> sourceHashes,
+        IReadOnlyList<long> styleSampleIds,
         Exception exception,
         CancellationToken cancellationToken)
     {
@@ -1177,6 +1290,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             existing?.ProgressTotal ?? StyleProfileBuildProgressTotal,
             existing?.AnchorIds.Count > 0 ? existing.AnchorIds : anchorIds,
             existing?.SourceHashes.Count > 0 ? existing.SourceHashes : sourceHashes,
+            existing?.StyleSampleIds?.Count > 0 ? existing.StyleSampleIds : styleSampleIds,
             BuildFailureDiagnostics(exception),
             exception.GetType().Name,
             "Style profile build failed before completion.",
@@ -1194,6 +1308,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         string title,
         IReadOnlyList<long> anchorIds,
         IReadOnlyList<string> sourceHashes,
+        IReadOnlyList<long> styleSampleIds,
         CancellationToken cancellationToken)
     {
         await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
@@ -1212,6 +1327,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             existing?.ProgressTotal ?? StyleProfileBuildProgressTotal,
             existing?.AnchorIds.Count > 0 ? existing.AnchorIds : anchorIds,
             existing?.SourceHashes.Count > 0 ? existing.SourceHashes : sourceHashes,
+            existing?.StyleSampleIds?.Count > 0 ? existing.StyleSampleIds : styleSampleIds,
             ["cancelled"],
             errorCode: null,
             errorMessage: null,
@@ -1231,7 +1347,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         command.CommandText = """
             SELECT build_id, novel_id, profile_id, title, status, stage,
                    progress_completed, progress_total, anchor_ids_json, source_hashes_json,
-                   diagnostics_json, error_code, error_message, created_at, updated_at,
+                   style_sample_ids_json, diagnostics_json, error_code, error_message, created_at, updated_at,
                    completed_at, cancelled_at
             FROM reference_style_profile_builds
             WHERE build_id = $build_id;
@@ -1249,6 +1365,11 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         IReadOnlyList<string> allowedSourceTrustLevels,
         CancellationToken cancellationToken)
     {
+        if (anchorIds.Count == 0)
+        {
+            return [];
+        }
+
         await using var command = connection.CreateCommand();
         var anchorParameters = AddLongParameters(command, "$anchor_id_", anchorIds);
         command.CommandText = $$"""
@@ -1305,6 +1426,11 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         IReadOnlyList<long> anchorIds,
         CancellationToken cancellationToken)
     {
+        if (anchorIds.Count == 0)
+        {
+            return [];
+        }
+
         await using var command = connection.CreateCommand();
         var anchorParameters = AddLongParameters(command, "$material_anchor_id_", anchorIds);
         command.CommandText = $$"""
@@ -1344,6 +1470,237 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         }
 
         return rows;
+    }
+
+    private async ValueTask<IReadOnlyList<ReferenceStyleSampleSource>> ReadAccessibleStyleSamplesAsync(
+        long novelId,
+        IReadOnlyList<long> sampleIds,
+        CancellationToken cancellationToken)
+    {
+        if (sampleIds.Count == 0)
+        {
+            return [];
+        }
+
+        var sources = new List<ReferenceStyleSampleSource>(sampleIds.Count);
+        foreach (var sampleId in sampleIds)
+        {
+            var sample = await _styleSamples.GetSampleAsync(new GetStyleSamplePayload(sampleId), cancellationToken)
+                ?? throw new ArgumentException($"Reference style profile cannot access style samples: {sampleId}.", nameof(sampleIds));
+            if (!sample.IsGlobal && sample.NovelId != novelId)
+            {
+                throw new ArgumentException($"Reference style profile cannot access style samples: {sampleId}.", nameof(sampleIds));
+            }
+
+            var sourceHash = NormalizeSampleSourceHash(sample);
+            sources.Add(new ReferenceStyleSampleSource(
+                sample.SampleId,
+                sample.NovelId,
+                sample.IsGlobal,
+                sample.Name,
+                sample.Content,
+                sample.Stats,
+                sample.StatsSchemaVersion,
+                sourceHash));
+        }
+
+        return sampleIds
+            .Select(sampleId => sources.Single(source => source.SampleId == sampleId))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<ReferenceStyleMaterialSample> BuildStyleSampleMaterials(
+        IReadOnlyList<ReferenceStyleSampleSource> sources)
+    {
+        if (sources.Count == 0)
+        {
+            return [];
+        }
+
+        var materials = new List<ReferenceStyleMaterialSample>();
+        foreach (var source in sources)
+        {
+            AddStyleSampleMaterials(materials, source, ReferenceMaterialTypes.Passage, SplitSampleParagraphs(source.Content));
+            AddStyleSampleMaterials(materials, source, ReferenceMaterialTypes.Sentence, SplitSampleSentences(source.Content));
+        }
+
+        return materials;
+    }
+
+    private static void AddStyleSampleMaterials(
+        List<ReferenceStyleMaterialSample> materials,
+        ReferenceStyleSampleSource source,
+        string materialType,
+        IReadOnlyList<SampleTextSpan> spans)
+    {
+        for (var index = 0; index < spans.Count; index++)
+        {
+            var span = spans[index];
+            if (string.IsNullOrWhiteSpace(span.Text))
+            {
+                continue;
+            }
+
+            var sourceSegmentId = $"style-sample:{source.SampleId}:{materialType}:{index + 1}";
+            var materialId = $"style-sample-material:{source.SampleId}:{materialType}:{index + 1}";
+            materials.Add(new ReferenceStyleMaterialSample(
+                materialId,
+                AnchorId: 0,
+                sourceSegmentId,
+                materialType,
+                InferStyleSampleFunctionTag(span.Text),
+                InferStyleSampleEmotionTag(span.Text),
+                "sample",
+                "unknown",
+                InferStyleSampleTechniqueTag(span.Text),
+                0.7,
+                0.6,
+                0.6,
+                span.Text,
+                source.SourceHash,
+                span.StartOffset,
+                span.EndOffset,
+                HashText(span.Text),
+                ReferenceStyleProfileSourceTypes.StyleSample,
+                source.SampleId));
+        }
+    }
+
+    private static IReadOnlyList<SampleTextSpan> SplitSampleParagraphs(string content)
+    {
+        var spans = new List<SampleTextSpan>();
+        var start = 0;
+        foreach (var part in content.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n'))
+        {
+            var index = content.IndexOf(part, start, StringComparison.Ordinal);
+            if (index < 0)
+            {
+                index = start;
+            }
+
+            var text = part.Trim();
+            if (text.Length > 0)
+            {
+                spans.Add(new SampleTextSpan(text, index, index + part.Length));
+            }
+
+            start = Math.Min(content.Length, index + part.Length + 1);
+        }
+
+        return spans;
+    }
+
+    private static IReadOnlyList<SampleTextSpan> SplitSampleSentences(string content)
+    {
+        var spans = new List<SampleTextSpan>();
+        var start = 0;
+        for (var index = 0; index < content.Length; index++)
+        {
+            if (!IsSampleSentenceTerminator(content[index]))
+            {
+                continue;
+            }
+
+            var end = index + 1;
+            while (end < content.Length && content[end] is '”' or '」' or '』' or '"' or '\'' or ')' or '）')
+            {
+                end++;
+            }
+
+            AddSpan(start, end);
+            start = end;
+            index = end - 1;
+        }
+
+        if (start < content.Length)
+        {
+            AddSpan(start, content.Length);
+        }
+
+        return spans;
+
+        void AddSpan(int rawStart, int rawEnd)
+        {
+            var raw = content[rawStart..rawEnd];
+            var trimmed = raw.Trim();
+            if (trimmed.Length == 0)
+            {
+                return;
+            }
+
+            var leading = raw.Length - raw.TrimStart().Length;
+            spans.Add(new SampleTextSpan(trimmed, rawStart + leading, rawStart + leading + trimmed.Length));
+        }
+    }
+
+    private static bool IsSampleSentenceTerminator(char ch)
+    {
+        return ch is '。' or '！' or '？' or '!' or '?' or '；' or ';' or '.';
+    }
+
+    private static string InferStyleSampleFunctionTag(string text)
+    {
+        if (ContainsAny(text, ["“", "”", "「", "」", "『", "』", "\"", "说", "问", "答"]))
+        {
+            return "dialogue";
+        }
+
+        if (ContainsAny(text, ["想", "心", "意识到", "明白", "知道", "觉得"]))
+        {
+            return "interiority";
+        }
+
+        if (ContainsAny(text, ["雨", "风", "雪", "光", "声", "冷", "热", "疼", "气味"]))
+        {
+            return "environment";
+        }
+
+        return "sample";
+    }
+
+    private static string InferStyleSampleEmotionTag(string text)
+    {
+        if (ContainsAny(text, ["紧", "怕", "疼", "沉默", "压低", "暗"]))
+        {
+            return "pressure";
+        }
+
+        return "neutral";
+    }
+
+    private static string InferStyleSampleTechniqueTag(string text)
+    {
+        if (ContainsAny(text, ["“", "”", "「", "」", "『", "』", "\""]))
+        {
+            return "dialogue_exchange";
+        }
+
+        if (ContainsAny(text, ["雨", "风", "声", "光", "冷", "气味"]))
+        {
+            return "sensory_detail";
+        }
+
+        if (ContainsAny(text, ["停", "看", "拿", "推", "转", "站", "坐", "伸"]))
+        {
+            return "afterbeat";
+        }
+
+        return "style_sample";
+    }
+
+    private static string NormalizeSampleSourceHash(StyleSampleDetailPayload sample)
+    {
+        if (!string.IsNullOrWhiteSpace(sample.SourceMetadata?.SourceHash))
+        {
+            return sample.SourceMetadata.SourceHash;
+        }
+
+        return HashText(string.Join(
+            "|",
+            StyleTextStatistics.SchemaVersion,
+            sample.SampleId.ToString(CultureInfo.InvariantCulture),
+            sample.UpdatedAt.ToString("O", CultureInfo.InvariantCulture),
+            sample.Content));
     }
 
     private async ValueTask<ReferenceStyleLlmAnalysisValidationResultPayload?> RunLlmAnalysisAsync(
@@ -1478,6 +1835,193 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         return baseline with { CategoricalFeatures = categories };
     }
 
+    private static ReferenceStyleFeatureVectorPayload MergeStyleSampleStatsFeatures(
+        ReferenceStyleFeatureVectorPayload baseline,
+        IReadOnlyList<ReferenceStyleSampleSource> sampleSources,
+        IReadOnlyList<ReferenceStyleEvidenceSpanPayload> sampleEvidenceSpans,
+        bool replaceExisting)
+    {
+        if (sampleSources.Count == 0)
+        {
+            return baseline;
+        }
+
+        var stats = AggregateStyleSampleStats(sampleSources);
+        var confidence = Math.Round(Math.Clamp(
+            0.55 + Math.Min(0.25, sampleSources.Count / 10.0) + Math.Min(0.20, stats.SentenceCount / 100.0),
+            0.55,
+            1.0),
+            4);
+        var evidenceIds = sampleEvidenceSpans
+            .GroupBy(evidence => evidence.FeatureKey, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(evidence => evidence.EvidenceId).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
+                StringComparer.Ordinal);
+        var prefix = replaceExisting ? string.Empty : "style_sample_";
+
+        var numericFeatures = new List<ReferenceStyleNumericFeaturePayload>(baseline.NumericFeatures);
+        UpsertNumeric("character_count", stats.CharacterCount, "chars", confidence, []);
+        UpsertNumeric("word_count", stats.WordCount, "count", confidence, []);
+        UpsertNumeric("sentence_count", stats.SentenceCount, "count", confidence, []);
+        UpsertNumeric("paragraph_count", stats.ParagraphCount, "count", confidence, []);
+        UpsertNumeric("average_sentence_chars", stats.AverageSentenceChars, "chars", confidence, EvidenceIds("average_sentence_chars"));
+        UpsertNumeric("sentence_length_std_dev", stats.SentenceLengthStdDev, "chars", confidence, EvidenceIds("average_sentence_chars"));
+        UpsertNumeric("average_paragraph_chars", stats.AverageParagraphChars, "chars", confidence, EvidenceIds("average_paragraph_chars"));
+        UpsertNumeric("dialogue_ratio", stats.DialogueRatio, "ratio", confidence, EvidenceIds("dialogue_ratio"));
+        UpsertNumeric("interiority_ratio", stats.InteriorityRatio, "ratio", confidence, EvidenceIds("interiority_ratio"));
+        UpsertNumeric("sensory_ratio", stats.SensoryRatio, "ratio", confidence, EvidenceIds("sensory_ratio"));
+        UpsertNumeric("punctuation_per_100_chars", stats.PunctuationPer100Chars, "per_100_chars", confidence, []);
+        UpsertNumeric("quote_density", stats.QuoteDensity, "per_100_chars", confidence, []);
+
+        var distributionFeatures = new List<ReferenceStyleDistributionFeaturePayload>(baseline.DistributionFeatures);
+        UpsertDistribution(
+            "sentence_length_distribution",
+            "chars",
+            BuildStyleSampleLengthBuckets(stats.SentenceLengthDistribution),
+            confidence,
+            EvidenceIds("average_sentence_chars"));
+
+        return baseline with
+        {
+            NumericFeatures = numericFeatures,
+            DistributionFeatures = distributionFeatures
+        };
+
+        void UpsertNumeric(string featureKey, double value, string unit, double featureConfidence, IReadOnlyList<string> featureEvidenceIds)
+        {
+            var key = prefix + featureKey;
+            if (replaceExisting)
+            {
+                numericFeatures.RemoveAll(feature => string.Equals(feature.FeatureKey, key, StringComparison.Ordinal));
+            }
+
+            numericFeatures.Add(new ReferenceStyleNumericFeaturePayload(
+                key,
+                Math.Round(value, 4),
+                unit,
+                featureConfidence,
+                featureEvidenceIds));
+        }
+
+        void UpsertDistribution(
+            string featureKey,
+            string unit,
+            IReadOnlyList<ReferenceStyleDistributionBucketPayload> buckets,
+            double featureConfidence,
+            IReadOnlyList<string> featureEvidenceIds)
+        {
+            var key = prefix + featureKey;
+            if (replaceExisting)
+            {
+                distributionFeatures.RemoveAll(feature => string.Equals(feature.FeatureKey, key, StringComparison.Ordinal));
+            }
+
+            distributionFeatures.Add(new ReferenceStyleDistributionFeaturePayload(
+                key,
+                unit,
+                buckets,
+                featureConfidence,
+                featureEvidenceIds));
+        }
+
+        IReadOnlyList<string> EvidenceIds(string featureKey)
+        {
+            return evidenceIds.TryGetValue(featureKey, out var ids) ? ids : [];
+        }
+    }
+
+    private static StyleSampleStatsPayload AggregateStyleSampleStats(IReadOnlyList<ReferenceStyleSampleSource> sampleSources)
+    {
+        var stats = sampleSources.Select(source => source.Stats).ToArray();
+        var characterCount = stats.Sum(item => Math.Max(0, item.CharacterCount));
+        var wordCount = stats.Sum(item => Math.Max(0, item.WordCount));
+        var sentenceCount = stats.Sum(item => Math.Max(0, item.SentenceCount));
+        var paragraphCount = stats.Sum(item => Math.Max(0, item.ParagraphCount));
+        var sentenceLengths = stats
+            .SelectMany(item => item.SentenceLengthDistribution ?? [])
+            .Where(length => length > 0)
+            .ToArray();
+        var punctuationCount = stats.Sum(item => item.PunctuationPer100Chars * Math.Max(0, item.CharacterCount) / 100.0);
+        var quoteCount = stats.Sum(item => item.QuoteDensity * Math.Max(0, item.CharacterCount) / 100.0);
+        var dialogueChars = stats.Sum(item => item.DialogueRatio * Math.Max(0, item.CharacterCount));
+        var interiorityChars = stats.Sum(item => item.InteriorityRatio * Math.Max(0, item.CharacterCount));
+        var sensoryChars = stats.Sum(item => item.SensoryRatio * Math.Max(0, item.CharacterCount));
+
+        return new StyleSampleStatsPayload(
+            StyleTextStatistics.SchemaVersion,
+            characterCount,
+            wordCount,
+            sentenceCount,
+            sentenceLengths,
+            AverageFromLengths(sentenceLengths, fallback: WeightedAverage(stats, item => item.AverageSentenceChars, item => item.SentenceCount)),
+            StandardDeviation(sentenceLengths, fallback: WeightedAverage(stats, item => item.SentenceLengthStdDev, item => item.SentenceCount)),
+            characterCount == 0 ? 0 : Math.Round(punctuationCount * 100.0 / characterCount, 4),
+            characterCount == 0 ? 0 : Math.Round(quoteCount * 100.0 / characterCount, 4),
+            paragraphCount,
+            WeightedAverage(stats, item => item.AverageParagraphChars, item => item.ParagraphCount),
+            characterCount == 0 ? 0 : Math.Round(dialogueChars / characterCount, 4),
+            characterCount == 0 ? 0 : Math.Round(interiorityChars / characterCount, 4),
+            characterCount == 0 ? 0 : Math.Round(sensoryChars / characterCount, 4));
+    }
+
+    private static IReadOnlyList<ReferenceStyleDistributionBucketPayload> BuildStyleSampleLengthBuckets(IReadOnlyList<int> lengths)
+    {
+        if (lengths.Count == 0)
+        {
+            return
+            [
+                new ReferenceStyleDistributionBucketPayload("short", 0, 20, 0),
+                new ReferenceStyleDistributionBucketPayload("medium", 21, 60, 0),
+                new ReferenceStyleDistributionBucketPayload("long", 61, 120, 0),
+                new ReferenceStyleDistributionBucketPayload("very_long", 121, 1000000, 0)
+            ];
+        }
+
+        return
+        [
+            new ReferenceStyleDistributionBucketPayload("short", 0, 20, Ratio(lengths.Count(length => length <= 20), lengths.Count)),
+            new ReferenceStyleDistributionBucketPayload("medium", 21, 60, Ratio(lengths.Count(length => length > 20 && length <= 60), lengths.Count)),
+            new ReferenceStyleDistributionBucketPayload("long", 61, 120, Ratio(lengths.Count(length => length > 60 && length <= 120), lengths.Count)),
+            new ReferenceStyleDistributionBucketPayload("very_long", 121, 1000000, Ratio(lengths.Count(length => length > 120), lengths.Count))
+        ];
+    }
+
+    private static double AverageFromLengths(IReadOnlyList<int> lengths, double fallback)
+    {
+        return lengths.Count == 0 ? Math.Round(fallback, 4) : Math.Round(lengths.Average(), 4);
+    }
+
+    private static double StandardDeviation(IReadOnlyList<int> lengths, double fallback)
+    {
+        if (lengths.Count == 0)
+        {
+            return Math.Round(fallback, 4);
+        }
+
+        var average = lengths.Average();
+        return Math.Round(Math.Sqrt(lengths.Sum(length => Math.Pow(length - average, 2)) / lengths.Count), 4);
+    }
+
+    private static double WeightedAverage(
+        IReadOnlyList<StyleSampleStatsPayload> stats,
+        Func<StyleSampleStatsPayload, double> value,
+        Func<StyleSampleStatsPayload, int> weight)
+    {
+        var denominator = stats.Sum(item => Math.Max(0, weight(item)));
+        if (denominator == 0)
+        {
+            return 0;
+        }
+
+        return Math.Round(stats.Sum(item => value(item) * Math.Max(0, weight(item))) / denominator, 4);
+    }
+
+    private static double Ratio(int count, int total)
+    {
+        return total <= 0 ? 0 : Math.Round(count / (double)total, 4);
+    }
+
     private static IReadOnlyDictionary<string, object> BuildLlmDiagnostics(
         ReferenceStyleLlmAnalysisValidationResultPayload validation)
     {
@@ -1498,6 +2042,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         string description,
         IReadOnlyList<long> anchorIds,
         IReadOnlyList<string> sourceHashes,
+        IReadOnlyList<long> styleSampleIds,
         IReadOnlyList<string> allowedLicenseStatuses,
         IReadOnlyList<string> allowedSourceTrustLevels,
         DateTimeOffset now,
@@ -1508,12 +2053,12 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         command.CommandText = """
             INSERT INTO reference_style_profiles
               (novel_id, title, description, status, analyzer_version, feature_schema_version,
-               analyzer_source, anchor_ids_json, source_hashes_json, allowed_license_statuses_json,
+               analyzer_source, anchor_ids_json, source_hashes_json, style_sample_ids_json, allowed_license_statuses_json,
                allowed_source_trust_levels_json, feature_vector_json, aggregate_confidence,
                created_at, updated_at, archived_at)
             VALUES
               ($novel_id, $title, $description, $status, $analyzer_version, $feature_schema_version,
-               $analyzer_source, $anchor_ids_json, $source_hashes_json, $allowed_license_statuses_json,
+               $analyzer_source, $anchor_ids_json, $source_hashes_json, $style_sample_ids_json, $allowed_license_statuses_json,
                $allowed_source_trust_levels_json, $feature_vector_json, 0,
                $created_at, $updated_at, NULL);
             """;
@@ -1526,6 +2071,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         command.Parameters.AddWithValue("$analyzer_source", ReferenceStyleAnalyzerSources.DeterministicBaseline);
         command.Parameters.AddWithValue("$anchor_ids_json", JsonSerializer.Serialize(anchorIds, JsonOptions));
         command.Parameters.AddWithValue("$source_hashes_json", JsonSerializer.Serialize(sourceHashes, JsonOptions));
+        command.Parameters.AddWithValue("$style_sample_ids_json", JsonSerializer.Serialize(styleSampleIds, JsonOptions));
         command.Parameters.AddWithValue("$allowed_license_statuses_json", JsonSerializer.Serialize(allowedLicenseStatuses, JsonOptions));
         command.Parameters.AddWithValue("$allowed_source_trust_levels_json", JsonSerializer.Serialize(allowedSourceTrustLevels, JsonOptions));
         command.Parameters.AddWithValue("$feature_vector_json", JsonSerializer.Serialize(EmptyFeatureVector(), JsonOptions));
@@ -1571,6 +2117,38 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         }
     }
 
+    private static async ValueTask InsertSampleProfileSourcesAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long profileId,
+        IReadOnlyList<ReferenceStyleSampleSource> sources,
+        IReadOnlyList<ReferenceStyleMaterialSample> materials,
+        CancellationToken cancellationToken)
+    {
+        foreach (var source in sources)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO reference_style_profile_sample_sources
+                  (profile_id, sample_id, novel_id, is_global, source_hash, stats_schema_version,
+                   material_count, segment_count)
+                VALUES
+                  ($profile_id, $sample_id, $novel_id, $is_global, $source_hash, $stats_schema_version,
+                   $material_count, $segment_count);
+                """;
+            command.Parameters.AddWithValue("$profile_id", profileId);
+            command.Parameters.AddWithValue("$sample_id", source.SampleId);
+            command.Parameters.AddWithValue("$novel_id", (object?)source.NovelId ?? DBNull.Value);
+            command.Parameters.AddWithValue("$is_global", source.IsGlobal ? 1 : 0);
+            command.Parameters.AddWithValue("$source_hash", source.SourceHash);
+            command.Parameters.AddWithValue("$stats_schema_version", source.StatsSchemaVersion);
+            command.Parameters.AddWithValue("$material_count", materials.Count(material => material.StyleSampleId == source.SampleId));
+            command.Parameters.AddWithValue("$segment_count", materials.Where(material => material.StyleSampleId == source.SampleId).Select(material => material.SourceSegmentId).Distinct(StringComparer.Ordinal).Count());
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
     private static async ValueTask InsertEvidenceAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -1595,6 +2173,49 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             command.Parameters.AddWithValue("$evidence_id", evidence.EvidenceId);
             command.Parameters.AddWithValue("$profile_id", evidence.ProfileId);
             command.Parameters.AddWithValue("$anchor_id", evidence.AnchorId);
+            command.Parameters.AddWithValue("$source_segment_id", evidence.SourceSegmentId);
+            command.Parameters.AddWithValue("$material_id", (object?)evidence.MaterialId ?? DBNull.Value);
+            command.Parameters.AddWithValue("$feature_key", evidence.FeatureKey);
+            command.Parameters.AddWithValue("$label", evidence.Label);
+            command.Parameters.AddWithValue("$start_offset", evidence.StartOffset);
+            command.Parameters.AddWithValue("$end_offset", evidence.EndOffset);
+            command.Parameters.AddWithValue("$text_hash", evidence.TextHash);
+            command.Parameters.AddWithValue("$confidence", evidence.Confidence);
+            command.Parameters.AddWithValue("$analyzer_source", evidence.AnalyzerSource);
+            command.Parameters.AddWithValue("$created_at", FormatTimestamp(now));
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static async ValueTask InsertSampleEvidenceAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        IReadOnlyList<ReferenceStyleEvidenceSpanPayload> evidenceSpans,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        foreach (var evidence in evidenceSpans)
+        {
+            if (evidence.StyleSampleId is null or <= 0)
+            {
+                throw new InvalidOperationException("Sample-backed style evidence must carry a style sample id.");
+            }
+
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO reference_style_profile_sample_evidence
+                  (evidence_id, profile_id, sample_id, source_segment_id, material_id,
+                   feature_key, label, start_offset, end_offset, text_hash, confidence,
+                   analyzer_source, created_at)
+                VALUES
+                  ($evidence_id, $profile_id, $sample_id, $source_segment_id, $material_id,
+                   $feature_key, $label, $start_offset, $end_offset, $text_hash, $confidence,
+                   $analyzer_source, $created_at);
+                """;
+            command.Parameters.AddWithValue("$evidence_id", evidence.EvidenceId);
+            command.Parameters.AddWithValue("$profile_id", evidence.ProfileId);
+            command.Parameters.AddWithValue("$sample_id", evidence.StyleSampleId.Value);
             command.Parameters.AddWithValue("$source_segment_id", evidence.SourceSegmentId);
             command.Parameters.AddWithValue("$material_id", (object?)evidence.MaterialId ?? DBNull.Value);
             command.Parameters.AddWithValue("$feature_key", evidence.FeatureKey);
@@ -1723,7 +2344,7 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         command.CommandText = """
             SELECT profile_id, novel_id, title, description, status, analyzer_version,
                    feature_schema_version, analyzer_source, anchor_ids_json, source_hashes_json,
-                   allowed_license_statuses_json, allowed_source_trust_levels_json,
+                   style_sample_ids_json, allowed_license_statuses_json, allowed_source_trust_levels_json,
                    feature_vector_json, aggregate_confidence, created_at, updated_at, archived_at
             FROM reference_style_profiles
             WHERE novel_id = $novel_id
@@ -1739,6 +2360,12 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
 
         var profile = ReadStyleProfile(reader);
         var evidence = await ReadEvidenceAsync(connection, profileId, cancellationToken);
+        var sampleEvidence = await ReadSampleEvidenceAsync(connection, profileId, cancellationToken);
+        evidence = evidence
+            .Concat(sampleEvidence)
+            .OrderBy(item => item.FeatureKey, StringComparer.Ordinal)
+            .ThenBy(item => item.EvidenceId, StringComparer.Ordinal)
+            .ToArray();
         return profile with { EvidenceSpans = evidence };
     }
 
@@ -1762,6 +2389,31 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         while (await reader.ReadAsync(cancellationToken))
         {
             evidence.Add(ReadEvidence(reader));
+        }
+
+        return evidence;
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceStyleEvidenceSpanPayload>> ReadSampleEvidenceAsync(
+        SqliteConnection connection,
+        long profileId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT evidence_id, profile_id, sample_id, source_segment_id, material_id,
+                   feature_key, label, start_offset, end_offset, text_hash, confidence,
+                   analyzer_source
+            FROM reference_style_profile_sample_evidence
+            WHERE profile_id = $profile_id
+            ORDER BY feature_key ASC, evidence_id ASC;
+            """;
+        command.Parameters.AddWithValue("$profile_id", profileId);
+        var evidence = new List<ReferenceStyleEvidenceSpanPayload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            evidence.Add(ReadSampleEvidence(reader));
         }
 
         return evidence;
@@ -2006,8 +2658,18 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
 
     private static IReadOnlyList<long> NormalizeAnchorIds(IReadOnlyList<long>? anchorIds)
     {
+        return NormalizeAnchorIds(anchorIds, allowEmpty: false);
+    }
+
+    private static IReadOnlyList<long> NormalizeAnchorIds(IReadOnlyList<long>? anchorIds, bool allowEmpty)
+    {
         if (anchorIds is null || anchorIds.Count == 0)
         {
+            if (allowEmpty)
+            {
+                return [];
+            }
+
             throw new ArgumentException("At least one source anchor is required.", nameof(anchorIds));
         }
 
@@ -2029,6 +2691,36 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         if (normalized.Count > MaxAnchorCount)
         {
             throw new ArgumentException($"At most {MaxAnchorCount} source anchors can be used for one style profile.", nameof(anchorIds));
+        }
+
+        return normalized;
+    }
+
+    private static IReadOnlyList<long> NormalizeStyleSampleIds(IReadOnlyList<long>? sampleIds)
+    {
+        if (sampleIds is null || sampleIds.Count == 0)
+        {
+            return [];
+        }
+
+        var normalized = new List<long>(sampleIds.Count);
+        var seen = new HashSet<long>();
+        foreach (var sampleId in sampleIds)
+        {
+            if (sampleId <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(sampleIds), sampleId, "Style sample id must be positive.");
+            }
+
+            if (seen.Add(sampleId))
+            {
+                normalized.Add(sampleId);
+            }
+        }
+
+        if (normalized.Count > MaxStyleSampleCount)
+        {
+            throw new ArgumentException($"At most {MaxStyleSampleCount} style samples can be used for one style profile.", nameof(sampleIds));
         }
 
         return normalized;
@@ -2074,10 +2766,11 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             reader.GetString(7),
             ReadLongList(reader.GetString(8)),
             ReadStringList(reader.GetString(9)),
-            reader.GetDouble(10),
-            ParseTimestamp(reader.GetString(11)),
+            reader.GetDouble(11),
             ParseTimestamp(reader.GetString(12)),
-            reader.IsDBNull(13) ? null : ParseTimestamp(reader.GetString(13)));
+            ParseTimestamp(reader.GetString(13)),
+            reader.IsDBNull(14) ? null : ParseTimestamp(reader.GetString(14)),
+            ReadLongList(reader.GetString(10)));
     }
 
     private static ReferenceStyleProfileBuildStatusPayload ReadStyleBuildStatus(SqliteDataReader reader)
@@ -2093,13 +2786,14 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             reader.GetInt32(7),
             ReadLongList(reader.GetString(8)),
             ReadStringList(reader.GetString(9)),
-            ReadStringList(reader.GetString(10)),
-            reader.IsDBNull(11) ? null : reader.GetString(11),
+            ReadStringList(reader.GetString(11)),
             reader.IsDBNull(12) ? null : reader.GetString(12),
-            ParseTimestamp(reader.GetString(13)),
+            reader.IsDBNull(13) ? null : reader.GetString(13),
             ParseTimestamp(reader.GetString(14)),
-            reader.IsDBNull(15) ? null : ParseTimestamp(reader.GetString(15)),
-            reader.IsDBNull(16) ? null : ParseTimestamp(reader.GetString(16)));
+            ParseTimestamp(reader.GetString(15)),
+            reader.IsDBNull(16) ? null : ParseTimestamp(reader.GetString(16)),
+            reader.IsDBNull(17) ? null : ParseTimestamp(reader.GetString(17)),
+            ReadLongList(reader.GetString(10)));
     }
 
     private static ReferenceStyleProfilePayload ReadStyleProfile(SqliteDataReader reader)
@@ -2115,14 +2809,15 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             reader.GetString(7),
             ReadLongList(reader.GetString(8)),
             ReadStringList(reader.GetString(9)),
-            ReadStringList(reader.GetString(10)),
             ReadStringList(reader.GetString(11)),
-            reader.GetDouble(13),
-            ReadFeatureVector(reader.GetString(12)),
+            ReadStringList(reader.GetString(12)),
+            reader.GetDouble(14),
+            ReadFeatureVector(reader.GetString(13)),
             [],
-            ParseTimestamp(reader.GetString(14)),
             ParseTimestamp(reader.GetString(15)),
-            reader.IsDBNull(16) ? null : ParseTimestamp(reader.GetString(16)));
+            ParseTimestamp(reader.GetString(16)),
+            reader.IsDBNull(17) ? null : ParseTimestamp(reader.GetString(17)),
+            ReadLongList(reader.GetString(10)));
     }
 
     private static ReferenceStyleEvidenceSpanPayload ReadEvidence(SqliteDataReader reader)
@@ -2139,7 +2834,28 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             reader.GetInt32(8),
             reader.GetString(9),
             reader.GetDouble(10),
-            reader.GetString(11));
+            reader.GetString(11),
+            ReferenceStyleProfileSourceTypes.ReferenceAnchor,
+            StyleSampleId: null);
+    }
+
+    private static ReferenceStyleEvidenceSpanPayload ReadSampleEvidence(SqliteDataReader reader)
+    {
+        return new ReferenceStyleEvidenceSpanPayload(
+            reader.GetString(0),
+            reader.GetInt64(1),
+            AnchorId: 0,
+            reader.GetString(3),
+            reader.IsDBNull(4) ? null : reader.GetString(4),
+            reader.GetString(5),
+            reader.GetString(6),
+            reader.GetInt32(7),
+            reader.GetInt32(8),
+            reader.GetString(9),
+            reader.GetDouble(10),
+            reader.GetString(11),
+            ReferenceStyleProfileSourceTypes.StyleSample,
+            reader.GetInt64(2));
     }
 
     private static ReferenceStyleFeatureVectorPayload ReadFeatureVector(string json)
@@ -2197,6 +2913,20 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
             .Where(anchorId => anchorId > 0)
             .Distinct()
             .Take(MaxAnchorCount)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<long> NormalizeBestEffortStyleSampleIds(IReadOnlyList<long>? sampleIds)
+    {
+        if (sampleIds is null || sampleIds.Count == 0)
+        {
+            return [];
+        }
+
+        return sampleIds
+            .Where(sampleId => sampleId > 0)
+            .Distinct()
+            .Take(MaxStyleSampleCount)
             .ToArray();
     }
 
@@ -2291,6 +3021,16 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         return value.ToString("O", CultureInfo.InvariantCulture);
     }
 
+    private static bool ContainsAny(string text, IReadOnlyList<string> markers)
+    {
+        return markers.Any(marker => text.Contains(marker, StringComparison.Ordinal));
+    }
+
+    private static string HashText(string text)
+    {
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
+    }
+
     private sealed record ReferenceStyleAnchorSource(
         long AnchorId,
         long NovelId,
@@ -2298,4 +3038,19 @@ public sealed class SqliteReferenceStyleProfileService : IReferenceStyleProfileS
         string LicenseStatus,
         string SourceTrust,
         string CorpusVisibility);
+
+    private sealed record ReferenceStyleSampleSource(
+        long SampleId,
+        long? NovelId,
+        bool IsGlobal,
+        string Name,
+        string Content,
+        StyleSampleStatsPayload Stats,
+        string StatsSchemaVersion,
+        string SourceHash);
+
+    private sealed record SampleTextSpan(
+        string Text,
+        int StartOffset,
+        int EndOffset);
 }

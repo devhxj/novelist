@@ -72,7 +72,7 @@ const label = dark ? '浅色' : '深色'
 - [ ] 没有 `const dark = ...; if (dark)` 或 `dark ? ... : ...`
 - [ ] 如果有彩色 Tag/标签 → 用 `--tag-*` 语义变量
 - [ ] 如果有工具/状态卡片 → 按需扩展 `--tool-*` 变量
-- [ ] 深色模式下用 `make dev` 切换主题目视验证
+- [ ] 深色模式下用 `dotnet run --project src/Novelist.App/Novelist.App.csproj -- --desktop` 切换主题目视验证
 - [ ] `npm run build` 无报错
 
 ## 常见陷阱

@@ -234,7 +234,9 @@ internal static class ReferenceStyleDeterministicBaselineExtractor
                 material.EndOffset,
                 material.TextHash,
                 MaterialConfidence(material),
-                ReferenceStyleAnalyzerSources.DeterministicBaseline));
+                ReferenceStyleAnalyzerSources.DeterministicBaseline,
+                material.SourceType,
+                material.StyleSampleId));
         }
     }
 
@@ -405,7 +407,9 @@ internal sealed record ReferenceStyleMaterialSample(
     string SourceHash,
     int StartOffset,
     int EndOffset,
-    string TextHash);
+    string TextHash,
+    string SourceType = ReferenceStyleProfileSourceTypes.ReferenceAnchor,
+    long? StyleSampleId = null);
 
 internal sealed record ReferenceStyleBaseline(
     ReferenceStyleFeatureVectorPayload Features,

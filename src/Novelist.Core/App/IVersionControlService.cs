@@ -1,3 +1,5 @@
+using Novelist.Contracts.App;
+
 namespace Novelist.Core.App;
 
 public interface IVersionControlService
@@ -13,6 +15,18 @@ public interface IVersionControlService
         long novelId,
         string? relativePath,
         int count,
+        CancellationToken cancellationToken);
+
+    ValueTask<PageResultPayload<GitCommitSummaryPayload>> GetCommitSummariesAsync(
+        GetGitCommitsPayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<IReadOnlyList<GitCommitFilePayload>> GetCommitFilesAsync(
+        GetGitCommitFilesPayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<GitFileDiffPayload> GetFileDiffAsync(
+        GetGitFileDiffPayload input,
         CancellationToken cancellationToken);
 }
 

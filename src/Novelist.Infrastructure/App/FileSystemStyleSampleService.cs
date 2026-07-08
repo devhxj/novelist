@@ -7,7 +7,7 @@ namespace Novelist.Infrastructure.App;
 
 public sealed class FileSystemStyleSampleService : IStyleSampleService
 {
-    private const string StatsSchemaVersion = "style_sample_stats_v1";
+    private const string StatsSchemaVersion = StyleTextStatistics.SchemaVersion;
     private const int PreviewLength = 120;
     private const int MaxNameLength = 160;
     private const int MaxContentLength = 200_000;
@@ -23,16 +23,6 @@ public sealed class FileSystemStyleSampleService : IStyleSampleService
     {
         WriteIndented = true
     };
-
-    private static readonly string[] InteriorityMarkers =
-    [
-        "想", "心里", "意识到", "明白", "知道", "觉得", "以为", "记得", "念头", "犹豫", "不该"
-    ];
-
-    private static readonly string[] SensoryMarkers =
-    [
-        "雨", "风", "声", "光", "灯", "冷", "热", "潮", "气味", "味", "疼", "痛", "滑", "针", "铁锈", "窗"
-    ];
 
     private readonly AppInitializationOptions _options;
     private readonly INovelService _novels;
@@ -76,7 +66,7 @@ public sealed class FileSystemStyleSampleService : IStyleSampleService
                 Preview = BuildPreview(normalized.Content),
                 Tags = [.. normalized.Tags],
                 StatsSchemaVersion = StatsSchemaVersion,
-                Stats = CalculateStats(normalized.Content),
+                Stats = StyleTextStatistics.Analyze(normalized.Content),
                 SourceMetadata = normalized.SourceMetadata,
                 CreatedAt = now,
                 UpdatedAt = now
@@ -124,7 +114,7 @@ public sealed class FileSystemStyleSampleService : IStyleSampleService
                 Preview = BuildPreview(normalized.Content),
                 Tags = [.. normalized.Tags],
                 StatsSchemaVersion = StatsSchemaVersion,
-                Stats = CalculateStats(normalized.Content),
+                Stats = StyleTextStatistics.Analyze(normalized.Content),
                 SourceMetadata = normalized.SourceMetadata,
                 CreatedAt = current.CreatedAt,
                 UpdatedAt = DateTimeOffset.UtcNow
@@ -290,11 +280,19 @@ public sealed class FileSystemStyleSampleService : IStyleSampleService
             return empty;
         }
 
-        await using var stream = File.OpenRead(path);
-        var store = await JsonSerializer.DeserializeAsync<StyleSampleStoreDocument>(stream, JsonOptions, cancellationToken)
-            ?? throw new InvalidOperationException("Style sample store is empty or malformed.");
+        StyleSampleStoreDocument store;
+        await using (var stream = File.OpenRead(path))
+        {
+            store = await JsonSerializer.DeserializeAsync<StyleSampleStoreDocument>(stream, JsonOptions, cancellationToken)
+                ?? throw new InvalidOperationException("Style sample store is empty or malformed.");
+        }
 
         ValidateStore(store);
+        if (RefreshDerivedFields(store))
+        {
+            await SaveAsync(store, cancellationToken);
+        }
+
         return store;
     }
 
@@ -419,16 +417,33 @@ public sealed class FileSystemStyleSampleService : IStyleSampleService
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var normalized = new List<string>();
-        foreach (var tag in tags)
+        foreach (var tag in tags.SelectMany(SplitTagInput))
         {
             var value = NormalizeOptionalText(tag, nameof(tags), MaxTagLength, allowLineBreaks: false);
             if (value.Length > 0 && seen.Add(value))
             {
                 normalized.Add(value);
+                if (normalized.Count > MaxTagCount)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(tags), normalized.Count, $"At most {MaxTagCount} tags are allowed.");
+                }
             }
         }
 
         return normalized;
+    }
+
+    private static IEnumerable<string> SplitTagInput(string? tag)
+    {
+        if (string.IsNullOrWhiteSpace(tag))
+        {
+            yield break;
+        }
+
+        foreach (var part in tag.Split([';', '；', ',', '，', '\n', '\r'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            yield return part;
+        }
     }
 
     private static StyleSampleSourceMetadataPayload? NormalizeSourceMetadata(StyleSampleSourceMetadataPayload? source)
@@ -498,6 +513,32 @@ public sealed class FileSystemStyleSampleService : IStyleSampleService
         }
     }
 
+    private static bool RefreshDerivedFields(StyleSampleStoreDocument store)
+    {
+        var changed = false;
+        foreach (var item in store.Items)
+        {
+            var expectedPreview = BuildPreview(item.Content);
+            if (!string.Equals(item.Preview, expectedPreview, StringComparison.Ordinal))
+            {
+                item.Preview = expectedPreview;
+                changed = true;
+            }
+
+            if (item.Stats is null ||
+                !string.Equals(item.StatsSchemaVersion, StatsSchemaVersion, StringComparison.Ordinal) ||
+                item.Stats.SchemaVersion != StatsSchemaVersion ||
+                item.Stats.SentenceLengthDistribution is null)
+            {
+                item.StatsSchemaVersion = StatsSchemaVersion;
+                item.Stats = StyleTextStatistics.Analyze(item.Content);
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
     private static StyleSamplePayload ToSummary(StyleSampleStoreItem item)
     {
         return new StyleSamplePayload(
@@ -559,113 +600,6 @@ public sealed class FileSystemStyleSampleService : IStyleSampleService
         return new string([.. result]).Trim();
     }
 
-    private static StyleSampleStatsPayload CalculateStats(string content)
-    {
-        var characterCount = CountTextCharacters(content);
-        if (characterCount == 0)
-        {
-            return new StyleSampleStatsPayload(0, 0, 0, 0, 0, 0, 0);
-        }
-
-        var sentences = SplitSentences(content);
-        var sentenceCount = Math.Max(1, sentences.Count);
-        var punctuationCount = content.Count(char.IsPunctuation);
-        return new StyleSampleStatsPayload(
-            characterCount,
-            sentenceCount,
-            Round(characterCount / (double)sentenceCount),
-            Ratio(CountDialogueCharacters(content), characterCount),
-            Ratio(CountMarkerSentenceCharacters(sentences, InteriorityMarkers), characterCount),
-            Ratio(CountMarkerSentenceCharacters(sentences, SensoryMarkers), characterCount),
-            Round(punctuationCount / (double)characterCount * 100));
-    }
-
-    private static int CountTextCharacters(string value)
-    {
-        return value.Count(ch => !char.IsWhiteSpace(ch));
-    }
-
-    private static IReadOnlyList<string> SplitSentences(string content)
-    {
-        var sentences = new List<string>();
-        var start = 0;
-        for (var i = 0; i < content.Length; i++)
-        {
-            if (!IsSentenceTerminator(content[i]))
-            {
-                continue;
-            }
-
-            AddSentence(content[start..(i + 1)]);
-            start = i + 1;
-        }
-
-        if (start < content.Length)
-        {
-            AddSentence(content[start..]);
-        }
-
-        return sentences;
-
-        void AddSentence(string sentence)
-        {
-            var normalized = sentence.Trim();
-            if (normalized.Length > 0)
-            {
-                sentences.Add(normalized);
-            }
-        }
-    }
-
-    private static bool IsSentenceTerminator(char ch)
-    {
-        return ch is '。' or '！' or '？' or '!' or '?' or '；' or ';' or '\n';
-    }
-
-    private static int CountDialogueCharacters(string content)
-    {
-        var count = 0;
-        var inDialogue = false;
-        foreach (var ch in content)
-        {
-            if (ch is '“' or '「' or '『')
-            {
-                inDialogue = true;
-                continue;
-            }
-
-            if (ch is '”' or '」' or '』')
-            {
-                inDialogue = false;
-                continue;
-            }
-
-            if (inDialogue && !char.IsWhiteSpace(ch))
-            {
-                count++;
-            }
-        }
-
-        return count;
-    }
-
-    private static int CountMarkerSentenceCharacters(IReadOnlyList<string> sentences, IReadOnlyList<string> markers)
-    {
-        return sentences
-            .Where(sentence => markers.Any(marker => sentence.Contains(marker, StringComparison.Ordinal)))
-            .Sum(CountTextCharacters);
-    }
-
-    private static double Ratio(int numerator, int denominator)
-    {
-        return Round(Math.Min(1, Math.Max(0, numerator / (double)denominator)));
-    }
-
-    private static double Round(double value)
-    {
-        return Math.Round(value, 4, MidpointRounding.AwayFromZero);
-    }
-
     private sealed record NormalizedStyleSampleInput(
         long? NovelId,
         string Name,
@@ -712,7 +646,7 @@ public sealed class FileSystemStyleSampleService : IStyleSampleService
         public string StatsSchemaVersion { get; set; } = FileSystemStyleSampleService.StatsSchemaVersion;
 
         [JsonPropertyName("stats")]
-        public StyleSampleStatsPayload Stats { get; set; } = new(0, 0, 0, 0, 0, 0, 0);
+        public StyleSampleStatsPayload Stats { get; set; } = StyleTextStatistics.Analyze(string.Empty);
 
         [JsonPropertyName("source_metadata")]
         public StyleSampleSourceMetadataPayload? SourceMetadata { get; set; }

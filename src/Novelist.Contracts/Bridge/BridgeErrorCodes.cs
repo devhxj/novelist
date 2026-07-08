@@ -11,6 +11,7 @@ public static class BridgeErrorCodes
     public const string CoverTooLargeForBridge = "COVER_TOO_LARGE_FOR_BRIDGE";
     public const string LlmProviderError = "LLM_PROVIDER_ERROR";
     public const string RagUnavailable = "RAG_UNAVAILABLE";
+    public const string VersionControlError = "VERSION_CONTROL_ERROR";
     public const string Cancelled = "CANCELLED";
     public const string InternalError = "INTERNAL_ERROR";
 }

@@ -16,7 +16,7 @@ public static class DesktopBridgeComposition
 
         var options = appOptions ?? new AppInitializationOptions { EnableLegacyMigration = true };
         var settingsService = new FileSystemAppSettingsService(options);
-        var versionControl = new GitVersionControlService(options);
+        var versionControl = new GitVersionControlService(options, settings: settingsService);
         var novelService = new FileSystemNovelService(options, settingsService, versionControl);
         var writingService = new FileSystemWritingStatisticsService(options, novelService);
         var ragRefreshNotifier = new DeferredRagIndexRefreshNotifier();
@@ -50,9 +50,33 @@ public static class DesktopBridgeComposition
         var eventSink = new PhotinoBridgeEventSink(window);
         var approvalCoordinator = new ToolApprovalCoordinator(eventSink);
         var skillService = new FileSystemSkillCatalogService(options, novelService, llmService);
-        var novelImportRunService = new FileSystemNovelImportRunService(options);
+        var novelImportRunService = new FileSystemNovelImportService(
+            options,
+            novelService: novelService,
+            versionControl: versionControl,
+            writingDeltaRecorder: writingService,
+            ragRefreshNotifier: ragRefreshNotifier,
+            eventSink: eventSink);
+        var novelImportRecoveryService = new FileSystemNovelImportRecoveryService(
+            options,
+            novelService);
         var styleSampleService = new FileSystemStyleSampleService(options, novelService);
-        var narrativePatternService = new FileSystemNarrativePatternExtractionService(options, novelService);
+        var styleSkillExtractionService = new FileSystemStyleSkillExtractionService(
+            options,
+            novelService,
+            styleSampleService,
+            chatCompletionClient,
+            eventSink);
+        var updateCheckService = new GitHubUpdateCheckService(
+            options,
+            settingsService);
+        var narrativePatternService = new FileSystemNarrativePatternExtractionService(
+            options,
+            novelService,
+            chapterContentService,
+            chatCompletionClient,
+            llmService,
+            eventSink);
         var searchService = new FileSystemWorkspaceSearchService(
             options,
             novelService,
@@ -123,7 +147,9 @@ public static class DesktopBridgeComposition
             .RegisterDefaultNovelistHandlers(new PhotinoBridgeRuntimeHost(
                 window,
                 externalUrlOpener ?? new SystemExternalUrlOpener()))
-            .RegisterAppInitializationHandlers(new FileSystemAppInitializationService(options))
+            .RegisterAppInitializationHandlers(new FileSystemAppInitializationService(
+                options,
+                importRecovery: novelImportRecoveryService))
             .RegisterAppSettingsHandlers(settingsService)
             .RegisterNovelHandlers(novelService)
             .RegisterChapterContentHandlers(chapterContentService)
@@ -139,9 +165,14 @@ public static class DesktopBridgeComposition
                 writingService,
                 storyMemoryService,
                 referenceSourceFilePicker)
-            .RegisterNovelImportHandlers(novelImportRunService, novelImportFilePicker)
-            .RegisterStyleSampleHandlers(styleSampleService)
+            .RegisterNovelImportHandlers(
+                novelImportRunService,
+                novelImportFilePicker,
+                novelImportRecoveryService)
+            .RegisterStyleSampleHandlers(styleSampleService, styleSkillExtractionService)
+            .RegisterUpdateCheckHandlers(updateCheckService)
             .RegisterNarrativePatternHandlers(narrativePatternService)
+            .RegisterGitHistoryHandlers(versionControl)
             .RegisterReferenceAnchorHandlers(referenceAnchorService)
             .RegisterReferenceStyleProfileHandlers(referenceStyleProfileService)
             .RegisterReferenceAnchoredDraftHandlers(referenceAnchoredDraftService)

@@ -6,12 +6,11 @@ Novelist is a .NET 10 + Photino.NET desktop app with a React/Vite frontend. The 
 
 ## Build, Test, and Development Commands
 
-- `make deps`: download or reuse the bundled Git runtime under `build/runtime/`.
-- `make dev`: run the .NET Photino desktop app.
-- `make build`: build frontend assets, prepare runtime deps, then publish `Novelist.App` to `build/bin/novelist/`.
-- `make publish RID=win-x64`: publish a self-contained RID-specific app output.
-- `make package-windows`, `make package-linux`, `make package-macos`: build platform packages into `build/dist/`.
-- `make frontend-dev`: run only the Vite frontend; backend bridge APIs are unavailable.
+- `dotnet run --project src/Novelist.App/Novelist.App.csproj -- --desktop`: run the .NET Photino desktop app after frontend assets are built.
+- `npm --prefix frontend run build`: run TypeScript and Vite production build.
+- `bash scripts/novelist-publish.sh win-x64`: publish a self-contained Windows app output to `build/bin/novelist/`.
+- `VERSION=1.2.3 bash scripts/novelist-package-windows.sh`: build the Windows installer into `build/dist/`.
+- `npm --prefix frontend run dev`: run only the Vite frontend; backend bridge APIs are unavailable unless the desktop host is launched with `--start-url=http://localhost:5173/`.
 - `dotnet test Novelist.slnx --no-restore -v minimal`: run the .NET test suite used by CI.
 - `cd frontend && npm ci && npm run build`: install frontend dependencies, then run TypeScript and Vite build.
 - `cd frontend && npm run lint`: run ESLint for TypeScript/React files.

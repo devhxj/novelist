@@ -18,31 +18,45 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
 
     private readonly AppInitializationOptions _options;
     private readonly ILegacyDataMigrationService? _legacyMigration;
+    private readonly INovelImportRecoveryService _importRecovery;
+    private readonly SemaphoreSlim _startupRecoveryMutex = new(1, 1);
+    private NovelImportReconciliationResultPayload? _lastImportRecoveryResult;
 
     public FileSystemAppInitializationService(
         AppInitializationOptions? options = null,
-        ILegacyDataMigrationService? legacyMigration = null)
+        ILegacyDataMigrationService? legacyMigration = null,
+        INovelImportRecoveryService? importRecovery = null)
     {
         _options = options ?? new AppInitializationOptions();
         _legacyMigration = legacyMigration ??
             (_options.EnableLegacyMigration ? new LegacyDataMigrationService(_options) : null);
+        _importRecovery = importRecovery ?? new FileSystemNovelImportRecoveryService(_options);
     }
 
     public async ValueTask<bool> IsInitializedAsync(CancellationToken cancellationToken)
     {
-        return await LoadConfigAsync(cancellationToken) is not null;
+        if (await LoadConfigAsync(cancellationToken) is null)
+        {
+            return false;
+        }
+
+        await ReconcileStartupImportsAsync(cancellationToken);
+        return true;
     }
 
     public async ValueTask InitializeAsync(string dataDirectory, CancellationToken cancellationToken)
     {
         var hadConfig = File.Exists(ConfigPath);
         await SaveConfigAsync(dataDirectory, cancellationToken);
+        _lastImportRecoveryResult = null;
         try
         {
             if (_legacyMigration is not null)
             {
                 await _legacyMigration.MigrateAsync(NormalizePath(dataDirectory), cancellationToken);
             }
+
+            await ReconcileStartupImportsAsync(cancellationToken);
         }
         catch
         {
@@ -58,14 +72,19 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
     public async ValueTask<AppConfigPayload> GetAppConfigAsync(CancellationToken cancellationToken)
     {
         var config = await LoadConfigAsync(cancellationToken);
+        var importRecovery = config is null
+            ? null
+            : await ReconcileStartupImportsAsync(cancellationToken);
         return config is null
-            ? new AppConfigPayload(false, null, CreateUpdateCheckConfiguration())
-            : new AppConfigPayload(true, config.DataDir, CreateUpdateCheckConfiguration());
+            ? new AppConfigPayload(false, null, CreateUpdateCheckConfiguration(), null)
+            : new AppConfigPayload(true, config.DataDir, CreateUpdateCheckConfiguration(), importRecovery);
     }
 
     public async ValueTask UpdateDataDirectoryAsync(string dataDirectory, CancellationToken cancellationToken)
     {
         await SaveConfigAsync(dataDirectory, cancellationToken);
+        _lastImportRecoveryResult = null;
+        await ReconcileStartupImportsAsync(cancellationToken);
     }
 
     public ValueTask<PlatformPayload> GetPlatformAsync(CancellationToken cancellationToken)
@@ -112,6 +131,26 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
         var config = new AppPointerConfig(normalizedDataDirectory);
         await using var stream = File.Create(ConfigPath);
         await JsonSerializer.SerializeAsync(stream, config, ConfigJsonOptions, cancellationToken);
+    }
+
+    private async ValueTask<NovelImportReconciliationResultPayload> ReconcileStartupImportsAsync(
+        CancellationToken cancellationToken)
+    {
+        await _startupRecoveryMutex.WaitAsync(cancellationToken);
+        try
+        {
+            if (_lastImportRecoveryResult is not null)
+            {
+                return _lastImportRecoveryResult;
+            }
+
+            _lastImportRecoveryResult = await _importRecovery.ReconcileAsync(cancellationToken);
+            return _lastImportRecoveryResult;
+        }
+        finally
+        {
+            _startupRecoveryMutex.Release();
+        }
     }
 
     private string ConfigPath => Path.Combine(_options.ConfigDirectory, "config.json");

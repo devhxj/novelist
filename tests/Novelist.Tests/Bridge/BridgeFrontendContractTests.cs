@@ -33,6 +33,7 @@ public sealed class BridgeFrontendContractTests
 
         Assert.Contains("GetAppConfig: AppMethod<[], config.AppConfig>", apiSource, StringComparison.Ordinal);
         Assert.Contains("update_check", typeSource, StringComparison.Ordinal);
+        Assert.Contains("import_recovery?: novelImport.ImportReconciliationResult | null", typeSource, StringComparison.Ordinal);
         Assert.DoesNotContain("api.github.com/repos", bridgeAdapterSource, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("sigpanic/goink", bridgeAdapterSource, StringComparison.OrdinalIgnoreCase);
     }

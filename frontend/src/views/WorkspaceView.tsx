@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { flushSync } from 'react-dom'
 import { useApp } from '@/hooks/useApp'
 import type { novel, chapter, search } from '@/hooks/useApp'
-import type { novelImport } from '@/lib/novelist/types'
-import { buildStartNovelImportInput } from '@/lib/novelist/importBoundary'
+import type { novelImport, update } from '@/lib/novelist/types'
+import { useNovelImport } from '@/hooks/useNovelImport'
 import ActivityBar from '@/components/shell/ActivityBar'
 import StatusBar from '@/components/shell/StatusBar'
 import SidePanel from '@/components/sidebar/SidePanel'
@@ -15,7 +15,11 @@ import TimelineView from '@/components/timeline/TimelineView'
 import ReaderView from '@/components/reader/ReaderView'
 import PreferenceView from '@/components/preference/PreferenceView'
 import ReferenceAnchorView from '@/components/reference-anchor/ReferenceAnchorView'
+import StyleSampleLibraryView from '@/components/style/StyleSampleLibraryView'
+import NarrativePatternView from '@/components/pattern/NarrativePatternView'
+import GitHistoryView from '@/components/git/GitHistoryView'
 import BookshelfView from '@/components/novel/BookshelfView'
+import NovelImportDialog from '@/components/novel/NovelImportDialog'
 import NovelEditDialog from '@/components/novel/NovelEditDialog'
 import NovelDeleteDialog from '@/components/novel/NovelDeleteDialog'
 import ExportDialog from '@/components/export/ExportDialog'
@@ -23,8 +27,9 @@ import ChatPanel from '@/components/chat/ChatPanel'
 import GitHubLink from '@/components/shell/GitHubLink'
 import SettingsDialog from '@/components/settings/SettingsDialog'
 import HelpDialog from '@/components/help/HelpDialog'
+import UpdateDialog from '@/components/update/UpdateDialog'
 import ProfileView from '@/components/profile/ProfileView'
-import { Settings, User, HelpCircle, Moon, Sun } from 'lucide-react'
+import { Settings, User, HelpCircle, Moon, Sun, AlertTriangle, CheckCircle2, Clipboard, X } from 'lucide-react'
 import { WindowMinimise, WindowToggleMaximise, WindowIsMaximised, Quit } from '@/lib/novelist/runtime'
 import Logo from '@/components/Logo'
 import { useTheme, type Theme } from '@/hooks/useTheme'
@@ -35,9 +40,10 @@ const THEME_LABEL: Record<Theme, string> = { light: '深色模式', dark: '浅�
 interface Props {
   initialNovelId: number
   initialShowHelp?: boolean
+  startupRecovery?: novelImport.ImportReconciliationResult | null
 }
 
-export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props) {
+export default function WorkspaceView({ initialNovelId, initialShowHelp, startupRecovery }: Props) {
   const app = useApp()
   const contentRef = useRef<ContentPanelHandle>(null)
 
@@ -64,8 +70,16 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
   const [activeSkillName, setActiveSkillName] = useState<string | null>(null)
   const [isMaximised, setIsMaximised] = useState(false)
   const [platformOS, setPlatformOS] = useState('')
+  const [updateResult, setUpdateResult] = useState<update.UpdateCheckResult | null>(null)
+  const [showUpdateDialog, setShowUpdateDialog] = useState(false)
   const loadedRef = useRef(false)
+  const autoUpdateCheckedRef = useRef(false)
   const { theme, toggle: toggleTheme } = useTheme()
+  const novelImportController = useNovelImport({
+    onStartNovelImport: handleStartNovelImport,
+    onCancelNovelImport: handleCancelNovelImport,
+    onFinished: handleNovelImportFinished,
+  })
 
   // ── 书籍管理弹窗 ──────────────────────────────────────
   const [editingNovel, setEditingNovel] = useState<novel.Novel | null>(null)
@@ -80,6 +94,32 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
       if (info.os) setPlatformOS(info.os as string)
     })
     WindowIsMaximised().then(setIsMaximised)
+  }, [app])
+
+  useEffect(() => {
+    let cancelled = false
+
+    void (async () => {
+      try {
+        const settings = await app.GetUpdateCheckSettings()
+        if (cancelled || autoUpdateCheckedRef.current) return
+        autoUpdateCheckedRef.current = true
+        if (cancelled || !settings.enabled || !settings.endpoint_url) return
+        const result = await app.CheckForUpdates({
+          task_id: `update-auto-${Date.now().toString(36)}`,
+          manual: false,
+        })
+        if (cancelled) return
+        if (result.status === 'update_available') {
+          setUpdateResult(result)
+          setShowUpdateDialog(true)
+        }
+      } catch {
+        // Automatic update checks must never interrupt writing startup.
+      }
+    })()
+
+    return () => { cancelled = true }
   }, [app])
 
   // ── 首次进入自动弹帮助 ──────────────────────────────────
@@ -259,14 +299,39 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
     return await app.PickNovelImportFile()
   }
 
-  async function handleStartNovelImport(sourcePath: string): Promise<novelImport.ImportRun> {
-    const run = await app.StartNovelImport(buildStartNovelImportInput(sourcePath))
+  async function handleStartNovelImport(input: novelImport.StartNovelImportInput): Promise<novelImport.ImportRun> {
+    return await app.StartNovelImport(input)
+  }
+
+  async function handleCancelNovelImport(input: novelImport.CancelNovelImportInput): Promise<novelImport.ImportRun> {
+    return await app.CancelNovelImport(input)
+  }
+
+  async function handleNovelImportFinished(run: novelImport.ImportRun) {
     await loadNovels()
-    if (run.created_novel_id) {
-      setActiveNovelId(run.created_novel_id)
-      await app.SetActiveNovel({ novel_id: run.created_novel_id })
+    if (!isSuccessfulNovelImportRun(run) || !run.created_novel_id) {
+      return
     }
-    return run
+
+    const importedNovelId = run.created_novel_id
+    setActiveNovelId(importedNovelId)
+    setActivePanel('chapters')
+    setTabTarget(null)
+    setActiveContent('')
+    await app.SetActiveNovel({ novel_id: importedNovelId })
+
+    const chapters = await app.GetChapters(importedNovelId)
+    const firstChapter = chapters[0]
+    if (firstChapter) {
+      const target = {
+        path: firstChapter.file_path,
+        title: `第${firstChapter.chapter_number}章 ${firstChapter.title}`,
+      }
+      setTabTarget(target)
+      window.setTimeout(() => {
+        contentRef.current?.openFile(target.path, target.title)
+      }, 0)
+    }
   }
 
   const activeNovel = novels.find(n => n.id === activeNovelId)
@@ -343,44 +408,48 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
         </div>
       </header>
 
+      <StartupImportRecoveryBanner recovery={startupRecovery} />
+
       <div className="flex-1 flex min-h-0 overflow-hidden">
         <ActivityBar activeId={sidebarPanel ?? activePanel} onSelect={handleActivitySelect} />
 
-        <SidePanel
-          activePanel={sidebarPanel ?? activePanel}
-          novels={novels}
-          novelId={activeNovelId}
-          onSelectNovel={handleSelectNovel}
-          onSelectChapter={handleSelectChapter}
-          onSelectNovelist={handleSelectNovelist}
-          onExportNovel={(id) => setExportNovelId(id)}
-          target={tabTarget}
-          showCreate={showCreate}
-          setShowCreate={setShowCreate}
-          title={title}
-          setTitle={setTitle}
-          description={description}
-          setDescription={setDescription}
-          onCreateNovel={handleCreateNovel}
-          activeSkillName={activeSkillName}
-          onSelectSkill={(path, title, readOnly) => {
-            setActiveSkillName(title)
-            contentRef.current?.openFile(path, title, readOnly)
-          }}
-          onEditSkill={(path, title, readOnly) => {
-            setActiveSkillName(title)
-            contentRef.current?.openFile(path, title, readOnly, 'edit')
-          }}
-          onNewSkill={(name) => {
-            setActiveSkillName(`技能: ${name}`)
-            contentRef.current?.openFile(`skills/${name}.md`, `技能: ${name}`, false, 'edit')
-          }}
-          onSearchNavigateEntity={handleSearchNavigateEntity}
-          onSearchNavigateChapter={handleSearchNavigateChapter}
-          searchQuery={searchQuery}
-          searchResults={searchResults}
-          onSearchChange={(q, r) => { setSearchQuery(q); setSearchResults(r) }}
-        />
+        {(sidebarPanel ?? activePanel) !== 'git-history' && (
+          <SidePanel
+            activePanel={sidebarPanel ?? activePanel}
+            novels={novels}
+            novelId={activeNovelId}
+            onSelectNovel={handleSelectNovel}
+            onSelectChapter={handleSelectChapter}
+            onSelectNovelist={handleSelectNovelist}
+            onExportNovel={(id) => setExportNovelId(id)}
+            target={tabTarget}
+            showCreate={showCreate}
+            setShowCreate={setShowCreate}
+            title={title}
+            setTitle={setTitle}
+            description={description}
+            setDescription={setDescription}
+            onCreateNovel={handleCreateNovel}
+            activeSkillName={activeSkillName}
+            onSelectSkill={(path, title, readOnly) => {
+              setActiveSkillName(title)
+              contentRef.current?.openFile(path, title, readOnly)
+            }}
+            onEditSkill={(path, title, readOnly) => {
+              setActiveSkillName(title)
+              contentRef.current?.openFile(path, title, readOnly, 'edit')
+            }}
+            onNewSkill={(name) => {
+              setActiveSkillName(`技能: ${name}`)
+              contentRef.current?.openFile(`skills/${name}.md`, `技能: ${name}`, false, 'edit')
+            }}
+            onSearchNavigateEntity={handleSearchNavigateEntity}
+            onSearchNavigateChapter={handleSearchNavigateChapter}
+            searchQuery={searchQuery}
+            searchResults={searchResults}
+            onSearchChange={(q, r) => { setSearchQuery(q); setSearchResults(r) }}
+          />
+        )}
 
         {activePanel === 'novels' ? (
           <BookshelfView
@@ -393,9 +462,12 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
             onSaveCover={handleSaveCover}
             onExportNovel={(n) => setExportNovelId(n.id)}
             onPickNovelImportFile={handlePickNovelImportFile}
-            onStartNovelImport={handleStartNovelImport}
+            novelImportState={novelImportController.state}
+            onBeginNovelImportSelection={novelImportController.beginSelecting}
+            onCancelNovelImportSelection={novelImportController.markSelectionCancelled}
+            onStartNovelImportFromPath={novelImportController.startFromPath}
           />
-        ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && activePanel !== 'reference' && activePanel !== 'profile' && (
+        ) : activePanel !== 'characters' && activePanel !== 'locations' && activePanel !== 'storyarcs' && activePanel !== 'timeline' && activePanel !== 'reader' && activePanel !== 'preferences' && activePanel !== 'reference' && activePanel !== 'style-samples' && activePanel !== 'patterns' && activePanel !== 'git-history' && activePanel !== 'profile' && (
           <ContentPanel
             ref={contentRef}
             novelId={activeNovelId}
@@ -419,6 +491,12 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
           <PreferenceView novelId={activeNovelId} focusId={preferenceFocusId} />
         ) : activePanel === 'reference' ? (
           <ReferenceAnchorView novelId={activeNovelId} />
+        ) : activePanel === 'style-samples' ? (
+          <StyleSampleLibraryView novelId={activeNovelId} />
+        ) : activePanel === 'patterns' ? (
+          <NarrativePatternView novelId={activeNovelId} />
+        ) : activePanel === 'git-history' ? (
+          <GitHistoryView novelId={activeNovelId} />
         ) : activePanel === 'profile' ? (
           <ProfileView />
         ) : null}
@@ -465,6 +543,137 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp }: Props
         onClose={() => setExportNovelId(null)}
         onExport={handleExportNovel}
       />
+
+      <NovelImportDialog
+        state={novelImportController.state}
+        onCancel={() => { void novelImportController.cancel() }}
+        onClose={novelImportController.close}
+      />
+
+      <UpdateDialog
+        open={showUpdateDialog}
+        result={updateResult}
+        onClose={() => setShowUpdateDialog(false)}
+        onDismissVersion={async (version) => {
+          const settings = await app.GetUpdateCheckSettings()
+          await app.SaveUpdateCheckSettings({
+            enabled: settings.enabled,
+            endpoint_url: settings.endpoint_url,
+            dismissed_version: version,
+          })
+        }}
+      />
     </div>
   )
+}
+
+function StartupImportRecoveryBanner({ recovery }: { recovery?: novelImport.ImportReconciliationResult | null }) {
+  const [dismissed, setDismissed] = useState(false)
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+
+  if (!recovery || dismissed) return null
+
+  const cleaned = recovery.reconciled_runs.filter(run => run.state === 'cleanup_completed').length
+  const warned = recovery.reconciled_runs.filter(run => run.state === 'completed_with_warning').length
+  const blocked = recovery.blocked_runs.length
+  const total = cleaned + warned + blocked
+  if (total === 0) return null
+
+  const hasBlocked = blocked > 0
+  const copyLabel = copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制诊断'
+  const diagnosticText = JSON.stringify(recovery, null, 2)
+
+  async function handleCopyDiagnostics() {
+    try {
+      await copyTextToClipboard(diagnosticText)
+      setCopyState('copied')
+      window.setTimeout(() => setCopyState('idle'), 1800)
+    } catch {
+      setCopyState('failed')
+      window.setTimeout(() => setCopyState('idle'), 1800)
+    }
+  }
+
+  return (
+    <section
+      role="status"
+      aria-label="导入启动恢复状态"
+      className={`shrink-0 border-b px-4 py-2.5 text-sm ${hasBlocked ? 'border-danger-border bg-danger-bg' : 'border-border bg-tag-amber'}`}
+    >
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex min-w-0 gap-2.5">
+          <div className={`mt-0.5 shrink-0 ${hasBlocked ? 'text-destructive' : 'text-tag-amber-foreground'}`}>
+            {hasBlocked ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-foreground">导入恢复已处理</h2>
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              {cleaned > 0 && <span>已清理 {cleaned} 个未完成导入</span>}
+              {warned > 0 && <span>{warned} 个导入已保留并带有警告</span>}
+              {blocked > 0 && <span>{blocked} 个导入需要手动处理</span>}
+            </div>
+            {hasBlocked && (
+              <div className="mt-2 flex flex-col gap-1 text-xs text-foreground">
+                {recovery.blocked_runs.slice(0, 3).map(run => (
+                  <div key={run.task_id} className="break-words">
+                    <span className="font-medium">{run.task_id}</span>
+                    {run.error?.message ? <span className="text-muted-foreground"> · {run.error.message}</span> : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 self-start">
+          <button
+            type="button"
+            onClick={() => void handleCopyDiagnostics()}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background/80 px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Clipboard className="h-3.5 w-3.5" />
+            {copyLabel}
+          </button>
+          {!hasBlocked && (
+            <button
+              type="button"
+              onClick={() => setDismissed(true)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/80 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="关闭导入恢复提示"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch {
+      // Fall through to the textarea path for desktop/webview contexts that expose
+      // Clipboard API but reject writes without an explicit permission grant.
+    }
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+  if (!copied) {
+    throw new Error('Clipboard copy failed.')
+  }
+}
+
+function isSuccessfulNovelImportRun(run: novelImport.ImportRun): boolean {
+  return run.state === 'completed' || run.state === 'completed_with_warning'
 }

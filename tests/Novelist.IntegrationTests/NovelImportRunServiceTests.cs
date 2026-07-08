@@ -160,11 +160,71 @@ public sealed class NovelImportRunServiceTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(async () =>
             await service.StartRunAsync(ValidStartPayload("import-display") with { SourceDisplayName = "" }, CancellationToken.None));
         await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.StartRunAsync(
+                ValidStartPayload("import-display-slash") with { SourceDisplayName = "folder/book.txt" },
+                CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.StartRunAsync(
+                ValidStartPayload("import-display-backslash") with { SourceDisplayName = @"folder\book.txt" },
+                CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
             await service.StartRunAsync(ValidStartPayload("import-kind") with { ImportKind = "pdf" }, CancellationToken.None));
 
         await service.StartRunAsync(ValidStartPayload("import-duplicate"), CancellationToken.None);
         await Assert.ThrowsAsync<ArgumentException>(async () =>
             await service.StartRunAsync(ValidStartPayload("import-duplicate"), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ImportRunCreatedFileRootsNormalizeBackslashSeparatorsAndRejectRootedPaths()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var service = new FileSystemNovelImportRunService(options);
+        await service.StartRunAsync(ValidStartPayload("import-created-roots"), CancellationToken.None);
+
+        var updated = await service.UpdateRunAsync(
+            new NovelImportRunUpdate(
+                TaskId: "import-created-roots",
+                State: NovelImportRunStates.WritingFiles,
+                Stage: "write_chapters",
+                CreatedNovelId: 7,
+                CreatedFileRoots: [@"novels\7", "novels/7/chapters/"],
+                SkippedChapters: null,
+                Diagnostics: null,
+                Warnings: null,
+                Error: null),
+            CancellationToken.None);
+
+        Assert.Equal(["novels/7", "novels/7/chapters"], updated.CreatedFileRoots);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.UpdateRunAsync(
+                new NovelImportRunUpdate(
+                    TaskId: "import-created-roots",
+                    State: NovelImportRunStates.SavingMetadata,
+                    Stage: "saving_metadata",
+                    CreatedNovelId: 7,
+                    CreatedFileRoots: [Path.GetFullPath(Path.Combine(_root, "outside"))],
+                    SkippedChapters: null,
+                    Diagnostics: null,
+                    Warnings: null,
+                    Error: null),
+                CancellationToken.None));
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.UpdateRunAsync(
+                new NovelImportRunUpdate(
+                    TaskId: "import-created-roots",
+                    State: NovelImportRunStates.SavingMetadata,
+                    Stage: "saving_metadata",
+                    CreatedNovelId: 7,
+                    CreatedFileRoots: [@"C:\novels\7"],
+                    SkippedChapters: null,
+                    Diagnostics: null,
+                    Warnings: null,
+                    Error: null),
+                CancellationToken.None));
     }
 
     [Fact]

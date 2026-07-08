@@ -56,6 +56,14 @@ public static class ReferenceStyleAnalyzerSources
     public static IReadOnlyList<string> All { get; } = [DeterministicBaseline, LlmAssisted];
 }
 
+public static class ReferenceStyleProfileSourceTypes
+{
+    public const string ReferenceAnchor = "reference_anchor";
+    public const string StyleSample = "style_sample";
+
+    public static IReadOnlyList<string> All { get; } = [ReferenceAnchor, StyleSample];
+}
+
 public static class ReferenceStyleFeatureSchemaVersions
 {
     public const string V1 = "style-profile-v1";
@@ -332,7 +340,10 @@ public sealed record BuildReferenceStyleProfilePayload(
     [property: JsonPropertyName("allowed_source_trust_levels")] IReadOnlyList<string> AllowedSourceTrustLevels,
     [property: JsonPropertyName("build_id")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    string? BuildId = null);
+    string? BuildId = null,
+    [property: JsonPropertyName("style_sample_ids")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<long>? StyleSampleIds = null);
 
 public sealed record GetReferenceStyleProfileBuildStatusPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
@@ -375,7 +386,10 @@ public sealed record ReferenceStyleProfileSummaryPayload(
     [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt,
     [property: JsonPropertyName("archived_at")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    DateTimeOffset? ArchivedAt);
+    DateTimeOffset? ArchivedAt,
+    [property: JsonPropertyName("source_style_sample_ids")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<long>? SourceStyleSampleIds = null);
 
 public sealed record ReferenceStyleProfileBuildStatusPayload(
     [property: JsonPropertyName("build_id")] string BuildId,
@@ -404,7 +418,10 @@ public sealed record ReferenceStyleProfileBuildStatusPayload(
     DateTimeOffset? CompletedAt,
     [property: JsonPropertyName("cancelled_at")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    DateTimeOffset? CancelledAt);
+    DateTimeOffset? CancelledAt,
+    [property: JsonPropertyName("style_sample_ids")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<long>? StyleSampleIds = null);
 
 public sealed record ReferenceStyleProfileComparisonPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
@@ -471,7 +488,10 @@ public sealed record ReferenceStyleProfilePayload(
     [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt,
     [property: JsonPropertyName("archived_at")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    DateTimeOffset? ArchivedAt);
+    DateTimeOffset? ArchivedAt,
+    [property: JsonPropertyName("source_style_sample_ids")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<long>? SourceStyleSampleIds = null);
 
 public sealed record ReferenceStyleFeatureVectorPayload(
     [property: JsonPropertyName("numeric_features")] IReadOnlyList<ReferenceStyleNumericFeaturePayload> NumericFeatures,
@@ -519,7 +539,13 @@ public sealed record ReferenceStyleEvidenceSpanPayload(
     [property: JsonPropertyName("end_offset")] int EndOffset,
     [property: JsonPropertyName("text_hash")] string TextHash,
     [property: JsonPropertyName("confidence")] double Confidence,
-    [property: JsonPropertyName("analyzer_source")] string AnalyzerSource);
+    [property: JsonPropertyName("analyzer_source")] string AnalyzerSource,
+    [property: JsonPropertyName("source_type")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? SourceType = null,
+    [property: JsonPropertyName("style_sample_id")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    long? StyleSampleId = null);
 
 public sealed record ReferenceStyleLlmAnalysisRequestPayload(
     [property: JsonPropertyName("profile_id")] long ProfileId,

@@ -86,6 +86,154 @@ public sealed class ReferenceStyleProfileServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task BuildStyleProfileFromStyleSamplesMapsStatsAndPersistsSampleSourceWithoutText()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("样本画像测试", "", ""), CancellationToken.None);
+        var samples = new FileSystemStyleSampleService(options, novels);
+        const string sampleSentinel = "雨声压低了整条街的呼吸";
+        var sample = await samples.CreateSampleAsync(
+            new CreateStyleSamplePayload(
+                novel.Id,
+                IsGlobal: false,
+                Name: "雨夜样本",
+                Content:
+                $"""
+                {sampleSentinel}。林岚在门口停了很久，指节慢慢发紧。
+
+                她说：“你终于来了。”
+
+                后来灯光暗下去，他没有回答，只把钥匙放回桌面。
+                """,
+                Tags: ["rain", "restraint"],
+                SourceMetadata: new StyleSampleSourceMetadataPayload("manual", "chapter-1", "sample-source-hash")),
+            CancellationToken.None);
+        var styleService = new SqliteReferenceStyleProfileService(options, novels, llmAnalyzer: null, styleSamples: samples);
+
+        var profile = await styleService.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                novel.Id,
+                "样本风格画像",
+                "sample backed profile",
+                AnchorIds: [],
+                AllowedLicenseStatuses: [],
+                AllowedSourceTrustLevels: [],
+                StyleSampleIds: [sample.SampleId]),
+            CancellationToken.None);
+
+        Assert.True(profile.ProfileId > 0);
+        Assert.Equal(ReferenceStyleProfileStatuses.Active, profile.Status);
+        Assert.Empty(profile.SourceAnchorIds);
+        Assert.Equal([sample.SampleId], profile.SourceStyleSampleIds);
+        Assert.NotEmpty(profile.SourceHashes);
+        Assert.NotEmpty(profile.EvidenceSpans);
+        Assert.All(profile.EvidenceSpans, evidence =>
+        {
+            Assert.Equal(0, evidence.AnchorId);
+            Assert.Equal(ReferenceStyleProfileSourceTypes.StyleSample, evidence.SourceType);
+            Assert.Equal(sample.SampleId, evidence.StyleSampleId);
+            Assert.StartsWith($"style-sample:{sample.SampleId}:", evidence.SourceSegmentId, StringComparison.Ordinal);
+            Assert.False(string.IsNullOrWhiteSpace(evidence.TextHash));
+            Assert.True(evidence.EndOffset > evidence.StartOffset);
+        });
+
+        Assert.Equal(sample.Stats.AverageSentenceChars, ReadNumericFeature(profile.Features, "average_sentence_chars"), precision: 4);
+        Assert.Equal(sample.Stats.DialogueRatio, ReadNumericFeature(profile.Features, "dialogue_ratio"), precision: 4);
+        Assert.Equal(sample.Stats.InteriorityRatio, ReadNumericFeature(profile.Features, "interiority_ratio"), precision: 4);
+        Assert.Equal(sample.Stats.SensoryRatio, ReadNumericFeature(profile.Features, "sensory_ratio"), precision: 4);
+
+        var reloaded = await styleService.GetStyleProfileAsync(novel.Id, profile.ProfileId, CancellationToken.None);
+        Assert.NotNull(reloaded);
+        Assert.Equal([sample.SampleId], reloaded.SourceStyleSampleIds);
+        Assert.Equal(profile.EvidenceSpans.Count, reloaded.EvidenceSpans.Count);
+
+        var sampleSources = await ReadSampleProfileSourcesAsync(options, profile.ProfileId);
+        var source = Assert.Single(sampleSources);
+        Assert.Equal(sample.SampleId, source.SampleId);
+        Assert.Equal(novel.Id, source.NovelId);
+        Assert.False(source.IsGlobal);
+        Assert.Equal(sample.Stats.SchemaVersion, source.StatsSchemaVersion);
+        Assert.Equal(sample.SourceMetadata!.SourceHash, source.SourceHash);
+        Assert.True(source.MaterialCount > 0);
+        Assert.True(source.SegmentCount > 0);
+
+        var persisted = await ReadPersistedStyleProfileAsync(options, profile.ProfileId);
+        Assert.DoesNotContain(sampleSentinel, persisted.FeatureVectorJson, StringComparison.Ordinal);
+        var sampleEvidenceColumns = await ReadTableColumnsAsync(options, "reference_style_profile_sample_evidence");
+        Assert.DoesNotContain("text", sampleEvidenceColumns, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("content", sampleEvidenceColumns, StringComparer.OrdinalIgnoreCase);
+
+        var status = await styleService.GetStyleProfileBuildStatusAsync(
+            new GetReferenceStyleProfileBuildStatusPayload(novel.Id, "style-build-sample"),
+            CancellationToken.None);
+        Assert.Null(status);
+    }
+
+    [Fact]
+    public async Task BuildStyleProfileFromStyleSamplesRespectsGlobalAndNovelScope()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("样本作用域测试", "", ""), CancellationToken.None);
+        var otherNovel = await novels.CreateNovelAsync(new CreateNovelPayload("其他样本作用域测试", "", ""), CancellationToken.None);
+        var samples = new FileSystemStyleSampleService(options, novels);
+        var localSample = await samples.CreateSampleAsync(
+            new CreateStyleSamplePayload(
+                novel.Id,
+                IsGlobal: false,
+                Name: "当前小说样本",
+                Content: "她说：“门口别停。”雨声压低了整条街的呼吸。",
+                Tags: [],
+                SourceMetadata: null),
+            CancellationToken.None);
+        var globalSample = await samples.CreateSampleAsync(
+            new CreateStyleSamplePayload(
+                NovelId: null,
+                IsGlobal: true,
+                Name: "全局样本",
+                Content: "灯光落在窗边，他忽然明白自己不能回头。",
+                Tags: [],
+                SourceMetadata: null),
+            CancellationToken.None);
+        var otherSample = await samples.CreateSampleAsync(
+            new CreateStyleSamplePayload(
+                otherNovel.Id,
+                IsGlobal: false,
+                Name: "其他小说样本",
+                Content: "其他小说里的门外脚步声越来越近。",
+                Tags: [],
+                SourceMetadata: null),
+            CancellationToken.None);
+        var styleService = new SqliteReferenceStyleProfileService(options, novels, llmAnalyzer: null, styleSamples: samples);
+
+        var profile = await styleService.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                novel.Id,
+                "可访问样本画像",
+                "",
+                AnchorIds: [],
+                AllowedLicenseStatuses: [],
+                AllowedSourceTrustLevels: [],
+                StyleSampleIds: [localSample.SampleId, globalSample.SampleId]),
+            CancellationToken.None);
+
+        Assert.Equal([localSample.SampleId, globalSample.SampleId], profile.SourceStyleSampleIds);
+        await Assert.ThrowsAsync<ArgumentException>(async () => await styleService.BuildStyleProfileAsync(
+            new BuildReferenceStyleProfilePayload(
+                novel.Id,
+                "越权样本画像",
+                "",
+                AnchorIds: [],
+                AllowedLicenseStatuses: [],
+                AllowedSourceTrustLevels: [],
+                StyleSampleIds: [otherSample.SampleId]),
+            CancellationToken.None).AsTask());
+    }
+
+    [Fact]
     public async Task TenMbSourceBuildsDeterministicStyleProfileWithoutPersistingSourceText()
     {
         var options = CreateOptions();
@@ -1026,6 +1174,36 @@ public sealed class ReferenceStyleProfileServiceTests : IDisposable
         return rows;
     }
 
+    private static async ValueTask<IReadOnlyList<PersistedSampleProfileSource>> ReadSampleProfileSourcesAsync(
+        AppInitializationOptions options,
+        long profileId)
+    {
+        await using var connection = await OpenReferenceConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT sample_id, novel_id, is_global, source_hash, stats_schema_version, material_count, segment_count
+            FROM reference_style_profile_sample_sources
+            WHERE profile_id = $profile_id
+            ORDER BY sample_id ASC;
+            """;
+        command.Parameters.AddWithValue("$profile_id", profileId);
+        var rows = new List<PersistedSampleProfileSource>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            rows.Add(new PersistedSampleProfileSource(
+                reader.GetInt64(0),
+                reader.IsDBNull(1) ? null : reader.GetInt64(1),
+                reader.GetInt32(2) == 1,
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetInt32(5),
+                reader.GetInt32(6)));
+        }
+
+        return rows;
+    }
+
     private static IReadOnlyList<string> FeatureSignature(ReferenceStyleFeatureVectorPayload features)
     {
         var numeric = features.NumericFeatures
@@ -1210,6 +1388,15 @@ public sealed class ReferenceStyleProfileServiceTests : IDisposable
 
     private sealed record PersistedProfileSource(
         long AnchorId,
+        int MaterialCount,
+        int SegmentCount);
+
+    private sealed record PersistedSampleProfileSource(
+        long SampleId,
+        long? NovelId,
+        bool IsGlobal,
+        string SourceHash,
+        string StatsSchemaVersion,
         int MaterialCount,
         int SegmentCount);
 
