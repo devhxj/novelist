@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { Plus, X, Search, Loader2 } from 'lucide-react'
+import ErrorCallout from '@/components/shared/ErrorCallout'
 import { useApp, type llm } from '@/hooks/useApp'
+import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
+import type { diagnostics } from '@/lib/novelist/types'
 import ModelEditForm from './ModelEditForm'
 
 interface Props {
@@ -12,6 +15,14 @@ interface Props {
 
 const DEFAULT_CTX = 200_000
 const DEFAULT_MAX = 64_000
+
+type DiscoverFeedback =
+  | { kind: 'empty'; message: string }
+  | {
+    kind: 'error'
+    message: string
+    diagnostic: diagnostics.CopyableDiagnostic | null
+  }
 
 const emptyModel = (): llm.ModelInfo => ({
   id: '', name: '', context_window: DEFAULT_CTX, max_output_tokens: DEFAULT_MAX,
@@ -27,7 +38,7 @@ export default function ModelDiscoveryPanel({ baseUrl, apiKey, existingIds, onAd
 
   // 自动发现
   const [discovering, setDiscovering] = useState(false)
-  const [discoverError, setDiscoverError] = useState('')
+  const [discoverFeedback, setDiscoverFeedback] = useState<DiscoverFeedback | null>(null)
   const [discoveredModels, setDiscoveredModels] = useState<llm.ModelInfo[]>([])
   const [selectedForImport, setSelectedForImport] = useState<Set<string>>(new Set())
   const [pendingImports, setPendingImports] = useState<llm.ModelInfo[]>([])
@@ -44,19 +55,33 @@ export default function ModelDiscoveryPanel({ baseUrl, apiKey, existingIds, onAd
 
   const handleDiscover = async () => {
     setDiscovering(true)
-    setDiscoverError('')
+    setDiscoverFeedback(null)
     setDiscoveredModels([])
     setSelectedForImport(new Set())
     try {
       const models = await app.DiscoverModels(baseUrl, apiKey)
       if (!models || models.length === 0) {
-        setDiscoverError('未发现任何模型')
+        setDiscoverFeedback({ kind: 'empty', message: '未发现任何模型' })
       } else {
         setDiscoveredModels(models)
         setSelectedForImport(new Set(models.map(m => m.id)))
       }
     } catch (e: unknown) {
-      setDiscoverError(e instanceof Error ? e.message : String(e))
+      setDiscoverFeedback({
+        kind: 'error',
+        message: diagnosticMessage(e, '模型发现失败'),
+        diagnostic: buildCopyableDiagnostic({
+          error: e,
+          fallbackMessage: '模型发现失败',
+          operation: 'DiscoverModels',
+          bridgeMethod: 'DiscoverModels',
+          detail: {
+            base_url: baseUrl.trim(),
+            has_api_key: Boolean(apiKey),
+            existing_model_count: existingIds.size,
+          },
+        }),
+      })
     } finally {
       setDiscovering(false)
     }
@@ -76,7 +101,7 @@ export default function ModelDiscoveryPanel({ baseUrl, apiKey, existingIds, onAd
     setPendingImports(withDefaults)
     setDiscoveredModels([])
     setSelectedForImport(new Set())
-    setDiscoverError('')
+    setDiscoverFeedback(null)
   }
 
   const handleSavePending = (index: number, model: llm.ModelInfo) => {
@@ -134,8 +159,18 @@ export default function ModelDiscoveryPanel({ baseUrl, apiKey, existingIds, onAd
       )}
 
       {/* 发现错误（无结果时） */}
-      {discoverError && !discovering && discoveredModels.length === 0 && (
-        <div className="text-xs text-red-500 mb-2">{discoverError}</div>
+      {discoverFeedback?.kind === 'empty' && !discovering && discoveredModels.length === 0 && (
+        <div className="text-xs text-muted-foreground mb-2">{discoverFeedback.message}</div>
+      )}
+      {discoverFeedback?.kind === 'error' && !discovering && discoveredModels.length === 0 && (
+        <ErrorCallout
+          compact
+          title="模型发现失败"
+          message={discoverFeedback.message}
+          diagnostic={discoverFeedback.diagnostic}
+          className="mb-2 rounded-md"
+          onClose={() => setDiscoverFeedback(null)}
+        />
       )}
 
       {/* 发现结果面板 */}
@@ -160,7 +195,7 @@ export default function ModelDiscoveryPanel({ baseUrl, apiKey, existingIds, onAd
                 className="h-7 px-2.5 rounded-md bg-primary text-primary-foreground text-xs disabled:opacity-50"
               >导入选中</button>
               <button
-                onClick={() => { setDiscoveredModels([]); setDiscoverError('') }}
+                onClick={() => { setDiscoveredModels([]); setDiscoverFeedback(null) }}
                 className="text-muted-foreground hover:text-destructive"
               ><X className="w-3.5 h-3.5" /></button>
             </div>

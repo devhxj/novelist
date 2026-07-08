@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
+import ErrorCallout from '@/components/shared/ErrorCallout'
 import { useApp } from '@/hooks/useApp'
 import type { llm } from '@/hooks/useApp'
 import type { EmbeddingConfigView, SqliteVecStatusView } from '@/lib/novelist/api'
+import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
+import type { diagnostics } from '@/lib/novelist/types'
 import BuiltinProviderPane from './BuiltinProviderPane'
 import CustomProviderPane from './CustomProviderPane'
 import EmbeddingConfigPane from './EmbeddingConfigPane'
@@ -13,7 +16,28 @@ interface Props {
   onSaved?: () => void
 }
 
-type TestResult = { ok: boolean; msg?: string; configSnapshot: string }
+type DiagnosticFeedback = {
+  title: string
+  message: string
+  diagnostic: diagnostics.CopyableDiagnostic | null
+}
+
+type SaveFeedback =
+  | { kind: 'success' | 'validation' | 'progress'; message: string }
+  | ({ kind: 'error' } & DiagnosticFeedback)
+
+type TestResult = {
+  ok: boolean
+  msg?: string
+  configSnapshot: string
+  diagnostic?: diagnostics.CopyableDiagnostic | null
+}
+
+type EmbeddingTestResult = {
+  ok: boolean
+  msg?: string
+  diagnostic?: diagnostics.CopyableDiagnostic | null
+}
 
 const emptyEmbeddingConfig = (): EmbeddingConfigView => ({
   provider_type: '',
@@ -49,35 +73,68 @@ export default function ModelConfigTab({ onSaved }: Props) {
   const [subNav, setSubNav] = useState<SubNav>('builtin')
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
-  const [saveMsg, setSaveMsg] = useState('')
+  const [loadError, setLoadError] = useState<DiagnosticFeedback | null>(null)
+  const [saveFeedback, setSaveFeedback] = useState<SaveFeedback | null>(null)
 
   // 测试状态：{ providerKey: { ok, msg, apiKey } }
   const [testResults, setTestResults] = useState<Record<string, TestResult | undefined>>({})
   const [testing, setTesting] = useState<Record<string, boolean>>({})
-  const [embeddingTestResult, setEmbeddingTestResult] = useState<{ ok: boolean; msg?: string } | undefined>()
+  const [embeddingTestResult, setEmbeddingTestResult] = useState<EmbeddingTestResult | undefined>()
   const [embeddingTesting, setEmbeddingTesting] = useState(false)
   // 保存过后的配置哈希，用于判断 key 是否被修改
   const savedKeysRef = useRef<Record<string, string>>({})
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([
+    Promise.allSettled([
       app.GetLLMConfig(),
       app.GetEmbeddingConfig(),
       app.GetSqliteVecStatus(),
-    ]).then(([config, embedding, sqliteVec]) => {
+    ]).then((results) => {
       if (cancelled) return
-      if (config?.providers) {
+      const [configResult, embeddingResult, sqliteVecResult] = results
+      const failed: Array<{ method: string; reason: unknown }> = []
+
+      if (configResult.status === 'fulfilled') {
+        const config = configResult.value
         setProviders(config.providers)
         const keys: Record<string, string> = {}
         for (const p of config.providers) {
           if (p.api_key) keys[p.key] = p.api_key
         }
         savedKeysRef.current = keys
+      } else {
+        failed.push({ method: 'GetLLMConfig', reason: configResult.reason })
       }
-      setEmbeddingConfig(embedding ?? emptyEmbeddingConfig())
-      setSqliteVecStatus(sqliteVec ?? null)
-    }).catch(() => {}).finally(() => {
+
+      if (embeddingResult.status === 'fulfilled') {
+        setEmbeddingConfig(embeddingResult.value ?? emptyEmbeddingConfig())
+      } else {
+        failed.push({ method: 'GetEmbeddingConfig', reason: embeddingResult.reason })
+      }
+
+      if (sqliteVecResult.status === 'fulfilled') {
+        setSqliteVecStatus(sqliteVecResult.value ?? null)
+      } else {
+        failed.push({ method: 'GetSqliteVecStatus', reason: sqliteVecResult.reason })
+      }
+
+      if (failed.length > 0) {
+        const firstFailure = failed[0]
+        setLoadError(diagnosticFeedback({
+          error: firstFailure.reason,
+          fallbackMessage: '模型配置加载失败',
+          operation: 'LoadModelSettings',
+          bridgeMethod: firstFailure.method,
+          detail: {
+            failed_methods: failed.map(item => item.method),
+            failure_count: failed.length,
+          },
+        }))
+      } else {
+        setLoadError(null)
+      }
+    }).finally(() => {
       if (!cancelled) setIsLoading(false)
     })
     return () => { cancelled = true }
@@ -174,8 +231,15 @@ export default function ModelConfigTab({ onSaved }: Props) {
       setTestResults(prev => ({ ...prev, [providerKey]: { ok: true, configSnapshot } }))
       return null
     } catch (err: unknown) {
-      const msg = String(err).replace(/^app: test connection: /, '')
-      setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, configSnapshot } }))
+      const msg = diagnosticMessage(err, '模型连通性测试失败').replace(/^app: test connection: /, '')
+      const diagnostic = buildCopyableDiagnostic({
+        error: err,
+        fallbackMessage: '模型连通性测试失败',
+        operation: 'TestConnection',
+        bridgeMethod: 'TestConnection',
+        detail: providerDiagnosticDetail(provider, modelId),
+      })
+      setTestResults(prev => ({ ...prev, [providerKey]: { ok: false, msg, configSnapshot, diagnostic } }))
       return msg
     } finally {
       setTesting(prev => ({ ...prev, [providerKey]: false }))
@@ -189,15 +253,32 @@ export default function ModelConfigTab({ onSaved }: Props) {
       await app.TestEmbeddingConnection(embeddingConfig)
       setEmbeddingTestResult({ ok: true })
     } catch (err) {
-      setEmbeddingTestResult({ ok: false, msg: String(err) })
+      setEmbeddingTestResult({
+        ok: false,
+        msg: diagnosticMessage(err, 'Embedding 连通性测试失败'),
+        diagnostic: buildCopyableDiagnostic({
+          error: err,
+          fallbackMessage: 'Embedding 连通性测试失败',
+          operation: 'TestEmbeddingConnection',
+          bridgeMethod: 'TestEmbeddingConnection',
+          detail: embeddingDiagnosticDetail(embeddingConfig),
+        }),
+      })
     } finally {
       setEmbeddingTesting(false)
     }
   }, [app, embeddingConfig])
 
+  const setTemporarySaveFeedback = useCallback((feedback: SaveFeedback, durationMs = 2000) => {
+    setSaveFeedback(feedback)
+    window.setTimeout(() => {
+      setSaveFeedback(current => current?.message === feedback.message ? null : current)
+    }, durationMs)
+  }, [])
+
   const handleSaveEmbedding = useCallback(async () => {
     setIsSaving(true)
-    setSaveMsg('')
+    setSaveFeedback(null)
     try {
       await app.SaveEmbeddingConfig(embeddingConfig)
       const [saved, sqliteVec] = await Promise.all([
@@ -206,15 +287,23 @@ export default function ModelConfigTab({ onSaved }: Props) {
       ])
       setEmbeddingConfig(saved ?? emptyEmbeddingConfig())
       setSqliteVecStatus(sqliteVec ?? null)
-      setSaveMsg('配置已保存')
+      setTemporarySaveFeedback({ kind: 'success', message: '配置已保存' })
       onSaved?.()
-      setTimeout(() => setSaveMsg(''), 2000)
     } catch (err) {
-      setSaveMsg(`保存失败: ${String(err)}`)
+      setSaveFeedback({
+        kind: 'error',
+        ...diagnosticFeedback({
+          error: err,
+          fallbackMessage: 'Embedding 配置保存失败',
+          operation: 'SaveEmbeddingConfig',
+          bridgeMethod: 'SaveEmbeddingConfig',
+          detail: embeddingDiagnosticDetail(embeddingConfig),
+        }),
+      })
     } finally {
       setIsSaving(false)
     }
-  }, [app, embeddingConfig, onSaved])
+  }, [app, embeddingConfig, onSaved, setTemporarySaveFeedback])
 
   const handleSave = useCallback(async () => {
     if (subNav === 'embedding') {
@@ -225,8 +314,7 @@ export default function ModelConfigTab({ onSaved }: Props) {
     // 收集有 key 的 provider
     const withKey = providers.filter(p => p.api_key)
     if (withKey.length === 0) {
-      setSaveMsg('请先配置至少一个服务商的 API Key')
-      setTimeout(() => setSaveMsg(''), 3000)
+      setTemporarySaveFeedback({ kind: 'validation', message: '请先配置至少一个服务商的 API Key' }, 3000)
       return
     }
 
@@ -239,19 +327,18 @@ export default function ModelConfigTab({ onSaved }: Props) {
     })
 
     if (needTest.length > 0) {
-      setSaveMsg('正在测试连通性...')
+      setSaveFeedback({ kind: 'progress', message: '正在测试连通性...' })
       for (const p of needTest) {
         const err = await handleTest(p.key)
         if (err) {
-          setSaveMsg(`${p.name} 连通性测试失败: ${err}`)
-          setTimeout(() => setSaveMsg(''), 5000)
+          setTemporarySaveFeedback({ kind: 'validation', message: `${p.name} 连通性测试失败: ${err}` }, 5000)
           return
         }
       }
     }
 
     setIsSaving(true)
-    setSaveMsg('')
+    setSaveFeedback(null)
     try {
       await app.SaveLLMConfig({ providers } as unknown as llm.LLMConfigView)
       const keys: Record<string, string> = {}
@@ -259,15 +346,27 @@ export default function ModelConfigTab({ onSaved }: Props) {
         if (p.api_key) keys[p.key] = p.api_key
       }
       savedKeysRef.current = keys
-      setSaveMsg('配置已保存')
+      setTemporarySaveFeedback({ kind: 'success', message: '配置已保存' })
       onSaved?.()
-      setTimeout(() => setSaveMsg(''), 2000)
     } catch (err) {
-      setSaveMsg(`保存失败: ${String(err)}`)
+      setSaveFeedback({
+        kind: 'error',
+        ...diagnosticFeedback({
+          error: err,
+          fallbackMessage: '模型配置保存失败',
+          operation: 'SaveLLMConfig',
+          bridgeMethod: 'SaveLLMConfig',
+          detail: {
+            provider_count: providers.length,
+            configured_provider_keys: providers.filter(provider => provider.api_key).map(provider => provider.key),
+            custom_provider_count: providers.filter(provider => provider.source === 'custom').length,
+          },
+        }),
+      })
     } finally {
       setIsSaving(false)
     }
-  }, [providers, app, testResults, handleTest, subNav, handleSaveEmbedding, onSaved])
+  }, [providers, app, testResults, handleTest, subNav, handleSaveEmbedding, onSaved, setTemporarySaveFeedback])
 
   if (isLoading) {
     return (
@@ -315,6 +414,16 @@ export default function ModelConfigTab({ onSaved }: Props) {
 
       {/* 内容区 */}
       <div className="flex-1 overflow-y-auto">
+        {loadError && (
+          <ErrorCallout
+            compact
+            title={loadError.title}
+            message={loadError.message}
+            diagnostic={loadError.diagnostic}
+            onClose={() => setLoadError(null)}
+            className="mb-3 rounded-md"
+          />
+        )}
         {subNav === 'builtin' ? (
           <BuiltinProviderPane
             providers={builtinProviders}
@@ -350,20 +459,91 @@ export default function ModelConfigTab({ onSaved }: Props) {
       </div>
 
       {/* 底部保存栏 */}
-      <div className="flex items-center justify-end gap-3 pt-4 border-t mt-4">
-        {saveMsg && (
-          <span className={`text-xs ${saveMsg.includes('失败') || saveMsg.includes('测试') ? 'text-red-500' : 'text-emerald-600'}`}>
-            {saveMsg}
-          </span>
+      <div className="space-y-2 pt-4 border-t mt-4">
+        {saveFeedback?.kind === 'error' && (
+          <ErrorCallout
+            compact
+            title={saveFeedback.title}
+            message={saveFeedback.message}
+            diagnostic={saveFeedback.diagnostic}
+            onClose={() => setSaveFeedback(null)}
+            className="rounded-md"
+          />
         )}
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          className="h-8 px-4 rounded-md bg-primary text-primary-foreground text-sm disabled:opacity-50"
-        >
-          {isSaving ? '保存中...' : '保存配置'}
-        </button>
+        <div className="flex items-center justify-end gap-3">
+          {saveFeedback && saveFeedback.kind !== 'error' && (
+            <span
+              role={saveFeedback.kind === 'success' ? 'status' : undefined}
+              className={`text-xs ${saveFeedback.kind === 'success' ? 'text-emerald-600' : 'text-red-500'}`}
+            >
+              {saveFeedback.message}
+            </span>
+          )}
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="h-8 px-4 rounded-md bg-primary text-primary-foreground text-sm disabled:opacity-50"
+          >
+            {isSaving ? '保存中...' : '保存配置'}
+          </button>
+        </div>
       </div>
     </div>
   )
+
+}
+
+function diagnosticFeedback({
+  error,
+  fallbackMessage,
+  operation,
+  bridgeMethod,
+  detail,
+}: {
+  error: unknown
+  fallbackMessage: string
+  operation: string
+  bridgeMethod: string | null
+  detail: Record<string, unknown>
+}): DiagnosticFeedback {
+  return {
+    title: fallbackMessage,
+    message: diagnosticMessage(error, fallbackMessage),
+    diagnostic: buildCopyableDiagnostic({
+      error,
+      fallbackMessage,
+      operation,
+      bridgeMethod,
+      detail,
+    }),
+  }
+}
+
+function providerDiagnosticDetail(provider: llm.ProviderView, modelId: string) {
+  return {
+    provider_key: provider.key,
+    provider_name: provider.name,
+    source: provider.source,
+    base_url: (provider.base_url || provider.chat_url || '').trim(),
+    endpoint_type: provider.endpoint_type || 'chat',
+    model_id: modelId,
+    has_api_key: Boolean(provider.api_key),
+    custom_model_count: provider.custom_models?.length ?? 0,
+  }
+}
+
+function embeddingDiagnosticDetail(config: EmbeddingConfigView) {
+  return {
+    provider_type: config.provider_type || 'api',
+    provider_key: config.provider_key,
+    endpoint_url: config.endpoint_url,
+    model_id: config.model_id,
+    dimensions: config.dimensions,
+    user_present: Boolean(config.user),
+    has_api_key: Boolean(config.api_key),
+    onnx_model_path_present: Boolean(config.onnx_model_path),
+    onnx_vocab_path_present: Boolean(config.onnx_vocab_path),
+    max_sequence_length: config.max_sequence_length,
+    normalize_embeddings: config.normalize_embeddings,
+  }
 }

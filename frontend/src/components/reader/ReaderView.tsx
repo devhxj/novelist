@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, BookOpen, Clock, Plus, Pencil, Trash2, X, Eye } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { reader } from '@/hooks/useApp'
+import ErrorCallout from '@/components/shared/ErrorCallout'
+import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
+import type { diagnostics } from '@/lib/novelist/types'
 
 interface Props { novelId: number; focusId?: number }
 
@@ -47,6 +50,11 @@ const EMPTY_FORM: EditForm = {
   revealed_chapter: 0,
 }
 
+type VisibleError = {
+  message: string
+  diagnostic?: diagnostics.CopyableDiagnostic | null
+}
+
 function typeMeta(type: string) {
   switch (type) {
     case 'known':
@@ -65,7 +73,7 @@ export default function ReaderView({ novelId, focusId }: Props) {
 
   const [entries, setEntries] = useState<reader.ReaderPerspective[]>([])
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<VisibleError | null>(null)
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [expandedId, setExpandedId] = useState<number | null>(null)
@@ -86,7 +94,7 @@ export default function ReaderView({ novelId, focusId }: Props) {
         setWindowCenter(prev => prev || maxCh)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      setError(buildVisibleError(err, '加载读者视角失败', '加载读者视角', 'GetReaderPerspectives', { novel_id: novelId }))
     } finally {
       setLoading(false)
     }
@@ -115,7 +123,7 @@ export default function ReaderView({ novelId, focusId }: Props) {
           }
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : '加载失败')
+        if (!cancelled) setError(buildVisibleError(err, '加载读者视角失败', '加载读者视角', 'GetReaderPerspectives', { novel_id: novelId }))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -186,8 +194,8 @@ export default function ReaderView({ novelId, focusId }: Props) {
   }
 
   async function handleCreate() {
-    if (!form.content.trim()) { setError('请输入内容'); return }
-    if (!form.type) { setError('请选择类型'); return }
+    if (!form.content.trim()) { setError({ message: '请输入内容' }); return }
+    if (!form.type) { setError({ message: '请选择类型' }); return }
     setSaving(true)
     try {
       const created = await app.CreateReaderPerspective(novelId, {
@@ -202,7 +210,14 @@ export default function ReaderView({ novelId, focusId }: Props) {
       await load()
       setExpandedId(created.id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '创建失败')
+      setError(buildVisibleError(err, '创建读者视角失败', '创建读者视角', 'CreateReaderPerspective', {
+        novel_id: novelId,
+        type: form.type,
+        planted_chapter: form.planted_chapter,
+        revealed_chapter: form.revealed_chapter,
+        source_text: form.content,
+        source_content: { related_truth: form.related_truth },
+      }))
     } finally {
       setSaving(false)
     }
@@ -210,7 +225,7 @@ export default function ReaderView({ novelId, focusId }: Props) {
 
   async function handleUpdate() {
     if (!editMode || editMode.type !== 'edit') return
-    if (!form.content.trim()) { setError('请输入内容'); return }
+    if (!form.content.trim()) { setError({ message: '请输入内容' }); return }
     const entryId = editMode.item.id
     setSaving(true)
     try {
@@ -226,7 +241,15 @@ export default function ReaderView({ novelId, focusId }: Props) {
       await load()
       setExpandedId(entryId)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新失败')
+      setError(buildVisibleError(err, '更新读者视角失败', '更新读者视角', 'UpdateReaderPerspective', {
+        novel_id: novelId,
+        reader_perspective_id: entryId,
+        type: form.type,
+        planted_chapter: form.planted_chapter,
+        revealed_chapter: form.revealed_chapter,
+        source_text: form.content,
+        source_content: { related_truth: form.related_truth },
+      }))
     } finally {
       setSaving(false)
     }
@@ -240,7 +263,10 @@ export default function ReaderView({ novelId, focusId }: Props) {
       if (expandedId === id) setExpandedId(null)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败')
+      setError(buildVisibleError(err, '删除读者视角失败', '删除读者视角', 'DeleteReaderPerspective', {
+        novel_id: novelId,
+        reader_perspective_id: id,
+      }))
     } finally {
       setSaving(false)
     }
@@ -258,7 +284,15 @@ export default function ReaderView({ novelId, focusId }: Props) {
       })
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新失败')
+      setError(buildVisibleError(err, '标记读者视角已回收失败', '标记读者视角已回收', 'UpdateReaderPerspective', {
+        novel_id: novelId,
+        reader_perspective_id: item.id,
+        type: item.type,
+        planted_chapter: item.planted_chapter,
+        revealed_chapter: item.planted_chapter,
+        source_text: item.content,
+        source_content: { related_truth: item.related_truth || '' },
+      }))
     } finally {
       setSaving(false)
     }
@@ -329,10 +363,18 @@ export default function ReaderView({ novelId, focusId }: Props) {
     <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-background">
       {loading ? (
         <div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载中...</div>
-      ) : error ? (
-        <div className="flex h-full items-center justify-center text-sm text-destructive">{error}</div>
       ) : (
         <div className="max-w-3xl mx-auto px-5 py-6 space-y-5">
+          {error && (
+            <ErrorCallout
+              message={error.message}
+              diagnostic={error.diagnostic}
+              onRetry={() => { void load() }}
+              retrying={loading}
+              onClose={() => setError(null)}
+            />
+          )}
+
           {/* Header */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -586,4 +628,23 @@ export default function ReaderView({ novelId, focusId }: Props) {
       )}
     </main>
   )
+}
+
+function buildVisibleError(
+  error: unknown,
+  fallbackMessage: string,
+  operation: string,
+  bridgeMethod: string,
+  detail: unknown,
+): VisibleError {
+  return {
+    message: diagnosticMessage(error, fallbackMessage),
+    diagnostic: buildCopyableDiagnostic({
+      error,
+      fallbackMessage,
+      operation,
+      bridgeMethod,
+      detail,
+    }),
+  }
 }

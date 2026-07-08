@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { Pencil, Plus, Settings, Trash2, X } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { novel } from '@/hooks/useApp'
+import ErrorCallout from '@/components/shared/ErrorCallout'
+import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
+import type { diagnostics } from '@/lib/novelist/types'
 
 interface Props { novelId: number; focusId?: number }
 
@@ -17,13 +20,18 @@ type EditForm = {
 
 const EMPTY_FORM: EditForm = { category: '', content: '' }
 
+type VisibleError = {
+  message: string
+  diagnostic?: diagnostics.CopyableDiagnostic | null
+}
+
 export default function PreferenceView({ novelId }: Props) {
   const app = useApp()
 
   const [global, setGlobal] = useState<novel.PreferenceItem[]>([])
   const [novelPrefs, setNovelPrefs] = useState<novel.PreferenceItem[]>([])
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<VisibleError | null>(null)
   const [editMode, setEditMode] = useState<EditMode>(null)
   const [form, setForm] = useState<EditForm>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
@@ -37,7 +45,7 @@ export default function PreferenceView({ novelId }: Props) {
       setGlobal(result.global ?? [])
       setNovelPrefs(result.novel ?? [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      setError(buildVisibleError(err, '加载偏好失败', '加载偏好', 'GetPreferences', { novel_id: novelId }))
     } finally {
       setLoading(false)
     }
@@ -65,7 +73,7 @@ export default function PreferenceView({ novelId }: Props) {
           setNovelPrefs(result.novel ?? [])
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : '加载失败')
+        if (!cancelled) setError(buildVisibleError(err, '加载偏好失败', '加载偏好', 'GetPreferences', { novel_id: novelId }))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -94,7 +102,7 @@ export default function PreferenceView({ novelId }: Props) {
 
   async function handleSave() {
     if (!editMode) return
-    if (!form.content.trim()) { setError('请输入偏好内容'); return }
+    if (!form.content.trim()) { setError({ message: '请输入偏好内容' }); return }
 
     setSaving(true)
     try {
@@ -114,7 +122,20 @@ export default function PreferenceView({ novelId }: Props) {
       setForm(EMPTY_FORM)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败')
+      const isCreate = editMode.type === 'create'
+      setError(buildVisibleError(
+        err,
+        isCreate ? '创建偏好失败' : '更新偏好失败',
+        isCreate ? '创建偏好' : '更新偏好',
+        isCreate ? 'CreatePreference' : 'UpdatePreference',
+        {
+          novel_id: novelId,
+          preference_id: editMode.type === 'edit' ? editMode.item.id : null,
+          is_global: editMode.type === 'create' ? editMode.isGlobal : editMode.item.is_global,
+          category: form.category || '未分类',
+          source_text: form.content,
+        },
+      ))
     } finally {
       setSaving(false)
     }
@@ -127,7 +148,10 @@ export default function PreferenceView({ novelId }: Props) {
       await app.DeletePreference(id)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败')
+      setError(buildVisibleError(err, '删除偏好失败', '删除偏好', 'DeletePreference', {
+        novel_id: novelId,
+        preference_id: id,
+      }))
     } finally {
       setSaving(false)
     }
@@ -276,10 +300,18 @@ export default function PreferenceView({ novelId }: Props) {
     <main className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-background">
       {loading ? (
         <div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载中...</div>
-      ) : error ? (
-        <div className="flex h-full items-center justify-center text-sm text-destructive">{error}</div>
       ) : (
         <div className="max-w-3xl mx-auto px-5 py-6 space-y-8">
+          {error && (
+            <ErrorCallout
+              message={error.message}
+              diagnostic={error.diagnostic}
+              onRetry={() => { void load() }}
+              retrying={loading}
+              onClose={() => setError(null)}
+            />
+          )}
+
           <div className="flex items-center gap-2">
             <Settings className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold text-foreground">
@@ -297,4 +329,23 @@ export default function PreferenceView({ novelId }: Props) {
       )}
     </main>
   )
+}
+
+function buildVisibleError(
+  error: unknown,
+  fallbackMessage: string,
+  operation: string,
+  bridgeMethod: string,
+  detail: unknown,
+): VisibleError {
+  return {
+    message: diagnosticMessage(error, fallbackMessage),
+    diagnostic: buildCopyableDiagnostic({
+      error,
+      fallbackMessage,
+      operation,
+      bridgeMethod,
+      detail,
+    }),
+  }
 }

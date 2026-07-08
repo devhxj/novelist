@@ -4,6 +4,9 @@ import { useApp } from '@/hooks/useApp'
 import { useTheme } from '@/hooks/useTheme'
 import type { storyarc } from '@/hooks/useApp'
 import StoryArcGraph from '@/components/storyarc/StoryArcGraph'
+import ErrorCallout from '@/components/shared/ErrorCallout'
+import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
+import type { diagnostics } from '@/lib/novelist/types'
 
 interface Props { novelId: number; focusArcId?: number }
 
@@ -75,6 +78,11 @@ type NodeForm = { story_arc_id: number; title: string; description?: string; tar
 const EMPTY_ARC: ArcForm = { name: '', arc_type: 'main' }
 const EMPTY_NODE: NodeForm = { story_arc_id: 0, title: '', target_chapter: 1 }
 
+type VisibleError = {
+  message: string
+  diagnostic?: diagnostics.CopyableDiagnostic | null
+}
+
 export default function ArcListView({ novelId, focusArcId }: Props) {
   const app = useApp()
   const { theme } = useTheme()
@@ -83,7 +91,7 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
   const [arcs, setArcs] = useState<storyarc.StoryArc[]>([])
   const [allNodes, setAllNodes] = useState<storyarc.ArcNode[]>([])
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<VisibleError | null>(null)
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [windowCenter, setWindowCenter] = useState(0)
   const [filter, setFilter] = useState<Filter>('all')
@@ -108,7 +116,7 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
       setAllNodes(nodeList ?? [])
       setWindowCenter(Math.max(1, maxCh))
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      setError(buildVisibleError(err, '加载弧线节点失败', '加载弧线节点', null, { novel_id: novelId }))
     } finally {
       setLoading(false)
     }
@@ -141,7 +149,7 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
           setWindowCenter(Math.max(1, maxCh))
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : '加载失败')
+        if (!cancelled) setError(buildVisibleError(err, '加载弧线节点失败', '加载弧线节点', null, { novel_id: novelId }))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -232,15 +240,21 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
   }
 
   async function handleCreateArc() {
-    if (!arcForm.name.trim()) { setError('请输入弧线名称'); return }
-    if (!arcForm.arc_type) { setError('请选择弧线类型'); return }
+    if (!arcForm.name.trim()) { setError({ message: '请输入弧线名称' }); return }
+    if (!arcForm.arc_type) { setError({ message: '请选择弧线类型' }); return }
     setSaving(true)
     try {
       await app.CreateStoryArc(novelId, arcForm)
       setEditMode(null)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '创建弧线失败')
+      setError(buildVisibleError(err, '创建弧线失败', '创建弧线', 'CreateStoryArc', {
+        novel_id: novelId,
+        name: arcForm.name,
+        arc_type: arcForm.arc_type,
+        importance: arcForm.importance,
+        source_text: arcForm.description || '',
+      }))
     } finally {
       setSaving(false)
     }
@@ -254,7 +268,15 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
       setEditMode(null)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新弧线失败')
+      setError(buildVisibleError(err, '更新弧线失败', '更新弧线', 'UpdateStoryArc', {
+        novel_id: novelId,
+        story_arc_id: editMode.arc.id,
+        name: arcForm.name,
+        arc_type: arcForm.arc_type,
+        status: arcForm.status ?? editMode.arc.status,
+        importance: arcForm.importance,
+        source_text: arcForm.description || '',
+      }))
     } finally {
       setSaving(false)
     }
@@ -268,7 +290,10 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
       setExpandedId(null)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除弧线失败')
+      setError(buildVisibleError(err, '删除弧线失败', '删除弧线', 'DeleteStoryArc', {
+        novel_id: novelId,
+        story_arc_id: arcId,
+      }))
     } finally {
       setSaving(false)
     }
@@ -294,9 +319,9 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
   }
 
   async function handleCreateNode() {
-    if (!nodeForm.title.trim()) { setError('请输入节点标题'); return }
-    if (!nodeForm.story_arc_id) { setError('请选择所属弧线'); return }
-    if (!nodeForm.target_chapter) { setError('请输入目标章节'); return }
+    if (!nodeForm.title.trim()) { setError({ message: '请输入节点标题' }); return }
+    if (!nodeForm.story_arc_id) { setError({ message: '请选择所属弧线' }); return }
+    if (!nodeForm.target_chapter) { setError({ message: '请输入目标章节' }); return }
     setSaving(true)
     try {
       const created = await app.CreateArcNode(novelId, nodeForm)
@@ -304,7 +329,13 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
       await load()
       setExpandedId(created.id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '创建节点失败')
+      setError(buildVisibleError(err, '创建节点失败', '创建弧线节点', 'CreateArcNode', {
+        novel_id: novelId,
+        story_arc_id: nodeForm.story_arc_id,
+        title: nodeForm.title,
+        target_chapter: nodeForm.target_chapter,
+        source_text: nodeForm.description || '',
+      }))
     } finally {
       setSaving(false)
     }
@@ -312,7 +343,7 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
 
   async function handleUpdateNode() {
     if (!editMode || editMode.type !== 'edit_node') return
-    if (!nodeForm.title.trim()) { setError('请输入节点标题'); return }
+    if (!nodeForm.title.trim()) { setError({ message: '请输入节点标题' }); return }
     const nodeId = editMode.node.id
     setSaving(true)
     try {
@@ -321,7 +352,15 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
       await load()
       setExpandedId(nodeId)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新节点失败')
+      setError(buildVisibleError(err, '更新节点失败', '更新弧线节点', 'UpdateArcNode', {
+        novel_id: novelId,
+        arc_node_id: nodeId,
+        story_arc_id: nodeForm.story_arc_id,
+        title: nodeForm.title,
+        target_chapter: nodeForm.target_chapter,
+        status: nodeForm.status ?? editMode.node.status,
+        source_text: nodeForm.description || '',
+      }))
     } finally {
       setSaving(false)
     }
@@ -335,7 +374,10 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
       setExpandedId(null)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除节点失败')
+      setError(buildVisibleError(err, '删除节点失败', '删除弧线节点', 'DeleteArcNode', {
+        novel_id: novelId,
+        arc_node_id: nodeId,
+      }))
     } finally {
       setSaving(false)
     }
@@ -347,7 +389,15 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
       await app.UpdateArcNode(novelId, node.id, { status: newStatus })
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新节点状态失败')
+      setError(buildVisibleError(err, '更新节点状态失败', '更新弧线节点状态', 'UpdateArcNode', {
+        novel_id: novelId,
+        arc_node_id: node.id,
+        story_arc_id: node.story_arc_id,
+        title: node.title,
+        previous_status: node.status,
+        next_status: newStatus,
+        source_text: node.description || '',
+      }))
     } finally {
       setSaving(false)
     }
@@ -540,11 +590,19 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
         <StoryArcGraph novelId={novelId} />
       ) : loading ? (
         <div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载中...</div>
-      ) : error ? (
-        <div className="flex h-full items-center justify-center text-sm text-destructive">{error}</div>
       ) : (
         <div className="flex-1 overflow-y-auto overscroll-contain">
         <div className="max-w-3xl mx-auto px-5 py-6 space-y-6">
+          {error && (
+            <ErrorCallout
+              message={error.message}
+              diagnostic={error.diagnostic}
+              onRetry={() => { void load() }}
+              retrying={loading}
+              onClose={() => setError(null)}
+            />
+          )}
+
           {/* Header */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -785,4 +843,23 @@ export default function ArcListView({ novelId, focusArcId }: Props) {
       )}
     </main>
   )
+}
+
+function buildVisibleError(
+  error: unknown,
+  fallbackMessage: string,
+  operation: string,
+  bridgeMethod: string | null,
+  detail: unknown,
+): VisibleError {
+  return {
+    message: diagnosticMessage(error, fallbackMessage),
+    diagnostic: buildCopyableDiagnostic({
+      error,
+      fallbackMessage,
+      operation,
+      bridgeMethod,
+      detail,
+    }),
+  }
 }

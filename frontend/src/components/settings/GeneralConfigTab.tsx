@@ -15,6 +15,15 @@ type UpdateFeedback =
     diagnostic: diagnostics.CopyableDiagnostic | null
   }
 
+type InlineSettingsFeedback =
+  | { kind: 'success' | 'validation'; message: string }
+  | {
+    kind: 'error'
+    title: string
+    message: string
+    diagnostic: diagnostics.CopyableDiagnostic | null
+  }
+
 export default function GeneralConfigTab() {
   const app = useApp()
   const [dataDir, setDataDir] = useState('')
@@ -24,7 +33,7 @@ export default function GeneralConfigTab() {
   const [gitAuthorName, setGitAuthorName] = useState('')
   const [gitAuthorEmail, setGitAuthorEmail] = useState('')
   const [gitAuthorSaving, setGitAuthorSaving] = useState(false)
-  const [gitAuthorMessage, setGitAuthorMessage] = useState('')
+  const [gitAuthorFeedback, setGitAuthorFeedback] = useState<InlineSettingsFeedback | null>(null)
   const [updateEnabled, setUpdateEnabled] = useState(false)
   const [updateEndpoint, setUpdateEndpoint] = useState('')
   const [updateDismissedVersion, setUpdateDismissedVersion] = useState('')
@@ -50,8 +59,10 @@ export default function GeneralConfigTab() {
     app.GetGitAuthorSettings().then(settings => {
       setGitAuthorName(settings?.name || '')
       setGitAuthorEmail(settings?.email || '')
-    }).catch(() => {
-      setGitAuthorMessage('Git 作者设置加载失败')
+    }).catch((err) => {
+      setGitAuthorError(err, 'Git 作者设置加载失败', 'GetGitAuthorSettings', {
+        phase: 'load_git_author_settings',
+      })
     })
     app.GetUpdateCheckSettings().then(settings => {
       setUpdateEnabled(settings?.enabled === true)
@@ -81,25 +92,33 @@ export default function GeneralConfigTab() {
     const email = gitAuthorEmail.trim()
 
     if ((name && !email) || (!name && email)) {
-      setGitAuthorMessage('Git 作者名称和邮箱必须同时填写')
+      setGitAuthorFeedback({ kind: 'validation', message: 'Git 作者名称和邮箱必须同时填写' })
       return
     }
 
     if (email && !isValidGitEmail(email)) {
-      setGitAuthorMessage('请输入有效的 Git 作者邮箱')
+      setGitAuthorFeedback({ kind: 'validation', message: '请输入有效的 Git 作者邮箱' })
       return
     }
 
     setGitAuthorSaving(true)
-    setGitAuthorMessage('')
+    setGitAuthorFeedback(null)
     try {
       const saved = await app.SaveGitAuthorSettings({ name, email })
       setGitAuthorName(saved.name)
       setGitAuthorEmail(saved.email)
-      setGitAuthorMessage(saved.name ? 'Git 作者设置已保存' : 'Git 作者设置已清空，将使用默认身份')
-      window.setTimeout(() => setGitAuthorMessage(''), 2400)
+      const message = saved.name ? 'Git 作者设置已保存' : 'Git 作者设置已清空，将使用默认身份'
+      setGitAuthorFeedback({ kind: 'success', message })
+      window.setTimeout(() => {
+        setGitAuthorFeedback(current => current?.message === message ? null : current)
+      }, 2400)
     } catch (err) {
-      setGitAuthorMessage(errorText(err, 'Git 作者设置保存失败'))
+      setGitAuthorError(err, 'Git 作者设置保存失败', 'SaveGitAuthorSettings', {
+        phase: 'save_git_author_settings',
+        name_present: name.length > 0,
+        email_present: email.length > 0,
+        email_domain: emailDomain(email),
+      })
     } finally {
       setGitAuthorSaving(false)
     }
@@ -212,6 +231,26 @@ export default function GeneralConfigTab() {
     setUpdateFeedback({ kind: 'success', message })
   }
 
+  function setGitAuthorError(
+    errorValue: unknown,
+    fallbackMessage: string,
+    bridgeMethod: string,
+    detail: Record<string, unknown>,
+  ) {
+    setGitAuthorFeedback({
+      kind: 'error',
+      title: fallbackMessage,
+      message: diagnosticMessage(errorValue, fallbackMessage),
+      diagnostic: buildCopyableDiagnostic({
+        error: errorValue,
+        fallbackMessage,
+        operation: bridgeMethod,
+        bridgeMethod,
+        detail,
+      }),
+    })
+  }
+
   function setUpdateValidationError(message: string, endpoint: string) {
     setUpdateError(message, '更新检查设置无效', 'UpdateCheckSettingsValidation', null, {
       phase: 'validate_update_settings',
@@ -302,10 +341,20 @@ export default function GeneralConfigTab() {
             {gitAuthorSaving ? '保存中...' : '保存 Git 作者'}
           </button>
         </div>
-        {gitAuthorMessage && (
-          <p className={`text-xs ${gitAuthorMessage.includes('失败') || gitAuthorMessage.includes('必须') || gitAuthorMessage.includes('有效') ? 'text-red-500' : 'text-emerald-600'}`}>
-            {gitAuthorMessage}
+        {gitAuthorFeedback && gitAuthorFeedback.kind !== 'error' && (
+          <p className={`text-xs ${gitAuthorFeedback.kind === 'success' ? 'text-emerald-600' : 'text-red-500'}`}>
+            {gitAuthorFeedback.message}
           </p>
+        )}
+        {gitAuthorFeedback?.kind === 'error' && (
+          <ErrorCallout
+            compact
+            title={gitAuthorFeedback.title}
+            message={gitAuthorFeedback.message}
+            diagnostic={gitAuthorFeedback.diagnostic}
+            className="rounded-md"
+            onClose={() => setGitAuthorFeedback(null)}
+          />
         )}
       </div>
 
@@ -418,12 +467,6 @@ function isValidGitEmail(email: string) {
     email.indexOf('@') < email.length - 1
 }
 
-function errorText(error: unknown, fallback: string) {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'string') return error
-  return fallback
-}
-
 function isHttpsUrl(value: string) {
   try {
     return new URL(value).protocol === 'https:'
@@ -446,4 +489,10 @@ function endpointProtocol(value: string) {
   } catch {
     return ''
   }
+}
+
+function emailDomain(value: string) {
+  const at = value.lastIndexOf('@')
+  if (at <= 0 || at >= value.length - 1) return ''
+  return value.slice(at + 1)
 }

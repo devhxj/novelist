@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, BookOpen, Flag, Lightbulb, Pencil, Plus, Target, Trash2, X } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { timeline } from '@/hooks/useApp'
+import ErrorCallout from '@/components/shared/ErrorCallout'
+import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
+import type { diagnostics } from '@/lib/novelist/types'
 
 interface Props { novelId: number; focusEntryId?: number }
 
@@ -59,13 +62,18 @@ const EDIT_FORM_EMPTY: EditForm = {
   resolved_chapter_id: 0,
 }
 
+type VisibleError = {
+  message: string
+  diagnostic?: diagnostics.CopyableDiagnostic | null
+}
+
 export default function TimelineView({ novelId, focusEntryId }: Props) {
   const app = useApp()
 
   const [plans, setPlans] = useState<timeline.ChapterPlan[]>([])
   const [entries, setEntries] = useState<timeline.TimelineEntry[]>([])
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<VisibleError | null>(null)
   const [planTab, setPlanTab] = useState<Tab>('next')
   const [filter, setFilter] = useState<Filter>('all')
   const [windowCenter, setWindowCenter] = useState(0)
@@ -88,7 +96,7 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
       setEntries(entryList ?? [])
       setWindowCenter(Math.max(1, maxCh))
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      setError(buildVisibleError(err, '加载时间线失败', '加载时间线', null, { novel_id: novelId }))
     } finally {
       setLoading(false)
     }
@@ -121,7 +129,7 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
           setWindowCenter(Math.max(1, maxCh))
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : '加载失败')
+        if (!cancelled) setError(buildVisibleError(err, '加载时间线失败', '加载时间线', null, { novel_id: novelId }))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -232,15 +240,19 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
       setEditMode(null)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存计划失败')
+      setError(buildVisibleError(err, '保存计划失败', '保存章节计划', 'UpdateChapterPlan', {
+        novel_id: novelId,
+        scope: editMode.scope,
+        source_text: form.content,
+      }))
     } finally {
       setSaving(false)
     }
   }
 
   async function handleCreate() {
-    if (!form.title.trim()) { setError('请输入标题'); return }
-    if (!form.target_chapter) { setError('请输入目标章节'); return }
+    if (!form.title.trim()) { setError({ message: '请输入标题' }); return }
+    if (!form.target_chapter) { setError({ message: '请输入目标章节' }); return }
     setSaving(true)
     try {
       await app.CreateTimelineEntry(novelId, {
@@ -256,7 +268,14 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
       setEditMode(null)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '创建失败')
+      setError(buildVisibleError(err, '创建时间线条目失败', '创建时间线条目', 'CreateTimelineEntry', {
+        novel_id: novelId,
+        category: createCat,
+        title: form.title,
+        target_chapter: form.target_chapter,
+        importance: form.importance,
+        source_text: form.content,
+      }))
     } finally {
       setSaving(false)
     }
@@ -264,7 +283,7 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
 
   async function handleUpdate() {
     if (!editMode || editMode.type !== 'edit') return
-    if (!form.title.trim()) { setError('请输入标题'); return }
+    if (!form.title.trim()) { setError({ message: '请输入标题' }); return }
     setSaving(true)
     try {
       const payload = {
@@ -280,7 +299,16 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
       setEditMode(null)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新失败')
+      setError(buildVisibleError(err, '更新时间线条目失败', '更新时间线条目', 'UpdateTimelineEntry', {
+        novel_id: novelId,
+        timeline_entry_id: editMode.entry.id,
+        title: form.title,
+        target_chapter: form.target_chapter,
+        importance: form.importance,
+        status: form.status,
+        resolved_chapter_id: form.status === 'resolved' ? form.resolved_chapter_id || form.target_chapter : 0,
+        source_text: form.content,
+      }))
     } finally {
       setSaving(false)
     }
@@ -293,7 +321,10 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
       await app.DeleteTimelineEntry(novelId, entryId)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败')
+      setError(buildVisibleError(err, '删除时间线条目失败', '删除时间线条目', 'DeleteTimelineEntry', {
+        novel_id: novelId,
+        timeline_entry_id: entryId,
+      }))
     } finally {
       setSaving(false)
     }
@@ -313,7 +344,16 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
       })
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新状态失败')
+      setError(buildVisibleError(err, '更新时间线状态失败', '更新时间线状态', 'UpdateTimelineEntry', {
+        novel_id: novelId,
+        timeline_entry_id: entry.id,
+        title: entry.title,
+        previous_status: entry.status,
+        next_status: newStatus,
+        target_chapter: entry.target_chapter,
+        importance: entry.importance,
+        source_text: entry.content || '',
+      }))
     } finally {
       setSaving(false)
     }
@@ -398,10 +438,18 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
     <main className="relative flex-1 min-w-0 overflow-y-auto overscroll-contain bg-background">
       {loading ? (
         <div className="flex h-full items-center justify-center text-sm text-muted-foreground">加载中...</div>
-      ) : error ? (
-        <div className="flex h-full items-center justify-center text-sm text-destructive">{error}</div>
       ) : (
         <div className="max-w-3xl mx-auto px-5 py-6 space-y-6">
+          {error && (
+            <ErrorCallout
+              message={error.message}
+              diagnostic={error.diagnostic}
+              onRetry={() => { void load() }}
+              retrying={loading}
+              onClose={() => setError(null)}
+            />
+          )}
+
           {/* Chapter Plans */}
           <section>
             <div className="flex items-center gap-2 mb-3">
@@ -664,4 +712,23 @@ export default function TimelineView({ novelId, focusEntryId }: Props) {
       )}
     </main>
   )
+}
+
+function buildVisibleError(
+  error: unknown,
+  fallbackMessage: string,
+  operation: string,
+  bridgeMethod: string | null,
+  detail: unknown,
+): VisibleError {
+  return {
+    message: diagnosticMessage(error, fallbackMessage),
+    diagnostic: buildCopyableDiagnostic({
+      error,
+      fallbackMessage,
+      operation,
+      bridgeMethod,
+      detail,
+    }),
+  }
 }

@@ -1,5 +1,7 @@
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react'
+import ErrorCallout from '@/components/shared/ErrorCallout'
 import type { EmbeddingConfigView, SqliteVecStatusView } from '@/lib/novelist/api'
+import type { diagnostics } from '@/lib/novelist/types'
 
 const BUILTIN_ONNX_MODEL_ID = 'bge-small-zh-v1.5'
 const BUILTIN_ONNX_DIMENSIONS = 512
@@ -11,7 +13,7 @@ interface Props {
   onUpdate: (patch: Partial<EmbeddingConfigView>) => void
   onTest: () => Promise<void>
   testing: boolean
-  testResult?: { ok: boolean; msg?: string }
+  testResult?: { ok: boolean; msg?: string; diagnostic?: diagnostics.CopyableDiagnostic | null }
 }
 
 export default function EmbeddingConfigPane({
@@ -178,9 +180,25 @@ export default function EmbeddingConfigPane({
         </details>
       )}
 
-      {testResult && (
-        <div className={`text-xs pl-[7rem] ${testResult.ok ? 'text-emerald-600' : 'text-red-500'}`}>
-          {testResult.ok ? '✓ 连通成功' : `✗ ${testResult.msg || '连接失败'}`}
+      {testResult?.ok && (
+        <div className="text-xs pl-[7rem] text-emerald-600">
+          ✓ 连通成功
+        </div>
+      )}
+      {testResult && !testResult.ok && testResult.diagnostic && (
+        <div className="pl-[7rem]">
+          <ErrorCallout
+            compact
+            title="Embedding 连通性测试失败"
+            message={testResult.msg || '连接失败'}
+            diagnostic={testResult.diagnostic}
+            className="rounded-md"
+          />
+        </div>
+      )}
+      {testResult && !testResult.ok && !testResult.diagnostic && (
+        <div className="text-xs pl-[7rem] text-red-500">
+          ✗ {testResult.msg || '连接失败'}
         </div>
       )}
 

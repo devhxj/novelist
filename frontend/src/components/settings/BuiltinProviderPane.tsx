@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { X, CheckCircle2, Loader2, Globe, ExternalLink, ChevronDown } from 'lucide-react'
+import ErrorCallout from '@/components/shared/ErrorCallout'
 import { BrowserOpenURL } from '@/lib/novelist/runtime'
 import type { llm } from '@/hooks/useApp'
+import type { diagnostics } from '@/lib/novelist/types'
 import TemperatureInfo from './TemperatureInfo'
 import ModelDiscoveryPanel from './ModelDiscoveryPanel'
 import ProviderIcon from './ProviderIcon'
@@ -12,7 +14,7 @@ interface Props {
   onAddCustomModel: (providerKey: string, model: llm.ModelInfo) => void
   onRemoveCustomModel: (providerKey: string, modelId: string) => void
   onTest: (providerKey: string) => Promise<string | null>
-  testResults: Record<string, { ok: boolean; msg?: string } | undefined>
+  testResults: Record<string, { ok: boolean; msg?: string; diagnostic?: diagnostics.CopyableDiagnostic | null } | undefined>
   testing: Record<string, boolean>
 }
 
@@ -136,9 +138,25 @@ export default function BuiltinProviderPane({ providers, onUpdate, onAddCustomMo
       </div>
 
       {/* 测试结果 */}
-      {testResult && (
+      {testResult?.ok && (
         <div className={`text-xs pl-[4.5rem] ${testResult.ok ? 'text-emerald-600' : 'text-red-500'}`}>
-          {testResult.ok ? '✓ 连通成功' : `✗ ${testResult.msg || '连接失败'}`}
+          ✓ 连通成功
+        </div>
+      )}
+      {testResult && !testResult.ok && testResult.diagnostic && (
+        <div className="pl-[4.5rem]">
+          <ErrorCallout
+            compact
+            title="连通性测试失败"
+            message={testResult.msg || '连接失败'}
+            diagnostic={testResult.diagnostic}
+            className="rounded-md"
+          />
+        </div>
+      )}
+      {testResult && !testResult.ok && !testResult.diagnostic && (
+        <div className="text-xs pl-[4.5rem] text-red-500">
+          ✗ {testResult.msg || '连接失败'}
         </div>
       )}
 
