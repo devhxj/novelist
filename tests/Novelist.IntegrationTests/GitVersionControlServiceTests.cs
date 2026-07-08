@@ -151,6 +151,61 @@ public sealed class GitVersionControlServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task FileDiffMarksBinaryFilesAndTruncatesLargeTextContent()
+    {
+        const int maxTextLength = 200_000;
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var service = new GitVersionControlService(options);
+        var novelService = new FileSystemNovelService(options, versionControl: service);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("Diff Boundaries", "", ""), CancellationToken.None);
+        var workspace = Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString());
+        var largeText = "large text sentinel prefix\n" + string.Concat(Enumerable.Repeat("large text payload line\n", 12_000));
+        var binaryBytes = new byte[1024];
+        for (var i = 0; i < binaryBytes.Length; i++)
+        {
+            binaryBytes[i] = i % 2 == 0 ? (byte)0x00 : (byte)0xFF;
+        }
+
+        Assert.True(largeText.Length > maxTextLength);
+        await WriteWorkspaceBytesAsync(workspace, "assets/cover.bin", binaryBytes);
+        await WriteWorkspaceTextAsync(workspace, "chapters/large.md", largeText);
+        var commit = await service.CommitIfChangedAsync(novel.Id, "add binary and large text", CancellationToken.None);
+
+        Assert.True(commit.Committed);
+        var files = await service.GetCommitFilesAsync(
+            new GetGitCommitFilesPayload(novel.Id, commit.CommitHash),
+            CancellationToken.None);
+        var binaryFile = Assert.Single(files, item => string.Equals(item.Path, "assets/cover.bin", StringComparison.Ordinal));
+        Assert.Equal("added", binaryFile.ChangeType);
+        Assert.True(binaryFile.Binary);
+        var largeFile = Assert.Single(files, item => string.Equals(item.Path, "chapters/large.md", StringComparison.Ordinal));
+        Assert.Equal("added", largeFile.ChangeType);
+        Assert.False(largeFile.Binary);
+
+        var binaryDiff = await service.GetFileDiffAsync(
+            new GetGitFileDiffPayload(novel.Id, commit.CommitHash, "assets/cover.bin"),
+            CancellationToken.None);
+        Assert.True(binaryDiff.Binary);
+        Assert.Equal("added", binaryDiff.ChangeType);
+        Assert.Null(binaryDiff.OriginalContent);
+        Assert.Null(binaryDiff.ModifiedContent);
+        Assert.True(binaryDiff.DiffText.Length <= maxTextLength);
+
+        var largeDiff = await service.GetFileDiffAsync(
+            new GetGitFileDiffPayload(novel.Id, commit.CommitHash, "chapters/large.md"),
+            CancellationToken.None);
+        Assert.False(largeDiff.Binary);
+        Assert.True(largeDiff.Truncated);
+        Assert.Null(largeDiff.OriginalContent);
+        Assert.NotNull(largeDiff.ModifiedContent);
+        Assert.StartsWith("large text sentinel prefix", largeDiff.ModifiedContent, StringComparison.Ordinal);
+        Assert.True(largeDiff.ModifiedContent.Length <= maxTextLength);
+        Assert.Contains("large text sentinel prefix", largeDiff.DiffText, StringComparison.Ordinal);
+        Assert.True(largeDiff.DiffText.Length <= maxTextLength);
+    }
+
+    [Fact]
     public async Task CommitDoesNotDependOnConfiguredGitExecutable()
     {
         var previousGitPath = Environment.GetEnvironmentVariable("NOVELIST_GIT_PATH");
@@ -180,8 +235,11 @@ public sealed class GitVersionControlServiceTests : IDisposable
         }
     }
 
-    [Fact]
-    public async Task CommitIfChangedRejectsExistingGitLockWithoutDeletingIt()
+    [Theory]
+    [InlineData("index.lock")]
+    [InlineData("HEAD.lock")]
+    [InlineData("config.lock")]
+    public async Task CommitIfChangedRejectsExistingGitLockWithoutDeletingIt(string lockFileName)
     {
         var options = CreateOptions();
         await InitializeAsync(options);
@@ -189,7 +247,7 @@ public sealed class GitVersionControlServiceTests : IDisposable
         var novelService = new FileSystemNovelService(options, versionControl: service);
         var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("Locked Git", "", ""), CancellationToken.None);
         var workspace = Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString());
-        var lockPath = Path.Combine(workspace, ".git", "index.lock");
+        var lockPath = Path.Combine(workspace, ".git", lockFileName);
         await File.WriteAllTextAsync(lockPath, "other git process", CancellationToken.None);
         await WriteWorkspaceTextAsync(workspace, "chapters/locked.md", "locked content\n");
 
@@ -197,7 +255,7 @@ public sealed class GitVersionControlServiceTests : IDisposable
             await service.CommitIfChangedAsync(novel.Id, "commit while locked", CancellationToken.None));
 
         Assert.Contains("Git repository lock file exists", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("index.lock", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(lockFileName, ex.Message, StringComparison.Ordinal);
         Assert.True(File.Exists(lockPath), "stale lock files must not be deleted automatically");
     }
 
@@ -344,6 +402,13 @@ public sealed class GitVersionControlServiceTests : IDisposable
         var path = Path.Combine(workspace, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, content);
+    }
+
+    private static async ValueTask WriteWorkspaceBytesAsync(string workspace, string relativePath, byte[] content)
+    {
+        var path = Path.Combine(workspace, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllBytesAsync(path, content);
     }
 
     private static JsonDocument ParseOutbound(BridgeDispatchResult result)

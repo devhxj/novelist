@@ -36,6 +36,7 @@ internal static class NovelImportEpubParser
         using var stream = new MemoryStream(sourceBytes, writable: false);
         using var archive = OpenArchive(stream);
         var diagnostics = new List<NovelImportDiagnosticPayload>();
+        var readBudget = new EpubUncompressedReadBudget(options.MaxTotalUncompressedBytes);
 
         var containerEntry = FindEntry(archive, "META-INF/container.xml")
             ?? throw BuildFailure(
@@ -43,7 +44,7 @@ internal static class NovelImportEpubParser
                 "EPUB 缺少 container.xml。",
                 "Missing META-INF/container.xml.");
         var container = ParseXml(
-            ReadEntryText(containerEntry, options.MaxMetadataEntryBytes),
+            ReadEntryText(containerEntry, options.MaxMetadataEntryBytes, readBudget),
             "import.epub.invalid_container",
             "EPUB container.xml 无法解析。");
 
@@ -67,7 +68,7 @@ internal static class NovelImportEpubParser
                 "EPUB OPF 文件不存在。",
                 $"opf_path={opfPath}");
         var opf = ParseXml(
-            ReadEntryText(opfEntry, options.MaxMetadataEntryBytes),
+            ReadEntryText(opfEntry, options.MaxMetadataEntryBytes, readBudget),
             "import.epub.invalid_opf",
             "EPUB OPF 文件无法解析。");
 
@@ -127,7 +128,7 @@ internal static class NovelImportEpubParser
             string chapterText;
             try
             {
-                chapterText = ReadEntryText(chapterEntry, options.MaxChapterEntryBytes);
+                chapterText = ReadEntryText(chapterEntry, options.MaxChapterEntryBytes, readBudget);
             }
             catch (NovelImportEpubParseException)
             {
@@ -217,7 +218,7 @@ internal static class NovelImportEpubParser
         }
     }
 
-    private static string ReadEntryText(ZipArchiveEntry entry, long maxBytes)
+    private static string ReadEntryText(ZipArchiveEntry entry, long maxBytes, EpubUncompressedReadBudget readBudget)
     {
         if (entry.Length > maxBytes)
         {
@@ -227,15 +228,30 @@ internal static class NovelImportEpubParser
                 $"entry={entry.FullName}; observed_bytes={entry.Length}; limit_bytes={maxBytes}");
         }
 
+        readBudget.EnsureEntryCanFit(entry);
         using var entryStream = entry.Open();
         using var memory = new MemoryStream(capacity: checked((int)Math.Min(entry.Length, maxBytes)));
-        entryStream.CopyTo(memory);
-        if (memory.Length > maxBytes)
+        var buffer = new byte[81920];
+        long entryBytesRead = 0;
+        while (true)
         {
-            throw BuildFailure(
-                "import.epub.entry_too_large",
-                "EPUB 内部文件超过大小限制。",
-                $"entry={entry.FullName}; observed_bytes={memory.Length}; limit_bytes={maxBytes}");
+            var read = entryStream.Read(buffer, 0, buffer.Length);
+            if (read == 0)
+            {
+                break;
+            }
+
+            entryBytesRead += read;
+            if (entryBytesRead > maxBytes)
+            {
+                throw BuildFailure(
+                    "import.epub.entry_too_large",
+                    "EPUB 内部文件超过大小限制。",
+                    $"entry={entry.FullName}; observed_bytes={entryBytesRead}; limit_bytes={maxBytes}");
+            }
+
+            readBudget.Consume(entry, read);
+            memory.Write(buffer, 0, read);
         }
 
         return Encoding.UTF8.GetString(memory.ToArray());
@@ -494,7 +510,8 @@ internal static class NovelImportEpubParser
     {
         if (options.MaxCompressedBytes <= 0 ||
             options.MaxMetadataEntryBytes <= 0 ||
-            options.MaxChapterEntryBytes <= 0)
+            options.MaxChapterEntryBytes <= 0 ||
+            options.MaxTotalUncompressedBytes <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(options), "Parser limits must be positive.");
         }
@@ -503,12 +520,48 @@ internal static class NovelImportEpubParser
     private sealed record ManifestItem(string Id, string Href);
 
     private sealed record EpubHtmlText(string Title, string Content);
+
+    private sealed class EpubUncompressedReadBudget(long limitBytes)
+    {
+        private long _bytesRead;
+
+        public void EnsureEntryCanFit(ZipArchiveEntry entry)
+        {
+            if (entry.Length > limitBytes - _bytesRead)
+            {
+                ThrowExpandedTooLarge(entry.FullName, SaturatingAdd(_bytesRead, entry.Length), limitBytes);
+            }
+        }
+
+        public void Consume(ZipArchiveEntry entry, int bytesRead)
+        {
+            _bytesRead += bytesRead;
+            if (_bytesRead > limitBytes)
+            {
+                ThrowExpandedTooLarge(entry.FullName, _bytesRead, limitBytes);
+            }
+        }
+
+        private static void ThrowExpandedTooLarge(string entryName, long observedBytes, long limitBytes)
+        {
+            throw BuildFailure(
+                "import.epub.expanded_too_large",
+                "EPUB 解压后内容超过大小限制。",
+                $"entry={entryName}; observed_bytes={observedBytes}; limit_bytes={limitBytes}");
+        }
+
+        private static long SaturatingAdd(long left, long right)
+        {
+            return right > long.MaxValue - left ? long.MaxValue : left + right;
+        }
+    }
 }
 
 internal sealed record NovelImportEpubParserOptions(
     long MaxCompressedBytes = 104_857_600,
     long MaxMetadataEntryBytes = 1_048_576,
-    long MaxChapterEntryBytes = 10_485_760);
+    long MaxChapterEntryBytes = 10_485_760,
+    long MaxTotalUncompressedBytes = 262_144_000);
 
 internal sealed record NovelImportEpubParseResult(
     string Title,

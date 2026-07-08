@@ -42,6 +42,8 @@ import { verifyGitHistoryWorkflow, verifyRelativeTimeRefreshWorkflow } from './g
 import { verifyLayoutPersistenceWorkflow } from './layout-workflows.mjs'
 import { verifyMetadataActionWorkflow, verifyMetadataPanels } from './metadata-workflows.mjs'
 import { settingsFixture } from './mock-bridge.mjs'
+import { verifyPhase15CompactMatrixWorkflow } from './phase15-compact-workflows.mjs'
+import { verifyPhase15StressWorkflow } from './phase15-stress-workflows.mjs'
 import { verifyReferenceErrorFeedbackWorkflow } from './reference-error-feedback.mjs'
 import {
   assertBridgeCallCount,
@@ -280,6 +282,19 @@ function errorFeedbackFaults() {
 
 export async function runFullSuite(browser, url) {
   const { consoleErrors, pageErrors } = diagnostics
+
+  if (runConfig.grep === '@phase15-stress') {
+    logStep('checking Phase 15 large import and Git fixtures')
+    await verifyPhase15StressWorkflow(browser, url, consoleErrors, pageErrors)
+    return
+  }
+
+  if (runConfig.grep === '@phase15-compact') {
+    logStep('checking Phase 15 compact viewport matrix')
+    await verifyPhase15CompactMatrixWorkflow(browser, url, consoleErrors, pageErrors)
+    return
+  }
+
   const shouldRun = makeTagFilter(runConfig.grep)
   const isPhase15Surface = runConfig.grep === '@phase15-surface'
 

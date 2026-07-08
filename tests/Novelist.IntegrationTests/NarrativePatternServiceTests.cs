@@ -140,6 +140,25 @@ public sealed class NarrativePatternServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task EmptyPhaseOutputStopsAfterBoundedRetriesAndMarksRunFailed()
+    {
+        var (options, novelService, novel, chapters) = await CreateNovelWithChaptersAsync(4);
+        var chat = new ScriptedNarrativePatternChat(chapters, ValidSkillMarkdown("雨夜悬疑结构"))
+        {
+            EmptyPhaseResponsesBeforeSuccess = int.MaxValue
+        };
+        var service = CreateService(options, novelService, chat, new RecordingBridgeEventSink());
+
+        var failed = await service.StartExtractionAsync(
+            ValidStartPayload("pattern-phase-retry-exhausted", novel.Id),
+            CancellationToken.None);
+
+        Assert.Equal("failed", failed.Status);
+        Assert.Contains(failed.Diagnostics, item => item.Code == "pattern.empty_phase_output");
+        Assert.Equal(NarrativePatternPipeline.MaxEmptyPhaseRetries + 1, chat.PhaseCallCount);
+    }
+
+    [Fact]
     public async Task CompressionStallMarksRunFailed()
     {
         var (options, novelService, novel, chapters) = await CreateNovelWithChaptersAsync(6);

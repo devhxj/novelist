@@ -304,6 +304,37 @@ public sealed class NovelImportServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task NovelStorageFailureDuringCreateMarksRunFailedWithoutWorkspace()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novelService = new ThrowingCreateNovelService();
+        var importService = new FileSystemNovelImportService(
+            options,
+            novelService: novelService,
+            versionControl: new NoOpVersionControlService());
+        var source = WriteFixture("db-fail.txt", "第一章 存储失败\n正文不应写入。");
+
+        var run = await importService.StartRunAsync(
+            new StartNovelImportPayload(
+                "import-db-fail-1",
+                source,
+                "db-fail.txt",
+                NovelImportKinds.Txt,
+                RequestedTitle: "Storage Failure",
+                CommitMessage: null),
+            CancellationToken.None);
+
+        Assert.Equal(NovelImportRunStates.Failed, run.State);
+        Assert.Equal("failed", run.Stage);
+        Assert.Equal("import.failed", run.Error?.Code);
+        Assert.Null(run.CreatedNovelId);
+        Assert.Empty(run.CreatedFileRoots);
+        Assert.Empty(await novelService.GetNovelsAsync(CancellationToken.None));
+        Assert.False(Directory.Exists(Path.Combine(options.DefaultDataDirectory, "novels", "1")));
+    }
+
+    [Fact]
     public async Task IndexRefreshFailureReturnsWarningWithoutDeletingImportedData()
     {
         var options = CreateOptions();
@@ -809,6 +840,57 @@ public sealed class NovelImportServiceTests : IDisposable
         public override ValueTask EnsureRepositoryAsync(long novelId, CancellationToken cancellationToken)
         {
             throw new VersionControlException("simulated git init failure");
+        }
+    }
+
+    private sealed class ThrowingCreateNovelService : INovelService
+    {
+        public ValueTask<IReadOnlyList<NovelPayload>> GetNovelsAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult<IReadOnlyList<NovelPayload>>([]);
+        }
+
+        public ValueTask<NovelPayload> CreateNovelAsync(CreateNovelPayload input, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new InvalidOperationException("simulated novel storage failure");
+        }
+
+        public ValueTask<NovelPayload> UpdateNovelAsync(long novelId, UpdateNovelPayload input, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new NotSupportedException();
+        }
+
+        public ValueTask DeleteNovelAsync(long novelId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new NotSupportedException();
+        }
+
+        public ValueTask SetActiveNovelAsync(long novelId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new NotSupportedException();
+        }
+
+        public ValueTask SaveCoverAsync(long novelId, IReadOnlyList<byte> data, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new NotSupportedException();
+        }
+
+        public ValueTask DeleteCoverAsync(long novelId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new NotSupportedException();
+        }
+
+        public ValueTask<NovelCoverFile?> GetCoverAsync(long novelId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult<NovelCoverFile?>(null);
         }
     }
 

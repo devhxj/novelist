@@ -923,7 +923,7 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 ## Task 25: End-to-End Import, Style, Pattern, Git, and Error Playwright Suite
 
-**Status:** Partial. `npm --prefix frontend run test:phase15` now exists and runs focused mocked Photino bridge slices for Phase 15 surface/import/style/settings, reference-anchor error lifecycle, pattern, Git history, layout persistence, relative time, update checks, and unified error feedback. The app mock harness now supports `--phase=phase15`, so screenshots, diagnostics, bridge-call logs, traces, and fixture artifacts land under `output/playwright/phase15/` while existing Phase 13 commands keep their default output path. Remaining work is the dedicated stress coverage for large TXT/MD import plus large Git history/diff fixtures and the full compact-viewport matrix across each named Phase 15 surface.
+**Status:** Complete. `npm --prefix frontend run test:phase15` now runs focused mocked Photino bridge slices for Phase 15 surface/import/style/settings, large TXT/MD import and large Git history/diff stress fixtures, compact viewport matrix coverage, reference-anchor error lifecycle, pattern, Git history, layout persistence, relative time, update checks, and unified error feedback. The app mock harness supports `--phase=phase15`, so screenshots, diagnostics, bridge-call logs, traces, stress metrics, and fixture artifacts land under `output/playwright/phase15/` while existing Phase 13 commands keep their default output path.
 
 **Description:** Extend the Phase 13 app-wide QA approach with Phase 15-specific product workflows and regression artifacts.
 
@@ -933,13 +933,13 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 - [x] Suite uses mocked Photino bridge and deterministic fixtures for import/style/pattern/Git/update/error workflows.
 - [x] Captures screenshots, console diagnostics, bridge-call logs, traces, and failure artifacts under `output/playwright/phase15/`.
 - [x] Asserts no implicit `SaveContent` during import/style/pattern/Git/update workflows except explicit editor save paths.
-- [ ] Stress path includes a large TXT/MD import fixture and a large Git history/diff fixture.
-- [ ] Compact viewport checks cover import dialog, style library, pattern progress, Git history, settings, and error callouts.
+- [x] Stress path includes a large TXT/MD import fixture and a large Git history/diff fixture.
+- [x] Compact viewport checks cover import dialog, style library, pattern progress, Git history, settings, and error callouts.
 
 **Verification:**
 
 - [x] `npm --prefix frontend run test:phase15`
-- [ ] Existing `test:app`, `test:app:full`, `test:app:stress`, `test:app:usability`, and `test:reference-anchor` remain green.
+- [x] Existing `test:app`, `test:app:full`, `test:app:stress`, `test:app:usability`, and `test:reference-anchor` remain green.
 
 **Dependencies:** Tasks 7, 8, 10, 15, 17, 18, 19, 20, 21, 22.
 
@@ -962,22 +962,24 @@ Work should be delivered in vertical slices where possible, but schema/contracts
 
 **Description:** Add backend verification that Phase 15 is robust under malformed inputs, large files, partial failures, and platform differences.
 
+**Status:** Complete as of 2026-07-08. Backend regression coverage now includes malformed/oversized EPUB parser failures, total EPUB uncompressed expansion limits, import storage/write/Git failure cleanup behavior, bounded narrative-pattern retry exhaustion, Git binary/large diff truncation, all tracked Git lock files, and fake-HTTP update checks.
+
 **Acceptance criteria:**
 
-- [ ] Import parsers and workflow have unit/integration coverage for malformed EPUB, malformed encodings, large TXT/MD, chapter-boundary edge cases, write failure, DB failure, Git failure, and cleanup.
+- [x] Import parsers and workflow have unit/integration coverage for malformed EPUB, malformed encodings, large TXT/MD, chapter-boundary edge cases, write failure, DB failure, Git failure, and cleanup.
 - [x] Startup import recovery has integration coverage for simulated process death after each durable import phase, idempotent cleanup, and cleanup-blocked path corruption.
-- [ ] Encoding tests include UTF-16 LE/BE with BOM, conservative UTF-16 no-BOM detection, GB18030 provider availability, binary-looking files, low-confidence decode failure, and visible diagnostics.
-- [ ] Size-limit tests cover TXT/MD source limits, compressed EPUB limits, and uncompressed EPUB expansion limits.
-- [ ] Style stats/extraction tests cover malformed model output, cancellation, invalid skill output, and scoped authorization.
-- [ ] Pattern extraction tests cover invalid tool JSON, retry boundaries, compression stall, selected ranges, cancellation, and no-live-network default composition.
-- [ ] Git tests cover empty repos, missing/corrupt native runtime or repository metadata, lock files, renames, deleted files, binary/large diff handling, and custom author identity.
-- [ ] Update tests use fake HTTP and never depend on GitHub live availability.
+- [x] Encoding tests include UTF-16 LE/BE with BOM, conservative UTF-16 no-BOM detection, GB18030 provider availability, binary-looking files, low-confidence decode failure, and visible diagnostics.
+- [x] Size-limit tests cover TXT/MD source limits, compressed EPUB limits, and uncompressed EPUB expansion limits.
+- [x] Style stats/extraction tests cover malformed model output, cancellation, invalid skill output, and scoped authorization.
+- [x] Pattern extraction tests cover invalid tool JSON, retry boundaries, compression stall, selected ranges, cancellation, and no-live-network default composition.
+- [x] Git tests cover empty repos, missing/corrupt native runtime or repository metadata, lock files, renames, deleted files, binary/large diff handling, and custom author identity.
+- [x] Update tests use fake HTTP and never depend on GitHub live availability.
 
 **Verification:**
 
-- [ ] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Import|StyleSample|StyleExtraction|NarrativePattern|Git|Update|Error' -v minimal`
-- [ ] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'Import|StyleSample|StyleExtraction|NarrativePattern|Git|Update' -v minimal`
-- [ ] Full `dotnet test Novelist.slnx --no-restore -v minimal`.
+- [x] `dotnet test tests/Novelist.Tests/Novelist.Tests.csproj --filter 'Import|StyleSample|StyleExtraction|NarrativePattern|Git|Update|Error' -v minimal`
+- [x] `dotnet test tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj --filter 'Import|StyleSample|StyleExtraction|NarrativePattern|Git|Update' -v minimal`
+- [x] Full `dotnet test Novelist.slnx --no-restore -v minimal`.
 
 **Dependencies:** All backend feature tasks.
 

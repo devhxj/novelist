@@ -121,10 +121,76 @@ public sealed class NovelImportEpubParserTests
             }));
     }
 
-    private static void AssertFailure(string expectedCode, byte[] epub)
+    [Fact]
+    public void ParseRejectsInvalidZipWithStructuredDiagnostics()
+    {
+        AssertFailure(
+            "import.epub.invalid_zip",
+            Encoding.UTF8.GetBytes("not an epub archive"));
+    }
+
+    [Fact]
+    public void ParseRejectsCompressedEpubOverConfiguredParserLimit()
+    {
+        var epub = BuildEpub(new Dictionary<string, string>
+        {
+            ["META-INF/container.xml"] = Container("content.opf"),
+            ["content.opf"] = Opf("Compressed Limit", [("chapter", "chapter.xhtml")], ["chapter"]),
+            ["chapter.xhtml"] = Xhtml("Chapter One", "<p>Readable text.</p>")
+        });
+
+        AssertFailure(
+            "import.epub.too_large",
+            epub,
+            new NovelImportEpubParserOptions(MaxCompressedBytes: epub.Length - 1));
+    }
+
+    [Fact]
+    public void ParseRejectsEntriesThatExceedConfiguredEntryLimits()
+    {
+        var epub = BuildEpub(new Dictionary<string, string>
+        {
+            ["META-INF/container.xml"] = Container("content.opf"),
+            ["content.opf"] = Opf("Entry Limit", [("chapter", "chapter.xhtml")], ["chapter"]),
+            ["chapter.xhtml"] = Xhtml("Oversized", "<p>Readable text that exceeds the tiny chapter entry limit.</p>")
+        });
+
+        AssertFailure(
+            "import.epub.entry_too_large",
+            epub,
+            new NovelImportEpubParserOptions(MaxChapterEntryBytes: 64));
+    }
+
+    [Fact]
+    public void ParseRejectsEpubWhoseCumulativeUncompressedBytesExceedConfiguredLimit()
+    {
+        var container = Container("content.opf");
+        var opf = Opf("Expanded Limit", [("chapter", "chapter.xhtml")], ["chapter"]);
+        var chapter = Xhtml("Chapter One", "<p>This chapter is small but should push the total expanded byte count over the configured limit.</p>");
+        var epub = BuildEpub(new Dictionary<string, string>
+        {
+            ["META-INF/container.xml"] = container,
+            ["content.opf"] = opf,
+            ["chapter.xhtml"] = chapter
+        });
+        var metadataBytes = Encoding.UTF8.GetByteCount(container) + Encoding.UTF8.GetByteCount(opf);
+
+        AssertFailure(
+            "import.epub.expanded_too_large",
+            epub,
+            new NovelImportEpubParserOptions(
+                MaxMetadataEntryBytes: 4_096,
+                MaxChapterEntryBytes: 4_096,
+                MaxTotalUncompressedBytes: metadataBytes + 16));
+    }
+
+    private static void AssertFailure(
+        string expectedCode,
+        byte[] epub,
+        NovelImportEpubParserOptions? options = null)
     {
         var exception = Assert.Throws<NovelImportEpubParseException>(() =>
-            NovelImportEpubParser.Parse(epub, "broken.epub"));
+            NovelImportEpubParser.Parse(epub, "broken.epub", options));
         Assert.Equal(expectedCode, exception.Code);
         Assert.Contains(exception.Diagnostics, diagnostic => diagnostic.Code == expectedCode);
     }
