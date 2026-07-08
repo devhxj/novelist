@@ -1,12 +1,86 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
-import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { chromium } from 'playwright'
-import { verifyErrorFeedbackWorkflow } from './app-mock-workflow/error-feedback.mjs'
+import {
+  assertGitHistoryReadOnlyCalls,
+  verifyBridgeCalls,
+  verifyDiagnosticsBridgeCalls,
+  verifyErrorBridgeCalls,
+  verifyGitBridgeCalls,
+  verifyLayoutBridgeCalls,
+  verifyPatternBridgeCalls,
+  verifyReferenceBridgeCalls,
+  verifyRelativeTimeBridgeCalls,
+  verifySmokeBridgeCalls,
+  verifyStartupBridgeCalls,
+  verifyStressGuardrails,
+  verifyUpdateBridgeCalls,
+  verifyWritingBridgeCalls,
+} from './app-mock-workflow/bridge-guardrails.mjs'
+import { verifyErrorFeedbackWorkflow, verifyReferenceErrorFeedbackWorkflow } from './app-mock-workflow/error-feedback.mjs'
+import {
+  makeLargeChineseFixture,
+  makeStressChapters,
+  makeStressReferenceFixture,
+  mockImportRecoveryResult,
+  realisticWritingText,
+} from './app-mock-workflow/fixtures.mjs'
 import { installConfigurableAppMockBridge, settingsFixture } from './app-mock-workflow/mock-bridge.mjs'
+import {
+  assertActiveNovelId,
+  assertActiveTabTitle,
+  assertBridgeCallCount,
+  assertButtonDisabled,
+  assertChapterTitle,
+  assertCreatedReferenceAnchor,
+  assertDisabled,
+  assertEditorContains,
+  assertEditorNotContains,
+  assertExportedNovels,
+  assertLastBinaryCall,
+  assertLastBridgeCallInput,
+  assertNoBridgeCallArgValue,
+  assertNoSavedEmbeddingConfig,
+  assertNovelDeleted,
+  assertOnlyTemporaryFixturePaths,
+  assertSavedAvatar,
+  assertSavedCover,
+  assertSavedEmbeddingConfig,
+  assertSavedLLMConfig,
+  assertSearchResultContainsRestrictedSourcePath,
+  assertSelectedChapterPath,
+  assertSettingsCallsUseMockCredentials,
+  assertStoredContent,
+  bridgeCallCount,
+  clickCardAction,
+  dispatchNovelImportDrop,
+  expectHidden,
+  expectInputValue,
+  expectSelectedValue,
+  expectVisible,
+  insertEditorText,
+  replaceEditorText,
+  settingsDialog,
+  shortcutKey,
+  waitForBridgeCall,
+  waitForBridgeCallArg,
+  waitForBridgeCallCountAfter,
+  waitForSaveContent,
+  waitForSaveContentAfter,
+} from './app-mock-workflow/page-helpers.mjs'
+import {
+  artifactRunName,
+  getFreePort,
+  launchBrowser,
+  makeTagFilter,
+  parseRunConfig,
+  sanitizeArtifactName,
+  startServer,
+  stopProcess,
+  waitForServer,
+} from './app-mock-workflow/runtime.mjs'
+import { usabilityObservation, writeUsabilityReport } from './app-mock-workflow/usability-report.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const frontendRoot = path.resolve(__dirname, '..')
@@ -29,14 +103,14 @@ async function main() {
   await fs.mkdir(path.join(outputDir, 'traces'), { recursive: true })
 
   const port = await getFreePort()
-  const server = startServer(port, runConfig.target)
+  const server = startServer(port, runConfig.target, frontendRoot)
   const url = `http://127.0.0.1:${port}/`
   let browser
 
   try {
     logStep(`waiting for ${runConfig.target} server`)
     await waitForServer(url, server)
-    browser = await launchBrowser()
+    browser = await launchBrowser(logStep)
 
     if (runConfig.suite === 'smoke') {
       await runSmokeSuite(browser, url)
@@ -142,6 +216,7 @@ function errorFeedbackWorkflowContext(page, browser, url, consoleErrors, pageErr
     waitForBridgeCallArg,
     waitForBridgeCallCountAfter,
     bridgeCallCount,
+    assertBridgeCallCount,
     errorAlert,
     expectVisible,
     assertNoSensitiveDiagnosticsVisible,
@@ -377,7 +452,7 @@ async function runFullSuite(browser, url) {
 
   if (runConfig.grep === '@reference-anchor') {
     logStep('checking reference error feedback')
-    await verifyReferenceErrorFeedbackWorkflow(browser, url, consoleErrors, pageErrors)
+    await verifyReferenceErrorFeedbackWorkflow(errorFeedbackWorkflowContext(page, browser, url, consoleErrors, pageErrors))
   }
 
   if (shouldRun('@surface')) {
@@ -461,7 +536,7 @@ async function runStressSuite(browser, url) {
   const stressPath = `chapters/${stressChapterNumber}.md`
   const largeText = makeLargeChineseFixture(runConfig.stressSizeBytes)
   const chapters = makeStressChapters(chapterCount, stressTitle)
-  const referenceStress = makeStressReferenceFixture(largeText)
+  const referenceStress = makeStressReferenceFixture(largeText, runConfig.stressChapterCount)
   const page = await newAppPage(
     browser,
     consoleErrors,
@@ -734,7 +809,7 @@ async function runUsabilitySuite(browser, url) {
   await assertBridgeCallCount(compactPage, 'SaveContent', 0)
   await compactPage.close()
 
-  await writeUsabilityReport(observations)
+  await writeUsabilityReport(observations, { phaseOutputRoot, outputDir, repoRoot })
   await verifySmokeBridgeCalls(page)
   await page.close()
 }
@@ -2801,154 +2876,6 @@ async function verifyReferenceSmoke(page) {
   await expectVisible(page.getByText('默认编排').first(), 'orchestration panel')
 }
 
-async function verifyReferenceErrorFeedbackWorkflow(browser, url, consoleErrors, pageErrors) {
-  const details = sensitiveDiagnosticDetails()
-  const page = await newAppPage(browser, consoleErrors, pageErrors, {
-    initialized: true,
-    faults: {
-      CreateReferenceAnchor: {
-        mode: 'storage',
-        code: 'REFERENCE_ANCHOR_CREATE_FAILED',
-        message: '参考锚点创建失败：Bearer reference-create-token-abcdefghijklmnopqrstuvwxyz',
-        details,
-        retryable: true,
-      },
-      RebuildReferenceAnchor: {
-        mode: 'storage',
-        code: 'REFERENCE_ANCHOR_REBUILD_FAILED',
-        message: '锚点重建失败：Bearer reference-rebuild-token-abcdefghijklmnopqrstuvwxyz',
-        details,
-        retryable: true,
-      },
-      SearchReferenceMaterials: {
-        mode: 'storage',
-        code: 'REFERENCE_MATERIAL_SEARCH_FAILED',
-        message: '参考材料搜索失败：Bearer reference-search-token-abcdefghijklmnopqrstuvwxyz',
-        details,
-        retryable: true,
-      },
-      GenerateReferenceChapterBlueprint: {
-        mode: 'storage',
-        code: 'REFERENCE_BLUEPRINT_GENERATE_FAILED',
-        message: '章节蓝图生成失败：Bearer reference-blueprint-generate-token-abcdefghijklmnopqrstuvwxyz',
-        details,
-        retryable: true,
-      },
-      ReviewReferenceChapterBlueprint: {
-        mode: 'storage',
-        code: 'REFERENCE_BLUEPRINT_REVIEW_FAILED',
-        message: '蓝图评审失败：Bearer reference-blueprint-review-token-abcdefghijklmnopqrstuvwxyz',
-        details,
-        retryable: true,
-      },
-      ApproveReferenceChapterBlueprint: {
-        mode: 'storage',
-        code: 'REFERENCE_BLUEPRINT_APPROVE_FAILED',
-        message: '蓝图批准失败：Bearer reference-blueprint-approve-token-abcdefghijklmnopqrstuvwxyz',
-        details,
-        retryable: true,
-      },
-      BindReferenceBlueprintMaterials: {
-        mode: 'storage',
-        code: 'REFERENCE_BLUEPRINT_BIND_FAILED',
-        message: '蓝图材料绑定失败：Bearer reference-blueprint-bind-token-abcdefghijklmnopqrstuvwxyz',
-        details,
-        retryable: true,
-      },
-    },
-  }, undefined, 'reference-error-feedback')
-  await installClipboardSpy(page)
-  await page.goto(url, { waitUntil: 'domcontentloaded' })
-  await expectVisible(page.getByText('全局回归小说'), 'reference error workspace')
-  await page.getByTitle('参考锚定').click()
-  await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'reference error heading')
-
-  await page.getByPlaceholder('参考书名').fill('错误反馈参考')
-  await page.getByLabel('本地路径').fill('D:\\books\\reference-error.md')
-  const createBefore = await bridgeCallCount(page, 'CreateReferenceAnchor')
-  await page.getByTestId('reference-import-panel').getByRole('button', { name: '创建' }).click()
-  await waitForBridgeCallCountAfter(page, 'CreateReferenceAnchor', createBefore)
-  const createAlert = errorAlert(page, '参考锚点创建失败')
-  await expectVisible(createAlert, 'reference create failure callout')
-  await assertNoSensitiveDiagnosticsVisible(page)
-  await assertCopyableDiagnostic(page, createAlert, 'CreateReferenceAnchor')
-
-  const rebuildBefore = await bridgeCallCount(page, 'RebuildReferenceAnchor')
-  await page.getByTitle('重建').first().click()
-  await waitForBridgeCallCountAfter(page, 'RebuildReferenceAnchor', rebuildBefore)
-  const rebuildAlert = errorAlert(page, '锚点重建失败')
-  await expectVisible(rebuildAlert, 'reference rebuild failure callout')
-  await assertNoSensitiveDiagnosticsVisible(page)
-  await assertCopyableDiagnostic(page, rebuildAlert, 'RebuildReferenceAnchor')
-
-  const searchBefore = await bridgeCallCount(page, 'SearchReferenceMaterials')
-  await page.getByRole('button', { name: /浏览 全局雨夜参考 的材料/ }).click()
-  await waitForBridgeCallCountAfter(page, 'SearchReferenceMaterials', searchBefore)
-  const searchAlert = errorAlert(page, '参考材料搜索失败')
-  await expectVisible(searchAlert, 'reference material search failure callout')
-  await assertNoSensitiveDiagnosticsVisible(page)
-  await assertCopyableDiagnostic(page, searchAlert, 'SearchReferenceMaterials')
-
-  await page.getByRole('button', { name: /打开高级模式/ }).click()
-  const blueprintPanel = page.getByTestId('reference-blueprint-panel')
-  await blueprintPanel.getByLabel('章节号').fill('1')
-  await blueprintPanel.getByLabel('标题').fill('错误反馈蓝图')
-  const generateBefore = await bridgeCallCount(page, 'GenerateReferenceChapterBlueprint')
-  await blueprintPanel.getByRole('button', { name: /生成蓝图/ }).click()
-  await waitForBridgeCallCountAfter(page, 'GenerateReferenceChapterBlueprint', generateBefore)
-  const generateAlert = errorAlert(page, '章节蓝图生成失败')
-  await expectVisible(generateAlert, 'reference blueprint generate failure callout')
-  await assertNoSensitiveDiagnosticsVisible(page)
-  await assertCopyableDiagnostic(page, generateAlert, 'GenerateReferenceChapterBlueprint')
-
-  await page.evaluate(() => { window.__appMockState.clearFaultQueue('GenerateReferenceChapterBlueprint') })
-  const generateSuccessBefore = await bridgeCallCount(page, 'GenerateReferenceChapterBlueprint')
-  await blueprintPanel.getByRole('button', { name: /生成蓝图/ }).click()
-  await waitForBridgeCallCountAfter(page, 'GenerateReferenceChapterBlueprint', generateSuccessBefore)
-  await expectVisible(page.getByText('章节蓝图已生成'), 'reference blueprint generated after clearing fault')
-
-  const detail = page.getByTestId('reference-blueprint-detail')
-  const reviewBefore = await bridgeCallCount(page, 'ReviewReferenceChapterBlueprint')
-  await detail.getByRole('button', { name: /评审/ }).click()
-  await waitForBridgeCallCountAfter(page, 'ReviewReferenceChapterBlueprint', reviewBefore)
-  const reviewAlert = errorAlert(page, '蓝图评审失败')
-  await expectVisible(reviewAlert, 'reference blueprint review failure callout')
-  await assertNoSensitiveDiagnosticsVisible(page)
-  await assertCopyableDiagnostic(page, reviewAlert, 'ReviewReferenceChapterBlueprint')
-
-  await page.evaluate(() => { window.__appMockState.clearFaultQueue('ReviewReferenceChapterBlueprint') })
-  const reviewSuccessBefore = await bridgeCallCount(page, 'ReviewReferenceChapterBlueprint')
-  await detail.getByRole('button', { name: /评审/ }).click()
-  await waitForBridgeCallCountAfter(page, 'ReviewReferenceChapterBlueprint', reviewSuccessBefore)
-  await expectVisible(page.getByText('蓝图评审已完成'), 'reference blueprint reviewed after clearing fault')
-
-  const approveBefore = await bridgeCallCount(page, 'ApproveReferenceChapterBlueprint')
-  await detail.getByRole('button', { name: /批准/ }).click()
-  await waitForBridgeCallCountAfter(page, 'ApproveReferenceChapterBlueprint', approveBefore)
-  const approveAlert = errorAlert(page, '蓝图批准失败')
-  await expectVisible(approveAlert, 'reference blueprint approve failure callout')
-  await assertNoSensitiveDiagnosticsVisible(page)
-  await assertCopyableDiagnostic(page, approveAlert, 'ApproveReferenceChapterBlueprint')
-
-  await page.evaluate(() => { window.__appMockState.clearFaultQueue('ApproveReferenceChapterBlueprint') })
-  const approveSuccessBefore = await bridgeCallCount(page, 'ApproveReferenceChapterBlueprint')
-  await detail.getByRole('button', { name: /批准/ }).click()
-  await waitForBridgeCallCountAfter(page, 'ApproveReferenceChapterBlueprint', approveSuccessBefore)
-  await expectVisible(page.getByText('蓝图已批准'), 'reference blueprint approved after clearing fault')
-
-  const bindBefore = await bridgeCallCount(page, 'BindReferenceBlueprintMaterials')
-  await detail.getByRole('button', { name: /绑定/ }).click()
-  await waitForBridgeCallCountAfter(page, 'BindReferenceBlueprintMaterials', bindBefore)
-  const bindAlert = errorAlert(page, '蓝图材料绑定失败')
-  await expectVisible(bindAlert, 'reference blueprint bind failure callout')
-  await assertNoSensitiveDiagnosticsVisible(page)
-  await assertCopyableDiagnostic(page, bindAlert, 'BindReferenceBlueprintMaterials')
-
-  await assertBridgeCallCount(page, 'SaveContent', 0)
-  await assertBridgeCallCount(page, 'runtime.shell.openExternal', 0)
-  await page.close()
-}
-
 async function verifyStyleSampleWorkflow(page) {
   await clickActivity(page, '风格素材')
   await expectVisible(page.getByRole('heading', { name: /风格素材/ }), 'style sample heading')
@@ -3416,353 +3343,6 @@ async function verifyRelativeTimeRefreshWorkflow(browser, url, consoleErrors, pa
   await page.close()
 }
 
-async function verifyBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-  const requiredMethods = [
-    'IsInitialized',
-    'GetSettings',
-    'GetNovels',
-    'GetChapters',
-    'GetContent',
-    'SearchAll',
-    'Chat',
-    'GetModels',
-    'GetSessions',
-    'ListSlashCommands',
-    'GetLLMConfig',
-    'GetEmbeddingConfig',
-    'GetSqliteVecStatus',
-    'GetCharacters',
-    'GetLocations',
-    'GetStoryArcs',
-    'GetTimelineEntries',
-    'GetReaderPerspectives',
-    'GetPreferences',
-    'GetWritingActivity',
-    'GetWritingStats',
-    'ListSkills',
-    'GetReferenceAnchors',
-    'SearchStyleSamples',
-    'GetStyleSample',
-    'CreateStyleSample',
-    'UpdateStyleSample',
-    'DeleteStyleSample',
-    'ExtractStyleSkillFromSamples',
-    'CancelStyleSkillExtraction',
-    'BuildReferenceStyleProfile',
-    'StartNarrativePatternExtraction',
-    'CancelNarrativePatternExtraction',
-    'GetNarrativePatternTrace',
-    'GetGitCommits',
-    'GetGitCommitFiles',
-    'GetGitFileDiff',
-    'SaveContent',
-    'CancelChat',
-  ]
-
-  for (const method of requiredMethods) {
-    assert(methods.includes(method), `Expected bridge method ${method} to be called.`)
-  }
-
-  const chapterSaves = calls.filter((call) =>
-    call.method === 'SaveContent' &&
-    String(call.args?.[0]?.path ?? '').startsWith('chapters/'))
-  assert.deepEqual(chapterSaves, [], 'app-wide smoke must not save chapter content implicitly')
-  assert(!methods.includes('runtime.shell.openExternal'), 'app-wide smoke must not open external URLs')
-  assert(!methods.includes('PickReferenceSourceFile'), 'app-wide smoke must not open arbitrary file pickers')
-
-  const saveCandidates = calls.filter((call) =>
-    (call.method.startsWith('Save') || call.method.startsWith('Update') || call.method.startsWith('Delete')) &&
-    !isAllowedSurfaceMutation(call))
-  assert.deepEqual(
-    saveCandidates.map((call) => `${call.method}:${JSON.stringify(call.args)}`),
-    [],
-    `Unexpected mutating bridge calls:\n${saveCandidates.map((call) => call.method).join('\n')}`)
-  await assertGitHistoryReadOnlyCalls(page)
-}
-
-function isAllowedSurfaceMutation(call) {
-  if (call.method === 'UpdateStyleSample' || call.method === 'DeleteStyleSample') {
-    return true
-  }
-
-  if (call.method === 'SaveContent') {
-    const path = String(call.args?.[0]?.path ?? '')
-    return path.startsWith('skills/') || path.startsWith('~/.novelist/skills/')
-  }
-
-  return false
-}
-
-async function verifyStartupBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-
-  assert(methods.includes('IsInitialized'), 'startup workflow must check initialization state')
-  assert(methods.includes('GetAppConfig'), 'startup workflow must load startup recovery status')
-  assert(methods.includes('GetSettings'), 'startup workflow must load settings after successful initialization')
-  assert(!methods.includes('SaveContent'), 'startup workflow must not save chapter content implicitly')
-  assert(!methods.includes('runtime.shell.openExternal'), 'startup workflow must not open external URLs')
-}
-
-async function verifyDiagnosticsBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-
-  assert(methods.includes('IsInitialized'), 'diagnostics workflow must load the app before probing fixtures')
-  assert(!methods.includes('SaveContent'), 'diagnostics workflow must not save chapter content implicitly')
-  assert(!methods.includes('runtime.shell.openExternal'), 'diagnostics workflow must not open external URLs')
-}
-
-async function verifyWritingBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetContent']
-
-  for (const method of requiredMethods) {
-    assert(methods.includes(method), `Expected writing bridge method ${method} to be called.`)
-  }
-
-  assert(!methods.includes('runtime.shell.openExternal'), 'writing workflow must not open external URLs')
-}
-
-async function verifyReferenceBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetReferenceAnchors']
-
-  for (const method of requiredMethods) {
-    assert(methods.includes(method), `Expected reference bridge method ${method} to be called.`)
-  }
-
-  assert(!methods.includes('SaveContent'), 'reference entry workflow must not save chapter content implicitly')
-  assert(!methods.includes('runtime.shell.openExternal'), 'reference entry workflow must not open external URLs')
-}
-
-async function verifyPatternBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-  const requiredMethods = [
-    'IsInitialized',
-    'GetSettings',
-    'GetNovels',
-    'GetChapters',
-    'GetModels',
-    'StartNarrativePatternExtraction',
-    'GetNarrativePatternTrace',
-    'CancelNarrativePatternExtraction',
-    'SaveContent',
-  ]
-
-  for (const method of requiredMethods) {
-    assert(methods.includes(method), `Expected pattern bridge method ${method} to be called.`)
-  }
-
-  const chapterSaves = calls.filter((call) =>
-    call.method === 'SaveContent' &&
-    String(call.args?.[0]?.path ?? '').startsWith('chapters/'))
-  assert.deepEqual(chapterSaves, [], 'pattern workflow must not save chapter content')
-
-  const skillSaves = calls.filter((call) =>
-    call.method === 'SaveContent' &&
-    String(call.args?.[0]?.path ?? '').startsWith('skills/'))
-  assert(skillSaves.length >= 1, 'pattern workflow must save generated skills through the skill catalog path')
-  assert(!methods.includes('runtime.shell.openExternal'), 'pattern workflow must not open external URLs')
-  assert(!methods.includes('ApproveReferenceChapterBlueprint'), 'pattern workflow must not approve reference blueprints')
-  assert(!methods.includes('BindReferenceBlueprintMaterials'), 'pattern workflow must not bind reference materials')
-}
-
-async function verifyRelativeTimeBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetSessions']
-
-  for (const method of requiredMethods) {
-    assert(methods.includes(method), `Expected relative-time workflow bridge method ${method} to be called.`)
-  }
-
-  assert(!methods.includes('SaveContent'), 'relative-time workflow must not save chapter content')
-  assert(!methods.includes('runtime.shell.openExternal'), 'relative-time workflow must not open external URLs')
-  assert(!methods.includes('PickNovelImportFile'), 'relative-time workflow must not open file pickers')
-}
-
-async function verifyLayoutBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-  const requiredMethods = [
-    'IsInitialized',
-    'GetSettings',
-    'GetNovels',
-    'GetLayoutSettings',
-    'SaveLayoutSettings',
-    'GetWindowSettings',
-    'SaveWindowSettings',
-    'runtime.window.toggleMaximize',
-  ]
-
-  for (const method of requiredMethods) {
-    assert(methods.includes(method), `Expected layout workflow bridge method ${method} to be called.`)
-  }
-
-  assert(!methods.includes('SetChatPanelWidth'), 'layout workflow must use SaveLayoutSettings instead of the retired chat-width setter')
-  assert(!methods.includes('SaveContent'), 'layout workflow must not save chapter content')
-  assert(!methods.includes('runtime.shell.openExternal'), 'layout workflow must not open external URLs')
-  assert(!methods.includes('PickNovelImportFile'), 'layout workflow must not open file pickers')
-}
-
-async function verifyErrorBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-  const requiredMethods = [
-    'IsInitialized',
-    'GetSettings',
-    'GetNovels',
-    'GetChapters',
-    'CreateNovel',
-    'UpdateNovel',
-    'DeleteNovel',
-    'GetCharacters',
-    'DeleteCharacter',
-    'GetLocations',
-    'DeleteLocation',
-    'ListSkills',
-    'DeleteSkill',
-    'UpdateChapterTitle',
-    'StartNovelImport',
-    'GetModels',
-    'StartNarrativePatternExtraction',
-    'SearchStyleSamples',
-    'GetStyleSample',
-    'CreateStyleSample',
-    'UpdateStyleSample',
-    'DeleteStyleSample',
-    'ExtractStyleSkillFromSamples',
-  ]
-
-  for (const method of requiredMethods) {
-    assert(methods.includes(method), `Expected error workflow bridge method ${method} to be called.`)
-  }
-
-  assert(!methods.includes('SaveContent'), 'error workflow must not save chapter content')
-  assert(!methods.includes('runtime.shell.openExternal'), 'error workflow must not open external URLs')
-  assert(!methods.includes('PickNovelImportFile'), 'error workflow must not open file pickers')
-}
-
-async function verifyGitBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetGitCommits', 'GetGitCommitFiles', 'GetGitFileDiff']
-
-  for (const method of requiredMethods) {
-    assert(methods.includes(method), `Expected Git history bridge method ${method} to be called.`)
-  }
-
-  const pagedCall = calls.find((call) =>
-    call.method === 'GetGitCommits' &&
-    call.args?.[0]?.cursor_commit_id === 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
-  assert(pagedCall, 'Git history bridge calls must include cursor-based paging')
-  await assertGitHistoryReadOnlyCalls(page)
-}
-
-async function verifyUpdateBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-  const requiredMethods = [
-    'IsInitialized',
-    'GetSettings',
-    'GetNovels',
-    'GetUpdateCheckSettings',
-    'CheckForUpdates',
-    'SaveUpdateCheckSettings',
-    'runtime.shell.openExternal',
-  ]
-
-  for (const method of requiredMethods) {
-    assert(methods.includes(method), `Expected update workflow bridge method ${method} to be called.`)
-  }
-
-  const opened = calls.filter((call) => call.method === 'runtime.shell.openExternal')
-  assert.equal(opened.length, 1, 'update workflow must open exactly one external URL after explicit user action')
-  assert.equal(opened[0].payload?.url, 'https://updates.example.test/releases/v2.0.0')
-  assert(!methods.includes('SaveContent'), 'update workflow must not save chapter content')
-  assert(!methods.includes('PickNovelImportFile'), 'update workflow must not open file pickers')
-  assert(!methods.includes('GetGitCommits'), 'update workflow must not load Git history')
-  assert(!methods.includes('GetGitCommitFiles'), 'update workflow must not load Git changed files')
-  assert(!methods.includes('GetGitFileDiff'), 'update workflow must not load Git diffs')
-}
-
-async function assertGitHistoryReadOnlyCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const gitMethods = calls
-    .map((call) => call.method)
-    .filter((method) => /^Git|^GetGit|^SaveGit|^SetGit|^DeleteGit|^CreateGit|^UpdateGit|^RevertGit|^ResetGit|^CheckoutGit|^RestoreGit|^CommitGit/.test(method))
-  const unexpected = gitMethods.filter((method) =>
-    !['GetGitCommits', 'GetGitCommitFiles', 'GetGitFileDiff', 'GetGitAuthorSettings', 'SaveGitAuthorSettings'].includes(method))
-  assert.deepEqual(unexpected, [], `Git history UI must call only read-only Git methods, got ${unexpected.join(', ')}`)
-
-  const chapterSaves = calls.filter((call) =>
-    call.method === 'SaveContent' &&
-    String(call.args?.[0]?.path ?? '').startsWith('chapters/'))
-  assert.deepEqual(chapterSaves, [], 'Git history workflow must not save chapter content')
-}
-
-async function verifySmokeBridgeCalls(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetContent']
-
-  for (const method of requiredMethods) {
-    assert(methods.includes(method), `Expected smoke bridge method ${method} to be called.`)
-  }
-
-  assert(!methods.includes('SaveContent'), 'smoke workflow must not save chapter content implicitly')
-  assert(!methods.includes('runtime.shell.openExternal'), 'smoke workflow must not open external URLs')
-}
-
-async function verifyStressGuardrails(page) {
-  const calls = await page.evaluate(() => window.__appMockState.calls)
-  const methods = calls.map((call) => call.method)
-  assert(methods.includes('GetContent'), 'stress workflow must load the large chapter through the bridge')
-  assert(methods.includes('GetReferenceAnchors'), 'stress workflow must load reference anchors')
-  assert(methods.includes('RebuildReferenceAnchor'), 'stress workflow must exercise reference import/segmentation status')
-  assert(methods.includes('SearchReferenceMaterials'), 'stress workflow must search generated reference materials')
-  assert(methods.includes('GenerateReferenceChapterBlueprint'), 'stress workflow must generate a reference blueprint')
-  assert(methods.includes('BindReferenceBlueprintMaterials'), 'stress workflow must bind generated materials into the blueprint')
-  assert(!methods.includes('SaveContent'), 'stress workflow must not save large chapter content implicitly')
-  assert(!methods.includes('runtime.shell.openExternal'), 'stress workflow must not open external URLs')
-
-  const rebuildCall = calls.find((call) => call.method === 'RebuildReferenceAnchor')
-  assert(rebuildCall?.result?.source_segment_count > 0, 'stress rebuild must report source segments')
-  assert(rebuildCall?.result?.material_count > 0, 'stress rebuild must report generated materials')
-
-  const defaultLibrarySearch = calls.find((call) =>
-    call.method === 'SearchReferenceMaterials' &&
-    Array.isArray(call.args[0]?.anchor_ids) &&
-    call.args[0].anchor_ids.length === 0 &&
-    call.args[0].page === 1)
-  assert(defaultLibrarySearch, 'stress material library search must not require manually selected anchors')
-  assert(defaultLibrarySearch.result?.total >= 1_200, 'stress material library search must expose a large paged material set')
-
-  const blueprintCall = calls.find((call) => call.method === 'GenerateReferenceChapterBlueprint')
-  assert(blueprintCall, 'stress workflow must generate a blueprint')
-  assert.deepEqual(blueprintCall.args[0].anchor_ids, [], 'stress blueprint generation must work without manual per-novel corpus binding')
-
-  const bindCall = calls.find((call) => call.method === 'BindReferenceBlueprintMaterials')
-  assert(bindCall, 'stress workflow must bind blueprint materials')
-  assert(bindCall.result?.links?.some((link) => String(link.material_id).startsWith('stress-mat-')), 'stress binding must use generated stress materials')
-  assertBridgeCallOrder(calls, 'ReviewReferenceChapterBlueprint', 'ApproveReferenceChapterBlueprint')
-  assertBridgeCallOrder(calls, 'ApproveReferenceChapterBlueprint', 'BindReferenceBlueprintMaterials')
-}
-
-function assertBridgeCallOrder(calls, beforeMethod, afterMethod) {
-  const beforeIndex = calls.findIndex((call) => call.method === beforeMethod)
-  const afterIndex = calls.findIndex((call) => call.method === afterMethod)
-  assert(beforeIndex >= 0, `Missing bridge call ${beforeMethod}`)
-  assert(afterIndex >= 0, `Missing bridge call ${afterMethod}`)
-  assert(beforeIndex < afterIndex, `${beforeMethod} must happen before ${afterMethod}`)
-}
-
 async function verifyStressReferenceMaterialPath(page, referenceStress) {
   await clickActivity(page, '参考锚定')
   await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'stress reference heading')
@@ -3854,881 +3434,8 @@ async function invokeProbe(page, method, timeoutMs = 1_000) {
   )
 }
 
-function makeStressChapters(count, stressTitle) {
-  return Array.from({ length: count }, (_, index) => {
-    const chapterNumber = index + 1
-    return {
-      id: chapterNumber,
-      novel_id: 42,
-      chapter_number: chapterNumber,
-      title: chapterNumber === count ? stressTitle : `压力章 ${String(chapterNumber).padStart(3, '0')}`,
-      summary: chapterNumber === count ? '10MB 中文正文压力章节。' : '压力测试占位章节。',
-      word_count: chapterNumber === count ? 3_500_000 : 1200,
-      file_path: `chapters/${chapterNumber}.md`,
-      created_at: '2026-07-05T12:00:00.000Z',
-      updated_at: '2026-07-05T12:00:00.000Z',
-    }
-  })
-}
-
-function makeLargeChineseFixture(targetBytes) {
-  const chunks = []
-  let bytes = 0
-  let paragraph = 1
-
-  while (bytes < targetBytes) {
-    const line = `第${paragraph}段，雨声沿着旧城门往下落，林岚把杯子推远，仍然只记录自己能看见的水痕、灯影和门缝里的停顿。她不替门外的人下结论，也不把未经确认的身份写进正文。\n`
-    chunks.push(line)
-    bytes += Buffer.byteLength(line, 'utf8')
-    paragraph += 1
-  }
-
-  return chunks.join('')
-}
-
-function makeStressReferenceFixture(sourceText) {
-  const sourceBytes = Buffer.byteLength(sourceText, 'utf8')
-  const sourceSegmentCount = Math.max(1_200, Math.ceil(sourceBytes / 4096))
-  const materialTotal = Math.max(1_200, sourceSegmentCount)
-  const anchorId = 1001
-  const chapterNumber = runConfig.stressChapterCount
-  const sourcePath = 'D:\\books\\stress-reference-10mb.md'
-
-  const anchor = {
-    anchor_id: anchorId,
-    novel_id: 42,
-    title: '10MB 自动分段参考源',
-    author: 'Phase 13 Stress Fixture',
-    source_path: sourcePath,
-    source_kind: 'markdown',
-    license_status: 'user_provided',
-    visibility: 'workspace',
-    source_trust: 'user_verified',
-    owner_scope: 'workspace_corpus',
-    owner_novel_id: null,
-    user_tags: ['10MB', '自动分段', '压力测试'],
-    source_file_hash: `hash-stress-${sourceBytes}`,
-    build_version: 'mock-reference-stress-v1',
-    status: 'ready',
-    created_at: '2026-07-05T12:00:00.000Z',
-    updated_at: '2026-07-05T12:00:00.000Z',
-  }
-
-  return {
-    anchor,
-    buildStatus: {
-      novel_id: 42,
-      anchor_id: anchorId,
-      status: 'ready',
-      stage: 'completed',
-      source_segment_count: sourceSegmentCount,
-      material_count: materialTotal,
-      slot_count: Math.ceil(materialTotal / 5),
-      vector_count: 0,
-      last_error: '',
-      updated_at: '2026-07-05T12:00:00.000Z',
-    },
-    sourceBytes,
-    sourceCharacters: sourceText.length,
-    materialTotal,
-    chapterNumber,
-    sourcePath,
-  }
-}
-
-function realisticWritingText() {
-  const paragraphs = [
-    '## 雨夜复盘',
-    '林岚在雨夜旧宅门前停住。门缝里没有灯，檐下却挂着半截湿线，像有人刚把伞收起，又故意把水滴留在青砖上。',
-    '她没有立刻推门，只把手套往上拉了拉，低声记下三件事：第一，杯沿朝外；第二，桌面水痕还没散；第三，门后的人知道她会来。',
-    '> 这不是供词，只是一段给自己看的现场笔记。',
-    '- 风从旧城门方向吹来，带着铁锈味。',
-    '- 鞋印停在门槛前，没有跨进去。',
-    '- “如果我说没看见，你会信吗？”周砚问。',
-    '林岚没有回答。她把那句话在心里放慢了一遍，确认其中的停顿比内容更像线索。雨声压住远处车灯，整条巷子只剩纸页被潮气卷起的声音。',
-    '她写下最后一行：不要替门外的人下结论；先让读者看见水、光、脚印和沉默。',
-  ]
-
-  return paragraphs.join('\n\n')
-}
-
-function usabilityObservation(input) {
-  const scores = {
-    discoverability: input.scores?.discoverability ?? 0,
-    clickCost: input.scores?.clickCost ?? 0,
-    feedbackClarity: input.scores?.feedbackClarity ?? 0,
-    errorRecovery: input.scores?.errorRecovery ?? 0,
-    keyboardErgonomics: input.scores?.keyboardErgonomics ?? 0,
-    informationDensity: input.scores?.informationDensity ?? 0,
-    visualReadability: input.scores?.visualReadability ?? 0,
-  }
-  return {
-    surface: input.surface,
-    severity: input.severity,
-    issueType: input.issueType,
-    summary: input.summary,
-    screenshot: input.screenshot,
-    reproduction: input.reproduction ?? [],
-    expected: input.expected,
-    actual: input.actual,
-    impact: input.impact,
-    proposedFix: input.proposedFix,
-    scores,
-  }
-}
-
-async function writeUsabilityReport(observations) {
-  const scoreRows = observations
-    .map((item) => [
-      item.surface,
-      item.scores.discoverability,
-      item.scores.clickCost,
-      item.scores.feedbackClarity,
-      item.scores.errorRecovery,
-      item.scores.keyboardErgonomics,
-      item.scores.informationDensity,
-      item.scores.visualReadability,
-    ].map(markdownCell).join(' | '))
-    .map((row) => `| ${row} |`)
-    .join('\n')
-
-  const issueRows = observations
-    .map((item) => `| ${markdownCell(item.surface)} | ${markdownCell(item.severity)} | ${markdownCell(item.issueType)} | ${markdownCell(item.summary)} | ${markdownCell(artifactPath(item.screenshot))} |`)
-    .join('\n')
-
-  const details = observations
-    .map((item) => `### ${item.surface}
-
-- Severity: ${item.severity}
-- Type: ${item.issueType}
-- Screenshot: \`${artifactPath(item.screenshot)}\`
-- Reproduction:
-${numberedList(item.reproduction)}
-- Expected behavior: ${item.expected}
-- Actual behavior: ${item.actual}
-- Likely user impact: ${item.impact}
-- Proposed fix or tracking: ${item.proposedFix}`)
-    .join('\n\n')
-
-  const report = `# Phase 13 Usability Report
-
-Generated by \`npm --prefix frontend run test:app:usability\`.
-
-## Scope
-
-This report is generated from deterministic mocked bridge fixtures. It records workflow scoring, severity, affected surface, screenshots, reproduction steps, expected behavior, actual behavior, likely user impact, and proposed fixes. Correctness bugs and ergonomic friction are separated by the Type field.
-
-Artifacts: \`${path.relative(repoRoot, outputDir)}\`
-
-Scoring uses 1-5 where 5 is best. Scores are heuristic product-QA ratings from the scripted browser walkthrough, not performance metrics.
-
-## Workflow Scores
-
-| Surface | Discoverability | Click Cost | Feedback Clarity | Error Recovery | Keyboard Ergonomics | Information Density | Visual Readability |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-${scoreRows}
-
-## Issues And Observations
-
-| Surface | Severity | Type | Summary | Screenshot |
-| --- | --- | --- | --- | --- |
-${issueRows}
-
-## Details
-
-${details}
-
-## Reference/Corpus Automation Verdict
-
-The current usability pass confirms the reference surface is reachable, but it deliberately keeps a medium ergonomic-friction item open until Phase 13 proves the normal flow can turn supplied source text into segmented source records, extracted materials, blueprint bindings, and audit feedback without manual corpus plumbing.
-`
-
-  await fs.mkdir(phaseOutputRoot, { recursive: true })
-  await fs.writeFile(path.join(phaseOutputRoot, 'usability-report.md'), report, 'utf8')
-  await fs.writeFile(path.join(outputDir, 'usability-report.md'), report, 'utf8')
-}
-
-function artifactPath(fileName) {
-  return path.join(path.relative(repoRoot, outputDir), fileName)
-}
-
-function markdownCell(value) {
-  return String(value ?? '').replaceAll('|', '\\|').replace(/\r?\n/g, '<br>')
-}
-
-function numberedList(items) {
-  if (!items.length) return '1. No reproduction steps recorded.'
-  return items.map((item, index) => `${index + 1}. ${item}`).join('\n')
-}
-
-async function replaceEditorText(page, content) {
-  const editor = page.locator('.monaco-editor').first()
-  await expectVisible(editor, 'content editor')
-  await page.waitForFunction(() => typeof window.__novelistEditor?.setValue === 'function', null, { timeout: 12_000 })
-  await page.evaluate((content) => window.__novelistEditor.setValue(content), content)
-}
-
-async function insertEditorText(page, content) {
-  const editor = page.locator('.monaco-editor').first()
-  await expectVisible(editor, 'content editor')
-  await page.waitForFunction(() => typeof window.__novelistEditor?.insertText === 'function', null, { timeout: 12_000 })
-  await page.evaluate((content) => window.__novelistEditor.insertText(content), content)
-}
-
-async function assertEditorContains(page, expectedText) {
-  await page.waitForFunction(
-    (expectedText) => window.__novelistEditor?.getValue?.().includes(expectedText),
-    expectedText,
-    { timeout: 12_000 },
-  ).catch((error) => {
-    throw new Error(`Expected editor to contain: ${expectedText}`, { cause: error })
-  })
-}
-
-async function assertEditorNotContains(page, unexpectedText) {
-  await page.waitForFunction(
-    (unexpectedText) => !window.__novelistEditor?.getValue?.().includes(unexpectedText),
-    unexpectedText,
-    { timeout: 12_000 },
-  ).catch((error) => {
-    throw new Error(`Expected editor not to contain: ${unexpectedText}`, { cause: error })
-  })
-}
-
-function shortcutKey(key) {
-  return `${process.platform === 'darwin' ? 'Meta' : 'Control'}+${key}`
-}
-
-async function waitForSaveContent(page, path, expectedText) {
-  await page.waitForFunction(
-    ({ path, expectedText }) => {
-      return window.__appMockState.calls.some((call) =>
-        call.method === 'SaveContent' &&
-        call.args[0]?.path === path &&
-        String(call.args[0]?.content ?? '').includes(expectedText))
-    },
-    { path, expectedText },
-    { timeout: 12_000 },
-  )
-}
-
-async function waitForSaveContentAfter(page, path, expectedText, previousCount) {
-  await page.waitForFunction(
-    ({ path, expectedText, previousCount }) => {
-      const saveCalls = window.__appMockState.calls.filter((call) => call.method === 'SaveContent')
-      return saveCalls.length > previousCount &&
-        window.__appMockState.contentByPath[path] === saveCalls.at(-1)?.args[0]?.content &&
-        String(window.__appMockState.contentByPath[path] ?? '').includes(expectedText)
-    },
-    { path, expectedText, previousCount },
-    { timeout: 12_000 },
-  )
-}
-
-async function assertStoredContent(page, path, expectedContent) {
-  const actual = await page.evaluate((path) => window.__appMockState.contentByPath[path], path)
-  assert.equal(actual, expectedContent)
-}
-
-async function assertBridgeCallCount(page, method, expectedCount) {
-  const actual = await bridgeCallCount(page, method)
-  assert.equal(actual, expectedCount, `Expected ${expectedCount} ${method} calls, got ${actual}.`)
-}
-
-async function assertNoBridgeCallArgValue(page, method, unexpectedValue, message) {
-  const found = await page.evaluate(
-    ({ method, unexpectedValue }) => window.__appMockState.calls.some((call) =>
-      call.method === method &&
-      (call.args ?? []).some((arg) => JSON.stringify(arg) === JSON.stringify(unexpectedValue))),
-    { method, unexpectedValue },
-  )
-  assert.equal(found, false, message)
-}
-
-async function bridgeCallCount(page, method) {
-  return await page.evaluate(
-    (method) => window.__appMockState.calls.filter((call) => call.method === method).length,
-    method,
-  )
-}
-
-function settingsDialog(page) {
-  return page.locator('.fixed').filter({ hasText: '设置' }).last()
-}
-
-async function assertSavedLLMConfig(page, expected) {
-  const actual = await page.evaluate(() => window.__appMockState.savedLLMConfig?.providers?.[0] ?? null)
-  assert(actual, 'Expected LLM config to be saved.')
-  assert.equal(actual.key, expected.providerKey)
-  assert.equal(actual.api_key, expected.apiKey)
-  assert.equal(actual.endpoint_type, expected.endpointType)
-}
-
-async function assertSavedEmbeddingConfig(page, expected) {
-  const actual = await page.evaluate(() => window.__appMockState.savedEmbeddingConfig ?? null)
-  assert(actual, 'Expected embedding config to be saved.')
-  for (const [key, expectedValue] of Object.entries(expected)) {
-    assert.deepEqual(actual[key], expectedValue, `Expected saved embedding ${key} to equal ${JSON.stringify(expectedValue)}.`)
-  }
-}
-
-async function assertNoSavedEmbeddingConfig(page) {
-  const actual = await page.evaluate(() => window.__appMockState.savedEmbeddingConfig)
-  assert.equal(actual, null, 'Expected embedding config not to be saved.')
-}
-
-async function assertLastBridgeCallInput(page, method, expected) {
-  const actual = await page.evaluate((method) => {
-    const call = window.__appMockState.calls.filter((item) => item.method === method).at(-1)
-    return call?.args?.[0] ?? null
-  }, method)
-  assert(actual, `Expected ${method} to be called.`)
-  for (const [key, expectedValue] of Object.entries(expected)) {
-    assert.deepEqual(actual[key], expectedValue, `Expected ${method}.${key} to equal ${JSON.stringify(expectedValue)}.`)
-  }
-}
-
-async function assertButtonDisabled(locator, description) {
-  await locator.waitFor({ state: 'visible', timeout: 12_000 }).catch((error) => {
-    throw new Error(`Expected visible button before disabled check: ${description}`, { cause: error })
-  })
-  const disabled = await locator.isDisabled()
-  assert.equal(disabled, true, `Expected disabled button: ${description}.`)
-}
-
-async function assertSettingsCallsUseMockCredentials(page) {
-  const leakedLiveCredentialOrEndpoint = await page.evaluate(() => {
-    const liveCredentialPatterns = [
-      /sk-[A-Za-z0-9_-]{12,}/,
-      /sk-proj-[A-Za-z0-9_-]{12,}/,
-      /AIza[0-9A-Za-z_-]{12,}/,
-      /xox[baprs]-[0-9A-Za-z-]{12,}/,
-      /api\.openai\.com/i,
-      /api\.anthropic\.com/i,
-      /generativelanguage\.googleapis\.com/i,
-      /dashscope\.aliyuncs\.com/i,
-      /api\.siliconflow\.cn/i,
-    ]
-    return window.__appMockState.calls.some((call) =>
-      liveCredentialPatterns.some((pattern) => pattern.test(JSON.stringify(call.args ?? []))))
-  })
-  assert.equal(leakedLiveCredentialOrEndpoint, false, 'Settings workflow must use mock credentials and non-live endpoints only.')
-}
-
-async function assertSearchResultContainsRestrictedSourcePath(page) {
-  const hasRestrictedPath = await page.evaluate(() =>
-    window.__appMockState.calls
-      .filter((call) => call.method === 'SearchAll')
-      .some((call) => call.result?.some?.((item) => item.source_path === 'D:\\restricted\\reference-source.md')))
-  assert.equal(hasRestrictedPath, true, 'Expected mocked search payload to include a restricted source path for leakage guardrail coverage.')
-}
-
-async function expectVisible(locator, description) {
-  await locator.waitFor({ state: 'visible', timeout: 12_000 }).catch((error) => {
-    throw new Error(`Expected visible: ${description}`, { cause: error })
-  })
-}
-
-async function expectHidden(locator, description) {
-  await locator.waitFor({ state: 'hidden', timeout: 12_000 }).catch((error) => {
-    throw new Error(`Expected hidden: ${description}`, { cause: error })
-  })
-}
-
-async function assertDisabled(locator, description) {
-  await locator.waitFor({ state: 'attached', timeout: 12_000 }).catch((error) => {
-    throw new Error(`Expected attached before disabled check: ${description}`, { cause: error })
-  })
-  const disabled = await locator.isDisabled()
-  assert.equal(disabled, true, `Expected disabled: ${description}`)
-}
-
-async function waitForBridgeCallArg(page, method, argIndex, expectedValue) {
-  await page.waitForFunction(
-    ({ method, argIndex, expectedValue }) => {
-      return window.__appMockState.calls.some((call) =>
-        call.method === method && JSON.stringify(call.args[argIndex]) === JSON.stringify(expectedValue))
-    },
-    { method, argIndex, expectedValue },
-    { timeout: 12_000 },
-  )
-}
-
-async function waitForBridgeCall(page, method) {
-  await page.waitForFunction(
-    (method) => window.__appMockState.calls.some((call) => call.method === method),
-    method,
-    { timeout: 12_000 },
-  )
-}
-
-async function waitForBridgeCallCountAfter(page, method, previousCount) {
-  await page.waitForFunction(
-    ({ method, previousCount }) =>
-      window.__appMockState.calls.filter((call) => call.method === method).length > previousCount,
-    { method, previousCount },
-    { timeout: 12_000 },
-  )
-}
-
-async function assertActiveNovelId(page, expectedNovelId) {
-  const actual = await page.evaluate(() => window.__appMockState.activeNovelId)
-  assert.equal(actual, expectedNovelId)
-}
-
-async function assertNovelDeleted(page, novelId) {
-  const exists = await page.evaluate((novelId) =>
-    window.__appMockState.novels.some((novel) => novel.id === novelId),
-  novelId)
-  assert.equal(exists, false, `Expected novel ${novelId} to be deleted.`)
-}
-
-async function assertSelectedChapterPath(page, expectedPath) {
-  const expectedTitle = expectedPath.endsWith('7.md')
-    ? '新章验收-改名'
-    : expectedPath.endsWith('2.md')
-      ? '旧城门'
-      : '雨夜线索'
-
-  await page.waitForFunction(
-    ({ expectedTitle }) => {
-      return Array.from(document.querySelectorAll('aside button')).some((button) =>
-        button.classList.contains('bg-primary/10') &&
-        (button.textContent ?? '').includes(expectedTitle))
-    },
-    { expectedTitle },
-    { timeout: 12_000 },
-  ).catch((error) => {
-    throw new Error(`Expected selected chapter for ${expectedPath}.`, { cause: error })
-  })
-
-  const activeClasses = await page.locator('aside').getByRole('button', { name: /第\d+章/ }).evaluateAll((buttons) =>
-    buttons
-      .map((button) => ({ text: button.textContent ?? '', className: button.getAttribute('class') ?? '' }))
-      .filter((button) => button.className.includes('bg-primary/10')),
-  )
-  assert(activeClasses.some((button) => button.text.includes(expectedTitle)), `Expected selected chapter for ${expectedPath}.`)
-}
-
-async function assertActiveTabTitle(page, expectedTitle) {
-  const activeTabs = await page.locator('main').locator('div').evaluateAll((nodes) =>
-    nodes
-      .map((node) => ({ text: node.textContent ?? '', className: node.getAttribute('class') ?? '' }))
-      .filter((node) => node.className.includes('border-t-blue-500')),
-  )
-  assert(activeTabs.some((tab) => tab.text.includes(expectedTitle)), `Expected active tab ${expectedTitle}.`)
-}
-
-async function assertChapterTitle(page, novelId, chapterNumber, expectedTitle) {
-  const actual = await page.evaluate(({ novelId, chapterNumber }) => {
-    return window.__appMockState.chaptersByNovelId[String(novelId)]
-      ?.find((chapter) => chapter.chapter_number === chapterNumber)
-      ?.title ?? ''
-  }, { novelId, chapterNumber })
-  assert.equal(actual, expectedTitle)
-}
-
-async function assertLastBinaryCall(page, method, expectedByteCount) {
-  const actual = await page.evaluate((method) => {
-    const call = window.__appMockState.calls.filter((item) => item.method === method).at(-1)
-    const payload = call?.args.at(-1)
-    return Array.isArray(payload) ? payload.length : 0
-  }, method)
-  assert.equal(actual, expectedByteCount, `Expected ${method} to receive ${expectedByteCount} bytes, got ${actual}.`)
-}
-
-async function assertExportedNovels(page, expected) {
-  const actual = await page.evaluate(() => window.__appMockState.exportedNovels)
-  assert.deepEqual(actual, expected)
-}
-
-async function assertSavedCover(page, expected) {
-  const actual = await page.evaluate(() => window.__appMockState.savedCovers.at(-1))
-  assert.deepEqual(actual, expected)
-}
-
-async function assertSavedAvatar(page, expected) {
-  const actual = await page.evaluate(() => window.__appMockState.savedAvatars.at(-1))
-  assert.deepEqual(actual, expected)
-}
-
-async function expectInputValue(locator, expectedValue) {
-  const actual = await locator.inputValue()
-  assert.equal(actual, expectedValue)
-}
-
-async function expectSelectedValue(locator, expectedValue) {
-  const actual = await locator.inputValue()
-  assert.equal(actual, expectedValue)
-}
-
-async function clickCardAction(root, cardText, actionTitle) {
-  const card = root.locator('.group').filter({ hasText: cardText }).first()
-  await expectVisible(card, `${cardText} card`)
-  await card.getByTitle(actionTitle).click({ force: true })
-}
-
-async function assertCreatedReferenceAnchor(page, expected) {
-  const actual = await page.evaluate(() => window.__appMockState.createdReferenceAnchors.at(-1))
-  assert.equal(actual?.title, expected.title)
-  assert.equal(actual?.source_path, expected.sourcePath)
-  assert.equal(actual?.source_kind, expected.sourceKind)
-}
-
-async function assertOnlyTemporaryFixturePaths(page, allowedFixtureRoot) {
-  const unexpectedAbsolutePaths = await page.evaluate((allowedFixtureRoot) => {
-    const normalize = (value) => String(value).replaceAll('\\', '/')
-    const allowedRoot = normalize(allowedFixtureRoot).replace(/\/+$/, '')
-    const isAbsolutePath = (value) => /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('/')
-    const strings = []
-
-    const collectStrings = (value) => {
-      if (typeof value === 'string') {
-        strings.push(value)
-        return
-      }
-      if (Array.isArray(value)) {
-        for (const item of value) collectStrings(item)
-        return
-      }
-      if (value && typeof value === 'object') {
-        for (const item of Object.values(value)) collectStrings(item)
-      }
-    }
-
-    for (const call of window.__appMockState.calls) {
-      collectStrings(call.args)
-    }
-
-    return strings.filter((value) => {
-      if (!isAbsolutePath(value)) return false
-      const normalized = normalize(value)
-      return normalized !== allowedRoot && !normalized.startsWith(`${allowedRoot}/`)
-    })
-  }, allowedFixtureRoot)
-
-  assert.deepEqual(
-    unexpectedAbsolutePaths,
-    [],
-    `Expected absolute file path bridge arguments to stay under ${allowedFixtureRoot}.`,
-  )
-}
-
-async function dispatchNovelImportDrop(page, payload) {
-  await page.evaluate((payload) => {
-    const target = document.querySelector('[data-testid="novel-import-dropzone"]')
-    if (!target) throw new Error('Novel import dropzone was not found.')
-
-    const event = new Event('drop', { bubbles: true, cancelable: true })
-    if (payload.kind === 'files') {
-      const dataTransfer = new DataTransfer()
-      for (const dropped of payload.files ?? []) {
-        const file = new File(['mock import fixture'], dropped.name, { type: dropped.type ?? '' })
-        Object.defineProperty(file, 'path', {
-          configurable: true,
-          enumerable: false,
-          value: dropped.path,
-        })
-        dataTransfer.items.add(file)
-      }
-      Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
-    } else if (payload.kind === 'url') {
-      const data = {
-        'text/plain': payload.url,
-        'text/uri-list': payload.url,
-      }
-      Object.defineProperty(event, 'dataTransfer', {
-        value: {
-          files: [],
-          items: [],
-          getData(type) {
-            return data[type] ?? ''
-          },
-        },
-      })
-    } else if (payload.kind === 'fileUriText') {
-      const data = {
-        'text/plain': payload.uri,
-        'text/uri-list': '',
-      }
-      Object.defineProperty(event, 'dataTransfer', {
-        value: {
-          files: [],
-          items: [],
-          getData(type) {
-            return data[type] ?? ''
-          },
-        },
-      })
-    } else if (payload.kind === 'directory') {
-      Object.defineProperty(event, 'dataTransfer', {
-        value: {
-          files: [],
-          items: [
-            {
-              kind: 'file',
-              webkitGetAsEntry() {
-                return { isDirectory: true }
-              },
-            },
-          ],
-          getData() {
-            return ''
-          },
-        },
-      })
-    } else {
-      Object.defineProperty(event, 'dataTransfer', {
-        value: {
-          files: [],
-          items: [],
-          getData() {
-            return ''
-          },
-        },
-      })
-    }
-
-    target.dispatchEvent(event)
-  }, payload)
-}
-
-function startServer(port, target) {
-  if (target === 'dist') return startVitePreview(port)
-  return startVite(port)
-}
-
-function startVite(port) {
-  const viteBin = path.join(frontendRoot, 'node_modules', 'vite', 'bin', 'vite.js')
-
-  return spawn(process.execPath, [viteBin, '--host', '127.0.0.1', '--port', String(port)], {
-    cwd: frontendRoot,
-    env: {
-      ...process.env,
-      BROWSER: 'none',
-      NODE_ENV: 'development',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-}
-
-function startVitePreview(port) {
-  const viteBin = path.join(frontendRoot, 'node_modules', 'vite', 'bin', 'vite.js')
-
-  return spawn(process.execPath, [viteBin, 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-    cwd: frontendRoot,
-    env: {
-      ...process.env,
-      BROWSER: 'none',
-      NODE_ENV: 'production',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-}
-
-async function launchBrowser() {
-  try {
-    return await chromium.launch({ headless: true })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (process.platform === 'win32' && message.includes("Executable doesn't exist")) {
-      logStep('Playwright Chromium is not installed; falling back to Microsoft Edge')
-      return chromium.launch({ channel: 'msedge', headless: true })
-    }
-
-    throw new Error(
-      `${message}\nRun "npx playwright install chromium" from frontend/ if this machine has no browser fallback.`,
-      { cause: error },
-    )
-  }
-}
-
-async function waitForServer(url, child) {
-  const logs = []
-  child.stdout.on('data', (chunk) => logs.push(String(chunk)))
-  child.stderr.on('data', (chunk) => logs.push(String(chunk)))
-
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < 30_000) {
-    if (child.exitCode !== null) {
-      throw new Error(`Vite exited before becoming ready:\n${logs.join('')}`)
-    }
-
-    try {
-      const response = await fetch(url)
-      if (response.ok) return
-    } catch {
-      // keep polling
-    }
-    await delay(200)
-  }
-
-  throw new Error(`Timed out waiting for Vite:\n${logs.join('')}`)
-}
-
-function stopProcess(child) {
-  if (child.exitCode === null && child.signalCode === null) {
-    child.kill()
-  }
-}
-
-async function getFreePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer()
-    server.unref()
-    server.on('error', reject)
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address()
-      server.close(() => {
-        if (typeof address === 'object' && address?.port) {
-          resolve(address.port)
-        } else {
-          reject(new Error('Unable to reserve a local port.'))
-        }
-      })
-    })
-  })
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 function logStep(message) {
   console.log(`[app mock:${runConfig.suite}:${runConfig.target}] ${message}`)
-}
-
-function parseRunConfig(args) {
-  const config = {
-    suite: 'full',
-    target: 'vite',
-    grep: '',
-    stressSizeBytes: 10 * 1024 * 1024,
-    stressChapterCount: 250,
-  }
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]
-    if (arg.startsWith('--suite=')) {
-      config.suite = arg.slice('--suite='.length)
-    } else if (arg.startsWith('--target=')) {
-      config.target = arg.slice('--target='.length)
-    } else if (arg.startsWith('--grep=')) {
-      config.grep = arg.slice('--grep='.length)
-    } else if (arg === '--grep') {
-      config.grep = args[index + 1] ?? ''
-      index += 1
-    } else if (arg.startsWith('--stress-size-mb=')) {
-      config.stressSizeBytes = Math.max(1, Number.parseInt(arg.slice('--stress-size-mb='.length), 10)) * 1024 * 1024
-    } else if (arg.startsWith('--stress-chapters=')) {
-      config.stressChapterCount = Math.max(1, Number.parseInt(arg.slice('--stress-chapters='.length), 10))
-    }
-  }
-
-  if (!['smoke', 'full', 'stress', 'usability'].includes(config.suite)) {
-    throw new Error(`Unsupported app mock suite: ${config.suite}`)
-  }
-  if (!['vite', 'dist'].includes(config.target)) {
-    throw new Error(`Unsupported app mock target: ${config.target}`)
-  }
-  config.grep = normalizeGrepTag(config.grep)
-  if (config.grep && !['@startup', '@diagnostics', '@surface', '@writing', '@reference-anchor', '@pattern', '@git', '@update', '@time', '@layout', '@error'].includes(config.grep)) {
-    throw new Error(`Unsupported app mock grep: ${config.grep}`)
-  }
-  if (!Number.isFinite(config.stressSizeBytes) || config.stressSizeBytes <= 0) {
-    throw new Error('Stress size must be a positive number of megabytes.')
-  }
-  if (!Number.isFinite(config.stressChapterCount) || config.stressChapterCount <= 0) {
-    throw new Error('Stress chapter count must be a positive number.')
-  }
-
-  return config
-}
-
-function makeTagFilter(grep) {
-  return (tag) => !grep || grep === tag
-}
-
-function normalizeGrepTag(value) {
-  const tag = String(value ?? '').trim()
-  if (!tag) return ''
-  return tag.startsWith('@') ? tag : `@${tag}`
-}
-
-function artifactRunName(config) {
-  const grepSuffix = config.grep ? `-${sanitizeArtifactName(config.grep.replace(/^@/, ''))}` : ''
-  return `${config.suite}-${config.target}${grepSuffix}`
-}
-
-function mockImportRecoveryResult() {
-  const now = '2026-07-05T12:00:00.000Z'
-  return {
-    reconciled_runs: [
-      {
-        task_id: 'startup-cleaned-import',
-        state: 'cleanup_completed',
-        stage: 'cleanup_completed',
-        source_display_name: '半截导入.txt',
-        source_path_hash: 'sha256:startup-cleaned',
-        parser_type: 'txt',
-        created_novel_id: 77,
-        created_file_roots: ['novels/77'],
-        skipped_chapters: [],
-        diagnostics: [],
-        warnings: [],
-        error: {
-          code: 'import.recovered_cleanup',
-          message: '启动恢复已清理未完成的导入。',
-          detail: 'Created rows and files were removed.',
-          operation: 'ReconcileNovelImportRuns',
-          task_id: 'startup-cleaned-import',
-          run_id: null,
-          bridge_method: 'ReconcileNovelImportRuns',
-          timestamp: now,
-        },
-        started_at: now,
-        updated_at: now,
-        completed_at: now,
-      },
-    ],
-    blocked_runs: [
-      {
-        task_id: 'startup-blocked-import',
-        state: 'cleanup_blocked',
-        stage: 'cleanup_blocked',
-        source_display_name: '越界导入.txt',
-        source_path_hash: 'sha256:startup-blocked',
-        parser_type: 'txt',
-        created_novel_id: 88,
-        created_file_roots: ['novels/88'],
-        skipped_chapters: [],
-        diagnostics: [],
-        warnings: [],
-        error: {
-          code: 'import.cleanup_blocked',
-          message: '导入恢复清理被阻止。',
-          detail: 'Created file root resolves outside the allowed cleanup boundary.',
-          operation: 'ReconcileNovelImportRuns',
-          task_id: 'startup-blocked-import',
-          run_id: null,
-          bridge_method: 'ReconcileNovelImportRuns',
-          timestamp: now,
-        },
-        started_at: now,
-        updated_at: now,
-        completed_at: now,
-      },
-    ],
-    diagnostics: [
-      {
-        code: 'import.cleanup_blocked',
-        message: '导入恢复清理被阻止。',
-        detail: 'startup-blocked-import requires manual review.',
-        severity: 'warning',
-      },
-    ],
-    reconciled_at: now,
-  }
 }
 
 async function writeRunDiagnostics() {
@@ -4755,13 +3462,6 @@ async function closeOpenPages() {
       diagnostics.pageErrors.push(`Failed to close diagnostic page: ${error instanceof Error ? error.message : String(error)}`)
     })
   }
-}
-
-function sanitizeArtifactName(value) {
-  return String(value)
-    .replace(/[^a-z0-9._-]+/gi, '-')
-    .replace(/^-+|-+$/g, '')
-    || 'page'
 }
 
 main().catch((error) => {
