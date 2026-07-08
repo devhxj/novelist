@@ -476,6 +476,53 @@ public sealed class MafToolRegistryTests
     }
 
     [Fact]
+    public void Phase15AgentBoundaryDoesNotExposeUnsafeDesktopOrMutationTools()
+    {
+        var events = new RecordingBridgeEventSink();
+        var registry = new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            new RecordingChapterContentService(),
+            new ToolApprovalCoordinator(events),
+            events,
+            subagents: new RecordingSubagentRunner(),
+            preferences: new RecordingPreferenceService(),
+            world: new RecordingWorldEntityService(),
+            planning: new RecordingPlanningService(),
+            webFetch: new RecordingWebFetchService(),
+            webSearch: new RecordingWebSearchService(),
+            referenceAnchors: new RecordingReferenceAnchorService(),
+            referenceDrafts: new RecordingReferenceAnchoredDraftService(),
+            referenceStyleProfiles: new RecordingReferenceStyleProfileService());
+
+        var tools = registry.CreateTools(new NovelistMafToolContext(17));
+        var names = tools.Select(tool => tool.Name).ToArray();
+
+        foreach (var forbidden in ForbiddenPhase15AgentToolNames)
+        {
+            Assert.DoesNotContain(forbidden, names);
+        }
+
+        Assert.DoesNotContain(names, name => name.Contains("import", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(names, name => name.Contains("picker", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(names, name => name.Contains("pick_file", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(names, name => name.Contains("external_url", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(names, name => name.Contains("open_release", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(names, name => name.Contains("update_check", StringComparison.OrdinalIgnoreCase));
+
+        AssertToolDescriptionContains(
+            tools.Single(tool => tool.Name == "read"),
+            "读取小说文件或技能文件",
+            "chapters/",
+            "skills/",
+            "内置技能，只读");
+        AssertToolDescriptionContains(
+            tools.Single(tool => tool.Name == "web_fetch"),
+            "SSRF",
+            "只读取网页内容",
+            "不执行页面脚本");
+    }
+
+    [Fact]
     public void ReferenceStyleAgentToolAuthorityMatrixAllowsOnlySearchInspectAndCandidatePreparation()
     {
         var registry = new NovelistMafToolRegistry(
@@ -1136,6 +1183,62 @@ public sealed class MafToolRegistryTests
         "restore",
         "save",
         "SaveContent"
+    ];
+
+    private static readonly string[] ForbiddenPhase15AgentToolNames =
+    [
+        "start_novel_import",
+        "cancel_novel_import",
+        "reconcile_novel_import_runs",
+        "pick_novel_import_file",
+        "pick_reference_source_file",
+        "create_reference_anchor",
+        "create_reference_anchors",
+        "promote_reference_anchor_to_workspace_corpus",
+        "promote_reference_anchors_to_workspace_corpus",
+        "update_reference_anchor_metadata",
+        "delete_reference_anchor",
+        "delete_reference_anchors",
+        "rebuild_reference_anchor",
+        "build_reference_style_profile",
+        "import_reference_style_profile",
+        "archive_reference_style_profile",
+        "restore_reference_style_profile",
+        "update_reference_style_profile",
+        "delete_reference_style_profile",
+        "approve_reference_style_contract",
+        "resume_reference_orchestration_run",
+        "approve_reference_orchestration_decision",
+        "apply_reference_blueprint_revision",
+        "insert_reference_anchored_draft",
+        "save_reference_anchored_draft",
+        "insert_style_imitation_candidate",
+        "search_git_history",
+        "get_git_commits",
+        "get_git_commit_files",
+        "get_git_file_diff",
+        "git_commit",
+        "git_stage",
+        "git_reset",
+        "git_checkout",
+        "git_restore",
+        "git_revert",
+        "git_cherry_pick",
+        "check_for_updates",
+        "open_release_page",
+        "open_external_url",
+        "runtime.shell.openExternal",
+        "search_style_samples",
+        "get_style_sample",
+        "create_style_sample",
+        "update_style_sample",
+        "delete_style_sample",
+        "extract_style_skill_from_samples",
+        "cancel_style_skill_extraction",
+        "start_narrative_pattern_extraction",
+        "cancel_narrative_pattern_extraction",
+        "save_generated_pattern_skill",
+        "save_generated_style_skill"
     ];
 
     private sealed class RecordingStoryMemorySearchService : IStoryMemorySearchService

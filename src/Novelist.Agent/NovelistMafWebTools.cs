@@ -68,7 +68,7 @@ public sealed partial class NovelistMafToolRegistry
     private sealed class WebFetchMafTool
     {
         private const string ToolName = "web_fetch";
-        private const string ToolDescription = "抓取指定网页的正文内容，返回清洗后的 markdown 文本。适用于需要查看某个来源原文、深入了解细节或验证 web_search 结果时使用。一次只能抓取一个 URL。";
+        private const string ToolDescription = "受 SSRF 防护地抓取指定网页正文内容，返回清洗后的 markdown 文本。只读取网页内容，不执行页面脚本，不打开外部 URL，不访问本地文件或文件选择器。适用于需要查看某个来源原文、深入了解细节或验证 web_search 结果时使用。一次只能抓取一个 URL。";
 
         private static readonly MethodInfo FetchMethod =
             typeof(WebFetchMafTool).GetMethod(

@@ -269,7 +269,7 @@ tests/
 
 当前构建版本先只考虑 Windows。可从 [Releases](https://github.com/devhxj/novelist/releases) 下载 Windows 安装包并运行安装程序。
 
-需要配置 LLM API Key。内置 DeepSeek、GLM、MiMo 模板，并兼容 OpenAI 格式接口。Windows 安装包自带桌面宿主和前端资源，不需要 Python、Node.js 或外部数据库。本地版本历史依赖系统 Git；未安装 Git 时，相关功能会提示安装。
+需要配置 LLM API Key。内置 DeepSeek、GLM、MiMo 模板，并兼容 OpenAI 格式接口。Windows 安装包自带桌面宿主、前端资源和 LibGit2Sharp 原生运行时，不需要 Python、Node.js、外部数据库或单独安装 Git CLI。本地版本历史由内置 libgit2 运行时提供。
 
 语义检索可使用在线 Embeddings API，也可切换到内置 ONNX。ONNX 模式固定使用随包的 `bge-small-zh-v1.5` int8 模型，不会静默回退到线上 API。
 
@@ -282,8 +282,7 @@ Windows SmartScreen 可能提示未签名程序，可通过“更多信息”继
 - Windows 10/11
 - .NET 10 SDK
 - Node.js/npm
-- Git Bash
-- Git（用于本地版本历史）
+- Git Bash / Git（用于克隆源码和运行发布脚本；本地版本历史不依赖系统 Git）
 - Inno Setup 6（仅打 Windows 安装包时需要）
 
 ```bash

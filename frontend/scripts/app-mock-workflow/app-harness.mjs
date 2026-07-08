@@ -7,8 +7,8 @@ import { artifactRunName, parseRunConfig, sanitizeArtifactName } from './runtime
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const frontendRoot = path.resolve(__dirname, '..', '..')
 export const repoRoot = path.resolve(frontendRoot, '..')
-export const phaseOutputRoot = path.join(repoRoot, 'output', 'playwright', 'phase13')
 export const runConfig = parseRunConfig(process.argv.slice(2))
+export const phaseOutputRoot = path.join(repoRoot, 'output', 'playwright', runConfig.phase)
 export const outputDir = path.join(phaseOutputRoot, artifactRunName(runConfig))
 export const diagnostics = {
   consoleErrors: [],
@@ -115,6 +115,7 @@ export async function writeRunDiagnostics() {
       suite: runConfig.suite,
       target: runConfig.target,
       grep: runConfig.grep,
+      phase: runConfig.phase,
       artifactDirectory: path.relative(repoRoot, outputDir),
       consoleErrors: diagnostics.consoleErrors,
       consoleWarnings: diagnostics.consoleWarnings,

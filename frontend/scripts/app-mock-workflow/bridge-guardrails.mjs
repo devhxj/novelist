@@ -276,6 +276,37 @@ export async function verifyUpdateBridgeCalls(page) {
   assert(!methods.includes('GetGitFileDiff'), 'update workflow must not load Git diffs')
 }
 
+export async function verifyPhase15SurfaceBridgeCalls(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const methods = calls.map((call) => call.method)
+  const requiredMethods = [
+    'IsInitialized',
+    'GetSettings',
+    'GetNovels',
+    'GetChapters',
+    'SearchStyleSamples',
+    'GetStyleSample',
+    'CreateStyleSample',
+    'UpdateStyleSample',
+    'DeleteStyleSample',
+    'ExtractStyleSkillFromSamples',
+    'CancelStyleSkillExtraction',
+    'BuildReferenceStyleProfile',
+    'SaveContent',
+  ]
+
+  for (const method of requiredMethods) {
+    assert(methods.includes(method), `Expected Phase 15 surface bridge method ${method} to be called.`)
+  }
+
+  const chapterSaves = calls.filter((call) =>
+    call.method === 'SaveContent' &&
+    String(call.args?.[0]?.path ?? '').startsWith('chapters/'))
+  assert.deepEqual(chapterSaves, [], 'Phase 15 surface workflow must not save chapter content implicitly')
+  assert(!methods.includes('runtime.shell.openExternal'), 'Phase 15 surface workflow must not open external URLs')
+  await assertGitHistoryReadOnlyCalls(page)
+}
+
 export async function assertGitHistoryReadOnlyCalls(page) {
   const calls = await page.evaluate(() => window.__appMockState.calls)
   const gitMethods = calls

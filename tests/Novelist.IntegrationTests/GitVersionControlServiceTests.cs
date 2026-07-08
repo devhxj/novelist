@@ -12,58 +12,6 @@ public sealed class GitVersionControlServiceTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "novelist-tests", Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public void ParserHandlesRenamesBinaryFilesAndSimpleLogLatestFirst()
-    {
-        var files = GitHistoryParser.ParseCommitFiles(
-            "A\0chapters/001.md\0M\0cover.bin\0D\0notes/old.md\0R087\0chapters/002.md\0chapters/renamed.md\0",
-            "3\t0\tchapters/001.md\0-\t-\tcover.bin\00\t4\tnotes/old.md\01\t2\t\0chapters/002.md\0chapters/renamed.md\0");
-
-        Assert.Collection(
-            files,
-            item =>
-            {
-                Assert.Equal("chapters/001.md", item.Path);
-                Assert.Equal("added", item.ChangeType);
-                Assert.Equal(3, item.Additions);
-                Assert.Equal(0, item.Deletions);
-                Assert.False(item.Binary);
-            },
-            item =>
-            {
-                Assert.Equal("chapters/renamed.md", item.Path);
-                Assert.Equal("chapters/002.md", item.OldPath);
-                Assert.Equal("renamed", item.ChangeType);
-                Assert.Equal(1, item.Additions);
-                Assert.Equal(2, item.Deletions);
-            },
-            item =>
-            {
-                Assert.Equal("cover.bin", item.Path);
-                Assert.Equal("modified", item.ChangeType);
-                Assert.True(item.Binary);
-            },
-            item =>
-            {
-                Assert.Equal("notes/old.md", item.Path);
-                Assert.Equal("deleted", item.ChangeType);
-                Assert.Equal(0, item.Additions);
-                Assert.Equal(4, item.Deletions);
-            });
-
-        var simpleLog = GitHistoryParser.ParseSimpleLog(
-            "bbbb\0newer\01720000001\n" +
-            "aaaa\0older\01720000000\n");
-
-        Assert.Equal(["bbbb", "aaaa"], simpleLog.Select(item => item.Hash));
-
-        var sameSecondLog = GitHistoryParser.ParseSimpleLog(
-            "zzzz\0first from git\01720000001\n" +
-            "aaaa\0second from git\01720000001\n");
-
-        Assert.Equal(["zzzz", "aaaa"], sameSecondLog.Select(item => item.Hash));
-    }
-
-    [Fact]
     public async Task EmptyRepositoryHistoryReturnsEmptyPagesWithoutCreatingInitialCommit()
     {
         var options = CreateOptions();
@@ -203,56 +151,71 @@ public sealed class GitVersionControlServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task MissingGitExecutableProducesVersionControlException()
+    public async Task CommitDoesNotDependOnConfiguredGitExecutable()
     {
+        var previousGitPath = Environment.GetEnvironmentVariable("NOVELIST_GIT_PATH");
         var options = CreateOptions();
-        await InitializeAsync(options);
-        var service = new GitVersionControlService(
-            options,
-            gitExecutableOverride: Path.Combine(_root, "missing", "git-does-not-exist.exe"));
+        try
+        {
+            Environment.SetEnvironmentVariable(
+                "NOVELIST_GIT_PATH",
+                Path.Combine(_root, "missing", "git-does-not-exist.exe"));
+            await InitializeAsync(options);
+            var service = new GitVersionControlService(options);
+            var novelService = new FileSystemNovelService(options, versionControl: service);
+            var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("LibGit2Sharp Git", "", ""), CancellationToken.None);
+            var workspace = Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString());
+            await WriteWorkspaceTextAsync(workspace, "chapters/libgit.md", "libgit2sharp content\n");
 
-        var ex = await Assert.ThrowsAsync<VersionControlException>(async () =>
-            await service.GetCommitSummariesAsync(new GetGitCommitsPayload(1, 1, 20), CancellationToken.None));
-        Assert.Contains("Git executable was not found", ex.Message, StringComparison.Ordinal);
+            var result = await service.CommitIfChangedAsync(novel.Id, "commit through libgit2sharp", CancellationToken.None);
+
+            Assert.True(result.Committed);
+            Assert.False(string.IsNullOrWhiteSpace(result.CommitHash));
+            var commits = await service.GetLogAsync(novel.Id, "chapters/libgit.md", 5, CancellationToken.None);
+            Assert.Equal("commit through libgit2sharp", commits[0].Message);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("NOVELIST_GIT_PATH", previousGitPath);
+        }
     }
 
     [Fact]
-    public async Task GitCommandTimeoutProducesVersionControlException()
+    public async Task CommitIfChangedRejectsExistingGitLockWithoutDeletingIt()
     {
         var options = CreateOptions();
         await InitializeAsync(options);
-        var fakeGit = await CreateSleepingGitExecutableAsync();
-        var service = new GitVersionControlService(
-            options,
-            gitExecutableOverride: fakeGit,
-            commandTimeout: TimeSpan.FromMilliseconds(100));
+        var service = new GitVersionControlService(options);
+        var novelService = new FileSystemNovelService(options, versionControl: service);
+        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("Locked Git", "", ""), CancellationToken.None);
+        var workspace = Path.Combine(options.DefaultDataDirectory, "novels", novel.Id.ToString());
+        var lockPath = Path.Combine(workspace, ".git", "index.lock");
+        await File.WriteAllTextAsync(lockPath, "other git process", CancellationToken.None);
+        await WriteWorkspaceTextAsync(workspace, "chapters/locked.md", "locked content\n");
+
+        var ex = await Assert.ThrowsAsync<VersionControlException>(async () =>
+            await service.CommitIfChangedAsync(novel.Id, "commit while locked", CancellationToken.None));
+
+        Assert.Contains("Git repository lock file exists", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("index.lock", ex.Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(lockPath), "stale lock files must not be deleted automatically");
+    }
+
+    [Fact]
+    public async Task InvalidRepositoryMetadataProducesStableVersionControlException()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var workspace = Path.Combine(options.DefaultDataDirectory, "novels", "1");
+        Directory.CreateDirectory(workspace);
+        await File.WriteAllTextAsync(Path.Combine(workspace, ".git"), "not a gitdir", CancellationToken.None);
+        var service = new GitVersionControlService(options);
 
         var ex = await Assert.ThrowsAsync<VersionControlException>(async () =>
             await service.GetCommitSummariesAsync(new GetGitCommitsPayload(1, 1, 20), CancellationToken.None));
 
-        Assert.Contains("Git command timed out", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("init", ex.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void BundledGitCandidatePathsCoverWindowsMacOsAndLinuxRuntimeLayouts()
-    {
-        var windowsBase = Path.Combine(_root, "windows", "app");
-        var windows = GitVersionControlService.GetBundledGitCandidatePaths(windowsBase, "windows");
-
-        Assert.Equal(Path.Combine(windowsBase, "runtime", "git", "mingw64", "bin", "git.exe"), windows[0]);
-        Assert.Contains(Path.Combine(windowsBase, "runtime", "git", "cmd", "git.exe"), windows);
-        Assert.Contains(Path.Combine(windowsBase, "runtime", "git", "bin", "git.exe"), windows);
-        Assert.Contains(Path.Combine(windowsBase, "runtime", "git", "git.exe"), windows);
-
-        var macBase = Path.Combine(_root, "Novelist.app", "Contents", "MacOS");
-        var macos = GitVersionControlService.GetBundledGitCandidatePaths(macBase, "macos");
-        Assert.Equal(Path.GetFullPath(Path.Combine(macBase, "..", "Resources", "runtime", "git", "git")), macos[0]);
-        Assert.Equal(Path.Combine(macBase, "runtime", "git", "git"), macos[1]);
-
-        var linuxBase = Path.Combine(_root, "linux", "app");
-        var linux = GitVersionControlService.GetBundledGitCandidatePaths(linuxBase, "linux");
-        Assert.Equal([Path.Combine(linuxBase, "runtime", "git", "git")], linux);
+        Assert.Contains("Git repository metadata is invalid or unsupported", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain('\n', ex.Message);
     }
 
     [Fact]
@@ -332,9 +295,10 @@ public sealed class GitVersionControlServiceTests : IDisposable
     {
         var options = CreateOptions();
         await InitializeAsync(options);
-        var service = new GitVersionControlService(
-            options,
-            gitExecutableOverride: Path.Combine(_root, "missing", "git-does-not-exist.exe"));
+        var workspace = Path.Combine(options.DefaultDataDirectory, "novels", "1");
+        Directory.CreateDirectory(workspace);
+        await File.WriteAllTextAsync(Path.Combine(workspace, ".git"), "not a gitdir", CancellationToken.None);
+        var service = new GitVersionControlService(options);
         var dispatcher = new BridgeDispatcher()
             .RegisterCompatibilityAppMethodHandlers()
             .RegisterGitHistoryHandlers(service);
@@ -342,14 +306,14 @@ public sealed class GitVersionControlServiceTests : IDisposable
         using var json = ParseOutbound(await dispatcher.DispatchAsync("""
             {
               "kind": "request",
-              "id": "req_git_missing",
+              "id": "req_git_invalid",
               "method": "GetGitCommits",
               "payload": { "args": [{ "novel_id": 1, "page": 1, "size": 20 }] }
             }
             """));
 
-        var error = AssertBridgeError(json.RootElement, "req_git_missing", BridgeErrorCodes.VersionControlError);
-        Assert.Contains("Git executable was not found", error.GetProperty("message").GetString(), StringComparison.Ordinal);
+        var error = AssertBridgeError(json.RootElement, "req_git_invalid", BridgeErrorCodes.VersionControlError);
+        Assert.Contains("Git repository metadata is invalid or unsupported", error.GetProperty("message").GetString(), StringComparison.Ordinal);
         Assert.True(error.GetProperty("retryable").GetBoolean());
     }
 
@@ -380,27 +344,6 @@ public sealed class GitVersionControlServiceTests : IDisposable
         var path = Path.Combine(workspace, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, content);
-    }
-
-    private async ValueTask<string> CreateSleepingGitExecutableAsync()
-    {
-        var directory = Path.Combine(_root, "fake-git", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, OperatingSystem.IsWindows() ? "git.cmd" : "git");
-        var content = OperatingSystem.IsWindows()
-            ? "@echo off\r\nping -n 6 127.0.0.1 > nul\r\n"
-            : "#!/bin/sh\nsleep 5\n";
-        await File.WriteAllTextAsync(path, content);
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(
-                path,
-                UnixFileMode.UserRead |
-                UnixFileMode.UserWrite |
-                UnixFileMode.UserExecute);
-        }
-
-        return path;
     }
 
     private static JsonDocument ParseOutbound(BridgeDispatchResult result)

@@ -36,6 +36,7 @@ export async function assertCopyableDiagnostic(page, alert, expectedBridgeMethod
   const copyButton = alert.getByRole('button', { name: '复制错误诊断' })
   await copyButton.click()
   await page.waitForFunction(() => typeof window.__appMockClipboardText === 'string' && window.__appMockClipboardText.length > 0)
+  assert.equal(await alert.isVisible(), true, `${expectedBridgeMethod} error callout should remain visible after copy feedback rerender`)
   const copied = await page.evaluate(() => window.__appMockClipboardText)
   const diagnostic = JSON.parse(copied)
 

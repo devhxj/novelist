@@ -109,6 +109,7 @@ export function parseRunConfig(args) {
     suite: 'full',
     target: 'vite',
     grep: '',
+    phase: 'phase13',
     stressSizeBytes: 10 * 1024 * 1024,
     stressChapterCount: 250,
   }
@@ -124,6 +125,11 @@ export function parseRunConfig(args) {
     } else if (arg === '--grep') {
       config.grep = args[index + 1] ?? ''
       index += 1
+    } else if (arg.startsWith('--phase=')) {
+      config.phase = arg.slice('--phase='.length)
+    } else if (arg === '--phase') {
+      config.phase = args[index + 1] ?? ''
+      index += 1
     } else if (arg.startsWith('--stress-size-mb=')) {
       config.stressSizeBytes = Math.max(1, Number.parseInt(arg.slice('--stress-size-mb='.length), 10)) * 1024 * 1024
     } else if (arg.startsWith('--stress-chapters=')) {
@@ -138,8 +144,11 @@ export function parseRunConfig(args) {
     throw new Error(`Unsupported app mock target: ${config.target}`)
   }
   config.grep = normalizeGrepTag(config.grep)
-  if (config.grep && !['@startup', '@diagnostics', '@surface', '@writing', '@reference-anchor', '@pattern', '@git', '@update', '@time', '@layout', '@error'].includes(config.grep)) {
+  if (config.grep && !['@startup', '@diagnostics', '@surface', '@phase15-surface', '@writing', '@reference-anchor', '@pattern', '@git', '@update', '@time', '@layout', '@error'].includes(config.grep)) {
     throw new Error(`Unsupported app mock grep: ${config.grep}`)
+  }
+  if (!/^phase\d+$/i.test(config.phase)) {
+    throw new Error(`Unsupported app mock output phase: ${config.phase}`)
   }
   if (!Number.isFinite(config.stressSizeBytes) || config.stressSizeBytes <= 0) {
     throw new Error('Stress size must be a positive number of megabytes.')

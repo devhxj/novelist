@@ -6,6 +6,7 @@ import {
   verifyErrorBridgeCalls,
   verifyGitBridgeCalls,
   verifyLayoutBridgeCalls,
+  verifyPhase15SurfaceBridgeCalls,
   verifyPatternBridgeCalls,
   verifyReferenceBridgeCalls,
   verifyRelativeTimeBridgeCalls,
@@ -15,7 +16,7 @@ import {
   verifyUpdateBridgeCalls,
   verifyWritingBridgeCalls,
 } from './bridge-guardrails.mjs'
-import { verifyErrorFeedbackWorkflow, verifyReferenceErrorFeedbackWorkflow } from './error-feedback.mjs'
+import { verifyErrorFeedbackWorkflow } from './error-feedback.mjs'
 import {
   makeLargeChineseFixture,
   makeStressChapters,
@@ -41,11 +42,13 @@ import { verifyGitHistoryWorkflow, verifyRelativeTimeRefreshWorkflow } from './g
 import { verifyLayoutPersistenceWorkflow } from './layout-workflows.mjs'
 import { verifyMetadataActionWorkflow, verifyMetadataPanels } from './metadata-workflows.mjs'
 import { settingsFixture } from './mock-bridge.mjs'
+import { verifyReferenceErrorFeedbackWorkflow } from './reference-error-feedback.mjs'
 import {
   assertBridgeCallCount,
   bridgeCallCount,
   clickCardAction,
   dispatchNovelImportDrop,
+  expectHidden,
   expectVisible,
   replaceEditorText,
   shortcutKey,
@@ -162,6 +165,7 @@ function errorFeedbackWorkflowContext(page, browser, url, consoleErrors, pageErr
     bridgeCallCount,
     assertBridgeCallCount,
     errorAlert,
+    expectHidden,
     expectVisible,
     assertNoSensitiveDiagnosticsVisible,
     assertCopyableDiagnostic,
@@ -277,6 +281,7 @@ function errorFeedbackFaults() {
 export async function runFullSuite(browser, url) {
   const { consoleErrors, pageErrors } = diagnostics
   const shouldRun = makeTagFilter(runConfig.grep)
+  const isPhase15Surface = runConfig.grep === '@phase15-surface'
 
   if (shouldRun('@startup')) {
     logStep('checking bootstrap states')
@@ -319,7 +324,7 @@ export async function runFullSuite(browser, url) {
     await verifyNovelChapterWorkflow(browser, url, consoleErrors, pageErrors)
   }
 
-  if (shouldRun('@surface')) {
+  if (shouldRun('@surface') || isPhase15Surface) {
     logStep('checking import export and file-picker paths')
     await verifyImportExportFilePickerWorkflow(browser, url, consoleErrors, pageErrors)
   }
@@ -336,7 +341,7 @@ export async function runFullSuite(browser, url) {
     await page.screenshot({ path: path.join(outputDir, 'app-04-chat.png'), fullPage: true })
   }
 
-  if (shouldRun('@surface')) {
+  if (shouldRun('@surface') || isPhase15Surface) {
     logStep('checking settings path')
     await verifySettingsWorkflow(page)
     await page.screenshot({ path: path.join(outputDir, 'app-05-settings.png'), fullPage: true })
@@ -374,7 +379,7 @@ export async function runFullSuite(browser, url) {
     await verifyReferenceErrorFeedbackWorkflow(errorFeedbackWorkflowContext(page, browser, url, consoleErrors, pageErrors))
   }
 
-  if (shouldRun('@surface')) {
+  if (shouldRun('@surface') || isPhase15Surface) {
     logStep('checking style sample library')
     await verifyStyleSampleWorkflow(page)
     await page.screenshot({ path: path.join(outputDir, 'app-08-style-samples.png'), fullPage: true })
@@ -414,7 +419,7 @@ export async function runFullSuite(browser, url) {
     await page.screenshot({ path: path.join(outputDir, 'app-12-error-feedback.png'), fullPage: true })
   }
 
-  if (shouldRun('@surface')) {
+  if (shouldRun('@surface') || isPhase15Surface) {
     logStep('checking compact viewport layout')
     await verifyCompactViewportSmoke(browser, url, consoleErrors, pageErrors)
   }
@@ -438,6 +443,8 @@ export async function runFullSuite(browser, url) {
     await verifyRelativeTimeBridgeCalls(page)
   } else if (runConfig.grep === '@layout') {
     await verifyLayoutBridgeCalls(page)
+  } else if (runConfig.grep === '@phase15-surface') {
+    await verifyPhase15SurfaceBridgeCalls(page)
   } else if (runConfig.grep === '@error') {
     await verifyErrorBridgeCalls(page)
   } else {

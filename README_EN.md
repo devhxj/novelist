@@ -269,7 +269,7 @@ tests/
 
 Current builds target Windows first. Download the Windows installer from [Releases](https://github.com/devhxj/novelist/releases) and run it.
 
-An LLM API key is required. Built-in provider templates include DeepSeek, GLM, and MiMo, and OpenAI-compatible endpoints are supported. The Windows installer includes the desktop host and frontend assets. No Python, Node.js, or external database is required. Local version history uses system Git; if Git is not installed, related features will ask the user to install it.
+An LLM API key is required. Built-in provider templates include DeepSeek, GLM, and MiMo, and OpenAI-compatible endpoints are supported. The Windows installer includes the desktop host, frontend assets, and LibGit2Sharp native runtime assets. No Python, Node.js, external database, or separately installed Git CLI is required. Local version history is provided by the bundled libgit2 runtime.
 
 Semantic search can use an online Embeddings API or the built-in ONNX mode. ONNX mode uses the bundled fixed `bge-small-zh-v1.5` int8 model and does not silently fall back to online APIs.
 
@@ -282,8 +282,7 @@ Requirements:
 - Windows 10/11
 - .NET 10 SDK
 - Node.js/npm
-- Git Bash
-- Git, for local version history
+- Git Bash / Git, for source checkout and release scripts; local version history does not depend on system Git
 - Inno Setup 6, only when building the Windows installer
 
 ```bash

@@ -1,6 +1,6 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Globalization;
+using System.Text;
+using LibGit2Sharp;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
 
@@ -8,29 +8,23 @@ namespace Novelist.Infrastructure.App;
 
 public sealed class GitVersionControlService : IVersionControlService
 {
-    private const string GitPathEnvironmentVariable = "NOVELIST_GIT_PATH";
     private const int MaxCommitMessageLength = 4_000;
     private const int MaxHistoryPageSize = 100;
     private const int MaxDiffTextLength = 200_000;
     private const int MaxContentTextLength = 200_000;
-    private static readonly TimeSpan DefaultCommandTimeout = TimeSpan.FromSeconds(30);
+    private const int MaxGitErrorTextLength = 500;
+    private static readonly string[] GitLockFileNames = ["index.lock", "HEAD.lock", "config.lock"];
 
     private readonly AppInitializationOptions _options;
-    private readonly string? _gitExecutableOverride;
     private readonly IPhase15AppSettingsService _settings;
-    private readonly TimeSpan _commandTimeout;
     private readonly SemaphoreSlim _mutex = new(1, 1);
 
     public GitVersionControlService(
         AppInitializationOptions? options = null,
-        string? gitExecutableOverride = null,
-        IPhase15AppSettingsService? settings = null,
-        TimeSpan? commandTimeout = null)
+        IPhase15AppSettingsService? settings = null)
     {
         _options = options ?? new AppInitializationOptions();
-        _gitExecutableOverride = string.IsNullOrWhiteSpace(gitExecutableOverride) ? null : gitExecutableOverride;
         _settings = settings ?? new FileSystemAppSettingsService(_options);
-        _commandTimeout = ValidateCommandTimeout(commandTimeout ?? DefaultCommandTimeout);
     }
 
     public async ValueTask EnsureRepositoryAsync(long novelId, CancellationToken cancellationToken)
@@ -49,24 +43,16 @@ public sealed class GitVersionControlService : IVersionControlService
         {
             var workspace = await NovelWorkspacePathAsync(novelId, cancellationToken);
             Directory.CreateDirectory(workspace);
-            var git = ResolveGitExecutable();
-            var gitMetadataExists = Directory.Exists(Path.Combine(workspace, ".git")) ||
-                File.Exists(Path.Combine(workspace, ".git"));
+            using var repository = OpenOrInitializeRepository(workspace);
+            cancellationToken.ThrowIfCancellationRequested();
 
-            if (!gitMetadataExists)
+            ThrowIfRepositoryLockFilesExist(workspace);
+            await ConfigureRepositoryUserAsync(repository, cancellationToken);
+            if (!HasHead(repository) && createInitialCommitWhenEmpty)
             {
-                await RunGitAsync(git, workspace, ["init"], cancellationToken);
-            }
-            else
-            {
-                await RunGitAsync(git, workspace, ["rev-parse", "--is-inside-work-tree"], cancellationToken);
-            }
-
-            await ConfigureRepositoryUserAsync(git, workspace, cancellationToken);
-            if (!await HasHeadAsync(git, workspace, cancellationToken) && createInitialCommitWhenEmpty)
-            {
+                ThrowIfRepositoryLockFilesExist(workspace);
                 await EnsureBaselineFilesAsync(workspace, cancellationToken);
-                await CommitIfChangedCoreAsync(git, workspace, "initial commit", cancellationToken);
+                CommitIfChangedCore(repository, workspace, "initial commit", cancellationToken);
             }
 
             ClearReadOnlyAttributes(workspace);
@@ -90,8 +76,8 @@ public sealed class GitVersionControlService : IVersionControlService
         try
         {
             var workspace = await NovelWorkspacePathAsync(novelId, cancellationToken);
-            var git = ResolveGitExecutable();
-            return await CommitIfChangedCoreAsync(git, workspace, message, cancellationToken);
+            using var repository = OpenRepository(workspace);
+            return CommitIfChangedCore(repository, workspace, message, cancellationToken);
         }
         finally
         {
@@ -113,27 +99,34 @@ public sealed class GitVersionControlService : IVersionControlService
         try
         {
             var workspace = await NovelWorkspacePathAsync(novelId, cancellationToken);
-            var git = ResolveGitExecutable();
-            if (!await HasHeadAsync(git, workspace, cancellationToken))
+            using var repository = OpenRepository(workspace);
+            if (!HasHead(repository))
             {
                 return [];
             }
 
-            var args = new List<string> { "log", "--format=%H%x00%s%x00%ct" };
-            if (count > 0)
+            var limit = count > 0 ? Math.Min(count, 500) : 500;
+            var commits = new List<VersionControlCommitInfo>();
+            foreach (var commit in EnumerateCommits(repository))
             {
-                args.Add("-n");
-                args.Add(Math.Min(count, 500).ToString(CultureInfo.InvariantCulture));
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!string.IsNullOrWhiteSpace(normalizedPath) &&
+                    !CommitTouchesPath(repository, commit, normalizedPath))
+                {
+                    continue;
+                }
+
+                commits.Add(new VersionControlCommitInfo(
+                    commit.Sha,
+                    FirstCommitMessageLine(commit),
+                    commit.Author.When));
+                if (commits.Count >= limit)
+                {
+                    break;
+                }
             }
 
-            if (!string.IsNullOrWhiteSpace(normalizedPath))
-            {
-                args.Add("--");
-                args.Add(normalizedPath);
-            }
-
-            var result = await RunGitAsync(git, workspace, args, cancellationToken);
-            return GitHistoryParser.ParseSimpleLog(result.Stdout);
+            return commits;
         }
         finally
         {
@@ -156,59 +149,38 @@ public sealed class GitVersionControlService : IVersionControlService
         try
         {
             var workspace = await NovelWorkspacePathAsync(input.NovelId, cancellationToken);
-            var git = ResolveGitExecutable();
-            if (!await HasHeadAsync(git, workspace, cancellationToken))
+            using var repository = OpenRepository(workspace);
+            if (!HasHead(repository))
             {
                 return new PageResultPayload<GitCommitSummaryPayload>([], 0, page, size, 0);
             }
 
+            Commit? cursorCommit = null;
             if (cursor is not null)
             {
-                _ = await ResolveCommitAsync(git, workspace, cursor, cancellationToken);
+                cursorCommit = ResolveCommit(repository, cursor);
             }
 
-            var total = await CountCommitsAsync(git, workspace, cancellationToken);
-            var args = new List<string>
-            {
-                "log",
-                "--format=%H%x00%h%x00%an%x00%ae%x00%ct%x00%s"
-            };
+            var commits = EnumerateCommits(repository).ToArray();
+            var total = commits.LongLength;
+            var pageCommits = cursorCommit is null
+                ? commits.Skip(checked((page - 1) * size)).Take(size)
+                : commits.SkipWhile(commit => !string.Equals(commit.Sha, cursorCommit.Sha, StringComparison.Ordinal))
+                    .Skip(1)
+                    .Take(size);
 
-            if (cursor is null)
+            var summaries = new List<GitCommitSummaryPayload>();
+            foreach (var commit in pageCommits)
             {
-                var skip = checked((page - 1) * size);
-                if (skip > 0)
-                {
-                    args.Add("--skip");
-                    args.Add(skip.ToString(CultureInfo.InvariantCulture));
-                }
-            }
-            else
-            {
-                args.Add("--skip");
-                args.Add("1");
-            }
-
-            args.Add("-n");
-            args.Add(size.ToString(CultureInfo.InvariantCulture));
-            if (cursor is not null)
-            {
-                args.Add(cursor);
-            }
-
-            var result = await RunGitAsync(git, workspace, args, cancellationToken);
-            var metadata = GitHistoryParser.ParseCommitMetadataLog(result.Stdout);
-            var summaries = new List<GitCommitSummaryPayload>(metadata.Count);
-            foreach (var commit in metadata)
-            {
-                var files = await GetCommitFilesCoreAsync(git, workspace, commit.CommitId, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                var files = GetCommitFilesCore(repository, commit);
                 summaries.Add(new GitCommitSummaryPayload(
-                    commit.CommitId,
-                    commit.ShortCommitId,
-                    commit.AuthorName,
-                    commit.AuthorEmail,
-                    commit.Message,
-                    commit.CommittedAt,
+                    commit.Sha,
+                    ShortSha(commit),
+                    commit.Author.Name,
+                    commit.Author.Email,
+                    FirstCommitMessageLine(commit),
+                    commit.Author.When,
                     files.Count,
                     files.Sum(file => file.Additions),
                     files.Sum(file => file.Deletions)));
@@ -236,14 +208,14 @@ public sealed class GitVersionControlService : IVersionControlService
         try
         {
             var workspace = await NovelWorkspacePathAsync(input.NovelId, cancellationToken);
-            var git = ResolveGitExecutable();
-            if (!await HasHeadAsync(git, workspace, cancellationToken))
+            using var repository = OpenRepository(workspace);
+            if (!HasHead(repository))
             {
                 return [];
             }
 
-            var resolvedCommit = await ResolveCommitAsync(git, workspace, commitId, cancellationToken);
-            return await GetCommitFilesCoreAsync(git, workspace, resolvedCommit, cancellationToken);
+            var commit = ResolveCommit(repository, commitId);
+            return GetCommitFilesCore(repository, commit);
         }
         finally
         {
@@ -265,14 +237,14 @@ public sealed class GitVersionControlService : IVersionControlService
         try
         {
             var workspace = await NovelWorkspacePathAsync(input.NovelId, cancellationToken);
-            var git = ResolveGitExecutable();
-            if (!await HasHeadAsync(git, workspace, cancellationToken))
+            using var repository = OpenRepository(workspace);
+            if (!HasHead(repository))
             {
                 throw new VersionControlException("Git repository has no commits.");
             }
 
-            var resolvedCommit = await ResolveCommitAsync(git, workspace, commitId, cancellationToken);
-            var files = await GetCommitFilesCoreAsync(git, workspace, resolvedCommit, cancellationToken);
+            var commit = ResolveCommit(repository, commitId);
+            var files = GetCommitFilesCore(repository, commit);
             var file = files.FirstOrDefault(item => string.Equals(item.Path, requestedPath, StringComparison.Ordinal)) ??
                 files.FirstOrDefault(item => string.Equals(item.OldPath, requestedPath, StringComparison.Ordinal));
             if (file is null)
@@ -280,22 +252,14 @@ public sealed class GitVersionControlService : IVersionControlService
                 throw new VersionControlException("Requested file is not part of the selected commit.");
             }
 
-            var diff = await RunGitAsync(
-                git,
-                workspace,
-                ["show", "--format=", "--find-renames", "--no-ext-diff", "--patch", resolvedCommit, "--", file.Path],
-                cancellationToken);
-            var (diffText, diffTruncated) = TruncateText(diff.Stdout, MaxDiffTextLength);
-            var originalContent = file.Binary
-                ? null
-                : await ReadOriginalContentAsync(git, workspace, resolvedCommit, file, cancellationToken);
-            var modifiedContent = file.Binary
-                ? null
-                : await ReadModifiedContentAsync(git, workspace, resolvedCommit, file, cancellationToken);
+            using var patch = CompareCommitPatch(repository, commit, file.Path);
+            var (diffText, diffTruncated) = TruncateText(patch.Content, MaxDiffTextLength);
+            var originalContent = file.Binary ? null : ReadOriginalContent(commit, file);
+            var modifiedContent = file.Binary ? null : ReadModifiedContent(commit, file);
             var contentTruncated = IsTruncated(originalContent) || IsTruncated(modifiedContent);
 
             return new GitFileDiffPayload(
-                resolvedCommit,
+                commit.Sha,
                 file.Path,
                 file.OldPath,
                 file.ChangeType,
@@ -312,180 +276,294 @@ public sealed class GitVersionControlService : IVersionControlService
     }
 
     private async ValueTask ConfigureRepositoryUserAsync(
-        string git,
-        string workspace,
+        Repository repository,
         CancellationToken cancellationToken)
     {
         var settings = await _settings.GetGitAuthorSettingsAsync(cancellationToken);
         var name = string.IsNullOrWhiteSpace(settings.Name) ? "Novelist" : settings.Name.Trim();
         var email = string.IsNullOrWhiteSpace(settings.Email) ? "novelist@local" : settings.Email.Trim();
-        await RunGitAsync(git, workspace, ["config", "user.name", name], cancellationToken);
-        await RunGitAsync(git, workspace, ["config", "user.email", email], cancellationToken);
+        RunGitOperation(
+            "configure repository author",
+            () =>
+            {
+                repository.Config.Set("user.name", name, ConfigurationLevel.Local);
+                repository.Config.Set("user.email", email, ConfigurationLevel.Local);
+                return 0;
+            });
     }
 
-    private async ValueTask<bool> HasHeadAsync(
-        string git,
-        string workspace,
-        CancellationToken cancellationToken)
+    private static bool HasHead(Repository repository)
     {
-        var result = await RunGitAsync(
-            git,
-            workspace,
-            ["rev-parse", "--verify", "HEAD"],
-            cancellationToken,
-            throwOnFailure: false);
-        return result.ExitCode == 0;
+        return RunGitOperation("read repository HEAD", () => repository.Head.Tip is not null);
     }
 
-    private async ValueTask<VersionControlCommitResult> CommitIfChangedCoreAsync(
-        string git,
+    private VersionControlCommitResult CommitIfChangedCore(
+        Repository repository,
         string workspace,
         string message,
         CancellationToken cancellationToken)
     {
         ValidateCommitMessage(message);
-        var status = await RunGitAsync(
-            git,
-            workspace,
-            ["status", "--porcelain", "--untracked-files=all"],
-            cancellationToken);
-        if (string.IsNullOrWhiteSpace(status.Stdout))
+        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfRepositoryLockFilesExist(workspace);
+        EnsureIndexIsMerged(repository);
+
+        var status = RetrieveRepositoryStatus(repository);
+        if (!status.IsDirty)
         {
-            var head = await CurrentHeadAsync(git, workspace, cancellationToken);
-            return new VersionControlCommitResult(false, head);
+            return new VersionControlCommitResult(false, CurrentHead(repository));
         }
 
-        await RunGitAsync(git, workspace, ["add", "-A"], cancellationToken);
-        await RunGitAsync(git, workspace, ["commit", "-m", message], cancellationToken);
+        RunGitOperation(
+            "stage repository changes",
+            () =>
+            {
+                Commands.Stage(repository, "*", new StageOptions { IncludeIgnored = false });
+                return 0;
+            });
+        EnsureIndexIsMerged(repository);
+
+        var stagedStatus = RetrieveRepositoryStatus(repository);
+        if (!stagedStatus.Any(IsStagedChange))
+        {
+            return new VersionControlCommitResult(false, CurrentHead(repository));
+        }
+
+        var signature = BuildConfiguredSignature(repository);
+        var commit = RunGitOperation(
+            "commit repository changes",
+            () => repository.Commit(message, signature, signature));
         ClearReadOnlyAttributes(workspace);
-        var hash = await CurrentHeadAsync(git, workspace, cancellationToken);
-        return new VersionControlCommitResult(true, hash);
+        return new VersionControlCommitResult(true, commit.Sha);
     }
 
-    private async ValueTask<IReadOnlyList<GitCommitFilePayload>> GetCommitFilesCoreAsync(
-        string git,
-        string workspace,
-        string commitId,
-        CancellationToken cancellationToken)
+    private static IReadOnlyList<GitCommitFilePayload> GetCommitFilesCore(
+        Repository repository,
+        Commit commit)
     {
-        var nameStatus = await RunGitAsync(
-            git,
-            workspace,
-            ["show", "--format=", "--name-status", "-z", "--find-renames", commitId],
-            cancellationToken);
-        var numstat = await RunGitAsync(
-            git,
-            workspace,
-            ["show", "--format=", "--numstat", "-z", "--find-renames", commitId],
-            cancellationToken);
-        return GitHistoryParser.ParseCommitFiles(nameStatus.Stdout, numstat.Stdout);
+        using var patch = CompareCommitPatch(repository, commit);
+        return patch
+            .Where(entry => IsSafeGitPath(entry.Path) && (entry.OldPath is null || IsSafeGitPath(entry.OldPath)))
+            .Select(entry => new GitCommitFilePayload(
+                entry.Path,
+                string.Equals(entry.OldPath, entry.Path, StringComparison.Ordinal) ? null : entry.OldPath,
+                ToPayloadChangeType(entry.Status),
+                Math.Max(entry.LinesAdded, 0),
+                Math.Max(entry.LinesDeleted, 0),
+                entry.IsBinaryComparison))
+            .OrderBy(item => item.Path, StringComparer.Ordinal)
+            .ToArray();
     }
 
-    private async ValueTask<long> CountCommitsAsync(
-        string git,
-        string workspace,
-        CancellationToken cancellationToken)
+    private static bool CommitTouchesPath(
+        Repository repository,
+        Commit commit,
+        string path)
     {
-        var result = await RunGitAsync(git, workspace, ["rev-list", "--count", "HEAD"], cancellationToken);
-        return long.TryParse(result.Stdout.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) && count > 0
-            ? count
-            : 0;
+        return GetCommitFilesCore(repository, commit)
+            .Any(file =>
+                string.Equals(file.Path, path, StringComparison.Ordinal) ||
+                string.Equals(file.OldPath, path, StringComparison.Ordinal));
     }
 
-    private async ValueTask<string> ResolveCommitAsync(
-        string git,
-        string workspace,
-        string commitId,
-        CancellationToken cancellationToken)
+    private static Patch CompareCommitPatch(
+        Repository repository,
+        Commit commit,
+        string? path = null)
     {
-        var result = await RunGitAsync(
-            git,
-            workspace,
-            ["rev-parse", "--verify", $"{commitId}^{{commit}}"],
-            cancellationToken);
-        return result.Stdout.Trim();
+        var oldTree = commit.Parents.FirstOrDefault()?.Tree;
+        var paths = string.IsNullOrWhiteSpace(path) ? null : new[] { path };
+        return RunGitOperation(
+            "read commit diff",
+            () => paths is null
+                ? repository.Diff.Compare<Patch>(oldTree, commit.Tree, DiffCompareOptions())
+                : repository.Diff.Compare<Patch>(
+                    oldTree,
+                    commit.Tree,
+                    paths,
+                    new ExplicitPathsOptions { ShouldFailOnUnmatchedPath = false },
+                    DiffCompareOptions()));
     }
 
-    private async ValueTask<string?> ReadOriginalContentAsync(
-        string git,
-        string workspace,
-        string commitId,
-        GitCommitFilePayload file,
-        CancellationToken cancellationToken)
+    private static LibGit2Sharp.CompareOptions DiffCompareOptions()
+    {
+        return new LibGit2Sharp.CompareOptions
+        {
+            Similarity = SimilarityOptions.Renames
+        };
+    }
+
+    private static RepositoryStatus RetrieveRepositoryStatus(Repository repository)
+    {
+        return RunGitOperation(
+            "read repository status",
+            () => repository.RetrieveStatus(new StatusOptions
+            {
+                Show = StatusShowOption.IndexAndWorkDir,
+                DetectRenamesInIndex = true,
+                DetectRenamesInWorkDir = true,
+                IncludeIgnored = false,
+                IncludeUntracked = true,
+                RecurseUntrackedDirs = true
+            }));
+    }
+
+    private static bool IsStagedChange(StatusEntry entry)
+    {
+        return (entry.State & (
+            FileStatus.NewInIndex |
+            FileStatus.ModifiedInIndex |
+            FileStatus.DeletedFromIndex |
+            FileStatus.RenamedInIndex |
+            FileStatus.TypeChangeInIndex)) != 0;
+    }
+
+    private static void EnsureIndexIsMerged(Repository repository)
+    {
+        if (!RunGitOperation("read repository index", () => repository.Index.IsFullyMerged))
+        {
+            throw new VersionControlException("Git repository has unresolved index conflicts.");
+        }
+    }
+
+    private static Signature BuildConfiguredSignature(Repository repository)
+    {
+        return RunGitOperation(
+            "build repository author signature",
+            () => repository.Config.BuildSignature(DateTimeOffset.Now));
+    }
+
+    private static string CurrentHead(Repository repository)
+    {
+        var head = RunGitOperation("read current HEAD", () => repository.Head.Tip);
+        return head?.Sha ?? string.Empty;
+    }
+
+    private static Commit ResolveCommit(
+        Repository repository,
+        string commitId)
+    {
+        return RunGitOperation(
+            "resolve commit",
+            () => repository.Lookup<Commit>(commitId)) ??
+            throw new VersionControlException("Git commit was not found.");
+    }
+
+    private static IReadOnlyList<Commit> EnumerateCommits(Repository repository)
+    {
+        return RunGitOperation(
+            "read commit log",
+            () =>
+            {
+                var commits = new List<Commit>();
+                var visited = new HashSet<string>(StringComparer.Ordinal);
+                var current = repository.Head.Tip;
+                while (current is not null && visited.Add(current.Sha))
+                {
+                    commits.Add(current);
+                    current = current.Parents.FirstOrDefault();
+                }
+
+                return commits;
+            });
+    }
+
+    private static string? ReadOriginalContent(
+        Commit commit,
+        GitCommitFilePayload file)
     {
         if (string.Equals(file.ChangeType, "added", StringComparison.Ordinal))
         {
             return null;
         }
 
-        if (!await HasParentAsync(git, workspace, commitId, cancellationToken))
+        var parent = commit.Parents.FirstOrDefault();
+        if (parent is null)
         {
             return null;
         }
 
         var path = file.OldPath ?? file.Path;
-        return await ReadBlobTextAsync(git, workspace, $"{commitId}^", path, cancellationToken);
+        return ReadBlobText(parent, path);
     }
 
-    private async ValueTask<string?> ReadModifiedContentAsync(
-        string git,
-        string workspace,
-        string commitId,
-        GitCommitFilePayload file,
-        CancellationToken cancellationToken)
+    private static string? ReadModifiedContent(
+        Commit commit,
+        GitCommitFilePayload file)
     {
         if (string.Equals(file.ChangeType, "deleted", StringComparison.Ordinal))
         {
             return null;
         }
 
-        return await ReadBlobTextAsync(git, workspace, commitId, file.Path, cancellationToken);
+        return ReadBlobText(commit, file.Path);
     }
 
-    private async ValueTask<bool> HasParentAsync(
-        string git,
-        string workspace,
-        string commitId,
-        CancellationToken cancellationToken)
+    private static string? ReadBlobText(
+        Commit commit,
+        string path)
     {
-        var result = await RunGitAsync(
-            git,
-            workspace,
-            ["rev-parse", "--verify", $"{commitId}^"],
-            cancellationToken,
-            throwOnFailure: false);
-        return result.ExitCode == 0;
-    }
-
-    private async ValueTask<string?> ReadBlobTextAsync(
-        string git,
-        string workspace,
-        string treeish,
-        string path,
-        CancellationToken cancellationToken)
-    {
-        var result = await RunGitAsync(
-            git,
-            workspace,
-            ["show", $"{treeish}:{path}"],
-            cancellationToken,
-            throwOnFailure: false);
-        if (result.ExitCode != 0)
+        var entry = commit[path];
+        if (entry?.Target is not Blob blob || blob.IsBinary)
         {
             return null;
         }
 
-        var (text, truncated) = TruncateText(result.Stdout, MaxContentTextLength);
-        return truncated ? MarkTruncated(text) : text;
+        return RunGitOperation(
+            "read blob content",
+            () =>
+            {
+                using var stream = blob.GetContentStream();
+                var maxBytes = checked(MaxContentTextLength * 4 + 4);
+                var buffer = new byte[16 * 1024];
+                using var output = new MemoryStream();
+                var truncatedBytes = false;
+
+                while (true)
+                {
+                    var remaining = maxBytes - (int)output.Length;
+                    if (remaining <= 0)
+                    {
+                        truncatedBytes = stream.ReadByte() != -1;
+                        break;
+                    }
+
+                    var read = stream.Read(buffer, 0, Math.Min(buffer.Length, remaining));
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    output.Write(buffer, 0, read);
+                }
+
+                var text = Encoding.UTF8.GetString(output.ToArray());
+                var (truncatedText, truncatedChars) = TruncateText(text, MaxContentTextLength);
+                return truncatedBytes || truncatedChars ? MarkTruncated(truncatedText) : text;
+            });
     }
 
-    private async ValueTask<string> CurrentHeadAsync(
-        string git,
-        string workspace,
-        CancellationToken cancellationToken)
+    private static string ToPayloadChangeType(ChangeKind status)
     {
-        var result = await RunGitAsync(git, workspace, ["rev-parse", "HEAD"], cancellationToken);
-        return result.Stdout.Trim();
+        return status switch
+        {
+            ChangeKind.Added => "added",
+            ChangeKind.Deleted => "deleted",
+            ChangeKind.Renamed => "renamed",
+            ChangeKind.Copied => "renamed",
+            ChangeKind.TypeChanged => "modified",
+            _ => "modified"
+        };
+    }
+
+    private static string FirstCommitMessageLine(Commit commit)
+    {
+        return commit.MessageShort.Split('\n', 2)[0];
+    }
+
+    private static string ShortSha(Commit commit)
+    {
+        return commit.Sha.Length <= 7 ? commit.Sha : commit.Sha[..7];
     }
 
     private async ValueTask<string> NovelWorkspacePathAsync(long novelId, CancellationToken cancellationToken)
@@ -494,160 +572,40 @@ public sealed class GitVersionControlService : IVersionControlService
         return SafeChildPath(Path.Combine(dataDirectory, "novels"), novelId.ToString(CultureInfo.InvariantCulture));
     }
 
-    private string ResolveGitExecutable()
+    private static Repository OpenOrInitializeRepository(string workspace)
     {
-        if (!string.IsNullOrWhiteSpace(_gitExecutableOverride))
-        {
-            return _gitExecutableOverride;
-        }
-
-        var configured = Environment.GetEnvironmentVariable(GitPathEnvironmentVariable);
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            return configured;
-        }
-
-        foreach (var candidate in GetBundledGitCandidatePaths(AppContext.BaseDirectory, CurrentPlatformKey()))
-        {
-            if (File.Exists(candidate))
+        return RunGitOperation(
+            "open or initialize repository",
+            () =>
             {
-                return candidate;
-            }
-        }
+                var gitMetadataExists = Directory.Exists(Path.Combine(workspace, ".git")) ||
+                    File.Exists(Path.Combine(workspace, ".git"));
+                if (!gitMetadataExists)
+                {
+                    Repository.Init(workspace);
+                }
+                else if (!IsValidRepository(workspace))
+                {
+                    throw new VersionControlException("Git repository metadata is invalid or unsupported.");
+                }
 
-        var fromPath = FindOnPath(OperatingSystem.IsWindows() ? "git.exe" : "git");
-        if (!string.IsNullOrWhiteSpace(fromPath))
-        {
-            return fromPath;
-        }
-
-        return OperatingSystem.IsWindows() ? "git.exe" : "git";
+                return new Repository(workspace);
+            });
     }
 
-    internal static IReadOnlyList<string> GetBundledGitCandidatePaths(string baseDirectory, string platformKey)
+    private static Repository OpenRepository(string workspace)
     {
-        if (string.Equals(platformKey, "windows", StringComparison.OrdinalIgnoreCase))
-        {
-            return
-            [
-                Path.Combine(baseDirectory, "runtime", "git", "mingw64", "bin", "git.exe"),
-                Path.Combine(baseDirectory, "runtime", "git", "cmd", "git.exe"),
-                Path.Combine(baseDirectory, "runtime", "git", "bin", "git.exe"),
-                Path.Combine(baseDirectory, "runtime", "git", "git.exe")
-            ];
-        }
-
-        if (string.Equals(platformKey, "macos", StringComparison.OrdinalIgnoreCase))
-        {
-            return
-            [
-                Path.GetFullPath(Path.Combine(baseDirectory, "..", "Resources", "runtime", "git", "git")),
-                Path.Combine(baseDirectory, "runtime", "git", "git")
-            ];
-        }
-
-        return
-        [
-            Path.Combine(baseDirectory, "runtime", "git", "git")
-        ];
-    }
-
-    private static string CurrentPlatformKey()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return "windows";
-        }
-
-        return OperatingSystem.IsMacOS() ? "macos" : "linux";
-    }
-
-    private static string? FindOnPath(string executableName)
-    {
-        var path = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return null;
-        }
-
-        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            var candidate = Path.Combine(directory, executableName);
-            if (File.Exists(candidate))
+        return RunGitOperation(
+            "open repository",
+            () =>
             {
-                return candidate;
-            }
-        }
+                if (!IsValidRepository(workspace))
+                {
+                    throw new VersionControlException("Git repository metadata is invalid or unsupported.");
+                }
 
-        return null;
-    }
-
-    private async ValueTask<GitCommandResult> RunGitAsync(
-        string git,
-        string workspace,
-        IReadOnlyList<string> args,
-        CancellationToken cancellationToken,
-        bool throwOnFailure = true)
-    {
-        try
-        {
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = git,
-                WorkingDirectory = workspace,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            foreach (var arg in args)
-            {
-                startInfo.ArgumentList.Add(arg);
-            }
-
-            startInfo.Environment["LC_ALL"] = "C";
-            startInfo.Environment["LANG"] = "C";
-            startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
-
-            using var process = new Process { StartInfo = startInfo };
-            if (!process.Start())
-            {
-                throw new VersionControlException("Git process did not start.");
-            }
-
-            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            using var timeout = new CancellationTokenSource(_commandTimeout);
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
-            try
-            {
-                await process.WaitForExitAsync(linked.Token);
-            }
-            catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-            {
-                TryKill(process);
-                throw new VersionControlException($"Git command timed out: {FormatArgs(args)}");
-            }
-
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
-            var result = new GitCommandResult(process.ExitCode, stdout, stderr);
-            if (throwOnFailure && result.ExitCode != 0)
-            {
-                throw new VersionControlException($"Git command failed: {FormatArgs(args)}: {TrimError(stderr)}");
-            }
-
-            return result;
-        }
-        catch (Win32Exception ex)
-        {
-            throw new VersionControlException("Git executable was not found. Install Git and make sure it is available on PATH.", ex);
-        }
-        catch (InvalidOperationException ex)
-        {
-            throw new VersionControlException("Git command could not be started.", ex);
-        }
+                return new Repository(workspace);
+            });
     }
 
     private static async ValueTask EnsureBaselineFilesAsync(string workspace, CancellationToken cancellationToken)
@@ -660,6 +618,18 @@ public sealed class GitVersionControlService : IVersionControlService
         }
     }
 
+    private static bool IsValidRepository(string workspace)
+    {
+        try
+        {
+            return Repository.IsValid(workspace);
+        }
+        catch (LibGit2SharpException)
+        {
+            return false;
+        }
+    }
+
     private static int NormalizePage(int page)
     {
         return page <= 0 ? 1 : Math.Min(page, 10_000);
@@ -668,16 +638,6 @@ public sealed class GitVersionControlService : IVersionControlService
     private static int NormalizePageSize(int size)
     {
         return size <= 0 ? 20 : Math.Clamp(size, 1, MaxHistoryPageSize);
-    }
-
-    private static TimeSpan ValidateCommandTimeout(TimeSpan timeout)
-    {
-        if (timeout <= TimeSpan.Zero || timeout > TimeSpan.FromMinutes(5))
-        {
-            throw new ArgumentOutOfRangeException(nameof(timeout), timeout, "Git command timeout must be between 0 and 5 minutes.");
-        }
-
-        return timeout;
     }
 
     private static string NormalizeCommitId(string? commitId, string name)
@@ -726,16 +686,22 @@ public sealed class GitVersionControlService : IVersionControlService
         }
 
         var normalized = relativePath.Trim().Replace('\\', '/');
-        if (normalized.Contains('\0') ||
-            normalized.Length > 512 ||
-            normalized.StartsWith("/", StringComparison.Ordinal) ||
-            normalized.Contains(':') ||
-            normalized.Split('/').Any(segment => segment is "" or "." or ".."))
+        if (!IsSafeGitPath(normalized))
         {
             throw new ArgumentException("Git path must be a safe repository-relative path.", name);
         }
 
         return normalized;
+    }
+
+    private static bool IsSafeGitPath(string? path)
+    {
+        return !string.IsNullOrEmpty(path) &&
+            path.Length <= 512 &&
+            !path.Contains('\0') &&
+            !path.StartsWith("/", StringComparison.Ordinal) &&
+            !path.Contains(':', StringComparison.Ordinal) &&
+            path.Split('/').All(segment => segment is not "" and not "." and not "..");
     }
 
     private static (string Text, bool Truncated) TruncateText(string text, int maxLength)
@@ -813,9 +779,68 @@ public sealed class GitVersionControlService : IVersionControlService
             }
             catch
             {
-                // Best-effort cleanup support; Git command failures are surfaced separately.
+                // Best-effort cleanup support; repository operation failures are surfaced separately.
             }
         }
+    }
+
+    private static void ThrowIfRepositoryLockFilesExist(string workspace)
+    {
+        var gitDirectory = ResolveGitDirectory(workspace);
+        if (gitDirectory is null)
+        {
+            return;
+        }
+
+        foreach (var lockFileName in GitLockFileNames)
+        {
+            var lockPath = Path.Combine(gitDirectory, lockFileName);
+            if (File.Exists(lockPath))
+            {
+                throw new VersionControlException(
+                    $"Git repository lock file exists: {FormatRepositoryLockPath(workspace, lockPath)}. " +
+                    "Close any running Git operation and retry; Novelist will not delete Git lock files automatically.");
+            }
+        }
+    }
+
+    private static string? ResolveGitDirectory(string workspace)
+    {
+        var gitPath = Path.Combine(workspace, ".git");
+        if (Directory.Exists(gitPath))
+        {
+            return gitPath;
+        }
+
+        if (!File.Exists(gitPath))
+        {
+            return null;
+        }
+
+        var firstLine = File.ReadLines(gitPath).FirstOrDefault();
+        const string prefix = "gitdir:";
+        if (firstLine is null || !firstLine.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var gitDirectory = firstLine[prefix.Length..].Trim();
+        if (string.IsNullOrWhiteSpace(gitDirectory))
+        {
+            return null;
+        }
+
+        return Path.GetFullPath(Path.IsPathRooted(gitDirectory)
+            ? gitDirectory
+            : Path.Combine(workspace, gitDirectory));
+    }
+
+    private static string FormatRepositoryLockPath(string workspace, string lockPath)
+    {
+        var relative = Path.GetRelativePath(workspace, lockPath).Replace('\\', '/');
+        return relative.StartsWith("..", StringComparison.Ordinal)
+            ? Path.GetFileName(lockPath)
+            : relative;
     }
 
     private static void ValidateCommitMessage(string message)
@@ -836,31 +861,41 @@ public sealed class GitVersionControlService : IVersionControlService
         }
     }
 
-    private static string FormatArgs(IReadOnlyList<string> args)
-    {
-        return string.Join(" ", args.Select(arg => arg.Contains(' ', StringComparison.Ordinal) ? $"\"{arg}\"" : arg));
-    }
-
-    private static string TrimError(string error)
-    {
-        var trimmed = error.Trim();
-        return trimmed.Length == 0 ? "no stderr" : trimmed;
-    }
-
-    private static void TryKill(Process process)
+    private static T RunGitOperation<T>(string operation, Func<T> action)
     {
         try
         {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
+            return action();
         }
-        catch
+        catch (VersionControlException)
         {
-            // Preserve the original timeout error.
+            throw;
+        }
+        catch (LibGit2SharpException ex)
+        {
+            throw new VersionControlException($"Git operation failed: {operation}: {NormalizeGitErrorText(ex.Message)}", ex);
+        }
+        catch (IOException ex)
+        {
+            throw new VersionControlException($"Git operation failed: {operation}: {NormalizeGitErrorText(ex.Message)}", ex);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new VersionControlException($"Git operation failed: {operation}: {NormalizeGitErrorText(ex.Message)}", ex);
         }
     }
 
-    private sealed record GitCommandResult(int ExitCode, string Stdout, string Stderr);
+    private static string NormalizeGitErrorText(string error)
+    {
+        var trimmed = error.Trim();
+        if (trimmed.Length == 0)
+        {
+            return "no detail";
+        }
+
+        var singleLine = string.Join(" ", trimmed.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return singleLine.Length <= MaxGitErrorTextLength
+            ? singleLine
+            : singleLine[..MaxGitErrorTextLength] + "...";
+    }
 }
