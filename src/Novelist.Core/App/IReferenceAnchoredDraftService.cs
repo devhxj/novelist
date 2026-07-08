@@ -38,6 +38,10 @@ public interface IReferenceAnchoredDraftService
         GenerateReferenceAnchoredDraftPayload input,
         CancellationToken cancellationToken);
 
+    ValueTask<IReadOnlyList<ReferenceDraftParagraphCandidatePayload>> GetDraftCandidatesAsync(
+        GetReferenceDraftCandidatesPayload input,
+        CancellationToken cancellationToken);
+
     ValueTask<ReferenceAnchoredDraftAuditPayload> AuditDraftAgainstBlueprintAsync(
         AuditReferenceAnchoredDraftPayload input,
         CancellationToken cancellationToken);

@@ -34,6 +34,7 @@ export function settingsFixture(lastNovelId) {
 
 export function installConfigurableAppMockBridge(options = {}) {
   const now = '2026-07-05T12:00:00.000Z'
+  const referenceCandidateText = '林岚没有立刻抬头。杯底那半圈水痕贴着木纹，像刚被雨夜重新描过一遍；她只把指尖收紧，确认门外的人还不知道这条线索。'
   const receivers = new Set()
   const defaultSettings = {
     ID: 1,
@@ -446,12 +447,12 @@ export function installConfigurableAppMockBridge(options = {}) {
       material_type: 'passage',
       function_tag: 'emotion_evidence',
       emotion_tag: 'suspense',
-      scene_tag: 'interior',
+      scene_tag: 'unknown',
       pov_tag: 'close',
       technique_tag: 'subtext',
-      function_confidence: 0.87,
+      function_confidence: 0.72,
       emotion_confidence: 0.84,
-      pov_confidence: 0.89,
+      pov_confidence: 0.62,
       text: '灯影在门缝里停了一瞬，她把袖口往下拉，只把这处停顿记进本子。',
       source_hash: 'hash-mock-material-002',
       extractor_version: 'mock-reference-v1',
@@ -969,10 +970,16 @@ export function installConfigurableAppMockBridge(options = {}) {
       case 'GetReferenceAnchorBuildStatus': return referenceBuildStatus(args[1])
       case 'PickReferenceSourceFile': return options.pickedReferenceSourceFile ?? null
       case 'CreateReferenceAnchor': return createReferenceAnchor(args[0])
+      case 'CreateReferenceAnchors': return createReferenceAnchors(args[0])
+      case 'CreateReferenceAnchorsWithResult': return createReferenceAnchorsWithResult(args[0])
       case 'RebuildReferenceAnchor': return rebuildReferenceAnchor(args[1])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
+      case 'GetReferenceMaterialTagReviewQueue': return getReferenceMaterialTagReviewQueue(args[0])
       case 'GetReferenceMaterialDetail': return getReferenceMaterialDetail(args[0])
+      case 'GetReferenceSourceSegmentDetail': return getReferenceSourceSegmentDetail(args[0])
       case 'GetReferenceSourceProcessingDetail': return getReferenceSourceProcessingDetail(args[0])
+      case 'UpdateReferenceMaterialTags': return updateReferenceMaterialTags(args[0])
+      case 'UpdateReferenceMaterialsTags': return updateReferenceMaterialsTags(args[0])
       case 'AdaptReferenceMaterial': return adaptReferenceMaterial(args[0])
       case 'BuildReferenceStyleProfile': return buildReferenceStyleProfile(args[0])
       case 'GetReferenceStyleProfileBuildStatus': return referenceStyleProfileBuildStatus(args[0])
@@ -982,6 +989,8 @@ export function installConfigurableAppMockBridge(options = {}) {
       case 'ReviewReferenceChapterBlueprint': return reviewReferenceBlueprint(args[0])
       case 'ApproveReferenceChapterBlueprint': return approveReferenceBlueprint(args[0])
       case 'BindReferenceBlueprintMaterials': return bindReferenceBlueprintMaterials(args[0])
+      case 'GetReferenceDraftCandidates': return getReferenceDraftCandidates(args[0])
+      case 'GetReferenceAnchoredDraftAudits': return getReferenceAnchoredDraftAudits(args[0])
       case 'StartReferenceOrchestrationRun': return startReferenceOrchestrationRun(args[0])
       case 'GetReferenceOrchestrationRuns': return referenceOrchestrationRuns(args[0], args[1])
       case 'GetReferenceOrchestrationRun': return referenceOrchestrationRun(args[1])
@@ -3279,6 +3288,55 @@ export function installConfigurableAppMockBridge(options = {}) {
     return sanitizeReferenceAnchor(anchor)
   }
 
+  function createReferenceAnchors(input) {
+    const anchors = Array.isArray(input?.anchors) ? input.anchors : []
+    return anchors.map((anchor) => createReferenceAnchor(anchor))
+  }
+
+  function createReferenceAnchorsWithResult(input) {
+    const anchors = Array.isArray(input?.anchors) ? input.anchors : []
+    const succeeded = []
+    const failed = []
+
+    anchors.forEach((anchor, index) => {
+      if (shouldMockReferenceAnchorPartialFailure(anchor)) {
+        failed.push(mockReferenceAnchorFailure(anchor, index))
+        return
+      }
+
+      succeeded.push(createReferenceAnchor(anchor))
+    })
+
+    return {
+      succeeded,
+      failed,
+      total_count: anchors.length,
+      succeeded_count: succeeded.length,
+      failed_count: failed.length,
+    }
+  }
+
+  function shouldMockReferenceAnchorPartialFailure(anchor) {
+    const values = [
+      anchor?.title,
+      anchor?.source_path,
+      anchor?.source_kind,
+      ...(Array.isArray(anchor?.user_tags) ? anchor.user_tags : []),
+    ]
+    return values.some((value) => String(value ?? '').toLowerCase().includes('mock-partial-fail'))
+  }
+
+  function mockReferenceAnchorFailure(anchor, index) {
+    return {
+      index,
+      title: String(anchor?.title ?? ''),
+      source_kind: String(anchor?.source_kind ?? ''),
+      source_identity: `mock-source-${index + 1}`,
+      diagnostic: '模拟语料解析失败；本地路径已隐藏。',
+      retry_available: true,
+    }
+  }
+
   function referenceBuildStatus(anchorId) {
     const key = String(anchorId)
     if (state.referenceBuildStatuses[key]) {
@@ -3340,7 +3398,171 @@ export function installConfigurableAppMockBridge(options = {}) {
       return queryTerms.some((term) => searchable.includes(term))
     })
     const startIndex = (page - 1) * size
-    return pagedResult(filtered.slice(startIndex, startIndex + size), page, size, filtered.length)
+    return pagedResult(
+      filtered.slice(startIndex, startIndex + size).map(toReferenceMaterialSummary),
+      page,
+      size,
+      filtered.length,
+    )
+  }
+
+  function toReferenceMaterialSummary(material) {
+    const preview = boundedPreview(material.text, 160)
+    return {
+      material_id: material.material_id,
+      anchor_id: material.anchor_id,
+      source_segment_id: material.source_segment_id,
+      material_type: material.material_type,
+      function_tag: material.function_tag,
+      emotion_tag: material.emotion_tag,
+      scene_tag: material.scene_tag,
+      pov_tag: material.pov_tag,
+      technique_tag: material.technique_tag,
+      function_confidence: material.function_confidence,
+      emotion_confidence: material.emotion_confidence,
+      pov_confidence: material.pov_confidence,
+      text_preview: preview.text,
+      text_truncated: preview.truncated,
+      source_hash: material.source_hash,
+      extractor_version: material.extractor_version,
+      user_verified: material.user_verified,
+      created_at: material.created_at,
+      archive_state: material.archived_at ? 'archived' : 'active',
+      archived_at: material.archived_at ?? null,
+      score_components: material.score_components ?? null,
+    }
+  }
+
+  function getReferenceMaterialTagReviewQueue(input = {}) {
+    if (options.referenceStress) {
+      return getStressReferenceMaterialTagReviewQueue(input)
+    }
+
+    const page = Math.max(1, Number(input.page ?? 1))
+    const size = Math.max(1, Number(input.size ?? 10))
+    const anchorIds = Array.isArray(input.anchor_ids)
+      ? input.anchor_ids.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0)
+      : []
+    const archiveFilter = String(input.archive_filter ?? 'active')
+    const source = Array.isArray(state.referenceMaterials) ? state.referenceMaterials : []
+    const queued = source
+      .filter((material) => {
+        if (anchorIds.length > 0 && !anchorIds.includes(Number(material.anchor_id))) return false
+        if (archiveFilter === 'active' && material.archived_at) return false
+        if (archiveFilter === 'archived' && !material.archived_at) return false
+        return true
+      })
+      .map((material) => toReferenceMaterialTagReviewItem(material))
+      .filter((item) => item.issues.length > 0)
+    const startIndex = (page - 1) * size
+    return pagedResult(queued.slice(startIndex, startIndex + size), page, size, queued.length)
+  }
+
+  function toReferenceMaterialTagReviewItem(material) {
+    return {
+      material: toReferenceMaterialSummary(material),
+      issues: referenceMaterialTagReviewIssues(material),
+    }
+  }
+
+  function referenceMaterialTagReviewIssues(material) {
+    const issues = []
+    if (material.user_verified !== true) {
+      issues.push({ code: 'unverified', label: '未校正', severity: 'review' })
+    }
+
+    const lowConfidence = []
+    addLowConfidenceIssueLabel(lowConfidence, '功能', material.function_confidence)
+    addLowConfidenceIssueLabel(lowConfidence, '情绪', material.emotion_confidence)
+    addLowConfidenceIssueLabel(lowConfidence, 'POV', material.pov_confidence)
+    if (lowConfidence.length > 0) {
+      issues.push({
+        code: 'low_confidence',
+        label: `低置信 ${lowConfidence.join(' / ')}`,
+        severity: 'warning',
+      })
+    }
+
+    const unknownTags = []
+    addUnknownTagIssueLabel(unknownTags, '功能', material.function_tag)
+    addUnknownTagIssueLabel(unknownTags, '情绪', material.emotion_tag)
+    addUnknownTagIssueLabel(unknownTags, '场景', material.scene_tag)
+    addUnknownTagIssueLabel(unknownTags, 'POV', material.pov_tag)
+    addUnknownTagIssueLabel(unknownTags, '技法', material.technique_tag)
+    if (unknownTags.length > 0) {
+      issues.push({
+        code: 'unknown_tag',
+        label: `unknown 标签 ${unknownTags.join(' / ')}`,
+        severity: 'review',
+      })
+    }
+
+    return issues
+  }
+
+  function addLowConfidenceIssueLabel(labels, label, confidence) {
+    const value = Number(confidence)
+    if (Number.isFinite(value) && value < 0.75) {
+      labels.push(`${label} ${value.toFixed(2)}`)
+    }
+  }
+
+  function addUnknownTagIssueLabel(labels, label, tag) {
+    if (isUnknownReferenceTag(tag)) {
+      labels.push(label)
+    }
+  }
+
+  function isUnknownReferenceTag(tag) {
+    const value = String(tag ?? '').trim().toLowerCase()
+    return value.length === 0 || ['unknown', 'untagged', 'none', 'null', 'undefined'].includes(value)
+  }
+
+  function updateReferenceMaterialTags(input = {}) {
+    const materialId = String(input?.material_id ?? '')
+    let updatedMaterial = null
+    state.referenceMaterials = state.referenceMaterials.map((material) => {
+      if (material.material_id !== materialId) return material
+      updatedMaterial = {
+        ...material,
+        function_tag: input.function_tag ?? material.function_tag,
+        emotion_tag: input.emotion_tag ?? material.emotion_tag,
+        scene_tag: input.scene_tag ?? material.scene_tag,
+        pov_tag: input.pov_tag ?? material.pov_tag,
+        technique_tag: input.technique_tag ?? material.technique_tag,
+        function_confidence: input.function_tag == null ? material.function_confidence : 1,
+        emotion_confidence: input.emotion_tag == null ? material.emotion_confidence : 1,
+        pov_confidence: input.pov_tag == null ? material.pov_confidence : 1,
+        user_verified: true,
+      }
+      return updatedMaterial
+    })
+
+    return updatedMaterial ? toReferenceMaterialSummary(updatedMaterial) : null
+  }
+
+  function updateReferenceMaterialsTags(input = {}) {
+    const materialIds = new Set(Array.isArray(input.material_ids) ? input.material_ids.map(String) : [])
+    const updated = []
+    state.referenceMaterials = state.referenceMaterials.map((material) => {
+      if (!materialIds.has(material.material_id)) return material
+      const updatedMaterial = {
+        ...material,
+        function_tag: input.function_tag ?? material.function_tag,
+        emotion_tag: input.emotion_tag ?? material.emotion_tag,
+        scene_tag: input.scene_tag ?? material.scene_tag,
+        pov_tag: input.pov_tag ?? material.pov_tag,
+        technique_tag: input.technique_tag ?? material.technique_tag,
+        function_confidence: input.function_tag == null ? material.function_confidence : 1,
+        emotion_confidence: input.emotion_tag == null ? material.emotion_confidence : 1,
+        pov_confidence: input.pov_tag == null ? material.pov_confidence : 1,
+        user_verified: true,
+      }
+      updated.push(toReferenceMaterialSummary(updatedMaterial))
+      return updatedMaterial
+    })
+
+    return updated
   }
 
   function getReferenceMaterialDetail(input = {}) {
@@ -3425,6 +3647,64 @@ export function installConfigurableAppMockBridge(options = {}) {
     }
   }
 
+  function getReferenceSourceSegmentDetail(input = {}) {
+    const anchorId = Number(input?.anchor_id ?? 0)
+    const segmentId = String(input?.segment_id ?? '')
+    const anchor = referenceAnchors().find((item) => Number(item.anchor_id) === anchorId)
+    if (!anchor || !segmentId) return null
+
+    const material = state.referenceMaterials.find((item) =>
+      Number(item.anchor_id) === anchorId && String(item.source_segment_id) === segmentId)
+    const sourceText = material?.text ?? '雨声压低了整条街的呼吸。他在门口停了很久，手指贴着伞柄。'
+    const preview = boundedPreview(sourceText, 32)
+    return {
+      source: {
+        anchor_id: anchor.anchor_id,
+        novel_id: anchor.novel_id ?? 0,
+        title: anchor.title,
+        author: anchor.author,
+        source_kind: anchor.source_kind,
+        license_status: anchor.license_status,
+        source_file_hash: anchor.source_file_hash,
+        build_version: anchor.build_version,
+        status: anchor.status,
+        visibility: anchor.visibility,
+        source_trust: anchor.source_trust,
+        user_tags: anchor.user_tags,
+        owner_scope: anchor.owner_scope ?? (Number(anchor.novel_id ?? 0) === 0 ? 'workspace_corpus' : 'novel'),
+        owner_novel_id: anchor.owner_novel_id ?? (Number(anchor.novel_id ?? 0) === 0 ? null : Number(anchor.novel_id)),
+      },
+      segment: {
+        anchor_id: anchor.anchor_id,
+        segment_id: segmentId,
+        segment_type: material?.material_type === 'sentence' ? 'sentence' : 'paragraph',
+        chapter_index: 1,
+        chapter_title: '雨夜参考',
+        segment_index: 1,
+        parent_segment_id: 'mock-chapter-rain-001',
+        start_offset: 0,
+        end_offset: sourceText.length,
+        text_preview: preview.text,
+        text_truncated: preview.truncated,
+        text_hash: `hash-segment-${segmentId}`,
+      },
+      processing_notes: [{
+        stage: 'extracting_materials',
+        status: material ? 'ready' : 'failed_extraction',
+        message: material ? 'segments=3; materials=2; slots=1; vectors=2' : 'extractor stopped before material rows were produced',
+        updated_at: now,
+        source_segment_count: 3,
+        material_count: material ? 2 : 0,
+        slot_count: material ? 1 : 0,
+        vector_count: material ? 2 : 0,
+        affected_source_id: String(anchor.anchor_id),
+        affected_material_id: material?.material_id ?? '',
+        affected_segment_id: segmentId,
+        affected_slot_id: material ? 'object' : '',
+      }],
+    }
+  }
+
   function getReferenceSourceProcessingDetail(input = {}) {
     const anchorId = Number(input?.anchor_id ?? 0)
     const anchor = referenceAnchors().find((item) => Number(item.anchor_id) === anchorId)
@@ -3471,9 +3751,47 @@ export function installConfigurableAppMockBridge(options = {}) {
         affected_material_id: 'mock-mat-rain-001',
         affected_segment_id: 'mock-seg-rain-001',
         affected_slot_id: 'object',
+      }, {
+        event_id: 'event-failed-extraction',
+        stage: 'extracting_materials',
+        status: 'failed_extraction',
+        message: 'extractor stopped before material rows were produced',
+        created_at: now,
+        source_segment_count: 3,
+        material_count: 0,
+        slot_count: 0,
+        vector_count: 0,
+        affected_source_id: String(anchor.anchor_id),
+        affected_material_id: '',
+        affected_segment_id: 'mock-seg-rain-001',
+        affected_slot_id: '',
       }],
       retry_available: false,
       rebuild_available: true,
+      attempt_count: 1,
+      current_attempt: {
+        attempt_id: `anchor:${anchor.anchor_id}:attempt:1`,
+        attempt_number: 1,
+        build_id: `anchor:${anchor.anchor_id}:build:1`,
+        build_version: anchor.build_version,
+        stage: 'embedding',
+        status: 'ready',
+        started_at: now,
+        updated_at: now,
+        completed_at: now,
+        event_count: 1,
+        source_segment_count: 3,
+        material_count: 2,
+        slot_count: 1,
+        vector_count: 2,
+        recovered_from_attempt_id: '',
+        recovered_from_build_id: '',
+        blocked_reason: '',
+      },
+      prior_attempts: [],
+      recovered_from_attempt_id: '',
+      recovered_from_build_id: '',
+      blocked_reason: '',
     }
   }
 
@@ -3526,11 +3844,37 @@ export function installConfigurableAppMockBridge(options = {}) {
 
     if (startIndex <= total) {
       for (let index = startIndex; index <= endIndex; index += 1) {
-        items.push(stressReferenceMaterial(index))
+        items.push(toReferenceMaterialSummary(stressReferenceMaterial(index)))
       }
     }
 
     return pagedResult(items, page, size, anchorScopedPreview ? total : total)
+  }
+
+  function getStressReferenceMaterialTagReviewQueue(input = {}) {
+    const page = Math.max(1, Number(input.page ?? 1))
+    const size = Math.max(1, Number(input.size ?? 10))
+    const total = options.referenceStress.materialTotal
+    const anchorId = options.referenceStress.anchor.anchor_id
+    const anchorIds = Array.isArray(input.anchor_ids) ? input.anchor_ids.map(Number).filter(Number.isFinite) : []
+    const archiveFilter = String(input.archive_filter ?? 'active')
+
+    if ((anchorIds.length > 0 && !anchorIds.includes(Number(anchorId))) || archiveFilter === 'archived') {
+      return pagedResult([], page, size, 0)
+    }
+
+    const queuedIndexes = []
+    for (let index = 1; index <= total; index += 1) {
+      if (referenceMaterialTagReviewIssues(stressReferenceMaterial(index)).length > 0) {
+        queuedIndexes.push(index)
+      }
+    }
+
+    const startIndex = (page - 1) * size
+    const items = queuedIndexes
+      .slice(startIndex, startIndex + size)
+      .map((index) => toReferenceMaterialTagReviewItem(stressReferenceMaterial(index)))
+    return pagedResult(items, page, size, queuedIndexes.length)
   }
 
   function stressReferenceMaterial(index) {
@@ -3741,6 +4085,63 @@ export function installConfigurableAppMockBridge(options = {}) {
     state.referenceOrchestrationRuns = state.referenceOrchestrationRuns.map((item) =>
       item.run_id === run.run_id ? updated : item)
     return updated
+  }
+
+  function getReferenceDraftCandidates(input = {}) {
+    const blueprintId = Number(input?.blueprint_id ?? 701)
+    const candidateIds = Array.isArray(input?.candidate_ids) ? input.candidate_ids : []
+    return candidateIds.map((candidateId, index) => ({
+      candidate_id: String(candidateId),
+      blueprint_id: blueprintId,
+      beat_id: `beat-${index + 1}`,
+      material_id: 'material-global-rain',
+      rewrite_level: 'L2',
+      text: referenceCandidateText,
+      changed_slots: [
+        { slot_name: 'sensory_anchor', value: '杯底半圈水痕' },
+      ],
+      non_slot_edits: ['压缩直述，保留近距离视角。'],
+      audit_status: 'passed',
+      created_at: now,
+      style_attempts: [
+        {
+          style_profile_ids: [],
+          style_dimensions: ['sensory_ratio', 'inner_monologue_ratio'],
+          imitation_intensity: 'moderate',
+          min_style_fit: 0.8,
+          allowed_closeness: 'moderate',
+          required_evidence_types: ['sensory_anchor'],
+          forbidden_style_risks: ['source_leak'],
+          selected_material_style_fit: 0.91,
+          selected_material_low_confidence: false,
+          status: 'attempted',
+        },
+      ],
+    }))
+  }
+
+  function getReferenceAnchoredDraftAudits(input = {}) {
+    const blueprintId = Number(input?.blueprint_id ?? 701)
+    const candidateIds = Array.isArray(input?.candidate_ids) ? input.candidate_ids.map(String) : ['mock-candidate-001']
+    return [{
+      audit_id: 'draft-audit-mock-001',
+      blueprint_id: blueprintId,
+      status: 'passed',
+      rewrite_level: 'L2',
+      provenance_errors: [],
+      blueprint_errors: [],
+      unsupported_fact_errors: [],
+      pov_errors: [],
+      ai_prose_risks: [],
+      required_fixes: [],
+      audited_at: now,
+      candidate_ids: candidateIds,
+      readable_report: {
+        summary: `Draft audit passed for ${candidateIds.length} candidate(s) at rewrite level L2.`,
+        candidate_ids: candidateIds,
+        findings: [],
+      },
+    }]
   }
 
   function cancelReferenceOrchestrationRun(input = {}) {

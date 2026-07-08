@@ -19,18 +19,22 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
     private readonly AppInitializationOptions _options;
     private readonly ILegacyDataMigrationService? _legacyMigration;
     private readonly INovelImportRecoveryService _importRecovery;
+    private readonly IReferenceAnchorProcessingRecoveryService? _referenceAnchorRecovery;
     private readonly SemaphoreSlim _startupRecoveryMutex = new(1, 1);
     private NovelImportReconciliationResultPayload? _lastImportRecoveryResult;
+    private bool _referenceAnchorRecoveryCompleted;
 
     public FileSystemAppInitializationService(
         AppInitializationOptions? options = null,
         ILegacyDataMigrationService? legacyMigration = null,
-        INovelImportRecoveryService? importRecovery = null)
+        INovelImportRecoveryService? importRecovery = null,
+        IReferenceAnchorProcessingRecoveryService? referenceAnchorRecovery = null)
     {
         _options = options ?? new AppInitializationOptions();
         _legacyMigration = legacyMigration ??
             (_options.EnableLegacyMigration ? new LegacyDataMigrationService(_options) : null);
         _importRecovery = importRecovery ?? new FileSystemNovelImportRecoveryService(_options);
+        _referenceAnchorRecovery = referenceAnchorRecovery;
     }
 
     public async ValueTask<bool> IsInitializedAsync(CancellationToken cancellationToken)
@@ -40,7 +44,7 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
             return false;
         }
 
-        await ReconcileStartupImportsAsync(cancellationToken);
+        await ReconcileStartupRecoveryAsync(cancellationToken);
         return true;
     }
 
@@ -49,6 +53,7 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
         var hadConfig = File.Exists(ConfigPath);
         await SaveConfigAsync(dataDirectory, cancellationToken);
         _lastImportRecoveryResult = null;
+        _referenceAnchorRecoveryCompleted = false;
         try
         {
             if (_legacyMigration is not null)
@@ -56,7 +61,7 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
                 await _legacyMigration.MigrateAsync(NormalizePath(dataDirectory), cancellationToken);
             }
 
-            await ReconcileStartupImportsAsync(cancellationToken);
+            await ReconcileStartupRecoveryAsync(cancellationToken);
         }
         catch
         {
@@ -74,7 +79,7 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
         var config = await LoadConfigAsync(cancellationToken);
         var importRecovery = config is null
             ? null
-            : await ReconcileStartupImportsAsync(cancellationToken);
+            : await ReconcileStartupRecoveryAsync(cancellationToken);
         return config is null
             ? new AppConfigPayload(false, null, CreateUpdateCheckConfiguration(), null)
             : new AppConfigPayload(true, config.DataDir, CreateUpdateCheckConfiguration(), importRecovery);
@@ -84,7 +89,8 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
     {
         await SaveConfigAsync(dataDirectory, cancellationToken);
         _lastImportRecoveryResult = null;
-        await ReconcileStartupImportsAsync(cancellationToken);
+        _referenceAnchorRecoveryCompleted = false;
+        await ReconcileStartupRecoveryAsync(cancellationToken);
     }
 
     public ValueTask<PlatformPayload> GetPlatformAsync(CancellationToken cancellationToken)
@@ -133,18 +139,23 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
         await JsonSerializer.SerializeAsync(stream, config, ConfigJsonOptions, cancellationToken);
     }
 
-    private async ValueTask<NovelImportReconciliationResultPayload> ReconcileStartupImportsAsync(
+    private async ValueTask<NovelImportReconciliationResultPayload> ReconcileStartupRecoveryAsync(
         CancellationToken cancellationToken)
     {
         await _startupRecoveryMutex.WaitAsync(cancellationToken);
         try
         {
-            if (_lastImportRecoveryResult is not null)
+            if (_lastImportRecoveryResult is null)
             {
-                return _lastImportRecoveryResult;
+                _lastImportRecoveryResult = await _importRecovery.ReconcileAsync(cancellationToken);
             }
 
-            _lastImportRecoveryResult = await _importRecovery.ReconcileAsync(cancellationToken);
+            if (!_referenceAnchorRecoveryCompleted && _referenceAnchorRecovery is not null)
+            {
+                await _referenceAnchorRecovery.ReconcileRecoverableProcessingAsync(cancellationToken);
+                _referenceAnchorRecoveryCompleted = true;
+            }
+
             return _lastImportRecoveryResult;
         }
         finally

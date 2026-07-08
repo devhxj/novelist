@@ -2756,6 +2756,21 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         var candidate = Assert.Single(draft.Candidates);
         Assert.Equal(blueprint.BlueprintId, candidate.BlueprintId);
         Assert.False(string.IsNullOrWhiteSpace(candidate.Text));
+        var auditRowsBeforeCandidateRead = await ReadDraftAuditRowsAsync(options, blueprint.BlueprintId);
+
+        var persistedCandidates = await service.GetDraftCandidatesAsync(
+            new GetReferenceDraftCandidatesPayload(novel.Id, blueprint.BlueprintId, [candidate.CandidateId]),
+            CancellationToken.None);
+
+        var persistedCandidate = Assert.Single(persistedCandidates);
+        Assert.Equal(candidate.CandidateId, persistedCandidate.CandidateId);
+        Assert.Equal(candidate.Text, persistedCandidate.Text);
+        Assert.Empty(await service.GetDraftCandidatesAsync(
+            new GetReferenceDraftCandidatesPayload(novel.Id, blueprint.BlueprintId, []),
+            CancellationToken.None));
+        Assert.Empty(await service.GetDraftCandidatesAsync(
+            new GetReferenceDraftCandidatesPayload(novel.Id, blueprint.BlueprintId, ["missing-candidate"]),
+            CancellationToken.None));
         Assert.Equal(
             originalContent,
             await chapters.GetContentAsync(novel.Id, chapter.FilePath, CancellationToken.None));
@@ -2763,6 +2778,15 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
         Assert.Equal(
             originalContent,
             await reloadedChapters.GetContentAsync(novel.Id, chapter.FilePath, CancellationToken.None));
+        Assert.Equal(
+            auditRowsBeforeCandidateRead.Select(row => row.AuditId).ToArray(),
+            (await ReadDraftAuditRowsAsync(options, blueprint.BlueprintId)).Select(row => row.AuditId).ToArray());
+
+        var otherNovel = await novels.CreateNovelAsync(new CreateNovelPayload("候选读取隔离测试", "", ""), CancellationToken.None);
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.GetDraftCandidatesAsync(
+                new GetReferenceDraftCandidatesPayload(otherNovel.Id, blueprint.BlueprintId, [candidate.CandidateId]),
+                CancellationToken.None));
     }
 
     [Fact]
@@ -6483,6 +6507,19 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
                 TotalPages: items.Length == 0 ? 0 : 1));
         }
 
+        public ValueTask<PageResultPayload<ReferenceMaterialTagReviewItemPayload>> GetMaterialTagReviewQueueAsync(
+            GetReferenceMaterialTagReviewQueuePayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialTagReviewItemPayload>(
+                [],
+                Total: 0,
+                Page: input.Page,
+                Size: input.Size,
+                TotalPages: 0));
+        }
+
         private static bool MatchesSearch(
             SearchReferenceMaterialsPayload input,
             ReferenceMaterialPayload material)
@@ -6522,6 +6559,13 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             return ValueTask.FromResult<ReferenceMaterialDetailPayload?>(null);
         }
 
+        public ValueTask<ReferenceSourceSegmentDetailPayload?> GetSourceSegmentDetailAsync(
+            GetReferenceSourceSegmentDetailPayload input,
+            CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<ReferenceSourceSegmentDetailPayload?>(null);
+        }
+
         public ValueTask<ReferenceSourceProcessingDetailPayload?> GetSourceProcessingDetailAsync(
             GetReferenceSourceProcessingDetailPayload input,
             CancellationToken cancellationToken)
@@ -6545,6 +6589,11 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             throw new NotSupportedException();
 
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync(
+            CreateReferenceAnchorsPayload input,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public ValueTask<CreateReferenceAnchorsResultPayload> CreateAnchorsWithResultAsync(
             CreateReferenceAnchorsPayload input,
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();

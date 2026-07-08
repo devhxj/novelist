@@ -3,13 +3,13 @@ import { clickActivity, escapeRegExp } from './navigation-helpers.mjs'
 import { expectVisible } from './page-helpers.mjs'
 
 export async function verifyStressReferenceMaterialPath(page, referenceStress) {
-  await clickActivity(page, '参考锚定')
-  await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'stress reference heading')
+  await clickActivity(page, '素材库')
+  await expectVisible(page.getByRole('heading', { name: '语料库管理' }), 'stress corpus library heading')
   await expectVisible(page.getByText(referenceStress.anchor.title), 'stress reference anchor title')
   await expectVisible(page.getByText(referenceStress.anchor.status), 'stress reference anchor ready state')
 
-  await page.getByTitle('重建').first().click()
-  await expectVisible(page.getByText('锚点已重建'), 'stress anchor rebuild message')
+  await page.getByTitle('重建语料').first().click()
+  await expectVisible(page.getByText('语料已重建'), 'stress anchor rebuild message')
 
   const rebuildStatus = await page.evaluate(async ({ novelId, anchorId }) =>
     await window.novelist.invoke('GetReferenceAnchorBuildStatus', { args: [novelId, anchorId] }),

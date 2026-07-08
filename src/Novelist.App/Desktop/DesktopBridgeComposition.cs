@@ -149,7 +149,8 @@ public static class DesktopBridgeComposition
                 externalUrlOpener ?? new SystemExternalUrlOpener()))
             .RegisterAppInitializationHandlers(new FileSystemAppInitializationService(
                 options,
-                importRecovery: novelImportRecoveryService))
+                importRecovery: novelImportRecoveryService,
+                referenceAnchorRecovery: referenceAnchorService))
             .RegisterAppSettingsHandlers(settingsService)
             .RegisterNovelHandlers(novelService)
             .RegisterChapterContentHandlers(chapterContentService)

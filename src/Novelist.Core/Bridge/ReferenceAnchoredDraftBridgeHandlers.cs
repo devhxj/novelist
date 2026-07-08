@@ -56,6 +56,12 @@ public static class ReferenceAnchoredDraftBridgeHandlers
                 ReadObjectArg<GenerateReferenceAnchoredDraftPayload>(context.Payload, 0, "input"),
                 cancellationToken));
 
+        dispatcher.Register("GetReferenceDraftCandidates", async (context, cancellationToken) =>
+            ReferencePayloadSanitizer.SanitizeDraftCandidates(
+                await service.GetDraftCandidatesAsync(
+                    ReadObjectArg<GetReferenceDraftCandidatesPayload>(context.Payload, 0, "input"),
+                    cancellationToken)));
+
         dispatcher.Register("AuditReferenceAnchoredDraft", async (context, cancellationToken) =>
             await service.AuditDraftAgainstBlueprintAsync(
                 ReadObjectArg<AuditReferenceAnchoredDraftPayload>(context.Payload, 0, "input"),

@@ -12,6 +12,10 @@ public interface IReferenceAnchorService
         CreateReferenceAnchorsPayload input,
         CancellationToken cancellationToken);
 
+    ValueTask<CreateReferenceAnchorsResultPayload> CreateAnchorsWithResultAsync(
+        CreateReferenceAnchorsPayload input,
+        CancellationToken cancellationToken);
+
     ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(
         long novelId,
         CancellationToken cancellationToken);
@@ -30,8 +34,16 @@ public interface IReferenceAnchorService
         SearchReferenceMaterialsPayload input,
         CancellationToken cancellationToken);
 
+    ValueTask<PageResultPayload<ReferenceMaterialTagReviewItemPayload>> GetMaterialTagReviewQueueAsync(
+        GetReferenceMaterialTagReviewQueuePayload input,
+        CancellationToken cancellationToken);
+
     ValueTask<ReferenceMaterialDetailPayload?> GetMaterialDetailAsync(
         GetReferenceMaterialDetailPayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<ReferenceSourceSegmentDetailPayload?> GetSourceSegmentDetailAsync(
+        GetReferenceSourceSegmentDetailPayload input,
         CancellationToken cancellationToken);
 
     ValueTask<ReferenceSourceProcessingDetailPayload?> GetSourceProcessingDetailAsync(

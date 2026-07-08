@@ -391,6 +391,11 @@ public sealed record ReferenceDraftParagraphCandidatePayload(
     [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
     [property: JsonPropertyName("style_attempts")] IReadOnlyList<ReferenceDraftStyleAttemptPayload>? StyleAttempts = null);
 
+public sealed record GetReferenceDraftCandidatesPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("blueprint_id")] long BlueprintId,
+    [property: JsonPropertyName("candidate_ids")] IReadOnlyList<string> CandidateIds);
+
 public sealed record ReferenceDraftStyleAttemptPayload(
     [property: JsonPropertyName("style_profile_ids")] IReadOnlyList<long> StyleProfileIds,
     [property: JsonPropertyName("style_dimensions")] IReadOnlyList<string> StyleDimensions,

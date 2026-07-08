@@ -127,7 +127,7 @@ export async function verifyReferenceBridgeCalls(page) {
 export async function verifyCorpusLibraryBridgeCalls(page) {
   const calls = await page.evaluate(() => window.__appMockState.calls)
   const methods = calls.map((call) => call.method)
-  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetReferenceAnchors', 'GetReferenceSourceProcessingDetail', 'RebuildReferenceAnchor']
+  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetReferenceAnchors', 'GetReferenceMaterialDetail', 'GetReferenceMaterialTagReviewQueue', 'GetReferenceSourceSegmentDetail', 'GetReferenceSourceProcessingDetail', 'RebuildReferenceAnchor']
 
   for (const method of requiredMethods) {
     assert(methods.includes(method), `Expected corpus library bridge method ${method} to be called.`)
@@ -147,6 +147,7 @@ export async function verifyCorpusLibraryBridgeCalls(page) {
     'GetReferenceOrchestrationRunEvents',
     'AdaptReferenceMaterial',
     'GenerateReferenceAnchoredDraft',
+    'GetReferenceDraftCandidates',
     'AuditReferenceAnchoredDraft',
     'GetReferenceAnchoredDraftAudits',
   ]
@@ -159,11 +160,21 @@ function assertReferenceAnchorResultsArePathFree(calls) {
   const anchorResults = calls
     .filter((call) => call.method === 'GetReferenceAnchors')
     .flatMap((call) => Array.isArray(call.result) ? call.result : [])
+  const createResultAnchors = calls
+    .filter((call) => call.method === 'CreateReferenceAnchorsWithResult')
+    .flatMap((call) => Array.isArray(call.result?.succeeded) ? call.result.succeeded : [])
+  const createResultFailures = calls
+    .filter((call) => call.method === 'CreateReferenceAnchorsWithResult')
+    .flatMap((call) => Array.isArray(call.result?.failed) ? call.result.failed : [])
 
-  assert(anchorResults.length > 0, 'reference anchor calls must return at least one anchor fixture')
-  for (const anchor of anchorResults) {
+  assert(anchorResults.length + createResultAnchors.length > 0, 'reference anchor calls must return at least one anchor fixture')
+  for (const anchor of [...anchorResults, ...createResultAnchors]) {
     assert.equal(anchor.source_path ?? '', '', 'reference anchor bridge results must not expose local source_path values')
     assert(!JSON.stringify(anchor).includes('D:\\books'), 'reference anchor bridge results must not include local filesystem paths')
+  }
+  for (const failure of createResultFailures) {
+    assert(!('source_path' in failure), 'reference anchor partial failure results must not expose source_path')
+    assert(!JSON.stringify(failure).includes('D:\\books'), 'reference anchor partial failure results must not include local filesystem paths')
   }
 }
 
@@ -177,10 +188,12 @@ export async function verifyChapterReferenceBridgeCalls(page) {
     'GetChapters',
     'GetContent',
     'SearchReferenceMaterials',
+    'GetReferenceMaterialDetail',
     'GetReferenceOrchestrationRuns',
     'StartReferenceOrchestrationRun',
     'ResumeReferenceOrchestrationRun',
-    'AdaptReferenceMaterial',
+    'GetReferenceDraftCandidates',
+    'GetReferenceAnchoredDraftAudits',
     'CancelReferenceOrchestrationRun',
   ]
 
@@ -203,18 +216,13 @@ export async function verifyChapterReferenceBridgeCalls(page) {
   assert(resumeCall, 'chapter reference drawer must resume the current orchestration decision in place')
   assert.equal(resumeCall.args?.[0]?.decision_type, 'confirm_source_and_facts', 'chapter reference resume must use stable backend decision type')
 
-  const adaptIndex = calls.findIndex((call) => call.method === 'AdaptReferenceMaterial')
   const saveContentCalls = calls.filter((call) => call.method === 'SaveContent')
-  for (const saveCall of saveContentCalls) {
-    const path = String(saveCall.args?.[0]?.path ?? '')
-    assert(path.startsWith('chapters/'), 'chapter reference explicit candidate insertion may only save chapter content through the editor')
-    assert(String(saveCall.args?.[0]?.content ?? '').includes('杯底半圈水痕'), 'chapter reference chapter save must come from explicit candidate insertion')
-    assert(adaptIndex >= 0 && calls.indexOf(saveCall) > adaptIndex, 'chapter reference must not save before a candidate is generated and explicitly inserted')
-  }
+  assert.deepEqual(saveContentCalls, [], 'chapter reference drawer must not save chapter content directly')
 
   const forbiddenMethods = [
     'CreateReferenceAnchor',
     'CreateReferenceAnchors',
+    'CreateReferenceAnchorsWithResult',
     'UpdateReferenceAnchor',
     'UpdateReferenceAnchorMetadata',
     'DeleteReferenceAnchor',
@@ -229,6 +237,7 @@ export async function verifyChapterReferenceBridgeCalls(page) {
     'UpdateReferenceMaterialsTags',
     'DeleteReferenceMaterials',
     'RestoreReferenceMaterials',
+    'AdaptReferenceMaterial',
     'GenerateReferenceChapterBlueprint',
     'ReviewReferenceChapterBlueprint',
     'ApproveReferenceChapterBlueprint',

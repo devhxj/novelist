@@ -37,8 +37,9 @@ public sealed partial class NovelistMafToolRegistry
         private const string GetAnchorsDescription = "列出当前小说可访问的已导入参考锚定书籍。返回 path-free 来源摘要，不返回 source_path；novel_id 由运行时注入，不需要也不能传入；不能导入新来源，不能读取任意文件。";
         private const string SearchMaterialsDescription = "按 story context 和可选 style filters 搜索已导入且受 license/visibility 过滤的参考语料库。返回材料 id、标签、来源、bounded text_preview 和 score_components，不返回完整材料文本；style_profile_ids 只影响受授权材料排序和 style-risk 解释，不能绕过来源/许可边界。用于给蓝图 beat 绑定材料，不直接写章节，不能导入新来源，不能读取任意文件。";
         private const string GetMaterialDetailDescription = "只读查看已导入参考材料的结构化明细。返回 provenance、tags/confidence、bounded previews、slots、score_components 和 processing_notes；不返回 source_path，不返回 source_text，不返回 candidate_text，不返回 prompt，不返回完整来源或完整章节，不能导入新来源，不能读取任意文件，不能写章节。";
+        private const string GetSourceSegmentDetailDescription = "只读查看已导入参考来源片段的结构化明细。返回 source summary、segment metadata、bounded text_preview 和 processing_notes；不返回 source_path，不返回 source_text，不返回 candidate_text，不返回 prompt，不返回完整来源或完整章节，不能导入新来源，不能读取任意文件，不能写章节。";
         private const string GetSourceProcessingDetailDescription = "只读查看已导入参考来源的处理记录。返回 parse/segment/extract/index 状态、counts、affected ids 和已脱敏 diagnostics；不返回 source_path，不返回 source_text，不返回 candidate_text，不返回 prompt，不返回完整来源或完整章节，不能导入新来源，不能读取任意文件，不能写章节。";
-        private const string AdaptMaterialDescription = "预览参考材料改写。只允许基于 material_id、slot_values、scene_facts 和 max_rewrite_level 生成候选，不直接写章节。";
+        private const string AdaptMaterialDescription = "预览参考材料改写。只允许基于 material_id、slot_values、scene_facts 和 max_rewrite_level 生成候选；返回 bounded text preview 和 audit，不返回完整材料文本，不返回 source_text，不返回 candidate_text，不返回 prompt，不返回 source_path，不直接写章节。";
         private const string AuditReuseDescription = "审计参考材料复用候选。纯检查工具，不写章节，不保存正文。";
 
         private readonly IReferenceAnchorService _referenceAnchors;
@@ -60,6 +61,7 @@ public sealed partial class NovelistMafToolRegistry
             tools.Add(CreateFunction(nameof(GetReferenceAnchorsAsync), "get_reference_anchors", GetAnchorsDescription));
             tools.Add(CreateFunction(nameof(SearchReferenceMaterialsAsync), "search_reference_materials", SearchMaterialsDescription));
             tools.Add(CreateFunction(nameof(GetReferenceMaterialDetailAsync), "get_reference_material_detail", GetMaterialDetailDescription));
+            tools.Add(CreateFunction(nameof(GetReferenceSourceSegmentDetailAsync), "get_reference_source_segment_detail", GetSourceSegmentDetailDescription));
             tools.Add(CreateFunction(nameof(GetReferenceSourceProcessingDetailAsync), "get_reference_source_processing_detail", GetSourceProcessingDetailDescription));
             tools.Add(CreateFunction(nameof(AdaptReferenceMaterialAsync), "adapt_reference_material", AdaptMaterialDescription));
             tools.Add(CreateFunction(nameof(AuditReferenceReuseAsync), "audit_reference_reuse", AuditReuseDescription));
@@ -100,6 +102,7 @@ public sealed partial class NovelistMafToolRegistry
                     anchor.UserTags,
                     anchor.OwnerScope,
                     anchor.OwnerNovelId))
+                .Select(ReferencePayloadSanitizer.SanitizeSourceSummary)
                 .ToArray();
         }
 
@@ -174,7 +177,7 @@ public sealed partial class NovelistMafToolRegistry
         private static ReferenceMaterialSummaryPayload ToMaterialSummary(ReferenceMaterialPayload material)
         {
             var preview = BuildPreview(material.Text, MaterialListPreviewMaxChars);
-            return new ReferenceMaterialSummaryPayload(
+            return ReferencePayloadSanitizer.SanitizeMaterialSummary(new ReferenceMaterialSummaryPayload(
                 material.MaterialId,
                 material.AnchorId,
                 material.SourceSegmentId,
@@ -193,12 +196,13 @@ public sealed partial class NovelistMafToolRegistry
                 material.ExtractorVersion,
                 material.UserVerified,
                 material.CreatedAt,
-                ScoreComponents: material.ScoreComponents);
+                ScoreComponents: material.ScoreComponents));
         }
 
         private static TextPreview BuildPreview(string? text, int maxLength)
         {
-            var normalized = Regex.Replace((text ?? string.Empty).Trim(), @"\s+", " ");
+            var normalized = ReferencePayloadSanitizer.RedactSensitiveText(
+                Regex.Replace((text ?? string.Empty).Trim(), @"\s+", " "));
             if (normalized.Length <= maxLength)
             {
                 return new TextPreview(normalized, false);
@@ -208,7 +212,7 @@ public sealed partial class NovelistMafToolRegistry
         }
 
         [Description(GetMaterialDetailDescription)]
-        private ValueTask<ReferenceMaterialDetailPayload?> GetReferenceMaterialDetailAsync(
+        private async ValueTask<ReferenceMaterialDetailPayload?> GetReferenceMaterialDetailAsync(
             [Description("参考材料 id")]
             string material_id,
             CancellationToken cancellationToken = default)
@@ -218,13 +222,36 @@ public sealed partial class NovelistMafToolRegistry
                 throw new ArgumentException("material_id is required.", nameof(material_id));
             }
 
-            return _referenceAnchors.GetMaterialDetailAsync(
+            return ReferencePayloadSanitizer.SanitizeMaterialDetail(await _referenceAnchors.GetMaterialDetailAsync(
                 new GetReferenceMaterialDetailPayload(_context.NovelId, material_id.Trim()),
-                cancellationToken);
+                cancellationToken));
+        }
+
+        [Description(GetSourceSegmentDetailDescription)]
+        private async ValueTask<ReferenceSourceSegmentDetailPayload?> GetReferenceSourceSegmentDetailAsync(
+            [Description("参考来源 anchor id")]
+            long anchor_id,
+            [Description("参考来源片段 id")]
+            string segment_id,
+            CancellationToken cancellationToken = default)
+        {
+            if (anchor_id <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(anchor_id), anchor_id, "anchor_id must be positive.");
+            }
+
+            if (string.IsNullOrWhiteSpace(segment_id))
+            {
+                throw new ArgumentException("segment_id is required.", nameof(segment_id));
+            }
+
+            return ReferencePayloadSanitizer.SanitizeSourceSegmentDetail(await _referenceAnchors.GetSourceSegmentDetailAsync(
+                new GetReferenceSourceSegmentDetailPayload(_context.NovelId, anchor_id, segment_id.Trim()),
+                cancellationToken));
         }
 
         [Description(GetSourceProcessingDetailDescription)]
-        private ValueTask<ReferenceSourceProcessingDetailPayload?> GetReferenceSourceProcessingDetailAsync(
+        private async ValueTask<ReferenceSourceProcessingDetailPayload?> GetReferenceSourceProcessingDetailAsync(
             [Description("参考来源 anchor id")]
             long anchor_id,
             CancellationToken cancellationToken = default)
@@ -234,13 +261,13 @@ public sealed partial class NovelistMafToolRegistry
                 throw new ArgumentOutOfRangeException(nameof(anchor_id), anchor_id, "anchor_id must be positive.");
             }
 
-            return _referenceAnchors.GetSourceProcessingDetailAsync(
+            return ReferencePayloadSanitizer.SanitizeSourceProcessingDetail(await _referenceAnchors.GetSourceProcessingDetailAsync(
                 new GetReferenceSourceProcessingDetailPayload(_context.NovelId, anchor_id),
-                cancellationToken);
+                cancellationToken));
         }
 
         [Description(AdaptMaterialDescription)]
-        private ValueTask<AdaptReferenceMaterialResultPayload> AdaptReferenceMaterialAsync(
+        private async ValueTask<AdaptReferenceMaterialResultPayload?> AdaptReferenceMaterialAsync(
             [Description("参考材料 id")]
             string material_id,
             [Description("声明式槽位替换，只允许替换材料中已识别的 slot")]
@@ -251,7 +278,7 @@ public sealed partial class NovelistMafToolRegistry
             string[]? scene_facts = null,
             CancellationToken cancellationToken = default)
         {
-            return _referenceAnchors.AdaptMaterialAsync(
+            var result = await _referenceAnchors.AdaptMaterialAsync(
                 new AdaptReferenceMaterialPayload(
                     _context.NovelId,
                     material_id,
@@ -259,10 +286,11 @@ public sealed partial class NovelistMafToolRegistry
                     string.IsNullOrWhiteSpace(max_rewrite_level) ? ReferenceRewriteLevels.L1 : max_rewrite_level,
                     scene_facts ?? []),
                 cancellationToken);
+            return ReferencePayloadSanitizer.SanitizeAdaptMaterialResult(result);
         }
 
         [Description(AuditReuseDescription)]
-        private ValueTask<ReferenceReuseAuditPayload> AuditReferenceReuseAsync(
+        private async ValueTask<ReferenceReuseAuditPayload> AuditReferenceReuseAsync(
             [Description("参考材料 id")]
             string material_id,
             [Description("待审计候选文本")]
@@ -273,7 +301,7 @@ public sealed partial class NovelistMafToolRegistry
             string[]? scene_facts = null,
             CancellationToken cancellationToken = default)
         {
-            return _referenceAnchors.AuditCandidateAsync(
+            var audit = await _referenceAnchors.AuditCandidateAsync(
                 new AuditReferenceReusePayload(
                     _context.NovelId,
                     material_id,
@@ -281,6 +309,7 @@ public sealed partial class NovelistMafToolRegistry
                     string.IsNullOrWhiteSpace(max_rewrite_level) ? ReferenceRewriteLevels.L1 : max_rewrite_level,
                     scene_facts ?? []),
                 cancellationToken);
+            return ReferencePayloadSanitizer.SanitizeReuseAudit(audit);
         }
 
         private readonly record struct TextPreview(string Text, bool Truncated);

@@ -51,6 +51,7 @@ import { verifyReferenceErrorFeedbackWorkflow } from './reference-error-feedback
 import {
   assertBridgeCallCount,
   assertEditorContains,
+  assertEditorNotContains,
   bridgeCallCount,
   clickCardAction,
   dispatchNovelImportDrop,
@@ -93,6 +94,15 @@ import {
 import { usabilityObservation, writeUsabilityReport } from './usability-report.mjs'
 
 const FULL_MATERIAL_LEAK_SENTINEL = '__FULL_MATERIAL_SHOULD_NOT_RENDER__'
+const MOCK_REFERENCE_CANDIDATE_TEXT = '林岚没有立刻抬头。杯底那半圈水痕贴着木纹，像刚被雨夜重新描过一遍；她只把指尖收紧，确认门外的人还不知道这条线索。'
+const CORPUS_LIBRARY_FORBIDDEN_CHAPTER_METHODS = [
+  'GenerateReferenceChapterBlueprint',
+  'StartReferenceOrchestrationRun',
+  'BindReferenceBlueprintMaterials',
+  'GenerateReferenceAnchoredDraft',
+  'GetReferenceDraftCandidates',
+  'SaveContent',
+]
 
 export async function runSmokeSuite(browser, url) {
   const { consoleErrors, pageErrors } = diagnostics
@@ -290,17 +300,148 @@ function errorFeedbackFaults() {
   }
 }
 
+async function waitForLatestBridgeCallWithResult(page, method, previousCount = -1) {
+  await page.waitForFunction(
+    ({ method, previousCount }) => {
+      const calls = window.__appMockState.calls.filter((call) => call.method === method)
+      return calls.length > previousCount && Object.hasOwn(calls.at(-1) ?? {}, 'result')
+    },
+    { method, previousCount },
+    { timeout: 12_000 },
+  )
+
+  return page.evaluate((method) => {
+    const calls = window.__appMockState.calls.filter((call) =>
+      call.method === method && Object.hasOwn(call, 'result'))
+    return calls.at(-1) ?? null
+  }, method)
+}
+
+async function waitForLatestBridgeResult(page, method, previousCount = -1) {
+  const call = await waitForLatestBridgeCallWithResult(page, method, previousCount)
+  return call?.result ?? null
+}
+
+async function assertCorpusLibraryLegacyWritingEntrypointsHidden(page, context) {
+  await expectHidden(page.getByRole('heading', { name: '参考写作检索' }), `${context} legacy reference-writing retrieval heading`)
+  await expectHidden(page.getByTestId('reference-orchestration-panel'), `${context} legacy orchestration panel`)
+  await expectHidden(page.getByRole('button', { name: '启动候选编排' }), `${context} legacy orchestration start button`)
+  await expectHidden(page.getByRole('heading', { name: '默认编排' }), `${context} legacy orchestration heading`)
+  await expectHidden(page.getByTestId('reference-manual-material-search'), `${context} legacy manual material search`)
+  await expectHidden(page.getByTestId('reference-blueprint-panel'), `${context} legacy chapter blueprint panel`)
+  await expectHidden(page.getByRole('heading', { name: '章节蓝图' }), `${context} legacy chapter blueprint heading`)
+  await expectHidden(page.getByRole('button', { name: /生成蓝图/ }), `${context} legacy generate blueprint button`)
+  await expectHidden(page.getByTestId('reference-blueprint-detail'), `${context} legacy blueprint detail`)
+  await expectHidden(page.getByRole('button', { name: /^绑定$/ }), `${context} legacy bind materials button`)
+  await expectHidden(page.getByRole('button', { name: /^候选$/ }), `${context} legacy generate anchored draft button`)
+  await expectHidden(page.getByRole('button', { name: /生成锚定草稿|生成候选/ }), `${context} legacy anchored draft generation button`)
+}
+
+async function assertCorpusLibraryNoChapterWritingBridgeCalls(page, context) {
+  const counts = await page.evaluate((methods) => {
+    return Object.fromEntries(methods.map((method) => [
+      method,
+      window.__appMockState.calls.filter((call) => call.method === method).length,
+    ]))
+  }, CORPUS_LIBRARY_FORBIDDEN_CHAPTER_METHODS)
+
+  for (const method of CORPUS_LIBRARY_FORBIDDEN_CHAPTER_METHODS) {
+    assert.equal(counts[method], 0, `${context} must not call ${method}`)
+  }
+}
+
 async function verifyCorpusLibraryWorkflow(page) {
   await clickActivity(page, '素材库')
-  await expectVisible(page.getByRole('heading', { name: /素材库|语料库管理/ }).first(), 'corpus library heading')
-  await expectVisible(page.getByLabel('材料库结果').or(page.getByLabel('材料库搜索')).first(), 'corpus library material area')
+  await expectVisible(page.getByRole('heading', { name: '语料库管理' }), 'corpus library heading')
+  const corpusTabs = page.getByTestId('corpus-library-tabs')
+  await expectVisible(corpusTabs, 'corpus library task tabs')
+  for (const tabName of ['处理后语料', '素材来源', '标签校正', '风格画像', '处理记录', '高级']) {
+    await expectVisible(corpusTabs.getByRole('tab', { name: tabName }), `corpus library ${tabName} tab`)
+  }
+  await expectVisible(page.getByTestId('reference-import-panel'), 'corpus library default source import panel')
+  assert.equal(await corpusTabs.getByRole('tab', { name: '素材来源' }).getAttribute('aria-selected'), 'true', 'corpus library should default to source import tab')
+  await assertCorpusLibraryLegacyWritingEntrypointsHidden(page, 'corpus library default source tab')
+  await assertCorpusLibraryNoChapterWritingBridgeCalls(page, 'corpus library default source tab')
+  await verifyCorpusLibraryPartialImportFailure(page)
 
+  await corpusTabs.getByRole('tab', { name: '高级' }).click()
+  await expectVisible(page.getByTestId('reference-corpus-advanced-tab'), 'corpus library advanced tab')
+  assert.equal(await corpusTabs.getByRole('tab', { name: '高级' }).getAttribute('aria-selected'), 'true', 'corpus library advanced tab should be selected')
+  await assertCorpusLibraryLegacyWritingEntrypointsHidden(page, 'corpus library advanced tab')
+  await assertCorpusLibraryNoChapterWritingBridgeCalls(page, 'corpus library advanced tab')
+
+  const tagReviewQueueCountBeforeTab = await bridgeCallCount(page, 'GetReferenceMaterialTagReviewQueue')
+  await corpusTabs.getByRole('tab', { name: '标签校正' }).click()
+  await expectVisible(page.getByLabel('材料库结果').or(page.getByLabel('材料库搜索')).first(), 'corpus library material area')
+  const initialTagReviewQueueResult = await waitForLatestBridgeResult(page, 'GetReferenceMaterialTagReviewQueue', tagReviewQueueCountBeforeTab)
+  assert.equal(initialTagReviewQueueResult?.total, 1, 'corpus material tag review queue must be loaded from the server-owned queue')
+
+  const corpusSearchCountBefore = await bridgeCallCount(page, 'SearchReferenceMaterials')
+  const tagReviewQueueCountBeforeSearch = await bridgeCallCount(page, 'GetReferenceMaterialTagReviewQueue')
   await page.getByRole('button', { name: '检索材料库' }).click()
+  const corpusSearchResult = await waitForLatestBridgeResult(page, 'SearchReferenceMaterials', corpusSearchCountBefore)
+  const corpusSearchJson = JSON.stringify(corpusSearchResult)
+  assert(!corpusSearchJson.includes(FULL_MATERIAL_LEAK_SENTINEL), 'corpus library bridge search result must not expose full material text')
+  assert(!corpusSearchJson.includes('"text"'), 'corpus library bridge search result must not include full text field')
+  assert(corpusSearchJson.includes('text_preview'), 'corpus library bridge search result must include bounded text_preview')
+  const tagReviewQueueResult = await waitForLatestBridgeResult(page, 'GetReferenceMaterialTagReviewQueue', tagReviewQueueCountBeforeSearch)
+  const tagReviewQueueJson = JSON.stringify(tagReviewQueueResult)
+  assert.equal(tagReviewQueueResult?.total, 1, 'corpus material tag review server queue must include one item before correction')
+  assert.equal(tagReviewQueueResult?.items?.[0]?.material?.material_id, 'mock-mat-rain-002', 'corpus material tag review server queue must focus the queued material')
+  assert(!tagReviewQueueJson.includes(FULL_MATERIAL_LEAK_SENTINEL), 'corpus material tag review queue result must not expose full material text')
+  assert(!tagReviewQueueJson.includes('"text"'), 'corpus material tag review queue result must not include full text field')
+  assert(tagReviewQueueJson.includes('text_preview'), 'corpus material tag review queue result must include bounded text_preview')
+  for (const expectedIssue of ['unverified', 'low_confidence', 'unknown_tag']) {
+    assert(
+      tagReviewQueueResult.items[0].issues.some((issue) => issue.code === expectedIssue),
+      `corpus material tag review server queue must include ${expectedIssue}`,
+    )
+  }
   const materialLibraryCard = page.getByTestId('reference-material-library-card').first()
   await expectVisible(materialLibraryCard, 'corpus library material card')
   const materialLibraryCardText = await materialLibraryCard.innerText()
   assert(!materialLibraryCardText.includes(FULL_MATERIAL_LEAK_SENTINEL), 'corpus library material card must render bounded preview only')
   assert(materialLibraryCardText.includes('预览已截断，不显示全文'), 'corpus library material card must mark bounded preview')
+  const tagReviewQueue = page.getByTestId('reference-material-tag-review-queue')
+  await expectVisible(tagReviewQueue, 'corpus material tag review queue')
+  const tagReviewText = await tagReviewQueue.innerText()
+  for (const expectedText of ['标签校正', '待校正 1 · 队列第 1 / 1 页', '服务端跨页计算', '未校正', '低置信', 'unknown 标签']) {
+    assert(tagReviewText.includes(expectedText), `corpus material tag review queue must render ${expectedText}`)
+  }
+  const tagReviewItem = tagReviewQueue.getByTestId('reference-material-tag-review-item').first()
+  await expectVisible(tagReviewItem, 'corpus material tag review queue item')
+  const tagReviewItemText = await tagReviewItem.innerText()
+  const tagReviewMaterialId = tagReviewItemText.match(/\bmock-mat-[\w-]+\b/)?.[0] ?? ''
+  assert.equal(tagReviewMaterialId, 'mock-mat-rain-002', 'corpus material tag review queue must focus the unverified low-confidence material')
+  await tagReviewQueue.getByRole('button', { name: '选择当前队列' }).click()
+  await expectVisible(tagReviewQueue.getByText('已选 1 / 1'), 'corpus material tag review selected count')
+  await expectVisible(page.getByText('已选 1 条材料'), 'corpus material library selected review material count')
+  await page.getByLabel('材料库批量功能标签').fill('library_review_corrected')
+  await page.getByLabel('材料库批量场景标签').fill('interior_reviewed')
+  await page.getByLabel('材料库批量 POV 标签').fill('close_reviewed')
+  const tagUpdateCountBefore = await bridgeCallCount(page, 'UpdateReferenceMaterialsTags')
+  const tagReviewQueueCountBeforeUpdate = await bridgeCallCount(page, 'GetReferenceMaterialTagReviewQueue')
+  await page.getByRole('button', { name: /^批量校正材料库$/ }).click()
+  const tagUpdateCall = await waitForLatestBridgeCallWithResult(page, 'UpdateReferenceMaterialsTags', tagUpdateCountBefore)
+  assert(tagUpdateCall, 'corpus material tag review must call UpdateReferenceMaterialsTags')
+  const tagUpdateInput = tagUpdateCall.args?.[0] ?? {}
+  assert(Array.isArray(tagUpdateInput.material_ids), 'corpus material tag review bulk payload must include material_ids')
+  assert(tagUpdateInput.material_ids.includes(tagReviewMaterialId), 'corpus material tag review bulk payload must include queued material id')
+  assert.equal(tagUpdateInput.function_tag, 'library_review_corrected', 'corpus material tag review bulk payload must include corrected function tag')
+  assert.equal(tagUpdateInput.scene_tag, 'interior_reviewed', 'corpus material tag review bulk payload must include corrected scene tag')
+  assert.equal(tagUpdateInput.pov_tag, 'close_reviewed', 'corpus material tag review bulk payload must include corrected POV tag')
+  assert.equal(tagUpdateInput.origin, 'ui', 'corpus material tag review bulk payload must mark UI origin')
+  assert.equal(tagUpdateInput.note, 'corpus material library bulk correction', 'corpus material tag review bulk payload must mark material library correction')
+  const tagUpdateJson = JSON.stringify(tagUpdateCall.result)
+  assert(!tagUpdateJson.includes(FULL_MATERIAL_LEAK_SENTINEL), 'corpus material tag review bridge update result must not expose full material text')
+  assert(!tagUpdateJson.includes('"text"'), 'corpus material tag review bridge update result must not include full text field')
+  assert(tagUpdateJson.includes('text_preview'), 'corpus material tag review bridge update result must include bounded text_preview')
+  await expectVisible(page.getByText('材料库已批量校正 1 条材料标签'), 'corpus material tag review bulk update message')
+  const tagReviewQueueAfterUpdate = await waitForLatestBridgeResult(page, 'GetReferenceMaterialTagReviewQueue', tagReviewQueueCountBeforeUpdate)
+  assert.equal(tagReviewQueueAfterUpdate?.total, 0, 'corpus material tag review server queue must clear after correction')
+  assert.equal(tagReviewQueueAfterUpdate?.items?.length, 0, 'corpus material tag review server queue must return no items after correction')
+  await expectVisible(tagReviewQueue.getByText('待校正 0 · 队列第 1 / 1 页'), 'corpus material tag review queue clears after correction')
+  await expectVisible(tagReviewQueue.getByText('服务端队列暂无未校正、低置信或 unknown 标签材料'), 'corpus material tag review queue empty state')
   await page.getByRole('button', { name: /查看 .* 的材料明细/ }).first().click()
   const drawer = page.getByTestId('reference-material-detail-drawer')
   await expectVisible(drawer, 'corpus material detail drawer')
@@ -316,8 +457,12 @@ async function verifyCorpusLibraryWorkflow(page) {
   const drawerText = await drawer.innerText()
   assert(!drawerText.includes('D:\\books'), 'material detail drawer must not render local source paths')
   assert(!drawerText.includes(FULL_MATERIAL_LEAK_SENTINEL), 'material detail drawer must not render full material text')
+  await drawer.getByRole('button', { name: '关闭材料明细' }).click()
+  await expectHidden(drawer, 'corpus material detail drawer after close')
 
-  await page.getByRole('button', { name: /查看 全局雨夜参考 的处理记录/ }).click()
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  await expectVisible(page.getByTestId('reference-processing-records-tab'), 'corpus processing records tab')
+  await page.getByTestId('reference-processing-record-detail-button').first().click()
   await waitForBridgeCall(page, 'GetReferenceSourceProcessingDetail')
   const processingDrawer = page.getByTestId('reference-source-processing-drawer')
   await expectVisible(processingDrawer, 'corpus source processing drawer')
@@ -328,26 +473,144 @@ async function verifyCorpusLibraryWorkflow(page) {
     '当前状态',
     'embedding · ready',
     'segments=3 · materials=2 · slots=1 · vectors=2',
+    '处理尝试',
+    '第 1 次 · embedding · ready',
+    'attempt=anchor:101:attempt:1 · build=anchor:101:build:1',
     '历史事件',
     'event-1',
     'affected: 101 · mock-mat-rain-001 · mock-seg-rain-001 · object',
-    '可重建',
-    '不可重试',
-    '重新处理',
+    '可重建语料',
+    '当前无失败重试项',
+    '重试加载详情只刷新本抽屉；重建语料会重新跑来源解析、切分、材料抽取和索引。',
+    '重建语料',
   ]) {
     assert(processingDrawerText.includes(expectedText), `source processing drawer must render ${expectedText}`)
   }
   for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text']) {
     assert(!processingDrawerText.includes(sensitiveText), `source processing drawer must not render ${sensitiveText}`)
   }
+  await processingDrawer.getByTestId('reference-source-processing-copy-diagnostic').click()
+  await page.waitForFunction(() => window.__appMockClipboardText?.includes('处理记录: 全局雨夜参考'), null, { timeout: 12_000 })
+  const copiedProcessingDiagnostic = await page.evaluate(() => window.__appMockClipboardText)
+  assert(copiedProcessingDiagnostic.includes('current=embedding/ready'), 'source processing copied diagnostic must include current status')
+  assert(copiedProcessingDiagnostic.includes('current_attempt=1 anchor:101:attempt:1 embedding/ready'), 'source processing copied diagnostic must include current attempt')
+  assert(copiedProcessingDiagnostic.includes('affected=101 · mock-mat-rain-001 · mock-seg-rain-001 · object'), 'source processing copied diagnostic must include affected ids')
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!copiedProcessingDiagnostic.includes(sensitiveText), `source processing copied diagnostic must not include ${sensitiveText}`)
+  }
   const rebuildCountBefore = await bridgeCallCount(page, 'RebuildReferenceAnchor')
   const processingDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
-  await processingDrawer.getByRole('button', { name: /重新处理 全局雨夜参考/ }).click()
+  await processingDrawer.getByRole('button', { name: /重建语料 全局雨夜参考/ }).click()
   await waitForBridgeCallCountAfter(page, 'RebuildReferenceAnchor', rebuildCountBefore)
   await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', processingDetailCountBefore)
 
-  const legacyRetrievalVisible = await page.getByText('参考写作检索', { exact: true }).isVisible().catch(() => false)
-  assert.equal(legacyRetrievalVisible, false, 'corpus library activity must not render the retired reference-writing retrieval section')
+  await processingDrawer.getByRole('button', { name: /查看 mock-mat-rain-001 的材料明细/ }).click()
+  await expectHidden(processingDrawer, 'source processing drawer after opening affected material detail')
+  const affectedMaterialDrawer = page.getByTestId('reference-material-detail-drawer')
+  await expectVisible(affectedMaterialDrawer, 'affected material detail drawer from source processing')
+  await expectVisible(affectedMaterialDrawer.getByText('mock-mat-rain-001', { exact: true }), 'affected material detail id')
+  await affectedMaterialDrawer.getByRole('button', { name: '关闭材料明细' }).click()
+  await expectHidden(affectedMaterialDrawer, 'affected material detail drawer after close')
+
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const materialLocateProcessingCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByTestId('reference-processing-record-detail-button').first().click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', materialLocateProcessingCountBefore)
+  const materialLocateDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(materialLocateDrawer, 'source processing drawer before affected material locate')
+  const materialLocateSearchBefore = await bridgeCallCount(page, 'SearchReferenceMaterials')
+  await materialLocateDrawer.getByRole('button', { name: /在材料库筛选 mock-mat-rain-001/ }).click()
+  await waitForBridgeCallCountAfter(page, 'SearchReferenceMaterials', materialLocateSearchBefore)
+  await expectHidden(materialLocateDrawer, 'source processing drawer after affected material locate')
+  assert.equal(await page.getByLabel('材料库搜索').inputValue(), 'mock-mat-rain-001', 'affected material locate must fill material library query')
+  await expectVisible(page.getByTestId('reference-material-library-card').filter({ hasText: 'mock-mat-rain-001' }).first(), 'affected material located in material library')
+
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const segmentDetailProcessingCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByTestId('reference-processing-record-detail-button').first().click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', segmentDetailProcessingCountBefore)
+  const segmentDetailProcessingDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(segmentDetailProcessingDrawer, 'source processing drawer before affected segment detail')
+  const segmentDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceSegmentDetail')
+  await segmentDetailProcessingDrawer.getByRole('button', { name: /查看 mock-seg-rain-001 的来源片段明细/ }).first().click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceSegmentDetail', segmentDetailCountBefore)
+  await expectHidden(segmentDetailProcessingDrawer, 'source processing drawer after opening affected segment detail')
+  const sourceSegmentDrawer = page.getByTestId('reference-source-segment-detail-drawer')
+  await expectVisible(sourceSegmentDrawer, 'affected source segment detail drawer')
+  const sourceSegmentDrawerText = await sourceSegmentDrawer.innerText()
+  assert(sourceSegmentDrawerText.includes('来源片段明细'), 'source segment detail drawer must render title')
+  assert(sourceSegmentDrawerText.includes('mock-seg-rain-001'), 'source segment detail drawer must render segment id')
+  assert(sourceSegmentDrawerText.includes('预览已截断，不显示全文'), 'source segment detail drawer must mark bounded preview')
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!sourceSegmentDrawerText.includes(sensitiveText), `source segment detail drawer must not render ${sensitiveText}`)
+  }
+  await sourceSegmentDrawer.getByRole('button', { name: '关闭来源片段明细' }).click()
+  await expectHidden(sourceSegmentDrawer, 'affected source segment detail drawer after close')
+
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const sourceLocateProcessingCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByTestId('reference-processing-record-detail-button').first().click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', sourceLocateProcessingCountBefore)
+  const sourceLocateDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(sourceLocateDrawer, 'source processing drawer before affected source locate')
+  await sourceLocateDrawer.getByRole('button', { name: /定位来源 101/ }).first().click()
+  await expectHidden(sourceLocateDrawer, 'source processing drawer after affected source locate')
+  assert.equal(await corpusTabs.getByRole('tab', { name: '素材来源' }).getAttribute('aria-selected'), 'true', 'affected source locate must switch to sources tab')
+  assert.equal(await page.getByLabel('锚点搜索').inputValue(), '101', 'affected source locate must filter by source id')
+  await expectVisible(page.getByTestId('reference-anchor-row').filter({ hasText: '全局雨夜参考' }).first(), 'affected source located in source list')
+
+  await assertCorpusLibraryLegacyWritingEntrypointsHidden(page, 'corpus library workflow completion')
+  await assertCorpusLibraryNoChapterWritingBridgeCalls(page, 'corpus library workflow completion')
+}
+
+async function verifyCorpusLibraryPartialImportFailure(page) {
+  const importPanel = page.getByTestId('reference-import-panel')
+  const partialImportTitle = '部分失败导入'
+  const partialImportPaths = 'D:\\books\\partial-success.md\nD:\\books\\mock-partial-fail.md'
+  const createCountBefore = await bridgeCallCount(page, 'CreateReferenceAnchorsWithResult')
+
+  await importPanel.getByPlaceholder('参考书名').fill(partialImportTitle)
+  await importPanel.getByPlaceholder('可选').fill('Partial Import Author')
+  await importPanel.getByLabel('可见性').selectOption('workspace')
+  await importPanel.getByLabel('来源可信度').selectOption('imported')
+  await importPanel.getByLabel('用户标签').fill('partial;failure')
+  await importPanel.getByLabel('批量路径').fill(partialImportPaths)
+  await importPanel.getByRole('button', { name: /^批量导入$/ }).click()
+
+  const createCall = await waitForLatestBridgeCallWithResult(page, 'CreateReferenceAnchorsWithResult', createCountBefore)
+  assert.equal(createCall.result?.total_count, 2, 'partial corpus import must report both attempted sources')
+  assert.equal(createCall.result?.succeeded_count, 1, 'partial corpus import must keep the successful source')
+  assert.equal(createCall.result?.failed_count, 1, 'partial corpus import must report one failed source')
+  assert(!JSON.stringify(createCall.result?.failed ?? []).includes('D:\\books'), 'partial corpus import failure result must not expose local source paths')
+
+  await expectVisible(page.getByText('已批量导入 1/2 个语料来源'), 'partial corpus import success count message')
+  await expectVisible(
+    page.getByTestId('reference-anchor-row').filter({ hasText: '部分失败导入 1' }).first(),
+    'partial corpus import successful source row',
+  )
+  assert.equal(await importPanel.getByPlaceholder('参考书名').inputValue(), partialImportTitle, 'partial corpus import must keep title input')
+  assert.equal(await importPanel.getByPlaceholder('可选').inputValue(), 'Partial Import Author', 'partial corpus import must keep author input')
+  assert.equal(await importPanel.getByLabel('用户标签').inputValue(), 'partial;failure', 'partial corpus import must keep tag input')
+  assert.equal(await importPanel.getByLabel('批量路径').inputValue(), partialImportPaths, 'partial corpus import must keep bulk path input')
+
+  const partialAlert = errorAlert(page, '部分语料导入失败')
+  await expectVisible(partialAlert, 'partial corpus import failure callout')
+  await expectVisible(partialAlert.getByText('第 2 项「部分失败导入 2」'), 'partial corpus import failed item preview')
+  await expectVisible(partialAlert.getByText('模拟语料解析失败；本地路径已隐藏。'), 'partial corpus import sanitized diagnostic')
+  await expectVisible(partialAlert.getByRole('button', { name: '复制错误诊断' }), 'partial corpus import copy diagnostic button')
+  const partialAlertText = await partialAlert.innerText()
+  assert(!partialAlertText.includes('D:\\books'), 'partial corpus import visible diagnostics must not expose local source paths')
+
+  await page.evaluate(() => { window.__appMockClipboardText = '' })
+  await partialAlert.getByRole('button', { name: '复制错误诊断' }).click()
+  await page.waitForFunction(() => typeof window.__appMockClipboardText === 'string' && window.__appMockClipboardText.length > 0)
+  const copiedDiagnostic = await page.evaluate(() => window.__appMockClipboardText)
+  assert(!copiedDiagnostic.includes('D:\\books'), 'partial corpus import copied diagnostics must not expose local source paths')
+  const parsedDiagnostic = JSON.parse(copiedDiagnostic)
+  assert.equal(parsedDiagnostic.bridge_method, 'CreateReferenceAnchorsWithResult', 'partial corpus import diagnostic must name the bridge method')
+  const diagnosticDetail = JSON.parse(parsedDiagnostic.detail)
+  assert.equal(diagnosticDetail.succeeded_count, 1, 'partial corpus import diagnostic must include succeeded count')
+  assert.equal(diagnosticDetail.failed_count, 1, 'partial corpus import diagnostic must include failed count')
 }
 
 async function verifyChapterReferenceWorkflow(page) {
@@ -357,16 +620,35 @@ async function verifyChapterReferenceWorkflow(page) {
   await expectVisible(page.locator('.monaco-editor').first(), 'chapter editor')
   await waitForBridgeCallArg(page, 'GetContent', 1, 'chapters/1.md')
 
+  const chapterSearchCountBefore = await bridgeCallCount(page, 'SearchReferenceMaterials')
   await page.getByRole('button', { name: /参考素材/ }).click()
   const drawer = page.getByTestId('chapter-reference-panel')
   await expectVisible(drawer, 'chapter reference drawer')
-  await expectVisible(drawer.getByText('推荐素材'), 'chapter reference recommendations heading')
+  await expectVisible(drawer.getByRole('heading', { name: '推荐素材' }), 'chapter reference recommendations heading')
   const chapterMaterialCard = drawer.getByTestId('chapter-reference-material-card').first()
   await expectVisible(chapterMaterialCard, 'chapter reference recommendation card')
+  const chapterSearchResult = await waitForLatestBridgeResult(page, 'SearchReferenceMaterials', chapterSearchCountBefore)
+  const chapterSearchJson = JSON.stringify(chapterSearchResult)
+  assert(!chapterSearchJson.includes(FULL_MATERIAL_LEAK_SENTINEL), 'chapter reference bridge search result must not expose full material text')
+  assert(!chapterSearchJson.includes('"text"'), 'chapter reference bridge search result must not include full text field')
+  assert(chapterSearchJson.includes('text_preview'), 'chapter reference bridge search result must include bounded text_preview')
   const chapterMaterialCardText = await chapterMaterialCard.innerText()
   assert(!chapterMaterialCardText.includes(FULL_MATERIAL_LEAK_SENTINEL), 'chapter reference material card must render bounded preview only')
   assert(chapterMaterialCardText.includes('预览已截断，不显示全文'), 'chapter reference material card must mark bounded preview')
-  await waitForBridgeCall(page, 'SearchReferenceMaterials')
+  const chapterMaterialDetailCountBefore = await bridgeCallCount(page, 'GetReferenceMaterialDetail')
+  await chapterMaterialCard.getByRole('button', { name: /查看 .* 的材料明细/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceMaterialDetail', chapterMaterialDetailCountBefore)
+  const chapterMaterialDetailDrawer = page.getByTestId('chapter-reference-material-detail-drawer')
+  await expectVisible(chapterMaterialDetailDrawer, 'chapter reference material detail drawer')
+  const chapterMaterialDetailText = await chapterMaterialDetailDrawer.innerText()
+  for (const expectedText of ['材料明细', '来源片段', '处理记录', '工作区语料', '预览已截断，不显示全文']) {
+    assert(chapterMaterialDetailText.includes(expectedText), `chapter material detail drawer must render ${expectedText}`)
+  }
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!chapterMaterialDetailText.includes(sensitiveText), `chapter material detail drawer must not render ${sensitiveText}`)
+  }
+  await chapterMaterialDetailDrawer.getByRole('button', { name: '关闭章节推荐材料明细' }).click()
+  await expectHidden(chapterMaterialDetailDrawer, 'chapter reference material detail drawer after close')
   await waitForBridgeCall(page, 'GetReferenceOrchestrationRuns')
 
   await drawer.getByRole('button', { name: '启动参考流程' }).click()
@@ -378,35 +660,71 @@ async function verifyChapterReferenceWorkflow(page) {
   await waitForBridgeCall(page, 'ResumeReferenceOrchestrationRun')
   await expectVisible(drawer.getByText('来源和事实边界已确认，请审批自动蓝图。'), 'chapter reference resumed decision')
 
-  const saveCountBeforeCandidate = await bridgeCallCount(page, 'SaveContent')
-  await drawer.getByRole('button', { name: '生成候选' }).first().click()
-  await waitForBridgeCall(page, 'AdaptReferenceMaterial')
+  const adaptCountBeforeStrictFlow = await bridgeCallCount(page, 'AdaptReferenceMaterial')
+  const saveCountBeforeStrictFlow = await bridgeCallCount(page, 'SaveContent')
+  await expectHidden(drawer.getByRole('button', { name: '生成候选' }), 'direct material candidate generation button')
+  await expectHidden(drawer.getByTestId('chapter-reference-candidate-preview'), 'direct chapter candidate preview')
+  await expectVisible(drawer.getByText('推荐卡不直接改写或插入正文'), 'strict chapter reference material card copy')
+  await expectVisible(drawer.getByText(/本面板不会从推荐素材直接生成可插入候选/), 'strict chapter reference flow copy')
+  assert.equal(await bridgeCallCount(page, 'AdaptReferenceMaterial'), adaptCountBeforeStrictFlow, 'chapter reference drawer must not call direct material adaptation')
+  assert.equal(await bridgeCallCount(page, 'SaveContent'), saveCountBeforeStrictFlow, 'chapter reference drawer must not save chapter content')
+
+  const finalInsertionResumeCountBefore = await bridgeCallCount(page, 'ResumeReferenceOrchestrationRun')
+  const candidateReadCountBefore = await bridgeCallCount(page, 'GetReferenceDraftCandidates')
+  const auditReadCountBefore = await bridgeCallCount(page, 'GetReferenceAnchoredDraftAudits')
+  await drawer.getByRole('button', { name: '确认并继续' }).click()
+  await waitForBridgeCallCountAfter(page, 'ResumeReferenceOrchestrationRun', finalInsertionResumeCountBefore)
+  await expectVisible(drawer.getByText('候选已通过审计，请在正文中显式插入。'), 'chapter reference final insertion stop')
+  await expectVisible(drawer.getByText(/候选 1 个/), 'chapter reference final insertion candidate count')
+  await expectVisible(drawer.getByText(/最终插入需要进入独立候选审查/), 'chapter reference final insertion manual boundary copy')
+  const candidateResult = await waitForLatestBridgeResult(page, 'GetReferenceDraftCandidates', candidateReadCountBefore)
+  await waitForLatestBridgeResult(page, 'GetReferenceAnchoredDraftAudits', auditReadCountBefore)
+  const candidateJson = JSON.stringify(candidateResult)
+  assert(candidateJson.includes(MOCK_REFERENCE_CANDIDATE_TEXT), 'chapter reference candidate getter must return preview text for explicit editor insertion')
+  for (const sensitiveText of ['D:\\books', 'source_text', 'source_path', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!candidateJson.includes(sensitiveText), `chapter reference candidate getter must not expose ${sensitiveText}`)
+  }
   const candidatePreview = drawer.getByTestId('chapter-reference-candidate-preview')
   await expectVisible(candidatePreview, 'chapter reference candidate preview')
-  await expectVisible(candidatePreview.getByText('林岚把雨声和杯底半圈水痕'), 'chapter reference candidate text')
-  await candidatePreview.getByRole('button', { name: '复制' }).click()
-  await page.waitForFunction(() => window.__appMockClipboardText?.includes('杯底半圈水痕'), null, { timeout: 12_000 })
-  assert.equal(await bridgeCallCount(page, 'SaveContent'), saveCountBeforeCandidate, 'copying a candidate must not save chapter content')
-
-  await candidatePreview.getByRole('button', { name: '追加末尾' }).click()
-  await assertEditorContains(page, '林岚把雨声和杯底半圈水痕重新放回眼前')
-  await waitForBridgeCallCountAfter(page, 'SaveContent', saveCountBeforeCandidate)
-
-  const adaptCountBeforeFailed = await bridgeCallCount(page, 'AdaptReferenceMaterial')
-  const saveCountBeforeFailed = await bridgeCallCount(page, 'SaveContent')
-  await drawer.getByLabel('已知事实').fill('mock_failed_audit')
-  await drawer.getByRole('button', { name: '生成候选' }).first().click()
-  await waitForBridgeCallCountAfter(page, 'AdaptReferenceMaterial', adaptCountBeforeFailed)
-  await expectVisible(candidatePreview.getByText('L2 · failed'), 'failed audit candidate status')
-  await expectVisible(drawer.getByTestId('chapter-reference-candidate-blocked'), 'failed audit insertion block')
-  assert.equal(await candidatePreview.getByRole('button', { name: '插入光标' }).isDisabled(), true, 'failed audit candidate must not allow cursor insertion')
-  assert.equal(await candidatePreview.getByRole('button', { name: '追加末尾' }).isDisabled(), true, 'failed audit candidate must not allow append insertion')
-  assert.equal(await candidatePreview.getByRole('button', { name: '替换选区' }).isDisabled(), true, 'failed audit candidate must not allow selection replacement')
-  assert.equal(await bridgeCallCount(page, 'SaveContent'), saveCountBeforeFailed, 'failed audit candidate must not save chapter content')
+  await expectVisible(candidatePreview.getByText(MOCK_REFERENCE_CANDIDATE_TEXT), 'chapter reference candidate text')
+  await assertEditorNotContains(page, MOCK_REFERENCE_CANDIDATE_TEXT)
+  assert.equal(await bridgeCallCount(page, 'SaveContent'), saveCountBeforeStrictFlow, 'chapter reference candidate preview must not save chapter content')
+  await candidatePreview.getByRole('button', { name: '复制候选' }).click()
+  await page.waitForFunction(
+    (expectedText) => window.__appMockClipboardText === expectedText,
+    MOCK_REFERENCE_CANDIDATE_TEXT,
+    { timeout: 12_000 },
+  )
+  assert.equal(await bridgeCallCount(page, 'SaveContent'), saveCountBeforeStrictFlow, 'copying a candidate must not save chapter content')
+  await candidatePreview.getByRole('button', { name: '插入到光标' }).click()
+  await assertEditorContains(page, MOCK_REFERENCE_CANDIDATE_TEXT)
+  await page.keyboard.press(shortcutKey('z'))
+  await assertEditorNotContains(page, MOCK_REFERENCE_CANDIDATE_TEXT)
+  await candidatePreview.getByRole('button', { name: '追加到末尾' }).click()
+  await assertEditorContains(page, MOCK_REFERENCE_CANDIDATE_TEXT)
+  await page.keyboard.press(shortcutKey('z'))
+  await assertEditorNotContains(page, MOCK_REFERENCE_CANDIDATE_TEXT)
+  await page.evaluate(() => window.__novelistEditor.selectAll())
+  await candidatePreview.getByRole('button', { name: '替换选区' }).click()
+  await page.waitForFunction(
+    (expectedText) => window.__novelistEditor?.getValue?.() === expectedText,
+    MOCK_REFERENCE_CANDIDATE_TEXT,
+    { timeout: 12_000 },
+  )
+  await page.waitForTimeout(700)
+  assert.equal(await bridgeCallCount(page, 'SaveContent'), saveCountBeforeStrictFlow, 'explicit candidate insertion must update editor buffer without direct SaveContent')
+  assert.equal(await drawer.getByRole('button', { name: '确认并继续' }).isDisabled(), true, 'final insertion resume must be disabled in chapter reference drawer')
+  assert.equal(await bridgeCallCount(page, 'SaveContent'), saveCountBeforeStrictFlow, 'chapter reference final insertion stop must not save chapter content')
+  const resumeDecisionTypes = await page.evaluate(() =>
+    window.__appMockState.calls
+      .filter((item) => item.method === 'ResumeReferenceOrchestrationRun')
+      .map((item) => item.args?.[0]?.decision_type))
+  assert(resumeDecisionTypes.includes('approve_blueprint'), 'chapter reference must explicitly resume blueprint approval before final insertion stop')
+  assert(!resumeDecisionTypes.includes('approve_final_insertion'), 'chapter reference drawer must not auto-resume final insertion')
 
   await drawer.getByRole('button', { name: '取消流程' }).click()
   await waitForBridgeCall(page, 'CancelReferenceOrchestrationRun')
-  await expectVisible(drawer.getByText('cancelled · blueprint_approval'), 'chapter reference cancelled run status')
+  await expectVisible(drawer.getByText('cancelled · final_insertion'), 'chapter reference cancelled run status')
 
   const firstSearchInput = await page.evaluate(() => {
     const call = window.__appMockState.calls.find((item) => item.method === 'SearchReferenceMaterials')
@@ -430,12 +748,7 @@ async function verifyChapterReferenceWorkflow(page) {
   assert(resumeInput, 'chapter reference drawer must support in-place orchestration resume')
   assert.equal(resumeInput.decision_type, 'confirm_source_and_facts', 'chapter reference resume must use the backend decision type')
 
-  const adaptInput = await page.evaluate(() => {
-    const call = window.__appMockState.calls.find((item) => item.method === 'AdaptReferenceMaterial')
-    return call?.args?.[0] ?? null
-  })
-  assert(adaptInput, 'chapter reference drawer must generate a candidate from an existing material')
-  assert.equal(adaptInput.max_rewrite_level, 'L2', 'chapter reference candidate generation must use an explicit rewrite budget')
+  assert.equal(await bridgeCallCount(page, 'AdaptReferenceMaterial'), 0, 'chapter reference drawer must not bypass orchestration with direct material adaptation')
 
   await page.getByRole('button', { name: '大纲' }).click()
   await expectHidden(drawer, 'chapter reference drawer after switching to outline view')
@@ -475,7 +788,7 @@ export async function runFullSuite(browser, url) {
 
   logStep('loading workspace')
   const page = await newAppPage(browser, consoleErrors, pageErrors, fullSuiteBridgeOptions(), undefined, 'full-shell')
-  if (runConfig.grep === '@error' || runConfig.grep === '@update' || runConfig.grep === '@chapter-reference') {
+  if (runConfig.grep === '@error' || runConfig.grep === '@update' || runConfig.grep === '@chapter-reference' || runConfig.grep === '@corpus-library') {
     await installClipboardSpy(page)
   }
   await page.goto(url, { waitUntil: 'domcontentloaded' })
@@ -831,8 +1144,8 @@ export async function runUsabilitySuite(browser, url) {
     scores: { discoverability: 5, clickCost: 5, feedbackClarity: 4, errorRecovery: 4, keyboardErgonomics: 4, informationDensity: 4, visualReadability: 4 },
   }))
 
-  await clickActivity(page, '参考锚定')
-  await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'usability reference heading')
+  await clickActivity(page, '素材库')
+  await expectVisible(page.getByRole('heading', { name: '语料库管理' }), 'usability corpus library heading')
   await page.screenshot({ path: path.join(outputDir, 'usability-06-reference.png'), fullPage: true })
   observations.push(usabilityObservation({
     surface: 'Reference Anchor / Corpus',

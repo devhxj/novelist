@@ -25,7 +25,7 @@ const MONACO_THEME: Record<Theme, string> = { light: 'novelist-light', dark: 'vs
 type MonacoEditor = Parameters<OnMount>[0]
 type MonacoApi = Parameters<OnMount>[1]
 type SearchDecorations = ReturnType<MonacoEditor['createDecorationsCollection']>
-type ReferenceCandidateUseMode = 'insert' | 'append' | 'replace'
+type ReferenceCandidateInsertMode = 'cursor' | 'append' | 'replace'
 
 interface FileChangedEvent {
   novel_id?: number
@@ -40,6 +40,19 @@ interface SaveErrorState {
 
 function saveErrorText(message: string): string {
   return message.startsWith('保存失败') ? message : `保存失败：${message}`
+}
+
+function contentDiagnosticSummary(content: string): { content_length: number; content_hash: string } {
+  let hash = 2166136261
+  for (let index = 0; index < content.length; index += 1) {
+    hash ^= content.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+
+  return {
+    content_length: content.length,
+    content_hash: `fnv1a:${(hash >>> 0).toString(16).padStart(8, '0')}`,
+  }
 }
 
 export interface ContentPanelHandle {
@@ -81,6 +94,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   const monacoRef = useRef<MonacoApi | null>(null)
   const searchDecorationsRef = useRef<SearchDecorations | null>(null)
   const savingRef = useRef<{ id: string; path: string; content: string } | null>(null)
+  const suppressAutosaveUntilRef = useRef(0)
   const pendingHighlightRef = useRef<{ matchPos: number; matchLen: number } | null>(null)
   const didApplyHighlightRef = useRef(false) // handleEditorMount 已应用高亮时跳过清除
   const novelIdRef = useRef(novelId)
@@ -204,7 +218,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
           detail: {
             novel_id: novelIdRef.current,
             path,
-            source_text: content,
+            ...contentDiagnosticSummary(content),
           },
         }),
       })
@@ -219,12 +233,19 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
         e.preventDefault()
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
         const s = savingRef.current
-        if (s) void doSave(s.id, s.path, s.content).catch(() => undefined)
+        if (s) {
+          void doSave(s.id, s.path, s.content).catch(() => undefined)
+          return
+        }
+
+        if (activeTab?.type === 'file' && activeTab.isDirty) {
+          void doSave(activeTab.id, activeTab.path, activeTab.content ?? '').catch(() => undefined)
+        }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [doSave])
+  }, [activeTab, doSave])
 
   const handleEditorChange = useCallback((tabId: string, value: string | undefined) => {
     const content = value ?? ''
@@ -232,6 +253,12 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     onContentChange?.(content)
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    if (Date.now() < suppressAutosaveUntilRef.current) {
+      savingRef.current = null
+      saveTimerRef.current = null
+      return
+    }
+
     const tab = tabs.find(t => t.id === tabId)
     if (!tab) return
     savingRef.current = { id: tabId, path: tab.path, content }
@@ -241,6 +268,61 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       void doSave(s.id, s.path, s.content).catch(() => undefined)
     }, 500)
   }, [tabs, updateTab, doSave, onContentChange])
+
+  const insertReferenceCandidate = useCallback((text: string, mode: ReferenceCandidateInsertMode): boolean => {
+    if (!activeTab || activeTab.type !== 'file' || !isChapterPath(activeTab.path) || activeTab.viewMode === 'outline') {
+      return false
+    }
+
+    const editor = editorRef.current
+    const monaco = monacoRef.current
+    const model = editor?.getModel()
+    if (!editor || !monaco || !model || text.length === 0) {
+      return false
+    }
+
+    const selection = editor.getSelection()
+    let range: Parameters<MonacoEditor['executeEdits']>[1][number]['range']
+    let nextText = text
+
+    if (mode === 'cursor') {
+      const position = editor.getPosition()
+      if (!position) return false
+      range = new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column)
+    } else if (mode === 'append') {
+      const lastLine = model.getLineCount()
+      const lastColumn = model.getLineMaxColumn(lastLine)
+      const current = model.getValue()
+      const prefix = current.length === 0 ? '' : current.endsWith('\n') ? '\n' : '\n\n'
+      range = new monaco.Range(lastLine, lastColumn, lastLine, lastColumn)
+      nextText = `${prefix}${text}`
+    } else if (!selection || selection.isEmpty()) {
+      return false
+    } else {
+      range = selection
+    }
+
+    suppressAutosaveUntilRef.current = Date.now() + 5_000
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    savingRef.current = null
+
+    editor.focus()
+    editor.pushUndoStop()
+    editor.executeEdits('chapter-reference-candidate', [{
+      range,
+      text: nextText,
+      forceMoveMarkers: true,
+    }])
+    editor.pushUndoStop()
+
+    const content = model.getValue()
+    updateTab(activeTab.id, { content, isDirty: true })
+    onContentChange?.(content)
+    return true
+  }, [activeTab, onContentChange, updateTab])
 
   // 将 rune 偏移转为 Monaco 行列号（1-based）
   function runeOffsetToMonaco(text: string, runeOffset: number): { line: number; col: number } {
@@ -431,52 +513,6 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     searchDecorationsRef.current?.clear()
     searchDecorationsRef.current = null
   }, [activeTab?.id, activeTab?.content, doHighlight])
-
-  const applyReferenceCandidate = useCallback((text: string, mode: ReferenceCandidateUseMode): { ok: boolean; message: string } => {
-    const editor = editorRef.current
-    const monaco = monacoRef.current
-    const model = editor?.getModel()
-    if (!editor || !monaco || !model || activeTab?.type !== 'file' || !isChapterPath(activeTab.path) || activeTab.viewMode === 'outline') {
-      return { ok: false, message: '请先切回章节正文编辑器。' }
-    }
-
-    const candidateText = text.trim()
-    if (!candidateText) {
-      return { ok: false, message: '候选为空，无法插入。' }
-    }
-
-    let range
-    let insertedText = candidateText
-    if (mode === 'replace') {
-      const selection = editor.getSelection()
-      if (!selection || selection.isEmpty()) {
-        return { ok: false, message: '请先在正文中选择要替换的片段。' }
-      }
-      range = selection
-    } else if (mode === 'append') {
-      const lastLine = model.getLineCount()
-      const lastColumn = model.getLineMaxColumn(lastLine)
-      const current = model.getValue()
-      const prefix = current.length === 0 || current.endsWith('\n\n')
-        ? ''
-        : current.endsWith('\n') ? '\n' : '\n\n'
-      insertedText = `${prefix}${candidateText}`
-      range = new monaco.Range(lastLine, lastColumn, lastLine, lastColumn)
-    } else {
-      const position = editor.getPosition() ?? { lineNumber: model.getLineCount(), column: model.getLineMaxColumn(model.getLineCount()) }
-      range = new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column)
-    }
-
-    editor.focus()
-    editor.pushUndoStop()
-    editor.executeEdits('reference-candidate', [{
-      range,
-      text: insertedText,
-      forceMoveMarkers: true,
-    }])
-    editor.pushUndoStop()
-    return { ok: true, message: mode === 'append' ? '已追加到正文末尾。' : mode === 'replace' ? '已替换选区。' : '已插入到光标处。' }
-  }, [activeTab])
 
   function filePathFromDiff(diffPath: string): { filePath: string; viewMode: 'content' | 'outline' } {
     if (isOutlinePath(diffPath)) {
@@ -727,7 +763,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
           <ChapterReferencePanel
             novelId={novelId}
             activeChapter={activeChapter}
-            onApplyCandidate={applyReferenceCandidate}
+            onInsertCandidate={insertReferenceCandidate}
             onClose={() => setReferencePanelOpen(false)}
           />
         )}

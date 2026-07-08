@@ -47,6 +47,25 @@ internal static class ReferenceMaterialSlotDetector
     }
 }
 
+internal interface IReferenceMaterialSlotDetector
+{
+    IReadOnlyList<ReferenceMaterialSlot> Detect(ReferenceMaterialPayload material);
+}
+
+internal sealed class DefaultReferenceMaterialSlotDetector : IReferenceMaterialSlotDetector
+{
+    public static DefaultReferenceMaterialSlotDetector Instance { get; } = new();
+
+    private DefaultReferenceMaterialSlotDetector()
+    {
+    }
+
+    public IReadOnlyList<ReferenceMaterialSlot> Detect(ReferenceMaterialPayload material)
+    {
+        return ReferenceMaterialSlotDetector.Detect(material);
+    }
+}
+
 internal sealed record ReferenceMaterialSlot(
     string SlotId,
     string MaterialId,

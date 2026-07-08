@@ -120,6 +120,66 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void CreateReferenceAnchorsResultPayloadUsesStableSnakeCaseWithoutSourcePaths()
+    {
+        var result = new CreateReferenceAnchorsResultPayload(
+            Succeeded:
+            [
+                new ReferenceAnchorPayload(
+                    AnchorId: 7,
+                    NovelId: 42,
+                    Title: "Bulk Anchor",
+                    Author: "Reference Author",
+                    SourcePath: string.Empty,
+                    SourceKind: "markdown",
+                    LicenseStatus: "user_provided",
+                    SourceFileHash: "source-hash",
+                    BuildVersion: "reference-anchor-v1",
+                    Status: ReferenceAnchorBuildStates.Ready,
+                    CreatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
+                    UpdatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
+                    Visibility: ReferenceCorpusVisibilities.Private,
+                    SourceTrust: ReferenceSourceTrustLevels.Imported,
+                    UserTags: ["bulk"])
+            ],
+            Failed:
+            [
+                new CreateReferenceAnchorFailurePayload(
+                    Index: 1,
+                    Title: "Missing Anchor",
+                    SourceKind: "markdown",
+                    SourceIdentity: "source:6d0c04cf",
+                    Diagnostic: "Reference source file does not exist.",
+                    RetryAvailable: true)
+            ],
+            TotalCount: 2,
+            SucceededCount: 1,
+            FailedCount: 1);
+
+        var serialized = JsonSerializer.Serialize(result, BridgeJson.SerializerOptions);
+        using var json = JsonDocument.Parse(serialized);
+        var root = json.RootElement;
+
+        Assert.Equal(2, root.GetProperty("total_count").GetInt32());
+        Assert.Equal(1, root.GetProperty("succeeded_count").GetInt32());
+        Assert.Equal(1, root.GetProperty("failed_count").GetInt32());
+        Assert.Equal(7, root.GetProperty("succeeded")[0].GetProperty("anchor_id").GetInt64());
+        var failure = root.GetProperty("failed")[0];
+        Assert.Equal(1, failure.GetProperty("index").GetInt32());
+        Assert.Equal("Missing Anchor", failure.GetProperty("title").GetString());
+        Assert.Equal("markdown", failure.GetProperty("source_kind").GetString());
+        Assert.Equal("source:6d0c04cf", failure.GetProperty("source_identity").GetString());
+        Assert.True(failure.GetProperty("retry_available").GetBoolean());
+        Assert.False(root.TryGetProperty("Succeeded", out _));
+        Assert.False(failure.TryGetProperty("source_path", out _));
+        Assert.False(failure.TryGetProperty("SourcePath", out _));
+        Assert.DoesNotContain(@"D:\books", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", serialized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void PromoteReferenceAnchorsToWorkspaceCorpusPayloadUsesStableSnakeCaseJsonNames()
     {
         var input = new PromoteReferenceAnchorsToWorkspaceCorpusPayload(
@@ -376,6 +436,90 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void ReferenceSourceSegmentDetailPayloadUsesBoundedSnakeCaseFieldsWithoutSensitiveText()
+    {
+        var input = new GetReferenceSourceSegmentDetailPayload(
+            NovelId: 42,
+            AnchorId: 7,
+            SegmentId: "segment-1");
+
+        using var inputJson = JsonDocument.Parse(JsonSerializer.Serialize(input, BridgeJson.SerializerOptions));
+        var inputRoot = inputJson.RootElement;
+        Assert.Equal(42, inputRoot.GetProperty("novel_id").GetInt64());
+        Assert.Equal(7, inputRoot.GetProperty("anchor_id").GetInt64());
+        Assert.Equal("segment-1", inputRoot.GetProperty("segment_id").GetString());
+        Assert.False(inputRoot.TryGetProperty("NovelId", out _));
+
+        var detail = new ReferenceSourceSegmentDetailPayload(
+            Source: new ReferenceMaterialSourceSummaryPayload(
+                AnchorId: 7,
+                NovelId: 42,
+                Title: "Shared Anchor",
+                Author: "Reference Author",
+                SourceKind: "markdown",
+                LicenseStatus: "user_provided",
+                SourceFileHash: "source-hash",
+                BuildVersion: "reference-anchor-v1",
+                Status: ReferenceAnchorBuildStates.FailedExtraction,
+                Visibility: ReferenceCorpusVisibilities.Private,
+                SourceTrust: ReferenceSourceTrustLevels.UserVerified,
+                UserTags: ["rain"],
+                OwnerScope: ReferenceAnchorOwnerScopes.Novel,
+                OwnerNovelId: 42),
+            Segment: new ReferenceSourceSegmentPreviewPayload(
+                AnchorId: 7,
+                SegmentId: "segment-1",
+                SegmentType: "paragraph",
+                ChapterIndex: 1,
+                ChapterTitle: "雨夜",
+                SegmentIndex: 2,
+                ParentSegmentId: "chapter-1",
+                StartOffset: 12,
+                EndOffset: 80,
+                TextPreview: "片段预览",
+                TextTruncated: true,
+                TextHash: "segment-hash"),
+            ProcessingNotes:
+            [
+                new ReferenceMaterialProcessingNotePayload(
+                    Stage: "extracting_materials",
+                    Status: ReferenceAnchorBuildStates.FailedExtraction,
+                    Message: "extract failed",
+                    UpdatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
+                    SourceSegmentCount: 2,
+                    MaterialCount: 0,
+                    SlotCount: 0,
+                    VectorCount: 0,
+                    AffectedSourceId: "7",
+                    AffectedSegmentId: "segment-1")
+            ]);
+
+        var serialized = JsonSerializer.Serialize(detail, BridgeJson.SerializerOptions);
+        using var json = JsonDocument.Parse(serialized);
+        var root = json.RootElement;
+
+        Assert.Equal("Shared Anchor", root.GetProperty("source").GetProperty("title").GetString());
+        var segment = root.GetProperty("segment");
+        Assert.Equal(7, segment.GetProperty("anchor_id").GetInt64());
+        Assert.Equal("segment-1", segment.GetProperty("segment_id").GetString());
+        Assert.Equal("paragraph", segment.GetProperty("segment_type").GetString());
+        Assert.Equal("chapter-1", segment.GetProperty("parent_segment_id").GetString());
+        Assert.Equal(12, segment.GetProperty("start_offset").GetInt32());
+        Assert.Equal(80, segment.GetProperty("end_offset").GetInt32());
+        Assert.Equal("片段预览", segment.GetProperty("text_preview").GetString());
+        Assert.True(segment.GetProperty("text_truncated").GetBoolean());
+        Assert.Equal("segment-hash", segment.GetProperty("text_hash").GetString());
+        Assert.Equal("segment-1", root.GetProperty("processing_notes")[0].GetProperty("affected_segment_id").GetString());
+        Assert.False(root.GetProperty("source").TryGetProperty("source_path", out _));
+        Assert.False(segment.TryGetProperty("text", out _));
+        Assert.False(segment.TryGetProperty("source_text", out _));
+        Assert.False(segment.TryGetProperty("chapter_text", out _));
+        Assert.DoesNotContain("candidate_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(@"D:\books", serialized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ReferenceSourceProcessingDetailPayloadUsesStableSnakeCaseWithoutSensitiveText()
     {
         var input = new GetReferenceSourceProcessingDetailPayload(
@@ -424,7 +568,50 @@ public sealed class ReferenceAnchorContractTests
                     AffectedSlotId: "slot-1")
             ],
             RetryAvailable: false,
-            RebuildAvailable: true);
+            RebuildAvailable: true,
+            AttemptCount: 2,
+            CurrentAttempt: new ReferenceSourceProcessingAttemptPayload(
+                AttemptId: "attempt-2",
+                AttemptNumber: 2,
+                BuildId: "build-2",
+                BuildVersion: "reference-anchor-v1",
+                Stage: "embedding",
+                Status: ReferenceAnchorBuildStates.Ready,
+                StartedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
+                UpdatedAt: DateTimeOffset.Parse("2026-07-04T00:01:00Z"),
+                CompletedAt: DateTimeOffset.Parse("2026-07-04T00:01:00Z"),
+                EventCount: 1,
+                SourceSegmentCount: 3,
+                MaterialCount: 2,
+                SlotCount: 1,
+                VectorCount: 2,
+                RecoveredFromAttemptId: "attempt-1",
+                RecoveredFromBuildId: "build-1",
+                BlockedReason: ""),
+            PriorAttempts:
+            [
+                new ReferenceSourceProcessingAttemptPayload(
+                    AttemptId: "attempt-1",
+                    AttemptNumber: 1,
+                    BuildId: "build-1",
+                    BuildVersion: "reference-anchor-v1",
+                    Stage: "embedding",
+                    Status: ReferenceAnchorBuildStates.FailedEmbedding,
+                    StartedAt: DateTimeOffset.Parse("2026-07-03T00:00:00Z"),
+                    UpdatedAt: DateTimeOffset.Parse("2026-07-03T00:01:00Z"),
+                    CompletedAt: DateTimeOffset.Parse("2026-07-03T00:01:00Z"),
+                    EventCount: 1,
+                    SourceSegmentCount: 3,
+                    MaterialCount: 2,
+                    SlotCount: 1,
+                    VectorCount: 0,
+                    RecoveredFromAttemptId: "",
+                    RecoveredFromBuildId: "",
+                    BlockedReason: "sqlite-vec native extension is unavailable")
+            ],
+            RecoveredFromAttemptId: "attempt-1",
+            RecoveredFromBuildId: "build-1",
+            BlockedReason: "");
 
         using var inputJson = JsonDocument.Parse(JsonSerializer.Serialize(input, BridgeJson.SerializerOptions));
         Assert.Equal(42, inputJson.RootElement.GetProperty("novel_id").GetInt64());
@@ -439,6 +626,13 @@ public sealed class ReferenceAnchorContractTests
         Assert.Equal(3, root.GetProperty("current_status").GetProperty("source_segment_count").GetInt32());
         Assert.Equal("event-1", root.GetProperty("events")[0].GetProperty("event_id").GetString());
         Assert.Equal("material-1", root.GetProperty("events")[0].GetProperty("affected_material_id").GetString());
+        Assert.Equal(2, root.GetProperty("attempt_count").GetInt32());
+        Assert.Equal("attempt-2", root.GetProperty("current_attempt").GetProperty("attempt_id").GetString());
+        Assert.Equal(2, root.GetProperty("current_attempt").GetProperty("attempt_number").GetInt32());
+        Assert.Equal("build-2", root.GetProperty("current_attempt").GetProperty("build_id").GetString());
+        Assert.Equal("attempt-1", root.GetProperty("current_attempt").GetProperty("recovered_from_attempt_id").GetString());
+        Assert.Equal("attempt-1", root.GetProperty("recovered_from_attempt_id").GetString());
+        Assert.Equal("sqlite-vec native extension is unavailable", root.GetProperty("prior_attempts")[0].GetProperty("blocked_reason").GetString());
         Assert.True(root.GetProperty("rebuild_available").GetBoolean());
         Assert.False(root.GetProperty("retry_available").GetBoolean());
         Assert.False(root.TryGetProperty("source_path", out _));
@@ -863,6 +1057,63 @@ public sealed class ReferenceAnchorContractTests
         Assert.False(root.TryGetProperty("StyleProfileIds", out _));
         Assert.False(root.TryGetProperty("StyleDimensions", out _));
         Assert.False(root.TryGetProperty("ImitationIntensity", out _));
+    }
+
+    [Fact]
+    public void MaterialTagReviewQueuePayloadUsesStableJsonNamesWithoutFullTextFields()
+    {
+        var input = new GetReferenceMaterialTagReviewQueuePayload(
+            NovelId: 42,
+            AnchorIds: [7, 8],
+            Page: 2,
+            Size: 25,
+            ArchiveFilter: ReferenceMaterialArchiveFilters.Active);
+        var item = new ReferenceMaterialTagReviewItemPayload(
+            new ReferenceMaterialSummaryPayload(
+                MaterialId: "mat-1",
+                AnchorId: 7,
+                SourceSegmentId: "seg-1",
+                MaterialType: ReferenceMaterialTypes.Sentence,
+                FunctionTag: "environment",
+                EmotionTag: "unknown",
+                SceneTag: "threshold",
+                PovTag: "close",
+                TechniqueTag: "afterbeat",
+                FunctionConfidence: 0.7,
+                EmotionConfidence: 0.8,
+                PovConfidence: 0.6,
+                TextPreview: "bounded preview",
+                TextTruncated: true,
+                SourceHash: "hash",
+                ExtractorVersion: "extractor",
+                UserVerified: false,
+                CreatedAt: DateTimeOffset.Parse("2026-07-04T00:00:00Z")),
+            [
+                new ReferenceMaterialTagReviewIssuePayload(
+                    ReferenceMaterialTagReviewIssueCodes.LowConfidence,
+                    "低置信 功能 0.70 / POV 0.60",
+                    "warning")
+            ]);
+
+        using var inputJson = JsonDocument.Parse(JsonSerializer.Serialize(input, BridgeJson.SerializerOptions));
+        var inputRoot = inputJson.RootElement;
+        Assert.Equal(42, inputRoot.GetProperty("novel_id").GetInt64());
+        Assert.Equal(7, inputRoot.GetProperty("anchor_ids")[0].GetInt64());
+        Assert.Equal(2, inputRoot.GetProperty("page").GetInt32());
+        Assert.Equal(25, inputRoot.GetProperty("size").GetInt32());
+        Assert.Equal("active", inputRoot.GetProperty("archive_filter").GetString());
+        Assert.False(inputRoot.TryGetProperty("NovelId", out _));
+        Assert.False(inputRoot.TryGetProperty("AnchorIds", out _));
+
+        using var itemJson = JsonDocument.Parse(JsonSerializer.Serialize(item, BridgeJson.SerializerOptions));
+        var itemRoot = itemJson.RootElement;
+        Assert.Equal("mat-1", itemRoot.GetProperty("material").GetProperty("material_id").GetString());
+        Assert.Equal("bounded preview", itemRoot.GetProperty("material").GetProperty("text_preview").GetString());
+        Assert.Equal(ReferenceMaterialTagReviewIssueCodes.LowConfidence, itemRoot.GetProperty("issues")[0].GetProperty("code").GetString());
+        Assert.False(itemRoot.GetProperty("material").TryGetProperty("text", out _));
+        Assert.False(itemRoot.TryGetProperty("source_text", out _));
+        Assert.False(itemRoot.TryGetProperty("prompt", out _));
+        Assert.False(itemRoot.TryGetProperty("candidate_text", out _));
     }
 
     [Fact]
@@ -1649,6 +1900,31 @@ public sealed class ReferenceAnchorContractTests
     }
 
     [Fact]
+    public void GetReferenceDraftCandidatesPayloadUsesStableSnakeCaseWithoutSourceOrSaveFields()
+    {
+        var payload = new GetReferenceDraftCandidatesPayload(
+            NovelId: 42,
+            BlueprintId: 501,
+            CandidateIds: ["candidate-1", "candidate-2"]);
+
+        var serialized = JsonSerializer.Serialize(payload, BridgeJson.SerializerOptions);
+        using var json = JsonDocument.Parse(serialized);
+        var root = json.RootElement;
+
+        Assert.Equal(42, root.GetProperty("novel_id").GetInt64());
+        Assert.Equal(501, root.GetProperty("blueprint_id").GetInt64());
+        Assert.Equal("candidate-1", root.GetProperty("candidate_ids")[0].GetString());
+        Assert.Equal("candidate-2", root.GetProperty("candidate_ids")[1].GetString());
+        Assert.False(root.TryGetProperty("text", out _));
+        Assert.False(root.TryGetProperty("candidate_text", out _));
+        Assert.False(root.TryGetProperty("source_text", out _));
+        Assert.False(root.TryGetProperty("source_path", out _));
+        Assert.False(root.TryGetProperty("prompt", out _));
+        Assert.False(root.TryGetProperty("path", out _));
+        Assert.False(root.TryGetProperty("SaveContent", out _));
+    }
+
+    [Fact]
     public void ReferenceStyleAuditFindingPayloadUsesStableSnakeCaseWithoutTextFields()
     {
         var input = new GetReferenceStyleAuditFindingsPayload(
@@ -1702,6 +1978,7 @@ public sealed class ReferenceAnchorContractTests
         [
             "CreateReferenceAnchor",
             "CreateReferenceAnchors",
+            "CreateReferenceAnchorsWithResult",
             "GetReferenceAnchors",
             "DeleteReferenceAnchor",
             "DeleteReferenceAnchors",
@@ -1714,6 +1991,8 @@ public sealed class ReferenceAnchorContractTests
             "GetReferenceAnchorBuildStatus",
             "SearchReferenceMaterials",
             "GetReferenceMaterialDetail",
+            "GetReferenceMaterialTagReviewQueue",
+            "GetReferenceSourceSegmentDetail",
             "GetReferenceSourceProcessingDetail",
             "AdaptReferenceMaterial",
             "AuditReferenceReuse",
@@ -1729,6 +2008,7 @@ public sealed class ReferenceAnchorContractTests
             "ApproveReferenceChapterBlueprint",
             "BindReferenceBlueprintMaterials",
             "GenerateReferenceAnchoredDraft",
+            "GetReferenceDraftCandidates",
             "AuditReferenceAnchoredDraft",
             "GetReferenceAnchoredDraftAudits",
             "GetReferenceStyleAuditFindings",

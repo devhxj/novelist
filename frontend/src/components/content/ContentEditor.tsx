@@ -9,6 +9,7 @@ declare global {
       getValue: () => string
       setValue: (value: string) => void
       focus: () => void
+      selectAll: () => void
       insertText: (value: string) => void
     }
   }
@@ -28,6 +29,12 @@ export default function ContentEditor({ value, onChange, onMount, editorTheme }:
         getValue: () => editor.getValue(),
         setValue: (nextValue: string) => editor.setValue(nextValue),
         focus: () => editor.focus(),
+        selectAll: () => {
+          const model = editor.getModel()
+          if (!model) return
+          editor.focus()
+          editor.setSelection(model.getFullModelRange())
+        },
         insertText: (nextValue: string) => {
           editor.focus()
           const selection = editor.getSelection()

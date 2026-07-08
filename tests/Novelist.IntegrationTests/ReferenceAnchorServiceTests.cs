@@ -123,12 +123,11 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAnchorValidatesNovelIdAndSourceFile()
+    public async Task CreateAnchorValidatesNovelId()
     {
         var options = CreateOptions();
         await InitializeAsync(options);
         var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
-        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("校验测试", "", ""), CancellationToken.None);
         var service = new SqliteReferenceAnchorService(options, novels);
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
@@ -141,19 +140,169 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
                     "markdown",
                     "user_provided"),
                 CancellationToken.None));
+    }
 
-        var missingSourcePath = Path.Combine(_root, "sources", "missing.md");
-        var exception = await Assert.ThrowsAsync<ArgumentException>(async () =>
-            await service.CreateAnchorAsync(
-                new CreateReferenceAnchorPayload(
-                    novel.Id,
-                    "缺失参考",
-                    null,
-                    missingSourcePath,
-                    "markdown",
-                    "user_provided"),
-                CancellationToken.None));
-        Assert.Contains("does not exist", exception.Message, StringComparison.OrdinalIgnoreCase);
+    [Fact]
+    public async Task CreateAnchorRecordsInitialFailedImportWithInspectableProcessingDetail()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("初始失败导入测试", "", ""), CancellationToken.None);
+        var missingSourcePath = Path.Combine(_root, "sources", "initial-missing.md");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var input = new CreateReferenceAnchorPayload(
+            novel.Id,
+            "初始缺失参考",
+            null,
+            missingSourcePath,
+            "markdown",
+            "user_provided");
+
+        var failed = await service.CreateAnchorAsync(input, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, failed.Status);
+        Assert.Equal(Path.GetFullPath(missingSourcePath), failed.SourcePath);
+        Assert.StartsWith("unavailable:", failed.SourceFileHash, StringComparison.Ordinal);
+
+        var status = await service.GetBuildStatusAsync(novel.Id, failed.AnchorId, CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, status.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, status.Stage);
+        Assert.Equal(0, status.SourceSegmentCount);
+        Assert.Equal(0, status.MaterialCount);
+        Assert.Equal(0, status.SlotCount);
+        Assert.Equal(0, status.VectorCount);
+        Assert.False(string.IsNullOrWhiteSpace(status.LastError));
+        Assert.DoesNotContain(missingSourcePath, status.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(_root, status.LastError, StringComparison.OrdinalIgnoreCase);
+
+        var detail = await service.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, failed.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, detail.CurrentStatus.Status);
+        Assert.True(detail.RetryAvailable);
+        Assert.True(detail.RebuildAvailable);
+        Assert.Contains(detail.Events, item =>
+            item.Status == ReferenceAnchorBuildStates.FailedImport &&
+            item.MaterialCount == 0 &&
+            item.SourceSegmentCount == 0);
+
+        var anchors = await service.GetAnchorsAsync(novel.Id, CancellationToken.None);
+        var listed = Assert.Single(anchors);
+        Assert.Equal(failed.AnchorId, listed.AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, listed.Status);
+
+        var materials = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [failed.AnchorId],
+                "任何内容",
+                [],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        Assert.Empty(materials.Items);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(missingSourcePath)!);
+        await File.WriteAllTextAsync(missingSourcePath, "第一句。\n\n第二句。", CancellationToken.None);
+
+        var duplicate = await service.CreateAnchorAsync(input, CancellationToken.None);
+        Assert.Equal(failed.AnchorId, duplicate.AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, duplicate.Status);
+
+        var rebuilt = await service.RebuildAnchorAsync(novel.Id, failed.AnchorId, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, rebuilt.Status);
+        Assert.True(rebuilt.MaterialCount > 0);
+        var afterRebuild = await service.GetAnchorsAsync(novel.Id, CancellationToken.None);
+        Assert.Single(afterRebuild);
+        Assert.Equal(failed.AnchorId, afterRebuild[0].AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, afterRebuild[0].Status);
+    }
+
+    [Fact]
+    public async Task CreateAnchorsWithResultReportsPerSourceFailuresAndKeepsSuccessfulImportsUsable()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("批量局部失败测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("batch-ok.md", "第一句。\n\n第二句。");
+        var missingSourcePath = Path.Combine(_root, "sources", "batch-missing.md");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var input = new CreateReferenceAnchorsPayload(
+            [
+                new CreateReferenceAnchorPayload(novel.Id, "成功参考", null, sourcePath, "markdown", "user_provided"),
+                new CreateReferenceAnchorPayload(novel.Id, "缺失参考", null, missingSourcePath, "markdown", "user_provided")
+            ]);
+
+        var result = await service.CreateAnchorsWithResultAsync(input, CancellationToken.None);
+
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal(1, result.SucceededCount);
+        Assert.Equal(1, result.FailedCount);
+        var succeeded = Assert.Single(result.Succeeded);
+        Assert.Equal("成功参考", succeeded.Title);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, succeeded.Status);
+        var failure = Assert.Single(result.Failed);
+        Assert.Equal(1, failure.Index);
+        Assert.Equal("缺失参考", failure.Title);
+        Assert.Equal("markdown", failure.SourceKind);
+        Assert.StartsWith("source:", failure.SourceIdentity, StringComparison.Ordinal);
+        Assert.True(failure.RetryAvailable);
+        Assert.False(string.IsNullOrWhiteSpace(failure.Diagnostic));
+        Assert.DoesNotContain(missingSourcePath, failure.Diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(_root, failure.Diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(missingSourcePath, failure.SourceIdentity, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(_root, failure.SourceIdentity, StringComparison.OrdinalIgnoreCase);
+
+        var materials = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [succeeded.AnchorId],
+                "第一句",
+                [],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        Assert.NotEmpty(materials.Items);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(missingSourcePath)!);
+        await File.WriteAllTextAsync(missingSourcePath, "第三句。\n\n第四句。", CancellationToken.None);
+
+        var retry = await service.CreateAnchorsWithResultAsync(input, CancellationToken.None);
+
+        Assert.Equal(2, retry.TotalCount);
+        Assert.Equal(1, retry.SucceededCount);
+        Assert.Equal(1, retry.FailedCount);
+        Assert.Contains(retry.Succeeded, anchor => anchor.AnchorId == succeeded.AnchorId);
+        var anchors = await service.GetAnchorsAsync(novel.Id, CancellationToken.None);
+        Assert.Equal(2, anchors.Count);
+        Assert.Equal(2, anchors.Select(anchor => anchor.AnchorId).Distinct().Count());
+        var failedAnchor = Assert.Single(anchors, anchor => anchor.Status == ReferenceAnchorBuildStates.FailedImport);
+
+        var rebuilt = await service.RebuildAnchorAsync(novel.Id, failedAnchor.AnchorId, CancellationToken.None);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, rebuilt.Status);
+
+        var afterExplicitRetry = await service.CreateAnchorsWithResultAsync(input, CancellationToken.None);
+        Assert.Equal(2, afterExplicitRetry.TotalCount);
+        Assert.Equal(2, afterExplicitRetry.SucceededCount);
+        Assert.Equal(0, afterExplicitRetry.FailedCount);
+        Assert.Empty(afterExplicitRetry.Failed);
+        var afterRetryAnchors = await service.GetAnchorsAsync(novel.Id, CancellationToken.None);
+        Assert.Equal(2, afterRetryAnchors.Count);
+        Assert.All(afterRetryAnchors, anchor => Assert.Equal(ReferenceAnchorBuildStates.Ready, anchor.Status));
     }
 
     [Fact]
@@ -168,15 +317,28 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         var anchor = await service.CreateAnchorAsync(
             new CreateReferenceAnchorPayload(novel.Id, "参考", null, sourcePath, "markdown", "user_provided"),
             CancellationToken.None);
+        var beforeFailure = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "第一句",
+                [],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        Assert.NotEmpty(beforeFailure.Items);
         File.Delete(sourcePath);
 
         var failed = await service.RebuildAnchorAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
 
         Assert.Equal(ReferenceAnchorBuildStates.FailedImport, failed.Status);
         Assert.Equal(ReferenceAnchorBuildStates.FailedImport, failed.Stage);
-        Assert.Equal(0, failed.SourceSegmentCount);
-        Assert.Equal(0, failed.MaterialCount);
-        Assert.Equal(0, failed.SlotCount);
+        Assert.True(failed.SourceSegmentCount > 0);
+        Assert.Equal(beforeFailure.Items.Count, failed.MaterialCount);
         Assert.False(string.IsNullOrWhiteSpace(failed.LastError));
         Assert.DoesNotContain(sourcePath, failed.LastError, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(_root, failed.LastError, StringComparison.OrdinalIgnoreCase);
@@ -185,6 +347,94 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.NotNull(persisted);
         Assert.Equal(ReferenceAnchorBuildStates.FailedImport, persisted.Status);
         Assert.Equal(failed.LastError, persisted.LastError);
+        Assert.Equal(failed.SourceSegmentCount, persisted.SourceSegmentCount);
+        Assert.Equal(failed.MaterialCount, persisted.MaterialCount);
+
+        var afterFailure = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "第一句",
+                [],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        Assert.Equal(beforeFailure.Items.Select(item => item.MaterialId), afterFailure.Items.Select(item => item.MaterialId));
+
+        var detail = await service.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, anchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.True(detail.RetryAvailable);
+        Assert.True(detail.RebuildAvailable);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.Equal(failed.SourceSegmentCount, detail.CurrentStatus.SourceSegmentCount);
+        Assert.Equal(failed.MaterialCount, detail.CurrentStatus.MaterialCount);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.Ready);
+        var failedEvent = Assert.Single(
+            detail.Events,
+            item => item.Status == ReferenceAnchorBuildStates.FailedImport &&
+                item.SourceSegmentCount == failed.SourceSegmentCount &&
+                item.MaterialCount == failed.MaterialCount);
+        Assert.NotEmpty(failedEvent.AffectedMaterialId);
+        Assert.NotEmpty(failedEvent.AffectedSegmentId);
+        Assert.Contains(beforeFailure.Items, item => item.MaterialId == failedEvent.AffectedMaterialId);
+        var affectedDetail = await service.GetMaterialDetailAsync(
+            new GetReferenceMaterialDetailPayload(novel.Id, failedEvent.AffectedMaterialId),
+            CancellationToken.None);
+        Assert.NotNull(affectedDetail);
+        Assert.Equal(failedEvent.AffectedSegmentId, affectedDetail.Material.SourceSegmentId);
+    }
+
+    [Fact]
+    public async Task RebuildAnchorRecoversFailedImportAfterSourceRestoredAndKeepsHistory()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("失败导入恢复测试", "", ""), CancellationToken.None);
+        const string sourceText = "第一句。\n\n第二句。";
+        var sourcePath = CreateSourceFile("failed-import-recovery.md", sourceText);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "失败导入恢复参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var beforeRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        Assert.NotEmpty(beforeRows);
+
+        File.Delete(sourcePath);
+        var failed = await service.RebuildAnchorAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, failed.Status);
+        File.WriteAllText(sourcePath, sourceText);
+
+        var recovered = await service.RebuildAnchorAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recovered.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recovered.Stage);
+        Assert.True(string.IsNullOrEmpty(recovered.LastError));
+        Assert.Equal(beforeRows.Count, recovered.MaterialCount);
+        var afterRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        Assert.Equal(beforeRows.Select(row => row.MaterialId), afterRows.Select(row => row.MaterialId));
+        Assert.Equal(afterRows.Count, afterRows.Select(row => row.MaterialId).Distinct(StringComparer.Ordinal).Count());
+        var status = await service.GetBuildStatusAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, status.Status);
+        Assert.True(string.IsNullOrEmpty(status.LastError));
+
+        var detail = await service.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, anchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, detail.CurrentStatus.Status);
+        Assert.False(detail.RetryAvailable);
+        Assert.True(detail.RebuildAvailable);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.FailedImport);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.Ready);
     }
 
     [Fact]
@@ -241,6 +491,23 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.Equal(3, provision.Dimensions);
         Assert.Equal(status.MaterialCount, provision.Vectors.Count);
         Assert.All(provision.Vectors, vector => Assert.StartsWith(anchor.AnchorId + ":material:", vector.ChunkId, StringComparison.Ordinal));
+
+        var detail = await service.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, anchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        var readyEvent = Assert.Single(
+            detail.Events,
+            item => item.Status == ReferenceAnchorBuildStates.Ready && item.VectorCount == status.VectorCount);
+        Assert.NotEmpty(readyEvent.AffectedMaterialId);
+        Assert.NotEmpty(readyEvent.AffectedSegmentId);
+        Assert.Equal(anchor.AnchorId.ToString(System.Globalization.CultureInfo.InvariantCulture), readyEvent.AffectedSourceId);
+        var affectedDetail = await service.GetMaterialDetailAsync(
+            new GetReferenceMaterialDetailPayload(novel.Id, readyEvent.AffectedMaterialId),
+            CancellationToken.None);
+        Assert.NotNull(affectedDetail);
+        Assert.Equal(readyEvent.AffectedMaterialId, affectedDetail.Material.MaterialId);
+        Assert.Equal(readyEvent.AffectedSegmentId, affectedDetail.Material.SourceSegmentId);
     }
 
     [Fact]
@@ -277,10 +544,591 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.Equal(0, status.VectorCount);
         Assert.Contains("sqlite-vec", status.LastError, StringComparison.OrdinalIgnoreCase);
 
+        var detail = await service.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, anchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        var failedEvent = Assert.Single(
+            detail.Events,
+            item => item.Status == ReferenceAnchorBuildStates.FailedEmbedding);
+        Assert.NotEmpty(failedEvent.AffectedMaterialId);
+        Assert.NotEmpty(failedEvent.AffectedSegmentId);
+        var failedAffectedDetail = await service.GetMaterialDetailAsync(
+            new GetReferenceMaterialDetailPayload(novel.Id, failedEvent.AffectedMaterialId),
+            CancellationToken.None);
+        Assert.NotNull(failedAffectedDetail);
+        Assert.Equal(failedEvent.AffectedSegmentId, failedAffectedDetail.Material.SourceSegmentId);
+
         var materials = await service.SearchMaterialsAsync(
             new SearchReferenceMaterialsPayload(
                 novel.Id,
                 [anchor.AnchorId],
+                "雨声",
+                [],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        Assert.NotEmpty(materials.Items);
+
+        var recoveringEmbeddings = new DeterministicEmbeddingClient(dimensions: 3);
+        var recoveringProvisioner = new RecordingSqliteVecTableProvisioner();
+        var duplicateService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "custom",
+                "https://api.example.com/v1/embeddings",
+                "test-key",
+                "embed-v1",
+                3,
+                null)),
+            recoveringEmbeddings,
+            recoveringProvisioner);
+        var duplicate = await duplicateService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "向量失败重复导入", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        Assert.Equal(anchor.AnchorId, duplicate.AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedEmbedding, duplicate.Status);
+        Assert.Empty(recoveringEmbeddings.Requests);
+        Assert.Empty(recoveringProvisioner.Provisions);
+    }
+
+    [Fact]
+    public async Task CreateAnchorRecoversInterruptedEmbeddingStageForDuplicateImportAfterRestart()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("向量中断恢复测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "reference-vector-interrupted.md",
+            """
+            # 第一章
+
+            雨声压低了门口。
+
+            他在门口停住。
+            """);
+        var embeddingOptions = new EmbeddingRequestOptions(
+            "custom",
+            "https://api.example.com/v1/embeddings",
+            "test-key",
+            "embed-v1",
+            3,
+            null);
+        var interruptedService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            new CancelingEmbeddingClient(),
+            new RecordingSqliteVecTableProvisioner());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await interruptedService.CreateAnchorAsync(
+                new CreateReferenceAnchorPayload(novel.Id, "中断向量参考", null, sourcePath, "markdown", "user_provided"),
+                CancellationToken.None));
+
+        var interruptedAnchor = Assert.Single(await interruptedService.GetAnchorsAsync(novel.Id, CancellationToken.None));
+        Assert.Equal(ReferenceAnchorBuildStates.Embedding, interruptedAnchor.Status);
+        var rowsBeforeRecovery = await ReadMaterialRowsAsync(options, interruptedAnchor.AnchorId);
+        Assert.NotEmpty(rowsBeforeRecovery);
+        var correctedMaterialId = rowsBeforeRecovery[0].MaterialId;
+        await interruptedService.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(
+                novel.Id,
+                correctedMaterialId,
+                FunctionTag: "interiority",
+                EmotionTag: "unease",
+                SceneTag: "threshold",
+                PovTag: "close",
+                TechniqueTag: "afterbeat",
+                Origin: "user",
+                Note: "restart recovery must preserve manual correction"),
+            CancellationToken.None);
+
+        var embeddings = new DeterministicEmbeddingClient(dimensions: 3);
+        var provisioner = new RecordingSqliteVecTableProvisioner();
+        var restartedNovels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var restartedService = new SqliteReferenceAnchorService(
+            options,
+            restartedNovels,
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            embeddings,
+            provisioner);
+
+        var recovered = await restartedService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "重复导入恢复", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        Assert.Equal(interruptedAnchor.AnchorId, recovered.AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recovered.Status);
+        var recoveredStatus = await restartedService.GetBuildStatusAsync(novel.Id, recovered.AnchorId, CancellationToken.None);
+        Assert.NotNull(recoveredStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recoveredStatus.Status);
+        Assert.Equal(recoveredStatus.MaterialCount, recoveredStatus.VectorCount);
+        var rowsAfterRecovery = await ReadMaterialRowsAsync(options, recovered.AnchorId);
+        Assert.Equal(rowsBeforeRecovery.Select(row => row.MaterialId), rowsAfterRecovery.Select(row => row.MaterialId));
+        var corrected = Assert.Single(rowsAfterRecovery, row => row.MaterialId == correctedMaterialId);
+        Assert.True(corrected.UserVerified);
+        Assert.Equal("interiority", corrected.FunctionTag);
+        Assert.Equal("unease", corrected.EmotionTag);
+        Assert.Equal("close", corrected.PovTag);
+        Assert.Equal("afterbeat", corrected.TechniqueTag);
+        Assert.Single(await restartedService.GetAnchorsAsync(novel.Id, CancellationToken.None));
+        Assert.Single(provisioner.Provisions);
+        Assert.Single(embeddings.Requests);
+    }
+
+    [Fact]
+    public async Task StartupInitializationRecoversInterruptedEmbeddingStageWithoutDuplicateImport()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("启动主动恢复测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "reference-vector-startup-recovery.md",
+            """
+            # 第一章
+
+            雨声压低了门口。
+
+            他在门口停住。
+            """);
+        var embeddingOptions = new EmbeddingRequestOptions(
+            "custom",
+            "https://api.example.com/v1/embeddings",
+            "test-key",
+            "embed-v1",
+            3,
+            null);
+        var interruptedService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            new CancelingEmbeddingClient(),
+            new RecordingSqliteVecTableProvisioner());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await interruptedService.CreateAnchorAsync(
+                new CreateReferenceAnchorPayload(novel.Id, "启动恢复参考", null, sourcePath, "markdown", "user_provided"),
+                CancellationToken.None));
+
+        var interruptedAnchor = Assert.Single(await interruptedService.GetAnchorsAsync(novel.Id, CancellationToken.None));
+        Assert.Equal(ReferenceAnchorBuildStates.Embedding, interruptedAnchor.Status);
+        var rowsBeforeRecovery = await ReadMaterialRowsAsync(options, interruptedAnchor.AnchorId);
+        Assert.NotEmpty(rowsBeforeRecovery);
+        var correctedMaterialId = rowsBeforeRecovery[0].MaterialId;
+        await interruptedService.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(
+                novel.Id,
+                correctedMaterialId,
+                FunctionTag: "interiority",
+                EmotionTag: "unease",
+                SceneTag: "threshold",
+                PovTag: "close",
+                TechniqueTag: "afterbeat",
+                Origin: "user",
+                Note: "startup recovery must preserve manual correction"),
+            CancellationToken.None);
+
+        var startupEmbeddings = new DeterministicEmbeddingClient(dimensions: 3);
+        var startupProvisioner = new RecordingSqliteVecTableProvisioner();
+        var startupRecovery = new SqliteReferenceAnchorService(
+            options,
+            new FileSystemNovelService(options, new FileSystemAppSettingsService(options)),
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            startupEmbeddings,
+            startupProvisioner);
+        var initialization = new FileSystemAppInitializationService(
+            options,
+            referenceAnchorRecovery: startupRecovery);
+
+        Assert.True(await initialization.IsInitializedAsync(CancellationToken.None));
+
+        var recoveredAnchor = Assert.Single(await startupRecovery.GetAnchorsAsync(novel.Id, CancellationToken.None));
+        Assert.Equal(interruptedAnchor.AnchorId, recoveredAnchor.AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recoveredAnchor.Status);
+        var recoveredStatus = await startupRecovery.GetBuildStatusAsync(novel.Id, recoveredAnchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(recoveredStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recoveredStatus.Status);
+        Assert.Equal(recoveredStatus.MaterialCount, recoveredStatus.VectorCount);
+        var rowsAfterRecovery = await ReadMaterialRowsAsync(options, recoveredAnchor.AnchorId);
+        Assert.Equal(rowsBeforeRecovery.Select(row => row.MaterialId), rowsAfterRecovery.Select(row => row.MaterialId));
+        var corrected = Assert.Single(rowsAfterRecovery, row => row.MaterialId == correctedMaterialId);
+        Assert.True(corrected.UserVerified);
+        Assert.Equal("interiority", corrected.FunctionTag);
+        Assert.Equal("unease", corrected.EmotionTag);
+        Assert.Equal("close", corrected.PovTag);
+        Assert.Equal("afterbeat", corrected.TechniqueTag);
+        Assert.Single(startupProvisioner.Provisions);
+        Assert.Single(startupEmbeddings.Requests);
+        var detail = await startupRecovery.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, recoveredAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.Embedding);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.Ready);
+    }
+
+    [Theory]
+    [InlineData(ReferenceAnchorBuildStates.Created)]
+    [InlineData(ReferenceAnchorBuildStates.Importing)]
+    [InlineData(ReferenceAnchorBuildStates.SourceImported)]
+    [InlineData(ReferenceAnchorBuildStates.Segmenting)]
+    [InlineData(ReferenceAnchorBuildStates.SegmentsBuilt)]
+    [InlineData(ReferenceAnchorBuildStates.ExtractingMaterials)]
+    [InlineData(ReferenceAnchorBuildStates.MaterialsExtracted)]
+    [InlineData(ReferenceAnchorBuildStates.DetectingSlots)]
+    [InlineData(ReferenceAnchorBuildStates.SlotsDetected)]
+    [InlineData(ReferenceAnchorBuildStates.Stale)]
+    public async Task StartupInitializationRecoversRecoverablePreEmbeddingStageWithoutDuplicateMaterials(string recoverableStatus)
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload($"启动阶段恢复-{recoverableStatus}", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            $"startup-recovery-{recoverableStatus}.md",
+            """
+            # 第一章
+
+            雨声压低了门口。
+
+            他在门口停住。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, $"启动阶段恢复 {recoverableStatus}", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var rowsBeforeRecovery = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        Assert.NotEmpty(rowsBeforeRecovery);
+        var correctedMaterialId = rowsBeforeRecovery[0].MaterialId;
+        await service.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(
+                novel.Id,
+                correctedMaterialId,
+                FunctionTag: "interiority",
+                EmotionTag: "unease",
+                SceneTag: "threshold",
+                PovTag: "close",
+                TechniqueTag: "afterbeat",
+                Origin: "user",
+                Note: "startup stage recovery must preserve correction"),
+            CancellationToken.None);
+        await UpdateAnchorBuildStatusAsync(options, anchor.AnchorId, recoverableStatus, recoverableStatus);
+
+        var startupRecovery = new SqliteReferenceAnchorService(
+            options,
+            new FileSystemNovelService(options, new FileSystemAppSettingsService(options)));
+        var initialization = new FileSystemAppInitializationService(
+            options,
+            referenceAnchorRecovery: startupRecovery);
+
+        Assert.True(await initialization.IsInitializedAsync(CancellationToken.None));
+
+        var recoveredAnchor = Assert.Single(await startupRecovery.GetAnchorsAsync(novel.Id, CancellationToken.None));
+        Assert.Equal(anchor.AnchorId, recoveredAnchor.AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recoveredAnchor.Status);
+        var recoveredStatus = await startupRecovery.GetBuildStatusAsync(novel.Id, recoveredAnchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(recoveredStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recoveredStatus.Status);
+        var rowsAfterRecovery = await ReadMaterialRowsAsync(options, recoveredAnchor.AnchorId);
+        Assert.Equal(rowsBeforeRecovery.Select(row => row.MaterialId), rowsAfterRecovery.Select(row => row.MaterialId));
+        Assert.Equal(rowsAfterRecovery.Count, rowsAfterRecovery.Select(row => row.MaterialId).Distinct(StringComparer.Ordinal).Count());
+        var corrected = Assert.Single(rowsAfterRecovery, row => row.MaterialId == correctedMaterialId);
+        Assert.True(corrected.UserVerified);
+        Assert.Equal("interiority", corrected.FunctionTag);
+        Assert.Equal("unease", corrected.EmotionTag);
+        Assert.Equal("close", corrected.PovTag);
+        Assert.Equal("afterbeat", corrected.TechniqueTag);
+        var detail = await startupRecovery.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, recoveredAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.Contains(detail.Events, item => item.Status == recoverableStatus);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.Ready);
+    }
+
+    [Fact]
+    public async Task CreateAnchorRecordsCancelledEmbeddingAndDuplicateImportDoesNotAutoRecover()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("向量取消测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("reference-vector-cancelled.md", "雨声压低了整条街的呼吸。");
+        var embeddingOptions = new EmbeddingRequestOptions(
+            "custom",
+            "https://api.example.com/v1/embeddings",
+            "test-key",
+            "embed-v1",
+            3,
+            null);
+        using var cancellation = new CancellationTokenSource();
+        var service = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            new RequestedCancellationEmbeddingClient(cancellation),
+            new RecordingSqliteVecTableProvisioner());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await service.CreateAnchorAsync(
+                new CreateReferenceAnchorPayload(novel.Id, "取消向量参考", null, sourcePath, "markdown", "user_provided"),
+                cancellation.Token));
+
+        var cancelledAnchor = Assert.Single(await service.GetAnchorsAsync(novel.Id, CancellationToken.None));
+        Assert.Equal(ReferenceAnchorBuildStates.Cancelled, cancelledAnchor.Status);
+        var cancelledStatus = await service.GetBuildStatusAsync(novel.Id, cancelledAnchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(cancelledStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.Cancelled, cancelledStatus.Status);
+
+        var recoveringEmbeddings = new DeterministicEmbeddingClient(dimensions: 3);
+        var recoveringProvisioner = new RecordingSqliteVecTableProvisioner();
+        var duplicateService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            recoveringEmbeddings,
+            recoveringProvisioner);
+        var duplicate = await duplicateService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "取消后重复导入", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        Assert.Equal(cancelledAnchor.AnchorId, duplicate.AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.Cancelled, duplicate.Status);
+        Assert.Empty(recoveringEmbeddings.Requests);
+        Assert.Empty(recoveringProvisioner.Provisions);
+    }
+
+    [Fact]
+    public async Task RebuildAnchorRecoversCancelledEmbeddingAndKeepsHistory()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("取消后显式恢复测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("reference-vector-cancelled-rebuild.md", "雨声压低了整条街的呼吸。");
+        var embeddingOptions = new EmbeddingRequestOptions(
+            "custom",
+            "https://api.example.com/v1/embeddings",
+            "test-key",
+            "embed-v1",
+            3,
+            null);
+        using var cancellation = new CancellationTokenSource();
+        var cancelledService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            new RequestedCancellationEmbeddingClient(cancellation),
+            new RecordingSqliteVecTableProvisioner());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await cancelledService.CreateAnchorAsync(
+                new CreateReferenceAnchorPayload(novel.Id, "取消后恢复参考", null, sourcePath, "markdown", "user_provided"),
+                cancellation.Token));
+
+        var cancelledAnchor = Assert.Single(await cancelledService.GetAnchorsAsync(novel.Id, CancellationToken.None));
+        Assert.Equal(ReferenceAnchorBuildStates.Cancelled, cancelledAnchor.Status);
+        var beforeRows = await ReadMaterialRowsAsync(options, cancelledAnchor.AnchorId);
+        Assert.NotEmpty(beforeRows);
+        var correctedMaterialId = beforeRows[0].MaterialId;
+        await cancelledService.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(
+                novel.Id,
+                correctedMaterialId,
+                FunctionTag: "interiority",
+                EmotionTag: "unease",
+                SceneTag: "threshold",
+                PovTag: "close",
+                TechniqueTag: "afterbeat",
+                Origin: "user",
+                Note: "explicit rebuild should preserve cancellation corrections"),
+            CancellationToken.None);
+
+        var recoveryService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            new DeterministicEmbeddingClient(dimensions: 3),
+            new RecordingSqliteVecTableProvisioner());
+
+        var recovered = await recoveryService.RebuildAnchorAsync(novel.Id, cancelledAnchor.AnchorId, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recovered.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recovered.Stage);
+        Assert.Equal(recovered.MaterialCount, recovered.VectorCount);
+        var afterRows = await ReadMaterialRowsAsync(options, cancelledAnchor.AnchorId);
+        Assert.Equal(beforeRows.Select(row => row.MaterialId), afterRows.Select(row => row.MaterialId));
+        var corrected = Assert.Single(afterRows, row => row.MaterialId == correctedMaterialId);
+        Assert.True(corrected.UserVerified);
+        Assert.Equal("interiority", corrected.FunctionTag);
+        Assert.Equal("unease", corrected.EmotionTag);
+        Assert.Equal("close", corrected.PovTag);
+        Assert.Equal("afterbeat", corrected.TechniqueTag);
+        var detail = await recoveryService.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, cancelledAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, detail.CurrentStatus.Status);
+        Assert.False(detail.RetryAvailable);
+        Assert.True(detail.RebuildAvailable);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.Cancelled);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.Ready);
+    }
+
+    [Fact]
+    public async Task RebuildAnchorRecoversFailedEmbeddingAndKeepsFailureHistory()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("向量失败重试恢复测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("reference-vector-retry-success.md", "雨声压低了整条街的呼吸。");
+        var embeddingOptions = new EmbeddingRequestOptions(
+            "custom",
+            "https://api.example.com/v1/embeddings",
+            "test-key",
+            "embed-v1",
+            3,
+            null);
+        var failingService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            new DeterministicEmbeddingClient(dimensions: 3),
+            new FailingSqliteVecTableProvisioner("sqlite-vec native extension is unavailable for first attempt."));
+        var failedAnchor = await failingService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "向量失败后重试参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedEmbedding, failedAnchor.Status);
+
+        var retryEmbeddings = new DeterministicEmbeddingClient(dimensions: 3);
+        var retryProvisioner = new RecordingSqliteVecTableProvisioner();
+        var retryService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            retryEmbeddings,
+            retryProvisioner);
+
+        var recovered = await retryService.RebuildAnchorAsync(novel.Id, failedAnchor.AnchorId, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recovered.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recovered.Stage);
+        Assert.Equal(recovered.MaterialCount, recovered.VectorCount);
+        Assert.Single(retryProvisioner.Provisions);
+        Assert.Single(retryEmbeddings.Requests);
+        var detail = await retryService.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, failedAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, detail.CurrentStatus.Status);
+        Assert.False(detail.RetryAvailable);
+        Assert.True(detail.RebuildAvailable);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.FailedEmbedding);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.Ready);
+        Assert.True(detail.AttemptCount >= 2);
+        Assert.NotNull(detail.CurrentAttempt);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, detail.CurrentAttempt.Status);
+        Assert.True(detail.CurrentAttempt.AttemptNumber >= 2);
+        Assert.NotEmpty(detail.CurrentAttempt.AttemptId);
+        Assert.NotEmpty(detail.CurrentAttempt.BuildId);
+        Assert.Equal(detail.Source.BuildVersion, detail.CurrentAttempt.BuildVersion);
+        Assert.NotEmpty(detail.CurrentAttempt.RecoveredFromAttemptId);
+        Assert.NotEmpty(detail.CurrentAttempt.RecoveredFromBuildId);
+        Assert.NotNull(detail.PriorAttempts);
+        Assert.Contains(detail.PriorAttempts, item => item.Status == ReferenceAnchorBuildStates.FailedEmbedding);
+        Assert.Contains(detail.PriorAttempts, item => item.BlockedReason.Contains("first attempt", StringComparison.OrdinalIgnoreCase));
+
+        var persistedAttempts = await ReadProcessingAttemptRowsAsync(options, failedAnchor.AnchorId);
+        Assert.Equal(detail.AttemptCount, persistedAttempts.Count);
+        Assert.Contains(persistedAttempts, item => item.AttemptId == detail.CurrentAttempt.AttemptId &&
+            item.BuildId == detail.CurrentAttempt.BuildId &&
+            item.AttemptNumber == detail.CurrentAttempt.AttemptNumber &&
+            item.Status == ReferenceAnchorBuildStates.Ready &&
+            item.RecoveredFromAttemptId == detail.CurrentAttempt.RecoveredFromAttemptId &&
+            item.RecoveredFromBuildId == detail.CurrentAttempt.RecoveredFromBuildId);
+        Assert.Contains(persistedAttempts, item => item.Status == ReferenceAnchorBuildStates.FailedEmbedding &&
+            item.BlockedReason.Contains("first attempt", StringComparison.OrdinalIgnoreCase));
+
+        var eventAttemptRefs = await ReadProcessingEventAttemptRefsAsync(options, failedAnchor.AnchorId);
+        Assert.NotEmpty(eventAttemptRefs);
+        Assert.All(eventAttemptRefs, item =>
+        {
+            Assert.NotEmpty(item.AttemptId);
+            Assert.NotEmpty(item.BuildId);
+            Assert.True(item.AttemptNumber > 0);
+            Assert.Contains(persistedAttempts, attempt => attempt.AttemptId == item.AttemptId &&
+                attempt.BuildId == item.BuildId &&
+                attempt.AttemptNumber == item.AttemptNumber);
+        });
+    }
+
+    [Fact]
+    public async Task RebuildAnchorFailedEmbeddingRetryFailureUpdatesDiagnosticAndPreservesMaterials()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("向量失败重试仍失败测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "reference-vector-retry-failure.md",
+            """
+            雨声压低了整条街的呼吸。
+
+            他在门口停了很久。
+            """);
+        var embeddingOptions = new EmbeddingRequestOptions(
+            "custom",
+            "https://api.example.com/v1/embeddings",
+            "test-key",
+            "embed-v1",
+            3,
+            null);
+        var firstFailureService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            new DeterministicEmbeddingClient(dimensions: 3),
+            new FailingSqliteVecTableProvisioner("sqlite-vec native extension is unavailable for first failure."));
+        var failedAnchor = await firstFailureService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "向量重试仍失败参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedEmbedding, failedAnchor.Status);
+        var beforeRows = await ReadMaterialRowsAsync(options, failedAnchor.AnchorId);
+        Assert.NotEmpty(beforeRows);
+
+        var retryFailureService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            new DeterministicEmbeddingClient(dimensions: 3),
+            new FailingSqliteVecTableProvisioner("sqlite-vec native extension is unavailable for second failure."));
+
+        var failedAgain = await retryFailureService.RebuildAnchorAsync(novel.Id, failedAnchor.AnchorId, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.FailedEmbedding, failedAgain.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedEmbedding, failedAgain.Stage);
+        Assert.Contains("second failure", failedAgain.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(beforeRows.Count, failedAgain.MaterialCount);
+        Assert.Equal(0, failedAgain.VectorCount);
+        var afterRows = await ReadMaterialRowsAsync(options, failedAnchor.AnchorId);
+        Assert.Equal(beforeRows.Select(row => row.MaterialId), afterRows.Select(row => row.MaterialId));
+        Assert.Equal(afterRows.Count, afterRows.Select(row => row.MaterialId).Distinct(StringComparer.Ordinal).Count());
+        var search = await retryFailureService.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [failedAnchor.AnchorId],
                 "雨声",
                 [ReferenceMaterialTypes.Sentence],
                 [],
@@ -290,7 +1138,497 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
                 1,
                 10),
             CancellationToken.None);
-        Assert.NotEmpty(materials.Items);
+        Assert.NotEmpty(search.Items);
+
+        var detail = await retryFailureService.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, failedAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedEmbedding, detail.CurrentStatus.Status);
+        Assert.Contains("second failure", detail.CurrentStatus.Diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.True(detail.RetryAvailable);
+        Assert.True(detail.RebuildAvailable);
+        Assert.True(detail.Events.Count(item => item.Status == ReferenceAnchorBuildStates.FailedEmbedding) >= 2);
+    }
+
+    [Fact]
+    public async Task CreateAnchorFailedSegmentingPersistsTerminalFailureAndExplicitRebuildRecovers()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("分段失败恢复测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("reference-segmenting-recovery.md", "雨声压低了门口的呼吸。");
+        var failingService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            null,
+            null,
+            null,
+            null,
+            DefaultReferenceMaterialSlotDetector.Instance,
+            new FailingReferenceAnchorProcessingStageProbe(
+                ReferenceAnchorBuildStates.Segmenting,
+                $"segmenting failed at {Path.GetFullPath(sourcePath)} with source_text: forbidden"));
+
+        var failedAnchor = await failingService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "分段失败参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.FailedSegmenting, failedAnchor.Status);
+        var status = await failingService.GetBuildStatusAsync(novel.Id, failedAnchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedSegmenting, status.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedSegmenting, status.Stage);
+        Assert.Equal(0, status.SourceSegmentCount);
+        Assert.Equal(0, status.MaterialCount);
+        Assert.Equal(0, status.SlotCount);
+        Assert.Equal(0, status.VectorCount);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), status.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", status.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(await ReadSourceSegmentsAsync(options, failedAnchor.AnchorId));
+        Assert.Empty(await ReadMaterialRowsAsync(options, failedAnchor.AnchorId));
+
+        var detail = await failingService.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, failedAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedSegmenting, detail.CurrentStatus.Status);
+        Assert.True(detail.RetryAvailable);
+        Assert.True(detail.RebuildAvailable);
+        var failedEvent = Assert.Single(detail.Events, item => item.Status == ReferenceAnchorBuildStates.FailedSegmenting);
+        Assert.Empty(failedEvent.AffectedMaterialId);
+        Assert.Empty(failedEvent.AffectedSegmentId);
+
+        var duplicate = await failingService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "分段失败参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        Assert.Equal(failedAnchor.AnchorId, duplicate.AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedSegmenting, duplicate.Status);
+
+        var recovered = await new SqliteReferenceAnchorService(options, novels)
+            .RebuildAnchorAsync(novel.Id, failedAnchor.AnchorId, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recovered.Status);
+        Assert.True(recovered.SourceSegmentCount > 0);
+        Assert.True(recovered.MaterialCount > 0);
+        Assert.NotEmpty(await ReadMaterialRowsAsync(options, failedAnchor.AnchorId));
+        var recoveredDetail = await failingService.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, failedAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(recoveredDetail);
+        Assert.Contains(recoveredDetail.Events, item => item.Status == ReferenceAnchorBuildStates.FailedSegmenting);
+        Assert.Contains(recoveredDetail.Events, item => item.Status == ReferenceAnchorBuildStates.Ready);
+    }
+
+    [Fact]
+    public async Task CreateAnchorFailedExtractionPreservesSegmentsAndExplicitRebuildRecovers()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("提取失败恢复测试", "", ""), CancellationToken.None);
+        var otherNovel = await novels.CreateNovelAsync(new CreateNovelPayload("隔离作品", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "reference-extraction-recovery.md",
+            """
+            雨声压低了整条街的呼吸。
+            他在门口停了很久，手指贴着伞柄。
+            """);
+        var failingService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            null,
+            null,
+            null,
+            null,
+            DefaultReferenceMaterialSlotDetector.Instance,
+            new FailingReferenceAnchorProcessingStageProbe(
+                ReferenceAnchorBuildStates.ExtractingMaterials,
+                $"extraction failed at {Path.GetFullPath(sourcePath)} with prompt: hidden"));
+
+        var failedAnchor = await failingService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "提取失败参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.FailedExtraction, failedAnchor.Status);
+        var status = await failingService.GetBuildStatusAsync(novel.Id, failedAnchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedExtraction, status.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedExtraction, status.Stage);
+        Assert.True(status.SourceSegmentCount > 0);
+        Assert.Equal(0, status.MaterialCount);
+        Assert.Equal(0, status.SlotCount);
+        Assert.Equal(0, status.VectorCount);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), status.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", status.LastError, StringComparison.OrdinalIgnoreCase);
+        var segments = await ReadSourceSegmentsAsync(options, failedAnchor.AnchorId);
+        Assert.NotEmpty(segments);
+        Assert.Empty(await ReadMaterialRowsAsync(options, failedAnchor.AnchorId));
+
+        var detail = await failingService.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, failedAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedExtraction, detail.CurrentStatus.Status);
+        Assert.True(detail.RetryAvailable);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.SegmentsBuilt);
+        var failedEvent = Assert.Single(detail.Events, item => item.Status == ReferenceAnchorBuildStates.FailedExtraction);
+        Assert.Empty(failedEvent.AffectedMaterialId);
+        Assert.NotEmpty(failedEvent.AffectedSegmentId);
+        Assert.Contains(segments, item => item.SegmentId == failedEvent.AffectedSegmentId);
+
+        var segmentDetail = await failingService.GetSourceSegmentDetailAsync(
+            new GetReferenceSourceSegmentDetailPayload(novel.Id, failedAnchor.AnchorId, failedEvent.AffectedSegmentId),
+            CancellationToken.None);
+        Assert.NotNull(segmentDetail);
+        Assert.Equal(failedAnchor.AnchorId, segmentDetail.Source.AnchorId);
+        Assert.Equal(failedEvent.AffectedSegmentId, segmentDetail.Segment.SegmentId);
+        Assert.Equal(failedAnchor.AnchorId, segmentDetail.Segment.AnchorId);
+        Assert.True(segmentDetail.Segment.TextPreview.Length <= 243);
+        Assert.Contains(segmentDetail.ProcessingNotes, item => item.Status == ReferenceAnchorBuildStates.FailedExtraction);
+        var segmentSerialized = JsonSerializer.Serialize(segmentDetail, BridgeJson.SerializerOptions);
+        Assert.DoesNotContain("source_path", segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(sourcePath, segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), segmentSerialized, StringComparison.OrdinalIgnoreCase);
+
+        var isolatedSegment = await failingService.GetSourceSegmentDetailAsync(
+            new GetReferenceSourceSegmentDetailPayload(otherNovel.Id, failedAnchor.AnchorId, failedEvent.AffectedSegmentId),
+            CancellationToken.None);
+        Assert.Null(isolatedSegment);
+        var missingSegment = await failingService.GetSourceSegmentDetailAsync(
+            new GetReferenceSourceSegmentDetailPayload(novel.Id, failedAnchor.AnchorId, "missing-segment"),
+            CancellationToken.None);
+        Assert.Null(missingSegment);
+
+        var duplicate = await failingService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "提取失败参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        Assert.Equal(failedAnchor.AnchorId, duplicate.AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedExtraction, duplicate.Status);
+
+        var recoveryService = new SqliteReferenceAnchorService(options, novels);
+        var recovered = await recoveryService.RebuildAnchorAsync(novel.Id, failedAnchor.AnchorId, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recovered.Status);
+        Assert.True(recovered.MaterialCount > 0);
+        var recoveredRows = await ReadMaterialRowsAsync(options, failedAnchor.AnchorId);
+        Assert.NotEmpty(recoveredRows);
+        var recoveredDetail = await recoveryService.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, failedAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(recoveredDetail);
+        Assert.Contains(recoveredDetail.Events, item => item.Status == ReferenceAnchorBuildStates.FailedExtraction);
+        Assert.Contains(recoveredDetail.Events, item => item.Status == ReferenceAnchorBuildStates.Ready);
+        Assert.NotNull(recoveredDetail.PriorAttempts);
+        Assert.Contains(recoveredDetail.PriorAttempts, item => item.Status == ReferenceAnchorBuildStates.FailedExtraction);
+    }
+
+    [Theory]
+    [InlineData(ReferenceAnchorBuildStates.Segmenting, ReferenceAnchorBuildStates.FailedSegmenting)]
+    [InlineData(ReferenceAnchorBuildStates.ExtractingMaterials, ReferenceAnchorBuildStates.FailedExtraction)]
+    public async Task RebuildAnchorSegmentingOrExtractionFailurePreservesPreviousSearchableCorpus(
+        string failingStage,
+        string expectedFailureStatus)
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload($"重建{expectedFailureStatus}保留旧语料", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            $"reference-rebuild-{expectedFailureStatus}.md",
+            """
+            旧雨声压低了整条街的呼吸。
+            林岚在门口停住，手指贴着伞柄。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, $"重建{expectedFailureStatus}参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, anchor.Status);
+        var beforeStatus = await service.GetBuildStatusAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(beforeStatus);
+        var beforeRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        var beforeSegments = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
+        Assert.NotEmpty(beforeRows);
+        Assert.NotEmpty(beforeSegments);
+
+        await service.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(novel.Id, beforeRows[0].MaterialId, "manual_turn", null, null, null, null, null, null),
+            CancellationToken.None);
+        beforeRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        Assert.Contains(beforeRows, row => row.MaterialId == beforeRows[0].MaterialId && row.UserVerified);
+
+        await File.WriteAllTextAsync(
+            sourcePath,
+            """
+            新失败语料只应留在源文件中。
+            如果重建失败，它不应替换旧的可搜索素材。
+            """);
+        var failingService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            null,
+            null,
+            null,
+            null,
+            DefaultReferenceMaterialSlotDetector.Instance,
+            new FailingReferenceAnchorProcessingStageProbe(
+                failingStage,
+                $"rebuild {expectedFailureStatus} failed at {Path.GetFullPath(sourcePath)} with prompt: hidden"));
+
+        var failed = await failingService.RebuildAnchorAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+
+        Assert.Equal(expectedFailureStatus, failed.Status);
+        Assert.Equal(expectedFailureStatus, failed.Stage);
+        var failedAnchor = Assert.Single(await failingService.GetAnchorsAsync(novel.Id, CancellationToken.None), item => item.AnchorId == anchor.AnchorId);
+        Assert.Equal(anchor.SourceFileHash, failedAnchor.SourceFileHash);
+        Assert.Equal(beforeStatus.SourceSegmentCount, failed.SourceSegmentCount);
+        Assert.Equal(beforeStatus.MaterialCount, failed.MaterialCount);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), failed.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", failed.LastError, StringComparison.OrdinalIgnoreCase);
+        var afterRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        Assert.Equal(beforeRows.Select(row => row.MaterialId), afterRows.Select(row => row.MaterialId));
+        Assert.Equal(afterRows.Count, afterRows.Select(row => row.MaterialId).Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains(afterRows, row => row.MaterialId == beforeRows[0].MaterialId && row.UserVerified);
+        var oldSearch = await failingService.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(novel.Id, [anchor.AnchorId], "旧雨声", [], [], [], [], [], 1, 10),
+            CancellationToken.None);
+        Assert.NotEmpty(oldSearch.Items);
+        var newSearch = await failingService.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(novel.Id, [anchor.AnchorId], "新失败语料", [], [], [], [], [], 1, 10),
+            CancellationToken.None);
+        Assert.Empty(newSearch.Items);
+
+        var detail = await failingService.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, anchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.Equal(expectedFailureStatus, detail.CurrentStatus.Status);
+        Assert.True(detail.RetryAvailable);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.Ready);
+        Assert.Contains(detail.Events, item => item.Status == expectedFailureStatus);
+
+        var duplicate = await failingService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, $"重建{expectedFailureStatus}参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        Assert.NotEqual(anchor.AnchorId, duplicate.AnchorId);
+        Assert.Equal(expectedFailureStatus, duplicate.Status);
+        Assert.Equal(afterRows.Select(row => row.MaterialId), (await ReadMaterialRowsAsync(options, anchor.AnchorId)).Select(row => row.MaterialId));
+        Assert.Empty(await ReadMaterialRowsAsync(options, duplicate.AnchorId));
+    }
+
+    [Fact]
+    public async Task CreateAnchorFailedSlottingPreservesMaterialDetailAndExplicitRebuildRecovers()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("槽位失败恢复测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "reference-slotting-recovery.md",
+            """
+            雨声压低了整条街的呼吸，门口的灯影像一枚迟迟不肯落下的针。
+            他停在门槛前，想起那句 {{memory_anchor}}，然后把伞柄握得更紧。
+            """);
+        var failingService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            null,
+            null,
+            null,
+            null,
+            new FailingReferenceMaterialSlotDetector(
+                $"slot failed at {Path.GetFullPath(sourcePath)} with prompt: hidden source_text: forbidden"));
+
+        var failedAnchor = await failingService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "槽位失败参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.FailedSlotting, failedAnchor.Status);
+        var failedStatus = await failingService.GetBuildStatusAsync(novel.Id, failedAnchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(failedStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedSlotting, failedStatus.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedSlotting, failedStatus.Stage);
+        Assert.True(failedStatus.SourceSegmentCount > 0);
+        Assert.True(failedStatus.MaterialCount > 0);
+        Assert.Equal(0, failedStatus.SlotCount);
+        Assert.Equal(0, failedStatus.VectorCount);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), failedStatus.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", failedStatus.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", failedStatus.LastError, StringComparison.OrdinalIgnoreCase);
+
+        var failedRows = await ReadMaterialRowsAsync(options, failedAnchor.AnchorId);
+        Assert.NotEmpty(failedRows);
+        Assert.All(failedRows, row => Assert.Equal(0, row.SlotCount));
+        Assert.Equal(failedRows.Count, failedRows.Select(row => row.MaterialId).Distinct(StringComparer.Ordinal).Count());
+
+        var failedSearch = await failingService.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [failedAnchor.AnchorId],
+                "雨声",
+                [],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        Assert.NotEmpty(failedSearch.Items);
+
+        var failedDetail = await failingService.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, failedAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(failedDetail);
+        Assert.NotNull(failedDetail.CurrentStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedSlotting, failedDetail.CurrentStatus.Status);
+        Assert.True(failedDetail.RetryAvailable);
+        Assert.True(failedDetail.RebuildAvailable);
+        var failedEvent = Assert.Single(
+            failedDetail.Events,
+            item => item.Status == ReferenceAnchorBuildStates.FailedSlotting);
+        Assert.NotEmpty(failedEvent.AffectedMaterialId);
+        Assert.NotEmpty(failedEvent.AffectedSegmentId);
+        Assert.Empty(failedEvent.AffectedSlotId);
+
+        var materialDetail = await failingService.GetMaterialDetailAsync(
+            new GetReferenceMaterialDetailPayload(novel.Id, failedEvent.AffectedMaterialId),
+            CancellationToken.None);
+        Assert.NotNull(materialDetail);
+        Assert.Equal(failedEvent.AffectedMaterialId, materialDetail.Material.MaterialId);
+        Assert.Contains(materialDetail.ProcessingNotes, item => item.Status == ReferenceAnchorBuildStates.FailedSlotting);
+
+        var duplicate = await failingService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "槽位失败参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        Assert.Equal(failedAnchor.AnchorId, duplicate.AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedSlotting, duplicate.Status);
+        Assert.Equal(
+            failedRows.Select(row => row.MaterialId),
+            (await ReadMaterialRowsAsync(options, failedAnchor.AnchorId)).Select(row => row.MaterialId));
+
+        await failingService.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(novel.Id, failedRows[0].MaterialId, "manual_turn", null, null, null, null, null, null),
+            CancellationToken.None);
+
+        var recoveryService = new SqliteReferenceAnchorService(options, novels);
+        var recovered = await recoveryService.RebuildAnchorAsync(novel.Id, failedAnchor.AnchorId, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recovered.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recovered.Stage);
+        Assert.True(recovered.SlotCount > 0);
+        var recoveredRows = await ReadMaterialRowsAsync(options, failedAnchor.AnchorId);
+        Assert.Equal(failedRows.Select(row => row.MaterialId), recoveredRows.Select(row => row.MaterialId));
+        Assert.Equal(recoveredRows.Count, recoveredRows.Select(row => row.MaterialId).Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains(recoveredRows, row => row.MaterialId == failedRows[0].MaterialId && row.UserVerified);
+        Assert.Contains(recoveredRows, row => row.SlotCount > 0);
+
+        var recoveredDetail = await recoveryService.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, failedAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(recoveredDetail);
+        Assert.NotNull(recoveredDetail.CurrentStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recoveredDetail.CurrentStatus.Status);
+        Assert.False(recoveredDetail.RetryAvailable);
+        Assert.Contains(recoveredDetail.Events, item => item.Status == ReferenceAnchorBuildStates.FailedSlotting);
+        Assert.Contains(recoveredDetail.Events, item => item.Status == ReferenceAnchorBuildStates.Ready);
+        Assert.NotNull(recoveredDetail.PriorAttempts);
+        Assert.Contains(recoveredDetail.PriorAttempts, item => item.Status == ReferenceAnchorBuildStates.FailedSlotting);
+    }
+
+    [Fact]
+    public async Task RebuildAnchorFailedEmbeddingPreservesPreviousSearchableCorpus()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("向量重建失败回滚测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("reference-vector-rebuild-rollback.md", "旧材料仍应可搜索。");
+        var initialService = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await initialService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "向量失败回滚参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var beforeRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        Assert.NotEmpty(beforeRows);
+        var correctedMaterialId = beforeRows[0].MaterialId;
+        await initialService.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(
+                novel.Id,
+                correctedMaterialId,
+                FunctionTag: "interiority",
+                EmotionTag: "unease",
+                SceneTag: "threshold",
+                PovTag: "close",
+                TechniqueTag: "afterbeat",
+                Origin: "user",
+                Note: "failed rebuild must preserve manual correction"),
+            CancellationToken.None);
+        beforeRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+
+        File.WriteAllText(sourcePath, "新材料不应在失败后替换旧语料。");
+        var rebuildService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "custom",
+                "https://api.example.com/v1/embeddings",
+                "test-key",
+                "embed-v1",
+                3,
+                null)),
+            new DeterministicEmbeddingClient(dimensions: 3),
+            new FailingSqliteVecTableProvisioner("sqlite-vec native extension is unavailable during rebuild."));
+
+        var failed = await rebuildService.RebuildAnchorAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.FailedEmbedding, failed.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedEmbedding, failed.Stage);
+        Assert.Equal(0, failed.VectorCount);
+        var oldSearch = await rebuildService.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "旧材料",
+                [],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        Assert.NotEmpty(oldSearch.Items);
+        var newSearch = await rebuildService.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "新材料",
+                [],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None);
+        Assert.Empty(newSearch.Items);
+        var afterRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        Assert.Equal(beforeRows.Select(row => row.MaterialId), afterRows.Select(row => row.MaterialId));
+        var corrected = Assert.Single(afterRows, row => row.MaterialId == correctedMaterialId);
+        Assert.True(corrected.UserVerified);
+        Assert.Equal("interiority", corrected.FunctionTag);
+        Assert.Equal("unease", corrected.EmotionTag);
+        Assert.Equal("close", corrected.PovTag);
+        Assert.Equal("afterbeat", corrected.TechniqueTag);
     }
 
     [Fact]
@@ -454,7 +1792,7 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
             Assert.DoesNotContain(longSentence, segment.TextPreview, StringComparison.Ordinal);
         });
         Assert.True(detail.Slots.Count <= 20);
-        var note = Assert.Single(detail.ProcessingNotes);
+        var note = detail.ProcessingNotes.First(item => item.Status == ReferenceAnchorBuildStates.Ready);
         Assert.Equal(ReferenceAnchorBuildStates.Ready, note.Status);
         Assert.Contains("materials=", note.Message, StringComparison.Ordinal);
         Assert.True(note.SourceSegmentCount > 0);
@@ -506,6 +1844,33 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
             CancellationToken.None);
         Assert.Null(isolated);
 
+        var sourceSegmentDetail = await service.GetSourceSegmentDetailAsync(
+            new GetReferenceSourceSegmentDetailPayload(novel.Id, anchor.AnchorId, detail.Material.SourceSegmentId),
+            CancellationToken.None);
+        Assert.NotNull(sourceSegmentDetail);
+        Assert.Equal(anchor.AnchorId, sourceSegmentDetail.Source.AnchorId);
+        Assert.Equal(detail.Material.SourceSegmentId, sourceSegmentDetail.Segment.SegmentId);
+        Assert.Equal(anchor.AnchorId, sourceSegmentDetail.Segment.AnchorId);
+        Assert.True(sourceSegmentDetail.Segment.TextPreview.Length <= 243);
+        Assert.DoesNotContain(longSentence, sourceSegmentDetail.Segment.TextPreview, StringComparison.Ordinal);
+        var segmentSerialized = JsonSerializer.Serialize(sourceSegmentDetail, BridgeJson.SerializerOptions);
+        Assert.DoesNotContain("source_path", segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(sourcePath, segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), segmentSerialized, StringComparison.OrdinalIgnoreCase);
+
+        var isolatedSegment = await service.GetSourceSegmentDetailAsync(
+            new GetReferenceSourceSegmentDetailPayload(otherNovel.Id, anchor.AnchorId, detail.Material.SourceSegmentId),
+            CancellationToken.None);
+        Assert.Null(isolatedSegment);
+
+        var missingSegment = await service.GetSourceSegmentDetailAsync(
+            new GetReferenceSourceSegmentDetailPayload(novel.Id, anchor.AnchorId, "missing-segment"),
+            CancellationToken.None);
+        Assert.Null(missingSegment);
+
         var missing = await service.GetMaterialDetailAsync(
             new GetReferenceMaterialDetailPayload(novel.Id, "missing-material"),
             CancellationToken.None);
@@ -556,6 +1921,13 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
             Assert.True(segment.TextPreview.Length <= 51);
             Assert.True(segment.TextTruncated);
         });
+        var unknownSegmentDetail = await service.GetSourceSegmentDetailAsync(
+            new GetReferenceSourceSegmentDetailPayload(novel.Id, unknownAnchor.AnchorId, unknownMaterial.SourceSegmentId),
+            CancellationToken.None);
+        Assert.NotNull(unknownSegmentDetail);
+        Assert.Equal("unknown", unknownSegmentDetail.Source.LicenseStatus);
+        Assert.True(unknownSegmentDetail.Segment.TextPreview.Length <= 51);
+        Assert.True(unknownSegmentDetail.Segment.TextTruncated);
     }
 
     [Fact]
@@ -596,11 +1968,16 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
 
         Assert.NotNull(detail);
         Assert.True(detail.ProcessingNotes.Count >= 2);
+        Assert.Contains(detail.ProcessingNotes, note => note.Status == ReferenceAnchorBuildStates.SegmentsBuilt);
         Assert.All(detail.ProcessingNotes, note =>
         {
             Assert.Equal(anchor.AnchorId.ToString(), note.AffectedSourceId);
             Assert.True(note.SourceSegmentCount > 0);
-            Assert.True(note.MaterialCount > 0);
+            if (note.Status != ReferenceAnchorBuildStates.SegmentsBuilt)
+            {
+                Assert.True(note.MaterialCount > 0);
+            }
+
             Assert.DoesNotContain(sourcePath, note.Message, StringComparison.OrdinalIgnoreCase);
         });
     }
@@ -1060,6 +2437,230 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.True(verified.UserVerified);
         Assert.Equal("environment", verified.FunctionTag);
         Assert.Equal("suspense", verified.EmotionTag);
+    }
+
+    [Fact]
+    public async Task ConcurrentDuplicateImportsAcrossServiceInstancesReuseSingleAnchor()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("并发重复导入", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "concurrent-duplicate-import.md",
+            """
+            雨声压住门口，林岚停了一下。
+
+            杯沿碰到桌面，声音很轻。
+            """);
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var imports = Enumerable.Range(0, 8)
+            .Select(index =>
+            {
+                var service = new SqliteReferenceAnchorService(options, novels);
+                return Task.Run(async () =>
+                {
+                    await start.Task;
+                    return await service.CreateAnchorAsync(
+                        new CreateReferenceAnchorPayload(novel.Id, $"并发导入 {index}", null, sourcePath, "markdown", "user_provided"),
+                        CancellationToken.None);
+                });
+            })
+            .ToArray();
+
+        start.SetResult();
+        var anchors = await Task.WhenAll(imports);
+
+        var anchorId = Assert.Single(anchors.Select(anchor => anchor.AnchorId).Distinct());
+        Assert.All(anchors, anchor => Assert.Equal(anchorId, anchor.AnchorId));
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var listed = await service.GetAnchorsAsync(novel.Id, CancellationToken.None);
+        Assert.Single(listed, anchor => anchor.SourcePath == Path.GetFullPath(sourcePath));
+        var rows = await ReadMaterialRowsAsync(options, anchorId);
+        Assert.NotEmpty(rows);
+        Assert.Equal(rows.Select(row => row.MaterialId).Distinct(StringComparer.Ordinal).Count(), rows.Count);
+        var search = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchorId],
+                "雨声",
+                [],
+                [],
+                [],
+                [],
+                [],
+                1,
+                20),
+            CancellationToken.None);
+        Assert.NotEmpty(search.Items);
+        Assert.All(search.Items, item => Assert.Equal(anchorId, item.AnchorId));
+    }
+
+    [Fact]
+    public async Task DuplicateImportIdentityIsRejectedAtDatabaseLevel()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("数据库唯一导入", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "database-duplicate-import.md",
+            """
+            雨声压住门口，林岚停了一下。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "数据库唯一参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<SqliteException>(
+            () => InsertRawDuplicateAnchorIdentityAsync(options, 900_001, anchor, storedNovelId: novel.Id));
+
+        Assert.Equal(19, exception.SqliteErrorCode);
+        var anchors = await service.GetAnchorsAsync(novel.Id, CancellationToken.None);
+        Assert.Single(anchors, item => item.SourcePath == anchor.SourcePath && item.SourceFileHash == anchor.SourceFileHash);
+    }
+
+    [Fact]
+    public async Task WorkspaceDuplicateImportIdentityTreatsNullAndZeroNovelIdAsSameDatabaseScope()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("工作区数据库唯一导入", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "workspace-database-duplicate-import.md",
+            """
+            杯沿碰到桌面，声音很轻。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(
+                novel.Id,
+                "工作区数据库唯一参考",
+                null,
+                sourcePath,
+                "markdown",
+                "user_provided",
+                ReferenceCorpusVisibilities.Workspace),
+            CancellationToken.None);
+
+        Assert.Null(await ReadAnchorStoredNovelIdAsync(options, anchor.AnchorId));
+        var exception = await Assert.ThrowsAsync<SqliteException>(
+            () => InsertRawDuplicateAnchorIdentityAsync(options, 900_002, anchor, storedNovelId: 0));
+
+        Assert.Equal(19, exception.SqliteErrorCode);
+        var anchors = await service.GetAnchorsAsync(novel.Id, CancellationToken.None);
+        Assert.Single(anchors, item => item.SourcePath == anchor.SourcePath && item.SourceFileHash == anchor.SourceFileHash);
+    }
+
+    [Fact]
+    public async Task SchemaUpgradeQuarantinesLegacyDuplicateImportIdentitiesBeforeCreatingUniqueIndex()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("历史重复来源迁移", "", ""), CancellationToken.None);
+        var sourcePath = Path.GetFullPath(CreateSourceFile(
+            "legacy-duplicate-import.md",
+            """
+            旧版本可能已经写入重复来源。
+            """));
+        await CreateLegacyDuplicateImportIdentityAnchorsAsync(options, novel.Id, sourcePath);
+        var service = new SqliteReferenceAnchorService(options, novels);
+
+        var anchors = await service.GetAnchorsAsync(novel.Id, CancellationToken.None);
+
+        var imported = anchors
+            .Where(anchor => anchor.SourcePath == sourcePath)
+            .OrderBy(anchor => anchor.AnchorId)
+            .ToArray();
+        Assert.Equal([910_001L, 910_002L], imported.Select(anchor => anchor.AnchorId).ToArray());
+        Assert.Equal("legacy-source-hash", imported[0].SourceFileHash);
+        Assert.Equal("legacy-duplicate:910002:legacy-source-hash", imported[1].SourceFileHash);
+        var exception = await Assert.ThrowsAsync<SqliteException>(
+            () => InsertRawDuplicateAnchorIdentityAsync(options, 910_003, imported[0], storedNovelId: novel.Id));
+        Assert.Equal(19, exception.SqliteErrorCode);
+    }
+
+    [Fact]
+    public async Task SchemaUpgradeBackfillsProcessingAttemptsAndEventReferences()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("历史处理尝试迁移", "", ""), CancellationToken.None);
+        await CreateLegacyProcessingEventsWithoutAttemptMetadataAsync(options, novel.Id);
+        var service = new SqliteReferenceAnchorService(options, novels);
+
+        var detail = await service.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, 920_001),
+            CancellationToken.None);
+
+        Assert.NotNull(detail);
+        Assert.Equal(2, detail.AttemptCount);
+        Assert.NotNull(detail.CurrentAttempt);
+        Assert.Equal(2, detail.CurrentAttempt.AttemptNumber);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, detail.CurrentAttempt.Status);
+        Assert.NotEmpty(detail.CurrentAttempt.RecoveredFromAttemptId);
+        Assert.NotEmpty(detail.CurrentAttempt.RecoveredFromBuildId);
+        Assert.NotNull(detail.PriorAttempts);
+        var prior = Assert.Single(detail.PriorAttempts);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedEmbedding, prior.Status);
+        Assert.Contains("legacy first failure", prior.BlockedReason, StringComparison.OrdinalIgnoreCase);
+
+        var persistedAttempts = await ReadProcessingAttemptRowsAsync(options, 920_001);
+        Assert.Equal(2, persistedAttempts.Count);
+        var eventRefs = await ReadProcessingEventAttemptRefsAsync(options, 920_001);
+        Assert.Equal(2, eventRefs.Count);
+        Assert.All(eventRefs, item => Assert.Contains(persistedAttempts, attempt => attempt.AttemptId == item.AttemptId));
+
+        _ = await service.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, 920_001),
+            CancellationToken.None);
+        Assert.Equal(2, (await ReadProcessingAttemptRowsAsync(options, 920_001)).Count);
+    }
+
+    [Fact]
+    public async Task ProcessingAttemptBackfillRebuildsMixedPersistedAndLegacyEventHistory()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("混合处理历史回填", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile("mixed-processing-history.md", "雨声压住门口。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "混合处理历史参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var initialAttempts = await ReadProcessingAttemptRowsAsync(options, anchor.AnchorId);
+        Assert.Single(initialAttempts);
+
+        await UpdateAnchorBuildStatusAsync(
+            options,
+            anchor.AnchorId,
+            ReferenceAnchorBuildStates.FailedEmbedding,
+            ReferenceAnchorBuildStates.FailedEmbedding);
+
+        var detail = await service.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, anchor.AnchorId),
+            CancellationToken.None);
+
+        Assert.NotNull(detail);
+        Assert.Equal(2, detail.AttemptCount);
+        Assert.NotNull(detail.CurrentAttempt);
+        Assert.Equal(2, detail.CurrentAttempt.AttemptNumber);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedEmbedding, detail.CurrentAttempt.Status);
+        var persistedAttempts = await ReadProcessingAttemptRowsAsync(options, anchor.AnchorId);
+        Assert.Equal([1, 2], persistedAttempts.Select(item => item.AttemptNumber).ToArray());
+        Assert.Equal(2, persistedAttempts.Select(item => item.AttemptId).Distinct(StringComparer.Ordinal).Count());
+        var eventRefs = await ReadProcessingEventAttemptRefsAsync(options, anchor.AnchorId);
+        Assert.All(eventRefs, item =>
+        {
+            Assert.NotEmpty(item.AttemptId);
+            Assert.NotEmpty(item.BuildId);
+            Assert.Contains(persistedAttempts, attempt => attempt.AttemptId == item.AttemptId);
+        });
     }
 
     [Fact]
@@ -2308,7 +3909,7 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
                 novel.Id,
                 [anchor.AnchorId],
                 "",
-                [ReferenceMaterialTypes.Sentence],
+                [],
                 [],
                 [],
                 [],
@@ -2316,8 +3917,12 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
                 Page: 1,
                 Size: 10),
             CancellationToken.None);
-        var rainMaterial = Assert.Single(discovered.Items, item => item.Text == "雨声压低了门口。");
-        var doorwayMaterial = Assert.Single(discovered.Items, item => item.Text == "他在门口停住。");
+        var rainMaterial = Assert.Single(
+            discovered.Items,
+            item => item.Text == "雨声压低了门口。" && item.MaterialType == ReferenceMaterialTypes.Sentence);
+        var doorwayMaterial = Assert.Single(
+            discovered.Items,
+            item => item.Text == "他在门口停住。" && item.MaterialType == ReferenceMaterialTypes.Sentence);
         var vectors = Assert.Single(vec.Provisions).Vectors;
         var rainRowId = vectors.Single(vector => vector.ChunkId == rainMaterial.MaterialId).RowId;
         var doorwayRowId = vectors.Single(vector => vector.ChunkId == doorwayMaterial.MaterialId).RowId;
@@ -3187,6 +4792,231 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.Equal(targetMaterial.FunctionTag, unchanged.FunctionTag);
         Assert.Equal(targetMaterial.EmotionTag, unchanged.EmotionTag);
         Assert.False(unchanged.UserVerified);
+    }
+
+    [Fact]
+    public async Task MaterialTagReviewQueueIsServerOwnedPagedAndUpdatesAfterCorrection()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("服务端标签队列测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "tag-review-queue.md",
+            """
+            他在门口停了很久。
+
+            雨声压低了整条街的呼吸。
+
+            她没有回头，只把钥匙放回桌面。
+
+            杯底半圈水痕慢慢散开。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "服务端标签队列参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var materials = (await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                20),
+            CancellationToken.None)).Items;
+        Assert.True(materials.Count >= 4);
+
+        var firstPage = await service.GetMaterialTagReviewQueueAsync(
+            new GetReferenceMaterialTagReviewQueuePayload(
+                novel.Id,
+                [anchor.AnchorId],
+                Page: 1,
+                Size: 2),
+            CancellationToken.None);
+        var secondPage = await service.GetMaterialTagReviewQueueAsync(
+            new GetReferenceMaterialTagReviewQueuePayload(
+                novel.Id,
+                [anchor.AnchorId],
+                Page: 2,
+                Size: 2),
+            CancellationToken.None);
+
+        Assert.True(firstPage.Total >= 4);
+        Assert.Equal(1, firstPage.Page);
+        Assert.Equal(2, firstPage.Size);
+        Assert.Equal((int)Math.Ceiling(firstPage.Total / 2.0), firstPage.TotalPages);
+        Assert.Equal(2, firstPage.Items.Count);
+        Assert.Empty(firstPage.Items.Select(item => item.Material.MaterialId).Intersect(secondPage.Items.Select(item => item.Material.MaterialId)));
+        Assert.All(firstPage.Items.Concat(secondPage.Items), item =>
+        {
+            Assert.NotEmpty(item.Issues);
+            Assert.Contains(item.Issues, issue => issue.Code == ReferenceMaterialTagReviewIssueCodes.Unverified);
+            Assert.True(item.Material.TextPreview.Length <= 163);
+            Assert.True(item.Material.TextTruncated || item.Material.TextPreview.Length <= 160);
+        });
+
+        var correctedFromQueue = firstPage.Items[0].Material.MaterialId;
+        await service.UpdateMaterialsTagsAsync(
+            new UpdateReferenceMaterialsTagsPayload(
+                novel.Id,
+                [correctedFromQueue],
+                FunctionTag: "interiority",
+                EmotionTag: "unease",
+                SceneTag: "room",
+                PovTag: "close",
+                TechniqueTag: "sensory_detail",
+                Origin: "test",
+                Note: "queue correction removes material from server-owned queue"),
+            CancellationToken.None);
+
+        var afterCorrection = await service.GetMaterialTagReviewQueueAsync(
+            new GetReferenceMaterialTagReviewQueuePayload(
+                novel.Id,
+                [anchor.AnchorId],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        Assert.Equal(firstPage.Total - 1, afterCorrection.Total);
+        Assert.DoesNotContain(afterCorrection.Items, item => item.Material.MaterialId == correctedFromQueue);
+    }
+
+    [Fact]
+    public async Task MaterialTagReviewQueueKeepsVerifiedMaterialsWithRemainingLowConfidence()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("已校正低置信队列测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "verified-low-confidence-review.md",
+            """
+            雨声压低了街面。
+
+            林岚把钥匙放回桌面。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "已校正低置信参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var materials = (await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                20),
+            CancellationToken.None)).Items;
+        var targetMaterialId = Assert.Single(materials.Select(material => material.MaterialId).Take(1));
+
+        var databasePath = Path.Combine(options.DefaultDataDirectory, "reference-anchor", "index.sqlite");
+        await using (var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString()))
+        {
+            await connection.OpenAsync();
+            await using (var verifyAll = connection.CreateCommand())
+            {
+                verifyAll.CommandText = """
+                    UPDATE reference_materials
+                    SET function_tag = 'interiority',
+                        emotion_tag = 'restrained',
+                        scene_tag = 'room',
+                        pov_tag = 'close',
+                        technique_tag = 'sensory_detail',
+                        function_confidence = 1.0,
+                        emotion_confidence = 1.0,
+                        pov_confidence = 1.0,
+                        user_verified = 1
+                    WHERE anchor_id = $anchor_id;
+                    """;
+                verifyAll.Parameters.AddWithValue("$anchor_id", anchor.AnchorId);
+                Assert.True(await verifyAll.ExecuteNonQueryAsync() > 0);
+            }
+
+            await using var lowerOneDimension = connection.CreateCommand();
+            lowerOneDimension.CommandText = """
+                UPDATE reference_materials
+                SET emotion_confidence = 0.5
+                WHERE material_id = $material_id;
+                """;
+            lowerOneDimension.Parameters.AddWithValue("$material_id", targetMaterialId);
+            Assert.Equal(1, await lowerOneDimension.ExecuteNonQueryAsync());
+        }
+
+        var queue = await service.GetMaterialTagReviewQueueAsync(
+            new GetReferenceMaterialTagReviewQueuePayload(
+                novel.Id,
+                [anchor.AnchorId],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        var item = Assert.Single(queue.Items);
+        Assert.Equal(targetMaterialId, item.Material.MaterialId);
+        Assert.True(item.Material.UserVerified);
+        Assert.Contains(item.Issues, issue => issue.Code == ReferenceMaterialTagReviewIssueCodes.LowConfidence);
+        Assert.DoesNotContain(item.Issues, issue => issue.Code == ReferenceMaterialTagReviewIssueCodes.Unverified);
+        Assert.DoesNotContain(item.Issues, issue => issue.Code == ReferenceMaterialTagReviewIssueCodes.UnknownTag);
+    }
+
+    [Fact]
+    public async Task MaterialTagReviewQueueUsesBoundedPreviewForUnknownLicenseSources()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("未知授权标签队列测试", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "tag-review-unknown-license.md",
+            "雨声压低了整条街的呼吸，林岚在门口停住，先把杯底水痕记下，然后把更长的环境细节留在素材库内部。墙根泥点、杯沿缺口、门后停顿和窗台潮气继续延展，确保未知授权预览必须截断。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "未知授权队列参考", null, sourcePath, "markdown", "unknown"),
+            CancellationToken.None);
+
+        var queue = await service.GetMaterialTagReviewQueueAsync(
+            new GetReferenceMaterialTagReviewQueuePayload(
+                novel.Id,
+                [anchor.AnchorId],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+
+        Assert.NotEmpty(queue.Items);
+        Assert.All(queue.Items, item =>
+        {
+            Assert.True(item.Material.TextPreview.Length <= 51);
+        });
+    }
+
+    [Fact]
+    public async Task MaterialTagReviewQueueRejectsExcessiveExplicitAnchorIds()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("标签队列过滤上限测试", "", ""), CancellationToken.None);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var tooManyAnchorIds = Enumerable.Range(1, 257).Select(id => (long)id).ToArray();
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => service.GetMaterialTagReviewQueueAsync(
+            new GetReferenceMaterialTagReviewQueuePayload(
+                novel.Id,
+                tooManyAnchorIds,
+                Page: 1,
+                Size: 10),
+            CancellationToken.None).AsTask());
+
+        Assert.Contains("At most 256 anchor ids", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -4895,6 +6725,311 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         return rows;
     }
 
+    private static async ValueTask<IReadOnlyList<ReferenceProcessingAttemptRow>> ReadProcessingAttemptRowsAsync(
+        AppInitializationOptions options,
+        long anchorId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT attempt_id, build_id, attempt_number, build_version, status, stage,
+                   event_count, recovered_from_attempt_id, recovered_from_build_id, blocked_reason
+            FROM reference_anchor_processing_attempts
+            WHERE anchor_id = $anchor_id
+            ORDER BY attempt_number ASC;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        var rows = new List<ReferenceProcessingAttemptRow>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            rows.Add(new ReferenceProcessingAttemptRow(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetInt32(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5),
+                reader.GetInt32(6),
+                reader.GetString(7),
+                reader.GetString(8),
+                reader.GetString(9)));
+        }
+
+        return rows;
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceProcessingEventAttemptRefRow>> ReadProcessingEventAttemptRefsAsync(
+        AppInitializationOptions options,
+        long anchorId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT event_id, attempt_id, build_id, attempt_number
+            FROM reference_anchor_processing_events
+            WHERE anchor_id = $anchor_id
+            ORDER BY created_at ASC, event_id ASC;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        var rows = new List<ReferenceProcessingEventAttemptRefRow>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            rows.Add(new ReferenceProcessingEventAttemptRefRow(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetInt32(3)));
+        }
+
+        return rows;
+    }
+
+    private static async Task InsertRawDuplicateAnchorIdentityAsync(
+        AppInitializationOptions options,
+        long duplicateAnchorId,
+        ReferenceAnchorPayload source,
+        long? storedNovelId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO reference_anchors
+              (anchor_id, novel_id, title, author, source_path, source_kind, license_status,
+               source_file_hash, build_version, status, created_at, updated_at,
+               corpus_visibility, source_trust, user_tags_json)
+            VALUES
+              ($anchor_id, $novel_id, $title, $author, $source_path, $source_kind, $license_status,
+               $source_file_hash, $build_version, $status, $created_at, $updated_at,
+               $corpus_visibility, $source_trust, $user_tags_json);
+            """;
+        command.Parameters.AddWithValue("$anchor_id", duplicateAnchorId);
+        command.Parameters.AddWithValue("$novel_id", storedNovelId.HasValue ? storedNovelId.Value : DBNull.Value);
+        command.Parameters.AddWithValue("$title", "直接插入重复来源");
+        command.Parameters.AddWithValue("$author", string.Empty);
+        command.Parameters.AddWithValue("$source_path", source.SourcePath);
+        command.Parameters.AddWithValue("$source_kind", source.SourceKind);
+        command.Parameters.AddWithValue("$license_status", source.LicenseStatus);
+        command.Parameters.AddWithValue("$source_file_hash", source.SourceFileHash);
+        command.Parameters.AddWithValue("$build_version", source.BuildVersion);
+        command.Parameters.AddWithValue("$status", ReferenceAnchorBuildStates.Ready);
+        command.Parameters.AddWithValue("$created_at", source.CreatedAt.AddSeconds(1).ToString("O"));
+        command.Parameters.AddWithValue("$updated_at", source.UpdatedAt.AddSeconds(1).ToString("O"));
+        command.Parameters.AddWithValue("$corpus_visibility", source.Visibility);
+        command.Parameters.AddWithValue("$source_trust", source.SourceTrust);
+        command.Parameters.AddWithValue("$user_tags_json", "[]");
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async ValueTask CreateLegacyDuplicateImportIdentityAnchorsAsync(
+        AppInitializationOptions options,
+        long novelId,
+        string sourcePath)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using (var schema = connection.CreateCommand())
+        {
+            schema.CommandText = """
+                CREATE TABLE reference_anchors (
+                  anchor_id INTEGER PRIMARY KEY,
+                  novel_id INTEGER,
+                  title TEXT NOT NULL,
+                  author TEXT NOT NULL,
+                  source_path TEXT NOT NULL,
+                  source_kind TEXT NOT NULL,
+                  license_status TEXT NOT NULL,
+                  source_file_hash TEXT NOT NULL,
+                  build_version TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  corpus_visibility TEXT NOT NULL DEFAULT 'private',
+                  source_trust TEXT NOT NULL DEFAULT 'user_verified',
+                  user_tags_json TEXT NOT NULL DEFAULT '[]'
+                );
+                """;
+            await schema.ExecuteNonQueryAsync();
+        }
+
+        const string timestamp = "2026-07-04T00:00:00.0000000+00:00";
+        for (var index = 0; index < 2; index++)
+        {
+            await using var insert = connection.CreateCommand();
+            insert.CommandText = """
+                INSERT INTO reference_anchors
+                  (anchor_id, novel_id, title, author, source_path, source_kind, license_status,
+                   source_file_hash, build_version, status, created_at, updated_at,
+                   corpus_visibility, source_trust, user_tags_json)
+                VALUES
+                  ($anchor_id, $novel_id, $title, '', $source_path, 'markdown', 'user_provided',
+                   'legacy-source-hash', 'reference-anchor-v1', 'ready', $created_at, $updated_at,
+                   'private', 'user_verified', '[]');
+                """;
+            insert.Parameters.AddWithValue("$anchor_id", 910_001 + index);
+            insert.Parameters.AddWithValue("$novel_id", novelId);
+            insert.Parameters.AddWithValue("$title", index == 0 ? "历史重复参考" : "历史重复参考副本");
+            insert.Parameters.AddWithValue("$source_path", sourcePath);
+            insert.Parameters.AddWithValue("$created_at", timestamp);
+            insert.Parameters.AddWithValue("$updated_at", timestamp);
+            await insert.ExecuteNonQueryAsync();
+        }
+    }
+
+    private static async ValueTask CreateLegacyProcessingEventsWithoutAttemptMetadataAsync(
+        AppInitializationOptions options,
+        long novelId)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        await using (var schema = connection.CreateCommand())
+        {
+            schema.CommandText = """
+                CREATE TABLE reference_anchors (
+                  anchor_id INTEGER PRIMARY KEY,
+                  novel_id INTEGER,
+                  title TEXT NOT NULL,
+                  author TEXT NOT NULL,
+                  source_path TEXT NOT NULL,
+                  source_kind TEXT NOT NULL,
+                  license_status TEXT NOT NULL,
+                  source_file_hash TEXT NOT NULL,
+                  build_version TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  corpus_visibility TEXT NOT NULL DEFAULT 'private',
+                  source_trust TEXT NOT NULL DEFAULT 'user_verified',
+                  user_tags_json TEXT NOT NULL DEFAULT '[]'
+                );
+
+                CREATE TABLE reference_anchor_build_state (
+                  anchor_id INTEGER PRIMARY KEY,
+                  status TEXT NOT NULL,
+                  stage TEXT NOT NULL,
+                  source_segment_count INTEGER NOT NULL,
+                  material_count INTEGER NOT NULL,
+                  slot_count INTEGER NOT NULL,
+                  vector_count INTEGER NOT NULL,
+                  last_error TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE reference_anchor_processing_events (
+                  event_id TEXT PRIMARY KEY,
+                  anchor_id INTEGER NOT NULL,
+                  stage TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  source_segment_count INTEGER NOT NULL,
+                  material_count INTEGER NOT NULL,
+                  slot_count INTEGER NOT NULL,
+                  vector_count INTEGER NOT NULL,
+                  last_error TEXT NOT NULL,
+                  affected_source_id TEXT NOT NULL,
+                  affected_material_id TEXT NOT NULL,
+                  affected_segment_id TEXT NOT NULL,
+                  affected_slot_id TEXT NOT NULL,
+                  created_at TEXT NOT NULL
+                );
+                """;
+            await schema.ExecuteNonQueryAsync();
+        }
+
+        const string firstTimestamp = "2026-07-04T00:00:00.0000000+00:00";
+        const string secondTimestamp = "2026-07-04T00:01:00.0000000+00:00";
+        await using (var insertAnchor = connection.CreateCommand())
+        {
+            insertAnchor.CommandText = """
+                INSERT INTO reference_anchors
+                  (anchor_id, novel_id, title, author, source_path, source_kind, license_status,
+                   source_file_hash, build_version, status, created_at, updated_at,
+                   corpus_visibility, source_trust, user_tags_json)
+                VALUES
+                  (920001, $novel_id, '历史处理记录参考', '', 'legacy-processing.md', 'markdown',
+                   'user_provided', 'legacy-processing-hash', 'reference-anchor-v1', 'ready',
+                   $created_at, $updated_at, 'private', 'user_verified', '[]');
+                """;
+            insertAnchor.Parameters.AddWithValue("$novel_id", novelId);
+            insertAnchor.Parameters.AddWithValue("$created_at", firstTimestamp);
+            insertAnchor.Parameters.AddWithValue("$updated_at", secondTimestamp);
+            await insertAnchor.ExecuteNonQueryAsync();
+        }
+
+        await using (var insertStatus = connection.CreateCommand())
+        {
+            insertStatus.CommandText = """
+                INSERT INTO reference_anchor_build_state
+                  (anchor_id, status, stage, source_segment_count, material_count, slot_count,
+                   vector_count, last_error, updated_at)
+                VALUES
+                  (920001, 'ready', 'ready', 1, 1, 0, 1, '', $updated_at);
+                """;
+            insertStatus.Parameters.AddWithValue("$updated_at", secondTimestamp);
+            await insertStatus.ExecuteNonQueryAsync();
+        }
+
+        await using (var firstEvent = connection.CreateCommand())
+        {
+            firstEvent.CommandText = """
+                INSERT INTO reference_anchor_processing_events
+                  (event_id, anchor_id, stage, status, source_segment_count, material_count,
+                   slot_count, vector_count, last_error, affected_source_id, affected_material_id,
+                   affected_segment_id, affected_slot_id, created_at)
+                VALUES
+                  ('legacy-event-failed', 920001, 'failed_embedding', 'failed_embedding',
+                   1, 1, 0, 0, 'legacy first failure', '920001', '', '', '', $created_at);
+                """;
+            firstEvent.Parameters.AddWithValue("$created_at", firstTimestamp);
+            await firstEvent.ExecuteNonQueryAsync();
+        }
+
+        await using (var secondEvent = connection.CreateCommand())
+        {
+            secondEvent.CommandText = """
+                INSERT INTO reference_anchor_processing_events
+                  (event_id, anchor_id, stage, status, source_segment_count, material_count,
+                   slot_count, vector_count, last_error, affected_source_id, affected_material_id,
+                   affected_segment_id, affected_slot_id, created_at)
+                VALUES
+                  ('legacy-event-ready', 920001, 'ready', 'ready',
+                   1, 1, 0, 1, '', '920001', '', '', '', $created_at);
+                """;
+            secondEvent.Parameters.AddWithValue("$created_at", secondTimestamp);
+            await secondEvent.ExecuteNonQueryAsync();
+        }
+    }
+
     private static async ValueTask UpdateBuildStateErrorAsync(
         AppInitializationOptions options,
         long anchorId,
@@ -4920,6 +7055,83 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         command.Parameters.AddWithValue("$last_error", lastError);
         command.Parameters.AddWithValue("$anchor_id", anchorId);
         await command.ExecuteNonQueryAsync();
+    }
+
+    private static async ValueTask UpdateAnchorBuildStatusAsync(
+        AppInitializationOptions options,
+        long anchorId,
+        string status,
+        string stage)
+    {
+        var databasePath = Path.Combine(
+            options.DefaultDataDirectory,
+            "reference-anchor",
+            "index.sqlite");
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        var updatedAt = DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync();
+        await using (var anchor = connection.CreateCommand())
+        {
+            anchor.Transaction = transaction;
+            anchor.CommandText = """
+                UPDATE reference_anchors
+                SET status = $status,
+                    updated_at = $updated_at
+                WHERE anchor_id = $anchor_id;
+                """;
+            anchor.Parameters.AddWithValue("$status", status);
+            anchor.Parameters.AddWithValue("$updated_at", updatedAt);
+            anchor.Parameters.AddWithValue("$anchor_id", anchorId);
+            await anchor.ExecuteNonQueryAsync();
+        }
+
+        await using (var build = connection.CreateCommand())
+        {
+            build.Transaction = transaction;
+            build.CommandText = """
+                UPDATE reference_anchor_build_state
+                SET status = $status,
+                    stage = $stage,
+                    last_error = '',
+                    updated_at = $updated_at
+                WHERE anchor_id = $anchor_id;
+                """;
+            build.Parameters.AddWithValue("$status", status);
+            build.Parameters.AddWithValue("$stage", stage);
+            build.Parameters.AddWithValue("$updated_at", updatedAt);
+            build.Parameters.AddWithValue("$anchor_id", anchorId);
+            await build.ExecuteNonQueryAsync();
+        }
+
+        await using (var history = connection.CreateCommand())
+        {
+            history.Transaction = transaction;
+            history.CommandText = """
+                INSERT INTO reference_anchor_processing_events
+                  (event_id, anchor_id, stage, status, source_segment_count, material_count,
+                   slot_count, vector_count, last_error, affected_source_id, affected_material_id,
+                   affected_segment_id, affected_slot_id, created_at)
+                SELECT $event_id, $anchor_id, $stage, $status,
+                       COALESCE(s.source_segment_count, 0),
+                       COALESCE(s.material_count, 0),
+                       COALESCE(s.slot_count, 0),
+                       COALESCE(s.vector_count, 0),
+                       '', $affected_source_id, '', '', '', $updated_at
+                FROM reference_anchor_build_state s
+                WHERE s.anchor_id = $anchor_id;
+                """;
+            history.Parameters.AddWithValue("$event_id", Guid.NewGuid().ToString("N"));
+            history.Parameters.AddWithValue("$anchor_id", anchorId);
+            history.Parameters.AddWithValue("$stage", stage);
+            history.Parameters.AddWithValue("$status", status);
+            history.Parameters.AddWithValue("$affected_source_id", anchorId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            history.Parameters.AddWithValue("$updated_at", updatedAt);
+            await history.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
     }
 
     private static async ValueTask<ReferenceReuseProvenanceRow> ReadReuseProvenanceAsync(
@@ -5286,6 +7498,24 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         string SourceHash,
         bool UserVerified);
 
+    private sealed record ReferenceProcessingAttemptRow(
+        string AttemptId,
+        string BuildId,
+        int AttemptNumber,
+        string BuildVersion,
+        string Status,
+        string Stage,
+        int EventCount,
+        string RecoveredFromAttemptId,
+        string RecoveredFromBuildId,
+        string BlockedReason);
+
+    private sealed record ReferenceProcessingEventAttemptRefRow(
+        string EventId,
+        string AttemptId,
+        string BuildId,
+        int AttemptNumber);
+
     private sealed record ReferenceReuseProvenanceRow(
         string CandidateMaterialId,
         IReadOnlyList<ReferenceReuseAuditRow> AuditRows);
@@ -5356,6 +7586,64 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             throw new InvalidOperationException("query embedding failed");
+        }
+    }
+
+    private sealed class FailingReferenceMaterialSlotDetector : IReferenceMaterialSlotDetector
+    {
+        private readonly string _message;
+
+        public FailingReferenceMaterialSlotDetector(string message)
+        {
+            _message = message;
+        }
+
+        public IReadOnlyList<ReferenceMaterialSlot> Detect(ReferenceMaterialPayload material)
+        {
+            throw new InvalidOperationException(_message);
+        }
+    }
+
+    private sealed class FailingReferenceAnchorProcessingStageProbe : IReferenceAnchorProcessingStageProbe
+    {
+        private readonly string _stage;
+        private readonly string _message;
+
+        public FailingReferenceAnchorProcessingStageProbe(string stage, string message)
+        {
+            _stage = stage;
+            _message = message;
+        }
+
+        public void BeforeStage(string stage, long anchorId, string sourceFileHash)
+        {
+            if (string.Equals(stage, _stage, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(_message);
+            }
+        }
+    }
+
+    private sealed class CancelingEmbeddingClient : IEmbeddingClient
+    {
+        public ValueTask<EmbeddingBatchResult> EmbedAsync(
+            IReadOnlyList<string> inputs,
+            EmbeddingRequestOptions options,
+            CancellationToken cancellationToken)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+    }
+
+    private sealed class RequestedCancellationEmbeddingClient(CancellationTokenSource cancellation) : IEmbeddingClient
+    {
+        public ValueTask<EmbeddingBatchResult> EmbedAsync(
+            IReadOnlyList<string> inputs,
+            EmbeddingRequestOptions options,
+            CancellationToken cancellationToken)
+        {
+            cancellation.Cancel();
+            throw new OperationCanceledException(cancellation.Token);
         }
     }
 

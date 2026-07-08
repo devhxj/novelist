@@ -178,6 +178,7 @@ public sealed class MafToolRegistryTests
         Assert.Contains("get_reference_anchors", materialToolNames);
         Assert.Contains("search_reference_materials", materialToolNames);
         Assert.Contains("get_reference_material_detail", materialToolNames);
+        Assert.Contains("get_reference_source_segment_detail", materialToolNames);
         Assert.Contains("get_reference_source_processing_detail", materialToolNames);
         Assert.Contains("adapt_reference_material", materialToolNames);
         Assert.Contains("audit_reference_reuse", materialToolNames);
@@ -209,6 +210,7 @@ public sealed class MafToolRegistryTests
         Assert.Contains("generate_reference_anchored_draft", draftToolNames);
         Assert.Contains("get_reference_draft_audits", draftToolNames);
         Assert.Contains("get_reference_style_audit_findings", draftToolNames);
+        Assert.DoesNotContain("get_reference_draft_candidates", draftToolNames);
 
         var withOnlyStyleProfiles = new NovelistMafToolRegistry(
             new RecordingStoryMemorySearchService(),
@@ -257,6 +259,7 @@ public sealed class MafToolRegistryTests
         Assert.Contains("get_reference_anchors", names);
         Assert.Contains("search_reference_materials", names);
         Assert.Contains("get_reference_material_detail", names);
+        Assert.Contains("get_reference_source_segment_detail", names);
         Assert.Contains("get_reference_source_processing_detail", names);
         Assert.Contains("adapt_reference_material", names);
         Assert.Contains("audit_reference_reuse", names);
@@ -277,6 +280,7 @@ public sealed class MafToolRegistryTests
         Assert.Contains("get_reference_style_profiles", names);
         Assert.Contains("get_reference_style_profile", names);
         Assert.DoesNotContain("resume_reference_orchestration_run", names);
+        Assert.DoesNotContain("get_reference_draft_candidates", names);
         Assert.DoesNotContain("approve_reference_orchestration_decision", names);
         Assert.DoesNotContain("apply_reference_blueprint_revision", names);
         Assert.DoesNotContain("insert_reference_anchored_draft", names);
@@ -365,6 +369,18 @@ public sealed class MafToolRegistryTests
         Assert.False(getMaterialDetailProperties.TryGetProperty("prompt", out _));
         Assert.False(getMaterialDetailProperties.TryGetProperty("path", out _));
 
+        var getSourceSegmentDetail = tools.Single(tool => tool.Name == "get_reference_source_segment_detail");
+        AssertToolDescriptionContains(getSourceSegmentDetail, "只读", "bounded text_preview", "不返回 source_path", "不返回 source_text", "不能写章节");
+        Assert.True(getSourceSegmentDetail.JsonSchema.TryGetProperty("properties", out var getSourceSegmentDetailProperties));
+        Assert.True(getSourceSegmentDetailProperties.TryGetProperty("anchor_id", out _));
+        Assert.True(getSourceSegmentDetailProperties.TryGetProperty("segment_id", out _));
+        Assert.False(getSourceSegmentDetailProperties.TryGetProperty("novel_id", out _));
+        Assert.False(getSourceSegmentDetailProperties.TryGetProperty("source_path", out _));
+        Assert.False(getSourceSegmentDetailProperties.TryGetProperty("source_text", out _));
+        Assert.False(getSourceSegmentDetailProperties.TryGetProperty("candidate_text", out _));
+        Assert.False(getSourceSegmentDetailProperties.TryGetProperty("prompt", out _));
+        Assert.False(getSourceSegmentDetailProperties.TryGetProperty("path", out _));
+
         var getSourceProcessingDetail = tools.Single(tool => tool.Name == "get_reference_source_processing_detail");
         AssertToolDescriptionContains(getSourceProcessingDetail, "只读", "已脱敏 diagnostics", "不返回 source_path", "不返回 source_text", "不能写章节");
         Assert.True(getSourceProcessingDetail.JsonSchema.TryGetProperty("properties", out var getSourceProcessingDetailProperties));
@@ -375,6 +391,9 @@ public sealed class MafToolRegistryTests
         Assert.False(getSourceProcessingDetailProperties.TryGetProperty("candidate_text", out _));
         Assert.False(getSourceProcessingDetailProperties.TryGetProperty("prompt", out _));
         Assert.False(getSourceProcessingDetailProperties.TryGetProperty("path", out _));
+
+        var adaptMaterial = tools.Single(tool => tool.Name == "adapt_reference_material");
+        AssertToolDescriptionContains(adaptMaterial, "bounded text preview", "不返回完整材料文本", "不返回 source_path", "不直接写章节");
 
         var listStyleProfiles = tools.Single(tool => tool.Name == "get_reference_style_profiles");
         AssertToolDescriptionContains(listStyleProfiles, "只读", "不能构建", "不能导入", "不能审批", "不能写章节");
@@ -782,8 +801,29 @@ public sealed class MafToolRegistryTests
         Assert.DoesNotContain("candidate_text", materialDetail.GetRawText(), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("prompt", materialDetail.GetRawText(), StringComparison.OrdinalIgnoreCase);
 
-        var sourceProcessingResult = await executor.ExecuteAsync(
+        var sourceSegmentResult = await executor.ExecuteAsync(
             new ChatToolExecutionContext(23, "sess_reference", 3),
+            new ChatToolCall(
+                "call_reference_source_segment",
+                "get_reference_source_segment_detail",
+                """{"anchor_id":7,"segment_id":"seg-1"}"""),
+            CancellationToken.None);
+
+        Assert.True(sourceSegmentResult.Success, sourceSegmentResult.Error);
+        Assert.NotNull(anchors.LastSourceSegmentDetail);
+        Assert.Equal(23, anchors.LastSourceSegmentDetail.NovelId);
+        Assert.Equal(7, anchors.LastSourceSegmentDetail.AnchorId);
+        Assert.Equal("seg-1", anchors.LastSourceSegmentDetail.SegmentId);
+        var sourceSegment = sourceSegmentResult.Data!.Value;
+        Assert.Equal("seg-1", sourceSegment.GetProperty("segment").GetProperty("segment_id").GetString());
+        Assert.False(sourceSegment.GetProperty("segment").TryGetProperty("text", out _));
+        Assert.DoesNotContain("source_path", sourceSegment.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", sourceSegment.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", sourceSegment.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", sourceSegment.GetRawText(), StringComparison.OrdinalIgnoreCase);
+
+        var sourceProcessingResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 4),
             new ChatToolCall(
                 "call_reference_source_processing",
                 "get_reference_source_processing_detail",
@@ -802,6 +842,118 @@ public sealed class MafToolRegistryTests
         Assert.DoesNotContain("source_text", sourceProcessing.GetRawText(), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("candidate_text", sourceProcessing.GetRawText(), StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("prompt", sourceProcessing.GetRawText(), StringComparison.OrdinalIgnoreCase);
+
+        var adaptResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 5),
+            new ChatToolCall(
+                "call_reference_adapt",
+                "adapt_reference_material",
+                """{"material_id":"mat-1","slot_values":[{"slot_name":"object","value":"门"}],"max_rewrite_level":"L1","scene_facts":["door exists"]}"""),
+            CancellationToken.None);
+
+        Assert.True(adaptResult.Success, adaptResult.Error);
+        Assert.NotNull(anchors.LastAdapt);
+        Assert.Equal(23, anchors.LastAdapt.NovelId);
+        Assert.Equal("mat-1", anchors.LastAdapt.MaterialId);
+        Assert.Equal("门", anchors.LastAdapt.SlotValues[0].Value);
+        Assert.False(adaptResult.Data!.Value.GetRawText().Contains(FullReferenceMaterialLeakSentinel, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReferenceDetailToolsRedactDirtyServiceDiagnostics()
+    {
+        var anchors = new RecordingReferenceAnchorService
+        {
+            UseUnsafeReferenceDetails = true
+        };
+        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
+            new RecordingStoryMemorySearchService(),
+            chapterContent: null,
+            approvals: null,
+            events: null,
+            subagents: null,
+            preferences: null,
+            world: null,
+            planning: null,
+            webFetch: null,
+            webSearch: null,
+            referenceAnchors: anchors));
+
+        var anchorsResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 0),
+            new ChatToolCall(
+                "call_reference_anchors",
+                "get_reference_anchors",
+                "{}"),
+            CancellationToken.None);
+
+        Assert.True(anchorsResult.Success, anchorsResult.Error);
+        AssertReferenceToolResultDoesNotExposeSensitiveText(anchorsResult.Data!.Value);
+        Assert.Contains("safe-tag", anchorsResult.Data.Value.GetRawText(), StringComparison.Ordinal);
+
+        var materialDetailResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 1),
+            new ChatToolCall(
+                "call_reference_material_detail",
+                "get_reference_material_detail",
+                """{"material_id":"mat-unsafe"}"""),
+            CancellationToken.None);
+
+        Assert.True(materialDetailResult.Success, materialDetailResult.Error);
+        AssertReferenceToolResultDoesNotExposeSensitiveText(materialDetailResult.Data!.Value);
+        Assert.Equal("第一章", materialDetailResult.Data.Value.GetProperty("segments")[0].GetProperty("chapter_title").GetString());
+
+        var sourceSegmentResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 2),
+            new ChatToolCall(
+                "call_reference_source_segment",
+                "get_reference_source_segment_detail",
+                """{"anchor_id":7,"segment_id":"seg-unsafe"}"""),
+            CancellationToken.None);
+
+        Assert.True(sourceSegmentResult.Success, sourceSegmentResult.Error);
+        AssertReferenceToolResultDoesNotExposeSensitiveText(sourceSegmentResult.Data!.Value);
+        Assert.Equal("seg-unsafe", sourceSegmentResult.Data.Value.GetProperty("segment").GetProperty("segment_id").GetString());
+        Assert.False(sourceSegmentResult.Data.Value.GetProperty("segment").TryGetProperty("text", out _));
+
+        var sourceProcessingResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 3),
+            new ChatToolCall(
+                "call_reference_source_processing",
+                "get_reference_source_processing_detail",
+                """{"anchor_id":7}"""),
+            CancellationToken.None);
+
+        Assert.True(sourceProcessingResult.Success, sourceProcessingResult.Error);
+        AssertReferenceToolResultDoesNotExposeSensitiveText(sourceProcessingResult.Data!.Value);
+        Assert.Equal(1, sourceProcessingResult.Data.Value.GetProperty("current_status").GetProperty("source_segment_count").GetInt32());
+
+        var adaptResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 4),
+            new ChatToolCall(
+                "call_reference_adapt",
+                "adapt_reference_material",
+                """{"material_id":"mat-unsafe","slot_values":[],"max_rewrite_level":"L1","scene_facts":[]}"""),
+            CancellationToken.None);
+
+        Assert.True(adaptResult.Success, adaptResult.Error);
+        AssertReferenceToolResultDoesNotExposeSensitiveText(adaptResult.Data!.Value);
+        var adaptedText = adaptResult.Data.Value.GetProperty("text").GetString() ?? string.Empty;
+        Assert.True(adaptedText.Length <= 803, "MAF adapt tool must return a bounded text preview.");
+        Assert.DoesNotContain("tail-that-proves-unbounded-text", adaptResult.Data.Value.GetRawText(), StringComparison.Ordinal);
+
+        var auditResult = await executor.ExecuteAsync(
+            new ChatToolExecutionContext(23, "sess_reference", 5),
+            new ChatToolCall(
+                "call_reference_audit",
+                "audit_reference_reuse",
+                """{"material_id":"mat-unsafe","candidate_text":"candidate","max_rewrite_level":"L1","scene_facts":[]}"""),
+            CancellationToken.None);
+
+        Assert.True(auditResult.Success, auditResult.Error);
+        AssertReferenceToolResultDoesNotExposeSensitiveText(auditResult.Data!.Value);
+        Assert.Equal("audit-unsafe", auditResult.Data.Value.GetProperty("audit_id").GetString());
+        Assert.DoesNotContain("tail-that-proves-unbounded-text", auditResult.Data.Value.GetRawText(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1250,6 +1402,42 @@ public sealed class MafToolRegistryTests
         }
     }
 
+    private static void AssertReferenceToolResultDoesNotExposeSensitiveText(JsonElement result)
+    {
+        var raw = result.GetRawText();
+        foreach (var forbidden in new[]
+        {
+            @"D:\private",
+            "C:/Users/private",
+            @"\\server\share",
+            "file://",
+            "/Users/private",
+            "source_path",
+            "source_text",
+            "candidate_text",
+            "prompt",
+            "sk-proj",
+            "Bearer dirty",
+            "json secret source",
+            "json generated candidate",
+            "json hidden prompt",
+            "non-sk-secret-value",
+            "plain-token-value",
+            "jsonauthorizationtoken",
+            FullReferenceMaterialLeakSentinel
+        })
+        {
+            Assert.DoesNotContain(forbidden, raw, StringComparison.OrdinalIgnoreCase);
+        }
+
+        Assert.Contains("redacted", raw, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string UnsafeReferenceDiagnosticText()
+    {
+        return @"source_path: D:\private\reference.md; source_text: secret source; candidate_text: generated candidate; prompt: hidden prompt; {""source_text"":""json secret source"",""candidate_text"":""json generated candidate"",""prompt"":""json hidden prompt"",""api_key"":""non-sk-secret-value"",""token"":""plain-token-value"",""authorization"":""Bearer jsonauthorizationtokenabcdefghijklmnopqrstuvwxyz""}; C:/Users/private/reference.md; \\server\share\secret.md; file://D:/private/reference.md; /Users/private/reference.md; token=dirty-token-abcdefghijklmnopqrstuvwxyz; api_key=sk-proj-dirtyabcdefghijklmnopqrstuvwxyz1234567890; Bearer dirtytokenabcdefghijklmnopqrstuvwxyz; " + FullReferenceMaterialLeakSentinel;
+    }
+
     private static readonly string[] ForbiddenReferenceStyleToolProperties =
     [
         "novel_id",
@@ -1587,7 +1775,11 @@ public sealed class MafToolRegistryTests
     {
         public SearchReferenceMaterialsPayload? LastSearch { get; private set; }
         public GetReferenceMaterialDetailPayload? LastMaterialDetail { get; private set; }
+        public GetReferenceSourceSegmentDetailPayload? LastSourceSegmentDetail { get; private set; }
         public GetReferenceSourceProcessingDetailPayload? LastSourceProcessingDetail { get; private set; }
+        public AdaptReferenceMaterialPayload? LastAdapt { get; private set; }
+        public AuditReferenceReusePayload? LastAudit { get; private set; }
+        public bool UseUnsafeReferenceDetails { get; init; }
 
         public ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(
             CreateReferenceAnchorPayload input,
@@ -1621,8 +1813,44 @@ public sealed class MafToolRegistryTests
             return anchors;
         }
 
+        public async ValueTask<CreateReferenceAnchorsResultPayload> CreateAnchorsWithResultAsync(
+            CreateReferenceAnchorsPayload input,
+            CancellationToken cancellationToken)
+        {
+            var anchors = await CreateAnchorsAsync(input, cancellationToken);
+            return new CreateReferenceAnchorsResultPayload(
+                anchors,
+                [],
+                input.Anchors.Count,
+                anchors.Count,
+                0);
+        }
+
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(long novelId, CancellationToken cancellationToken)
         {
+            if (UseUnsafeReferenceDetails)
+            {
+                return ValueTask.FromResult<IReadOnlyList<ReferenceAnchorPayload>>(
+                [
+                    new ReferenceAnchorPayload(
+                        7,
+                        novelId,
+                        "参考书 C:/Users/private/reference.md",
+                        "api_key=\"non-sk-secret-value\"",
+                        @"\\server\share\reference.md",
+                        "markdown",
+                        "user_provided",
+                        "hash",
+                        "test",
+                        ReferenceAnchorBuildStates.Ready,
+                        DateTimeOffset.UtcNow,
+                        DateTimeOffset.UtcNow,
+                        ReferenceCorpusVisibilities.Private,
+                        ReferenceSourceTrustLevels.UserVerified,
+                        ["safe-tag", "token=\"plain-token-value\""])
+                ]);
+            }
+
             return ValueTask.FromResult<IReadOnlyList<ReferenceAnchorPayload>>(
             [
                 new ReferenceAnchorPayload(
@@ -1769,6 +1997,8 @@ public sealed class MafToolRegistryTests
                         "雨声压低了整条街的呼吸，林岚在门口停住，先把杯底水痕记下。" +
                             "这是一段用于验证 agent 搜索工具只能看到有界预览的完整素材正文。" +
                             "它继续补充窗台潮气、墙根泥点、杯沿缺口和门后停顿，让正文长度超过列表预览上限。" +
+                            "额外补充一段更长的材料说明，确保测试不会因为字符长度临界值而误判为未截断。" +
+                            "还要继续写出更多场景细节，确认即使敏感标记被出口层清理，预览长度仍然稳定超过上限。" +
                             FullReferenceMaterialLeakSentinel,
                         "hash",
                         "test",
@@ -1786,11 +2016,96 @@ public sealed class MafToolRegistryTests
                 TotalPages: 1));
         }
 
+        public ValueTask<PageResultPayload<ReferenceMaterialTagReviewItemPayload>> GetMaterialTagReviewQueueAsync(
+            GetReferenceMaterialTagReviewQueuePayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialTagReviewItemPayload>(
+                [],
+                Total: 0,
+                Page: input.Page,
+                Size: input.Size,
+                TotalPages: 0));
+        }
+
         public ValueTask<ReferenceMaterialDetailPayload?> GetMaterialDetailAsync(
             GetReferenceMaterialDetailPayload input,
             CancellationToken cancellationToken)
         {
             LastMaterialDetail = input;
+            if (UseUnsafeReferenceDetails)
+            {
+                var unsafeText = UnsafeReferenceDiagnosticText();
+                return ValueTask.FromResult<ReferenceMaterialDetailPayload?>(new ReferenceMaterialDetailPayload(
+                    new ReferenceMaterialSummaryPayload(
+                        input.MaterialId,
+                        7,
+                        "seg-unsafe",
+                        ReferenceMaterialTypes.Sentence,
+                        "environment",
+                        "pressure",
+                        "rain",
+                        "close",
+                        "sensory",
+                        1,
+                        1,
+                        1,
+                        unsafeText,
+                        true,
+                        "hash",
+                        "test",
+                        false,
+                        DateTimeOffset.UtcNow,
+                        ScoreComponents: new Dictionary<string, double>(StringComparer.Ordinal)
+                        {
+                            ["source_path_score"] = 2.5
+                        }),
+                    new ReferenceMaterialSourceSummaryPayload(
+                        7,
+                        input.NovelId,
+                        "参考书",
+                        "作者",
+                        "markdown",
+                        "user_provided",
+                        "hash",
+                        "test",
+                        ReferenceAnchorBuildStates.Ready,
+                        ReferenceCorpusVisibilities.Private,
+                        ReferenceSourceTrustLevels.UserVerified,
+                        [],
+                        ReferenceAnchorOwnerScopes.Novel,
+                        input.NovelId),
+                    [
+                        new ReferenceMaterialSegmentPreviewPayload(
+                            "seg-unsafe",
+                            "paragraph",
+                            1,
+                            "第一章",
+                            0,
+                            unsafeText,
+                            true,
+                            "seg-hash")
+                    ],
+                    [
+                        new ReferenceMaterialSlotPreviewPayload("object", unsafeText, 0, 2)
+                    ],
+                    [
+                        new ReferenceMaterialProcessingNotePayload(
+                            "completed",
+                            ReferenceAnchorBuildStates.Ready,
+                            unsafeText,
+                            DateTimeOffset.UtcNow,
+                            SourceSegmentCount: 1,
+                            MaterialCount: 1,
+                            SlotCount: 1,
+                            AffectedSourceId: @"D:\private\reference.md",
+                            AffectedMaterialId: input.MaterialId,
+                            AffectedSegmentId: "seg-unsafe",
+                            AffectedSlotId: "object")
+                    ]));
+            }
+
             return ValueTask.FromResult<ReferenceMaterialDetailPayload?>(new ReferenceMaterialDetailPayload(
                 new ReferenceMaterialSummaryPayload(
                     input.MaterialId,
@@ -1860,11 +2175,154 @@ public sealed class MafToolRegistryTests
                 ]));
         }
 
+        public ValueTask<ReferenceSourceSegmentDetailPayload?> GetSourceSegmentDetailAsync(
+            GetReferenceSourceSegmentDetailPayload input,
+            CancellationToken cancellationToken)
+        {
+            LastSourceSegmentDetail = input;
+            if (UseUnsafeReferenceDetails)
+            {
+                var unsafeText = UnsafeReferenceDiagnosticText();
+                return ValueTask.FromResult<ReferenceSourceSegmentDetailPayload?>(new ReferenceSourceSegmentDetailPayload(
+                    new ReferenceMaterialSourceSummaryPayload(
+                        input.AnchorId,
+                        input.NovelId,
+                        "参考书",
+                        "作者",
+                        "markdown",
+                        "user_provided",
+                        "hash",
+                        "test",
+                        ReferenceAnchorBuildStates.FailedExtraction,
+                        ReferenceCorpusVisibilities.Private,
+                        ReferenceSourceTrustLevels.UserVerified,
+                        [],
+                        ReferenceAnchorOwnerScopes.Novel,
+                        input.NovelId),
+                    new ReferenceSourceSegmentPreviewPayload(
+                        input.AnchorId,
+                        input.SegmentId,
+                        "paragraph",
+                        1,
+                        unsafeText,
+                        0,
+                        @"file://D:/private/parent",
+                        0,
+                        120,
+                        unsafeText,
+                        true,
+                        @"D:\private\segment-hash"),
+                    [
+                        new ReferenceMaterialProcessingNotePayload(
+                            "extract",
+                            ReferenceAnchorBuildStates.FailedExtraction,
+                            unsafeText,
+                            DateTimeOffset.UtcNow,
+                            SourceSegmentCount: 1,
+                            MaterialCount: 0,
+                            SlotCount: 0,
+                            VectorCount: 0,
+                            AffectedSourceId: @"D:\private\reference.md",
+                            AffectedSegmentId: input.SegmentId)
+                    ]));
+            }
+
+            return ValueTask.FromResult<ReferenceSourceSegmentDetailPayload?>(new ReferenceSourceSegmentDetailPayload(
+                new ReferenceMaterialSourceSummaryPayload(
+                    input.AnchorId,
+                    input.NovelId,
+                    "参考书",
+                    "作者",
+                    "markdown",
+                    "user_provided",
+                    "hash",
+                    "test",
+                    ReferenceAnchorBuildStates.Ready,
+                    ReferenceCorpusVisibilities.Private,
+                    ReferenceSourceTrustLevels.UserVerified,
+                    [],
+                    ReferenceAnchorOwnerScopes.Novel,
+                    input.NovelId),
+                new ReferenceSourceSegmentPreviewPayload(
+                    input.AnchorId,
+                    input.SegmentId,
+                    "paragraph",
+                    1,
+                    "第一章",
+                    0,
+                    "",
+                    0,
+                    20,
+                    "雨声压低了整条街的呼吸。",
+                    false,
+                    "seg-hash"),
+                [
+                    new ReferenceMaterialProcessingNotePayload(
+                        "completed",
+                        ReferenceAnchorBuildStates.Ready,
+                        "segments=1; materials=1; slots=1; vectors=0",
+                        DateTimeOffset.UtcNow,
+                        SourceSegmentCount: 1,
+                        MaterialCount: 1,
+                        SlotCount: 1,
+                        AffectedSourceId: input.AnchorId.ToString(),
+                        AffectedSegmentId: input.SegmentId)
+                ]));
+        }
+
         public ValueTask<ReferenceSourceProcessingDetailPayload?> GetSourceProcessingDetailAsync(
             GetReferenceSourceProcessingDetailPayload input,
             CancellationToken cancellationToken)
         {
             LastSourceProcessingDetail = input;
+            if (UseUnsafeReferenceDetails)
+            {
+                var unsafeText = UnsafeReferenceDiagnosticText();
+                return ValueTask.FromResult<ReferenceSourceProcessingDetailPayload?>(new ReferenceSourceProcessingDetailPayload(
+                    new ReferenceMaterialSourceSummaryPayload(
+                        input.AnchorId,
+                        input.NovelId,
+                        "参考书",
+                        "作者",
+                        "markdown",
+                        "user_provided",
+                        "hash",
+                        "test",
+                        ReferenceAnchorBuildStates.Ready,
+                        ReferenceCorpusVisibilities.Private,
+                        ReferenceSourceTrustLevels.UserVerified,
+                        [],
+                        ReferenceAnchorOwnerScopes.Novel,
+                        input.NovelId),
+                    new ReferenceSourceProcessingStatusPayload(
+                        "embedding",
+                        ReferenceAnchorBuildStates.Ready,
+                        unsafeText,
+                        DateTimeOffset.UtcNow,
+                        SourceSegmentCount: 1,
+                        MaterialCount: 1,
+                        SlotCount: 1,
+                        VectorCount: 0),
+                    [
+                        new ReferenceSourceProcessingEventPayload(
+                            "event-1",
+                            "embedding",
+                            ReferenceAnchorBuildStates.Ready,
+                            unsafeText,
+                            DateTimeOffset.UtcNow,
+                            SourceSegmentCount: 1,
+                            MaterialCount: 1,
+                            SlotCount: 1,
+                            VectorCount: 0,
+                            AffectedSourceId: @"file://D:/private/reference.md",
+                            AffectedMaterialId: "mat-1",
+                            AffectedSegmentId: "seg-1",
+                            AffectedSlotId: "object")
+                    ],
+                    RetryAvailable: false,
+                    RebuildAvailable: true));
+            }
+
             return ValueTask.FromResult<ReferenceSourceProcessingDetailPayload?>(new ReferenceSourceProcessingDetailPayload(
                 new ReferenceMaterialSourceSummaryPayload(
                     input.AnchorId,
@@ -1965,6 +2423,29 @@ public sealed class MafToolRegistryTests
             AdaptReferenceMaterialPayload input,
             CancellationToken cancellationToken)
         {
+            LastAdapt = input;
+            if (UseUnsafeReferenceDetails)
+            {
+                var unsafeText = UnsafeReferenceDiagnosticText() + new string('长', 2_000) + "tail-that-proves-unbounded-text";
+                return ValueTask.FromResult(new AdaptReferenceMaterialResultPayload(
+                    "candidate-unsafe",
+                    input.MaterialId,
+                    ReferenceRewriteLevels.L1,
+                    unsafeText,
+                    input.SlotValues,
+                    [unsafeText],
+                    new ReferenceReuseAuditPayload(
+                        "audit-unsafe",
+                        "passed",
+                        ReferenceRewriteLevels.L1,
+                        [unsafeText],
+                        [unsafeText],
+                        [unsafeText],
+                        [unsafeText],
+                        [unsafeText],
+                        DateTimeOffset.UtcNow)));
+            }
+
             return ValueTask.FromResult(new AdaptReferenceMaterialResultPayload(
                 "candidate-1",
                 input.MaterialId,
@@ -1988,6 +2469,22 @@ public sealed class MafToolRegistryTests
             AuditReferenceReusePayload input,
             CancellationToken cancellationToken)
         {
+            LastAudit = input;
+            if (UseUnsafeReferenceDetails)
+            {
+                var unsafeText = UnsafeReferenceDiagnosticText() + new string('审', 2_000) + "tail-that-proves-unbounded-text";
+                return ValueTask.FromResult(new ReferenceReuseAuditPayload(
+                    "audit-unsafe",
+                    "failed",
+                    ReferenceRewriteLevels.L1,
+                    [unsafeText],
+                    [unsafeText],
+                    [unsafeText],
+                    [unsafeText],
+                    [unsafeText],
+                    DateTimeOffset.UtcNow));
+            }
+
             return ValueTask.FromResult(new ReferenceReuseAuditPayload(
                 "audit-1",
                 "passed",
@@ -2060,6 +2557,8 @@ public sealed class MafToolRegistryTests
         public BindReferenceBlueprintMaterialsPayload? LastBind { get; private set; }
 
         public GetReferenceAnchoredDraftAuditsPayload? LastGetAudits { get; private set; }
+
+        public GetReferenceDraftCandidatesPayload? LastGetDraftCandidates { get; private set; }
 
         public GetReferenceStyleAuditFindingsPayload? LastGetStyleAuditFindings { get; private set; }
 
@@ -2183,6 +2682,15 @@ public sealed class MafToolRegistryTests
             CancellationToken cancellationToken)
         {
             return ValueTask.FromResult(new ReferenceAnchoredDraftPayload(input.BlueprintId, [], null));
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceDraftParagraphCandidatePayload>> GetDraftCandidatesAsync(
+            GetReferenceDraftCandidatesPayload input,
+            CancellationToken cancellationToken)
+        {
+            LastGetDraftCandidates = input;
+            IReadOnlyList<ReferenceDraftParagraphCandidatePayload> candidates = [];
+            return ValueTask.FromResult(candidates);
         }
 
         public ValueTask<ReferenceAnchoredDraftAuditPayload> AuditDraftAgainstBlueprintAsync(

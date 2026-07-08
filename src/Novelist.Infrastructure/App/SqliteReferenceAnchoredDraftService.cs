@@ -14,6 +14,7 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
 {
     private const string BuildVersion = "reference-blueprint-v1";
     private const long WorkspaceCorpusNovelId = 0;
+    private const int MaxDraftCandidateReadLimit = 50;
     private const int DefaultDraftAuditLimit = 20;
     private const int MaxDraftAuditLimit = 100;
     private static readonly HashSet<string> DefaultStyleAuditRiskTypes = new(
@@ -549,6 +550,47 @@ public sealed class SqliteReferenceAnchoredDraftService : IReferenceAnchoredDraf
         await PersistDraftCandidatesAsync(blueprint.BlueprintId, candidates, audit, cancellationToken);
 
         return new ReferenceAnchoredDraftPayload(blueprint.BlueprintId, candidates, audit);
+    }
+
+    public async ValueTask<IReadOnlyList<ReferenceDraftParagraphCandidatePayload>> GetDraftCandidatesAsync(
+        GetReferenceDraftCandidatesPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateNovelId(input.NovelId);
+        ValidateBlueprintId(input.BlueprintId);
+        var blueprint = await GetChapterBlueprintAsync(input.NovelId, input.BlueprintId, cancellationToken)
+            ?? throw new ArgumentException("Blueprint does not exist.", nameof(input));
+        var candidateIds = NormalizeList(input.CandidateIds);
+        if (candidateIds.Count == 0)
+        {
+            return [];
+        }
+
+        if (candidateIds.Count > MaxDraftCandidateReadLimit)
+        {
+            throw new ArgumentException(
+                $"At most {MaxDraftCandidateReadLimit.ToString(CultureInfo.InvariantCulture)} draft candidates can be read at once.",
+                nameof(input));
+        }
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            return await ReadDraftCandidatesAsync(
+                connection,
+                blueprint.BlueprintId,
+                candidateIds,
+                cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
     }
 
     public async ValueTask<ReferenceAnchoredDraftAuditPayload> AuditDraftAgainstBlueprintAsync(

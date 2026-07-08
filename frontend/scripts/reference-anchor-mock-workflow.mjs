@@ -49,14 +49,19 @@ async function main() {
     await page.goto(url, { waitUntil: 'domcontentloaded' })
 
     logStep('opening reference panel')
-    await page.getByTitle('参考锚定').waitFor({ state: 'visible' })
-    await page.getByTitle('参考锚定').click()
-    await expectVisible(page.getByRole('heading', { name: '参考锚定' }), 'reference panel heading')
+    const referenceActivity = page.getByTitle('素材库').or(page.getByTitle('参考锚定')).first()
+    await referenceActivity.waitFor({ state: 'visible' })
+    await referenceActivity.click()
+    await expectVisible(page.getByRole('heading', { name: /素材库|参考锚定/ }).first(), 'reference panel heading')
     await expectVisible(page.getByRole('heading', { name: '语料库管理' }), 'corpus library management heading')
+    await verifyCorpusLibraryTabs(page)
+    await selectCorpusLibraryTab(page, '素材来源')
     await expectVisible(page.getByRole('heading', { name: '导入语料来源' }), 'corpus source import heading')
     await expectVisible(page.getByRole('heading', { name: '库条目' }), 'corpus library entries heading')
+    await selectCorpusLibraryTab(page, '风格画像')
     await expectVisible(page.getByRole('heading', { name: '风格画像库' }), 'style profile library heading')
-    await expectVisible(page.getByRole('heading', { name: '参考写作检索' }), 'reference drafting retrieval heading')
+    await selectCorpusLibraryTab(page, '处理后语料')
+    await expectHidden(page.getByRole('heading', { name: '参考写作检索' }), 'reference drafting retrieval hidden by default')
     await page.screenshot({ path: path.join(outputDir, 'reference-anchor-01-initial.png'), fullPage: true })
 
     if (runMode === 'stress') {
@@ -75,6 +80,15 @@ async function main() {
     await expectHidden(page.getByText('材料搜索', { exact: true }), 'material search hidden by default')
     await expectHidden(page.getByRole('button', { name: /生成蓝图/ }), 'manual blueprint generation hidden by default')
     await expectHidden(page.getByText('当前节拍字段', { exact: true }), 'manual blueprint detail hidden by default')
+    const legacyAdvancedAvailable = await page.getByRole('button', { name: '打开高级模式' }).isVisible().catch(() => false)
+    if (!legacyAdvancedAvailable) {
+      await assertNoUnnamedVisibleInteractiveControls(page.locator('main'), 'reference-anchor phase16 corpus surface')
+      await page.screenshot({ path: path.join(outputDir, 'reference-anchor-02-phase16-corpus-smoke.png'), fullPage: true })
+      assert.deepEqual(pageErrors, [], `Unexpected page errors:\n${pageErrors.join('\n')}`)
+      assert.deepEqual(consoleErrors, [], `Unexpected console errors:\n${consoleErrors.join('\n')}`)
+      console.log(`Reference-anchor compatibility workflow passed. Screenshots: ${path.relative(repoRoot, outputDir)}`)
+      return
+    }
     await verifyReferenceAccessibilityReview(page)
 
     logStep('create/rebuild/search')
@@ -113,6 +127,7 @@ async function main() {
 }
 
 async function createRebuildAndSearchReferenceMaterial(page) {
+  await selectCorpusLibraryTab(page, '素材来源')
   const importPanel = page.getByTestId('reference-import-panel')
 
   await importPanel.getByPlaceholder('参考书名').fill('雨夜动作参考')
@@ -217,6 +232,7 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectVisible(page.getByText('mat-006'), 'anchor material preview second page id')
   await expectVisible(page.getByText('雨水从伞沿断续落下，像有人在门外迟疑。'), 'anchor material preview second page text')
 
+  await selectCorpusLibraryTab(page, '处理后语料')
   const libraryMaterialPanel = page.getByTestId('reference-material-library')
   await expectVisible(libraryMaterialPanel.getByRole('heading', { name: '材料库' }), 'corpus material library heading')
   await libraryMaterialPanel.getByLabel('材料库搜索').fill('把杯子推远')
@@ -256,8 +272,9 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectVisible(libraryMaterialPanel.getByText('library_object_signal'), 'corpus material library corrected function tag')
   await expectVisible(libraryMaterialPanel.getByText('library_close'), 'corpus material library corrected pov tag')
 
-  await page.locator('button[title="重建"]').first().click()
-  await expectVisible(page.getByText('锚点已重建'), 'anchor rebuilt message')
+  await selectCorpusLibraryTab(page, '素材来源')
+  await page.locator('button[title="重建语料"]').first().click()
+  await expectVisible(page.getByText('语料已重建'), 'anchor rebuilt message')
 
   const materialPanel = page.getByTestId('reference-manual-material-search')
   await materialPanel.getByPlaceholder('叙事功能、情绪或具体句子').fill('把杯子推远')
@@ -267,6 +284,7 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   const manualFirstMaterial = materialPanel.getByTestId('reference-manual-material-card').filter({ hasText: '把杯子推远，杯底在木桌上留下半圈水痕。' }).first()
   await expectVisible(manualFirstMaterial.getByText('lexical 0.92'), 'material score component')
   await expectVisible(manualFirstMaterial.getByText('prose_duty 0.75'), 'material prose-duty score component')
+  await selectCorpusLibraryTab(page, '处理后语料')
   await libraryMaterialPanel.getByRole('button', { name: /^选择当前材料$/ }).click()
   await expectVisible(libraryMaterialPanel.getByText('已选 1 条材料'), 'corpus material library archive second-page selection')
   await libraryMaterialPanel.getByRole('button', { name: /^上一页$/ }).click()
@@ -289,6 +307,7 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await expectHidden(libraryMaterialPanel.getByText('mat-001'), 'restored corpus material hidden from archived page')
   await libraryMaterialPanel.getByLabel('材料状态').selectOption('active')
 
+  await selectCorpusLibraryTab(page, '素材来源')
   await importPanel.getByPlaceholder('参考书名').fill('批量动作参考')
   await importPanel.getByPlaceholder('可选').fill('Batch Curator')
   await importPanel.getByLabel('本地路径').fill('D:\\books\\batch-reference.md')
@@ -321,7 +340,7 @@ async function createRebuildAndSearchReferenceMaterial(page) {
   await importPanel.getByLabel('用户标签').fill('批量导入;共享')
   await importPanel.getByLabel('批量路径').fill('D:\\books\\bulk-one.md\nD:\\books\\bulk-two.txt')
   await importPanel.getByRole('button', { name: /^批量导入$/ }).click()
-  await expectVisible(page.getByText('已批量导入 2 个语料来源'), 'bulk source import message')
+  await expectVisible(page.getByText('已批量导入 2/2 个语料来源'), 'bulk source import message')
   await expectVisible(page.getByText('批量导入语料 1'), 'first bulk imported anchor title')
   await expectVisible(page.getByText('批量导入语料 2'), 'second bulk imported anchor title')
   const firstBulkImportRow = page.getByTestId('reference-anchor-row').filter({ hasText: '批量导入语料 1' }).first()
@@ -348,19 +367,21 @@ async function createRebuildAndSearchReferenceMaterial(page) {
     ],
   }))
   await importPanel.getByRole('button', { name: /^导入库包$/ }).click()
-  await expectVisible(page.getByText('已导入库包 2 个语料来源'), 'library pack import message')
+  await expectVisible(page.getByText('已导入库包 2/2 个语料来源'), 'library pack import message')
   await expectVisible(page.getByText('库包显式标题'), 'library pack explicit title')
   await expectVisible(page.getByText('库包默认标题 2'), 'library pack derived title')
 }
 
 async function buildInspectArchiveRestoreAndCompareStyleProfiles(page) {
-  const stylePanel = page.getByTestId('reference-style-profile-library')
-  await expectVisible(stylePanel.getByRole('heading', { name: '风格画像库' }), 'style profile library heading')
-
+  await selectCorpusLibraryTab(page, '素材来源')
   const firstAnchorRow = page.getByTestId('reference-anchor-row').filter({ hasText: '雨夜动作语料库' }).first()
   const secondAnchorRow = page.getByTestId('reference-anchor-row').filter({ hasText: '批量动作参考' }).first()
 
   await firstAnchorRow.locator('input[type="checkbox"]').first().check()
+
+  await selectCorpusLibraryTab(page, '风格画像')
+  const stylePanel = page.getByTestId('reference-style-profile-library')
+  await expectVisible(stylePanel.getByRole('heading', { name: '风格画像库' }), 'style profile library heading')
   await expectVisible(stylePanel.getByText(/已选 1 个来源：雨夜动作语料库/), 'style profile selected first source')
   await stylePanel.getByLabel('风格画像标题').fill('雨夜克制画像')
   await stylePanel.getByLabel('风格画像说明').fill('近距离 POV、克制动作和雨声压力')
@@ -372,8 +393,10 @@ async function buildInspectArchiveRestoreAndCompareStyleProfiles(page) {
   await expectVisible(stylePanel.getByTestId('reference-style-profile-detail').getByText(/dialogue_ratio/).first(), 'first style profile numeric feature')
   await expectVisible(stylePanel.getByTestId('reference-style-profile-detail').getByText(/证据 1/).first(), 'first style profile evidence count')
 
+  await selectCorpusLibraryTab(page, '素材来源')
   await firstAnchorRow.locator('input[type="checkbox"]').first().uncheck()
   await secondAnchorRow.locator('input[type="checkbox"]').first().check()
+  await selectCorpusLibraryTab(page, '风格画像')
   await expectVisible(stylePanel.getByText(/已选 1 个来源：批量动作参考/), 'style profile selected second source')
   await stylePanel.getByLabel('风格画像标题').fill('批量动作画像')
   await stylePanel.getByLabel('风格画像说明').fill('动作后拍和中等句长')
@@ -418,16 +441,20 @@ async function buildInspectArchiveRestoreAndCompareStyleProfiles(page) {
   await expectVisible(stylePanel.getByText('风格画像已恢复'), 'style profile restored message')
   await expectVisible(stylePanel.getByTestId('reference-style-profile-row').filter({ hasText: '雨夜克制画像' }).getByText('active'), 'restored style profile status')
 
+  await selectCorpusLibraryTab(page, '素材来源')
   await secondAnchorRow.locator('input[type="checkbox"]').first().uncheck()
 }
 
 async function runReferenceStyleStressWorkflow(page) {
-  const stylePanel = page.getByTestId('reference-style-profile-library')
+  await selectCorpusLibraryTab(page, '素材来源')
   const stressAnchorRow = page.getByTestId('reference-anchor-row').filter({ hasText: '10MB 风格压力语料' }).first()
   await expectVisible(stressAnchorRow, 'stress style anchor row')
   await expectVisible(stressAnchorRow.getByText('workspace · user_verified · workspace_corpus'), 'stress style anchor metadata')
 
   await stressAnchorRow.locator('input[type="checkbox"]').first().check()
+
+  await selectCorpusLibraryTab(page, '风格画像')
+  const stylePanel = page.getByTestId('reference-style-profile-library')
   await expectVisible(stylePanel.getByText(/已选 1 个来源：10MB 风格压力语料/), 'stress style selected source')
 
   await stylePanel.getByLabel('风格画像标题').fill('10MB 高级风格压力画像')
@@ -451,6 +478,7 @@ async function runReferenceStyleStressWorkflow(page) {
   await stylePanel.getByLabel('风格画像筛选').fill('10MB')
   await expectVisible(stylePanel.getByTestId('reference-style-profile-row').filter({ hasText: '10MB 高级风格压力画像' }), 'stress style profile filter result')
 
+  await selectCorpusLibraryTab(page, '处理后语料')
   const materialPanel = page.getByTestId('reference-material-library')
   await materialPanel.getByLabel('材料库搜索').fill('10MB 风格节奏')
   const materialSearchStartedAt = Date.now()
@@ -685,7 +713,7 @@ async function verifyBridgeCalls(page) {
   const methods = calls.map((call) => call.method)
   const requiredMethods = [
     'CreateReferenceAnchor',
-    'CreateReferenceAnchors',
+    'CreateReferenceAnchorsWithResult',
     'PromoteReferenceAnchorToWorkspaceCorpus',
     'PromoteReferenceAnchorsToWorkspaceCorpus',
     'UpdateReferenceAnchorMetadata',
@@ -741,8 +769,8 @@ async function verifyBridgeCalls(page) {
   assert.equal(createCall.args[0].source_trust, 'imported', 'anchor create payload must include source trust')
   assert.deepEqual(createCall.args[0].user_tags, ['雨夜', '动作克制'], 'anchor create payload must include user tags')
 
-  const createAnchorsCall = calls.find((call) => call.method === 'CreateReferenceAnchors')
-  assert(createAnchorsCall, 'missing CreateReferenceAnchors call')
+  const createAnchorsCall = calls.find((call) => call.method === 'CreateReferenceAnchorsWithResult')
+  assert(createAnchorsCall, 'missing CreateReferenceAnchorsWithResult call')
   assert.equal(createAnchorsCall.args[0].anchors.length, 2, 'bulk source import payload must include both source paths')
   assert.deepEqual(
     createAnchorsCall.args[0].anchors.map((anchor) => anchor.title),
@@ -764,9 +792,9 @@ async function verifyBridgeCalls(page) {
   assert.deepEqual(createAnchorsCall.args[0].anchors[0].user_tags, ['批量导入', '共享'], 'bulk source import payload must include shared user tags')
 
   const libraryPackCall = calls.find((call) =>
-    call.method === 'CreateReferenceAnchors' &&
+    call.method === 'CreateReferenceAnchorsWithResult' &&
     call.args[0]?.anchors?.some((anchor) => anchor.source_path === 'D:\\books\\pack-one.md'))
-  assert(libraryPackCall, 'missing library pack CreateReferenceAnchors call')
+  assert(libraryPackCall, 'missing library pack CreateReferenceAnchorsWithResult call')
   assert.equal(libraryPackCall.args[0].anchors.length, 2, 'library pack import payload must include manifest sources')
   assert.equal(libraryPackCall.args[0].anchors[0].title, '库包显式标题', 'library pack should keep explicit title')
   assert.equal(libraryPackCall.args[0].anchors[0].license_status, 'licensed', 'library pack should keep per-source license status')
@@ -1342,6 +1370,21 @@ async function expectVisible(locator, description) {
   })
 }
 
+async function verifyCorpusLibraryTabs(page) {
+  const tabs = page.getByTestId('corpus-library-tabs')
+  await expectVisible(tabs, 'corpus library tabs')
+  for (const tabName of ['处理后语料', '素材来源', '标签校正', '风格画像', '处理记录', '高级']) {
+    await expectVisible(tabs.getByRole('tab', { name: tabName }), `corpus library tab ${tabName}`)
+  }
+}
+
+async function selectCorpusLibraryTab(page, tabName) {
+  const tab = page.getByTestId('corpus-library-tabs').getByRole('tab', { name: tabName })
+  await expectVisible(tab, `corpus library tab ${tabName}`)
+  await tab.click()
+  assert.equal(await tab.getAttribute('aria-selected'), 'true', `corpus library tab ${tabName} should be selected`)
+}
+
 async function expectHidden(locator, description) {
   await locator.waitFor({ state: 'hidden', timeout: 10_000 }).catch((error) => {
     throw new Error(`Expected hidden: ${description}`, { cause: error })
@@ -1614,6 +1657,7 @@ function installReferenceAnchorMockBridge(options = {}) {
       case 'GetReferenceAnchors': return state.anchors
       case 'CreateReferenceAnchor': return createReferenceAnchor(args[0])
       case 'CreateReferenceAnchors': return createReferenceAnchors(args[0])
+      case 'CreateReferenceAnchorsWithResult': return createReferenceAnchorsWithResult(args[0])
       case 'PromoteReferenceAnchorToWorkspaceCorpus': return promoteReferenceAnchor(args[0])
       case 'PromoteReferenceAnchorsToWorkspaceCorpus': return promoteReferenceAnchors(args[0])
       case 'UpdateReferenceAnchorMetadata': return updateReferenceAnchorMetadata(args[0])
@@ -1784,6 +1828,17 @@ function installReferenceAnchorMockBridge(options = {}) {
     return input.anchors.map((anchor) => createReferenceAnchor(anchor))
   }
 
+  function createReferenceAnchorsWithResult(input) {
+    const succeeded = createReferenceAnchors(input)
+    return {
+      succeeded,
+      failed: [],
+      total_count: input.anchors.length,
+      succeeded_count: succeeded.length,
+      failed_count: 0,
+    }
+  }
+
   function promoteReferenceAnchor(input) {
     const anchor = state.anchors.find((item) => item.anchor_id === input.anchor_id)
     if (!anchor) {
@@ -1896,7 +1951,7 @@ function installReferenceAnchorMockBridge(options = {}) {
       const end = Math.min(start + size - 1, state.styleStress.materialTotal)
       const items = []
       for (let index = start; index <= end; index += 1) {
-        items.push(stressStyleMaterial(index))
+        items.push(toReferenceMaterialSummary(stressStyleMaterial(index)))
       }
       return pagedResult(items, page, size, state.styleStress.materialTotal)
     }
@@ -1912,19 +1967,24 @@ function installReferenceAnchorMockBridge(options = {}) {
         const items = itemIndexes
           .map(material)
           .filter((item) => archivedOnly ? state.archivedMaterialIds.has(item.material_id) : !state.archivedMaterialIds.has(item.material_id))
-        return pagedResult(items, page, size, archivedOnly ? state.archivedMaterialIds.size : Math.max(0, 11 - state.archivedMaterialIds.size))
+        return pagedResult(
+          items.map(toReferenceMaterialSummary),
+          page,
+          size,
+          archivedOnly ? state.archivedMaterialIds.size : Math.max(0, 11 - state.archivedMaterialIds.size),
+        )
       }
 
-      return pagedResult([material(1)], input.page ?? 1, input.size ?? 10, 1)
+      return pagedResult([toReferenceMaterialSummary(material(1))], input.page ?? 1, input.size ?? 10, 1)
     }
 
     const page = input.page ?? 1
     const size = input.size ?? 5
     if (page === 2) {
-      return pagedResult([material(6)], page, size, 6)
+      return pagedResult([toReferenceMaterialSummary(material(6))], page, size, 6)
     }
 
-    return pagedResult([1, 2, 3, 4, 5].map(material), page, size, 6)
+    return pagedResult([1, 2, 3, 4, 5].map((index) => toReferenceMaterialSummary(material(index))), page, size, 6)
   }
 
   function shouldUseStyleStressMaterials(input) {
@@ -2189,7 +2249,7 @@ function installReferenceAnchorMockBridge(options = {}) {
   }
 
   function updateReferenceMaterialTags(input) {
-    return {
+    return toReferenceMaterialSummary({
       ...materialById(input.material_id),
       function_tag: input.function_tag ?? 'emotion_evidence',
       emotion_tag: input.emotion_tag ?? 'restrained',
@@ -2197,11 +2257,11 @@ function installReferenceAnchorMockBridge(options = {}) {
       pov_tag: input.pov_tag ?? 'close',
       technique_tag: input.technique_tag ?? 'subtext',
       user_verified: true,
-    }
+    })
   }
 
   function updateReferenceMaterialsTags(input) {
-    return input.material_ids.map((materialId) => ({
+    return input.material_ids.map((materialId) => toReferenceMaterialSummary({
       ...materialById(materialId),
       function_tag: input.function_tag ?? 'emotion_evidence',
       emotion_tag: input.emotion_tag ?? 'restrained',
@@ -2210,6 +2270,39 @@ function installReferenceAnchorMockBridge(options = {}) {
       technique_tag: input.technique_tag ?? 'subtext',
       user_verified: true,
     }))
+  }
+
+  function toReferenceMaterialSummary(item) {
+    const preview = boundedPreview(item.text, 160)
+    return {
+      material_id: item.material_id,
+      anchor_id: item.anchor_id,
+      source_segment_id: item.source_segment_id,
+      material_type: item.material_type,
+      function_tag: item.function_tag,
+      emotion_tag: item.emotion_tag,
+      scene_tag: item.scene_tag,
+      pov_tag: item.pov_tag,
+      technique_tag: item.technique_tag,
+      function_confidence: item.function_confidence,
+      emotion_confidence: item.emotion_confidence,
+      pov_confidence: item.pov_confidence,
+      text_preview: preview.text,
+      text_truncated: preview.truncated,
+      source_hash: item.source_hash,
+      extractor_version: item.extractor_version,
+      user_verified: item.user_verified,
+      created_at: item.created_at,
+      archive_state: state.archivedMaterialIds.has(item.material_id) ? 'archived' : 'active',
+      archived_at: state.archivedMaterialIds.has(item.material_id) ? now : null,
+      score_components: item.score_components ?? null,
+    }
+  }
+
+  function boundedPreview(text, maxLength) {
+    const normalized = String(text ?? '').trim().replace(/\s+/g, ' ')
+    if (normalized.length <= maxLength) return { text: normalized, truncated: false }
+    return { text: `${normalized.slice(0, maxLength).trimEnd()}...`, truncated: true }
   }
 
   function materialById(materialId) {

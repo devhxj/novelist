@@ -29,6 +29,12 @@ public static class ReferenceAnchorBridgeHandlers
                     ReadObjectArg<CreateReferenceAnchorsPayload>(context.Payload, 0, "input"),
                     cancellationToken)));
 
+        dispatcher.Register("CreateReferenceAnchorsWithResult", async (context, cancellationToken) =>
+            ReferencePayloadSanitizer.SanitizeCreateAnchorsResult(
+                await service.CreateAnchorsWithResultAsync(
+                    ReadObjectArg<CreateReferenceAnchorsPayload>(context.Payload, 0, "input"),
+                    cancellationToken)));
+
         dispatcher.Register("GetReferenceAnchors", async (context, cancellationToken) =>
             SanitizeAnchors(
                 await service.GetAnchorsAsync(
@@ -87,16 +93,18 @@ public static class ReferenceAnchorBridgeHandlers
                     cancellationToken)));
 
         dispatcher.Register("RebuildReferenceAnchor", async (context, cancellationToken) =>
-            await service.RebuildAnchorAsync(
-                ReadLongArg(context.Payload, 0, "novelId"),
-                ReadLongArg(context.Payload, 1, "anchorId"),
-                cancellationToken));
+            ReferencePayloadSanitizer.SanitizeBuildStatus(
+                await service.RebuildAnchorAsync(
+                    ReadLongArg(context.Payload, 0, "novelId"),
+                    ReadLongArg(context.Payload, 1, "anchorId"),
+                    cancellationToken)));
 
         dispatcher.Register("GetReferenceAnchorBuildStatus", async (context, cancellationToken) =>
-            await service.GetBuildStatusAsync(
-                ReadLongArg(context.Payload, 0, "novelId"),
-                ReadLongArg(context.Payload, 1, "anchorId"),
-                cancellationToken));
+            ReferencePayloadSanitizer.SanitizeBuildStatus(
+                await service.GetBuildStatusAsync(
+                    ReadLongArg(context.Payload, 0, "novelId"),
+                    ReadLongArg(context.Payload, 1, "anchorId"),
+                    cancellationToken)));
 
         dispatcher.Register("SearchReferenceMaterials", async (context, cancellationToken) =>
             SanitizeMaterialSearchResults(
@@ -104,15 +112,29 @@ public static class ReferenceAnchorBridgeHandlers
                     ReadObjectArg<SearchReferenceMaterialsPayload>(context.Payload, 0, "input"),
                     cancellationToken)));
 
+        dispatcher.Register("GetReferenceMaterialTagReviewQueue", async (context, cancellationToken) =>
+            SanitizeMaterialTagReviewQueueResults(
+                await service.GetMaterialTagReviewQueueAsync(
+                    ReadObjectArg<GetReferenceMaterialTagReviewQueuePayload>(context.Payload, 0, "input"),
+                    cancellationToken)));
+
         dispatcher.Register("GetReferenceMaterialDetail", async (context, cancellationToken) =>
-            await service.GetMaterialDetailAsync(
-                ReadObjectArg<GetReferenceMaterialDetailPayload>(context.Payload, 0, "input"),
-                cancellationToken));
+            ReferencePayloadSanitizer.SanitizeMaterialDetail(
+                await service.GetMaterialDetailAsync(
+                    ReadObjectArg<GetReferenceMaterialDetailPayload>(context.Payload, 0, "input"),
+                    cancellationToken)));
+
+        dispatcher.Register("GetReferenceSourceSegmentDetail", async (context, cancellationToken) =>
+            ReferencePayloadSanitizer.SanitizeSourceSegmentDetail(
+                await service.GetSourceSegmentDetailAsync(
+                    ReadObjectArg<GetReferenceSourceSegmentDetailPayload>(context.Payload, 0, "input"),
+                    cancellationToken)));
 
         dispatcher.Register("GetReferenceSourceProcessingDetail", async (context, cancellationToken) =>
-            await service.GetSourceProcessingDetailAsync(
-                ReadObjectArg<GetReferenceSourceProcessingDetailPayload>(context.Payload, 0, "input"),
-                cancellationToken));
+            ReferencePayloadSanitizer.SanitizeSourceProcessingDetail(
+                await service.GetSourceProcessingDetailAsync(
+                    ReadObjectArg<GetReferenceSourceProcessingDetailPayload>(context.Payload, 0, "input"),
+                    cancellationToken)));
 
         dispatcher.Register("UpdateReferenceMaterialTags", async (context, cancellationToken) =>
             ToMaterialSummary(
@@ -128,14 +150,16 @@ public static class ReferenceAnchorBridgeHandlers
             .ToArray());
 
         dispatcher.Register("AdaptReferenceMaterial", async (context, cancellationToken) =>
-            await service.AdaptMaterialAsync(
-                ReadObjectArg<AdaptReferenceMaterialPayload>(context.Payload, 0, "input"),
-                cancellationToken));
+            ReferencePayloadSanitizer.SanitizeAdaptMaterialResult(
+                await service.AdaptMaterialAsync(
+                    ReadObjectArg<AdaptReferenceMaterialPayload>(context.Payload, 0, "input"),
+                    cancellationToken)));
 
         dispatcher.Register("AuditReferenceReuse", async (context, cancellationToken) =>
-            await service.AuditCandidateAsync(
-                ReadObjectArg<AuditReferenceReusePayload>(context.Payload, 0, "input"),
-                cancellationToken));
+            ReferencePayloadSanitizer.SanitizeReuseAudit(
+                await service.AuditCandidateAsync(
+                    ReadObjectArg<AuditReferenceReusePayload>(context.Payload, 0, "input"),
+                    cancellationToken)));
 
         dispatcher.Register("RecordReferenceUserFeedback", async (context, cancellationToken) =>
             await service.RecordUserFeedbackAsync(
@@ -152,7 +176,7 @@ public static class ReferenceAnchorBridgeHandlers
 
     private static ReferenceAnchorPayload SanitizeAnchor(ReferenceAnchorPayload anchor)
     {
-        return anchor with { SourcePath = string.Empty };
+        return ReferencePayloadSanitizer.SanitizeAnchor(anchor);
     }
 
     private static IReadOnlyList<ReferenceAnchorPayload> SanitizeAnchors(IReadOnlyList<ReferenceAnchorPayload> anchors)
@@ -173,10 +197,38 @@ public static class ReferenceAnchorBridgeHandlers
             result.TotalPages);
     }
 
+    private static PageResultPayload<ReferenceMaterialTagReviewItemPayload> SanitizeMaterialTagReviewQueueResults(
+        PageResultPayload<ReferenceMaterialTagReviewItemPayload> result)
+    {
+        return new PageResultPayload<ReferenceMaterialTagReviewItemPayload>(
+            result.Items.Select(SanitizeMaterialTagReviewItem).ToArray(),
+            result.Total,
+            result.Page,
+            result.Size,
+            result.TotalPages);
+    }
+
+    private static ReferenceMaterialTagReviewItemPayload SanitizeMaterialTagReviewItem(
+        ReferenceMaterialTagReviewItemPayload item)
+    {
+        return item with
+        {
+            Material = ReferencePayloadSanitizer.SanitizeMaterialSummary(item.Material),
+            Issues = (item.Issues ?? Array.Empty<ReferenceMaterialTagReviewIssuePayload>())
+                .Select(issue => issue with
+                {
+                    Code = ReferencePayloadSanitizer.RedactAndBoundText(issue.Code, 128),
+                    Label = ReferencePayloadSanitizer.RedactAndBoundText(issue.Label, 256),
+                    Severity = ReferencePayloadSanitizer.RedactAndBoundText(issue.Severity, 128)
+                })
+                .ToArray()
+        };
+    }
+
     private static ReferenceMaterialSummaryPayload ToMaterialSummary(ReferenceMaterialPayload material)
     {
         var preview = BuildPreview(material.Text, MaterialListPreviewMaxChars);
-        return new ReferenceMaterialSummaryPayload(
+        return ReferencePayloadSanitizer.SanitizeMaterialSummary(new ReferenceMaterialSummaryPayload(
             material.MaterialId,
             material.AnchorId,
             material.SourceSegmentId,
@@ -195,12 +247,13 @@ public static class ReferenceAnchorBridgeHandlers
             material.ExtractorVersion,
             material.UserVerified,
             material.CreatedAt,
-            ScoreComponents: material.ScoreComponents);
+            ScoreComponents: material.ScoreComponents));
     }
 
     private static TextPreview BuildPreview(string? text, int maxLength)
     {
-        var normalized = Regex.Replace((text ?? string.Empty).Trim(), @"\s+", " ");
+        var normalized = ReferencePayloadSanitizer.RedactSensitiveText(
+            Regex.Replace((text ?? string.Empty).Trim(), @"\s+", " "));
         if (normalized.Length <= maxLength)
         {
             return new TextPreview(normalized, false);

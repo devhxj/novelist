@@ -135,21 +135,25 @@ public sealed class BridgeHandlerRegistrationTests
     [Fact]
     public void CompatibilityAppMethodListHasExpectedCoverage()
     {
-        Assert.Equal(161, BridgeCompatibilityAppMethods.MethodNames.Count);
+        Assert.Equal(167, BridgeCompatibilityAppMethods.MethodNames.Count);
         Assert.Equal(BridgeCompatibilityAppMethods.MethodNames.Count, BridgeCompatibilityAppMethods.MethodNames.Distinct(StringComparer.Ordinal).Count());
         Assert.Contains("Chat", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetCover", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("CreateReferenceAnchor", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("CreateReferenceAnchors", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("CreateReferenceAnchorsWithResult", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("RecordReferenceUserFeedback", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetReferenceUserFeedback", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("UpdateReferenceMaterialTags", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("GetReferenceMaterialTagReviewQueue", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("GetReferenceSourceSegmentDetail", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("DeleteReferenceMaterials", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("RestoreReferenceMaterials", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GenerateReferenceChapterBlueprint", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("ReviseReferenceChapterBlueprint", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GenerateReferenceAnchoredDraft", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetReferenceAnchoredDraftAudits", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("GetReferenceDraftCandidates", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetReferenceStyleAuditFindings", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("BuildReferenceStyleProfile", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetReferenceStyleProfileBuildStatus", BridgeCompatibilityAppMethods.MethodNames);

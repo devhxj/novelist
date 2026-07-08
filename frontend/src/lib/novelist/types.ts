@@ -871,6 +871,23 @@ export namespace reference {
     anchors: CreateAnchorInput[]
   }
 
+  export interface CreateAnchorFailure {
+    index: number
+    title: string
+    source_kind: string
+    source_identity: string
+    diagnostic: string
+    retry_available: boolean
+  }
+
+  export interface CreateAnchorsResult {
+    succeeded: Anchor[]
+    failed: CreateAnchorFailure[]
+    total_count: number
+    succeeded_count: number
+    failed_count: number
+  }
+
   export interface PromoteAnchorToWorkspaceCorpusInput {
     novel_id: number
     anchor_id: number
@@ -964,6 +981,25 @@ export namespace reference {
     score_components?: Record<string, number> | null
   }
 
+  export interface GetMaterialTagReviewQueueInput {
+    novel_id: number
+    anchor_ids: number[]
+    page: number
+    size: number
+    archive_filter?: 'active' | 'archived' | 'all' | null
+  }
+
+  export interface MaterialTagReviewIssue {
+    code: 'unverified' | 'low_confidence' | 'unknown_tag' | string
+    label: string
+    severity: string
+  }
+
+  export interface MaterialTagReviewItem {
+    material: MaterialSummary
+    issues: MaterialTagReviewIssue[]
+  }
+
   export interface MaterialSourceSummary {
     anchor_id: number
     novel_id: number
@@ -1022,6 +1058,33 @@ export namespace reference {
     processing_notes: MaterialProcessingNote[]
   }
 
+  export interface GetSourceSegmentDetailInput {
+    novel_id: number
+    anchor_id: number
+    segment_id: string
+  }
+
+  export interface SourceSegmentPreview {
+    anchor_id: number
+    segment_id: string
+    segment_type: string
+    chapter_index: number
+    chapter_title: string
+    segment_index: number
+    parent_segment_id: string
+    start_offset: number
+    end_offset: number
+    text_preview: string
+    text_truncated: boolean
+    text_hash: string
+  }
+
+  export interface SourceSegmentDetail {
+    source: MaterialSourceSummary
+    segment: SourceSegmentPreview
+    processing_notes: MaterialProcessingNote[]
+  }
+
   export interface GetSourceProcessingDetailInput {
     novel_id: number
     anchor_id: number
@@ -1054,12 +1117,38 @@ export namespace reference {
     affected_slot_id: string
   }
 
+  export interface SourceProcessingAttempt {
+    attempt_id: string
+    attempt_number: number
+    build_id: string
+    build_version: string
+    stage: string
+    status: string
+    started_at?: Timestamp | null
+    updated_at: Timestamp
+    completed_at?: Timestamp | null
+    event_count: number
+    source_segment_count: number
+    material_count: number
+    slot_count: number
+    vector_count: number
+    recovered_from_attempt_id: string
+    recovered_from_build_id: string
+    blocked_reason: string
+  }
+
   export interface SourceProcessingDetail {
     source: MaterialSourceSummary
     current_status: SourceProcessingStatus | null
     events: SourceProcessingEvent[]
     retry_available: boolean
     rebuild_available: boolean
+    attempt_count?: number
+    current_attempt?: SourceProcessingAttempt | null
+    prior_attempts?: SourceProcessingAttempt[] | null
+    recovered_from_attempt_id?: string
+    recovered_from_build_id?: string
+    blocked_reason?: string
   }
 
   export interface UpdateMaterialTagsInput {
@@ -1662,6 +1751,12 @@ export namespace reference {
     audit?: AnchoredDraftAudit | null
   }
 
+  export interface GetDraftCandidatesInput {
+    novel_id: number
+    blueprint_id: number
+    candidate_ids: string[]
+  }
+
   export interface AuditAnchoredDraftInput {
     novel_id: number
     blueprint_id: number
@@ -1902,6 +1997,22 @@ export namespace storage {
 
   export interface PageResult_reference_Material_ {
     items: reference.Material[]
+    total: number
+    page: number
+    size: number
+    total_pages: number
+  }
+
+  export interface PageResult_reference_MaterialSummary_ {
+    items: reference.MaterialSummary[]
+    total: number
+    page: number
+    size: number
+    total_pages: number
+  }
+
+  export interface PageResult_reference_MaterialTagReviewItem_ {
+    items: reference.MaterialTagReviewItem[]
     total: number
     page: number
     size: number

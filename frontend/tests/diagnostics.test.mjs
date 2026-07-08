@@ -31,9 +31,12 @@ try {
     api_key: 'sk-proj-abcdefghijklmnopqrstuvwxyz1234567890',
     authorization: 'Bearer live-secret-token-1234567890',
     source_text: '第一章'.repeat(400),
+    candidate_text: '候选正文不应进入诊断',
+    prompt: '请续写这一段正文',
     nested: {
       password: 'correct-horse-battery-staple',
-      message: 'failed at D:\\Users\\writer\\secret.txt',
+      message: 'failed at D:\\Users\\writer\\secret.txt; candidate_text=候选正文不应进入诊断; prompt: 请续写这一段正文',
+      chapter_text: '章节正文不应进入诊断',
     },
   }
   const serialized = serializeDiagnosticDetail(unsafe)
@@ -41,13 +44,30 @@ try {
   assert(!serialized.includes('sk-proj-abcdefghijklmnopqrstuvwxyz'), 'API keys must be redacted')
   assert(!serialized.includes('live-secret-token'), 'bearer tokens must be redacted')
   assert(!serialized.includes('correct-horse'), 'secret-like fields must be redacted')
+  assert(!serialized.includes('D:\\Users\\writer\\secret.txt'), 'local file paths must be redacted')
+  assert(!serialized.includes('候选正文不应进入诊断'), 'candidate text must be redacted')
+  assert(!serialized.includes('请续写这一段正文'), 'prompt text must be redacted')
+  assert(!serialized.includes('章节正文不应进入诊断'), 'chapter text must be redacted')
   assert(!serialized.includes('第一章'.repeat(100)), 'long raw source content must be truncated')
   assert(serialized.includes('[REDACTED]'), 'redaction marker should be visible in diagnostics')
+  assert(serialized.includes('[REDACTED_PATH]'), 'path redaction marker should be visible in diagnostics')
 
   assert.equal(
     redactDiagnosticText('Authorization: Bearer abcdefghijklmnopqrstuvwxyz'),
     'Authorization: Bearer [REDACTED]',
     'bearer tokens redact in plain strings',
+  )
+
+  assert.equal(
+    redactDiagnosticText('failed at file:///Users/writer/secret.md and /home/writer/private.md'),
+    'failed at [REDACTED_PATH] and [REDACTED_PATH]',
+    'file URIs and Unix paths redact in plain strings',
+  )
+
+  assert.equal(
+    redactDiagnosticText('candidate_text=候选正文不应进入诊断; full_content: 全文不应进入诊断'),
+    'candidate_text=[REDACTED_SOURCE_TEXT]; full_content=[REDACTED_SOURCE_TEXT]',
+    'sensitive text assignments redact in plain strings',
   )
 
   assert.equal(

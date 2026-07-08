@@ -171,6 +171,21 @@ public sealed record CreateReferenceAnchorPayload(
 public sealed record CreateReferenceAnchorsPayload(
     [property: JsonPropertyName("anchors")] IReadOnlyList<CreateReferenceAnchorPayload> Anchors);
 
+public sealed record CreateReferenceAnchorFailurePayload(
+    [property: JsonPropertyName("index")] int Index,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("source_kind")] string SourceKind,
+    [property: JsonPropertyName("source_identity")] string SourceIdentity,
+    [property: JsonPropertyName("diagnostic")] string Diagnostic,
+    [property: JsonPropertyName("retry_available")] bool RetryAvailable);
+
+public sealed record CreateReferenceAnchorsResultPayload(
+    [property: JsonPropertyName("succeeded")] IReadOnlyList<ReferenceAnchorPayload> Succeeded,
+    [property: JsonPropertyName("failed")] IReadOnlyList<CreateReferenceAnchorFailurePayload> Failed,
+    [property: JsonPropertyName("total_count")] int TotalCount,
+    [property: JsonPropertyName("succeeded_count")] int SucceededCount,
+    [property: JsonPropertyName("failed_count")] int FailedCount);
+
 public sealed record PromoteReferenceAnchorToWorkspaceCorpusPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_id")] long AnchorId,
@@ -310,6 +325,13 @@ public sealed record GetReferenceMaterialDetailPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("material_id")] string MaterialId);
 
+public static class ReferenceMaterialTagReviewIssueCodes
+{
+    public const string Unverified = "unverified";
+    public const string LowConfidence = "low_confidence";
+    public const string UnknownTag = "unknown_tag";
+}
+
 public sealed record ReferenceMaterialSummaryPayload(
     [property: JsonPropertyName("material_id")] string MaterialId,
     [property: JsonPropertyName("anchor_id")] long AnchorId,
@@ -334,6 +356,24 @@ public sealed record ReferenceMaterialSummaryPayload(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     DateTimeOffset? ArchivedAt = null,
     [property: JsonPropertyName("score_components")] IReadOnlyDictionary<string, double>? ScoreComponents = null);
+
+public sealed record GetReferenceMaterialTagReviewQueuePayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_ids")] IReadOnlyList<long> AnchorIds,
+    [property: JsonPropertyName("page")] int Page,
+    [property: JsonPropertyName("size")] int Size,
+    [property: JsonPropertyName("archive_filter")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ArchiveFilter = null);
+
+public sealed record ReferenceMaterialTagReviewIssuePayload(
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("severity")] string Severity);
+
+public sealed record ReferenceMaterialTagReviewItemPayload(
+    [property: JsonPropertyName("material")] ReferenceMaterialSummaryPayload Material,
+    [property: JsonPropertyName("issues")] IReadOnlyList<ReferenceMaterialTagReviewIssuePayload> Issues);
 
 public sealed record ReferenceMaterialSourceSummaryPayload(
     [property: JsonPropertyName("anchor_id")] long AnchorId,
@@ -390,6 +430,30 @@ public sealed record ReferenceMaterialDetailPayload(
     [property: JsonPropertyName("slots")] IReadOnlyList<ReferenceMaterialSlotPreviewPayload> Slots,
     [property: JsonPropertyName("processing_notes")] IReadOnlyList<ReferenceMaterialProcessingNotePayload> ProcessingNotes);
 
+public sealed record GetReferenceSourceSegmentDetailPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("segment_id")] string SegmentId);
+
+public sealed record ReferenceSourceSegmentPreviewPayload(
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("segment_id")] string SegmentId,
+    [property: JsonPropertyName("segment_type")] string SegmentType,
+    [property: JsonPropertyName("chapter_index")] int ChapterIndex,
+    [property: JsonPropertyName("chapter_title")] string ChapterTitle,
+    [property: JsonPropertyName("segment_index")] int SegmentIndex,
+    [property: JsonPropertyName("parent_segment_id")] string ParentSegmentId,
+    [property: JsonPropertyName("start_offset")] int StartOffset,
+    [property: JsonPropertyName("end_offset")] int EndOffset,
+    [property: JsonPropertyName("text_preview")] string TextPreview,
+    [property: JsonPropertyName("text_truncated")] bool TextTruncated,
+    [property: JsonPropertyName("text_hash")] string TextHash);
+
+public sealed record ReferenceSourceSegmentDetailPayload(
+    [property: JsonPropertyName("source")] ReferenceMaterialSourceSummaryPayload Source,
+    [property: JsonPropertyName("segment")] ReferenceSourceSegmentPreviewPayload Segment,
+    [property: JsonPropertyName("processing_notes")] IReadOnlyList<ReferenceMaterialProcessingNotePayload> ProcessingNotes);
+
 public sealed record GetReferenceSourceProcessingDetailPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_id")] long AnchorId);
@@ -419,12 +483,37 @@ public sealed record ReferenceSourceProcessingEventPayload(
     [property: JsonPropertyName("affected_segment_id")] string AffectedSegmentId,
     [property: JsonPropertyName("affected_slot_id")] string AffectedSlotId);
 
+public sealed record ReferenceSourceProcessingAttemptPayload(
+    [property: JsonPropertyName("attempt_id")] string AttemptId,
+    [property: JsonPropertyName("attempt_number")] int AttemptNumber,
+    [property: JsonPropertyName("build_id")] string BuildId,
+    [property: JsonPropertyName("build_version")] string BuildVersion,
+    [property: JsonPropertyName("stage")] string Stage,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("started_at")] DateTimeOffset? StartedAt,
+    [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt,
+    [property: JsonPropertyName("completed_at")] DateTimeOffset? CompletedAt,
+    [property: JsonPropertyName("event_count")] int EventCount,
+    [property: JsonPropertyName("source_segment_count")] int SourceSegmentCount,
+    [property: JsonPropertyName("material_count")] int MaterialCount,
+    [property: JsonPropertyName("slot_count")] int SlotCount,
+    [property: JsonPropertyName("vector_count")] int VectorCount,
+    [property: JsonPropertyName("recovered_from_attempt_id")] string RecoveredFromAttemptId,
+    [property: JsonPropertyName("recovered_from_build_id")] string RecoveredFromBuildId,
+    [property: JsonPropertyName("blocked_reason")] string BlockedReason);
+
 public sealed record ReferenceSourceProcessingDetailPayload(
     [property: JsonPropertyName("source")] ReferenceMaterialSourceSummaryPayload Source,
     [property: JsonPropertyName("current_status")] ReferenceSourceProcessingStatusPayload? CurrentStatus,
     [property: JsonPropertyName("events")] IReadOnlyList<ReferenceSourceProcessingEventPayload> Events,
     [property: JsonPropertyName("retry_available")] bool RetryAvailable,
-    [property: JsonPropertyName("rebuild_available")] bool RebuildAvailable);
+    [property: JsonPropertyName("rebuild_available")] bool RebuildAvailable,
+    [property: JsonPropertyName("attempt_count")] int AttemptCount = 0,
+    [property: JsonPropertyName("current_attempt")] ReferenceSourceProcessingAttemptPayload? CurrentAttempt = null,
+    [property: JsonPropertyName("prior_attempts")] IReadOnlyList<ReferenceSourceProcessingAttemptPayload>? PriorAttempts = null,
+    [property: JsonPropertyName("recovered_from_attempt_id")] string RecoveredFromAttemptId = "",
+    [property: JsonPropertyName("recovered_from_build_id")] string RecoveredFromBuildId = "",
+    [property: JsonPropertyName("blocked_reason")] string BlockedReason = "");
 
 public sealed record UpdateReferenceMaterialTagsPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,

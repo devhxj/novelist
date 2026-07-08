@@ -71,9 +71,9 @@ export async function verifyShellNavigation(page) {
   await expectVisible(page.getByPlaceholder('搜索人物、地点、时间线、正文...'), 'search sidebar from shell navigation')
   await expectVisible(page.getByText('输入关键词搜索'), 'search prompt from shell navigation')
 
-  await clickActivity(page, '参考锚定')
-  await expectVisible(page.locator('aside').getByText('即将推出'), 'reference sidebar placeholder from shell navigation')
-  await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'reference panel from shell navigation')
+  await clickActivity(page, '素材库')
+  await expectVisible(page.getByRole('heading', { name: '语料库管理' }), 'corpus library panel from shell navigation')
+  await expectVisible(page.getByTestId('reference-import-panel'), 'corpus library import panel from shell navigation')
 
   await clickActivity(page, '风格素材')
   await expectVisible(page.getByRole('heading', { name: /风格素材/ }), 'style sample panel from shell navigation')
@@ -146,7 +146,7 @@ export async function verifyShellNavigation(page) {
 }
 
 export async function verifyChapterWorkflow(page) {
-  await page.getByTitle('章节').click()
+  await clickActivity(page, '章节')
   await ensureChapterBlockExpanded(page)
 
   await expectVisible(chapterButton(page, '雨夜线索'), 'first chapter in side panel')
@@ -620,7 +620,7 @@ export async function verifyImportExportFilePickerWorkflow(browser, url, console
   await assertLastBinaryCall(page, 'SaveAvatar', 4)
   await assertSavedAvatar(page, { byte_count: 4 })
 
-  await clickActivity(page, '参考锚定')
+  await clickActivity(page, '素材库')
   await page.getByRole('button', { name: '选择参考源文件' }).click()
   await waitForBridgeCall(page, 'PickReferenceSourceFile')
   await expectInputValue(page.getByLabel('本地路径'), pickedReferenceSourceFile)
@@ -759,10 +759,10 @@ export async function verifyChatWorkflow(page) {
 }
 
 export async function verifyReferenceSmoke(page) {
-  await page.getByTitle('参考锚定').click()
-  await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'reference heading')
+  await page.getByTitle('素材库').click()
+  await expectVisible(page.getByRole('heading', { name: '语料库管理' }), 'corpus library heading')
   await expectVisible(page.getByText('全局雨夜参考').first(), 'reference anchor fixture')
-  await expectVisible(page.getByText('默认编排').first(), 'orchestration panel')
+  await expectVisible(page.getByTestId('reference-import-panel'), 'corpus library import panel')
 }
 
 export async function verifyCompactViewportSmoke(browser, url, consoleErrors, pageErrors) {
@@ -782,9 +782,9 @@ export async function verifyCompactViewportSmoke(browser, url, consoleErrors, pa
   await expectVisible(page.locator('aside').getByText(/角色 \(\d+\)/), 'compact character sidebar')
   await expectVisible(page.getByRole('heading', { name: /角色/ }), 'compact character surface')
 
-  await clickActivity(page, '参考锚定')
-  await expectVisible(page.locator('aside').getByText('即将推出'), 'compact reference sidebar placeholder')
-  await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'compact reference surface')
+  await clickActivity(page, '素材库')
+  await expectVisible(page.getByRole('heading', { name: '语料库管理' }), 'compact corpus library surface')
+  await expectVisible(page.getByTestId('reference-import-panel'), 'compact corpus library import panel')
 
   await clickActivity(page, '风格素材')
   await expectVisible(page.getByRole('heading', { name: /风格素材/ }), 'compact style sample surface')

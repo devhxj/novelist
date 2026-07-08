@@ -1,6 +1,7 @@
 import type { diagnostics } from './novelist/types'
 
 const REDACTION = '[REDACTED]'
+const PATH_REDACTION = '[REDACTED_PATH]'
 const SOURCE_REDACTION = '[REDACTED_SOURCE_TEXT]'
 const MAX_MESSAGE_CHARS = 500
 const MAX_STRING_CHARS = 800
@@ -9,9 +10,14 @@ const MAX_ARRAY_ITEMS = 20
 const MAX_OBJECT_DEPTH = 5
 
 const SECRET_KEY_PATTERN = /^(api[_-]?key|authorization|bearer|access[_-]?token|refresh[_-]?token|token|secret|password|credential)$/i
-const SOURCE_KEY_PATTERN = /^(source[_-]?text|source[_-]?content|raw[_-]?source|raw[_-]?content|original[_-]?content|modified[_-]?content)$/i
+const SOURCE_KEY_PATTERN = /^(source[_-]?text|source[_-]?content|raw[_-]?source|raw[_-]?content|original[_-]?content|modified[_-]?content|candidate[_-]?text|candidate[_-]?content|chapter[_-]?text|chapter[_-]?content|full[_-]?text|full[_-]?content|prompt|content)$/i
 const API_KEY_PATTERN = /\b(sk-proj-[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{12,}|AIza[0-9A-Za-z_-]{12,})\b/g
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b/gi
+const SENSITIVE_ASSIGNMENT_PATTERN = /\b(source[_-]?text|source[_-]?content|raw[_-]?source|raw[_-]?content|original[_-]?content|modified[_-]?content|candidate[_-]?text|candidate[_-]?content|chapter[_-]?text|chapter[_-]?content|full[_-]?text|full[_-]?content|prompt|content)\b\s*[:=]\s*[^\r\n;]+/gi
+const FILE_URI_PATTERN = /\bfile:\/\/[^\s;'"]+/gi
+const UNC_PATH_PATTERN = /\\\\[^\\/:*?"<>|\r\n;]+\\[^\\/:*?"<>|\r\n;]+(?:\\[^\\/:*?"<>|\r\n;]+)*/g
+const WINDOWS_PATH_PATTERN = /[A-Za-z]:[\\/](?:[^\\/:*?"<>|\r\n]+[\\/])*[^\\/:*?"<>|\r\n]*/g
+const UNIX_PATH_PATTERN = /(?<![\w])\/(?:Users|home|var|tmp|private|Volumes|mnt|opt|etc|root)\/[^\s:'"]+/g
 
 interface DiagnosticSource {
   error?: unknown
@@ -69,6 +75,14 @@ export function redactDiagnosticText(text: string): string {
   return text
     .replace(API_KEY_PATTERN, REDACTION)
     .replace(BEARER_PATTERN, 'Bearer ' + REDACTION)
+    .replace(SENSITIVE_ASSIGNMENT_PATTERN, (match) => {
+      const key = match.match(/^[^:=\s]+/)?.[0] ?? 'text'
+      return `${key}=${SOURCE_REDACTION}`
+    })
+    .replace(FILE_URI_PATTERN, PATH_REDACTION)
+    .replace(UNC_PATH_PATTERN, PATH_REDACTION)
+    .replace(WINDOWS_PATH_PATTERN, PATH_REDACTION)
+    .replace(UNIX_PATH_PATTERN, PATH_REDACTION)
 }
 
 export function formatDiagnosticNumber(value: unknown, locale = currentLocale()): string {

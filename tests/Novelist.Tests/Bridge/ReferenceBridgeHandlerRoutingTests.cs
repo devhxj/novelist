@@ -38,6 +38,11 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                     "user_provided",
                     Visibility: ReferenceCorpusVisibilities.Workspace)
             ]));
+        await AssertOkAsync(dispatcher, "CreateReferenceAnchorsWithResult", new CreateReferenceAnchorsPayload(
+            [
+                new CreateReferenceAnchorPayload(42, "Bulk Result One", null, @"D:\bulk-result-one.md", "markdown", "user_provided"),
+                new CreateReferenceAnchorPayload(42, "Bulk Result Two", null, @"D:\bulk-result-two.md", "markdown", "user_provided")
+            ]));
         await AssertOkAsync(dispatcher, "GetReferenceAnchors", 42L);
         await AssertOkAsync(dispatcher, "DeleteReferenceAnchor", 42L, 99L);
         await AssertOkAsync(dispatcher, "DeleteReferenceAnchors", new DeleteReferenceAnchorsPayload(42, [100, 101]));
@@ -77,9 +82,19 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             10,
             ProseDuties: ["source_backed_detail"],
             ArchiveFilter: ReferenceMaterialArchiveFilters.Archived));
+        await AssertOkAsync(dispatcher, "GetReferenceMaterialTagReviewQueue", new GetReferenceMaterialTagReviewQueuePayload(
+            42,
+            [99],
+            3,
+            25,
+            ReferenceMaterialArchiveFilters.Active));
         await AssertOkAsync(dispatcher, "GetReferenceMaterialDetail", new GetReferenceMaterialDetailPayload(
             42,
             "material-1"));
+        await AssertOkAsync(dispatcher, "GetReferenceSourceSegmentDetail", new GetReferenceSourceSegmentDetailPayload(
+            42,
+            99,
+            "segment-1"));
         await AssertOkAsync(dispatcher, "GetReferenceSourceProcessingDetail", new GetReferenceSourceProcessingDetailPayload(
             42,
             99));
@@ -138,6 +153,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             [
                 @"CreateAnchor:42:Anchor:Author:D:\reference.md:markdown:user_provided:workspace:imported:rain,threshold",
                 @"CreateAnchors:Bulk Anchor One,Bulk Anchor Two",
+                @"CreateAnchorsWithResult:Bulk Result One,Bulk Result Two",
                 "GetAnchors:42",
                 "DeleteAnchor:42:99",
                 "DeleteAnchors:42:100,101",
@@ -149,7 +165,9 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "RebuildAnchor:42:99",
                 "GetBuildStatus:42:99",
                 "SearchMaterials:42:99:fog:passage:unease:interiority:close:afterbeat:2:10:source_backed_detail:archived",
+                "GetMaterialTagReviewQueue:42:99:3:25:active",
                 "GetMaterialDetail:42:material-1",
+                "GetSourceSegmentDetail:42:99:segment-1",
                 "GetSourceProcessingDetail:42:99",
                 "UpdateMaterialTags:42:material-1:interiority:unease:threshold:close:afterbeat:user:verified",
                 "UpdateMaterialsTags:42:material-2,material-3:object_subtext:contained_tension:rain_threshold:limited_close:delayed_reaction:ui:bulk verified",
@@ -186,6 +204,22 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         AssertPathRedacted(bulkItems[0], @"D:\private\bulk-one.md");
         AssertPathRedacted(bulkItems[1], @"D:\private\bulk-two.md");
 
+        using var bulkWithResult = await AssertOkJsonAsync(dispatcher, "CreateReferenceAnchorsWithResult", new CreateReferenceAnchorsPayload(
+            [
+                new CreateReferenceAnchorPayload(42, "Bulk Result One", null, @"D:\private\bulk-result-one.md", "markdown", "user_provided"),
+                new CreateReferenceAnchorPayload(42, "Bulk Result Two", null, @"D:\private\bulk-result-two.md", "markdown", "user_provided")
+            ]));
+        var bulkResult = bulkWithResult.RootElement.GetProperty("result");
+        var succeededItems = bulkResult.GetProperty("succeeded").EnumerateArray().ToArray();
+        Assert.Equal(2, succeededItems.Length);
+        AssertPathRedacted(succeededItems[0], @"D:\private\bulk-result-one.md");
+        AssertPathRedacted(succeededItems[1], @"D:\private\bulk-result-two.md");
+        var failedItem = Assert.Single(bulkResult.GetProperty("failed").EnumerateArray());
+        Assert.True(failedItem.GetProperty("retry_available").GetBoolean());
+        Assert.False(failedItem.TryGetProperty("source_path", out _));
+        AssertReferenceDetailDoesNotExposeSensitiveText(failedItem);
+        Assert.DoesNotContain(@"D:\private", failedItem.GetRawText(), StringComparison.OrdinalIgnoreCase);
+
         using var anchors = await AssertOkJsonAsync(dispatcher, "GetReferenceAnchors", 42L);
         var listed = Assert.Single(anchors.RootElement.GetProperty("result").EnumerateArray());
         AssertPathRedacted(listed, @"D:\private\listed.md");
@@ -209,6 +243,30 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             ReferenceSourceTrustLevels.UserVerified,
             []));
         AssertPathRedacted(updated.RootElement.GetProperty("result"), @"D:\private\updated.md");
+    }
+
+    [Fact]
+    public async Task ReferenceAnchorHandlersSanitizeAnchorFreeTextFields()
+    {
+        var service = new RecordingReferenceAnchorService();
+        var dispatcher = new BridgeDispatcher().RegisterReferenceAnchorHandlers(service);
+
+        using var created = await AssertOkJsonAsync(dispatcher, "CreateReferenceAnchor", new CreateReferenceAnchorPayload(
+            42,
+            "Anchor C:/Users/private/reference.md",
+            "api_key=\"plain-secret-value\"",
+            @"\\server\share\reference.md",
+            "markdown",
+            "user_provided",
+            UserTags: ["safe-tag", "token=\"plain-token-value\""]));
+        var raw = created.RootElement.GetProperty("result").GetRawText();
+
+        Assert.DoesNotContain("C:/Users/private/reference.md", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(@"\\server\share\reference.md", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("plain-secret-value", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("plain-token-value", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("safe-tag", raw, StringComparison.Ordinal);
+        AssertPathRedacted(created.RootElement.GetProperty("result"), @"\\server\share\reference.md");
     }
 
     [Fact]
@@ -266,6 +324,161 @@ public sealed class ReferenceBridgeHandlerRoutingTests
     }
 
     [Fact]
+    public async Task GetReferenceMaterialTagReviewQueueReturnsBoundedPreviewWithoutFullText()
+    {
+        var service = new RecordingReferenceAnchorService();
+        var dispatcher = new BridgeDispatcher().RegisterReferenceAnchorHandlers(service);
+
+        using var queue = await AssertOkJsonAsync(dispatcher, "GetReferenceMaterialTagReviewQueue", new GetReferenceMaterialTagReviewQueuePayload(
+            42,
+            [],
+            1,
+            10));
+
+        var item = Assert.Single(queue.RootElement.GetProperty("result").GetProperty("items").EnumerateArray());
+        var material = item.GetProperty("material");
+        AssertMaterialSummaryDoesNotExposeFullText(material);
+        Assert.False(material.TryGetProperty("source_path", out _));
+        Assert.Equal(ReferenceMaterialTagReviewIssueCodes.Unverified, item.GetProperty("issues")[0].GetProperty("code").GetString());
+        var raw = item.GetRawText();
+        Assert.DoesNotContain("source_text", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(FullMaterialLeakSentinel, raw, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AdaptReferenceMaterialReturnsBoundedPreviewWithoutFullMaterialText()
+    {
+        var service = new RecordingReferenceAnchorService
+        {
+            AdaptMaterialResult = UnsafeAdaptMaterialResultPayload("material-unsafe")
+        };
+        var dispatcher = new BridgeDispatcher().RegisterReferenceAnchorHandlers(service);
+
+        using var adapted = await AssertOkJsonAsync(dispatcher, "AdaptReferenceMaterial", new AdaptReferenceMaterialPayload(
+            42,
+            "material-unsafe",
+            [],
+            ReferenceRewriteLevels.L1,
+            []));
+
+        var result = adapted.RootElement.GetProperty("result");
+        var text = result.GetProperty("text").GetString() ?? string.Empty;
+        Assert.Equal("candidate-unsafe", result.GetProperty("candidate_id").GetString());
+        Assert.True(text.Length <= 803, "Adapted bridge text must be a bounded preview.");
+        AssertReferenceDetailDoesNotExposeSensitiveText(result);
+        Assert.DoesNotContain("tail-that-proves-unbounded-text", result.GetRawText(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AuditReferenceReuseReturnsRedactedBoundedDiagnostics()
+    {
+        var service = new RecordingReferenceAnchorService
+        {
+            ReuseAuditResult = UnsafeReuseAuditPayload()
+        };
+        var dispatcher = new BridgeDispatcher().RegisterReferenceAnchorHandlers(service);
+
+        using var audit = await AssertOkJsonAsync(dispatcher, "AuditReferenceReuse", new AuditReferenceReusePayload(
+            42,
+            "material-unsafe",
+            "candidate text",
+            ReferenceRewriteLevels.L1,
+            ["fact"]));
+
+        var result = audit.RootElement.GetProperty("result");
+        Assert.Equal("audit-unsafe", result.GetProperty("audit_id").GetString());
+        AssertReferenceDetailDoesNotExposeSensitiveText(result);
+        Assert.DoesNotContain("tail-that-proves-unbounded-text", result.GetRawText(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReferenceDetailHandlersRedactDirtyServiceDiagnostics()
+    {
+        var service = new RecordingReferenceAnchorService
+        {
+            MaterialDetailResult = UnsafeMaterialDetailPayload(42, "material-unsafe"),
+            SourceSegmentDetailResult = UnsafeSourceSegmentDetailPayload(42, 99, "segment-unsafe"),
+            SourceProcessingDetailResult = UnsafeSourceProcessingDetailPayload(42, 99)
+        };
+        var dispatcher = new BridgeDispatcher().RegisterReferenceAnchorHandlers(service);
+
+        using var materialDetail = await AssertOkJsonAsync(dispatcher, "GetReferenceMaterialDetail", new GetReferenceMaterialDetailPayload(
+            42,
+            "material-unsafe"));
+        AssertReferenceDetailDoesNotExposeSensitiveText(materialDetail.RootElement.GetProperty("result"));
+        var materialResult = materialDetail.RootElement.GetProperty("result");
+        Assert.Equal("第一章", materialResult.GetProperty("segments")[0].GetProperty("chapter_title").GetString());
+        Assert.Equal("safe-tag", materialResult.GetProperty("source").GetProperty("user_tags")[0].GetString());
+
+        using var sourceSegment = await AssertOkJsonAsync(dispatcher, "GetReferenceSourceSegmentDetail", new GetReferenceSourceSegmentDetailPayload(
+            42,
+            99,
+            "segment-unsafe"));
+        AssertReferenceDetailDoesNotExposeSensitiveText(sourceSegment.RootElement.GetProperty("result"));
+        var sourceSegmentResult = sourceSegment.RootElement.GetProperty("result");
+        Assert.Equal("segment-unsafe", sourceSegmentResult.GetProperty("segment").GetProperty("segment_id").GetString());
+        Assert.Contains("redacted", sourceSegmentResult.GetProperty("segment").GetProperty("text_preview").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(sourceSegmentResult.GetProperty("segment").TryGetProperty("text", out _));
+
+        using var sourceProcessing = await AssertOkJsonAsync(dispatcher, "GetReferenceSourceProcessingDetail", new GetReferenceSourceProcessingDetailPayload(
+            42,
+            99));
+        AssertReferenceDetailDoesNotExposeSensitiveText(sourceProcessing.RootElement.GetProperty("result"));
+        var sourceProcessingResult = sourceProcessing.RootElement.GetProperty("result");
+        Assert.Equal(1, sourceProcessingResult.GetProperty("current_status").GetProperty("source_segment_count").GetInt32());
+        Assert.Equal(2, sourceProcessingResult.GetProperty("attempt_count").GetInt32());
+        Assert.Equal("attempt-unsafe", sourceProcessingResult.GetProperty("current_attempt").GetProperty("attempt_id").GetString());
+        Assert.Equal("prior-attempt-unsafe", sourceProcessingResult.GetProperty("prior_attempts")[0].GetProperty("attempt_id").GetString());
+    }
+
+    [Fact]
+    public async Task ReferenceBuildStatusHandlersRedactDirtyDiagnostics()
+    {
+        var service = new RecordingReferenceAnchorService
+        {
+            RebuildStatusResult = UnsafeBuildStatusPayload(42, 99),
+            BuildStatusResult = UnsafeBuildStatusPayload(42, 99)
+        };
+        var dispatcher = new BridgeDispatcher().RegisterReferenceAnchorHandlers(service);
+
+        using var rebuild = await AssertOkJsonAsync(dispatcher, "RebuildReferenceAnchor", 42L, 99L);
+        AssertReferenceDetailDoesNotExposeSensitiveText(rebuild.RootElement.GetProperty("result"));
+        Assert.Equal(3, rebuild.RootElement.GetProperty("result").GetProperty("source_segment_count").GetInt32());
+
+        using var status = await AssertOkJsonAsync(dispatcher, "GetReferenceAnchorBuildStatus", 42L, 99L);
+        AssertReferenceDetailDoesNotExposeSensitiveText(status.RootElement.GetProperty("result"));
+        Assert.Equal(2, status.RootElement.GetProperty("result").GetProperty("material_count").GetInt32());
+    }
+
+    [Fact]
+    public async Task GetReferenceDraftCandidatesReturnsBoundedRedactedText()
+    {
+        var service = new RecordingReferenceAnchoredDraftService
+        {
+            DraftCandidatesResult = [UnsafeDraftCandidatePayload(501, "candidate-unsafe")]
+        };
+        var dispatcher = new BridgeDispatcher().RegisterReferenceAnchoredDraftHandlers(service);
+
+        using var json = await AssertOkJsonAsync(dispatcher, "GetReferenceDraftCandidates", new GetReferenceDraftCandidatesPayload(
+            42,
+            501,
+            ["candidate-unsafe"]));
+        var candidate = Assert.Single(json.RootElement.GetProperty("result").EnumerateArray());
+
+        Assert.Equal("candidate-unsafe", candidate.GetProperty("candidate_id").GetString());
+        Assert.Equal(501, candidate.GetProperty("blueprint_id").GetInt64());
+        AssertReferenceDetailDoesNotExposeSensitiveText(candidate);
+        Assert.DoesNotContain("tail-that-proves-unbounded-text", candidate.GetRawText(), StringComparison.Ordinal);
+        Assert.False(candidate.TryGetProperty("source_text", out _));
+        Assert.False(candidate.TryGetProperty("candidate_text", out _));
+        Assert.False(candidate.TryGetProperty("prompt", out _));
+        Assert.False(candidate.TryGetProperty("source_path", out _));
+        Assert.False(candidate.TryGetProperty("path", out _));
+    }
+
+    [Fact]
     public async Task ReferenceAnchoredDraftHandlersRouteEveryMethodToServiceOperations()
     {
         var service = new RecordingReferenceAnchoredDraftService();
@@ -291,6 +504,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         await AssertOkAsync(dispatcher, "ApproveReferenceChapterBlueprint", new ApproveReferenceChapterBlueprintPayload(42, 501, "review-1"));
         await AssertOkAsync(dispatcher, "BindReferenceBlueprintMaterials", new BindReferenceBlueprintMaterialsPayload(42, 501, 3, SelectTopCandidate: true));
         await AssertOkAsync(dispatcher, "GenerateReferenceAnchoredDraft", new GenerateReferenceAnchoredDraftPayload(42, 501, ["beat-1", "beat-2"]));
+        await AssertOkAsync(dispatcher, "GetReferenceDraftCandidates", new GetReferenceDraftCandidatesPayload(42, 501, ["candidate-1"]));
         await AssertOkAsync(dispatcher, "AuditReferenceAnchoredDraft", new AuditReferenceAnchoredDraftPayload(42, 501, ["candidate-1"]));
         await AssertOkAsync(dispatcher, "GetReferenceAnchoredDraftAudits", new GetReferenceAnchoredDraftAuditsPayload(42, 501, ["candidate-1"], 10));
         await AssertOkAsync(dispatcher, "GetReferenceStyleAuditFindings", new GetReferenceStyleAuditFindingsPayload(
@@ -339,6 +553,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "ApproveChapterBlueprint:42:501:review-1",
                 "BindBlueprintMaterials:42:501:3:True",
                 "GenerateDraftFromBlueprint:42:501:beat-1,beat-2",
+                "GetDraftCandidates:42:501:candidate-1",
                 "AuditDraftAgainstBlueprint:42:501:candidate-1",
                 "GetDraftAudits:42:501:candidate-1:10",
                 "GetStyleAuditFindings:42:501:candidate-1:source_leak:10",
@@ -458,6 +673,337 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         Assert.DoesNotContain(FullMaterialLeakSentinel, raw, StringComparison.Ordinal);
     }
 
+    private static void AssertReferenceDetailDoesNotExposeSensitiveText(JsonElement result)
+    {
+        var raw = result.GetRawText();
+        foreach (var forbidden in new[]
+        {
+            @"D:\private",
+            "C:/Users/private",
+            @"\\server\share",
+            "file://",
+            "/Users/private",
+            "source_path",
+            "source_text",
+            "candidate_text",
+            "prompt",
+            "sk-proj",
+            "Bearer dirty",
+            "json secret source",
+            "json generated candidate",
+            "json hidden prompt",
+            "non-sk-secret-value",
+            "plain-token-value",
+            "jsonauthorizationtoken",
+            FullMaterialLeakSentinel
+        })
+        {
+            Assert.DoesNotContain(forbidden, raw, StringComparison.OrdinalIgnoreCase);
+        }
+
+        Assert.Contains("redacted", raw, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static ReferenceMaterialDetailPayload UnsafeMaterialDetailPayload(long novelId, string materialId)
+    {
+        var unsafeText = UnsafeDiagnosticText();
+        return new ReferenceMaterialDetailPayload(
+            new ReferenceMaterialSummaryPayload(
+                materialId,
+                99,
+                "seg-unsafe",
+                ReferenceMaterialTypes.Passage,
+                "environment",
+                "pressure",
+                "rain",
+                "close",
+                "sensory",
+                0.8,
+                0.7,
+                0.9,
+                unsafeText,
+                TextTruncated: true,
+                "hash",
+                "test",
+                UserVerified: false,
+                DateTimeOffset.UtcNow,
+                ScoreComponents: new Dictionary<string, double>(StringComparer.Ordinal)
+                {
+                    ["source_path_score"] = 1
+                }),
+            new ReferenceMaterialSourceSummaryPayload(
+                99,
+                novelId,
+                "Unsafe Source",
+                "Author",
+                "markdown",
+                "user_provided",
+                "hash",
+                "test",
+                ReferenceAnchorBuildStates.Ready,
+                ReferenceCorpusVisibilities.Private,
+                ReferenceSourceTrustLevels.UserVerified,
+                ["safe-tag"],
+                ReferenceAnchorOwnerScopes.Novel,
+                novelId),
+            [
+                new ReferenceMaterialSegmentPreviewPayload(
+                    "seg-unsafe",
+                    "paragraph",
+                    1,
+                    "第一章",
+                    0,
+                    unsafeText,
+                    TextTruncated: true,
+                    "seg-hash")
+            ],
+            [
+                new ReferenceMaterialSlotPreviewPayload("object", unsafeText, 0, 4)
+            ],
+            [
+                new ReferenceMaterialProcessingNotePayload(
+                    "extract",
+                    ReferenceAnchorBuildStates.FailedExtraction,
+                    unsafeText,
+                    DateTimeOffset.UtcNow,
+                    SourceSegmentCount: 1,
+                    MaterialCount: 1,
+                    SlotCount: 1,
+                    VectorCount: 0,
+                    AffectedSourceId: @"D:\private\reference.md",
+                    AffectedMaterialId: materialId,
+                    AffectedSegmentId: "seg-unsafe",
+                    AffectedSlotId: "slot-unsafe")
+            ]);
+    }
+
+    private static ReferenceSourceSegmentDetailPayload UnsafeSourceSegmentDetailPayload(
+        long novelId,
+        long anchorId,
+        string segmentId)
+    {
+        var unsafeText = UnsafeDiagnosticText();
+        return new ReferenceSourceSegmentDetailPayload(
+            new ReferenceMaterialSourceSummaryPayload(
+                anchorId,
+                novelId,
+                "Unsafe Source",
+                "Author",
+                "markdown",
+                "user_provided",
+                "hash",
+                "test",
+                ReferenceAnchorBuildStates.FailedExtraction,
+                ReferenceCorpusVisibilities.Private,
+                ReferenceSourceTrustLevels.Imported,
+                ["safe-tag"],
+                ReferenceAnchorOwnerScopes.Novel,
+                novelId),
+            new ReferenceSourceSegmentPreviewPayload(
+                anchorId,
+                segmentId,
+                "paragraph",
+                1,
+                unsafeText,
+                0,
+                @"file://D:/private/parent",
+                0,
+                128,
+                unsafeText,
+                TextTruncated: true,
+                @"D:\private\segment-hash"),
+            [
+                new ReferenceMaterialProcessingNotePayload(
+                    "extract",
+                    ReferenceAnchorBuildStates.FailedExtraction,
+                    unsafeText,
+                    DateTimeOffset.UtcNow,
+                    SourceSegmentCount: 1,
+                    MaterialCount: 0,
+                    SlotCount: 0,
+                    VectorCount: 0,
+                    AffectedSourceId: @"D:\private\reference.md",
+                    AffectedSegmentId: segmentId)
+            ]);
+    }
+
+    private static ReferenceSourceProcessingDetailPayload UnsafeSourceProcessingDetailPayload(long novelId, long anchorId)
+    {
+        var unsafeText = UnsafeDiagnosticText();
+        return new ReferenceSourceProcessingDetailPayload(
+            new ReferenceMaterialSourceSummaryPayload(
+                anchorId,
+                novelId,
+                "Unsafe Source",
+                "Author",
+                "markdown",
+                "user_provided",
+                "hash",
+                "test",
+                ReferenceAnchorBuildStates.FailedExtraction,
+                ReferenceCorpusVisibilities.Private,
+                ReferenceSourceTrustLevels.Imported,
+                ["safe-tag"],
+                ReferenceAnchorOwnerScopes.Novel,
+                novelId),
+            new ReferenceSourceProcessingStatusPayload(
+                "extract",
+                ReferenceAnchorBuildStates.FailedExtraction,
+                unsafeText,
+                DateTimeOffset.UtcNow,
+                SourceSegmentCount: 1,
+                MaterialCount: 1,
+                SlotCount: 1,
+                VectorCount: 0),
+            [
+                new ReferenceSourceProcessingEventPayload(
+                    "event-unsafe",
+                    "extract",
+                    ReferenceAnchorBuildStates.FailedExtraction,
+                    unsafeText,
+                    DateTimeOffset.UtcNow,
+                    SourceSegmentCount: 1,
+                    MaterialCount: 1,
+                    SlotCount: 1,
+                    VectorCount: 0,
+                    AffectedSourceId: @"file://D:/private/reference.md",
+                    AffectedMaterialId: "material-unsafe",
+                    AffectedSegmentId: "seg-unsafe",
+                    AffectedSlotId: "slot-unsafe")
+            ],
+            RetryAvailable: true,
+            RebuildAvailable: true,
+            AttemptCount: 2,
+            CurrentAttempt: new ReferenceSourceProcessingAttemptPayload(
+                AttemptId: "attempt-unsafe",
+                AttemptNumber: 2,
+                BuildId: "build-unsafe",
+                BuildVersion: "test",
+                Stage: "extract",
+                Status: ReferenceAnchorBuildStates.FailedExtraction,
+                StartedAt: DateTimeOffset.UtcNow,
+                UpdatedAt: DateTimeOffset.UtcNow,
+                CompletedAt: DateTimeOffset.UtcNow,
+                EventCount: 1,
+                SourceSegmentCount: 1,
+                MaterialCount: 1,
+                SlotCount: 1,
+                VectorCount: 0,
+                RecoveredFromAttemptId: @"file://D:/private/attempt",
+                RecoveredFromBuildId: @"D:\private\build",
+                BlockedReason: unsafeText),
+            PriorAttempts:
+            [
+                new ReferenceSourceProcessingAttemptPayload(
+                    AttemptId: "prior-attempt-unsafe",
+                    AttemptNumber: 1,
+                    BuildId: "prior-build-unsafe",
+                    BuildVersion: "test",
+                    Stage: "extract",
+                    Status: ReferenceAnchorBuildStates.FailedExtraction,
+                    StartedAt: DateTimeOffset.UtcNow,
+                    UpdatedAt: DateTimeOffset.UtcNow,
+                    CompletedAt: DateTimeOffset.UtcNow,
+                    EventCount: 1,
+                    SourceSegmentCount: 1,
+                    MaterialCount: 1,
+                    SlotCount: 1,
+                    VectorCount: 0,
+                    RecoveredFromAttemptId: "",
+                    RecoveredFromBuildId: "",
+                    BlockedReason: unsafeText)
+            ],
+            RecoveredFromAttemptId: @"file://D:/private/attempt",
+            RecoveredFromBuildId: @"D:\private\build",
+            BlockedReason: unsafeText);
+    }
+
+    private static ReferenceAnchorBuildStatusPayload UnsafeBuildStatusPayload(long novelId, long anchorId)
+    {
+        return new ReferenceAnchorBuildStatusPayload(
+            novelId,
+            anchorId,
+            ReferenceAnchorBuildStates.FailedExtraction,
+            "extract",
+            SourceSegmentCount: 3,
+            MaterialCount: 2,
+            SlotCount: 1,
+            VectorCount: 0,
+            LastError: UnsafeDiagnosticText(),
+            UpdatedAt: DateTimeOffset.UtcNow);
+    }
+
+    private static AdaptReferenceMaterialResultPayload UnsafeAdaptMaterialResultPayload(string materialId)
+    {
+        var unsafeText = UnsafeDiagnosticText() + new string('长', 2_000) + "tail-that-proves-unbounded-text";
+        return new AdaptReferenceMaterialResultPayload(
+            "candidate-unsafe",
+            materialId,
+            ReferenceRewriteLevels.L1,
+            unsafeText,
+            [new ReferenceSlotValuePayload("object", unsafeText)],
+            [unsafeText],
+            new ReferenceReuseAuditPayload(
+                "audit-unsafe",
+                "passed",
+                ReferenceRewriteLevels.L1,
+                [unsafeText],
+                [unsafeText],
+                [unsafeText],
+                [unsafeText],
+                [unsafeText],
+                DateTimeOffset.UtcNow));
+    }
+
+    private static ReferenceReuseAuditPayload UnsafeReuseAuditPayload()
+    {
+        var unsafeText = UnsafeDiagnosticText() + new string('审', 2_000) + "tail-that-proves-unbounded-text";
+        return new ReferenceReuseAuditPayload(
+            "audit-unsafe",
+            "failed",
+            ReferenceRewriteLevels.L1,
+            [unsafeText],
+            [unsafeText],
+            [unsafeText],
+            [unsafeText],
+            [unsafeText],
+            DateTimeOffset.UtcNow);
+    }
+
+    private static ReferenceDraftParagraphCandidatePayload UnsafeDraftCandidatePayload(long blueprintId, string candidateId)
+    {
+        var unsafeText = UnsafeDiagnosticText() + new string('候', 5_000) + "tail-that-proves-unbounded-text";
+        return new ReferenceDraftParagraphCandidatePayload(
+            candidateId,
+            blueprintId,
+            "beat-unsafe",
+            "material-unsafe",
+            ReferenceRewriteLevels.L1,
+            unsafeText,
+            [new ReferenceSlotValuePayload("object", unsafeText)],
+            [unsafeText],
+            "passed",
+            DateTimeOffset.UtcNow,
+            [
+                new ReferenceDraftStyleAttemptPayload(
+                    [301],
+                    ["dialogue_ratio"],
+                    ReferenceStyleImitationIntensities.Moderate,
+                    0.8,
+                    "moderate",
+                    ["dialogue_exchange"],
+                    ["source_leak"],
+                    0.9,
+                    SelectedMaterialLowConfidence: false,
+                    "attempted")
+            ]);
+    }
+
+    private static string UnsafeDiagnosticText()
+    {
+        return @"source_path: D:\private\reference.md; source_text: secret source; candidate_text: generated candidate; prompt: hidden prompt; {""source_text"":""json secret source"",""candidate_text"":""json generated candidate"",""prompt"":""json hidden prompt"",""api_key"":""non-sk-secret-value"",""token"":""plain-token-value"",""authorization"":""Bearer jsonauthorizationtokenabcdefghijklmnopqrstuvwxyz""}; C:/Users/private/reference.md; \\server\share\secret.md; file://D:/private/reference.md; /Users/private/reference.md; token=dirty-token-abcdefghijklmnopqrstuvwxyz; api_key=sk-proj-dirtyabcdefghijklmnopqrstuvwxyz1234567890; Bearer dirtytokenabcdefghijklmnopqrstuvwxyz; " + FullMaterialLeakSentinel;
+    }
+
     private static async Task<JsonDocument> AssertErrorAsync(
         BridgeDispatcher dispatcher,
         string method,
@@ -495,6 +1041,14 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         public List<string> Calls { get; } = [];
 
         public Exception? CreateAnchorException { get; set; }
+        public ReferenceMaterialDetailPayload? MaterialDetailResult { get; set; }
+        public ReferenceSourceSegmentDetailPayload? SourceSegmentDetailResult { get; set; }
+        public ReferenceSourceProcessingDetailPayload? SourceProcessingDetailResult { get; set; }
+        public ReferenceAnchorBuildStatusPayload? RebuildStatusResult { get; set; }
+        public ReferenceAnchorBuildStatusPayload? BuildStatusResult { get; set; }
+        public AdaptReferenceMaterialResultPayload? AdaptMaterialResult { get; set; }
+
+        public ReferenceReuseAuditPayload? ReuseAuditResult { get; set; }
 
         private static ReferenceAnchorPayload CreateAnchorPayload(
             long anchorId,
@@ -524,6 +1078,37 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 visibility,
                 sourceTrust,
                 userTags ?? []);
+        }
+
+        private static ReferenceMaterialPayload CreateMaterialPayload(string materialId)
+        {
+            return new ReferenceMaterialPayload(
+                materialId,
+                99,
+                "segment-1",
+                ReferenceMaterialTypes.Passage,
+                "environment",
+                "restrained",
+                "rain_threshold",
+                "close",
+                "delayed_reaction",
+                0.91,
+                0.88,
+                0.9,
+                "雨声压低了门口，林岚只看见杯底半圈水痕，没有急着给出判断。" +
+                    "这是一段用于验证 bridge 列表响应必须截断的完整素材正文，不能透出到 UI 或 agent 搜索结果。" +
+                    "它继续补充窗台潮气、墙根泥点、杯沿缺口和门后停顿，让正文长度超过列表预览上限。" +
+                    "额外补充一段更长的材料说明，确保测试不会因为字符长度临界值而误判为未截断。" +
+                    FullMaterialLeakSentinel,
+                "hash-material-1",
+                "test-extractor",
+                false,
+                DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
+                new Dictionary<string, double>(StringComparer.Ordinal)
+                {
+                    ["lexical"] = 0.92,
+                    ["prose_duty"] = 0.86
+                });
         }
 
         public ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(
@@ -571,6 +1156,43 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                         anchor.SourceTrust ?? ReferenceSourceTrustLevels.UserVerified,
                         anchor.UserTags ?? []))
                     .ToArray());
+        }
+
+        public ValueTask<CreateReferenceAnchorsResultPayload> CreateAnchorsWithResultAsync(
+            CreateReferenceAnchorsPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"CreateAnchorsWithResult:{string.Join(",", input.Anchors.Select(anchor => anchor.Title))}");
+            var succeeded = input.Anchors
+                .Select((anchor, index) => CreateAnchorPayload(
+                    200 + index,
+                    anchor.NovelId,
+                    anchor.Title,
+                    anchor.Author ?? string.Empty,
+                    anchor.SourcePath,
+                    anchor.SourceKind,
+                    anchor.LicenseStatus,
+                    anchor.Visibility ?? ReferenceCorpusVisibilities.Private,
+                    anchor.SourceTrust ?? ReferenceSourceTrustLevels.UserVerified,
+                    anchor.UserTags ?? []))
+                .ToArray();
+            IReadOnlyList<CreateReferenceAnchorFailurePayload> failed =
+            [
+                new CreateReferenceAnchorFailurePayload(
+                    input.Anchors.Count,
+                    @"Failed D:\private\failed.md",
+                    "markdown",
+                    "source:failed-source",
+                    UnsafeDiagnosticText(),
+                    RetryAvailable: true)
+            ];
+            return ValueTask.FromResult(new CreateReferenceAnchorsResultPayload(
+                succeeded,
+                failed,
+                input.Anchors.Count + failed.Count,
+                succeeded.Length,
+                failed.Count));
         }
 
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(
@@ -697,7 +1319,17 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"RebuildAnchor:{novelId}:{anchorId}");
-            return ValueTask.FromResult<ReferenceAnchorBuildStatusPayload>(null!);
+            return ValueTask.FromResult(RebuildStatusResult ?? new ReferenceAnchorBuildStatusPayload(
+                novelId,
+                anchorId,
+                ReferenceAnchorBuildStates.Ready,
+                "ready",
+                1,
+                1,
+                0,
+                0,
+                string.Empty,
+                DateTimeOffset.UtcNow));
         }
 
         public ValueTask<ReferenceAnchorBuildStatusPayload?> GetBuildStatusAsync(
@@ -707,7 +1339,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"GetBuildStatus:{novelId}:{anchorId}");
-            return ValueTask.FromResult<ReferenceAnchorBuildStatusPayload?>(null);
+            return ValueTask.FromResult<ReferenceAnchorBuildStatusPayload?>(BuildStatusResult);
         }
 
         public ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(
@@ -718,38 +1350,60 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             Calls.Add(
                 $"SearchMaterials:{input.NovelId}:{string.Join(',', input.AnchorIds)}:{input.Query}:{string.Join(',', input.MaterialTypes)}:{string.Join(',', input.EmotionTags)}:{string.Join(',', input.FunctionTags)}:{string.Join(',', input.PovTags)}:{string.Join(',', input.TechniqueTags)}:{input.Page}:{input.Size}:{string.Join(',', input.ProseDuties ?? [])}:{input.ArchiveFilter}");
             return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialPayload>(
+                [CreateMaterialPayload("material-1")],
+                1,
+                input.Page,
+                input.Size,
+                1));
+        }
+
+        public ValueTask<PageResultPayload<ReferenceMaterialTagReviewItemPayload>> GetMaterialTagReviewQueueAsync(
+            GetReferenceMaterialTagReviewQueuePayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"GetMaterialTagReviewQueue:{input.NovelId}:{string.Join(',', input.AnchorIds)}:{input.Page}:{input.Size}:{input.ArchiveFilter}");
+            return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialTagReviewItemPayload>(
                 [
-                    new ReferenceMaterialPayload(
-                        "material-1",
-                        99,
-                        "segment-1",
-                        ReferenceMaterialTypes.Passage,
-                        "environment",
-                        "restrained",
-                        "rain_threshold",
-                        "close",
-                        "delayed_reaction",
-                        0.91,
-                        0.88,
-                        0.9,
-                        "雨声压低了门口，林岚只看见杯底半圈水痕，没有急着给出判断。" +
-                            "这是一段用于验证 bridge 列表响应必须截断的完整素材正文，不能透出到 UI 或 agent 搜索结果。" +
-                            "它继续补充窗台潮气、墙根泥点、杯沿缺口和门后停顿，让正文长度超过列表预览上限。" +
-                            FullMaterialLeakSentinel,
-                        "hash-material-1",
-                        "test-extractor",
-                        false,
-                        DateTimeOffset.Parse("2026-07-04T00:00:00Z"),
-                        new Dictionary<string, double>(StringComparer.Ordinal)
-                        {
-                            ["lexical"] = 0.92,
-                            ["prose_duty"] = 0.86
-                        })
+                    new ReferenceMaterialTagReviewItemPayload(
+                        CreateMaterialSummaryPayload("material-1"),
+                        [
+                            new ReferenceMaterialTagReviewIssuePayload(
+                                ReferenceMaterialTagReviewIssueCodes.Unverified,
+                                "未校正",
+                                "review")
+                        ])
                 ],
                 1,
                 input.Page,
                 input.Size,
                 1));
+        }
+
+        private static ReferenceMaterialSummaryPayload CreateMaterialSummaryPayload(string materialId)
+        {
+            var material = CreateMaterialPayload(materialId);
+            return new ReferenceMaterialSummaryPayload(
+                material.MaterialId,
+                material.AnchorId,
+                material.SourceSegmentId,
+                material.MaterialType,
+                material.FunctionTag,
+                material.EmotionTag,
+                material.SceneTag,
+                material.PovTag,
+                material.TechniqueTag,
+                material.FunctionConfidence,
+                material.EmotionConfidence,
+                material.PovConfidence,
+                "雨声压低了门口，林岚只看见杯底半圈水痕...",
+                true,
+                material.SourceHash,
+                material.ExtractorVersion,
+                material.UserVerified,
+                material.CreatedAt,
+                ReferenceMaterialArchiveFilters.Active,
+                ScoreComponents: material.ScoreComponents);
         }
 
         public ValueTask<ReferenceMaterialDetailPayload?> GetMaterialDetailAsync(
@@ -758,7 +1412,16 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"GetMaterialDetail:{input.NovelId}:{input.MaterialId}");
-            return ValueTask.FromResult<ReferenceMaterialDetailPayload?>(null);
+            return ValueTask.FromResult(MaterialDetailResult);
+        }
+
+        public ValueTask<ReferenceSourceSegmentDetailPayload?> GetSourceSegmentDetailAsync(
+            GetReferenceSourceSegmentDetailPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"GetSourceSegmentDetail:{input.NovelId}:{input.AnchorId}:{input.SegmentId}");
+            return ValueTask.FromResult(SourceSegmentDetailResult);
         }
 
         public ValueTask<ReferenceSourceProcessingDetailPayload?> GetSourceProcessingDetailAsync(
@@ -767,7 +1430,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"GetSourceProcessingDetail:{input.NovelId}:{input.AnchorId}");
-            return ValueTask.FromResult<ReferenceSourceProcessingDetailPayload?>(null);
+            return ValueTask.FromResult(SourceProcessingDetailResult);
         }
 
         public ValueTask<ReferenceMaterialPayload> UpdateMaterialTagsAsync(
@@ -795,7 +1458,7 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"AdaptMaterial:{input.NovelId}:{input.MaterialId}:{FormatSlots(input.SlotValues)}:{input.MaxRewriteLevel}:{string.Join(',', input.SceneFacts)}");
-            return ValueTask.FromResult<AdaptReferenceMaterialResultPayload>(null!);
+            return ValueTask.FromResult(AdaptMaterialResult!);
         }
 
         public ValueTask<ReferenceReuseAuditPayload> AuditCandidateAsync(
@@ -804,7 +1467,16 @@ public sealed class ReferenceBridgeHandlerRoutingTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"AuditCandidate:{input.NovelId}:{input.MaterialId}:{input.CandidateText}:{input.MaxRewriteLevel}:{string.Join(',', input.SceneFacts)}");
-            return ValueTask.FromResult<ReferenceReuseAuditPayload>(null!);
+            return ValueTask.FromResult(ReuseAuditResult ?? new ReferenceReuseAuditPayload(
+                "audit-1",
+                "passed",
+                ReferenceRewriteLevels.L1,
+                [],
+                [],
+                [],
+                [],
+                [],
+                DateTimeOffset.UtcNow));
         }
 
         public ValueTask<ReferenceUserFeedbackPayload> RecordUserFeedbackAsync(
@@ -910,6 +1582,8 @@ public sealed class ReferenceBridgeHandlerRoutingTests
     {
         public List<string> Calls { get; } = [];
 
+        public IReadOnlyList<ReferenceDraftParagraphCandidatePayload> DraftCandidatesResult { get; set; } = [];
+
         public ValueTask<ReferenceChapterBlueprintPayload> GenerateChapterBlueprintAsync(
             GenerateReferenceChapterBlueprintPayload input,
             CancellationToken cancellationToken)
@@ -983,6 +1657,15 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"GenerateDraftFromBlueprint:{input.NovelId}:{input.BlueprintId}:{string.Join(',', input.BeatIds)}");
             return ValueTask.FromResult<ReferenceAnchoredDraftPayload>(null!);
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceDraftParagraphCandidatePayload>> GetDraftCandidatesAsync(
+            GetReferenceDraftCandidatesPayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"GetDraftCandidates:{input.NovelId}:{input.BlueprintId}:{string.Join(',', input.CandidateIds)}");
+            return ValueTask.FromResult(DraftCandidatesResult);
         }
 
         public ValueTask<ReferenceAnchoredDraftAuditPayload> AuditDraftAgainstBlueprintAsync(

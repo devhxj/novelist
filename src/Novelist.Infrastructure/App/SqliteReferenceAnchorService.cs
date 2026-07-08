@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -10,7 +11,7 @@ using Novelist.Core.App;
 
 namespace Novelist.Infrastructure.App;
 
-public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
+public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IReferenceAnchorProcessingRecoveryService
 {
     private const string BuildVersion = "reference-anchor-v1";
     private const long WorkspaceCorpusNovelId = 0;
@@ -25,10 +26,14 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private const int MaterialDetailSegmentPreviewMaxChars = 240;
     private const int MaterialDetailMaxSegments = 3;
     private const int MaterialDetailMaxSlots = 20;
+    private const int MaterialListPreviewMaxChars = 160;
+    private const double MaterialReviewConfidenceThreshold = 0.75;
+    private const int MaxExplicitAnchorFilterIds = 256;
     private const int AdvancedSceneMaxParagraphs = 8;
     private const int AdvancedEvidenceWindowChars = 480;
     private const int MaxStyleProfileFilters = 8;
     private const int MaxStyleDimensionFilters = 16;
+    private const int SqliteConstraintErrorCode = 19;
     private static readonly Regex MarkdownHeadingPattern = new(@"^\s{0,3}#{1,6}\s+(.+?)\s*$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex BlankLinePattern = new(@"\n\s*\n", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex RiskTokenPattern = new(@"[A-Za-z][A-Za-z0-9_]{1,}|\d+(?:\.\d+)?", RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -39,6 +44,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private static readonly Regex UnixPathPattern = new(@"(?<![\w])/(?:Users|home|var|tmp|private|Volumes|mnt|opt|etc|root)/[^\s:'""]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex SensitiveFieldPattern = new(@"(?i)\b(source_text|prompt|candidate_text|api_key|authorization|password|token)\b\s*[:=]\s*[^\r\n;]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly JsonSerializerOptions JsonOptions = BridgeJson.SerializerOptions;
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> ImportIdentityLocks = new(StringComparer.Ordinal);
     private static readonly string[] DialogueMarkers = ["“", "”", "「", "」", "『", "』", "\"", "说：", "道：", "问：", "答："];
     private static readonly string[] SensoryMarkers = ["雨", "风", "雪", "光", "声", "呼吸", "气味", "冷", "热", "疼", "黑", "亮"];
     private static readonly string[] InteriorityMarkers = ["心", "想", "觉得", "明白", "知道", "意识到", "记得", "忘了"];
@@ -52,6 +58,15 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private static readonly string[] AfterbeatMarkers = ["移开目光", "垂下眼", "停了一下", "停住", "顿了顿", "沉默了一下", "攥紧", "松开"];
     private static readonly string[] ActionAfterbeatEvidenceMarkers = [.. AfterbeatMarkers, .. EmotionEvidenceMarkers];
     private static readonly string[] AiRiskPhrases = ["无法言喻", "复杂的情绪", "某种意义上", "仿佛有什么", "命运的齿轮", "心中涌起"];
+    private static readonly HashSet<string> UnknownMaterialTags = new(StringComparer.OrdinalIgnoreCase)
+    {
+        string.Empty,
+        "unknown",
+        "untagged",
+        "none",
+        "null",
+        "undefined"
+    };
 
     private static readonly HashSet<string> AllowedSourceExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -86,6 +101,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private readonly IEmbeddingClient _embeddings;
     private readonly ISqliteVecTableProvisioner _vecProvisioner;
     private readonly ISqliteVecQueryProvider _vecQuery;
+    private readonly IReferenceMaterialSlotDetector _slotDetector;
+    private readonly IReferenceAnchorProcessingStageProbe _stageProbe;
     private readonly SemaphoreSlim _mutex = new(1, 1);
 
     public SqliteReferenceAnchorService(
@@ -95,6 +112,27 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         IEmbeddingClient? embeddings = null,
         ISqliteVecTableProvisioner? vecProvisioner = null,
         ISqliteVecQueryProvider? vecQuery = null)
+        : this(
+            options,
+            novels,
+            embeddingConfiguration,
+            embeddings,
+            vecProvisioner,
+            vecQuery,
+            DefaultReferenceMaterialSlotDetector.Instance,
+            NoopReferenceAnchorProcessingStageProbe.Instance)
+    {
+    }
+
+    internal SqliteReferenceAnchorService(
+        AppInitializationOptions? options,
+        INovelService? novels,
+        IEmbeddingConfigurationService? embeddingConfiguration,
+        IEmbeddingClient? embeddings,
+        ISqliteVecTableProvisioner? vecProvisioner,
+        ISqliteVecQueryProvider? vecQuery,
+        IReferenceMaterialSlotDetector slotDetector,
+        IReferenceAnchorProcessingStageProbe? stageProbe = null)
     {
         _options = options ?? new AppInitializationOptions();
         _novels = novels ?? new FileSystemNovelService(_options);
@@ -102,6 +140,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         _embeddings = embeddings ?? new HybridEmbeddingClient();
         _vecProvisioner = vecProvisioner ?? new SqliteVecTableProvisioner();
         _vecQuery = vecQuery ?? (_vecProvisioner as ISqliteVecQueryProvider) ?? new SqliteVecTableProvisioner();
+        _slotDetector = slotDetector;
+        _stageProbe = stageProbe ?? NoopReferenceAnchorProcessingStageProbe.Instance;
     }
 
     public async ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(
@@ -127,22 +167,70 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             ? ReferenceSourceTrustLevels.UserVerified
             : ValidateAllowedText(input.SourceTrust, nameof(input.SourceTrust), AllowedSourceTrustLevels);
         var userTags = NormalizeUserTags(input.UserTags);
-        var source = await ReadSourceFileAsync(sourcePath, cancellationToken);
-        var embeddingOptions = await _embeddingConfiguration.GetActiveEmbeddingOptionsAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
         var databasePath = await DatabasePathAsync(cancellationToken);
         ReferenceAnchorPayload? stagedAnchor = null;
         IReadOnlyList<ReferenceMaterialPayload> stagedMaterials = [];
+        ReferenceProcessingAffectedIds stagedAffectedIds = ReferenceProcessingAffectedIds.Empty;
         var stagedSegmentCount = 0;
         var stagedMaterialCount = 0;
         var stagedSlotCount = 0;
+        long? recoverExistingAnchorId = null;
+        var importLockKey = BuildImportIdentityLockKey(
+            databasePath,
+            storedNovelId,
+            visibility,
+            sourcePath,
+            sourceKind,
+            "source-path");
+        var importLock = ImportIdentityLocks.GetOrAdd(importLockKey, _ => new SemaphoreSlim(1, 1));
 
+        await importLock.WaitAsync(cancellationToken);
+        try
+        {
+        SourceSnapshot source;
+        try
+        {
+            source = await ReadSourceFileAsync(sourcePath, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return await RecordInitialFailedImportAsync(
+                databasePath,
+                storedNovelId,
+                title,
+                author,
+                sourcePath,
+                sourceKind,
+                licenseStatus,
+                visibility,
+                sourceTrust,
+                userTags,
+                exception,
+                cancellationToken);
+        }
+
+        var embeddingOptions = await _embeddingConfiguration.GetActiveEmbeddingOptionsAsync(cancellationToken);
         await _mutex.WaitAsync(cancellationToken);
         try
         {
             await EnsureSchemaAsync(databasePath, cancellationToken);
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+            var existingInitialFailure = await FindExistingInitialFailedImportForSourcePathAsync(
+                connection,
+                transaction,
+                storedNovelId,
+                visibility,
+                sourcePath,
+                sourceKind,
+                cancellationToken);
+            if (existingInitialFailure is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+                return existingInitialFailure;
+            }
 
             var existing = await FindExistingAnchorForImportAsync(
                 connection,
@@ -156,69 +244,265 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             if (existing is not null)
             {
                 await transaction.CommitAsync(cancellationToken);
-                return existing;
+                if (IsRecoverableBuildStatus(existing.Status))
+                {
+                    recoverExistingAnchorId = existing.AnchorId;
+                }
+                else
+                {
+                    return existing;
+                }
             }
 
-            var anchor = await InsertAnchorAsync(
-                connection,
-                transaction,
-                storedNovelId,
-                title,
-                author,
-                sourcePath,
-                sourceKind,
-                licenseStatus,
-                visibility,
-                sourceTrust,
-                userTags,
-                source.Hash,
-                now,
-                cancellationToken);
-
-            var segments = BuildSegments(anchor.AnchorId, source.Text);
-            var materials = BuildMaterials(anchor.AnchorId, segments, now);
-            await ReplaceSegmentsAsync(connection, transaction, anchor.AnchorId, segments, cancellationToken);
-            var slotCount = CountMaterialSlots(materials);
-            await ReplaceMaterialsAsync(connection, transaction, anchor.AnchorId, materials, cancellationToken);
-            var initialStatus = embeddingOptions is not null && materials.Count > 0
-                ? ReferenceAnchorBuildStates.Embedding
-                : ReferenceAnchorBuildStates.Ready;
-            var initialStage = embeddingOptions is not null && materials.Count > 0
-                ? ReferenceAnchorBuildStates.Embedding
-                : "ready";
-            var readyAnchor = anchor with
+            if (!recoverExistingAnchorId.HasValue)
             {
-                Status = initialStatus,
-                UpdatedAt = now
-            };
-            await UpdateAnchorBuildResultAsync(
-                connection,
-                transaction,
-                readyAnchor,
-                initialStatus,
-                initialStage,
-                segments.Count,
-                materials.Count,
-                slotCount,
-                lastError: string.Empty,
-                now,
-                cancellationToken);
+                ReferenceAnchorPayload? anchor = null;
+                try
+                {
+                    anchor = await InsertAnchorAsync(
+                        connection,
+                        transaction,
+                        storedNovelId,
+                        title,
+                        author,
+                        sourcePath,
+                        sourceKind,
+                        licenseStatus,
+                        visibility,
+                        sourceTrust,
+                        userTags,
+                        source.Hash,
+                        now,
+                        cancellationToken);
+                }
+                catch (SqliteException exception) when (IsSqliteConstraintViolation(exception))
+                {
+                    var conflicting = await FindExistingAnchorForImportAsync(
+                        connection,
+                        transaction,
+                        storedNovelId,
+                        visibility,
+                        sourcePath,
+                        sourceKind,
+                        source.Hash,
+                        cancellationToken);
+                    if (conflicting is null)
+                    {
+                        throw;
+                    }
 
-            await transaction.CommitAsync(cancellationToken);
-            if (embeddingOptions is null || materials.Count == 0)
-            {
-                return readyAnchor;
+                    await transaction.CommitAsync(cancellationToken);
+                    if (IsRecoverableBuildStatus(conflicting.Status))
+                    {
+                        recoverExistingAnchorId = conflicting.AnchorId;
+                    }
+                    else
+                    {
+                        return conflicting;
+                    }
+                }
+
+                if (!recoverExistingAnchorId.HasValue)
+                {
+                    var insertedAnchor = anchor
+                        ?? throw new InvalidOperationException("Reference anchor insert was not initialized.");
+                    IReadOnlyList<ReferenceSourceSegment> segments;
+                    ReferenceProcessingAffectedIds segmentAffectedIds;
+                    try
+                    {
+                        _stageProbe.BeforeStage(ReferenceAnchorBuildStates.Segmenting, insertedAnchor.AnchorId, source.Hash);
+                        segments = BuildSegments(insertedAnchor.AnchorId, source.Text);
+                        segmentAffectedIds = BuildAffectedProcessingIds(segments);
+                        await ReplaceSegmentsAsync(connection, transaction, insertedAnchor.AnchorId, segments, cancellationToken);
+                        var segmentsBuiltAnchor = insertedAnchor with
+                        {
+                            Status = ReferenceAnchorBuildStates.SegmentsBuilt,
+                            UpdatedAt = now
+                        };
+                        await UpdateAnchorBuildResultAsync(
+                            connection,
+                            transaction,
+                            segmentsBuiltAnchor,
+                            ReferenceAnchorBuildStates.SegmentsBuilt,
+                            ReferenceAnchorBuildStates.SegmentsBuilt,
+                            segments.Count,
+                            0,
+                            0,
+                            string.Empty,
+                            now,
+                            cancellationToken,
+                            affectedIds: segmentAffectedIds);
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        var failedAt = DateTimeOffset.UtcNow;
+                        var failedAnchor = insertedAnchor with
+                        {
+                            Status = ReferenceAnchorBuildStates.FailedSegmenting,
+                            UpdatedAt = failedAt
+                        };
+                        await UpdateAnchorBuildResultAsync(
+                            connection,
+                            transaction,
+                            failedAnchor,
+                            ReferenceAnchorBuildStates.FailedSegmenting,
+                            ReferenceAnchorBuildStates.FailedSegmenting,
+                            0,
+                            0,
+                            0,
+                            RedactError(exception.Message),
+                            failedAt,
+                            cancellationToken);
+                        await transaction.CommitAsync(cancellationToken);
+                        return failedAnchor;
+                    }
+
+                    await transaction.CommitAsync(cancellationToken);
+
+                    IReadOnlyList<ReferenceMaterialPayload> materials;
+                    ReferenceProcessingAffectedIds materialAffectedIds;
+                    try
+                    {
+                        _stageProbe.BeforeStage(ReferenceAnchorBuildStates.ExtractingMaterials, insertedAnchor.AnchorId, source.Hash);
+                        materials = BuildMaterials(insertedAnchor.AnchorId, segments, now);
+                        materialAffectedIds = BuildAffectedProcessingIds(materials);
+                        await using var materialTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                        await ReplaceMaterialRowsAsync(connection, materialTransaction, insertedAnchor.AnchorId, materials, cancellationToken);
+                        var materialExtractedAnchor = insertedAnchor with
+                        {
+                            Status = ReferenceAnchorBuildStates.MaterialsExtracted,
+                            UpdatedAt = now
+                        };
+                        await UpdateAnchorBuildResultAsync(
+                            connection,
+                            materialTransaction,
+                            materialExtractedAnchor,
+                            ReferenceAnchorBuildStates.MaterialsExtracted,
+                            ReferenceAnchorBuildStates.MaterialsExtracted,
+                            segments.Count,
+                            materials.Count,
+                            0,
+                            string.Empty,
+                            now,
+                            cancellationToken,
+                            affectedIds: materialAffectedIds);
+                        await materialTransaction.CommitAsync(cancellationToken);
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        var failedAt = DateTimeOffset.UtcNow;
+                        var failedAnchor = insertedAnchor with
+                        {
+                            Status = ReferenceAnchorBuildStates.FailedExtraction,
+                            UpdatedAt = failedAt
+                        };
+                        await using var failureTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                        await UpdateAnchorBuildResultAsync(
+                            connection,
+                            failureTransaction,
+                            failedAnchor,
+                            ReferenceAnchorBuildStates.FailedExtraction,
+                            ReferenceAnchorBuildStates.FailedExtraction,
+                            segments.Count,
+                            0,
+                            0,
+                            RedactError(exception.Message),
+                            failedAt,
+                            cancellationToken,
+                            affectedIds: segmentAffectedIds);
+                        await failureTransaction.CommitAsync(cancellationToken);
+                        return failedAnchor;
+                    }
+
+                    try
+                    {
+                        var slotsByMaterial = DetectMaterialSlots(materials);
+                        var slotCount = CountMaterialSlots(slotsByMaterial);
+                        await using var slotTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                        await ReplaceMaterialSlotsAsync(
+                            connection,
+                            slotTransaction,
+                            insertedAnchor.AnchorId,
+                            slotsByMaterial,
+                            BuildMaterialCreatedAt(materials),
+                            cancellationToken);
+                        var initialStatus = embeddingOptions is not null && materials.Count > 0
+                            ? ReferenceAnchorBuildStates.Embedding
+                            : ReferenceAnchorBuildStates.Ready;
+                        var initialStage = embeddingOptions is not null && materials.Count > 0
+                            ? ReferenceAnchorBuildStates.Embedding
+                            : "ready";
+                        var readyAnchor = insertedAnchor with
+                        {
+                            Status = initialStatus,
+                            UpdatedAt = now
+                        };
+                        var affectedIds = BuildAffectedProcessingIds(materials, slotsByMaterial);
+                        await UpdateAnchorBuildResultAsync(
+                            connection,
+                            slotTransaction,
+                            readyAnchor,
+                            initialStatus,
+                            initialStage,
+                            segments.Count,
+                            materials.Count,
+                            slotCount,
+                            lastError: string.Empty,
+                            now,
+                            cancellationToken,
+                            affectedIds: affectedIds);
+
+                        await slotTransaction.CommitAsync(cancellationToken);
+                        if (embeddingOptions is null || materials.Count == 0)
+                        {
+                            return readyAnchor;
+                        }
+
+                        stagedAnchor = readyAnchor;
+                        stagedMaterials = materials;
+                        stagedSegmentCount = segments.Count;
+                        stagedMaterialCount = materials.Count;
+                        stagedSlotCount = slotCount;
+                        stagedAffectedIds = affectedIds;
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        var failedAt = DateTimeOffset.UtcNow;
+                        var failedAnchor = insertedAnchor with
+                        {
+                            Status = ReferenceAnchorBuildStates.FailedSlotting,
+                            UpdatedAt = failedAt
+                        };
+                        await using var failureTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                        await UpdateAnchorBuildResultAsync(
+                            connection,
+                            failureTransaction,
+                            failedAnchor,
+                            ReferenceAnchorBuildStates.FailedSlotting,
+                            ReferenceAnchorBuildStates.FailedSlotting,
+                            segments.Count,
+                            materials.Count,
+                            0,
+                            RedactError(exception.Message),
+                            failedAt,
+                            cancellationToken,
+                            affectedIds: materialAffectedIds);
+                        await failureTransaction.CommitAsync(cancellationToken);
+                        return failedAnchor;
+                    }
+                }
             }
-
-            stagedAnchor = readyAnchor;
-            stagedMaterials = materials;
-            stagedSegmentCount = segments.Count;
-            stagedMaterialCount = materials.Count;
-            stagedSlotCount = slotCount;
         }
         finally
         {
             _mutex.Release();
+        }
+
+        if (recoverExistingAnchorId.HasValue)
+        {
+            await RebuildAnchorAsync(input.NovelId, recoverExistingAnchorId.Value, cancellationToken);
+            var recoveredAnchors = await GetAnchorsAsync(input.NovelId, cancellationToken);
+            return recoveredAnchors.First(anchor => anchor.AnchorId == recoverExistingAnchorId.Value);
         }
 
         var completed = await CompleteEmbeddingStageAsync(
@@ -228,9 +512,15 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             stagedMaterialCount,
             stagedSlotCount,
             stagedMaterials,
-            embeddingOptions,
+            embeddingOptions ?? throw new InvalidOperationException("Reference anchor embedding options were not initialized."),
+            stagedAffectedIds,
             cancellationToken);
         return completed.Anchor;
+        }
+        finally
+        {
+            importLock.Release();
+        }
     }
 
     public async ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync(
@@ -238,15 +528,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
-        if (input.Anchors is null || input.Anchors.Count == 0)
-        {
-            throw new ArgumentException("At least one reference anchor is required.", nameof(input));
-        }
-
-        if (input.Anchors.Count > 50)
-        {
-            throw new ArgumentException("At most 50 reference anchors can be imported at once.", nameof(input));
-        }
+        ValidateCreateAnchorsInput(input);
 
         var anchors = new List<ReferenceAnchorPayload>(input.Anchors.Count);
         foreach (var anchor in input.Anchors)
@@ -255,6 +537,73 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
 
         return anchors;
+    }
+
+    public async ValueTask<CreateReferenceAnchorsResultPayload> CreateAnchorsWithResultAsync(
+        CreateReferenceAnchorsPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateCreateAnchorsInput(input);
+
+        var succeeded = new List<ReferenceAnchorPayload>(input.Anchors.Count);
+        var failed = new List<CreateReferenceAnchorFailurePayload>();
+        for (var index = 0; index < input.Anchors.Count; index++)
+        {
+            var anchor = input.Anchors[index];
+            try
+            {
+                var created = await CreateAnchorAsync(anchor, cancellationToken);
+                if (IsFailedBuildStatus(created.Status) ||
+                    string.Equals(created.Status, ReferenceAnchorBuildStates.Cancelled, StringComparison.OrdinalIgnoreCase))
+                {
+                    var status = await GetBuildStatusAsync(anchor.NovelId, created.AnchorId, cancellationToken);
+                    failed.Add(CreateFailurePayload(index, anchor, status?.LastError ?? created.Status));
+                }
+                else
+                {
+                    succeeded.Add(created);
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                failed.Add(CreateFailurePayload(index, anchor, exception));
+            }
+        }
+
+        return new CreateReferenceAnchorsResultPayload(
+            succeeded,
+            failed,
+            input.Anchors.Count,
+            succeeded.Count,
+            failed.Count);
+    }
+
+    public async ValueTask ReconcileRecoverableProcessingAsync(CancellationToken cancellationToken)
+    {
+        var databasePath = await DatabasePathAsync(cancellationToken);
+        if (!File.Exists(databasePath))
+        {
+            return;
+        }
+
+        IReadOnlyList<ReferenceAnchorPayload> recoverableAnchors;
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            recoverableAnchors = await ReadRecoverableAnchorsAsync(connection, cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+
+        foreach (var anchor in recoverableAnchors)
+        {
+            await RebuildAnchorCoreAsync(anchor.NovelId, anchor.AnchorId, cancellationToken);
+        }
     }
 
     private static async ValueTask<ReferenceAnchorPayload?> FindExistingAnchorForImportAsync(
@@ -296,6 +645,175 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         return await reader.ReadAsync(cancellationToken) ? ReadAnchor(reader) : null;
+    }
+
+    private async ValueTask<ReferenceAnchorPayload> RecordInitialFailedImportAsync(
+        string databasePath,
+        long? storedNovelId,
+        string title,
+        string author,
+        string sourcePath,
+        string sourceKind,
+        string licenseStatus,
+        string visibility,
+        string sourceTrust,
+        IReadOnlyList<string> userTags,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var lastError = RedactError(exception.Message);
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+            var anchor = await FindExistingInitialFailedImportForSourcePathAsync(
+                connection,
+                transaction,
+                storedNovelId,
+                visibility,
+                sourcePath,
+                sourceKind,
+                cancellationToken);
+
+            if (anchor is null)
+            {
+                try
+                {
+                    anchor = await InsertAnchorAsync(
+                        connection,
+                        transaction,
+                        storedNovelId,
+                        title,
+                        author,
+                        sourcePath,
+                        sourceKind,
+                        licenseStatus,
+                        visibility,
+                        sourceTrust,
+                        userTags,
+                        BuildUnavailableSourceHash(storedNovelId, visibility, sourcePath, sourceKind),
+                        now,
+                        cancellationToken);
+                }
+                catch (SqliteException insertException) when (IsSqliteConstraintViolation(insertException))
+                {
+                    anchor = await FindExistingInitialFailedImportForSourcePathAsync(
+                        connection,
+                        transaction,
+                        storedNovelId,
+                        visibility,
+                        sourcePath,
+                        sourceKind,
+                        cancellationToken);
+                    if (anchor is null)
+                    {
+                        throw;
+                    }
+                }
+            }
+
+            var failedAnchor = anchor with
+            {
+                Status = ReferenceAnchorBuildStates.FailedImport,
+                UpdatedAt = now
+            };
+            await UpdateAnchorBuildResultAsync(
+                connection,
+                transaction,
+                failedAnchor,
+                ReferenceAnchorBuildStates.FailedImport,
+                ReferenceAnchorBuildStates.FailedImport,
+                sourceSegmentCount: 0,
+                materialCount: 0,
+                slotCount: 0,
+                lastError,
+                now,
+                cancellationToken,
+                vectorCount: 0);
+            await transaction.CommitAsync(cancellationToken);
+            return failedAnchor;
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    private static async ValueTask<ReferenceAnchorPayload?> FindExistingInitialFailedImportForSourcePathAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long? storedNovelId,
+        string visibility,
+        string sourcePath,
+        string sourceKind,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT a.anchor_id, a.novel_id, a.title, a.author, a.source_path, a.source_kind,
+                   a.license_status, a.source_file_hash, a.build_version,
+                   COALESCE(s.status, a.status) AS status,
+                   a.created_at, a.updated_at, a.corpus_visibility, a.source_trust,
+                   a.user_tags_json
+            FROM reference_anchors a
+            LEFT JOIN reference_anchor_build_state s ON s.anchor_id = a.anchor_id
+            WHERE a.corpus_visibility = $corpus_visibility
+              AND a.source_kind = $source_kind
+              AND (
+                    ($novel_id_is_null = 1 AND (a.novel_id IS NULL OR a.novel_id = $workspace_corpus_novel_id)) OR
+                    ($novel_id_is_null = 0 AND a.novel_id = $novel_id)
+                  )
+              AND a.source_path = $source_path
+              AND a.source_file_hash LIKE 'unavailable:%'
+              AND COALESCE(s.status, a.status) = $status
+            ORDER BY a.created_at ASC,
+                     a.anchor_id ASC
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$corpus_visibility", visibility);
+        command.Parameters.AddWithValue("$source_kind", sourceKind);
+        command.Parameters.AddWithValue("$novel_id_is_null", storedNovelId.HasValue ? 0 : 1);
+        command.Parameters.AddWithValue("$novel_id", storedNovelId.HasValue ? storedNovelId.Value : DBNull.Value);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+        command.Parameters.AddWithValue("$source_path", sourcePath);
+        command.Parameters.AddWithValue("$status", ReferenceAnchorBuildStates.FailedImport);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) ? ReadAnchor(reader) : null;
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceAnchorPayload>> ReadRecoverableAnchorsAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT a.anchor_id, a.novel_id, a.title, a.author, a.source_path, a.source_kind,
+                   a.license_status, a.source_file_hash, a.build_version,
+                   COALESCE(s.status, a.status) AS status,
+                   a.created_at, a.updated_at, a.corpus_visibility, a.source_trust,
+                   a.user_tags_json
+            FROM reference_anchors a
+            LEFT JOIN reference_anchor_build_state s ON s.anchor_id = a.anchor_id
+            ORDER BY a.updated_at ASC, a.anchor_id ASC;
+            """;
+
+        var anchors = new List<ReferenceAnchorPayload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var anchor = ReadAnchor(reader);
+            if (IsRecoverableBuildStatus(anchor.Status))
+            {
+                anchors.Add(anchor);
+            }
+        }
+
+        return anchors;
     }
 
     public async ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(
@@ -344,14 +862,25 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     {
         ValidateNovelId(novelId);
         ValidateAnchorId(anchorId);
+        return await RebuildAnchorCoreAsync(novelId, anchorId, cancellationToken);
+    }
 
+    private async ValueTask<ReferenceAnchorBuildStatusPayload> RebuildAnchorCoreAsync(
+        long novelId,
+        long anchorId,
+        CancellationToken cancellationToken)
+    {
         var databasePath = await DatabasePathAsync(cancellationToken);
         ReferenceAnchorPayload? stagedAnchor = null;
         IReadOnlyList<ReferenceMaterialPayload> stagedMaterials = [];
         EmbeddingRequestOptions? stagedEmbeddingOptions = null;
+        ReferenceProcessingAffectedIds stagedAffectedIds = ReferenceProcessingAffectedIds.Empty;
         var stagedSegmentCount = 0;
         var stagedMaterialCount = 0;
         var stagedSlotCount = 0;
+        ReferenceAnchorPayload? previousAnchor = null;
+        ReferenceAnchorCorpusSnapshot? previousCorpus = null;
+        ReferenceAnchorBuildStatusPayload? previousBuildStatus = null;
 
         await _mutex.WaitAsync(cancellationToken);
         try
@@ -359,72 +888,336 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             await EnsureSchemaAsync(databasePath, cancellationToken);
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
             var anchor = await ReadAnchorAsync(connection, novelId, anchorId, cancellationToken);
+            previousAnchor = anchor;
             var now = DateTimeOffset.UtcNow;
 
             try
             {
-                var source = await ReadSourceFileAsync(anchor.SourcePath, cancellationToken);
-                var segments = BuildSegments(anchor.AnchorId, source.Text);
+                previousBuildStatus = await ReadBuildStatusAsync(connection, novelId, anchor.AnchorId, cancellationToken);
+                var previousSegments = await ReadSourceSegmentsAsync(connection, anchor.AnchorId, cancellationToken);
+                var previousMaterials = await ReadMaterialsAsync(
+                    connection,
+                    novelId,
+                    [anchor.AnchorId],
+                    ReferenceMaterialArchiveFilters.All,
+                    cancellationToken);
+                var previousSlots = await ReadMaterialSlotsForAnchorAsync(connection, anchor.AnchorId, cancellationToken);
                 var userVerifiedMaterials = await ReadUserVerifiedMaterialsAsync(connection, anchor.AnchorId, cancellationToken);
                 var archivedMaterialMarkers = await ReadArchivedMaterialMarkersAsync(connection, anchor.AnchorId, cancellationToken);
-                var materials = ApplyUserVerifiedTagOverrides(
-                    BuildMaterials(anchor.AnchorId, segments, now),
-                    userVerifiedMaterials);
-                var archivedMaterialTimestamps = BuildArchivedMaterialTimestamps(materials, archivedMaterialMarkers);
-                var activeMaterials = materials
-                    .Where(material => !archivedMaterialTimestamps.ContainsKey(material.MaterialId))
-                    .ToArray();
-                var embeddingOptions = await _embeddingConfiguration.GetActiveEmbeddingOptionsAsync(cancellationToken);
-                await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-                var initialStatus = embeddingOptions is not null && activeMaterials.Length > 0
-                    ? ReferenceAnchorBuildStates.Embedding
-                    : ReferenceAnchorBuildStates.Ready;
-                var initialStage = embeddingOptions is not null && activeMaterials.Length > 0
-                    ? ReferenceAnchorBuildStates.Embedding
-                    : "ready";
-                var readyAnchor = anchor with
+                previousCorpus = new ReferenceAnchorCorpusSnapshot(
+                    previousSegments,
+                    previousMaterials,
+                    previousSlots,
+                    BuildArchivedMaterialTimestamps(previousMaterials, archivedMaterialMarkers));
+                var source = await ReadSourceFileAsync(anchor.SourcePath, cancellationToken);
+                IReadOnlyList<ReferenceSourceSegment> segments;
+                try
                 {
-                    SourceFileHash = source.Hash,
-                    Status = initialStatus,
-                    UpdatedAt = now
-                };
-                await ReplaceSegmentsAsync(connection, transaction, anchor.AnchorId, segments, cancellationToken);
-                var slotCount = CountMaterialSlots(materials);
-                await ReplaceMaterialsAsync(
-                    connection,
-                    transaction,
-                    anchor.AnchorId,
-                    materials,
-                    cancellationToken,
-                    archivedMaterialTimestamps);
-                await UpdateAnchorBuildResultAsync(
-                    connection,
-                    transaction,
-                    readyAnchor,
-                    initialStatus,
-                    initialStage,
-                    segments.Count,
-                    materials.Count,
-                    slotCount,
-                    lastError: string.Empty,
-                    now,
-                    cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
-                if (embeddingOptions is null || activeMaterials.Length == 0)
+                    _stageProbe.BeforeStage(ReferenceAnchorBuildStates.Segmenting, anchor.AnchorId, source.Hash);
+                    segments = BuildSegments(anchor.AnchorId, source.Text);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
                 {
-                    return BuildStatus(readyAnchor, ReferenceAnchorBuildStates.Ready, "ready", segments.Count, materials.Count, slotCount, string.Empty, now);
+                    var failedAt = DateTimeOffset.UtcNow;
+                    var retainedSegmentCount = previousCorpus.Segments.Count;
+                    var retainedMaterialCount = previousCorpus.Materials.Count;
+                    var retainedSlotCount = previousBuildStatus?.SlotCount ?? CountMaterialSlots(previousCorpus.SlotsByMaterial);
+                    var retainedVectorCount = previousBuildStatus?.VectorCount ?? 0;
+                    var failedAnchor = anchor with
+                    {
+                        SourceFileHash = previousAnchor.SourceFileHash,
+                        Status = ReferenceAnchorBuildStates.FailedSegmenting,
+                        UpdatedAt = failedAt
+                    };
+                    var lastError = RedactError(exception.Message);
+                    await using var failureTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                    await UpdateAnchorBuildResultAsync(
+                        connection,
+                        failureTransaction,
+                        failedAnchor,
+                        ReferenceAnchorBuildStates.FailedSegmenting,
+                        ReferenceAnchorBuildStates.FailedSegmenting,
+                        retainedSegmentCount,
+                        retainedMaterialCount,
+                        retainedSlotCount,
+                        lastError,
+                        failedAt,
+                        cancellationToken,
+                        vectorCount: retainedVectorCount,
+                        affectedIds: BuildAffectedProcessingIds(previousCorpus.Materials, previousCorpus.SlotsByMaterial));
+                    await failureTransaction.CommitAsync(cancellationToken);
+                    return BuildStatus(
+                        failedAnchor,
+                        ReferenceAnchorBuildStates.FailedSegmenting,
+                        ReferenceAnchorBuildStates.FailedSegmenting,
+                        retainedSegmentCount,
+                        retainedMaterialCount,
+                        retainedSlotCount,
+                        lastError,
+                        failedAt,
+                        retainedVectorCount);
                 }
 
-                stagedAnchor = readyAnchor;
-                stagedMaterials = activeMaterials;
-                stagedEmbeddingOptions = embeddingOptions;
-                stagedSegmentCount = segments.Count;
-                stagedMaterialCount = materials.Count;
-                stagedSlotCount = slotCount;
+                var hasPreviousMaterials = previousCorpus.Materials.Count > 0;
+                var segmentAffectedIds = BuildAffectedProcessingIds(segments);
+                if (!hasPreviousMaterials)
+                {
+                    try
+                    {
+                        await using var segmentTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                        var segmentsBuiltAnchor = anchor with
+                        {
+                            SourceFileHash = source.Hash,
+                            Status = ReferenceAnchorBuildStates.SegmentsBuilt,
+                            UpdatedAt = now
+                        };
+                        await ReplaceSegmentsAsync(connection, segmentTransaction, anchor.AnchorId, segments, cancellationToken);
+                        await UpdateAnchorBuildResultAsync(
+                            connection,
+                            segmentTransaction,
+                            segmentsBuiltAnchor,
+                            ReferenceAnchorBuildStates.SegmentsBuilt,
+                            ReferenceAnchorBuildStates.SegmentsBuilt,
+                            segments.Count,
+                            0,
+                            0,
+                            string.Empty,
+                            now,
+                            cancellationToken,
+                            affectedIds: segmentAffectedIds);
+                        await segmentTransaction.CommitAsync(cancellationToken);
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        var failedAt = DateTimeOffset.UtcNow;
+                        var failedAnchor = anchor with
+                        {
+                            SourceFileHash = previousAnchor.SourceFileHash,
+                            Status = ReferenceAnchorBuildStates.FailedSegmenting,
+                            UpdatedAt = failedAt
+                        };
+                        var lastError = RedactError(exception.Message);
+                        await using var failureTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                        await UpdateAnchorBuildResultAsync(
+                            connection,
+                            failureTransaction,
+                            failedAnchor,
+                            ReferenceAnchorBuildStates.FailedSegmenting,
+                            ReferenceAnchorBuildStates.FailedSegmenting,
+                            previousCorpus.Segments.Count,
+                            previousCorpus.Materials.Count,
+                            previousBuildStatus?.SlotCount ?? CountMaterialSlots(previousCorpus.SlotsByMaterial),
+                            lastError,
+                            failedAt,
+                            cancellationToken,
+                            vectorCount: previousBuildStatus?.VectorCount ?? 0,
+                            affectedIds: BuildAffectedProcessingIds(previousCorpus.Materials, previousCorpus.SlotsByMaterial));
+                        await failureTransaction.CommitAsync(cancellationToken);
+                        return BuildStatus(
+                            failedAnchor,
+                            ReferenceAnchorBuildStates.FailedSegmenting,
+                            ReferenceAnchorBuildStates.FailedSegmenting,
+                            previousCorpus.Segments.Count,
+                            previousCorpus.Materials.Count,
+                            previousBuildStatus?.SlotCount ?? CountMaterialSlots(previousCorpus.SlotsByMaterial),
+                            lastError,
+                            failedAt,
+                            previousBuildStatus?.VectorCount ?? 0);
+                    }
+                }
+
+                IReadOnlyList<ReferenceMaterialPayload> materials;
+                IReadOnlyList<ReferenceMaterialPayload> activeMaterials;
+                ReferenceProcessingAffectedIds materialAffectedIds;
+                EmbeddingRequestOptions? embeddingOptions;
+                try
+                {
+                    _stageProbe.BeforeStage(ReferenceAnchorBuildStates.ExtractingMaterials, anchor.AnchorId, source.Hash);
+                    materials = ApplyUserVerifiedTagOverrides(
+                        BuildMaterials(anchor.AnchorId, segments, now),
+                        userVerifiedMaterials);
+                    var archivedMaterialTimestamps = BuildArchivedMaterialTimestamps(materials, archivedMaterialMarkers);
+                    activeMaterials = materials
+                        .Where(material => !archivedMaterialTimestamps.ContainsKey(material.MaterialId))
+                        .ToArray();
+                    materialAffectedIds = BuildAffectedProcessingIds(activeMaterials.Count > 0 ? activeMaterials : materials);
+                    embeddingOptions = await _embeddingConfiguration.GetActiveEmbeddingOptionsAsync(cancellationToken);
+                    await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                    var materialExtractedAnchor = anchor with
+                    {
+                        SourceFileHash = source.Hash,
+                        Status = ReferenceAnchorBuildStates.MaterialsExtracted,
+                        UpdatedAt = now
+                    };
+                    await ReplaceSegmentsAsync(connection, transaction, anchor.AnchorId, segments, cancellationToken);
+                    await ReplaceMaterialRowsAsync(
+                        connection,
+                        transaction,
+                        anchor.AnchorId,
+                        materials,
+                        cancellationToken,
+                        archivedMaterialTimestamps);
+                    await UpdateAnchorBuildResultAsync(
+                        connection,
+                        transaction,
+                        materialExtractedAnchor,
+                        ReferenceAnchorBuildStates.MaterialsExtracted,
+                        ReferenceAnchorBuildStates.MaterialsExtracted,
+                        segments.Count,
+                        materials.Count,
+                        0,
+                        string.Empty,
+                        now,
+                        cancellationToken,
+                        affectedIds: materialAffectedIds);
+                    await transaction.CommitAsync(cancellationToken);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    var failedAt = DateTimeOffset.UtcNow;
+                    var retainedSegmentCount = hasPreviousMaterials ? previousCorpus.Segments.Count : segments.Count;
+                    var retainedMaterialCount = hasPreviousMaterials ? previousCorpus.Materials.Count : 0;
+                    var retainedSlotCount = hasPreviousMaterials
+                        ? previousBuildStatus?.SlotCount ?? CountMaterialSlots(previousCorpus.SlotsByMaterial)
+                        : 0;
+                    var retainedVectorCount = hasPreviousMaterials ? previousBuildStatus?.VectorCount ?? 0 : 0;
+                    var affectedIds = hasPreviousMaterials
+                        ? BuildAffectedProcessingIds(previousCorpus.Materials, previousCorpus.SlotsByMaterial)
+                        : segmentAffectedIds;
+                    var failedAnchor = anchor with
+                    {
+                        SourceFileHash = hasPreviousMaterials ? previousAnchor.SourceFileHash : source.Hash,
+                        Status = ReferenceAnchorBuildStates.FailedExtraction,
+                        UpdatedAt = failedAt
+                    };
+                    var lastError = RedactError(exception.Message);
+                    await using var failureTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                    await UpdateAnchorBuildResultAsync(
+                        connection,
+                        failureTransaction,
+                        failedAnchor,
+                        ReferenceAnchorBuildStates.FailedExtraction,
+                        ReferenceAnchorBuildStates.FailedExtraction,
+                        retainedSegmentCount,
+                        retainedMaterialCount,
+                        retainedSlotCount,
+                        lastError,
+                        failedAt,
+                        cancellationToken,
+                        vectorCount: retainedVectorCount,
+                        affectedIds: affectedIds);
+                    await failureTransaction.CommitAsync(cancellationToken);
+                    return BuildStatus(
+                        failedAnchor,
+                        ReferenceAnchorBuildStates.FailedExtraction,
+                        ReferenceAnchorBuildStates.FailedExtraction,
+                        retainedSegmentCount,
+                        retainedMaterialCount,
+                        retainedSlotCount,
+                        lastError,
+                        failedAt,
+                        retainedVectorCount);
+                }
+
+                try
+                {
+                    var slotsByMaterial = DetectMaterialSlots(materials);
+                    var slotCount = CountMaterialSlots(slotsByMaterial);
+                    await using var slotTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                    await ReplaceMaterialSlotsAsync(
+                        connection,
+                        slotTransaction,
+                        anchor.AnchorId,
+                        slotsByMaterial,
+                        BuildMaterialCreatedAt(materials),
+                        cancellationToken);
+                    var initialStatus = embeddingOptions is not null && activeMaterials.Count > 0
+                        ? ReferenceAnchorBuildStates.Embedding
+                        : ReferenceAnchorBuildStates.Ready;
+                    var initialStage = embeddingOptions is not null && activeMaterials.Count > 0
+                        ? ReferenceAnchorBuildStates.Embedding
+                        : "ready";
+                    var readyAnchor = anchor with
+                    {
+                        SourceFileHash = source.Hash,
+                        Status = initialStatus,
+                        UpdatedAt = now
+                    };
+                    var affectedIds = BuildAffectedProcessingIds(activeMaterials.Count > 0 ? activeMaterials : materials, slotsByMaterial);
+                    await UpdateAnchorBuildResultAsync(
+                        connection,
+                        slotTransaction,
+                        readyAnchor,
+                        initialStatus,
+                        initialStage,
+                        segments.Count,
+                        materials.Count,
+                        slotCount,
+                        lastError: string.Empty,
+                        now,
+                        cancellationToken,
+                        affectedIds: affectedIds);
+                    await slotTransaction.CommitAsync(cancellationToken);
+                    if (embeddingOptions is null || activeMaterials.Count == 0)
+                    {
+                        return BuildStatus(readyAnchor, ReferenceAnchorBuildStates.Ready, "ready", segments.Count, materials.Count, slotCount, string.Empty, now);
+                    }
+
+                    stagedAnchor = readyAnchor;
+                    stagedMaterials = activeMaterials;
+                    stagedEmbeddingOptions = embeddingOptions;
+                    stagedSegmentCount = segments.Count;
+                    stagedMaterialCount = materials.Count;
+                    stagedSlotCount = slotCount;
+                    stagedAffectedIds = affectedIds;
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    var failedAt = DateTimeOffset.UtcNow;
+                    var failedAnchor = anchor with
+                    {
+                        SourceFileHash = source.Hash,
+                        Status = ReferenceAnchorBuildStates.FailedSlotting,
+                        UpdatedAt = failedAt
+                    };
+                    await using var failureTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                    var lastError = RedactError(exception.Message);
+                    await UpdateAnchorBuildResultAsync(
+                        connection,
+                        failureTransaction,
+                        failedAnchor,
+                        ReferenceAnchorBuildStates.FailedSlotting,
+                        ReferenceAnchorBuildStates.FailedSlotting,
+                        segments.Count,
+                        materials.Count,
+                        0,
+                        lastError,
+                        failedAt,
+                        cancellationToken,
+                        vectorCount: 0,
+                        affectedIds: materialAffectedIds);
+                    await failureTransaction.CommitAsync(cancellationToken);
+                    return BuildStatus(
+                        failedAnchor,
+                        ReferenceAnchorBuildStates.FailedSlotting,
+                        ReferenceAnchorBuildStates.FailedSlotting,
+                        segments.Count,
+                        materials.Count,
+                        0,
+                        lastError,
+                        failedAt);
+                }
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                var retainedSegmentCount = previousCorpus?.Segments.Count ?? 0;
+                var retainedMaterialCount = previousCorpus?.Materials.Count ?? 0;
+                var retainedSlotCount = previousBuildStatus?.SlotCount ?? 0;
+                var retainedVectorCount = previousBuildStatus?.VectorCount ?? 0;
+                var affectedIds = previousCorpus is null
+                    ? ReferenceProcessingAffectedIds.Empty
+                    : BuildAffectedProcessingIds(previousCorpus.Materials);
                 var failedAnchor = anchor with
                 {
                     Status = ReferenceAnchorBuildStates.FailedImport,
@@ -437,14 +1230,25 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                     failedAnchor,
                     ReferenceAnchorBuildStates.FailedImport,
                     ReferenceAnchorBuildStates.FailedImport,
-                    sourceSegmentCount: 0,
-                    materialCount: 0,
-                    slotCount: 0,
+                    retainedSegmentCount,
+                    retainedMaterialCount,
+                    retainedSlotCount,
                     lastError,
                     now,
-                    cancellationToken);
+                    cancellationToken,
+                    retainedVectorCount,
+                    affectedIds);
                 await transaction.CommitAsync(cancellationToken);
-                return BuildStatus(failedAnchor, ReferenceAnchorBuildStates.FailedImport, ReferenceAnchorBuildStates.FailedImport, 0, 0, 0, lastError, now);
+                return BuildStatus(
+                    failedAnchor,
+                    ReferenceAnchorBuildStates.FailedImport,
+                    ReferenceAnchorBuildStates.FailedImport,
+                    retainedSegmentCount,
+                    retainedMaterialCount,
+                    retainedSlotCount,
+                    lastError,
+                    now,
+                    retainedVectorCount);
             }
         }
         finally
@@ -460,7 +1264,21 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             stagedSlotCount,
             stagedMaterials,
             stagedEmbeddingOptions ?? throw new InvalidOperationException("Reference anchor rebuild embedding options were not initialized."),
+            stagedAffectedIds,
             cancellationToken);
+        if (completed.Anchor.Status == ReferenceAnchorBuildStates.FailedEmbedding &&
+            previousCorpus is not null &&
+            previousCorpus.Materials.Count > 0)
+        {
+            return await RestorePreviousCorpusAfterFailedRebuildEmbeddingAsync(
+                databasePath,
+                previousAnchor ?? throw new InvalidOperationException("Reference anchor rebuild previous state was not initialized."),
+                previousCorpus,
+                completed.LastError,
+                completed.Anchor.UpdatedAt,
+                CancellationToken.None);
+        }
+
         return BuildStatus(
             completed.Anchor,
             completed.Anchor.Status,
@@ -593,6 +1411,57 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
     }
 
+    public async ValueTask<PageResultPayload<ReferenceMaterialTagReviewItemPayload>> GetMaterialTagReviewQueueAsync(
+        GetReferenceMaterialTagReviewQueuePayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        var page = Math.Max(1, input.Page);
+        var size = Math.Clamp(input.Size, 1, 100);
+        var archiveFilter = string.IsNullOrWhiteSpace(input.ArchiveFilter)
+            ? ReferenceMaterialArchiveFilters.Active
+            : ValidateAllowedText(input.ArchiveFilter, nameof(input.ArchiveFilter), AllowedMaterialArchiveFilters);
+        var requestedAnchorIds = input.AnchorIds?.Where(id => id > 0).Distinct().ToArray() ?? [];
+        if (requestedAnchorIds.Length > MaxExplicitAnchorFilterIds)
+        {
+            throw new ArgumentException(
+                $"At most {MaxExplicitAnchorFilterIds} anchor ids can be supplied for material tag review.",
+                nameof(input));
+        }
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var anchorIds = requestedAnchorIds;
+            if (anchorIds.Length == 0)
+            {
+                anchorIds = await GetAnchorIdsAsync(connection, input.NovelId, cancellationToken);
+            }
+
+            if (anchorIds.Length == 0)
+            {
+                return new PageResultPayload<ReferenceMaterialTagReviewItemPayload>([], 0, page, size, 0);
+            }
+
+            return await ReadMaterialTagReviewQueueItemsAsync(
+                connection,
+                input.NovelId,
+                anchorIds,
+                archiveFilter,
+                page,
+                size,
+                cancellationToken);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
     public async ValueTask<ReferenceMaterialDetailPayload?> GetMaterialDetailAsync(
         GetReferenceMaterialDetailPayload input,
         CancellationToken cancellationToken)
@@ -645,6 +1514,58 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
     }
 
+    public async ValueTask<ReferenceSourceSegmentDetailPayload?> GetSourceSegmentDetailAsync(
+        GetReferenceSourceSegmentDetailPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        ValidateAnchorId(input.AnchorId);
+        var segmentId = NormalizeRequiredText(input.SegmentId, nameof(input.SegmentId), maxLength: 256);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var anchor = await TryReadAnchorAsync(connection, input.NovelId, input.AnchorId, cancellationToken);
+            if (anchor is null)
+            {
+                return null;
+            }
+
+            var segmentPreviewMaxChars = IsUnknownLicense(anchor.LicenseStatus)
+                ? UnknownLicensePreviewMaxChars
+                : MaterialDetailSegmentPreviewMaxChars;
+            var segment = await ReadSourceSegmentPreviewAsync(
+                connection,
+                anchor.AnchorId,
+                segmentId,
+                segmentPreviewMaxChars,
+                cancellationToken);
+            if (segment is null)
+            {
+                return null;
+            }
+
+            var notes = await ReadMaterialDetailProcessingNotesAsync(
+                connection,
+                input.NovelId,
+                anchor.AnchorId,
+                cancellationToken);
+
+            return new ReferenceSourceSegmentDetailPayload(
+                ToSourceSummary(anchor),
+                segment,
+                notes);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
     public async ValueTask<ReferenceSourceProcessingDetailPayload?> GetSourceProcessingDetailAsync(
         GetReferenceSourceProcessingDetailPayload input,
         CancellationToken cancellationToken)
@@ -678,12 +1599,29 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 ];
             }
 
+            var attempts = await ReadSourceProcessingAttemptsAsync(connection, input.AnchorId, cancellationToken);
+            if (attempts.Count == 0)
+            {
+                attempts = BuildSourceProcessingAttempts(input.AnchorId, anchor.BuildVersion, currentStatus, events);
+            }
+
+            var currentAttempt = attempts.Count == 0 ? null : attempts[^1];
+            var priorAttempts = attempts.Count <= 1
+                ? Array.Empty<ReferenceSourceProcessingAttemptPayload>()
+                : attempts.Take(attempts.Count - 1).Reverse().ToArray();
+
             return new ReferenceSourceProcessingDetailPayload(
                 ToSourceSummary(anchor),
                 currentStatus is null ? null : ToSourceProcessingStatus(currentStatus),
                 events,
                 RetryAvailable: currentStatus is not null && IsFailedBuildStatus(currentStatus.Status),
-                RebuildAvailable: true);
+                RebuildAvailable: true,
+                AttemptCount: attempts.Count,
+                CurrentAttempt: currentAttempt,
+                PriorAttempts: priorAttempts,
+                RecoveredFromAttemptId: currentAttempt?.RecoveredFromAttemptId ?? string.Empty,
+                RecoveredFromBuildId: currentAttempt?.RecoveredFromBuildId ?? string.Empty,
+                BlockedReason: currentAttempt?.BlockedReason ?? string.Empty);
         }
         finally
         {
@@ -1632,8 +2570,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         string lastError,
         DateTimeOffset updatedAt,
         CancellationToken cancellationToken,
-        int vectorCount = 0)
+        int vectorCount = 0,
+        ReferenceProcessingAffectedIds? affectedIds = null)
     {
+        var affected = affectedIds ?? ReferenceProcessingAffectedIds.Empty;
         await using (var update = connection.CreateCommand())
         {
             update.Transaction = transaction;
@@ -1682,20 +2622,33 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         upsert.Parameters.AddWithValue("$updated_at", FormatTimestamp(updatedAt));
         await upsert.ExecuteNonQueryAsync(cancellationToken);
 
+        var processingAttempt = await ResolveProcessingAttemptForEventAsync(
+            connection,
+            transaction,
+            anchor,
+            status,
+            updatedAt,
+            cancellationToken);
         await using var history = connection.CreateCommand();
         history.Transaction = transaction;
         history.CommandText = """
             INSERT INTO reference_anchor_processing_events
-              (event_id, anchor_id, stage, status, source_segment_count, material_count,
-               slot_count, vector_count, last_error, affected_source_id, affected_material_id,
-               affected_segment_id, affected_slot_id, created_at)
+              (event_id, anchor_id, attempt_id, build_id, attempt_number, build_version,
+               stage, status, source_segment_count, material_count, slot_count, vector_count,
+               last_error, affected_source_id, affected_material_id, affected_segment_id,
+               affected_slot_id, created_at)
             VALUES
-              ($event_id, $anchor_id, $stage, $status, $source_segment_count, $material_count,
-               $slot_count, $vector_count, $last_error, $affected_source_id, $affected_material_id,
-               $affected_segment_id, $affected_slot_id, $created_at);
+              ($event_id, $anchor_id, $attempt_id, $build_id, $attempt_number, $build_version,
+               $stage, $status, $source_segment_count, $material_count, $slot_count, $vector_count,
+               $last_error, $affected_source_id, $affected_material_id, $affected_segment_id,
+               $affected_slot_id, $created_at);
             """;
         history.Parameters.AddWithValue("$event_id", Guid.NewGuid().ToString("N"));
         history.Parameters.AddWithValue("$anchor_id", anchor.AnchorId);
+        history.Parameters.AddWithValue("$attempt_id", processingAttempt.AttemptId);
+        history.Parameters.AddWithValue("$build_id", processingAttempt.BuildId);
+        history.Parameters.AddWithValue("$attempt_number", processingAttempt.AttemptNumber);
+        history.Parameters.AddWithValue("$build_version", processingAttempt.BuildVersion);
         history.Parameters.AddWithValue("$stage", stage);
         history.Parameters.AddWithValue("$status", status);
         history.Parameters.AddWithValue("$source_segment_count", sourceSegmentCount);
@@ -1704,11 +2657,174 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         history.Parameters.AddWithValue("$vector_count", vectorCount);
         history.Parameters.AddWithValue("$last_error", lastError);
         history.Parameters.AddWithValue("$affected_source_id", anchor.AnchorId.ToString(CultureInfo.InvariantCulture));
-        history.Parameters.AddWithValue("$affected_material_id", string.Empty);
-        history.Parameters.AddWithValue("$affected_segment_id", string.Empty);
-        history.Parameters.AddWithValue("$affected_slot_id", string.Empty);
+        history.Parameters.AddWithValue("$affected_material_id", affected.MaterialId);
+        history.Parameters.AddWithValue("$affected_segment_id", affected.SegmentId);
+        history.Parameters.AddWithValue("$affected_slot_id", affected.SlotId);
         history.Parameters.AddWithValue("$created_at", FormatTimestamp(updatedAt));
         await history.ExecuteNonQueryAsync(cancellationToken);
+
+        await UpsertProcessingAttemptAsync(
+            connection,
+            transaction,
+            processingAttempt,
+            stage,
+            status,
+            sourceSegmentCount,
+            materialCount,
+            slotCount,
+            vectorCount,
+            lastError,
+            updatedAt,
+            cancellationToken);
+    }
+
+    private static async ValueTask<ReferenceProcessingAttemptWrite> ResolveProcessingAttemptForEventAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        ReferenceAnchorPayload anchor,
+        string status,
+        DateTimeOffset updatedAt,
+        CancellationToken cancellationToken)
+    {
+        var latest = await ReadLatestProcessingAttemptAsync(
+            connection,
+            transaction,
+            anchor.AnchorId,
+            cancellationToken);
+        if (latest is null || IsTerminalBuildStatus(latest.Status))
+        {
+            var attemptNumber = (latest?.AttemptNumber ?? 0) + 1;
+            var attemptId = BuildSourceProcessingAttemptId(anchor.AnchorId, attemptNumber);
+            var buildId = BuildSourceProcessingBuildId(anchor.AnchorId, attemptNumber);
+            var recoveredFromAttemptId = latest is not null && IsRecoveredFromPriorAttempt(latest.Status, status)
+                ? latest.AttemptId
+                : string.Empty;
+            var recoveredFromBuildId = latest is not null && IsRecoveredFromPriorAttempt(latest.Status, status)
+                ? latest.BuildId
+                : string.Empty;
+            return new ReferenceProcessingAttemptWrite(
+                anchor.AnchorId,
+                attemptId,
+                buildId,
+                attemptNumber,
+                anchor.BuildVersion,
+                updatedAt,
+                recoveredFromAttemptId,
+                recoveredFromBuildId);
+        }
+
+        return new ReferenceProcessingAttemptWrite(
+            anchor.AnchorId,
+            latest.AttemptId,
+            latest.BuildId,
+            latest.AttemptNumber,
+            latest.BuildVersion,
+            latest.StartedAt,
+            latest.RecoveredFromAttemptId,
+            latest.RecoveredFromBuildId);
+    }
+
+    private static async ValueTask<ReferenceProcessingAttemptRead?> ReadLatestProcessingAttemptAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long anchorId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT attempt_id, build_id, attempt_number, build_version, status, started_at,
+                   recovered_from_attempt_id, recovered_from_build_id
+            FROM reference_anchor_processing_attempts
+            WHERE anchor_id = $anchor_id
+            ORDER BY attempt_number DESC
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new ReferenceProcessingAttemptRead(
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.GetInt32(2),
+            reader.GetString(3),
+            reader.GetString(4),
+            ParseTimestamp(reader.GetString(5)),
+            reader.GetString(6),
+            reader.GetString(7));
+    }
+
+    private static async ValueTask UpsertProcessingAttemptAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        ReferenceProcessingAttemptWrite attempt,
+        string stage,
+        string status,
+        int sourceSegmentCount,
+        int materialCount,
+        int slotCount,
+        int vectorCount,
+        string lastError,
+        DateTimeOffset updatedAt,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO reference_anchor_processing_attempts
+              (attempt_id, anchor_id, build_id, attempt_number, build_version, stage, status,
+               started_at, updated_at, completed_at, event_count, source_segment_count,
+               material_count, slot_count, vector_count, recovered_from_attempt_id,
+               recovered_from_build_id, blocked_reason)
+            VALUES
+              ($attempt_id, $anchor_id, $build_id, $attempt_number, $build_version, $stage, $status,
+               $started_at, $updated_at, $completed_at, 1, $source_segment_count,
+               $material_count, $slot_count, $vector_count, $recovered_from_attempt_id,
+               $recovered_from_build_id, $blocked_reason)
+            ON CONFLICT(attempt_id) DO UPDATE SET
+              build_version = excluded.build_version,
+              stage = excluded.stage,
+              status = excluded.status,
+              updated_at = excluded.updated_at,
+              completed_at = excluded.completed_at,
+              event_count = reference_anchor_processing_attempts.event_count + 1,
+              source_segment_count = excluded.source_segment_count,
+              material_count = excluded.material_count,
+              slot_count = excluded.slot_count,
+              vector_count = excluded.vector_count,
+              recovered_from_attempt_id = CASE
+                  WHEN excluded.recovered_from_attempt_id <> '' THEN excluded.recovered_from_attempt_id
+                  ELSE reference_anchor_processing_attempts.recovered_from_attempt_id
+                END,
+              recovered_from_build_id = CASE
+                  WHEN excluded.recovered_from_build_id <> '' THEN excluded.recovered_from_build_id
+                  ELSE reference_anchor_processing_attempts.recovered_from_build_id
+                END,
+              blocked_reason = excluded.blocked_reason;
+            """;
+        command.Parameters.AddWithValue("$attempt_id", attempt.AttemptId);
+        command.Parameters.AddWithValue("$anchor_id", attempt.AnchorId);
+        command.Parameters.AddWithValue("$build_id", attempt.BuildId);
+        command.Parameters.AddWithValue("$attempt_number", attempt.AttemptNumber);
+        command.Parameters.AddWithValue("$build_version", attempt.BuildVersion);
+        command.Parameters.AddWithValue("$stage", stage);
+        command.Parameters.AddWithValue("$status", status);
+        command.Parameters.AddWithValue("$started_at", FormatTimestamp(attempt.StartedAt));
+        command.Parameters.AddWithValue("$updated_at", FormatTimestamp(updatedAt));
+        command.Parameters.AddWithValue("$completed_at", IsTerminalBuildStatus(status) ? FormatTimestamp(updatedAt) : (object)DBNull.Value);
+        command.Parameters.AddWithValue("$source_segment_count", sourceSegmentCount);
+        command.Parameters.AddWithValue("$material_count", materialCount);
+        command.Parameters.AddWithValue("$slot_count", slotCount);
+        command.Parameters.AddWithValue("$vector_count", vectorCount);
+        command.Parameters.AddWithValue("$recovered_from_attempt_id", attempt.RecoveredFromAttemptId);
+        command.Parameters.AddWithValue("$recovered_from_build_id", attempt.RecoveredFromBuildId);
+        command.Parameters.AddWithValue("$blocked_reason", BuildAttemptBlockedReason(status, lastError));
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private async ValueTask<ReferenceAnchorBuildCompletion> CompleteEmbeddingStageAsync(
@@ -1719,6 +2835,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         int slotCount,
         IReadOnlyList<ReferenceMaterialPayload> materials,
         EmbeddingRequestOptions embeddingOptions,
+        ReferenceProcessingAffectedIds affectedIds,
         CancellationToken cancellationToken)
     {
         try
@@ -1746,8 +2863,32 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 vectorCount,
                 string.Empty,
                 now,
-                cancellationToken);
+                cancellationToken,
+                affectedIds);
             return new ReferenceAnchorBuildCompletion(readyAnchor, "ready", vectorCount, string.Empty);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var cancelledAnchor = anchor with
+            {
+                Status = ReferenceAnchorBuildStates.Cancelled,
+                UpdatedAt = now
+            };
+            await UpdateAnchorBuildResultInNewTransactionAsync(
+                databasePath,
+                cancelledAnchor,
+                ReferenceAnchorBuildStates.Cancelled,
+                ReferenceAnchorBuildStates.Cancelled,
+                sourceSegmentCount,
+                materialCount,
+                slotCount,
+                0,
+                "Operation was cancelled.",
+                now,
+                CancellationToken.None,
+                affectedIds);
+            throw;
         }
         catch (OperationCanceledException)
         {
@@ -1773,9 +2914,72 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
                 0,
                 lastError,
                 now,
-                CancellationToken.None);
+                CancellationToken.None,
+                affectedIds);
             return new ReferenceAnchorBuildCompletion(failedAnchor, ReferenceAnchorBuildStates.FailedEmbedding, 0, lastError);
         }
+    }
+
+    private static async ValueTask<ReferenceAnchorBuildStatusPayload> RestorePreviousCorpusAfterFailedRebuildEmbeddingAsync(
+        string databasePath,
+        ReferenceAnchorPayload previousAnchor,
+        ReferenceAnchorCorpusSnapshot previousCorpus,
+        string lastError,
+        DateTimeOffset updatedAt,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var failedAnchor = previousAnchor with
+        {
+            Status = ReferenceAnchorBuildStates.FailedEmbedding,
+            UpdatedAt = updatedAt
+        };
+        await ReplaceSegmentsAsync(
+            connection,
+            transaction,
+            previousAnchor.AnchorId,
+            previousCorpus.Segments,
+            cancellationToken);
+        await ReplaceMaterialRowsAsync(
+            connection,
+            transaction,
+            previousAnchor.AnchorId,
+            previousCorpus.Materials,
+            cancellationToken,
+            previousCorpus.ArchivedMaterialTimestamps);
+        await ReplaceMaterialSlotsAsync(
+            connection,
+            transaction,
+            previousAnchor.AnchorId,
+            previousCorpus.SlotsByMaterial,
+            BuildMaterialCreatedAt(previousCorpus.Materials),
+            cancellationToken);
+        var slotCount = CountMaterialSlots(previousCorpus.SlotsByMaterial);
+        await UpdateAnchorBuildResultAsync(
+            connection,
+            transaction,
+            failedAnchor,
+            ReferenceAnchorBuildStates.FailedEmbedding,
+            ReferenceAnchorBuildStates.FailedEmbedding,
+            previousCorpus.Segments.Count,
+            previousCorpus.Materials.Count,
+            slotCount,
+            lastError,
+            updatedAt,
+            cancellationToken,
+            vectorCount: 0,
+            affectedIds: BuildAffectedProcessingIds(previousCorpus.Materials, previousCorpus.SlotsByMaterial));
+        await transaction.CommitAsync(cancellationToken);
+        return BuildStatus(
+            failedAnchor,
+            ReferenceAnchorBuildStates.FailedEmbedding,
+            ReferenceAnchorBuildStates.FailedEmbedding,
+            previousCorpus.Segments.Count,
+            previousCorpus.Materials.Count,
+            slotCount,
+            lastError,
+            updatedAt);
     }
 
     private async ValueTask<int> ProvisionMaterialVectorsAsync(
@@ -1875,7 +3079,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         int vectorCount,
         string lastError,
         DateTimeOffset updatedAt,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ReferenceProcessingAffectedIds affectedIds)
     {
         await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
@@ -1891,11 +3096,12 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             lastError,
             updatedAt,
             cancellationToken,
-            vectorCount);
+            vectorCount,
+            affectedIds);
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private static async ValueTask ReplaceMaterialsAsync(
+    private static async ValueTask ReplaceMaterialRowsAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         long anchorId,
@@ -2005,26 +3211,6 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             insert.Parameters.AddWithValue("$created_at", FormatTimestamp(material.CreatedAt));
             insert.Parameters.AddWithValue("$archived_at", archivedAt is null ? DBNull.Value : archivedAt);
             await insert.ExecuteNonQueryAsync(cancellationToken);
-
-            foreach (var slot in ReferenceMaterialSlotDetector.Detect(material))
-            {
-                await using var slotInsert = connection.CreateCommand();
-                slotInsert.Transaction = transaction;
-                slotInsert.CommandText = """
-                    INSERT INTO reference_material_slots
-                      (slot_id, material_id, slot_name, placeholder, start_offset, end_offset, created_at)
-                    VALUES
-                      ($slot_id, $material_id, $slot_name, $placeholder, $start_offset, $end_offset, $created_at);
-                    """;
-                slotInsert.Parameters.AddWithValue("$slot_id", slot.SlotId);
-                slotInsert.Parameters.AddWithValue("$material_id", slot.MaterialId);
-                slotInsert.Parameters.AddWithValue("$slot_name", slot.SlotName);
-                slotInsert.Parameters.AddWithValue("$placeholder", slot.Placeholder);
-                slotInsert.Parameters.AddWithValue("$start_offset", slot.StartOffset);
-                slotInsert.Parameters.AddWithValue("$end_offset", slot.EndOffset);
-                slotInsert.Parameters.AddWithValue("$created_at", FormatTimestamp(material.CreatedAt));
-                await slotInsert.ExecuteNonQueryAsync(cancellationToken);
-            }
         }
 
         await using (var deleteStale = connection.CreateCommand())
@@ -2045,6 +3231,80 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             clearKeep.CommandText = "DELETE FROM temp_reference_material_keep;";
             await clearKeep.ExecuteNonQueryAsync(cancellationToken);
         }
+    }
+
+    private static async ValueTask ReplaceMaterialSlotsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long anchorId,
+        IReadOnlyDictionary<string, IReadOnlyList<ReferenceMaterialSlot>> slotsByMaterial,
+        IReadOnlyDictionary<string, DateTimeOffset> materialCreatedAt,
+        CancellationToken cancellationToken)
+    {
+        await using (var deleteSlots = connection.CreateCommand())
+        {
+            deleteSlots.Transaction = transaction;
+            deleteSlots.CommandText = """
+                DELETE FROM reference_material_slots
+                WHERE material_id IN (
+                  SELECT material_id
+                  FROM reference_materials
+                  WHERE anchor_id = $anchor_id
+                );
+                """;
+            deleteSlots.Parameters.AddWithValue("$anchor_id", anchorId);
+            await deleteSlots.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        foreach (var slots in slotsByMaterial.Values)
+        {
+            foreach (var slot in slots)
+            {
+                await using var slotInsert = connection.CreateCommand();
+                slotInsert.Transaction = transaction;
+                slotInsert.CommandText = """
+                    INSERT INTO reference_material_slots
+                      (slot_id, material_id, slot_name, placeholder, start_offset, end_offset, created_at)
+                    VALUES
+                      ($slot_id, $material_id, $slot_name, $placeholder, $start_offset, $end_offset, $created_at);
+                    """;
+                slotInsert.Parameters.AddWithValue("$slot_id", slot.SlotId);
+                slotInsert.Parameters.AddWithValue("$material_id", slot.MaterialId);
+                slotInsert.Parameters.AddWithValue("$slot_name", slot.SlotName);
+                slotInsert.Parameters.AddWithValue("$placeholder", slot.Placeholder);
+                slotInsert.Parameters.AddWithValue("$start_offset", slot.StartOffset);
+                slotInsert.Parameters.AddWithValue("$end_offset", slot.EndOffset);
+                slotInsert.Parameters.AddWithValue(
+                    "$created_at",
+                    materialCreatedAt.TryGetValue(slot.MaterialId, out var createdAt)
+                        ? FormatTimestamp(createdAt)
+                        : FormatTimestamp(DateTimeOffset.UtcNow));
+                await slotInsert.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+    }
+
+    private IReadOnlyDictionary<string, IReadOnlyList<ReferenceMaterialSlot>> DetectMaterialSlots(
+        IReadOnlyList<ReferenceMaterialPayload> materials)
+    {
+        var slotsByMaterial = new Dictionary<string, IReadOnlyList<ReferenceMaterialSlot>>(StringComparer.Ordinal);
+        foreach (var material in materials)
+        {
+            slotsByMaterial[material.MaterialId] = _slotDetector.Detect(material);
+        }
+
+        return slotsByMaterial;
+    }
+
+    private static int CountMaterialSlots(IReadOnlyDictionary<string, IReadOnlyList<ReferenceMaterialSlot>> slotsByMaterial)
+    {
+        return slotsByMaterial.Values.Sum(slots => slots.Count);
+    }
+
+    private static IReadOnlyDictionary<string, DateTimeOffset> BuildMaterialCreatedAt(
+        IReadOnlyList<ReferenceMaterialPayload> materials)
+    {
+        return materials.ToDictionary(material => material.MaterialId, material => material.CreatedAt, StringComparer.Ordinal);
     }
 
     private static async ValueTask<long[]> GetAnchorIdsAsync(
@@ -2071,6 +3331,45 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
 
         return anchorIds.ToArray();
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceSourceSegment>> ReadSourceSegmentsAsync(
+        SqliteConnection connection,
+        long anchorId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT segment_id, chapter_index, chapter_title, segment_type, segment_index,
+                   parent_segment_id, start_offset, end_offset, text, text_hash
+            FROM reference_source_segments
+            WHERE anchor_id = $anchor_id
+            ORDER BY chapter_index ASC,
+                     start_offset ASC,
+                     end_offset ASC,
+                     segment_type ASC,
+                     segment_index ASC,
+                     segment_id ASC;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        var segments = new List<ReferenceSourceSegment>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            segments.Add(new ReferenceSourceSegment(
+                reader.GetString(0),
+                reader.GetInt32(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetInt32(4),
+                reader.GetString(5),
+                reader.GetInt32(6),
+                reader.GetInt32(7),
+                reader.GetString(8),
+                reader.GetString(9)));
+        }
+
+        return segments;
     }
 
     private static async ValueTask<IReadOnlyList<ReferenceMaterialPayload>> ReadMaterialsAsync(
@@ -2126,6 +3425,143 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
 
         return materials;
+    }
+
+    private static async ValueTask<PageResultPayload<ReferenceMaterialTagReviewItemPayload>> ReadMaterialTagReviewQueueItemsAsync(
+        SqliteConnection connection,
+        long novelId,
+        IReadOnlyList<long> anchorIds,
+        string archiveFilter,
+        int page,
+        int size,
+        CancellationToken cancellationToken)
+    {
+        if (anchorIds.Count == 0)
+        {
+            return new PageResultPayload<ReferenceMaterialTagReviewItemPayload>([], 0, page, size, 0);
+        }
+
+        var parameterNames = new List<string>(anchorIds.Count);
+        await using var countCommand = connection.CreateCommand();
+        await using var pageCommand = connection.CreateCommand();
+        for (var index = 0; index < anchorIds.Count; index++)
+        {
+            var parameterName = "$anchor_id_" + index.ToString(CultureInfo.InvariantCulture);
+            parameterNames.Add(parameterName);
+            countCommand.Parameters.AddWithValue(parameterName, anchorIds[index]);
+            pageCommand.Parameters.AddWithValue(parameterName, anchorIds[index]);
+        }
+
+        var reviewWhere = $$"""
+            FROM reference_materials m
+            INNER JOIN reference_anchors a ON a.anchor_id = m.anchor_id
+            WHERE {{AnchorAliasNovelOrVisibleWorkspaceCorpusPredicate}}
+              AND (
+                $archive_filter = $archive_filter_all OR
+                ($archive_filter = $archive_filter_active AND m.archived_at IS NULL) OR
+                ($archive_filter = $archive_filter_archived AND m.archived_at IS NOT NULL)
+              )
+              AND m.anchor_id IN ({{string.Join(", ", parameterNames)}})
+              AND (
+                m.user_verified = 0 OR
+                m.function_confidence < $material_review_confidence_threshold OR
+                m.emotion_confidence < $material_review_confidence_threshold OR
+                m.pov_confidence < $material_review_confidence_threshold OR
+                lower(trim(m.function_tag)) IN ('', 'unknown', 'untagged', 'none', 'null', 'undefined') OR
+                lower(trim(m.emotion_tag)) IN ('', 'unknown', 'untagged', 'none', 'null', 'undefined') OR
+                lower(trim(m.scene_tag)) IN ('', 'unknown', 'untagged', 'none', 'null', 'undefined') OR
+                lower(trim(m.pov_tag)) IN ('', 'unknown', 'untagged', 'none', 'null', 'undefined') OR
+                lower(trim(m.technique_tag)) IN ('', 'unknown', 'untagged', 'none', 'null', 'undefined')
+              )
+            """;
+
+        countCommand.CommandText = $"SELECT COUNT(*) {reviewWhere};";
+        AddMaterialTagReviewQueueParameters(countCommand, novelId, archiveFilter);
+        var total = Convert.ToInt64(await countCommand.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+        if (total == 0)
+        {
+            return new PageResultPayload<ReferenceMaterialTagReviewItemPayload>([], 0, page, size, 0);
+        }
+
+        pageCommand.CommandText = $$"""
+            SELECT m.material_id, m.anchor_id, m.source_segment_id, m.material_type,
+                   m.function_tag, m.emotion_tag, m.scene_tag, m.pov_tag, m.technique_tag,
+                   m.function_confidence, m.emotion_confidence, m.pov_confidence,
+                   CASE
+                     WHEN length(m.text) > CASE WHEN lower(a.license_status) = $unknown_license_status THEN $unknown_preview_max_chars ELSE $preview_max_chars END
+                     THEN substr(m.text, 1, CASE WHEN lower(a.license_status) = $unknown_license_status THEN $unknown_preview_max_chars ELSE $preview_max_chars END) || '...'
+                     ELSE m.text
+                   END AS text_preview,
+                   CASE
+                     WHEN length(m.text) > CASE WHEN lower(a.license_status) = $unknown_license_status THEN $unknown_preview_max_chars ELSE $preview_max_chars END
+                     THEN 1 ELSE 0
+                   END AS text_truncated,
+                   m.source_hash, m.extractor_version, m.user_verified, m.created_at,
+                   m.archived_at,
+                   a.license_status
+            {{reviewWhere}}
+            ORDER BY CASE WHEN a.novel_id = $novel_id THEN 0 ELSE 1 END,
+                     m.anchor_id ASC, m.material_id ASC
+            LIMIT $size OFFSET $offset;
+            """;
+        AddMaterialTagReviewQueueParameters(pageCommand, novelId, archiveFilter);
+        pageCommand.Parameters.AddWithValue("$preview_max_chars", MaterialListPreviewMaxChars);
+        pageCommand.Parameters.AddWithValue("$unknown_preview_max_chars", UnknownLicensePreviewMaxChars);
+        pageCommand.Parameters.AddWithValue("$unknown_license_status", "unknown");
+        pageCommand.Parameters.AddWithValue("$size", size);
+        pageCommand.Parameters.AddWithValue("$offset", (page - 1) * size);
+
+        var items = new List<ReferenceMaterialTagReviewItemPayload>();
+        await using var reader = await pageCommand.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var archivedAt = reader.IsDBNull(18) ? (DateTimeOffset?)null : ParseTimestamp(reader.GetString(18));
+            var summary = new ReferenceMaterialSummaryPayload(
+                reader.GetString(0),
+                reader.GetInt64(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5),
+                reader.GetString(6),
+                reader.GetString(7),
+                reader.GetString(8),
+                reader.GetDouble(9),
+                reader.GetDouble(10),
+                reader.GetDouble(11),
+                NormalizePreviewText(reader.GetString(12)),
+                reader.GetInt64(13) != 0,
+                reader.GetString(14),
+                reader.GetString(15),
+                reader.GetInt64(16) != 0,
+                ParseTimestamp(reader.GetString(17)),
+                archivedAt.HasValue ? ReferenceMaterialArchiveFilters.Archived : ReferenceMaterialArchiveFilters.Active,
+                archivedAt);
+            items.Add(BuildMaterialTagReviewItem(summary));
+        }
+
+        var totalPages = (int)Math.Ceiling(total / (double)size);
+        return new PageResultPayload<ReferenceMaterialTagReviewItemPayload>(
+            items,
+            total,
+            page,
+            size,
+            totalPages);
+    }
+
+    private static void AddMaterialTagReviewQueueParameters(
+        SqliteCommand command,
+        long novelId,
+        string archiveFilter)
+    {
+        command.Parameters.AddWithValue("$novel_id", novelId);
+        command.Parameters.AddWithValue("$workspace_corpus_novel_id", WorkspaceCorpusNovelId);
+        command.Parameters.AddWithValue("$workspace_corpus_visibility", ReferenceCorpusVisibilities.Workspace);
+        command.Parameters.AddWithValue("$archive_filter", archiveFilter);
+        command.Parameters.AddWithValue("$archive_filter_active", ReferenceMaterialArchiveFilters.Active);
+        command.Parameters.AddWithValue("$archive_filter_archived", ReferenceMaterialArchiveFilters.Archived);
+        command.Parameters.AddWithValue("$archive_filter_all", ReferenceMaterialArchiveFilters.All);
+        command.Parameters.AddWithValue("$material_review_confidence_threshold", MaterialReviewConfidenceThreshold);
     }
 
     private static async ValueTask<IReadOnlySet<long>> ReadUnknownLicenseAnchorIdsAsync(
@@ -2395,6 +3831,47 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         return segments;
     }
 
+    private static async ValueTask<ReferenceSourceSegmentPreviewPayload?> ReadSourceSegmentPreviewAsync(
+        SqliteConnection connection,
+        long anchorId,
+        string segmentId,
+        int previewMaxChars,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT segment_id, anchor_id, segment_type, chapter_index, chapter_title, segment_index,
+                   parent_segment_id, start_offset, end_offset, text, text_hash
+            FROM reference_source_segments
+            WHERE anchor_id = $anchor_id
+              AND segment_id = $segment_id
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        command.Parameters.AddWithValue("$segment_id", segmentId);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        var preview = BuildPreview(reader.GetString(9), previewMaxChars);
+        return new ReferenceSourceSegmentPreviewPayload(
+            reader.GetInt64(1),
+            reader.GetString(0),
+            reader.GetString(2),
+            reader.GetInt32(3),
+            reader.GetString(4),
+            reader.GetInt32(5),
+            reader.GetString(6),
+            reader.GetInt32(7),
+            reader.GetInt32(8),
+            preview.Text,
+            preview.Truncated,
+            reader.GetString(10));
+    }
+
     private static async ValueTask<IReadOnlyList<ReferenceMaterialPayload>> ReadUserVerifiedMaterialsAsync(
         SqliteConnection connection,
         long anchorId,
@@ -2447,6 +3924,47 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
 
         return markers;
+    }
+
+    private static async ValueTask<IReadOnlyDictionary<string, IReadOnlyList<ReferenceMaterialSlot>>> ReadMaterialSlotsForAnchorAsync(
+        SqliteConnection connection,
+        long anchorId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT sl.slot_id, sl.material_id, sl.slot_name, sl.placeholder,
+                   sl.start_offset, sl.end_offset
+            FROM reference_material_slots sl
+            INNER JOIN reference_materials m ON m.material_id = sl.material_id
+            WHERE m.anchor_id = $anchor_id
+            ORDER BY sl.material_id ASC, sl.start_offset ASC, sl.slot_id ASC;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        var slotsByMaterial = new Dictionary<string, List<ReferenceMaterialSlot>>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var slot = new ReferenceMaterialSlot(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetInt32(4),
+                reader.GetInt32(5));
+            if (!slotsByMaterial.TryGetValue(slot.MaterialId, out var slots))
+            {
+                slots = [];
+                slotsByMaterial[slot.MaterialId] = slots;
+            }
+
+            slots.Add(slot);
+        }
+
+        return slotsByMaterial.ToDictionary(
+            item => item.Key,
+            item => (IReadOnlyList<ReferenceMaterialSlot>)item.Value.ToArray(),
+            StringComparer.Ordinal);
     }
 
     private static IReadOnlyDictionary<string, string> BuildArchivedMaterialTimestamps(
@@ -2795,6 +4313,50 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         return events;
     }
 
+    private static async ValueTask<IReadOnlyList<ReferenceSourceProcessingAttemptPayload>> ReadSourceProcessingAttemptsAsync(
+        SqliteConnection connection,
+        long anchorId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT attempt_id, attempt_number, build_id, build_version, stage, status,
+                   started_at, updated_at, completed_at, event_count, source_segment_count,
+                   material_count, slot_count, vector_count, recovered_from_attempt_id,
+                   recovered_from_build_id, blocked_reason
+            FROM reference_anchor_processing_attempts
+            WHERE anchor_id = $anchor_id
+            ORDER BY attempt_number ASC;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+
+        var attempts = new List<ReferenceSourceProcessingAttemptPayload>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            attempts.Add(new ReferenceSourceProcessingAttemptPayload(
+                reader.GetString(0),
+                reader.GetInt32(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(5),
+                ParseTimestamp(reader.GetString(6)),
+                ParseTimestamp(reader.GetString(7)),
+                reader.IsDBNull(8) ? null : ParseTimestamp(reader.GetString(8)),
+                reader.GetInt32(9),
+                reader.GetInt32(10),
+                reader.GetInt32(11),
+                reader.GetInt32(12),
+                reader.GetInt32(13),
+                reader.GetString(14),
+                reader.GetString(15),
+                reader.GetString(16)));
+        }
+
+        return attempts;
+    }
+
     private static ReferenceSourceProcessingEventPayload BuildSourceProcessingEventFromStatus(
         string eventId,
         long anchorId,
@@ -2816,6 +4378,99 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             string.Empty);
     }
 
+    private static IReadOnlyList<ReferenceSourceProcessingAttemptPayload> BuildSourceProcessingAttempts(
+        long anchorId,
+        string buildVersion,
+        ReferenceAnchorBuildStatusPayload? currentStatus,
+        IReadOnlyList<ReferenceSourceProcessingEventPayload> events)
+    {
+        var chronologicalEvents = (events ?? Array.Empty<ReferenceSourceProcessingEventPayload>())
+            .OrderBy(item => item.CreatedAt)
+            .ThenBy(item => item.EventId, StringComparer.Ordinal)
+            .ToArray();
+        if (chronologicalEvents.Length == 0 && currentStatus is not null)
+        {
+            chronologicalEvents =
+            [
+                BuildSourceProcessingEventFromStatus("current", anchorId, currentStatus)
+            ];
+        }
+
+        if (chronologicalEvents.Length == 0)
+        {
+            return Array.Empty<ReferenceSourceProcessingAttemptPayload>();
+        }
+
+        var attempts = new List<ReferenceSourceProcessingAttemptPayload>();
+        var attemptEvents = new List<ReferenceSourceProcessingEventPayload>();
+        foreach (var processingEvent in chronologicalEvents)
+        {
+            if (attemptEvents.Count > 0 && IsTerminalBuildStatus(attemptEvents[^1].Status))
+            {
+                AddSourceProcessingAttempt(anchorId, buildVersion, attempts, attemptEvents);
+                attemptEvents.Clear();
+            }
+
+            attemptEvents.Add(processingEvent);
+        }
+
+        if (attemptEvents.Count > 0)
+        {
+            AddSourceProcessingAttempt(anchorId, buildVersion, attempts, attemptEvents);
+        }
+
+        return attempts;
+    }
+
+    private static void AddSourceProcessingAttempt(
+        long anchorId,
+        string buildVersion,
+        List<ReferenceSourceProcessingAttemptPayload> attempts,
+        IReadOnlyList<ReferenceSourceProcessingEventPayload> attemptEvents)
+    {
+        var first = attemptEvents[0];
+        var last = attemptEvents[^1];
+        var attemptNumber = attempts.Count + 1;
+        var attemptId = BuildSourceProcessingAttemptId(anchorId, attemptNumber);
+        var buildId = BuildSourceProcessingBuildId(anchorId, attemptNumber);
+        var previous = attempts.Count == 0 ? null : attempts[^1];
+        var recoveredFromAttemptId = previous is not null && IsRecoveredFromPriorAttempt(previous.Status, last.Status)
+            ? previous.AttemptId
+            : string.Empty;
+        var recoveredFromBuildId = previous is not null && IsRecoveredFromPriorAttempt(previous.Status, last.Status)
+            ? previous.BuildId
+            : string.Empty;
+
+        attempts.Add(new ReferenceSourceProcessingAttemptPayload(
+            attemptId,
+            attemptNumber,
+            buildId,
+            buildVersion,
+            last.Stage,
+            last.Status,
+            first.CreatedAt,
+            last.CreatedAt,
+            IsTerminalBuildStatus(last.Status) ? last.CreatedAt : null,
+            attemptEvents.Count,
+            last.SourceSegmentCount,
+            last.MaterialCount,
+            last.SlotCount,
+            last.VectorCount,
+            recoveredFromAttemptId,
+            recoveredFromBuildId,
+            BuildAttemptBlockedReason(last.Status, last.Message)));
+    }
+
+    private static string BuildSourceProcessingAttemptId(long anchorId, int attemptNumber)
+    {
+        return string.Create(CultureInfo.InvariantCulture, $"anchor:{anchorId}:attempt:{attemptNumber}");
+    }
+
+    private static string BuildSourceProcessingBuildId(long anchorId, int attemptNumber)
+    {
+        return string.Create(CultureInfo.InvariantCulture, $"anchor:{anchorId}:build:{attemptNumber}");
+    }
+
     private static ReferenceSourceProcessingStatusPayload ToSourceProcessingStatus(
         ReferenceAnchorBuildStatusPayload status)
     {
@@ -2833,6 +4488,45 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
     private static bool IsFailedBuildStatus(string status)
     {
         return status.StartsWith("failed_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsTerminalBuildStatus(string status)
+    {
+        return status.Equals(ReferenceAnchorBuildStates.Ready, StringComparison.OrdinalIgnoreCase) ||
+            status.Equals(ReferenceAnchorBuildStates.Cancelled, StringComparison.OrdinalIgnoreCase) ||
+            IsFailedBuildStatus(status);
+    }
+
+    private static bool IsBlockedBuildStatus(string status)
+    {
+        return status.Equals(ReferenceAnchorBuildStates.Cancelled, StringComparison.OrdinalIgnoreCase) ||
+            status.Contains("blocked", StringComparison.OrdinalIgnoreCase) ||
+            IsFailedBuildStatus(status);
+    }
+
+    private static bool IsRecoveredFromPriorAttempt(string previousStatus, string currentStatus)
+    {
+        return IsBlockedBuildStatus(previousStatus) && !IsBlockedBuildStatus(currentStatus);
+    }
+
+    private static string BuildAttemptBlockedReason(string status, string message)
+    {
+        return IsBlockedBuildStatus(status) ? message : string.Empty;
+    }
+
+    private static bool IsRecoverableBuildStatus(string status)
+    {
+        return status.Equals(ReferenceAnchorBuildStates.Created, StringComparison.OrdinalIgnoreCase) ||
+            status.Equals(ReferenceAnchorBuildStates.Importing, StringComparison.OrdinalIgnoreCase) ||
+            status.Equals(ReferenceAnchorBuildStates.SourceImported, StringComparison.OrdinalIgnoreCase) ||
+            status.Equals(ReferenceAnchorBuildStates.Segmenting, StringComparison.OrdinalIgnoreCase) ||
+            status.Equals(ReferenceAnchorBuildStates.SegmentsBuilt, StringComparison.OrdinalIgnoreCase) ||
+            status.Equals(ReferenceAnchorBuildStates.ExtractingMaterials, StringComparison.OrdinalIgnoreCase) ||
+            status.Equals(ReferenceAnchorBuildStates.MaterialsExtracted, StringComparison.OrdinalIgnoreCase) ||
+            status.Equals(ReferenceAnchorBuildStates.DetectingSlots, StringComparison.OrdinalIgnoreCase) ||
+            status.Equals(ReferenceAnchorBuildStates.SlotsDetected, StringComparison.OrdinalIgnoreCase) ||
+            status.Equals(ReferenceAnchorBuildStates.Embedding, StringComparison.OrdinalIgnoreCase) ||
+            status.Equals(ReferenceAnchorBuildStates.Stale, StringComparison.OrdinalIgnoreCase);
     }
 
     private static async ValueTask<ReferenceAnchorBuildStatusPayload?> ReadBuildStatusAsync(
@@ -3153,6 +4847,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             CREATE TABLE IF NOT EXISTS reference_anchor_processing_events (
               event_id TEXT PRIMARY KEY,
               anchor_id INTEGER NOT NULL,
+              attempt_id TEXT NOT NULL DEFAULT '',
+              build_id TEXT NOT NULL DEFAULT '',
+              attempt_number INTEGER NOT NULL DEFAULT 0,
+              build_version TEXT NOT NULL DEFAULT '',
               stage TEXT NOT NULL,
               status TEXT NOT NULL,
               source_segment_count INTEGER NOT NULL,
@@ -3165,6 +4863,28 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
               affected_segment_id TEXT NOT NULL,
               affected_slot_id TEXT NOT NULL,
               created_at TEXT NOT NULL,
+              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS reference_anchor_processing_attempts (
+              attempt_id TEXT PRIMARY KEY,
+              anchor_id INTEGER NOT NULL,
+              build_id TEXT NOT NULL,
+              attempt_number INTEGER NOT NULL,
+              build_version TEXT NOT NULL,
+              stage TEXT NOT NULL,
+              status TEXT NOT NULL,
+              started_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              completed_at TEXT,
+              event_count INTEGER NOT NULL,
+              source_segment_count INTEGER NOT NULL,
+              material_count INTEGER NOT NULL,
+              slot_count INTEGER NOT NULL,
+              vector_count INTEGER NOT NULL,
+              recovered_from_attempt_id TEXT NOT NULL,
+              recovered_from_build_id TEXT NOT NULL,
+              blocked_reason TEXT NOT NULL,
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
             );
 
@@ -3286,6 +5006,12 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
 
             CREATE INDEX IF NOT EXISTS idx_reference_processing_events_anchor
               ON reference_anchor_processing_events(anchor_id, created_at);
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_reference_processing_attempts_anchor_number
+              ON reference_anchor_processing_attempts(anchor_id, attempt_number);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_processing_attempts_anchor_updated
+              ON reference_anchor_processing_attempts(anchor_id, updated_at);
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         var addedCorpusVisibilityColumn = await EnsureColumnAsync(
@@ -3317,8 +5043,34 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
             "archived_at",
             "ALTER TABLE reference_materials ADD COLUMN archived_at TEXT;",
             cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_anchor_processing_events",
+            "attempt_id",
+            "ALTER TABLE reference_anchor_processing_events ADD COLUMN attempt_id TEXT NOT NULL DEFAULT '';",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_anchor_processing_events",
+            "build_id",
+            "ALTER TABLE reference_anchor_processing_events ADD COLUMN build_id TEXT NOT NULL DEFAULT '';",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_anchor_processing_events",
+            "attempt_number",
+            "ALTER TABLE reference_anchor_processing_events ADD COLUMN attempt_number INTEGER NOT NULL DEFAULT 0;",
+            cancellationToken);
+        await EnsureColumnAsync(
+            connection,
+            "reference_anchor_processing_events",
+            "build_version",
+            "ALTER TABLE reference_anchor_processing_events ADD COLUMN build_version TEXT NOT NULL DEFAULT '';",
+            cancellationToken);
         await EnsureNullableAnchorNovelIdAsync(connection, cancellationToken);
         await PromoteLegacyOwnedWorkspaceCorpusRowsAsync(connection, cancellationToken);
+        await EnsureImportIdentityUniqueIndexAsync(connection, cancellationToken);
+        await BackfillReferenceProcessingAttemptsAsync(connection, cancellationToken);
         await using var indexCommand = connection.CreateCommand();
         indexCommand.CommandText = """
             CREATE INDEX IF NOT EXISTS idx_reference_anchors_corpus_visibility
@@ -3328,6 +5080,291 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
               ON reference_materials(anchor_id, archived_at);
             """;
         await indexCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask BackfillReferenceProcessingAttemptsAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var anchorIds = new List<long>();
+        await using (var readAnchors = connection.CreateCommand())
+        {
+            readAnchors.CommandText = """
+                SELECT DISTINCT e.anchor_id
+                FROM reference_anchor_processing_events e
+                WHERE e.attempt_id = ''
+                   OR e.build_id = ''
+                   OR e.attempt_number = 0
+                   OR e.build_version = ''
+                   OR NOT EXISTS (
+                        SELECT 1
+                        FROM reference_anchor_processing_attempts attempts
+                        WHERE attempts.attempt_id = e.attempt_id
+                      )
+                ORDER BY e.anchor_id ASC;
+                """;
+            await using var reader = await readAnchors.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                anchorIds.Add(reader.GetInt64(0));
+            }
+        }
+
+        foreach (var anchorId in anchorIds)
+        {
+            var rows = await ReadProcessingEventBackfillRowsAsync(connection, anchorId, cancellationToken);
+            await BackfillReferenceProcessingAttemptsForAnchorAsync(connection, rows, cancellationToken);
+        }
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceProcessingEventBackfillRow>> ReadProcessingEventBackfillRowsAsync(
+        SqliteConnection connection,
+        long anchorId,
+        CancellationToken cancellationToken)
+    {
+        await using var read = connection.CreateCommand();
+        read.CommandText = """
+            SELECT e.event_id, e.anchor_id, a.build_version, e.stage, e.status,
+                   e.source_segment_count, e.material_count, e.slot_count, e.vector_count,
+                   e.last_error, e.created_at
+            FROM reference_anchor_processing_events e
+            INNER JOIN reference_anchors a ON a.anchor_id = e.anchor_id
+            WHERE e.anchor_id = $anchor_id
+            ORDER BY e.created_at ASC, e.event_id ASC;
+            """;
+        read.Parameters.AddWithValue("$anchor_id", anchorId);
+
+        var rows = new List<ReferenceProcessingEventBackfillRow>();
+        await using var reader = await read.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add(new ReferenceProcessingEventBackfillRow(
+                reader.GetString(0),
+                reader.GetInt64(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetInt32(5),
+                reader.GetInt32(6),
+                reader.GetInt32(7),
+                reader.GetInt32(8),
+                reader.GetString(9),
+                ParseTimestamp(reader.GetString(10))));
+        }
+
+        return rows;
+    }
+
+    private static async ValueTask BackfillReferenceProcessingAttemptsForAnchorAsync(
+        SqliteConnection connection,
+        IReadOnlyList<ReferenceProcessingEventBackfillRow> rows,
+        CancellationToken cancellationToken)
+    {
+        if (rows.Count == 0)
+        {
+            return;
+        }
+
+        await using (var deleteAttempts = connection.CreateCommand())
+        {
+            deleteAttempts.CommandText = """
+                DELETE FROM reference_anchor_processing_attempts
+                WHERE anchor_id = $anchor_id;
+                """;
+            deleteAttempts.Parameters.AddWithValue("$anchor_id", rows[0].AnchorId);
+            await deleteAttempts.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var attempts = new List<IReadOnlyList<ReferenceProcessingEventBackfillRow>>();
+        var attemptRows = new List<ReferenceProcessingEventBackfillRow>();
+        foreach (var row in rows)
+        {
+            if (attemptRows.Count > 0 && IsTerminalBuildStatus(attemptRows[^1].Status))
+            {
+                attempts.Add(attemptRows.ToArray());
+                attemptRows.Clear();
+            }
+
+            attemptRows.Add(row);
+        }
+
+        if (attemptRows.Count > 0)
+        {
+            attempts.Add(attemptRows.ToArray());
+        }
+
+        for (var index = 0; index < attempts.Count; index++)
+        {
+            var attemptNumber = index + 1;
+            var attemptEvents = attempts[index];
+            var first = attemptEvents[0];
+            var last = attemptEvents[^1];
+            var attemptId = BuildSourceProcessingAttemptId(first.AnchorId, attemptNumber);
+            var buildId = BuildSourceProcessingBuildId(first.AnchorId, attemptNumber);
+            var previous = index == 0 ? null : attempts[index - 1][^1];
+            var recoveredFromAttemptId = previous is not null && IsRecoveredFromPriorAttempt(previous.Status, last.Status)
+                ? BuildSourceProcessingAttemptId(first.AnchorId, attemptNumber - 1)
+                : string.Empty;
+            var recoveredFromBuildId = previous is not null && IsRecoveredFromPriorAttempt(previous.Status, last.Status)
+                ? BuildSourceProcessingBuildId(first.AnchorId, attemptNumber - 1)
+                : string.Empty;
+
+            await UpsertBackfilledProcessingAttemptAsync(
+                connection,
+                first.AnchorId,
+                attemptId,
+                buildId,
+                attemptNumber,
+                last.BuildVersion,
+                first.CreatedAt,
+                last,
+                attemptEvents.Count,
+                recoveredFromAttemptId,
+                recoveredFromBuildId,
+                cancellationToken);
+            foreach (var processingEvent in attemptEvents)
+            {
+                await UpdateBackfilledProcessingEventAsync(
+                    connection,
+                    processingEvent.EventId,
+                    attemptId,
+                    buildId,
+                    attemptNumber,
+                    last.BuildVersion,
+                    cancellationToken);
+            }
+        }
+    }
+
+    private static async ValueTask UpsertBackfilledProcessingAttemptAsync(
+        SqliteConnection connection,
+        long anchorId,
+        string attemptId,
+        string buildId,
+        int attemptNumber,
+        string buildVersion,
+        DateTimeOffset startedAt,
+        ReferenceProcessingEventBackfillRow last,
+        int eventCount,
+        string recoveredFromAttemptId,
+        string recoveredFromBuildId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO reference_anchor_processing_attempts
+              (attempt_id, anchor_id, build_id, attempt_number, build_version, stage, status,
+               started_at, updated_at, completed_at, event_count, source_segment_count,
+               material_count, slot_count, vector_count, recovered_from_attempt_id,
+               recovered_from_build_id, blocked_reason)
+            VALUES
+              ($attempt_id, $anchor_id, $build_id, $attempt_number, $build_version, $stage, $status,
+               $started_at, $updated_at, $completed_at, $event_count, $source_segment_count,
+               $material_count, $slot_count, $vector_count, $recovered_from_attempt_id,
+               $recovered_from_build_id, $blocked_reason)
+            ON CONFLICT(attempt_id) DO UPDATE SET
+              build_version = excluded.build_version,
+              stage = excluded.stage,
+              status = excluded.status,
+              started_at = excluded.started_at,
+              updated_at = excluded.updated_at,
+              completed_at = excluded.completed_at,
+              event_count = excluded.event_count,
+              source_segment_count = excluded.source_segment_count,
+              material_count = excluded.material_count,
+              slot_count = excluded.slot_count,
+              vector_count = excluded.vector_count,
+              recovered_from_attempt_id = excluded.recovered_from_attempt_id,
+              recovered_from_build_id = excluded.recovered_from_build_id,
+              blocked_reason = excluded.blocked_reason;
+            """;
+        command.Parameters.AddWithValue("$attempt_id", attemptId);
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        command.Parameters.AddWithValue("$build_id", buildId);
+        command.Parameters.AddWithValue("$attempt_number", attemptNumber);
+        command.Parameters.AddWithValue("$build_version", buildVersion);
+        command.Parameters.AddWithValue("$stage", last.Stage);
+        command.Parameters.AddWithValue("$status", last.Status);
+        command.Parameters.AddWithValue("$started_at", FormatTimestamp(startedAt));
+        command.Parameters.AddWithValue("$updated_at", FormatTimestamp(last.CreatedAt));
+        command.Parameters.AddWithValue("$completed_at", IsTerminalBuildStatus(last.Status) ? FormatTimestamp(last.CreatedAt) : (object)DBNull.Value);
+        command.Parameters.AddWithValue("$event_count", eventCount);
+        command.Parameters.AddWithValue("$source_segment_count", last.SourceSegmentCount);
+        command.Parameters.AddWithValue("$material_count", last.MaterialCount);
+        command.Parameters.AddWithValue("$slot_count", last.SlotCount);
+        command.Parameters.AddWithValue("$vector_count", last.VectorCount);
+        command.Parameters.AddWithValue("$recovered_from_attempt_id", recoveredFromAttemptId);
+        command.Parameters.AddWithValue("$recovered_from_build_id", recoveredFromBuildId);
+        command.Parameters.AddWithValue("$blocked_reason", BuildAttemptBlockedReason(last.Status, last.LastError));
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask UpdateBackfilledProcessingEventAsync(
+        SqliteConnection connection,
+        string eventId,
+        string attemptId,
+        string buildId,
+        int attemptNumber,
+        string buildVersion,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_anchor_processing_events
+            SET attempt_id = $attempt_id,
+                build_id = $build_id,
+                attempt_number = $attempt_number,
+                build_version = $build_version
+            WHERE event_id = $event_id;
+            """;
+        command.Parameters.AddWithValue("$attempt_id", attemptId);
+        command.Parameters.AddWithValue("$build_id", buildId);
+        command.Parameters.AddWithValue("$attempt_number", attemptNumber);
+        command.Parameters.AddWithValue("$build_version", buildVersion);
+        command.Parameters.AddWithValue("$event_id", eventId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask EnsureImportIdentityUniqueIndexAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await QuarantineLegacyDuplicateImportIdentitiesAsync(connection, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_reference_anchors_import_identity_unique
+              ON reference_anchors(
+                corpus_visibility,
+                COALESCE(novel_id, 0),
+                source_path,
+                source_kind,
+                source_file_hash
+              );
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask QuarantineLegacyDuplicateImportIdentitiesAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_anchors
+            SET source_file_hash = 'legacy-duplicate:' || anchor_id || ':' || source_file_hash
+            WHERE source_file_hash NOT LIKE 'legacy-duplicate:%'
+              AND EXISTS (
+                SELECT 1
+                FROM reference_anchors canonical
+                WHERE canonical.anchor_id < reference_anchors.anchor_id
+                  AND canonical.corpus_visibility = reference_anchors.corpus_visibility
+                  AND COALESCE(canonical.novel_id, 0) = COALESCE(reference_anchors.novel_id, 0)
+                  AND canonical.source_path = reference_anchors.source_path
+                  AND canonical.source_kind = reference_anchors.source_kind
+                  AND canonical.source_file_hash = reference_anchors.source_file_hash
+              );
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async ValueTask EnsureNullableAnchorNovelIdAsync(
@@ -3510,6 +5547,11 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         command.CommandText = "PRAGMA foreign_keys = ON;";
         await command.ExecuteNonQueryAsync(cancellationToken);
         return connection;
+    }
+
+    private static bool IsSqliteConstraintViolation(SqliteException exception)
+    {
+        return exception.SqliteErrorCode == SqliteConstraintErrorCode;
     }
 
     private static async ValueTask<SourceSnapshot> ReadSourceFileAsync(
@@ -3894,9 +5936,39 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         return materials;
     }
 
-    private static int CountMaterialSlots(IReadOnlyList<ReferenceMaterialPayload> materials)
+    private static ReferenceProcessingAffectedIds BuildAffectedProcessingIds(
+        IReadOnlyList<ReferenceMaterialPayload> materials)
     {
-        return materials.Sum(material => ReferenceMaterialSlotDetector.Detect(material).Count);
+        return BuildAffectedProcessingIds(materials, null);
+    }
+
+    private static ReferenceProcessingAffectedIds BuildAffectedProcessingIds(
+        IReadOnlyList<ReferenceSourceSegment> segments)
+    {
+        var segment = segments.FirstOrDefault();
+        return segment is null
+            ? ReferenceProcessingAffectedIds.Empty
+            : new ReferenceProcessingAffectedIds(string.Empty, segment.SegmentId, string.Empty);
+    }
+
+    private static ReferenceProcessingAffectedIds BuildAffectedProcessingIds(
+        IReadOnlyList<ReferenceMaterialPayload> materials,
+        IReadOnlyDictionary<string, IReadOnlyList<ReferenceMaterialSlot>>? slotsByMaterial)
+    {
+        var material = materials.FirstOrDefault();
+        if (material is null)
+        {
+            return ReferenceProcessingAffectedIds.Empty;
+        }
+
+        var slotId = slotsByMaterial is not null &&
+            slotsByMaterial.TryGetValue(material.MaterialId, out var slots)
+            ? slots.FirstOrDefault()?.SlotId ?? string.Empty
+            : string.Empty;
+        return new ReferenceProcessingAffectedIds(
+            material.MaterialId,
+            material.SourceSegmentId,
+            slotId);
     }
 
     private static TextSpan BuildAbsoluteSpan(string sourceText, int startOffset, int endOffset)
@@ -4800,6 +6872,71 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         return string.Equals(licenseStatus, "unknown", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static ReferenceMaterialTagReviewItemPayload BuildMaterialTagReviewItem(
+        ReferenceMaterialSummaryPayload material)
+    {
+        return new ReferenceMaterialTagReviewItemPayload(
+            material,
+            BuildMaterialTagReviewIssues(material));
+    }
+
+    private static IReadOnlyList<ReferenceMaterialTagReviewIssuePayload> BuildMaterialTagReviewIssues(
+        ReferenceMaterialSummaryPayload material)
+    {
+        var issues = new List<ReferenceMaterialTagReviewIssuePayload>();
+        if (!material.UserVerified)
+        {
+            issues.Add(new ReferenceMaterialTagReviewIssuePayload(
+                ReferenceMaterialTagReviewIssueCodes.Unverified,
+                "未校正",
+                "review"));
+        }
+
+        var lowConfidence = new List<string>();
+        AddLowConfidenceLabel(lowConfidence, "功能", material.FunctionConfidence);
+        AddLowConfidenceLabel(lowConfidence, "情绪", material.EmotionConfidence);
+        AddLowConfidenceLabel(lowConfidence, "POV", material.PovConfidence);
+        if (lowConfidence.Count > 0)
+        {
+            issues.Add(new ReferenceMaterialTagReviewIssuePayload(
+                ReferenceMaterialTagReviewIssueCodes.LowConfidence,
+                $"低置信 {string.Join(" / ", lowConfidence)}",
+                "warning"));
+        }
+
+        var unknownTags = new List<string>();
+        AddUnknownTagLabel(unknownTags, "功能", material.FunctionTag);
+        AddUnknownTagLabel(unknownTags, "情绪", material.EmotionTag);
+        AddUnknownTagLabel(unknownTags, "场景", material.SceneTag);
+        AddUnknownTagLabel(unknownTags, "POV", material.PovTag);
+        AddUnknownTagLabel(unknownTags, "技法", material.TechniqueTag);
+        if (unknownTags.Count > 0)
+        {
+            issues.Add(new ReferenceMaterialTagReviewIssuePayload(
+                ReferenceMaterialTagReviewIssueCodes.UnknownTag,
+                $"unknown 标签 {string.Join(" / ", unknownTags)}",
+                "review"));
+        }
+
+        return issues;
+    }
+
+    private static void AddLowConfidenceLabel(ICollection<string> labels, string label, double confidence)
+    {
+        if (double.IsFinite(confidence) && confidence < MaterialReviewConfidenceThreshold)
+        {
+            labels.Add(string.Create(CultureInfo.InvariantCulture, $"{label} {confidence:0.00}"));
+        }
+    }
+
+    private static void AddUnknownTagLabel(ICollection<string> labels, string label, string value)
+    {
+        if (UnknownMaterialTags.Contains(NormalizeFilterToken(value)))
+        {
+            labels.Add(label);
+        }
+    }
+
     private static ReferenceMaterialSummaryPayload ToMaterialSummary(
         ReferenceMaterialPayload material,
         int previewMaxChars,
@@ -5073,6 +7210,128 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         }
 
         return fullPath;
+    }
+
+    private static void ValidateCreateAnchorsInput(CreateReferenceAnchorsPayload input)
+    {
+        if (input.Anchors is null || input.Anchors.Count == 0)
+        {
+            throw new ArgumentException("At least one reference anchor is required.", nameof(input));
+        }
+
+        if (input.Anchors.Count > 50)
+        {
+            throw new ArgumentException("At most 50 reference anchors can be imported at once.", nameof(input));
+        }
+    }
+
+    private static CreateReferenceAnchorFailurePayload CreateFailurePayload(
+        int index,
+        CreateReferenceAnchorPayload? input,
+        Exception exception)
+    {
+        return CreateFailurePayload(index, input, RedactError(exception.Message));
+    }
+
+    private static CreateReferenceAnchorFailurePayload CreateFailurePayload(
+        int index,
+        CreateReferenceAnchorPayload? input,
+        string diagnostic)
+    {
+        return new CreateReferenceAnchorFailurePayload(
+            index,
+            NormalizeFailureDisplayText(input?.Title, "Untitled reference source"),
+            NormalizeFailureDisplayText(input?.SourceKind, string.Empty),
+            BuildFailureSourceIdentity(input),
+            RedactError(diagnostic),
+            RetryAvailable: true);
+    }
+
+    private static string BuildFailureSourceIdentity(CreateReferenceAnchorPayload? input)
+    {
+        var visibility = string.IsNullOrWhiteSpace(input?.Visibility)
+            ? ReferenceCorpusVisibilities.Private
+            : NormalizeFailureDisplayText(input?.Visibility, ReferenceCorpusVisibilities.Private);
+        var scope = string.Equals(visibility, ReferenceCorpusVisibilities.Workspace, StringComparison.Ordinal)
+            ? "workspace"
+            : (input?.NovelId ?? 0).ToString(CultureInfo.InvariantCulture);
+        var sourceKind = NormalizeFailureDisplayText(input?.SourceKind, string.Empty);
+        var normalizedPath = NormalizeFailureSourcePath(input?.SourcePath);
+        return "source:" + HashText(string.Join('\u001F', scope, visibility, normalizedPath, sourceKind));
+    }
+
+    private static string BuildUnavailableSourceHash(
+        long? storedNovelId,
+        string visibility,
+        string sourcePath,
+        string sourceKind)
+    {
+        var scope = storedNovelId.HasValue
+            ? storedNovelId.Value.ToString(CultureInfo.InvariantCulture)
+            : "workspace";
+        return "unavailable:" + HashText(string.Join('\u001F', scope, visibility, NormalizeLockPath(sourcePath), sourceKind));
+    }
+
+    private static string NormalizeFailureSourcePath(string? sourcePath)
+    {
+        try
+        {
+            var normalized = NormalizeOptionalText(sourcePath, nameof(sourcePath), maxLength: 1024);
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return "<empty>";
+            }
+
+            return NormalizeLockPath(normalized);
+        }
+        catch
+        {
+            return "<invalid:" + HashText(sourcePath ?? string.Empty) + ">";
+        }
+    }
+
+    private static string NormalizeFailureDisplayText(string? value, string fallback)
+    {
+        var normalized = new string((value ?? string.Empty)
+            .Trim()
+            .Select(character => char.IsControl(character) ? ' ' : character)
+            .ToArray())
+            .Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return fallback;
+        }
+
+        return normalized.Length <= 200 ? normalized : normalized[..200].TrimEnd() + "...";
+    }
+
+    private static string BuildImportIdentityLockKey(
+        string databasePath,
+        long? storedNovelId,
+        string visibility,
+        string sourcePath,
+        string sourceKind,
+        string sourceFileHash)
+    {
+        var scope = storedNovelId.HasValue
+            ? storedNovelId.Value.ToString(CultureInfo.InvariantCulture)
+            : "workspace";
+        return string.Join(
+            '\u001F',
+            NormalizeLockPath(databasePath),
+            visibility,
+            scope,
+            NormalizeLockPath(sourcePath),
+            sourceKind,
+            sourceFileHash);
+    }
+
+    private static string NormalizeLockPath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        return OperatingSystem.IsWindows()
+            ? fullPath.ToUpperInvariant()
+            : fullPath;
     }
 
     private static string ValidateAllowedText(string? value, string name, IReadOnlySet<string> allowed)
@@ -5379,6 +7638,12 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         ReferenceMaterialHashKey HashKey,
         string ArchivedAt);
 
+    private sealed record ReferenceAnchorCorpusSnapshot(
+        IReadOnlyList<ReferenceSourceSegment> Segments,
+        IReadOnlyList<ReferenceMaterialPayload> Materials,
+        IReadOnlyDictionary<string, IReadOnlyList<ReferenceMaterialSlot>> SlotsByMaterial,
+        IReadOnlyDictionary<string, string> ArchivedMaterialTimestamps);
+
     private sealed record ReferenceSourceSegment(
         string SegmentId,
         int ChapterIndex,
@@ -5402,6 +7667,47 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService
         double PovConfidence);
 
     private sealed record ReferenceMaterialHashKey(string MaterialType, string SourceHash);
+
+    private sealed record ReferenceProcessingAffectedIds(
+        string MaterialId,
+        string SegmentId,
+        string SlotId)
+    {
+        public static ReferenceProcessingAffectedIds Empty { get; } = new(string.Empty, string.Empty, string.Empty);
+    }
+
+    private sealed record ReferenceProcessingAttemptRead(
+        string AttemptId,
+        string BuildId,
+        int AttemptNumber,
+        string BuildVersion,
+        string Status,
+        DateTimeOffset StartedAt,
+        string RecoveredFromAttemptId,
+        string RecoveredFromBuildId);
+
+    private sealed record ReferenceProcessingAttemptWrite(
+        long AnchorId,
+        string AttemptId,
+        string BuildId,
+        int AttemptNumber,
+        string BuildVersion,
+        DateTimeOffset StartedAt,
+        string RecoveredFromAttemptId,
+        string RecoveredFromBuildId);
+
+    private sealed record ReferenceProcessingEventBackfillRow(
+        string EventId,
+        long AnchorId,
+        string BuildVersion,
+        string Stage,
+        string Status,
+        int SourceSegmentCount,
+        int MaterialCount,
+        int SlotCount,
+        int VectorCount,
+        string LastError,
+        DateTimeOffset CreatedAt);
 
     private sealed record ReferenceAnchorBuildCompletion(
         ReferenceAnchorPayload Anchor,

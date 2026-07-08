@@ -31,7 +31,7 @@ export async function verifyReferenceErrorFeedbackWorkflow(context) {
       RebuildReferenceAnchor: {
         mode: 'storage',
         code: 'REFERENCE_ANCHOR_REBUILD_FAILED',
-        message: '锚点重建失败：Bearer reference-rebuild-token-abcdefghijklmnopqrstuvwxyz',
+        message: '语料重建失败：Bearer reference-rebuild-token-abcdefghijklmnopqrstuvwxyz',
         details,
         retryable: true,
       },
@@ -75,8 +75,8 @@ export async function verifyReferenceErrorFeedbackWorkflow(context) {
   await installClipboardSpy(page)
   await page.goto(url, { waitUntil: 'domcontentloaded' })
   await expectVisible(page.getByText('全局回归小说'), 'reference error workspace')
-  await page.getByTitle('参考锚定').click()
-  await expectVisible(page.getByRole('heading', { name: /参考锚定/ }), 'reference error heading')
+  await page.getByTitle('素材库').click()
+  await expectVisible(page.getByRole('heading', { name: '语料库管理' }), 'reference error heading')
 
   await page.getByPlaceholder('参考书名').fill('错误反馈参考')
   await page.getByLabel('本地路径').fill('D:\\books\\reference-error.md')
@@ -93,9 +93,9 @@ export async function verifyReferenceErrorFeedbackWorkflow(context) {
   await expectHidden(createAlert, 'reference create error clears only after explicit close')
 
   const rebuildBefore = await bridgeCallCount(page, 'RebuildReferenceAnchor')
-  await page.getByTitle('重建').first().click()
+  await page.getByTitle('重建语料').first().click()
   await waitForBridgeCallCountAfter(page, 'RebuildReferenceAnchor', rebuildBefore)
-  const rebuildAlert = errorAlert(page, '锚点重建失败')
+  const rebuildAlert = errorAlert(page, '语料重建失败')
   await expectVisible(rebuildAlert, 'reference rebuild failure callout')
   await assertNoSensitiveDiagnosticsVisible(page)
   await assertCopyableDiagnostic(page, rebuildAlert, 'RebuildReferenceAnchor')
