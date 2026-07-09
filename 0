@@ -1,0 +1,27 @@
+1344:                       s.material_count, s.slot_count, s.vector_count, s.last_error, s.updated_at
+1405:            var embeddingScores = await TryBuildEmbeddingScoresAsync(
+2635:               slot_count, vector_count, last_error, updated_at)
+2637:              ($anchor_id, $status, $stage, $source_segment_count, $material_count, $slot_count, $vector_count, $last_error, $updated_at)
+2644:              vector_count = excluded.vector_count,
+2654:        upsert.Parameters.AddWithValue("$vector_count", vectorCount);
+2671:               stage, status, source_segment_count, material_count, slot_count, vector_count,
+2676:               $stage, $status, $source_segment_count, $material_count, $slot_count, $vector_count,
+2691:        history.Parameters.AddWithValue("$vector_count", vectorCount);
+2816:               material_count, slot_count, vector_count, recovered_from_attempt_id,
+2821:               $material_count, $slot_count, $vector_count, $recovered_from_attempt_id,
+2833:              vector_count = excluded.vector_count,
+2857:        command.Parameters.AddWithValue("$vector_count", vectorCount);
+3690:              AND vector_count > 0
+4244:                SELECT stage, status, source_segment_count, material_count, slot_count, vector_count,
+4313:                   vector_count, last_error, affected_source_id, affected_material_id,
+4359:                   material_count, slot_count, vector_count, recovered_from_attempt_id,
+4575:                   s.material_count, s.slot_count, s.vector_count, s.last_error, s.updated_at
+4875:              vector_count INTEGER NOT NULL,
+4893:              vector_count INTEGER NOT NULL,
+4918:              vector_count INTEGER NOT NULL,
+5162:                   e.source_segment_count, e.material_count, e.slot_count, e.vector_count,
+5292:               material_count, slot_count, vector_count, recovered_from_attempt_id,
+5297:               $material_count, $slot_count, $vector_count, $recovered_from_attempt_id,
+5310:              vector_count = excluded.vector_count,
+5329:        command.Parameters.AddWithValue("$vector_count", last.VectorCount);
+6624:    private async ValueTask<IReadOnlyDictionary<string, double>> TryBuildEmbeddingScoresAsync(

@@ -944,7 +944,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                         failedAt,
                         cancellationToken,
                         vectorCount: retainedVectorCount,
-                        affectedIds: BuildAffectedProcessingIds(previousCorpus.Materials, previousCorpus.SlotsByMaterial));
+                        affectedIds: BuildAffectedProcessingIds(previousCorpus));
                     await failureTransaction.CommitAsync(cancellationToken);
                     return BuildStatus(
                         failedAnchor,
@@ -1011,7 +1011,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                             failedAt,
                             cancellationToken,
                             vectorCount: previousBuildStatus?.VectorCount ?? 0,
-                            affectedIds: BuildAffectedProcessingIds(previousCorpus.Materials, previousCorpus.SlotsByMaterial));
+                            affectedIds: BuildAffectedProcessingIds(previousCorpus));
                         await failureTransaction.CommitAsync(cancellationToken);
                         return BuildStatus(
                             failedAnchor,
@@ -1082,7 +1082,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                         : 0;
                     var retainedVectorCount = hasPreviousMaterials ? previousBuildStatus?.VectorCount ?? 0 : 0;
                     var affectedIds = hasPreviousMaterials
-                        ? BuildAffectedProcessingIds(previousCorpus.Materials, previousCorpus.SlotsByMaterial)
+                        ? BuildAffectedProcessingIds(previousCorpus)
                         : segmentAffectedIds;
                     var failedAnchor = anchor with
                     {
@@ -1143,7 +1143,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                         Status = initialStatus,
                         UpdatedAt = now
                     };
-                    var affectedIds = BuildAffectedProcessingIds(activeMaterials.Count > 0 ? activeMaterials : materials, slotsByMaterial);
+                    var affectedIds = BuildAffectedProcessingIds(activeMaterials, materials, slotsByMaterial);
                     await UpdateAnchorBuildResultAsync(
                         connection,
                         slotTransaction,
@@ -1181,7 +1181,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                         : 0;
                     var retainedVectorCount = hasPreviousMaterials ? previousBuildStatus?.VectorCount ?? 0 : 0;
                     var affectedIds = hasPreviousMaterials
-                        ? BuildAffectedProcessingIds(previousCorpus.Materials, previousCorpus.SlotsByMaterial)
+                        ? BuildAffectedProcessingIds(previousCorpus)
                         : materialAffectedIds;
                     var failedAnchor = anchor with
                     {
@@ -1251,7 +1251,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                 var retainedVectorCount = previousBuildStatus?.VectorCount ?? 0;
                 var affectedIds = previousCorpus is null
                     ? ReferenceProcessingAffectedIds.Empty
-                    : BuildAffectedProcessingIds(previousCorpus.Materials);
+                    : BuildAffectedProcessingIds(previousCorpus);
                 var failedAnchor = anchor with
                 {
                     Status = ReferenceAnchorBuildStates.FailedImport,
@@ -3003,7 +3003,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
             updatedAt,
             cancellationToken,
             vectorCount: 0,
-            affectedIds: BuildAffectedProcessingIds(previousCorpus.Materials, previousCorpus.SlotsByMaterial));
+            affectedIds: BuildAffectedProcessingIds(previousCorpus));
         await transaction.CommitAsync(cancellationToken);
         return BuildStatus(
             failedAnchor,
@@ -5989,7 +5989,20 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
         IReadOnlyList<ReferenceMaterialPayload> materials,
         IReadOnlyDictionary<string, IReadOnlyList<ReferenceMaterialSlot>>? slotsByMaterial)
     {
-        var material = materials.FirstOrDefault();
+        return BuildAffectedProcessingIds(materials, null, slotsByMaterial);
+    }
+
+    private static ReferenceProcessingAffectedIds BuildAffectedProcessingIds(
+        IReadOnlyList<ReferenceMaterialPayload> materials,
+        IReadOnlyList<ReferenceMaterialPayload>? slotFallbackMaterials,
+        IReadOnlyDictionary<string, IReadOnlyList<ReferenceMaterialSlot>>? slotsByMaterial)
+    {
+        var material = slotsByMaterial is null
+            ? materials.FirstOrDefault()
+            : FindFirstMaterialWithSlot(materials, slotsByMaterial)
+                ?? (slotFallbackMaterials is null ? null : FindFirstMaterialWithSlot(slotFallbackMaterials, slotsByMaterial))
+                ?? materials.FirstOrDefault()
+                ?? slotFallbackMaterials?.FirstOrDefault();
         if (material is null)
         {
             return ReferenceProcessingAffectedIds.Empty;
@@ -6003,6 +6016,22 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
             material.MaterialId,
             material.SourceSegmentId,
             slotId);
+    }
+
+    private static ReferenceMaterialPayload? FindFirstMaterialWithSlot(
+        IReadOnlyList<ReferenceMaterialPayload> materials,
+        IReadOnlyDictionary<string, IReadOnlyList<ReferenceMaterialSlot>> slotsByMaterial)
+    {
+        return materials.FirstOrDefault(item =>
+            slotsByMaterial.TryGetValue(item.MaterialId, out var materialSlots) &&
+            materialSlots.Count > 0);
+    }
+
+    private static ReferenceProcessingAffectedIds BuildAffectedProcessingIds(ReferenceAnchorCorpusSnapshot corpus)
+    {
+        return corpus.Materials.Count > 0
+            ? BuildAffectedProcessingIds(corpus.Materials, corpus.SlotsByMaterial)
+            : BuildAffectedProcessingIds(corpus.Segments);
     }
 
     private static TextSpan BuildAbsoluteSpan(string sourceText, int startOffset, int endOffset)

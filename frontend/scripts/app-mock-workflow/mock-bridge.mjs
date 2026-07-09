@@ -502,6 +502,44 @@ export function installConfigurableAppMockBridge(options = {}) {
       created_at: now,
       updated_at: now,
     },
+    {
+      anchor_id: 107,
+      novel_id: 42,
+      title: '缺源重启参考',
+      author: 'Mock Missing Source Startup Author',
+      source_path: 'D:\\books\\missing-startup-reference.md',
+      source_kind: 'markdown',
+      license_status: 'user_provided',
+      visibility: 'workspace',
+      source_trust: 'user_verified',
+      owner_scope: 'workspace_corpus',
+      owner_novel_id: null,
+      user_tags: ['重启恢复', '缺源失败', '材料保留'],
+      source_file_hash: 'hash-anchor-missing-startup-prior-001',
+      build_version: 'mock-reference-v1',
+      status: 'failed_import',
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      anchor_id: 108,
+      novel_id: 42,
+      title: '槽位重启参考',
+      author: 'Mock Slots Startup Recovery Author',
+      source_path: 'D:\\books\\slots-startup-reference.md',
+      source_kind: 'markdown',
+      license_status: 'user_provided',
+      visibility: 'workspace',
+      source_trust: 'user_verified',
+      owner_scope: 'workspace_corpus',
+      owner_novel_id: null,
+      user_tags: ['重启恢复', '槽位恢复', '向量索引'],
+      source_file_hash: 'hash-anchor-slots-startup-recovered-001',
+      build_version: 'mock-reference-v1',
+      status: 'ready',
+      created_at: now,
+      updated_at: now,
+    },
   ]
   const longMaterialLeakSentinel = '__FULL_MATERIAL_SHOULD_NOT_RENDER__'
   const longRainMaterialText = [
@@ -605,6 +643,54 @@ export function installConfigurableAppMockBridge(options = {}) {
         lexical: 0.89,
         function: 0.91,
         prose_duty: 0.83,
+      },
+    },
+    {
+      material_id: 'mock-mat-missing-startup-001',
+      anchor_id: 107,
+      source_segment_id: 'mock-seg-missing-startup-001',
+      material_type: 'sentence',
+      function_tag: 'continuity',
+      emotion_tag: 'unease',
+      scene_tag: 'missing_source_restart',
+      pov_tag: 'close',
+      technique_tag: 'afterbeat',
+      function_confidence: 0.93,
+      emotion_confidence: 0.88,
+      pov_confidence: 0.91,
+      text: '源文件丢失后的启动恢复保留旧材料摘要，可搜索、可检查，但诊断不暴露本地路径或完整来源正文。',
+      source_hash: 'hash-mock-material-missing-startup-001',
+      extractor_version: 'mock-reference-v1',
+      user_verified: true,
+      created_at: now,
+      score_components: {
+        lexical: 0.9,
+        function: 0.89,
+        prose_duty: 0.84,
+      },
+    },
+    {
+      material_id: 'mock-mat-slots-startup-001',
+      anchor_id: 108,
+      source_segment_id: 'mock-seg-slots-startup-001',
+      material_type: 'sentence',
+      function_tag: 'continuity',
+      emotion_tag: 'restrained',
+      scene_tag: 'slots_startup_recovery',
+      pov_tag: 'close',
+      technique_tag: 'slot_continuity',
+      function_confidence: 0.94,
+      emotion_confidence: 0.9,
+      pov_confidence: 0.91,
+      text: '槽位检测后重启恢复的材料摘要保留{{object}}槽位和向量索引状态，可定位但不暴露完整来源正文。',
+      source_hash: 'hash-mock-material-slots-startup-001',
+      extractor_version: 'mock-reference-v1',
+      user_verified: true,
+      created_at: now,
+      score_components: {
+        lexical: 0.91,
+        function: 0.9,
+        prose_duty: 0.85,
       },
     },
   ]
@@ -3586,6 +3672,12 @@ export function installConfigurableAppMockBridge(options = {}) {
     if (anchor?.status === 'failed_slotting') {
       return failedSlottingBuildStatus(anchorId)
     }
+    if (Number(anchorId) === 107 && anchor?.status === 'failed_import') {
+      return missingSourceStartupFailedImportBuildStatus(anchorId)
+    }
+    if (Number(anchorId) === 108) {
+      return recoveredSlotsDetectedStartupBuildStatus(anchorId)
+    }
 
     return {
       novel_id: 42,
@@ -3612,6 +3704,10 @@ export function installConfigurableAppMockBridge(options = {}) {
             ? recoveredFailedExtractionBuildStatus(anchorId)
             : Number(anchorId) === 106
               ? recoveredFailedSlottingBuildStatus(anchorId)
+              : Number(anchorId) === 107
+                ? recoveredMissingSourceStartupBuildStatus(anchorId)
+                : Number(anchorId) === 108
+                  ? recoveredSlotsDetectedStartupBuildStatus(anchorId)
       : referenceBuildStatus(anchorId)
     state.referenceBuildStatuses[String(anchorId)] = status
     if (Number(anchorId) === 105 && status.status === 'ready') {
@@ -3619,6 +3715,12 @@ export function installConfigurableAppMockBridge(options = {}) {
     }
     if (Number(anchorId) === 106 && status.status === 'ready') {
       ensureFailedSlottingMaterial(anchorId)
+    }
+    if (Number(anchorId) === 107 && status.status === 'ready') {
+      ensureMissingSourceStartupMaterial(anchorId)
+    }
+    if (Number(anchorId) === 108 && status.status === 'ready') {
+      ensureSlotsDetectedStartupMaterial(anchorId)
     }
     const nextAnchorStatus = status.status
     state.referenceAnchors = state.referenceAnchors.map(anchor =>
@@ -3703,6 +3805,51 @@ export function installConfigurableAppMockBridge(options = {}) {
     }
   }
 
+  function missingSourceStartupFailedImportBuildStatus(anchorId) {
+    return {
+      novel_id: 42,
+      anchor_id: Number(anchorId),
+      status: 'failed_import',
+      stage: 'failed_import',
+      source_segment_count: 2,
+      material_count: 1,
+      slot_count: 1,
+      vector_count: 0,
+      last_error: '启动恢复时来源不可读；保留旧材料，路径已脱敏。',
+      updated_at: now,
+    }
+  }
+
+  function recoveredMissingSourceStartupBuildStatus(anchorId) {
+    return {
+      novel_id: 42,
+      anchor_id: Number(anchorId),
+      status: 'ready',
+      stage: 'embedding',
+      source_segment_count: 2,
+      material_count: 1,
+      slot_count: 1,
+      vector_count: 1,
+      last_error: '',
+      updated_at: now,
+    }
+  }
+
+  function recoveredSlotsDetectedStartupBuildStatus(anchorId) {
+    return {
+      novel_id: 42,
+      anchor_id: Number(anchorId),
+      status: 'ready',
+      stage: 'embedding',
+      source_segment_count: 2,
+      material_count: 1,
+      slot_count: 1,
+      vector_count: 1,
+      last_error: '',
+      updated_at: now,
+    }
+  }
+
   function ensureRecoveredExtractionMaterial(anchorId) {
     if (state.referenceMaterials.some((material) => material.material_id === 'mock-mat-extract-001')) {
       return
@@ -3761,6 +3908,68 @@ export function installConfigurableAppMockBridge(options = {}) {
         lexical: 0.89,
         function: 0.91,
         prose_duty: 0.83,
+      },
+    })
+  }
+
+  function ensureMissingSourceStartupMaterial(anchorId) {
+    if (state.referenceMaterials.some((material) => material.material_id === 'mock-mat-missing-startup-001')) {
+      return
+    }
+
+    state.referenceMaterials.push({
+      material_id: 'mock-mat-missing-startup-001',
+      anchor_id: Number(anchorId),
+      source_segment_id: 'mock-seg-missing-startup-001',
+      material_type: 'sentence',
+      function_tag: 'continuity',
+      emotion_tag: 'unease',
+      scene_tag: 'missing_source_restart',
+      pov_tag: 'close',
+      technique_tag: 'afterbeat',
+      function_confidence: 0.93,
+      emotion_confidence: 0.88,
+      pov_confidence: 0.91,
+      text: '源文件丢失后的启动恢复保留旧材料摘要，可搜索、可检查，但诊断不暴露本地路径或完整来源正文。',
+      source_hash: 'hash-mock-material-missing-startup-001',
+      extractor_version: 'mock-reference-v1',
+      user_verified: true,
+      created_at: now,
+      score_components: {
+        lexical: 0.9,
+        function: 0.89,
+        prose_duty: 0.84,
+      },
+    })
+  }
+
+  function ensureSlotsDetectedStartupMaterial(anchorId) {
+    if (state.referenceMaterials.some((material) => material.material_id === 'mock-mat-slots-startup-001')) {
+      return
+    }
+
+    state.referenceMaterials.push({
+      material_id: 'mock-mat-slots-startup-001',
+      anchor_id: Number(anchorId),
+      source_segment_id: 'mock-seg-slots-startup-001',
+      material_type: 'sentence',
+      function_tag: 'continuity',
+      emotion_tag: 'restrained',
+      scene_tag: 'slots_startup_recovery',
+      pov_tag: 'close',
+      technique_tag: 'slot_continuity',
+      function_confidence: 0.94,
+      emotion_confidence: 0.9,
+      pov_confidence: 0.91,
+      text: '槽位检测后重启恢复的材料摘要保留{{object}}槽位和向量索引状态，可定位但不暴露完整来源正文。',
+      source_hash: 'hash-mock-material-slots-startup-001',
+      extractor_version: 'mock-reference-v1',
+      user_verified: true,
+      created_at: now,
+      score_components: {
+        lexical: 0.91,
+        function: 0.9,
+        prose_duty: 0.85,
       },
     })
   }
@@ -4059,15 +4268,25 @@ export function installConfigurableAppMockBridge(options = {}) {
         end_offset: 16,
       }],
       processing_notes: [{
-        stage: Number(anchor.anchor_id) === 106 && anchor.status === 'failed_slotting' ? 'detecting_slots' : 'completed',
-        status: Number(anchor.anchor_id) === 106 && anchor.status === 'failed_slotting' ? 'failed_slotting' : 'ready',
+        stage: Number(anchor.anchor_id) === 106 && anchor.status === 'failed_slotting'
+          ? 'detecting_slots'
+          : Number(anchor.anchor_id) === 107 && anchor.status === 'failed_import'
+            ? 'failed_import'
+            : 'completed',
+        status: Number(anchor.anchor_id) === 106 && anchor.status === 'failed_slotting'
+          ? 'failed_slotting'
+          : Number(anchor.anchor_id) === 107 && anchor.status === 'failed_import'
+            ? 'failed_import'
+            : 'ready',
         message: Number(anchor.anchor_id) === 106 && anchor.status === 'failed_slotting'
           ? '槽位检测失败；材料输出已保留。'
-          : 'segments=3; materials=2; slots=2; vectors=0',
+          : Number(anchor.anchor_id) === 107 && anchor.status === 'failed_import'
+            ? '启动恢复缺源；旧材料输出已保留。'
+            : 'segments=3; materials=2; slots=2; vectors=0',
         updated_at: now,
-        source_segment_count: Number(anchor.anchor_id) === 106 ? 2 : 3,
-        material_count: Number(anchor.anchor_id) === 106 ? 1 : 2,
-        slot_count: Number(anchor.anchor_id) === 106 && anchor.status === 'failed_slotting' ? 0 : 2,
+        source_segment_count: Number(anchor.anchor_id) === 106 || Number(anchor.anchor_id) === 107 ? 2 : 3,
+        material_count: Number(anchor.anchor_id) === 106 || Number(anchor.anchor_id) === 107 ? 1 : 2,
+        slot_count: Number(anchor.anchor_id) === 106 && anchor.status === 'failed_slotting' ? 0 : Number(anchor.anchor_id) === 107 ? 1 : 2,
         vector_count: 0,
         affected_source_id: String(anchor.anchor_id),
         affected_material_id: material.material_id,
@@ -4090,6 +4309,8 @@ export function installConfigurableAppMockBridge(options = {}) {
       : '雨声压低了整条街的呼吸。他在门口停了很久，手指贴着伞柄。'
     const sourceText = material?.text ?? fallbackSourceText
     const preview = boundedPreview(sourceText, 32)
+    const isMissingSourceStartup = Number(anchor.anchor_id) === 107
+    const isMissingSourceStartupFailed = isMissingSourceStartup && anchor.status === 'failed_import'
     return {
       source: {
         anchor_id: anchor.anchor_id,
@@ -4122,14 +4343,22 @@ export function installConfigurableAppMockBridge(options = {}) {
         text_hash: `hash-segment-${segmentId}`,
       },
       processing_notes: [{
-        stage: 'extracting_materials',
-        status: material ? 'ready' : 'failed_extraction',
-        message: material ? 'segments=3; materials=2; slots=1; vectors=2' : 'extractor stopped before material rows were produced',
+        stage: isMissingSourceStartupFailed
+          ? 'failed_import'
+          : isMissingSourceStartup ? 'embedding' : 'extracting_materials',
+        status: isMissingSourceStartupFailed
+          ? 'failed_import'
+          : material ? 'ready' : 'failed_extraction',
+        message: isMissingSourceStartupFailed
+          ? '启动恢复缺源；旧来源片段与材料输出已保留。'
+          : isMissingSourceStartup
+            ? 'segments=2; materials=1; slots=1; vectors=1'
+            : material ? 'segments=3; materials=2; slots=1; vectors=2' : 'extractor stopped before material rows were produced',
         updated_at: now,
-        source_segment_count: 3,
-        material_count: material ? 2 : 0,
-        slot_count: material ? 1 : 0,
-        vector_count: material ? 2 : 0,
+        source_segment_count: isMissingSourceStartup ? 2 : 3,
+        material_count: isMissingSourceStartup ? 1 : material ? 2 : 0,
+        slot_count: isMissingSourceStartup ? 1 : material ? 1 : 0,
+        vector_count: isMissingSourceStartupFailed ? 0 : isMissingSourceStartup ? 1 : material ? 2 : 0,
         affected_source_id: String(anchor.anchor_id),
         affected_material_id: material?.material_id ?? '',
         affected_segment_id: segmentId,
@@ -4167,6 +4396,16 @@ export function installConfigurableAppMockBridge(options = {}) {
       return anchor.status === 'ready'
         ? recoveredFailedSlottingProcessingDetail(anchor)
         : failedSlottingProcessingDetail(anchor)
+    }
+
+    if (anchorId === 107) {
+      return anchor.status === 'ready'
+        ? recoveredMissingSourceStartupProcessingDetail(anchor)
+        : missingSourceStartupFailedImportProcessingDetail(anchor)
+    }
+
+    if (anchorId === 108) {
+      return recoveredSlotsDetectedStartupProcessingDetail(anchor)
     }
 
     if (anchor.status === 'failed_import') {
@@ -4900,6 +5139,324 @@ export function installConfigurableAppMockBridge(options = {}) {
       }],
       recovered_from_attempt_id: failedAttemptId,
       recovered_from_build_id: failedBuildId,
+      blocked_reason: '',
+    }
+  }
+
+  function missingSourceStartupFailedImportProcessingDetail(anchor) {
+    const interruptedAttemptId = `anchor:${anchor.anchor_id}:attempt:1`
+    const interruptedBuildId = `anchor:${anchor.anchor_id}:build:1`
+    const failedAttemptId = `anchor:${anchor.anchor_id}:attempt:2`
+    const failedBuildId = `anchor:${anchor.anchor_id}:build:2`
+    const diagnostic = '启动恢复时来源不可读；保留旧材料，路径已脱敏。'
+    const blockedReason = 'source_missing_after_app_restart_redacted'
+
+    return {
+      source: referenceProcessingSourceSummary(anchor),
+      current_status: {
+        stage: 'failed_import',
+        status: 'failed_import',
+        diagnostic,
+        updated_at: now,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 0,
+      },
+      events: [{
+        event_id: 'event-startup-preembedding-interrupted',
+        stage: 'materials_extracted',
+        status: 'materials_extracted',
+        message: 'app restart found durable material output before searchable activation',
+        created_at: now,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 0,
+        affected_source_id: String(anchor.anchor_id),
+        affected_material_id: 'mock-mat-missing-startup-001',
+        affected_segment_id: 'mock-seg-missing-startup-001',
+        affected_slot_id: 'object',
+      }, {
+        event_id: 'event-startup-missing-source-failed-import',
+        stage: 'failed_import',
+        status: 'failed_import',
+        message: diagnostic,
+        created_at: now,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 0,
+        affected_source_id: String(anchor.anchor_id),
+        affected_material_id: 'mock-mat-missing-startup-001',
+        affected_segment_id: 'mock-seg-missing-startup-001',
+        affected_slot_id: 'object',
+      }],
+      retry_available: true,
+      rebuild_available: true,
+      attempt_count: 2,
+      current_attempt: {
+        attempt_id: failedAttemptId,
+        attempt_number: 2,
+        build_id: failedBuildId,
+        build_version: anchor.build_version,
+        stage: 'failed_import',
+        status: 'failed_import',
+        started_at: now,
+        updated_at: now,
+        completed_at: now,
+        event_count: 1,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 0,
+        recovered_from_attempt_id: '',
+        recovered_from_build_id: '',
+        blocked_reason: blockedReason,
+      },
+      prior_attempts: [{
+        attempt_id: interruptedAttemptId,
+        attempt_number: 1,
+        build_id: interruptedBuildId,
+        build_version: anchor.build_version,
+        stage: 'materials_extracted',
+        status: 'materials_extracted',
+        started_at: now,
+        updated_at: now,
+        completed_at: '',
+        event_count: 1,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 0,
+        recovered_from_attempt_id: '',
+        recovered_from_build_id: '',
+        blocked_reason: 'app_restart_before_searchable_activation',
+      }],
+      recovered_from_attempt_id: '',
+      recovered_from_build_id: '',
+      blocked_reason: blockedReason,
+    }
+  }
+
+  function recoveredMissingSourceStartupProcessingDetail(anchor) {
+    const interruptedAttemptId = `anchor:${anchor.anchor_id}:attempt:1`
+    const interruptedBuildId = `anchor:${anchor.anchor_id}:build:1`
+    const failedAttemptId = `anchor:${anchor.anchor_id}:attempt:2`
+    const failedBuildId = `anchor:${anchor.anchor_id}:build:2`
+    const recoveredAttemptId = `anchor:${anchor.anchor_id}:attempt:3`
+    const recoveredBuildId = `anchor:${anchor.anchor_id}:build:3`
+
+    return {
+      source: referenceProcessingSourceSummary(anchor),
+      current_status: {
+        stage: 'embedding',
+        status: 'ready',
+        diagnostic: 'segments=2; materials=1; slots=1; vectors=1; recovered from missing source startup failure',
+        updated_at: now,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 1,
+      },
+      events: [{
+        event_id: 'event-startup-preembedding-interrupted',
+        stage: 'materials_extracted',
+        status: 'materials_extracted',
+        message: 'app restart found durable material output before searchable activation',
+        created_at: now,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 0,
+        affected_source_id: String(anchor.anchor_id),
+        affected_material_id: 'mock-mat-missing-startup-001',
+        affected_segment_id: 'mock-seg-missing-startup-001',
+        affected_slot_id: 'object',
+      }, {
+        event_id: 'event-startup-missing-source-failed-import',
+        stage: 'failed_import',
+        status: 'failed_import',
+        message: '启动恢复时来源不可读；保留旧材料，路径已脱敏。',
+        created_at: now,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 0,
+        affected_source_id: String(anchor.anchor_id),
+        affected_material_id: 'mock-mat-missing-startup-001',
+        affected_segment_id: 'mock-seg-missing-startup-001',
+        affected_slot_id: 'object',
+      }, {
+        event_id: 'event-recovered-missing-source-startup',
+        stage: 'embedding',
+        status: 'ready',
+        message: 'segments=2; materials=1; slots=1; vectors=1',
+        created_at: now,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 1,
+        affected_source_id: String(anchor.anchor_id),
+        affected_material_id: 'mock-mat-missing-startup-001',
+        affected_segment_id: 'mock-seg-missing-startup-001',
+        affected_slot_id: 'object',
+      }],
+      retry_available: false,
+      rebuild_available: true,
+      attempt_count: 3,
+      current_attempt: {
+        attempt_id: recoveredAttemptId,
+        attempt_number: 3,
+        build_id: recoveredBuildId,
+        build_version: anchor.build_version,
+        stage: 'embedding',
+        status: 'ready',
+        started_at: now,
+        updated_at: now,
+        completed_at: now,
+        event_count: 1,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 1,
+        recovered_from_attempt_id: failedAttemptId,
+        recovered_from_build_id: failedBuildId,
+        blocked_reason: '',
+      },
+      prior_attempts: [{
+        attempt_id: failedAttemptId,
+        attempt_number: 2,
+        build_id: failedBuildId,
+        build_version: anchor.build_version,
+        stage: 'failed_import',
+        status: 'failed_import',
+        started_at: now,
+        updated_at: now,
+        completed_at: now,
+        event_count: 1,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 0,
+        recovered_from_attempt_id: '',
+        recovered_from_build_id: '',
+        blocked_reason: 'source_missing_after_app_restart_redacted',
+      }, {
+        attempt_id: interruptedAttemptId,
+        attempt_number: 1,
+        build_id: interruptedBuildId,
+        build_version: anchor.build_version,
+        stage: 'materials_extracted',
+        status: 'materials_extracted',
+        started_at: now,
+        updated_at: now,
+        completed_at: '',
+        event_count: 1,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 0,
+        recovered_from_attempt_id: '',
+        recovered_from_build_id: '',
+        blocked_reason: 'app_restart_before_searchable_activation',
+      }],
+      recovered_from_attempt_id: failedAttemptId,
+      recovered_from_build_id: failedBuildId,
+      blocked_reason: '',
+    }
+  }
+
+  function recoveredSlotsDetectedStartupProcessingDetail(anchor) {
+    const interruptedAttemptId = `anchor:${anchor.anchor_id}:attempt:1`
+    const interruptedBuildId = `anchor:${anchor.anchor_id}:build:1`
+    const recoveredAttemptId = `anchor:${anchor.anchor_id}:attempt:2`
+    const recoveredBuildId = `anchor:${anchor.anchor_id}:build:2`
+
+    return {
+      source: referenceProcessingSourceSummary(anchor),
+      current_status: {
+        stage: 'embedding',
+        status: 'ready',
+        diagnostic: 'segments=2; materials=1; slots=1; vectors=1; recovered from slots_detected startup recovery',
+        updated_at: now,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 1,
+      },
+      events: [{
+        event_id: 'event-startup-slots-detected',
+        stage: 'slots_detected',
+        status: 'slots_detected',
+        message: 'app restart found detected slots before vector indexing',
+        created_at: now,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 0,
+        affected_source_id: String(anchor.anchor_id),
+        affected_material_id: 'mock-mat-slots-startup-001',
+        affected_segment_id: 'mock-seg-slots-startup-001',
+        affected_slot_id: 'object',
+      }, {
+        event_id: 'event-startup-slots-indexed',
+        stage: 'embedding',
+        status: 'ready',
+        message: 'startup recovery built active vectors without duplicate searchable materials',
+        created_at: now,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 1,
+        affected_source_id: String(anchor.anchor_id),
+        affected_material_id: 'mock-mat-slots-startup-001',
+        affected_segment_id: 'mock-seg-slots-startup-001',
+        affected_slot_id: 'object',
+      }],
+      retry_available: false,
+      rebuild_available: true,
+      attempt_count: 2,
+      current_attempt: {
+        attempt_id: recoveredAttemptId,
+        attempt_number: 2,
+        build_id: recoveredBuildId,
+        build_version: anchor.build_version,
+        stage: 'embedding',
+        status: 'ready',
+        started_at: now,
+        updated_at: now,
+        completed_at: now,
+        event_count: 1,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 1,
+        recovered_from_attempt_id: interruptedAttemptId,
+        recovered_from_build_id: interruptedBuildId,
+        blocked_reason: '',
+      },
+      prior_attempts: [{
+        attempt_id: interruptedAttemptId,
+        attempt_number: 1,
+        build_id: interruptedBuildId,
+        build_version: anchor.build_version,
+        stage: 'slots_detected',
+        status: 'slots_detected',
+        started_at: now,
+        updated_at: now,
+        completed_at: '',
+        event_count: 1,
+        source_segment_count: 2,
+        material_count: 1,
+        slot_count: 1,
+        vector_count: 0,
+        recovered_from_attempt_id: '',
+        recovered_from_build_id: '',
+        blocked_reason: 'app_restart_before_vector_indexing',
+      }],
+      recovered_from_attempt_id: interruptedAttemptId,
+      recovered_from_build_id: interruptedBuildId,
       blocked_reason: '',
     }
   }

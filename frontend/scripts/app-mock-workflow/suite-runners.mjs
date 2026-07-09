@@ -645,6 +645,213 @@ async function verifyCorpusLibraryWorkflow(page) {
   await expectHidden(restartSourceSegmentDrawer, 'restart recovery affected source segment drawer after close')
 
   await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const slotsStartupDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByRole('button', { name: /查看 槽位重启参考 的处理详情与失败记录/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', slotsStartupDetailCountBefore)
+  const slotsStartupDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(slotsStartupDrawer, 'slots-detected startup source processing drawer')
+  const slotsStartupText = await slotsStartupDrawer.innerText()
+  for (const expectedText of [
+    '槽位重启参考',
+    'embedding · ready',
+    'segments=2 · materials=1 · slots=1 · vectors=1',
+    'recovered from slots_detected startup recovery',
+    '第 2 次 · embedding · ready',
+    '恢复自 anchor:108:attempt:1 · anchor:108:build:1',
+    '历史尝试：2 次',
+    '第 1 次 · slots_detected · slots_detected',
+    'app_restart_before_vector_indexing',
+    'event-startup-slots-detected',
+    'event-startup-slots-indexed',
+    'affected: 108 · mock-mat-slots-startup-001 · mock-seg-slots-startup-001 · object',
+    '当前无失败重试项',
+    '重建语料',
+  ]) {
+    assert(slotsStartupText.includes(expectedText), `slots-detected startup drawer must render ${expectedText}`)
+  }
+  const slotsStartupSensitiveText = [
+    'D:\\books',
+    'source_path',
+    'source_text',
+    'prompt',
+    'candidate_text',
+    'chapter_text',
+    'full_content',
+    FULL_MATERIAL_LEAK_SENTINEL,
+  ]
+  for (const sensitiveText of slotsStartupSensitiveText) {
+    assert(!slotsStartupText.includes(sensitiveText), `slots-detected startup drawer must not render ${sensitiveText}`)
+  }
+
+  await page.evaluate(() => { window.__appMockClipboardText = '' })
+  await slotsStartupDrawer.getByTestId('reference-source-processing-copy-diagnostic').click()
+  await page.waitForFunction(() => window.__appMockClipboardText?.includes('处理记录: 槽位重启参考'), null, { timeout: 12_000 })
+  const copiedSlotsStartupDiagnostic = await page.evaluate(() => window.__appMockClipboardText)
+  assert(copiedSlotsStartupDiagnostic.includes('current=embedding/ready'), 'slots-detected startup copied diagnostic must include ready current status')
+  assert(copiedSlotsStartupDiagnostic.includes('current_attempt=2 anchor:108:attempt:2 embedding/ready'), 'slots-detected startup copied diagnostic must include recovered attempt')
+  assert(copiedSlotsStartupDiagnostic.includes('recovered_from=anchor:108:attempt:1 build=anchor:108:build:1'), 'slots-detected startup copied diagnostic must include recovered-from ids')
+  assert(copiedSlotsStartupDiagnostic.includes('prior_attempt=1 anchor:108:attempt:1 slots_detected/slots_detected'), 'slots-detected startup copied diagnostic must include prior slots-detected attempt')
+  assert(copiedSlotsStartupDiagnostic.includes('blocked_reason=app_restart_before_vector_indexing'), 'slots-detected startup copied diagnostic must include restart blocked reason')
+  assert(copiedSlotsStartupDiagnostic.includes('affected=108 · mock-mat-slots-startup-001 · mock-seg-slots-startup-001 · object'), 'slots-detected startup copied diagnostic must include affected ids')
+  assert(copiedSlotsStartupDiagnostic.includes('actions=rebuild:yes retry:no'), 'slots-detected startup copied diagnostic must include resolved retry availability')
+  for (const sensitiveText of slotsStartupSensitiveText) {
+    assert(!copiedSlotsStartupDiagnostic.includes(sensitiveText), `slots-detected startup copied diagnostic must not include ${sensitiveText}`)
+  }
+
+  const slotsStartupLocateSearchBefore = await bridgeCallCount(page, 'SearchReferenceMaterials')
+  await slotsStartupDrawer.getByRole('button', { name: /在材料库筛选 mock-mat-slots-startup-001/ }).first().click()
+  await waitForBridgeCallCountAfter(page, 'SearchReferenceMaterials', slotsStartupLocateSearchBefore)
+  await expectHidden(slotsStartupDrawer, 'slots-detected startup drawer after affected material locate')
+  assert.equal(await page.getByLabel('材料库搜索').inputValue(), 'mock-mat-slots-startup-001', 'slots-detected startup affected material locate must fill material library query')
+  assert.equal(
+    await page.getByTestId('reference-material-library-card').filter({ hasText: 'mock-mat-slots-startup-001' }).count(),
+    1,
+    'slots-detected startup recovery must keep one searchable material row for the indexed material id',
+  )
+
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const missingSourceStartupDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByRole('button', { name: /查看 缺源重启参考 的处理详情与失败记录/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', missingSourceStartupDetailCountBefore)
+  const missingSourceStartupDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(missingSourceStartupDrawer, 'missing-source startup source processing drawer')
+  const missingSourceStartupText = await missingSourceStartupDrawer.innerText()
+  for (const expectedText of [
+    '缺源重启参考',
+    'failed_import · failed_import',
+    'segments=2 · materials=1 · slots=1 · vectors=0',
+    '启动恢复时来源不可读；保留旧材料，路径已脱敏。',
+    '第 2 次 · failed_import · failed_import',
+    'source_missing_after_app_restart_redacted',
+    '历史尝试：2 次',
+    '第 1 次 · materials_extracted · materials_extracted',
+    'app_restart_before_searchable_activation',
+    'event-startup-preembedding-interrupted',
+    'event-startup-missing-source-failed-import',
+    'affected: 107 · mock-mat-missing-startup-001 · mock-seg-missing-startup-001 · object',
+    '失败状态可恢复',
+    '重建语料',
+  ]) {
+    assert(missingSourceStartupText.includes(expectedText), `missing-source startup drawer must render ${expectedText}`)
+  }
+  const missingSourceStartupSensitiveText = [
+    'D:\\books',
+    'source_path',
+    'source_text',
+    'prompt',
+    'candidate_text',
+    'chapter_text',
+    'full_content',
+    FULL_MATERIAL_LEAK_SENTINEL,
+  ]
+  for (const sensitiveText of missingSourceStartupSensitiveText) {
+    assert(!missingSourceStartupText.includes(sensitiveText), `missing-source startup drawer must not render ${sensitiveText}`)
+  }
+
+  await page.evaluate(() => { window.__appMockClipboardText = '' })
+  await missingSourceStartupDrawer.getByTestId('reference-source-processing-copy-diagnostic').click()
+  await page.waitForFunction(() => window.__appMockClipboardText?.includes('处理记录: 缺源重启参考'), null, { timeout: 12_000 })
+  const copiedMissingSourceStartupDiagnostic = await page.evaluate(() => window.__appMockClipboardText)
+  assert(copiedMissingSourceStartupDiagnostic.includes('current=failed_import/failed_import'), 'missing-source startup copied diagnostic must include failed current status')
+  assert(copiedMissingSourceStartupDiagnostic.includes('current_attempt=2 anchor:107:attempt:2 failed_import/failed_import'), 'missing-source startup copied diagnostic must include failed attempt')
+  assert(copiedMissingSourceStartupDiagnostic.includes('prior_attempt=1 anchor:107:attempt:1 materials_extracted/materials_extracted'), 'missing-source startup copied diagnostic must include interrupted prior attempt')
+  assert(copiedMissingSourceStartupDiagnostic.includes('blocked_reason=source_missing_after_app_restart_redacted'), 'missing-source startup copied diagnostic must include blocked reason')
+  assert(copiedMissingSourceStartupDiagnostic.includes('affected=107 · mock-mat-missing-startup-001 · mock-seg-missing-startup-001 · object'), 'missing-source startup copied diagnostic must include retained material id')
+  assert(copiedMissingSourceStartupDiagnostic.includes('actions=rebuild:yes retry:yes'), 'missing-source startup copied diagnostic must include retry/rebuild availability')
+  for (const sensitiveText of missingSourceStartupSensitiveText) {
+    assert(!copiedMissingSourceStartupDiagnostic.includes(sensitiveText), `missing-source startup copied diagnostic must not include ${sensitiveText}`)
+  }
+
+  const missingSourceSegmentDetailBefore = await bridgeCallCount(page, 'GetReferenceSourceSegmentDetail')
+  await missingSourceStartupDrawer.getByRole('button', { name: /查看 mock-seg-missing-startup-001 的来源片段明细/ }).first().click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceSegmentDetail', missingSourceSegmentDetailBefore)
+  await expectHidden(missingSourceStartupDrawer, 'missing-source startup drawer after opening affected source segment detail')
+  const missingSourceSegmentDrawer = page.getByTestId('reference-source-segment-detail-drawer')
+  await expectVisible(missingSourceSegmentDrawer, 'missing-source startup affected source segment detail drawer')
+  const missingSourceSegmentText = await missingSourceSegmentDrawer.innerText()
+  assert(missingSourceSegmentText.includes('缺源重启参考'), 'missing-source startup source segment drawer must render source title')
+  assert(missingSourceSegmentText.includes('mock-seg-missing-startup-001'), 'missing-source startup source segment drawer must render segment id')
+  assert(missingSourceSegmentText.includes('failed_import'), 'missing-source startup source segment drawer must render failed processing note')
+  assert(missingSourceSegmentText.includes('启动恢复缺源；旧来源片段与材料输出已保留。'), 'missing-source startup source segment drawer must explain retained segment output')
+  assert(missingSourceSegmentText.includes('预览已截断，不显示全文'), 'missing-source startup source segment drawer must mark bounded preview')
+  assert(missingSourceSegmentText.includes('affected: 107 · mock-mat-missing-startup-001 · mock-seg-missing-startup-001 · object'), 'missing-source startup source segment drawer must render affected ids')
+  for (const sensitiveText of missingSourceStartupSensitiveText) {
+    assert(!missingSourceSegmentText.includes(sensitiveText), `missing-source startup source segment drawer must not render ${sensitiveText}`)
+  }
+  await missingSourceSegmentDrawer.getByRole('button', { name: '关闭来源片段明细' }).click()
+  await expectHidden(missingSourceSegmentDrawer, 'missing-source startup affected source segment drawer after close')
+
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const missingSourceMaterialProcessingCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByRole('button', { name: /查看 缺源重启参考 的处理详情与失败记录/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', missingSourceMaterialProcessingCountBefore)
+  const missingSourceMaterialProcessingDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(missingSourceMaterialProcessingDrawer, 'missing-source startup drawer before retained material detail')
+  const missingSourceMaterialDetailBefore = await bridgeCallCount(page, 'GetReferenceMaterialDetail')
+  await missingSourceMaterialProcessingDrawer.getByRole('button', { name: /查看 mock-mat-missing-startup-001 的材料明细/ }).first().click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceMaterialDetail', missingSourceMaterialDetailBefore)
+  await expectHidden(missingSourceMaterialProcessingDrawer, 'missing-source startup drawer after opening retained material detail')
+  const missingSourceMaterialDrawer = page.getByTestId('reference-material-detail-drawer')
+  await expectVisible(missingSourceMaterialDrawer, 'missing-source startup retained material detail drawer')
+  const missingSourceMaterialText = await missingSourceMaterialDrawer.innerText()
+  assert(missingSourceMaterialText.includes('mock-mat-missing-startup-001'), 'missing-source startup material detail must render material id')
+  assert(missingSourceMaterialText.includes('缺源重启参考'), 'missing-source startup material detail must render source title')
+  assert(missingSourceMaterialText.includes('failed_import'), 'missing-source startup material detail must render failed processing note')
+  assert(missingSourceMaterialText.includes('预览已截断，不显示全文'), 'missing-source startup material detail must mark bounded preview')
+  for (const sensitiveText of missingSourceStartupSensitiveText) {
+    assert(!missingSourceMaterialText.includes(sensitiveText), `missing-source startup material detail must not render ${sensitiveText}`)
+  }
+  await missingSourceMaterialDrawer.getByRole('button', { name: '关闭材料明细' }).click()
+  await expectHidden(missingSourceMaterialDrawer, 'missing-source startup retained material drawer after close')
+
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const missingSourceRecoveryDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByRole('button', { name: /查看 缺源重启参考 的处理详情与失败记录/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', missingSourceRecoveryDetailCountBefore)
+  const missingSourceRecoveryDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(missingSourceRecoveryDrawer, 'missing-source startup drawer before explicit rebuild')
+  const missingSourceRebuildCountBefore = await bridgeCallCount(page, 'RebuildReferenceAnchor')
+  const missingSourceRefreshBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await missingSourceRecoveryDrawer.getByRole('button', { name: /重建语料 缺源重启参考/ }).click()
+  await waitForBridgeCallCountAfter(page, 'RebuildReferenceAnchor', missingSourceRebuildCountBefore)
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', missingSourceRefreshBefore)
+  await page.waitForFunction(() =>
+    document.querySelector('[data-testid="reference-source-processing-drawer"]')?.innerText.includes('恢复自 anchor:107:attempt:2 · anchor:107:build:2'),
+  null, { timeout: 12_000 })
+  const missingSourceRecoveryText = await missingSourceRecoveryDrawer.innerText()
+  for (const expectedText of [
+    '缺源重启参考',
+    'embedding · ready',
+    'segments=2 · materials=1 · slots=1 · vectors=1',
+    'recovered from missing source startup failure',
+    '第 3 次 · embedding · ready',
+    '恢复自 anchor:107:attempt:2 · anchor:107:build:2',
+    '历史尝试：3 次',
+    '第 2 次 · failed_import · failed_import',
+    'source_missing_after_app_restart_redacted',
+    '第 1 次 · materials_extracted · materials_extracted',
+    'event-recovered-missing-source-startup',
+    'affected: 107 · mock-mat-missing-startup-001 · mock-seg-missing-startup-001 · object',
+    '当前无失败重试项',
+  ]) {
+    assert(missingSourceRecoveryText.includes(expectedText), `recovered missing-source startup drawer must render ${expectedText}`)
+  }
+  for (const sensitiveText of missingSourceStartupSensitiveText) {
+    assert(!missingSourceRecoveryText.includes(sensitiveText), `recovered missing-source startup drawer must not render ${sensitiveText}`)
+  }
+
+  const missingSourceLocateSearchBefore = await bridgeCallCount(page, 'SearchReferenceMaterials')
+  await missingSourceRecoveryDrawer.getByRole('button', { name: /在材料库筛选 mock-mat-missing-startup-001/ }).first().click()
+  await waitForBridgeCallCountAfter(page, 'SearchReferenceMaterials', missingSourceLocateSearchBefore)
+  await expectHidden(missingSourceRecoveryDrawer, 'recovered missing-source startup drawer after affected material locate')
+  assert.equal(await page.getByLabel('材料库搜索').inputValue(), 'mock-mat-missing-startup-001', 'recovered missing-source startup affected material locate must fill material library query')
+  assert.equal(
+    await page.getByTestId('reference-material-library-card').filter({ hasText: 'mock-mat-missing-startup-001' }).count(),
+    1,
+    'recovered missing-source startup rebuild must keep exactly one searchable material row for the retained material id',
+  )
+
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
   const extractionFailureDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
   await page.getByRole('button', { name: /查看 抽取失败参考 的处理详情与失败记录/ }).click()
   await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', extractionFailureDetailCountBefore)

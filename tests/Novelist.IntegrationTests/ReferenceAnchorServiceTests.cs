@@ -1329,6 +1329,502 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Theory]
+    [InlineData(ReferenceAnchorBuildStates.DetectingSlots)]
+    [InlineData(ReferenceAnchorBuildStates.SlotsDetected)]
+    [InlineData(ReferenceAnchorBuildStates.Stale)]
+    public async Task StartupInitializationRecoversSlottedPreEmbeddingStageAndBuildsActiveVectors(string recoverableStatus)
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload($"启动槽位向量恢复-{recoverableStatus}", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            $"startup-slotted-vector-recovery-{recoverableStatus}.md",
+            """
+            # 第一章
+
+            林岚握住{{object}}，没有立刻说话。
+
+            雨声压低了门口。
+
+            她把那句解释咽回去，只听街灯在水里发颤。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels, new StaticEmbeddingConfigurationService(null));
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "启动槽位向量恢复参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var initialStatus = await service.GetBuildStatusAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(initialStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, initialStatus.Status);
+        Assert.True(initialStatus.SlotCount > 0);
+        Assert.Equal(0, initialStatus.VectorCount);
+        var initialRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        Assert.True(initialRows.Count >= 2);
+        Assert.Contains(initialRows, row => row.SlotCount > 0);
+        var correctedMaterialId = initialRows[0].MaterialId;
+        var archivedMaterialId = initialRows[^1].MaterialId;
+        await service.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(
+                novel.Id,
+                correctedMaterialId,
+                FunctionTag: "interiority",
+                EmotionTag: "unease",
+                SceneTag: "threshold",
+                PovTag: "close",
+                TechniqueTag: "afterbeat",
+                Origin: "user",
+                Note: "slots-detected startup recovery must preserve correction"),
+            CancellationToken.None);
+        await service.DeleteMaterialsAsync(
+            new DeleteReferenceMaterialsPayload(novel.Id, [archivedMaterialId]),
+            CancellationToken.None);
+        var rowsBeforeRecovery = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        Assert.Equal(initialRows.Select(row => row.MaterialId), rowsBeforeRecovery.Select(row => row.MaterialId));
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, archivedMaterialId));
+        await UpdateAnchorBuildStatusAsync(
+            options,
+            anchor.AnchorId,
+            recoverableStatus,
+            recoverableStatus);
+
+        var embeddingOptions = new EmbeddingRequestOptions(
+            "custom",
+            "https://api.example.com/v1/embeddings",
+            "test-key",
+            "embed-v1",
+            3,
+            null);
+        var startupEmbeddings = new DeterministicEmbeddingClient(dimensions: 3);
+        var startupProvisioner = new RecordingSqliteVecTableProvisioner();
+        var startupRecovery = new SqliteReferenceAnchorService(
+            options,
+            new FileSystemNovelService(options, new FileSystemAppSettingsService(options)),
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            startupEmbeddings,
+            startupProvisioner);
+        var initialization = new FileSystemAppInitializationService(
+            options,
+            referenceAnchorRecovery: startupRecovery);
+
+        Assert.True(await initialization.IsInitializedAsync(CancellationToken.None));
+
+        var recoveredAnchor = Assert.Single(await startupRecovery.GetAnchorsAsync(novel.Id, CancellationToken.None));
+        Assert.Equal(anchor.AnchorId, recoveredAnchor.AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recoveredAnchor.Status);
+        var recoveredStatus = await startupRecovery.GetBuildStatusAsync(novel.Id, recoveredAnchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(recoveredStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recoveredStatus.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, recoveredStatus.Stage);
+        Assert.True(recoveredStatus.SlotCount > 0);
+
+        var rowsAfterRecovery = await ReadMaterialRowsAsync(options, recoveredAnchor.AnchorId);
+        Assert.Equal(rowsBeforeRecovery.Select(row => row.MaterialId), rowsAfterRecovery.Select(row => row.MaterialId));
+        Assert.Equal(rowsAfterRecovery.Count, rowsAfterRecovery.Select(row => row.MaterialId).Distinct(StringComparer.Ordinal).Count());
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, archivedMaterialId));
+        Assert.Contains(rowsAfterRecovery, row => row.SlotCount > 0);
+        var corrected = Assert.Single(rowsAfterRecovery, row => row.MaterialId == correctedMaterialId);
+        Assert.True(corrected.UserVerified);
+        Assert.Equal("interiority", corrected.FunctionTag);
+        Assert.Equal("unease", corrected.EmotionTag);
+        Assert.Equal("close", corrected.PovTag);
+        Assert.Equal("afterbeat", corrected.TechniqueTag);
+        var activeMaterialCount = 0;
+        foreach (var row in rowsAfterRecovery)
+        {
+            if (await ReadMaterialArchivedAtAsync(options, row.MaterialId) is null)
+            {
+                activeMaterialCount++;
+            }
+        }
+
+        Assert.Equal(activeMaterialCount, recoveredStatus.VectorCount);
+        Assert.Equal(activeMaterialCount, startupEmbeddings.Requests.Single().Count);
+        Assert.Single(startupProvisioner.Provisions);
+        var defaultSearch = await startupRecovery.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                AnchorIds: [],
+                Query: "",
+                MaterialTypes: [],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 100),
+            CancellationToken.None);
+        Assert.Equal(activeMaterialCount, defaultSearch.Items.Count);
+        Assert.Contains(defaultSearch.Items, item => item.MaterialId == correctedMaterialId);
+        Assert.DoesNotContain(defaultSearch.Items, item => item.MaterialId == archivedMaterialId);
+
+        var detail = await startupRecovery.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, recoveredAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.Contains(detail.Events, item => item.Status == recoverableStatus);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.Embedding);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.Ready);
+    }
+
+    [Theory]
+    [InlineData(ReferenceAnchorBuildStates.DetectingSlots)]
+    [InlineData(ReferenceAnchorBuildStates.SlotsDetected)]
+    [InlineData(ReferenceAnchorBuildStates.Stale)]
+    public async Task StartupInitializationMarksMissingSourceSlottedStageFailedImportAndPreservesAffectedSlotDetail(string recoverableStatus)
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload($"启动槽位缺源恢复-{recoverableStatus}", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            $"startup-slotted-missing-source-{recoverableStatus}.md",
+            """
+            # 第一章
+
+            林岚握住{{object}}，没有立刻说话。
+
+            雨声压低了门口。
+
+            她把那句解释咽回去，只听街灯在水里发颤。
+            """);
+        var embeddingOptions = new EmbeddingRequestOptions(
+            "custom",
+            "https://api.example.com/v1/embeddings",
+            "test-key",
+            "embed-v1",
+            3,
+            null);
+        var service = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            new StaticEmbeddingConfigurationService(embeddingOptions),
+            new DeterministicEmbeddingClient(dimensions: 3),
+            new RecordingSqliteVecTableProvisioner());
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "启动槽位缺源恢复参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var initialStatus = await service.GetBuildStatusAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(initialStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, initialStatus.Status);
+        Assert.True(initialStatus.SlotCount > 0);
+        Assert.True(initialStatus.VectorCount > 0);
+        var initialRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        Assert.True(initialRows.Count >= 2);
+        var slottedMaterial = initialRows.First(row => row.SlotCount > 0);
+        var archivedMaterialId = initialRows[^1].MaterialId == slottedMaterial.MaterialId
+            ? initialRows[0].MaterialId
+            : initialRows[^1].MaterialId;
+        await service.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(
+                novel.Id,
+                slottedMaterial.MaterialId,
+                FunctionTag: "interiority",
+                EmotionTag: "unease",
+                SceneTag: "threshold",
+                PovTag: "close",
+                TechniqueTag: "afterbeat",
+                Origin: "user",
+                Note: "missing-source slotted startup recovery must preserve correction"),
+            CancellationToken.None);
+        await service.DeleteMaterialsAsync(
+            new DeleteReferenceMaterialsPayload(novel.Id, [archivedMaterialId]),
+            CancellationToken.None);
+        var rowsBeforeRecovery = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        Assert.Equal(initialRows.Select(row => row.MaterialId), rowsBeforeRecovery.Select(row => row.MaterialId));
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, archivedMaterialId));
+        await UpdateAnchorBuildStatusAsync(options, anchor.AnchorId, recoverableStatus, recoverableStatus);
+        File.Delete(sourcePath);
+
+        var startupRecovery = new SqliteReferenceAnchorService(
+            options,
+            new FileSystemNovelService(options, new FileSystemAppSettingsService(options)));
+        var initialization = new FileSystemAppInitializationService(
+            options,
+            referenceAnchorRecovery: startupRecovery);
+
+        Assert.True(await initialization.IsInitializedAsync(CancellationToken.None));
+
+        var recoveredAnchor = Assert.Single(await startupRecovery.GetAnchorsAsync(novel.Id, CancellationToken.None));
+        Assert.Equal(anchor.AnchorId, recoveredAnchor.AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, recoveredAnchor.Status);
+        var recoveredStatus = await startupRecovery.GetBuildStatusAsync(novel.Id, recoveredAnchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(recoveredStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, recoveredStatus.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, recoveredStatus.Stage);
+        Assert.Equal(initialStatus.SourceSegmentCount, recoveredStatus.SourceSegmentCount);
+        Assert.Equal(initialStatus.MaterialCount, recoveredStatus.MaterialCount);
+        Assert.Equal(initialStatus.SlotCount, recoveredStatus.SlotCount);
+        Assert.Equal(initialStatus.VectorCount, recoveredStatus.VectorCount);
+
+        var rowsAfterRecovery = await ReadMaterialRowsAsync(options, recoveredAnchor.AnchorId);
+        Assert.Equal(rowsBeforeRecovery.Select(row => row.MaterialId), rowsAfterRecovery.Select(row => row.MaterialId));
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, archivedMaterialId));
+        var corrected = Assert.Single(rowsAfterRecovery, row => row.MaterialId == slottedMaterial.MaterialId);
+        Assert.True(corrected.UserVerified);
+        Assert.Equal("interiority", corrected.FunctionTag);
+        Assert.Equal("unease", corrected.EmotionTag);
+        Assert.Equal("close", corrected.PovTag);
+        Assert.Equal("afterbeat", corrected.TechniqueTag);
+
+        var detail = await startupRecovery.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, recoveredAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.Contains(detail.Events, item => item.Status == recoverableStatus);
+        var failedEvent = Assert.Single(
+            detail.Events,
+            item => item.Status == ReferenceAnchorBuildStates.FailedImport &&
+                item.MaterialCount == rowsAfterRecovery.Count);
+        Assert.Equal(slottedMaterial.MaterialId, failedEvent.AffectedMaterialId);
+        Assert.Equal(slottedMaterial.SourceSegmentId, failedEvent.AffectedSegmentId);
+        Assert.NotEmpty(failedEvent.AffectedSlotId);
+        Assert.NotNull(detail.CurrentAttempt);
+        Assert.Contains(detail.CurrentAttempt.BlockedReason, recoveredStatus!.LastError, StringComparison.Ordinal);
+
+        var serialized = JsonSerializer.Serialize(detail, BridgeJson.SerializerOptions);
+        Assert.DoesNotContain("source_path", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("full_content", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), serialized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StartupInitializationMarksMissingSourceRecoverableStageFailedImportAndPreservesPriorCorpus()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("启动缺源恢复保留旧语料", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "startup-missing-source-recovery.md",
+            """
+            旧雨声压低了整条街的呼吸。
+
+            林岚在门口停住，手指贴着伞柄。
+
+            她把伞收紧，没有回头。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "启动缺源恢复参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var initialRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        Assert.True(initialRows.Count >= 2);
+        var correctedMaterialId = initialRows[0].MaterialId;
+        var archivedMaterialId = initialRows[^1].MaterialId;
+        await service.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(
+                novel.Id,
+                correctedMaterialId,
+                FunctionTag: "interiority",
+                EmotionTag: "unease",
+                SceneTag: "threshold",
+                PovTag: "close",
+                TechniqueTag: "afterbeat",
+                Origin: "user",
+                Note: "startup missing-source recovery must preserve correction"),
+            CancellationToken.None);
+        await service.DeleteMaterialsAsync(
+            new DeleteReferenceMaterialsPayload(novel.Id, [archivedMaterialId]),
+            CancellationToken.None);
+        var rowsBeforeRecovery = await ReadMaterialRowsAsync(options, anchor.AnchorId);
+        Assert.Equal(initialRows.Select(row => row.MaterialId), rowsBeforeRecovery.Select(row => row.MaterialId));
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, archivedMaterialId));
+        var beforeActive = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(novel.Id, [anchor.AnchorId], "", [], [], [], [], [], 1, 100),
+            CancellationToken.None);
+        Assert.Contains(beforeActive.Items, item => item.MaterialId == correctedMaterialId);
+        Assert.DoesNotContain(beforeActive.Items, item => item.MaterialId == archivedMaterialId);
+        await UpdateAnchorBuildStatusAsync(
+            options,
+            anchor.AnchorId,
+            ReferenceAnchorBuildStates.MaterialsExtracted,
+            ReferenceAnchorBuildStates.MaterialsExtracted);
+        File.Delete(sourcePath);
+
+        var startupRecovery = new SqliteReferenceAnchorService(
+            options,
+            new FileSystemNovelService(options, new FileSystemAppSettingsService(options)));
+        var initialization = new FileSystemAppInitializationService(
+            options,
+            referenceAnchorRecovery: startupRecovery);
+
+        Assert.True(await initialization.IsInitializedAsync(CancellationToken.None));
+
+        var recoveredAnchor = Assert.Single(await startupRecovery.GetAnchorsAsync(novel.Id, CancellationToken.None));
+        Assert.Equal(anchor.AnchorId, recoveredAnchor.AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, recoveredAnchor.Status);
+        Assert.Equal(anchor.SourceFileHash, recoveredAnchor.SourceFileHash);
+        var recoveredStatus = await startupRecovery.GetBuildStatusAsync(novel.Id, recoveredAnchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(recoveredStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, recoveredStatus.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, recoveredStatus.Stage);
+        Assert.Equal(rowsBeforeRecovery.Count, recoveredStatus.MaterialCount);
+        Assert.True(recoveredStatus.SourceSegmentCount > 0);
+        Assert.False(string.IsNullOrWhiteSpace(recoveredStatus.LastError));
+        Assert.DoesNotContain(sourcePath, recoveredStatus.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), recoveredStatus.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(_root, recoveredStatus.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", recoveredStatus.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", recoveredStatus.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", recoveredStatus.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("full_content", recoveredStatus.LastError, StringComparison.OrdinalIgnoreCase);
+
+        var rowsAfterRecovery = await ReadMaterialRowsAsync(options, recoveredAnchor.AnchorId);
+        Assert.Equal(rowsBeforeRecovery.Select(row => row.MaterialId), rowsAfterRecovery.Select(row => row.MaterialId));
+        Assert.Equal(rowsAfterRecovery.Count, rowsAfterRecovery.Select(row => row.MaterialId).Distinct(StringComparer.Ordinal).Count());
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, archivedMaterialId));
+        var corrected = Assert.Single(rowsAfterRecovery, row => row.MaterialId == correctedMaterialId);
+        Assert.True(corrected.UserVerified);
+        Assert.Equal("interiority", corrected.FunctionTag);
+        Assert.Equal("unease", corrected.EmotionTag);
+        Assert.Equal("close", corrected.PovTag);
+        Assert.Equal("afterbeat", corrected.TechniqueTag);
+
+        var afterActive = await startupRecovery.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(novel.Id, [recoveredAnchor.AnchorId], "", [], [], [], [], [], 1, 100),
+            CancellationToken.None);
+        Assert.Equal(beforeActive.Items.Select(item => item.MaterialId), afterActive.Items.Select(item => item.MaterialId));
+        Assert.Contains(afterActive.Items, item => item.MaterialId == correctedMaterialId);
+        Assert.DoesNotContain(afterActive.Items, item => item.MaterialId == archivedMaterialId);
+
+        var detail = await startupRecovery.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, recoveredAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.True(detail.RetryAvailable);
+        Assert.True(detail.RebuildAvailable);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.NotNull(detail.CurrentAttempt);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, detail.CurrentStatus.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, detail.CurrentAttempt.Status);
+        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.MaterialsExtracted);
+        var failedEvent = Assert.Single(
+            detail.Events,
+            item => item.Status == ReferenceAnchorBuildStates.FailedImport &&
+                item.MaterialCount == rowsAfterRecovery.Count);
+        Assert.NotEmpty(failedEvent.AffectedMaterialId);
+        Assert.Contains(rowsAfterRecovery, row => row.MaterialId == failedEvent.AffectedMaterialId);
+        Assert.Contains(detail.CurrentAttempt.BlockedReason, recoveredStatus.LastError, StringComparison.Ordinal);
+
+        var serialized = JsonSerializer.Serialize(detail, BridgeJson.SerializerOptions);
+        Assert.DoesNotContain("source_path", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("full_content", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), serialized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(ReferenceAnchorBuildStates.Created)]
+    [InlineData(ReferenceAnchorBuildStates.Importing)]
+    [InlineData(ReferenceAnchorBuildStates.SourceImported)]
+    [InlineData(ReferenceAnchorBuildStates.Segmenting)]
+    public async Task StartupInitializationMarksMissingSourceEarlyRecoverableStageFailedImportWithoutFakeOutput(string recoverableStatus)
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload($"启动早期缺源恢复-{recoverableStatus}", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            $"startup-early-missing-source-{recoverableStatus}.md",
+            """
+            # 第一章
+
+            雨声压低了门口。
+
+            他在门口停住。
+            """);
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, $"启动早期缺源 {recoverableStatus}", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        Assert.NotEmpty(await ReadSourceSegmentsAsync(options, anchor.AnchorId));
+        Assert.NotEmpty(await ReadMaterialRowsAsync(options, anchor.AnchorId));
+        await RemoveAnchorOutputAndSetBuildStatusAsync(options, anchor.AnchorId, recoverableStatus, recoverableStatus);
+        File.Delete(sourcePath);
+
+        var startupRecovery = new SqliteReferenceAnchorService(
+            options,
+            new FileSystemNovelService(options, new FileSystemAppSettingsService(options)));
+        var initialization = new FileSystemAppInitializationService(
+            options,
+            referenceAnchorRecovery: startupRecovery);
+
+        Assert.True(await initialization.IsInitializedAsync(CancellationToken.None));
+
+        var recoveredAnchor = Assert.Single(await startupRecovery.GetAnchorsAsync(novel.Id, CancellationToken.None));
+        Assert.Equal(anchor.AnchorId, recoveredAnchor.AnchorId);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, recoveredAnchor.Status);
+        Assert.Equal(anchor.SourceFileHash, recoveredAnchor.SourceFileHash);
+        Assert.Empty(await ReadSourceSegmentsAsync(options, recoveredAnchor.AnchorId));
+        Assert.Empty(await ReadMaterialRowsAsync(options, recoveredAnchor.AnchorId));
+        var recoveredStatus = await startupRecovery.GetBuildStatusAsync(novel.Id, recoveredAnchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(recoveredStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, recoveredStatus.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, recoveredStatus.Stage);
+        Assert.Equal(0, recoveredStatus.SourceSegmentCount);
+        Assert.Equal(0, recoveredStatus.MaterialCount);
+        Assert.Equal(0, recoveredStatus.SlotCount);
+        Assert.Equal(0, recoveredStatus.VectorCount);
+        Assert.False(string.IsNullOrWhiteSpace(recoveredStatus.LastError));
+        Assert.DoesNotContain(sourcePath, recoveredStatus.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), recoveredStatus.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(_root, recoveredStatus.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", recoveredStatus.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", recoveredStatus.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", recoveredStatus.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("full_content", recoveredStatus.LastError, StringComparison.OrdinalIgnoreCase);
+
+        var search = await startupRecovery.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                AnchorIds: [],
+                Query: "门口",
+                MaterialTypes: [],
+                EmotionTags: [],
+                FunctionTags: [],
+                PovTags: [],
+                TechniqueTags: [],
+                Page: 1,
+                Size: 10),
+            CancellationToken.None);
+        Assert.Empty(search.Items);
+
+        var detail = await startupRecovery.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, recoveredAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.True(detail.RetryAvailable);
+        Assert.True(detail.RebuildAvailable);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.NotNull(detail.CurrentAttempt);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, detail.CurrentStatus.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, detail.CurrentAttempt.Status);
+        Assert.Contains(detail.Events, item => item.Status == recoverableStatus);
+        var failedEvent = Assert.Single(
+            detail.Events,
+            item => item.Status == ReferenceAnchorBuildStates.FailedImport &&
+                item.SourceSegmentCount == 0 &&
+                item.MaterialCount == 0);
+        Assert.Empty(failedEvent.AffectedMaterialId);
+        Assert.Empty(failedEvent.AffectedSegmentId);
+        Assert.Empty(failedEvent.AffectedSlotId);
+        Assert.Contains(detail.CurrentAttempt.BlockedReason, recoveredStatus.LastError, StringComparison.Ordinal);
+
+        var serialized = JsonSerializer.Serialize(detail, BridgeJson.SerializerOptions);
+        Assert.DoesNotContain("source_path", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("full_content", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), serialized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
     [InlineData(ReferenceAnchorBuildStates.Created)]
     [InlineData(ReferenceAnchorBuildStates.Importing)]
     [InlineData(ReferenceAnchorBuildStates.SourceImported)]
@@ -1462,7 +1958,13 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         await InitializeAsync(options);
         var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
         var novel = await novels.CreateNovelAsync(new CreateNovelPayload("取消后显式恢复测试", "", ""), CancellationToken.None);
-        var sourcePath = CreateSourceFile("reference-vector-cancelled-rebuild.md", "雨声压低了整条街的呼吸。");
+        var sourcePath = CreateSourceFile(
+            "reference-vector-cancelled-rebuild.md",
+            """
+            雨声压低了整条街的呼吸。
+
+            他停在门槛前，想起那句 {{memory_anchor}}，然后把伞柄握得更紧。
+            """);
         var embeddingOptions = new EmbeddingRequestOptions(
             "custom",
             "https://api.example.com/v1/embeddings",
@@ -1486,8 +1988,15 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         var cancelledAnchor = Assert.Single(await cancelledService.GetAnchorsAsync(novel.Id, CancellationToken.None));
         Assert.Equal(ReferenceAnchorBuildStates.Cancelled, cancelledAnchor.Status);
         var beforeRows = await ReadMaterialRowsAsync(options, cancelledAnchor.AnchorId);
-        Assert.NotEmpty(beforeRows);
-        var correctedMaterialId = beforeRows[0].MaterialId;
+        Assert.True(beforeRows.Count >= 2);
+        Assert.Contains(beforeRows, row => row.SlotCount > 0);
+        Assert.Contains(beforeRows, row => row.SlotCount == 0);
+        var slottedMaterialIds = beforeRows
+            .Where(row => row.SlotCount > 0)
+            .Select(row => row.MaterialId)
+            .ToArray();
+        var slottedMaterialIdSet = new HashSet<string>(slottedMaterialIds, StringComparer.Ordinal);
+        var correctedMaterialId = slottedMaterialIds[0];
         await cancelledService.UpdateMaterialTagsAsync(
             new UpdateReferenceMaterialTagsPayload(
                 novel.Id,
@@ -1498,8 +2007,19 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
                 PovTag: "close",
                 TechniqueTag: "afterbeat",
                 Origin: "user",
-                Note: "explicit rebuild should preserve cancellation corrections"),
+                Note: "explicit rebuild should preserve archived slotted correction"),
             CancellationToken.None);
+        await cancelledService.DeleteMaterialsAsync(
+            new DeleteReferenceMaterialsPayload(novel.Id, slottedMaterialIds),
+            CancellationToken.None);
+        beforeRows = await ReadMaterialRowsAsync(options, cancelledAnchor.AnchorId);
+        foreach (var slottedMaterialId in slottedMaterialIds)
+        {
+            Assert.NotNull(await ReadMaterialArchivedAtAsync(options, slottedMaterialId));
+        }
+
+        var activeMaterialCount = beforeRows.Count(row => !slottedMaterialIdSet.Contains(row.MaterialId));
+        Assert.True(activeMaterialCount > 0);
 
         var recoveryService = new SqliteReferenceAnchorService(
             options,
@@ -1512,15 +2032,27 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
 
         Assert.Equal(ReferenceAnchorBuildStates.Ready, recovered.Status);
         Assert.Equal(ReferenceAnchorBuildStates.Ready, recovered.Stage);
-        Assert.Equal(recovered.MaterialCount, recovered.VectorCount);
+        Assert.Equal(beforeRows.Count, recovered.MaterialCount);
+        Assert.Equal(activeMaterialCount, recovered.VectorCount);
         var afterRows = await ReadMaterialRowsAsync(options, cancelledAnchor.AnchorId);
         Assert.Equal(beforeRows.Select(row => row.MaterialId), afterRows.Select(row => row.MaterialId));
+        foreach (var slottedMaterialId in slottedMaterialIds)
+        {
+            Assert.NotNull(await ReadMaterialArchivedAtAsync(options, slottedMaterialId));
+        }
+
         var corrected = Assert.Single(afterRows, row => row.MaterialId == correctedMaterialId);
         Assert.True(corrected.UserVerified);
         Assert.Equal("interiority", corrected.FunctionTag);
         Assert.Equal("unease", corrected.EmotionTag);
         Assert.Equal("close", corrected.PovTag);
         Assert.Equal("afterbeat", corrected.TechniqueTag);
+        var search = await recoveryService.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(novel.Id, [cancelledAnchor.AnchorId], "", [], [], [], [], [], 1, 100),
+            CancellationToken.None);
+        Assert.Equal(activeMaterialCount, search.Items.Count);
+        Assert.DoesNotContain(search.Items, item => slottedMaterialIdSet.Contains(item.MaterialId));
+
         var detail = await recoveryService.GetSourceProcessingDetailAsync(
             new GetReferenceSourceProcessingDetailPayload(novel.Id, cancelledAnchor.AnchorId),
             CancellationToken.None);
@@ -1530,7 +2062,25 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.False(detail.RetryAvailable);
         Assert.True(detail.RebuildAvailable);
         Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.Cancelled);
-        Assert.Contains(detail.Events, item => item.Status == ReferenceAnchorBuildStates.Ready);
+        var readyEvent = detail.Events
+            .Where(item => item.Status == ReferenceAnchorBuildStates.Ready)
+            .OrderByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.EventId, StringComparer.Ordinal)
+            .First();
+        var affectedRow = Assert.Single(afterRows, row => row.MaterialId == readyEvent.AffectedMaterialId);
+        Assert.Contains(affectedRow.MaterialId, slottedMaterialIds);
+        Assert.True(affectedRow.SlotCount > 0);
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, affectedRow.MaterialId));
+        Assert.Equal(affectedRow.SourceSegmentId, readyEvent.AffectedSegmentId);
+        Assert.NotEmpty(readyEvent.AffectedSlotId);
+
+        var materialDetail = await recoveryService.GetMaterialDetailAsync(
+            new GetReferenceMaterialDetailPayload(novel.Id, readyEvent.AffectedMaterialId),
+            CancellationToken.None);
+        Assert.NotNull(materialDetail);
+        Assert.Equal(ReferenceMaterialArchiveFilters.Archived, materialDetail.Material.ArchiveState);
+        Assert.NotEmpty(materialDetail.Slots);
+        Assert.Contains(materialDetail.ProcessingNotes, item => item.Status == ReferenceAnchorBuildStates.Ready);
     }
 
     [Fact]
@@ -1822,6 +2372,172 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.True(detail.RetryAvailable);
         Assert.True(detail.RebuildAvailable);
         Assert.True(detail.Events.Count(item => item.Status == ReferenceAnchorBuildStates.FailedEmbedding) >= 2);
+    }
+
+    [Theory]
+    [InlineData(ReferenceAnchorBuildStates.FailedEmbedding)]
+    [InlineData(ReferenceAnchorBuildStates.Cancelled)]
+    public async Task RebuildAnchorEmbeddingTerminalMissingSourceMarksFailedImportAndPreservesMaterialDetail(string terminalStatus)
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload($"向量终态缺源重试保留材料-{terminalStatus}", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            $"reference-embedding-terminal-missing-source-{terminalStatus}.md",
+            """
+            雨声压低了整条街的呼吸，门口的灯影像一枚迟迟不肯落下的针。
+
+            他停在门槛前，想起那句 {{memory_anchor}}，然后把伞柄握得更紧。
+            """);
+        var embeddingOptions = new EmbeddingRequestOptions(
+            "custom",
+            "https://api.example.com/v1/embeddings",
+            "test-key",
+            "embed-v1",
+            3,
+            null);
+        using var cancellation = new CancellationTokenSource();
+        var terminalService = terminalStatus == ReferenceAnchorBuildStates.Cancelled
+            ? new SqliteReferenceAnchorService(
+                options,
+                novels,
+                new StaticEmbeddingConfigurationService(embeddingOptions),
+                new RequestedCancellationEmbeddingClient(cancellation),
+                new RecordingSqliteVecTableProvisioner())
+            : new SqliteReferenceAnchorService(
+                options,
+                novels,
+                new StaticEmbeddingConfigurationService(embeddingOptions),
+                new DeterministicEmbeddingClient(dimensions: 3),
+                new FailingSqliteVecTableProvisioner(
+                    $"sqlite-vec unavailable at {Path.GetFullPath(sourcePath)} with prompt: hidden source_text: forbidden"));
+        if (terminalStatus == ReferenceAnchorBuildStates.Cancelled)
+        {
+            await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+                await terminalService.CreateAnchorAsync(
+                    new CreateReferenceAnchorPayload(novel.Id, "向量取消缺源重试参考", null, sourcePath, "markdown", "user_provided"),
+                    cancellation.Token));
+        }
+        else
+        {
+            var failed = await terminalService.CreateAnchorAsync(
+                new CreateReferenceAnchorPayload(novel.Id, "向量失败缺源重试参考", null, sourcePath, "markdown", "user_provided"),
+                CancellationToken.None);
+            Assert.Equal(terminalStatus, failed.Status);
+        }
+
+        var terminalAnchor = Assert.Single(await terminalService.GetAnchorsAsync(novel.Id, CancellationToken.None));
+        Assert.Equal(terminalStatus, terminalAnchor.Status);
+        var terminalBuild = await terminalService.GetBuildStatusAsync(novel.Id, terminalAnchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(terminalBuild);
+        Assert.Equal(terminalStatus, terminalBuild.Status);
+        Assert.True(terminalBuild.SourceSegmentCount > 0);
+        Assert.True(terminalBuild.MaterialCount > 0);
+        Assert.True(terminalBuild.SlotCount > 0);
+        Assert.Equal(0, terminalBuild.VectorCount);
+        var beforeRows = await ReadMaterialRowsAsync(options, terminalAnchor.AnchorId);
+        Assert.True(beforeRows.Count >= 2);
+        Assert.Contains(beforeRows, row => row.SlotCount > 0);
+        var correctedMaterialId = beforeRows[0].MaterialId;
+        var archivedMaterialId = beforeRows[^1].MaterialId;
+        await terminalService.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(
+                novel.Id,
+                correctedMaterialId,
+                FunctionTag: "interiority",
+                EmotionTag: "unease",
+                SceneTag: "threshold",
+                PovTag: "close",
+                TechniqueTag: "afterbeat",
+                Origin: "user",
+                Note: "embedding terminal missing-source retry must preserve correction"),
+            CancellationToken.None);
+        await terminalService.DeleteMaterialsAsync(
+            new DeleteReferenceMaterialsPayload(novel.Id, [archivedMaterialId]),
+            CancellationToken.None);
+        beforeRows = await ReadMaterialRowsAsync(options, terminalAnchor.AnchorId);
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, archivedMaterialId));
+        File.Delete(sourcePath);
+
+        var retryService = new SqliteReferenceAnchorService(options, novels);
+
+        var failedImport = await retryService.RebuildAnchorAsync(novel.Id, terminalAnchor.AnchorId, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, failedImport.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, failedImport.Stage);
+        Assert.Equal(terminalBuild.SourceSegmentCount, failedImport.SourceSegmentCount);
+        Assert.Equal(terminalBuild.MaterialCount, failedImport.MaterialCount);
+        Assert.Equal(terminalBuild.SlotCount, failedImport.SlotCount);
+        Assert.Equal(terminalBuild.VectorCount, failedImport.VectorCount);
+        Assert.False(string.IsNullOrWhiteSpace(failedImport.LastError));
+        Assert.DoesNotContain(sourcePath, failedImport.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), failedImport.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", failedImport.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", failedImport.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("full_content", failedImport.LastError, StringComparison.OrdinalIgnoreCase);
+
+        var afterRows = await ReadMaterialRowsAsync(options, terminalAnchor.AnchorId);
+        Assert.Equal(beforeRows.Select(row => row.MaterialId), afterRows.Select(row => row.MaterialId));
+        Assert.Equal(afterRows.Count, afterRows.Select(row => row.MaterialId).Distinct(StringComparer.Ordinal).Count());
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, archivedMaterialId));
+        var corrected = Assert.Single(afterRows, row => row.MaterialId == correctedMaterialId);
+        Assert.True(corrected.UserVerified);
+        Assert.Equal("interiority", corrected.FunctionTag);
+        Assert.Equal("unease", corrected.EmotionTag);
+        Assert.Equal("close", corrected.PovTag);
+        Assert.Equal("afterbeat", corrected.TechniqueTag);
+
+        var activeSearch = await retryService.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(novel.Id, [terminalAnchor.AnchorId], "", [], [], [], [], [], 1, 100),
+            CancellationToken.None);
+        Assert.Contains(activeSearch.Items, item => item.MaterialId == correctedMaterialId);
+        Assert.DoesNotContain(activeSearch.Items, item => item.MaterialId == archivedMaterialId);
+
+        var detail = await retryService.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, terminalAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, detail.CurrentStatus.Status);
+        Assert.True(detail.RetryAvailable);
+        Assert.True(detail.RebuildAvailable);
+        Assert.NotNull(detail.CurrentAttempt);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, detail.CurrentAttempt.Status);
+        Assert.NotNull(detail.PriorAttempts);
+        Assert.Contains(detail.PriorAttempts, item => item.Status == terminalStatus);
+        var failedImportEvent = detail.Events
+            .Where(item => item.Status == ReferenceAnchorBuildStates.FailedImport)
+            .OrderByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.EventId, StringComparer.Ordinal)
+            .First();
+        Assert.NotEmpty(failedImportEvent.AffectedMaterialId);
+        Assert.NotEmpty(failedImportEvent.AffectedSegmentId);
+        Assert.NotEmpty(failedImportEvent.AffectedSlotId);
+        Assert.Contains(afterRows, row => row.MaterialId == failedImportEvent.AffectedMaterialId);
+
+        var materialDetail = await retryService.GetMaterialDetailAsync(
+            new GetReferenceMaterialDetailPayload(novel.Id, failedImportEvent.AffectedMaterialId),
+            CancellationToken.None);
+        Assert.NotNull(materialDetail);
+        Assert.Equal(failedImportEvent.AffectedMaterialId, materialDetail.Material.MaterialId);
+        Assert.Equal(failedImportEvent.AffectedSegmentId, materialDetail.Material.SourceSegmentId);
+        Assert.Contains(materialDetail.ProcessingNotes, item => item.Status == ReferenceAnchorBuildStates.FailedImport);
+
+        var detailSerialized = JsonSerializer.Serialize(detail, BridgeJson.SerializerOptions);
+        var materialSerialized = JsonSerializer.Serialize(materialDetail, BridgeJson.SerializerOptions);
+        Assert.DoesNotContain("source_path", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("full_content", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_path", materialSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", materialSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", materialSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", materialSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("full_content", materialSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), materialSerialized, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -2236,6 +2952,112 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.DoesNotContain(Path.GetFullPath(sourcePath), segmentSerialized, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task RebuildAnchorFailedExtractionMissingSourceMarksFailedImportAndPreservesSourceSegmentDetail()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("提取失败缺源重试保留片段", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "reference-extraction-missing-source-retry.md",
+            """
+            雨声压低了整条街的呼吸。
+
+            他在门口停了很久，手指贴着伞柄。
+            """);
+        var firstFailureService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            null,
+            null,
+            null,
+            null,
+            DefaultReferenceMaterialSlotDetector.Instance,
+            new FailingReferenceAnchorProcessingStageProbe(
+                ReferenceAnchorBuildStates.ExtractingMaterials,
+                $"first extraction failure at {Path.GetFullPath(sourcePath)} with prompt: hidden source_text: forbidden"));
+
+        var failedAnchor = await firstFailureService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "提取失败缺源重试参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.FailedExtraction, failedAnchor.Status);
+        var firstStatus = await firstFailureService.GetBuildStatusAsync(novel.Id, failedAnchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(firstStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedExtraction, firstStatus.Status);
+        Assert.True(firstStatus.SourceSegmentCount > 0);
+        Assert.Equal(0, firstStatus.MaterialCount);
+        var beforeSegments = await ReadSourceSegmentsAsync(options, failedAnchor.AnchorId);
+        Assert.NotEmpty(beforeSegments);
+        Assert.Empty(await ReadMaterialRowsAsync(options, failedAnchor.AnchorId));
+        File.Delete(sourcePath);
+
+        var retryService = new SqliteReferenceAnchorService(options, novels);
+
+        var failedImport = await retryService.RebuildAnchorAsync(novel.Id, failedAnchor.AnchorId, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, failedImport.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, failedImport.Stage);
+        Assert.Equal(firstStatus.SourceSegmentCount, failedImport.SourceSegmentCount);
+        Assert.Equal(0, failedImport.MaterialCount);
+        Assert.Equal(0, failedImport.SlotCount);
+        Assert.Equal(0, failedImport.VectorCount);
+        Assert.False(string.IsNullOrWhiteSpace(failedImport.LastError));
+        Assert.DoesNotContain(sourcePath, failedImport.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), failedImport.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", failedImport.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", failedImport.LastError, StringComparison.OrdinalIgnoreCase);
+        var afterSegments = await ReadSourceSegmentsAsync(options, failedAnchor.AnchorId);
+        Assert.Equal(beforeSegments.Select(row => row.Signature), afterSegments.Select(row => row.Signature));
+        Assert.Empty(await ReadMaterialRowsAsync(options, failedAnchor.AnchorId));
+
+        var detail = await retryService.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, failedAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, detail.CurrentStatus.Status);
+        Assert.True(detail.RetryAvailable);
+        Assert.True(detail.RebuildAvailable);
+        Assert.NotNull(detail.CurrentAttempt);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, detail.CurrentAttempt.Status);
+        Assert.NotNull(detail.PriorAttempts);
+        Assert.Contains(detail.PriorAttempts, item => item.Status == ReferenceAnchorBuildStates.FailedExtraction);
+        var failedImportEvent = detail.Events
+            .Where(item => item.Status == ReferenceAnchorBuildStates.FailedImport)
+            .OrderByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.EventId, StringComparer.Ordinal)
+            .First();
+        Assert.Empty(failedImportEvent.AffectedMaterialId);
+        Assert.NotEmpty(failedImportEvent.AffectedSegmentId);
+        Assert.Empty(failedImportEvent.AffectedSlotId);
+        Assert.Contains(afterSegments, row => row.SegmentId == failedImportEvent.AffectedSegmentId);
+
+        var segmentDetail = await retryService.GetSourceSegmentDetailAsync(
+            new GetReferenceSourceSegmentDetailPayload(novel.Id, failedAnchor.AnchorId, failedImportEvent.AffectedSegmentId),
+            CancellationToken.None);
+        Assert.NotNull(segmentDetail);
+        Assert.Equal(failedImportEvent.AffectedSegmentId, segmentDetail.Segment.SegmentId);
+        Assert.True(segmentDetail.Segment.TextPreview.Length <= 243);
+        Assert.Contains(segmentDetail.ProcessingNotes, item => item.Status == ReferenceAnchorBuildStates.FailedImport);
+
+        var detailSerialized = JsonSerializer.Serialize(detail, BridgeJson.SerializerOptions);
+        var segmentSerialized = JsonSerializer.Serialize(segmentDetail, BridgeJson.SerializerOptions);
+        Assert.DoesNotContain("source_path", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("full_content", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_path", segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("full_content", segmentSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), segmentSerialized, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Theory]
     [InlineData(ReferenceAnchorBuildStates.Segmenting, ReferenceAnchorBuildStates.FailedSegmenting)]
     [InlineData(ReferenceAnchorBuildStates.ExtractingMaterials, ReferenceAnchorBuildStates.FailedExtraction)]
@@ -2262,14 +3084,20 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.NotNull(beforeStatus);
         var beforeRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
         var beforeSegments = await ReadSourceSegmentsAsync(options, anchor.AnchorId);
-        Assert.NotEmpty(beforeRows);
+        Assert.True(beforeRows.Count >= 2);
         Assert.NotEmpty(beforeSegments);
+        var correctedMaterialId = beforeRows[0].MaterialId;
+        var archivedMaterialId = beforeRows[^1].MaterialId;
 
         await service.UpdateMaterialTagsAsync(
-            new UpdateReferenceMaterialTagsPayload(novel.Id, beforeRows[0].MaterialId, "manual_turn", null, null, null, null, null, null),
+            new UpdateReferenceMaterialTagsPayload(novel.Id, correctedMaterialId, "manual_turn", null, null, null, null, null, null),
+            CancellationToken.None);
+        await service.DeleteMaterialsAsync(
+            new DeleteReferenceMaterialsPayload(novel.Id, [archivedMaterialId]),
             CancellationToken.None);
         beforeRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
-        Assert.Contains(beforeRows, row => row.MaterialId == beforeRows[0].MaterialId && row.UserVerified);
+        Assert.Contains(beforeRows, row => row.MaterialId == correctedMaterialId && row.UserVerified);
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, archivedMaterialId));
 
         await File.WriteAllTextAsync(
             sourcePath,
@@ -2302,7 +3130,8 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         var afterRows = await ReadMaterialRowsAsync(options, anchor.AnchorId);
         Assert.Equal(beforeRows.Select(row => row.MaterialId), afterRows.Select(row => row.MaterialId));
         Assert.Equal(afterRows.Count, afterRows.Select(row => row.MaterialId).Distinct(StringComparer.Ordinal).Count());
-        Assert.Contains(afterRows, row => row.MaterialId == beforeRows[0].MaterialId && row.UserVerified);
+        Assert.Contains(afterRows, row => row.MaterialId == correctedMaterialId && row.UserVerified);
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, archivedMaterialId));
         var oldSearch = await failingService.SearchMaterialsAsync(
             new SearchReferenceMaterialsPayload(novel.Id, [anchor.AnchorId], "旧雨声", [], [], [], [], [], 1, 10),
             CancellationToken.None);
@@ -2311,6 +3140,10 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
             new SearchReferenceMaterialsPayload(novel.Id, [anchor.AnchorId], "新失败语料", [], [], [], [], [], 1, 10),
             CancellationToken.None);
         Assert.Empty(newSearch.Items);
+        var activeSearch = await failingService.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(novel.Id, [anchor.AnchorId], "", [], [], [], [], [], 1, 100),
+            CancellationToken.None);
+        Assert.DoesNotContain(activeSearch.Items, item => item.MaterialId == archivedMaterialId);
 
         var detail = await failingService.GetSourceProcessingDetailAsync(
             new GetReferenceSourceProcessingDetailPayload(novel.Id, anchor.AnchorId),
@@ -2699,6 +3532,145 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.NotEmpty(latestFailedEvent.AffectedMaterialId);
         Assert.NotEmpty(latestFailedEvent.AffectedSegmentId);
         Assert.Contains(afterRows, row => row.MaterialId == latestFailedEvent.AffectedMaterialId);
+    }
+
+    [Fact]
+    public async Task RebuildAnchorFailedSlottingMissingSourceMarksFailedImportAndPreservesMaterialDetail()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("槽位失败缺源重试保留材料", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "reference-slotting-missing-source-retry.md",
+            """
+            雨声压低了整条街的呼吸，门口的灯影像一枚迟迟不肯落下的针。
+
+            他停在门槛前，想起那句 {{memory_anchor}}，然后把伞柄握得更紧。
+            """);
+        var firstFailureService = new SqliteReferenceAnchorService(
+            options,
+            novels,
+            null,
+            null,
+            null,
+            null,
+            new FailingReferenceMaterialSlotDetector(
+                $"first slot failure at {Path.GetFullPath(sourcePath)} with prompt: hidden source_text: forbidden"));
+
+        var failedAnchor = await firstFailureService.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "槽位失败缺源重试参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.FailedSlotting, failedAnchor.Status);
+        var firstStatus = await firstFailureService.GetBuildStatusAsync(novel.Id, failedAnchor.AnchorId, CancellationToken.None);
+        Assert.NotNull(firstStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedSlotting, firstStatus.Status);
+        Assert.True(firstStatus.SourceSegmentCount > 0);
+        Assert.True(firstStatus.MaterialCount > 0);
+        Assert.Equal(0, firstStatus.SlotCount);
+        Assert.Equal(0, firstStatus.VectorCount);
+        var beforeRows = await ReadMaterialRowsAsync(options, failedAnchor.AnchorId);
+        Assert.True(beforeRows.Count >= 2);
+        var correctedMaterialId = beforeRows[0].MaterialId;
+        var archivedMaterialId = beforeRows[^1].MaterialId;
+        await firstFailureService.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(
+                novel.Id,
+                correctedMaterialId,
+                FunctionTag: "interiority",
+                EmotionTag: "unease",
+                SceneTag: "threshold",
+                PovTag: "close",
+                TechniqueTag: "afterbeat",
+                Origin: "user",
+                Note: "slotting missing-source retry must preserve correction"),
+            CancellationToken.None);
+        await firstFailureService.DeleteMaterialsAsync(
+            new DeleteReferenceMaterialsPayload(novel.Id, [archivedMaterialId]),
+            CancellationToken.None);
+        beforeRows = await ReadMaterialRowsAsync(options, failedAnchor.AnchorId);
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, archivedMaterialId));
+        File.Delete(sourcePath);
+
+        var retryService = new SqliteReferenceAnchorService(options, novels);
+
+        var failedImport = await retryService.RebuildAnchorAsync(novel.Id, failedAnchor.AnchorId, CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, failedImport.Status);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, failedImport.Stage);
+        Assert.Equal(firstStatus.SourceSegmentCount, failedImport.SourceSegmentCount);
+        Assert.Equal(firstStatus.MaterialCount, failedImport.MaterialCount);
+        Assert.Equal(0, failedImport.SlotCount);
+        Assert.Equal(0, failedImport.VectorCount);
+        Assert.False(string.IsNullOrWhiteSpace(failedImport.LastError));
+        Assert.DoesNotContain(sourcePath, failedImport.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), failedImport.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", failedImport.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", failedImport.LastError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("full_content", failedImport.LastError, StringComparison.OrdinalIgnoreCase);
+
+        var afterRows = await ReadMaterialRowsAsync(options, failedAnchor.AnchorId);
+        Assert.Equal(beforeRows.Select(row => row.MaterialId), afterRows.Select(row => row.MaterialId));
+        Assert.Equal(afterRows.Count, afterRows.Select(row => row.MaterialId).Distinct(StringComparer.Ordinal).Count());
+        Assert.NotNull(await ReadMaterialArchivedAtAsync(options, archivedMaterialId));
+        var corrected = Assert.Single(afterRows, row => row.MaterialId == correctedMaterialId);
+        Assert.True(corrected.UserVerified);
+        Assert.Equal("interiority", corrected.FunctionTag);
+        Assert.Equal("unease", corrected.EmotionTag);
+        Assert.Equal("close", corrected.PovTag);
+        Assert.Equal("afterbeat", corrected.TechniqueTag);
+
+        var activeSearch = await retryService.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(novel.Id, [failedAnchor.AnchorId], "", [], [], [], [], [], 1, 100),
+            CancellationToken.None);
+        Assert.Contains(activeSearch.Items, item => item.MaterialId == correctedMaterialId);
+        Assert.DoesNotContain(activeSearch.Items, item => item.MaterialId == archivedMaterialId);
+
+        var detail = await retryService.GetSourceProcessingDetailAsync(
+            new GetReferenceSourceProcessingDetailPayload(novel.Id, failedAnchor.AnchorId),
+            CancellationToken.None);
+        Assert.NotNull(detail);
+        Assert.NotNull(detail.CurrentStatus);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, detail.CurrentStatus.Status);
+        Assert.True(detail.RetryAvailable);
+        Assert.True(detail.RebuildAvailable);
+        Assert.NotNull(detail.CurrentAttempt);
+        Assert.Equal(ReferenceAnchorBuildStates.FailedImport, detail.CurrentAttempt.Status);
+        Assert.NotNull(detail.PriorAttempts);
+        Assert.Contains(detail.PriorAttempts, item => item.Status == ReferenceAnchorBuildStates.FailedSlotting);
+        var failedImportEvent = detail.Events
+            .Where(item => item.Status == ReferenceAnchorBuildStates.FailedImport)
+            .OrderByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.EventId, StringComparer.Ordinal)
+            .First();
+        Assert.NotEmpty(failedImportEvent.AffectedMaterialId);
+        Assert.NotEmpty(failedImportEvent.AffectedSegmentId);
+        Assert.Empty(failedImportEvent.AffectedSlotId);
+        Assert.Contains(afterRows, row => row.MaterialId == failedImportEvent.AffectedMaterialId);
+
+        var materialDetail = await retryService.GetMaterialDetailAsync(
+            new GetReferenceMaterialDetailPayload(novel.Id, failedImportEvent.AffectedMaterialId),
+            CancellationToken.None);
+        Assert.NotNull(materialDetail);
+        Assert.Equal(failedImportEvent.AffectedMaterialId, materialDetail.Material.MaterialId);
+        Assert.Equal(failedImportEvent.AffectedSegmentId, materialDetail.Material.SourceSegmentId);
+        Assert.Contains(materialDetail.ProcessingNotes, item => item.Status == ReferenceAnchorBuildStates.FailedImport);
+
+        var detailSerialized = JsonSerializer.Serialize(detail, BridgeJson.SerializerOptions);
+        var materialSerialized = JsonSerializer.Serialize(materialDetail, BridgeJson.SerializerOptions);
+        Assert.DoesNotContain("source_path", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("full_content", detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), detailSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_path", materialSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("source_text", materialSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("candidate_text", materialSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prompt", materialSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("full_content", materialSerialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Path.GetFullPath(sourcePath), materialSerialized, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
