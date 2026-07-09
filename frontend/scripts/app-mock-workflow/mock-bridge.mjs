@@ -743,6 +743,8 @@ export function installConfigurableAppMockBridge(options = {}) {
     nextReferenceStyleProfileId: 301,
     referenceBlueprints: {},
     nextReferenceBlueprintId: 701,
+    referenceCorpusFeatureAnalysisRuns: [],
+    nextReferenceCorpusFeatureAnalysisRunId: 1,
     referenceOrchestrationRuns: [],
     nextReferenceOrchestrationRunId: 1,
     contentByPath: options.contentByPath ?? defaultContentByPath,
@@ -1207,6 +1209,9 @@ export function installConfigurableAppMockBridge(options = {}) {
       case 'GetReferenceMaterialDetail': return getReferenceMaterialDetail(args[0])
       case 'GetReferenceSourceSegmentDetail': return getReferenceSourceSegmentDetail(args[0])
       case 'GetReferenceSourceProcessingDetail': return getReferenceSourceProcessingDetail(args[0])
+      case 'StartReferenceCorpusFeatureAnalysis': return startReferenceCorpusFeatureAnalysis(args[0])
+      case 'GetReferenceCorpusFeatureAnalysisRun': return getReferenceCorpusFeatureAnalysisRun(args[0])
+      case 'GenerateReferenceCorpusInsertionDraft': return generateReferenceCorpusInsertionDraft(args[0])
       case 'UpdateReferenceMaterialTags': return updateReferenceMaterialTags(args[0])
       case 'UpdateReferenceMaterialsTags': return updateReferenceMaterialsTags(args[0])
       case 'AdaptReferenceMaterial': return adaptReferenceMaterial(args[0])
@@ -5827,6 +5832,202 @@ export function installConfigurableAppMockBridge(options = {}) {
         findings: [],
       },
     }]
+  }
+
+  function startReferenceCorpusFeatureAnalysis(input = {}) {
+    const scope = normalizeReferenceCorpusFeatureAnalysisScope(input?.scope)
+    const novelId = normalizeReferenceCorpusFeatureAnalysisId(input?.novel_id ?? state.activeNovelId, 'novel_id', true)
+    const anchorId = normalizeReferenceCorpusFeatureAnalysisId(input?.anchor_id ?? 101, 'anchor_id', false)
+    const requestedRunId = normalizeReferenceCorpusFeatureAnalysisRunId(input?.run_id)
+    const tokenBudget = normalizeReferenceCorpusFeatureAnalysisTokenBudget(input?.token_budget)
+
+    if (input?.resume === true && !requestedRunId) {
+      throw new Error('Resume requires run_id.')
+    }
+
+    if (requestedRunId) {
+      const existing = getReferenceCorpusFeatureAnalysisRun({ novel_id: novelId, run_id: requestedRunId })
+      if (existing && input?.resume === true) return existing
+    }
+
+    const runId = requestedRunId ??
+      `corpus-feature:${anchorId}:${scope}:mock-${String(state.nextReferenceCorpusFeatureAnalysisRunId++).padStart(3, '0')}`
+    const families = referenceCorpusFeatureAnalysisFamilies(scope)
+    const budgetExhausted = tokenBudget === 0
+    const processedWorkItems = budgetExhausted ? 0 : families.length
+    const observationCount = budgetExhausted ? 0 : families.length
+    const tokensSpent = budgetExhausted ? 0 : Math.min(tokenBudget ?? (families.length * 24), families.length * 24)
+    const run = {
+      run_id: runId,
+      novel_id: novelId,
+      anchor_id: anchorId,
+      scope,
+      families,
+      status: budgetExhausted ? 'budget_exhausted' : 'completed',
+      token_budget: tokenBudget,
+      tokens_spent: tokensSpent,
+      resume_cursor: budgetExhausted ? `${scope}:0` : `${scope}:${families[families.length - 1]}`,
+      observation_count: observationCount,
+      processed_work_items: processedWorkItems,
+      analyzer_version: 'reference-corpus-feature-llm-v1',
+      schema_version: 'reference-corpus-feature-family-v1',
+      model_provider: 'mock',
+      model_id: 'gpt',
+      started_at: now,
+      completed_at: budgetExhausted ? null : now,
+      diagnostics: budgetExhausted
+        ? ['mock feature analysis stopped at the token budget boundary']
+        : ['mock feature analysis completed'],
+    }
+
+    state.referenceCorpusFeatureAnalysisRuns = [
+      run,
+      ...state.referenceCorpusFeatureAnalysisRuns.filter((item) => item.run_id !== run.run_id),
+    ]
+    return run
+  }
+
+  function getReferenceCorpusFeatureAnalysisRun(input = {}) {
+    const runId = String(input?.run_id ?? '').trim()
+    if (!runId) return null
+    const novelId = normalizeReferenceCorpusFeatureAnalysisId(input?.novel_id ?? state.activeNovelId, 'novel_id', true)
+    return state.referenceCorpusFeatureAnalysisRuns.find((run) =>
+      run.run_id === runId && Number(run.novel_id) === novelId) ?? null
+  }
+
+  function normalizeReferenceCorpusFeatureAnalysisScope(scope) {
+    const normalized = String(scope ?? 'sentence').trim()
+    if (normalized === 'sentence' || normalized === 'passage') return normalized
+    throw new Error('Feature analysis scope must be sentence or passage.')
+  }
+
+  function referenceCorpusFeatureAnalysisFamilies(scope) {
+    return scope === 'passage'
+      ? ['narrative', 'pov', 'action', 'character', 'commercial']
+      : ['syntax', 'rhythm', 'sensory', 'emotion', 'rhetoric']
+  }
+
+  function normalizeReferenceCorpusFeatureAnalysisId(value, name, allowZero) {
+    const id = Number(value)
+    if (!Number.isInteger(id) || id < 0 || (!allowZero && id === 0)) {
+      throw new Error(`${name} must be ${allowZero ? 'non-negative' : 'positive'}.`)
+    }
+
+    return id
+  }
+
+  function normalizeReferenceCorpusFeatureAnalysisRunId(value) {
+    if (value == null || String(value).trim() === '') return ''
+    const runId = String(value).trim()
+    if (runId.length > 128 || /[^A-Za-z0-9_:.-]/.test(runId)) {
+      throw new Error('run_id contains unsupported characters.')
+    }
+
+    return runId
+  }
+
+  function normalizeReferenceCorpusFeatureAnalysisTokenBudget(value) {
+    if (value == null) return null
+    const tokenBudget = Number(value)
+    if (!Number.isInteger(tokenBudget) || tokenBudget < 0) {
+      throw new Error('token_budget must be a non-negative integer.')
+    }
+
+    return tokenBudget
+  }
+
+  function generateReferenceCorpusInsertionDraft(input = {}) {
+    const chapterContext = input?.chapter_context ?? {}
+    const currentDraft = String(chapterContext.current_draft_text ?? '')
+    const requestedOffset = Number(chapterContext.insertion_offset ?? currentDraft.length)
+    const insertionOffset = Number.isFinite(requestedOffset)
+      ? Math.max(0, Math.min(currentDraft.length, requestedOffset))
+      : currentDraft.length
+    const prefix = currentDraft.length === 0
+      ? ''
+      : currentDraft.slice(0, insertionOffset).endsWith('\n') ? '\n' : '\n\n'
+    const assembledText = '林岚把杯底半圈水痕压进记忆里，没有急着回头。'
+    const chapterTextAfterInsertion = `${currentDraft.slice(0, insertionOffset)}${prefix}${assembledText}${currentDraft.slice(insertionOffset)}`
+    const libraryIds = Array.isArray(input?.scope?.library_ids) ? input.scope.library_ids : []
+
+    return {
+      query_context: {
+        scene_type: 'rain_threshold',
+        emotion_target: 'restrained_pressure',
+        pacing_target: 'tight',
+        narrative_position: 'chapter_insert',
+        commercial_mechanic: 'clue_hook',
+        character_states: ['current_chapter_focus'],
+        required_narrative_functions: ['clue_pressure'],
+        chapter_context: chapterContext,
+        scope: input?.scope ?? {
+          library_ids: libraryIds,
+          reuse_policies: ['verbatim_ok', 'adapted_only'],
+          include_anchor_ids: [],
+          exclude_anchor_ids: [],
+        },
+      },
+      blueprint: {
+        blueprint_id: 'mock-corpus-blueprint-001',
+        query_context_hash: 'mock-query-context-hash-001',
+        strategy: '自动检索共享语料并迁移为当前章节插入片段',
+        beats: [{
+          beat_id: 'mock-corpus-beat-001',
+          beat_index: 0,
+          role_in_beat: 'insert_clue_pressure',
+          narrative_function: 'clue_pressure',
+          node_ids: ['mock-node-rain-001'],
+        }],
+      },
+      pieces: [{
+        piece_id: 'mock-corpus-piece-001',
+        beat_id: 'mock-corpus-beat-001',
+        candidate_id: 'mock-corpus-candidate-001',
+        node_id: 'mock-node-rain-001',
+        anchor_id: 101,
+        library_id: libraryIds[0] ?? 'global:workspace',
+        text_hash: 'hash-mock-node-rain-001',
+        reuse_policy: 'adapted_only',
+        license_state: 'authorized',
+        output_text: assembledText,
+        preserved_text_hash: 'hash-preserved-mock-corpus-001',
+        preserved_hash_matches: true,
+        slot_replacements: [{
+          slot_name: 'character',
+          source_value: '她',
+          replacement_value: '林岚',
+          source_start: 0,
+          source_end: 1,
+          output_start: 0,
+          output_end: 2,
+        }],
+      }],
+      slot_replacements: [{
+        slot_name: 'character',
+        source_value: '她',
+        replacement_value: '林岚',
+        source_start: 0,
+        source_end: 1,
+        output_start: 0,
+        output_end: 2,
+      }],
+      assembled_text: assembledText,
+      chapter_text_after_insertion: chapterTextAfterInsertion,
+      ready_for_insertion: true,
+      gate: {
+        passed: true,
+        status: 'passed',
+        errors: [],
+        pieces: [{
+          piece_id: 'mock-corpus-piece-001',
+          node_id: 'mock-node-rain-001',
+          should_block: false,
+          four_gram_containment_ratio: 0.08,
+          longest_common_substring_ratio: 0.11,
+          violations: [],
+        }],
+      },
+    }
   }
 
   function cancelReferenceOrchestrationRun(input = {}) {

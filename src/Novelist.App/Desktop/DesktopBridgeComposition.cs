@@ -101,6 +101,14 @@ public static class DesktopBridgeComposition
             options,
             embeddingService,
             embeddingClient);
+        var referenceCorpusWritingService = new SqliteReferenceCorpusWritingService(
+            options,
+            referenceCorpusService,
+            chapterContentService);
+        var referenceCorpusAnalysisService = new SqliteReferenceCorpusAnalysisService(
+            options,
+            settingsService,
+            chatCompletion: chatCompletionClient);
         var referenceStyleProfileService = new SqliteReferenceStyleProfileService(
             options,
             novelService,
@@ -180,6 +188,8 @@ public static class DesktopBridgeComposition
             .RegisterGitHistoryHandlers(versionControl)
             .RegisterReferenceAnchorHandlers(referenceAnchorService)
             .RegisterReferenceCorpusHandlers(referenceCorpusService)
+            .RegisterReferenceCorpusAnalysisHandlers(referenceCorpusAnalysisService)
+            .RegisterReferenceCorpusWritingHandlers(referenceCorpusWritingService)
             .RegisterReferenceStyleProfileHandlers(referenceStyleProfileService)
             .RegisterReferenceAnchoredDraftHandlers(referenceAnchoredDraftService)
             .RegisterApprovalHandlers(approvalCoordinator)

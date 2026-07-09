@@ -94,6 +94,7 @@ import {
 import { usabilityObservation, writeUsabilityReport } from './usability-report.mjs'
 
 const FULL_MATERIAL_LEAK_SENTINEL = '__FULL_MATERIAL_SHOULD_NOT_RENDER__'
+const MOCK_CORPUS_INSERTION_TEXT = '林岚把杯底半圈水痕压进记忆里，没有急着回头。'
 const MOCK_REFERENCE_CANDIDATE_TEXT = '林岚没有立刻抬头。杯底那半圈水痕贴着木纹，像刚被雨夜重新描过一遍；她只把指尖收紧，确认门外的人还不知道这条线索。'
 const CORPUS_LIBRARY_FORBIDDEN_CHAPTER_METHODS = [
   'GenerateReferenceChapterBlueprint',
@@ -1309,6 +1310,40 @@ async function verifyChapterReferenceWorkflow(page) {
   await page.getByRole('button', { name: /参考素材/ }).click()
   const drawer = page.getByTestId('chapter-reference-panel')
   await expectVisible(drawer, 'chapter reference drawer')
+  await expectVisible(drawer.getByRole('heading', { name: '语料驱动草稿' }), 'corpus insertion draft heading')
+  await expectHidden(drawer.getByRole('heading', { name: '推荐素材' }), 'advanced recommendation heading before expand')
+  await expectHidden(drawer.getByRole('button', { name: '启动参考流程' }), 'advanced strict flow start before expand')
+  assert.equal(await bridgeCallCount(page, 'SearchReferenceMaterials'), chapterSearchCountBefore, 'chapter reference default path must not run material recommendation before advanced expansion')
+
+  const corpusDraftCountBefore = await bridgeCallCount(page, 'GenerateReferenceCorpusInsertionDraft')
+  const saveCountBeforeCorpusDraft = await bridgeCallCount(page, 'SaveContent')
+  await drawer.getByRole('button', { name: '生成插入草稿' }).click()
+  const corpusDraftCall = await waitForLatestBridgeCallWithResult(page, 'GenerateReferenceCorpusInsertionDraft', corpusDraftCountBefore)
+  const corpusDraftInput = corpusDraftCall.args?.[0] ?? null
+  assert(corpusDraftInput, 'chapter corpus insertion must call GenerateReferenceCorpusInsertionDraft with input')
+  assert.equal(corpusDraftInput.chapter_context?.chapter_number, 1, 'chapter corpus insertion must derive active chapter number')
+  assert.equal(corpusDraftInput.chapter_context?.current_draft_text, '林岚在雨夜旧宅门前停住。\n\n她看见桌上的水痕。', 'chapter corpus insertion must send current editor draft text')
+  assert.equal(typeof corpusDraftInput.chapter_context?.insertion_offset, 'number', 'chapter corpus insertion must send editor insertion offset')
+  assert.deepEqual(corpusDraftInput.scope?.library_ids, ['project:42:default', 'global:workspace'], 'chapter corpus insertion must use project and workspace corpus libraries by default')
+  assert.deepEqual(corpusDraftInput.scope?.reuse_policies, ['verbatim_ok', 'adapted_only'], 'chapter corpus insertion must use insertion-safe reuse policies')
+  await expectVisible(drawer.getByText(MOCK_CORPUS_INSERTION_TEXT), 'chapter corpus insertion preview text')
+  await expectVisible(drawer.getByTestId('chapter-corpus-draft-diff'), 'chapter corpus insertion diff preview')
+  await expectVisible(drawer.getByTestId('chapter-corpus-diff-preserved').first(), 'chapter corpus insertion preserved text')
+  await expectVisible(drawer.getByTestId('chapter-corpus-diff-slot-replacement'), 'chapter corpus insertion slot replacement highlight')
+  await assertEditorNotContains(page, MOCK_CORPUS_INSERTION_TEXT)
+  assert.equal(await bridgeCallCount(page, 'SaveContent'), saveCountBeforeCorpusDraft, 'generating corpus insertion draft must not save chapter content')
+  await drawer.getByRole('button', { name: '应用到编辑器' }).click()
+  await page.waitForFunction(
+    (expectedText) => window.__novelistEditor?.getValue?.() === expectedText,
+    corpusDraftCall.result.chapter_text_after_insertion,
+    { timeout: 12_000 },
+  )
+  await page.waitForTimeout(700)
+  assert.equal(await bridgeCallCount(page, 'SaveContent'), saveCountBeforeCorpusDraft, 'applying corpus insertion draft must update editor buffer without direct SaveContent')
+  await page.keyboard.press(shortcutKey('z'))
+  await assertEditorNotContains(page, MOCK_CORPUS_INSERTION_TEXT)
+
+  await drawer.getByText('高级参考流程').click()
   await expectVisible(drawer.getByRole('heading', { name: '推荐素材' }), 'chapter reference recommendations heading')
   const chapterMaterialCard = drawer.getByTestId('chapter-reference-material-card').first()
   await expectVisible(chapterMaterialCard, 'chapter reference recommendation card')
@@ -1334,6 +1369,7 @@ async function verifyChapterReferenceWorkflow(page) {
   }
   await chapterMaterialDetailDrawer.getByRole('button', { name: '关闭章节推荐材料明细' }).click()
   await expectHidden(chapterMaterialDetailDrawer, 'chapter reference material detail drawer after close')
+
   await waitForBridgeCall(page, 'GetReferenceOrchestrationRuns')
 
   await drawer.getByRole('button', { name: '启动参考流程' }).click()

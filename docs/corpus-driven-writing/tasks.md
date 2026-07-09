@@ -16,7 +16,8 @@
 
 - [x] `reference_text_nodes` 建表 + 三个索引（parent/atype/chapter）
 - [x] `reference_materials` / `reference_source_segments` 加 `node_id` FK
-- [ ] Stage 0 结构化写入器：源文本 → 节点树（章/场/段/句/从句），填 offset/text_hash/sequence
+- [x] Stage 0 结构化写入器（M1 最小版）：真实导入 → text_nodes（章/场/段/句），填 offset/text_hash/sequence，并回填 source_segments/materials.node_id
+- [ ] 从句级切分：补充 clause nodes 与 sentence→clause 父子关系
 - [ ] 章节窗口查询辅助：给定 node，取前 N 章/同场景兄弟节点
 - [ ] migration 幂等 + 存量库升级测试
 
@@ -27,9 +28,10 @@
 - [x] `reference_feature_observations` 建表：`value_kind`/`value_num`/`value_bool`/`value_json` + `review_state`/`validity_state`/`superseded_by_run_id`
 - [x] 三索引（family / num / node）
 - [x] **幂等写入 schema guard（护栏 G1）**：`ux_obs_generation_key` UNIQUE，重复 observation 生成键由数据库拒绝
-- [x] **确定性 observation identity（护栏 G1）**：`observation_id = hash(run_id,node_id,family,key,evidence_start,evidence_end)`，空 evidence 与 DB sentinel 对齐
+- [x] **确定性 observation identity（护栏 G1）**：`observation_id = hash(run_id,node_id,feature_family,feature_key,evidence_start,evidence_end)`，空 evidence 与 DB sentinel 对齐
 - [x] **幂等 upsert 写入器（护栏 G1）**：分析 observation 写入用 `INSERT ... ON CONFLICT`；并发/重试/续跑不重复写
-- [ ] 热路径 projection 表：`reference_obs_sensory`（示范）+ 写入同步 + 重建脚本
+- [x] 热路径 projection 表：`reference_obs_sensory`（示范）+ Stage 1 写入同步
+- [ ] projection 重建脚本：schema 演进/损坏修复时可从 active observation 重建热路径表
 - [x] `reference_analysis_runs` 建表（含 token_budget/tokens_spent）
 - [x] **预算续跑状态规则（护栏 G2）**：status 加 `paused`/`budget_exhausted`/`partial_completed` + `resume_cursor`，Core 状态机保证预算耗尽非 failed
 - [ ] **预算续跑管线接入（护栏 G2）**：分析任务从 `resume_cursor` 后开始，配合 G1 幂等覆盖已完成 node
@@ -75,9 +77,9 @@
 
 ### M1.1 导入 + Stage 0-1（后端）
 
-- [ ] 导入 golden 书 → text_nodes 树（M0.1 写入器）
-- [ ] Stage 1 确定性特征全量落 observation（rule-based，无 LLM）
-- [ ] license 标注入库
+- [x] 导入 golden 书/真实 source → text_nodes 树（M0.1 写入器）
+- [x] Stage 1 确定性特征落 observation（M1 最小版：句长/节奏、感官 marker、情绪 marker；rule-based，无 LLM）
+- [x] license 标注入库（旧 license_status → 新 reference_source_license gate；默认 project/global library membership）
 
 ### M1.2 最小检索（后端 / 修复 #5 / 护栏 G3 G4）
 
@@ -85,28 +87,34 @@
 - [ ] material embedding 构建任务：Stage 0/legacy material 与 text_nodes 对齐后补齐 material 级索引
 - [x] `CorpusQueryContext` + `CurrentChapterContext` 契约（前端不传 embedding，护栏 G4）
 - [x] 章节 embedding 后端计算 + 缓存（key = draft text hash，前端不传 embedding）
-- [ ] 最小 `IQueryContextParser`（fake LLM：大纲 → 固定 QueryContext）
+- [x] 最小 `IQueryContextParser`（M1 确定性 parser：自然语言目标 → 固定 QueryContext；后续 M2/M4 可替换为 structured LLM）
 - [x] 单路检索（M1 最小版）：text_nodes 语义向量 + library/license/visibility/reuse 过滤 + 当前章节 embedding 连贯度加权
 - [x] 返回 `PageResult<候选片段>` 的 bridge/contract 形态
 
 ### M1.3 单蓝图 + 槽位替换 + 插入（后端）
 
-- [ ] 最小 `ICorpusBlueprintAssembler`：单策略，产 1 份蓝图，beat→node 走 beat_pieces
-- [ ] 最小 `ICorpusSlotResolver`：检测人名槽位，输出替换表
-- [ ] 最小 `ICorpusTextAssembler`：槽位替换 + hash 校验 preserved_spans 逐字保留
-- [ ] 插入闸门（M0.4）：license cleared + 相似度阈值校验，通过才写编辑器 buffer
+- [x] 最小 `ICorpusBlueprintAssembler`：单策略，产 1 份蓝图，beat→node 走 `reference_blueprint_beat_pieces`
+- [x] 最小 `ICorpusSlotResolver`：检测人名/代词槽位，输出替换表
+- [x] 最小 `ICorpusTextAssembler`：槽位替换 + 非槽位 preserved hash 校验
+- [x] 插入闸门（M0.4 后端）：license cleared + 相似度阈值校验，通过才返回可插入结果；被阻断时保留原章节文本
 
 ### M1.4 自动模式前端（前端 / 修复 #11）
 
-- [ ] 写作会话最小界面：大纲输入 → 一份蓝图 → 一份草稿 → 插入
-- [ ] 全部专家控件默认隐藏，用 AI 默认决策
-- [ ] 草稿 diff 预览（原句保留 vs 槽位替换标色）
+- [x] 后端 bridge + TS adapter：`GenerateReferenceCorpusInsertionDraft` 自动闭环入口可被章节界面调用
+- [x] 写作会话最小界面：大纲输入 → 一份蓝图 → 一份草稿 → 插入编辑器 buffer
+- [x] 全部专家控件默认隐藏，用 AI 默认决策
+- [x] 草稿 diff 预览（原句保留 vs 槽位替换标色）
+
+**当前检查点：** 章节编辑器右侧 `参考素材` 面板已接入 `GenerateReferenceCorpusInsertionDraft` 默认路径。前端从 Monaco 读取当前正文与光标 offset，默认检索 `project:{novelId}:default` + `global:workspace`，生成后展示蓝图、片段、槽位替换、diff 标色和插入闸门；只有 `ready_for_insertion && gate.passed` 时才允许把 `chapter_text_after_insertion` 应用到编辑器 buffer，且不直接调用 `SaveContent`。推荐素材、事实边界和旧严格流程默认收进“高级参考流程”，展开前不会触发 `SearchReferenceMaterials` 或 orchestration 读取。
 
 ### M1.5 闭环验收（测试 / 修复 #12）
 
-- [ ] 端到端脚本：golden 书 + 固定大纲 → 期望草稿（golden JSON 比对）
-- [ ] hash 校验：非槽位原句逐字保留
-- [ ] 插入闸门：相似度超阈值时正确阻断
+- [x] 后端薄切片集成测试：真实导入 + Stage 1 + parser → 检索 → 蓝图 → 槽位替换 → 闸门 → 可插入文本
+- [x] 端到端脚本：golden 书 + 固定大纲 → 期望草稿（golden JSON 比对）
+- [x] hash 校验：非槽位原句逐字保留
+- [x] 插入闸门：相似度超阈值时正确阻断
+
+**当前检查点：** `Fixtures/corpus-driven-writing/m15-insertion-draft-golden.json` 固化小 golden 书、当前章节、固定目标和归一化 `expected_draft`；`GenerateInsertionDraftFromGoldenBookAndFixedOutlineMatchesGoldenJson` 从 fixture 创建真实 reference source，使用确定性 embedding 跑完整 `GenerateInsertionDraftAsync`，将 actual draft 投影到稳定 JSON 后做 deep equality，并额外断言 `reference_blueprint_beat_pieces` 追溯边已落库。
 
 **验收：** 全流程用 fake LLM 稳定复现同一草稿；原句 hash 校验通过；闸门阻断可复现。**此里程碑完成即证明产品闭环成立。**
 
@@ -118,27 +126,41 @@
 
 ### M2.1 feature_family 锁定 schema（后端 / 关键设计）
 
-为每个 family 定义严格 JSON Schema，LLM 只填枚举，禁止自由发挥：
+为每个 family 定义锁定 schema descriptor（用于 prompt/validator，后续可生成 response-format JSON Schema），LLM 只填枚举，禁止自由发挥：
 
-- [ ] 句级：`syntax` / `rhythm` / `sensory`（数组）/ `emotion` / `rhetoric`（数组）
-- [ ] 段落级：`narrative` / `pov` / `action` / `character` / `commercial`
-- [ ] 每 family 一份 schema 文件 + 输出校验器（不合 schema 触发重试）
-- [ ] sensory 等数组维度同步写 projection 表（M0.2）
+- [x] 句级：`syntax` / `rhythm` / `sensory`（数组）/ `emotion` / `rhetoric`（数组）
+- [x] 段落级：`narrative` / `pov` / `action` / `character` / `commercial`
+- [x] 每 family 一份 schema 文件 + 输出校验器（不合 schema 触发重试）
+- [x] sensory 数组维度同步写 projection 表（M0.2 Stage 1 + M2.2 runner）
+
+**当前检查点：** `Novelist.Core/App/ReferenceCorpusFeatureSchemas/*.json` 已内嵌 10 个 family 的锁定枚举 schema descriptor，字段名统一为 DB/DTO 契约的 `feature_key`；`ReferenceCorpusFeatureFamilyOutputValidator` 校验 `schema_version`/family/node_type/root 属性/observation 属性/枚举/数值范围/evidence offset，并把通过项投影为匹配 `reference_feature_observations` 的候选结构。空 `observations: []` 被视为合法“无可落地观察”，避免逼 LLM 编造；`value_kind` 收敛到 `enum|number|bool|array|object`，`value_text/value_num` 按 family + feature_key 显式映射（例如 `rhythm.pause_density` 不会误取 `char_count`）。`sensory`/`rhetoric` 允许 LLM 输出多项明细，但 validator 会聚合为单条 `value_kind=array` observation（`feature_key=senses/devices`，`value_json` 保存完整数组，evidence 覆盖整段，confidence 取最低值），避免数组型 family 拆多行导致幂等键冲突。Stage 1 的确定性 observation 已改为锁定 schema key，避免 `char_len/surface_mode` 继续污染共享表；M2.2 runner 已接通 LLM candidate → upsert → sensory projection。单元测试覆盖 10 family 加载、空输出、句级数组聚合输出、按 feature_key 数值映射、段落商业层输出、自由字段/错误枚举/证据越界拒绝。
 
 ### M2.2 Task A/B 全量分析（后端 / 修复 #3）
 
 - [ ] Task A 句级 LLM：全量、异步、按章节优先级排队、per-run token_budget、可续跑
-- [ ] Task B 段落级 LLM：全量、注入场景上下文
+- [ ] Task B 段落级 LLM：全量、异步队列、章节优先级排队
+- [x] 产品触发入口：`StartReferenceCorpusFeatureAnalysis` / `GetReferenceCorpusFeatureAnalysisRun`，按 anchor + scope 启动 sentence/passage 默认 family 分析并返回安全 run 状态
+- [x] Task B 段落节点选择 + 上下文地基：只分析 `reference_source_segments.segment_type='paragraph'` 的真实段落，跳过 hook/beat/action_afterbeat 等派生 passage；注入 parent chapter、containing scene、前后 paragraph context；旧库缺 `reference_source_segments.node_id` 时诊断并跳过，不做 hash/offset 猜测
+- [x] Task A/B 共用执行器地基：读取 node×family、调用可替换 analyzer、locked schema 校验、observation upsert、tokens/resume_cursor/status 更新、sensory projection 同步
+- [x] schema 失败重试：invalid JSON/schema/rejected output 按 `MaxValidationAttempts` 重试；失败尝试累计 tokens 但不写 observation、不推进 cursor；重试耗尽后 run 标 failed
+- [x] 真实 LLM analyzer 地基：复用 `IChatCompletionClient` + selected model，生成 schema-locked prompt，抽取 fenced JSON，读取 usage tokens；测试使用 fake chat client，不触发真实网络
 - [ ] evidence_start/end 精确记录
 - [ ] confidence < 阈值自动入复核队列（M8 消费）
 - [ ] 中断从已完成 node 续跑
 
+**当前检查点：** `ReferenceCorpusFeatureAnalysisRunner` 已用 fake analyzer 跑通 node×family 执行链：预算耗尽时停在当前 cursor，补预算后从下一项续跑；最后一项正好用完预算时正确收敛为 `completed`；写入通过 locked schema validator 的候选 observation，并同步 `reference_obs_sensory`。句级 Task A 传空 context；段落级 Task B 只读取真实 paragraph source segment，避免 `node_type='passage'` 混入 hook/beat/action_afterbeat 等派生节点，并给 analyzer 注入 parent/chapter/containing scene/前后 paragraph 的 bounded context。`ReferenceCorpusChatCompletionFeatureFamilyAnalyzer` 已接入现有 chat completion 抽象，prompt 包含 schema descriptor、node 元数据、bounded node_text 与安全压缩后的 `analysis_context`；system prompt 明确 `node_text` 是唯一 evidence 来源，context 只能辅助判断，不能用于 evidence offset。usage token 会回填 runner 预算记账。产品入口已接入 bridge/TS adapter/mock：`StartReferenceCorpusFeatureAnalysis` 读取 selected model、校验 anchor 可访问性、按 `scope=sentence|passage` 派生默认 family 并启动 runner；`GetReferenceCorpusFeatureAnalysisRun` 返回 run 元数据、tokens、cursor、observation_count 和 diagnostics，返回体不包含 `node_text/source_text/raw_text/prompt/model_output_json/embedding`。当前入口仍是一次调用内执行的薄触发，不是后台队列；异步队列、章节优先级调度、取消能力仍未接入。低置信度 observation 仍写 `review_state='unverified'`，避免和真正跨 run 冲突混淆；按 confidence 入复核队列仍留到 M8。
+
 ### M2.3 Task C 技法标本（后端 / 关键设计）
 
 - [ ] 综合推理：全部 A/B observation + 原文 → TechniqueSpecimen
-- [ ] why_it_works 每 contributing_factor 走 specimen_evidence FK 到真实 observation（禁空引用）
-- [ ] technique_abstract 去内容化 + 泄露检测（不含原文专有名词）
-- [ ] Stage 3 仅高置信度/标记节点触发
+- [x] Stage 3 runner/validator/writer 地基：读取 active 高置信度 observation + 原文节点，调用可替换 analyzer，写 `reference_technique_specimens`
+- [x] why_it_works 每 contributing_factor 走 `reference_specimen_evidence` FK 到真实 observation（禁空引用/未知 id）
+- [x] technique_abstract / transfer_template 去内容化泄露检测（拒绝原文专名、原文动作短语、长原文片段）
+- [x] Stage 3 仅高置信度节点触发（低于阈值 observation 不进入 analyzer 输入）
+- [ ] 真实 LLM analyzer：复用 `IChatCompletionClient`，schema-locked prompt，抽取 fenced JSON，读取 usage tokens
+- [ ] 产品触发入口：Start/Get TechniqueSpecimen run 状态 + 后台/预算调度接入
+
+**当前检查点：** `ReferenceCorpusTechniqueSpecimenRunner` 已作为独立 Stage 3 地基接入：按 source node 聚合同 anchor、同 node_type、active 且 `confidence >= MinObservationConfidence` 的 observation，把 node 原文和 observation evidence 交给可替换 analyzer；`ReferenceCorpusTechniqueSpecimenOutputValidator` 锁定 `reference-corpus-technique-specimen-v1` 输出，要求 `why_it_works` 每个 factor 至少引用一个真实 observation id，未知/空 evidence 直接拒绝；落库在同一事务内写 `reference_technique_specimens` 与 `reference_specimen_evidence`，`specimen_id = hash(run_id,node_id,technique_family)` 保证重试幂等，重跑保留人工 `review_state`，不把 confirmed/rejected 重置为 unverified。`reference_specimen_evidence(observation_id, specimen_id)` 索引用于后续从 superseded observation 反查受影响 specimen。去内容化闸门会拒绝 `technique_abstract` / `transfer_template` 中出现原文专名、原文动作短语或长原文片段。当前仍未接真实 chat analyzer、产品触发入口、预算/队列调度和前端 TechniqueSpecimen 卡。
 
 ### M2.4 分析前端
 

@@ -274,6 +274,16 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                         source.Hash,
                         now,
                         cancellationToken);
+                    await UpsertDefaultCorpusMembershipAsync(
+                        connection,
+                        transaction,
+                        anchor.AnchorId,
+                        storedNovelId,
+                        visibility,
+                        licenseStatus,
+                        sourceTrust,
+                        now,
+                        cancellationToken);
                 }
                 catch (SqliteException exception) when (IsSqliteConstraintViolation(exception))
                 {
@@ -368,6 +378,14 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                         materialAffectedIds = BuildAffectedProcessingIds(materials);
                         await using var materialTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
                         await ReplaceMaterialRowsAsync(connection, materialTransaction, insertedAnchor.AnchorId, materials, cancellationToken);
+                        await UpsertStage1DeterministicObservationsAsync(
+                            connection,
+                            materialTransaction,
+                            insertedAnchor.AnchorId,
+                            source.Hash,
+                            segments,
+                            now,
+                            cancellationToken);
                         var materialExtractedAnchor = insertedAnchor with
                         {
                             Status = ReferenceAnchorBuildStates.MaterialsExtracted,
@@ -1057,6 +1075,14 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                         materials,
                         cancellationToken,
                         archivedMaterialTimestamps);
+                    await UpsertStage1DeterministicObservationsAsync(
+                        connection,
+                        transaction,
+                        anchor.AnchorId,
+                        source.Hash,
+                        segments,
+                        now,
+                        cancellationToken);
                     await UpdateAnchorBuildResultAsync(
                         connection,
                         transaction,
@@ -2273,6 +2299,13 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                 {
                     throw new ArgumentException("Reference anchor does not exist for this novel.", nameof(input));
                 }
+
+                await UpsertDefaultCorpusMembershipFromAnchorAsync(
+                    connection,
+                    transaction,
+                    input.AnchorId,
+                    now,
+                    cancellationToken);
             }
 
             await transaction.CommitAsync(cancellationToken);
@@ -2345,6 +2378,13 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                 {
                     throw new ArgumentException("Reference anchor does not exist for this novel.", nameof(input));
                 }
+
+                await UpsertDefaultCorpusMembershipFromAnchorAsync(
+                    connection,
+                    transaction,
+                    anchorId,
+                    now,
+                    cancellationToken);
             }
 
             await transaction.CommitAsync(cancellationToken);
@@ -2398,7 +2438,9 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                 ? (long?)null
                 : input.NovelId;
 
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
             await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = """
                 UPDATE reference_anchors
                 SET novel_id = $novel_id,
@@ -2425,6 +2467,18 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
             {
                 throw new ArgumentException("Reference anchor does not exist for this novel.", nameof(input));
             }
+
+            await UpsertDefaultCorpusMembershipAsync(
+                connection,
+                transaction,
+                input.AnchorId,
+                storedNovelId,
+                visibility,
+                licenseStatus,
+                sourceTrust,
+                now,
+                cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
 
             return await ReadAnchorAsync(connection, input.NovelId, input.AnchorId, cancellationToken);
         }
@@ -2498,6 +2552,132 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
             userTags);
     }
 
+    private static async ValueTask UpsertDefaultCorpusMembershipFromAnchorAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long anchorId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        await using var read = connection.CreateCommand();
+        read.Transaction = transaction;
+        read.CommandText = """
+            SELECT novel_id, corpus_visibility, license_status, source_trust
+            FROM reference_anchors
+            WHERE anchor_id = $anchor_id;
+            """;
+        read.Parameters.AddWithValue("$anchor_id", anchorId);
+        await using var reader = await read.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            throw new InvalidOperationException("Reference anchor was not found while updating corpus membership.");
+        }
+
+        await UpsertDefaultCorpusMembershipAsync(
+            connection,
+            transaction,
+            anchorId,
+            reader.IsDBNull(0) ? null : reader.GetInt64(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.GetString(3),
+            now,
+            cancellationToken);
+    }
+
+    private static async ValueTask UpsertDefaultCorpusMembershipAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long anchorId,
+        long? storedNovelId,
+        string visibility,
+        string licenseStatus,
+        string sourceTrust,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var libraryId = BuildDefaultCorpusLibraryId(storedNovelId, visibility);
+        var libraryScope = string.Equals(visibility, ReferenceCorpusVisibilities.Workspace, StringComparison.Ordinal)
+            ? "global"
+            : "project";
+        var libraryNovelId = string.Equals(libraryScope, "project", StringComparison.Ordinal)
+            ? storedNovelId ?? throw new InvalidOperationException("Project corpus library requires a novel id.")
+            : (long?)null;
+
+        await using (var library = connection.CreateCommand())
+        {
+            library.Transaction = transaction;
+            library.CommandText = """
+                INSERT INTO reference_corpus_libraries
+                  (library_id, scope, novel_id, name, created_at)
+                VALUES
+                  ($library_id, $scope, $novel_id, $name, $created_at)
+                ON CONFLICT(library_id) DO UPDATE SET
+                  scope = excluded.scope,
+                  novel_id = excluded.novel_id,
+                  name = excluded.name;
+                """;
+            library.Parameters.AddWithValue("$library_id", libraryId);
+            library.Parameters.AddWithValue("$scope", libraryScope);
+            library.Parameters.AddWithValue("$novel_id", libraryNovelId.HasValue ? libraryNovelId.Value : DBNull.Value);
+            library.Parameters.AddWithValue("$name", string.Equals(libraryScope, "global", StringComparison.Ordinal)
+                ? "Workspace corpus"
+                : "Project corpus");
+            library.Parameters.AddWithValue("$created_at", FormatTimestamp(now));
+            await library.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var member = connection.CreateCommand())
+        {
+            member.Transaction = transaction;
+            member.CommandText = """
+                INSERT INTO reference_library_members
+                  (library_id, anchor_id, enabled, source_quality, disabled_reason, dedup_group_id)
+                VALUES
+                  ($library_id, $anchor_id, 1, $source_quality, NULL, $dedup_group_id)
+                ON CONFLICT(library_id, anchor_id) DO UPDATE SET
+                  enabled = 1,
+                  source_quality = excluded.source_quality,
+                  disabled_reason = NULL,
+                  dedup_group_id = excluded.dedup_group_id;
+                """;
+            member.Parameters.AddWithValue("$library_id", libraryId);
+            member.Parameters.AddWithValue("$anchor_id", anchorId);
+            member.Parameters.AddWithValue("$source_quality", MapSourceQuality(sourceTrust));
+            member.Parameters.AddWithValue("$dedup_group_id", "anchor:" + anchorId.ToString(CultureInfo.InvariantCulture));
+            await member.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var license = MapLicenseStatus(licenseStatus);
+        await using (var gate = connection.CreateCommand())
+        {
+            gate.Transaction = transaction;
+            gate.CommandText = """
+                INSERT INTO reference_source_license
+                  (anchor_id, license_state, authorization_evidence, reuse_policy,
+                   max_verbatim_ratio, cleared_for_insertion, reviewed_at)
+                VALUES
+                  ($anchor_id, $license_state, $authorization_evidence, $reuse_policy,
+                   $max_verbatim_ratio, $cleared_for_insertion, $reviewed_at)
+                ON CONFLICT(anchor_id) DO UPDATE SET
+                  license_state = excluded.license_state,
+                  authorization_evidence = excluded.authorization_evidence,
+                  reuse_policy = excluded.reuse_policy,
+                  max_verbatim_ratio = excluded.max_verbatim_ratio,
+                  cleared_for_insertion = excluded.cleared_for_insertion,
+                  reviewed_at = excluded.reviewed_at;
+                """;
+            gate.Parameters.AddWithValue("$anchor_id", anchorId);
+            gate.Parameters.AddWithValue("$license_state", license.LicenseState);
+            gate.Parameters.AddWithValue("$authorization_evidence", licenseStatus);
+            gate.Parameters.AddWithValue("$reuse_policy", license.ReusePolicy);
+            gate.Parameters.AddWithValue("$max_verbatim_ratio", license.MaxVerbatimRatio.HasValue ? license.MaxVerbatimRatio.Value : DBNull.Value);
+            gate.Parameters.AddWithValue("$cleared_for_insertion", license.ClearedForInsertion ? 1 : 0);
+            gate.Parameters.AddWithValue("$reviewed_at", FormatTimestamp(now));
+            await gate.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
     private static async ValueTask ReplaceSegmentsAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -2523,6 +2703,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
             await clearKeep.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        var segmentDepths = BuildSegmentDepths(segments);
+        var segmentIds = segments
+            .Select(segment => segment.SegmentId)
+            .ToHashSet(StringComparer.Ordinal);
         foreach (var segment in segments)
         {
             await using (var keep = connection.CreateCommand())
@@ -2536,16 +2720,35 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                 keep.Parameters.AddWithValue("$segment_id", segment.SegmentId);
                 await keep.ExecuteNonQueryAsync(cancellationToken);
             }
+        }
 
+        foreach (var segment in segments
+            .OrderBy(segment => segmentDepths.TryGetValue(segment.SegmentId, out var depth) ? depth : 0)
+            .ThenBy(segment => segment.StartOffset)
+            .ThenBy(segment => segment.SegmentIndex)
+            .ThenBy(segment => segment.SegmentId, StringComparer.Ordinal))
+        {
+            await UpsertTextNodeAsync(
+                connection,
+                transaction,
+                anchorId,
+                segment,
+                segmentDepths.TryGetValue(segment.SegmentId, out var depth) ? depth : 0,
+                segmentIds,
+                cancellationToken);
+        }
+
+        foreach (var segment in segments)
+        {
             await using var insert = connection.CreateCommand();
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO reference_source_segments
                   (segment_id, anchor_id, chapter_index, chapter_title, segment_type,
-                   segment_index, parent_segment_id, start_offset, end_offset, text, text_hash)
+                   segment_index, parent_segment_id, start_offset, end_offset, text, text_hash, node_id)
                 VALUES
                   ($segment_id, $anchor_id, $chapter_index, $chapter_title, $segment_type,
-                   $segment_index, $parent_segment_id, $start_offset, $end_offset, $text, $text_hash)
+                   $segment_index, $parent_segment_id, $start_offset, $end_offset, $text, $text_hash, $node_id)
                 ON CONFLICT(segment_id) DO UPDATE SET
                   anchor_id = excluded.anchor_id,
                   chapter_index = excluded.chapter_index,
@@ -2556,7 +2759,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                   start_offset = excluded.start_offset,
                   end_offset = excluded.end_offset,
                   text = excluded.text,
-                  text_hash = excluded.text_hash;
+                  text_hash = excluded.text_hash,
+                  node_id = excluded.node_id;
                 """;
             insert.Parameters.AddWithValue("$segment_id", segment.SegmentId);
             insert.Parameters.AddWithValue("$anchor_id", anchorId);
@@ -2569,6 +2773,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
             insert.Parameters.AddWithValue("$end_offset", segment.EndOffset);
             insert.Parameters.AddWithValue("$text", segment.Text);
             insert.Parameters.AddWithValue("$text_hash", segment.TextHash);
+            insert.Parameters.AddWithValue("$node_id", BuildTextNodeId(segment.SegmentId));
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -2590,6 +2795,58 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
             clearKeep.CommandText = "DELETE FROM temp_reference_source_segment_keep;";
             await clearKeep.ExecuteNonQueryAsync(cancellationToken);
         }
+    }
+
+    private static async ValueTask UpsertTextNodeAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long anchorId,
+        ReferenceSourceSegment segment,
+        int depth,
+        IReadOnlySet<string> segmentIds,
+        CancellationToken cancellationToken)
+    {
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = """
+            INSERT INTO reference_text_nodes
+              (node_id, anchor_id, parent_node_id, node_type, sequence_index, depth,
+               chapter_index, start_offset, end_offset, char_len, text_hash, text, created_at)
+            VALUES
+              ($node_id, $anchor_id, $parent_node_id, $node_type, $sequence_index, $depth,
+               $chapter_index, $start_offset, $end_offset, $char_len, $text_hash, $text, $created_at)
+            ON CONFLICT(node_id) DO UPDATE SET
+              anchor_id = excluded.anchor_id,
+              parent_node_id = excluded.parent_node_id,
+              node_type = excluded.node_type,
+              sequence_index = excluded.sequence_index,
+              depth = excluded.depth,
+              chapter_index = excluded.chapter_index,
+              start_offset = excluded.start_offset,
+              end_offset = excluded.end_offset,
+              char_len = excluded.char_len,
+              text_hash = excluded.text_hash,
+              text = excluded.text;
+            """;
+        insert.Parameters.AddWithValue("$node_id", BuildTextNodeId(segment.SegmentId));
+        insert.Parameters.AddWithValue("$anchor_id", anchorId);
+        insert.Parameters.AddWithValue(
+            "$parent_node_id",
+            string.IsNullOrWhiteSpace(segment.ParentSegmentId) ||
+            !segmentIds.Contains(segment.ParentSegmentId)
+                ? DBNull.Value
+                : BuildTextNodeId(segment.ParentSegmentId));
+        insert.Parameters.AddWithValue("$node_type", MapTextNodeType(segment.SegmentType));
+        insert.Parameters.AddWithValue("$sequence_index", segment.SegmentIndex);
+        insert.Parameters.AddWithValue("$depth", depth);
+        insert.Parameters.AddWithValue("$chapter_index", segment.ChapterIndex);
+        insert.Parameters.AddWithValue("$start_offset", segment.StartOffset);
+        insert.Parameters.AddWithValue("$end_offset", segment.EndOffset);
+        insert.Parameters.AddWithValue("$char_len", segment.Text.Length);
+        insert.Parameters.AddWithValue("$text_hash", segment.TextHash);
+        insert.Parameters.AddWithValue("$text", segment.Text);
+        insert.Parameters.AddWithValue("$created_at", FormatTimestamp(DateTimeOffset.UtcNow));
+        await insert.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async ValueTask UpdateAnchorBuildResultAsync(
@@ -3201,12 +3458,12 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                   (material_id, anchor_id, source_segment_id, material_type, function_tag,
                    emotion_tag, scene_tag, pov_tag, technique_tag, function_confidence,
                    emotion_confidence, pov_confidence, text, source_hash, extractor_version,
-                   user_verified, created_at, archived_at)
+                   user_verified, created_at, archived_at, node_id)
                 VALUES
                   ($material_id, $anchor_id, $source_segment_id, $material_type, $function_tag,
                    $emotion_tag, $scene_tag, $pov_tag, $technique_tag, $function_confidence,
                    $emotion_confidence, $pov_confidence, $text, $source_hash, $extractor_version,
-                   $user_verified, $created_at, $archived_at)
+                   $user_verified, $created_at, $archived_at, $node_id)
                 ON CONFLICT(material_id) DO UPDATE SET
                   anchor_id = excluded.anchor_id,
                   source_segment_id = excluded.source_segment_id,
@@ -3224,7 +3481,8 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                   extractor_version = excluded.extractor_version,
                   user_verified = excluded.user_verified,
                   created_at = excluded.created_at,
-                  archived_at = excluded.archived_at;
+                  archived_at = excluded.archived_at,
+                  node_id = excluded.node_id;
                 """;
             insert.Parameters.AddWithValue("$material_id", material.MaterialId);
             insert.Parameters.AddWithValue("$anchor_id", anchorId);
@@ -3244,6 +3502,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
             insert.Parameters.AddWithValue("$user_verified", material.UserVerified ? 1 : 0);
             insert.Parameters.AddWithValue("$created_at", FormatTimestamp(material.CreatedAt));
             insert.Parameters.AddWithValue("$archived_at", archivedAt is null ? DBNull.Value : archivedAt);
+            insert.Parameters.AddWithValue("$node_id", BuildTextNodeId(material.SourceSegmentId));
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -3264,6 +3523,278 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
             clearKeep.Transaction = transaction;
             clearKeep.CommandText = "DELETE FROM temp_reference_material_keep;";
             await clearKeep.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await PruneStaleTextNodesAsync(connection, transaction, anchorId, cancellationToken);
+    }
+
+    private static async ValueTask PruneStaleTextNodesAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long anchorId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            DELETE FROM reference_text_nodes
+            WHERE anchor_id = $anchor_id
+              AND node_id NOT IN (
+                SELECT node_id
+                FROM reference_source_segments
+                WHERE anchor_id = $anchor_id
+                  AND node_id IS NOT NULL
+              )
+              AND node_id NOT IN (
+                SELECT node_id
+                FROM reference_materials
+                WHERE anchor_id = $anchor_id
+                  AND node_id IS NOT NULL
+              );
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask<int> UpsertStage1DeterministicObservationsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long anchorId,
+        string sourceHash,
+        IReadOnlyList<ReferenceSourceSegment> segments,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var sentenceSegments = segments
+            .Where(segment => string.Equals(segment.SegmentType, "sentence", StringComparison.Ordinal))
+            .Where(segment => !string.IsNullOrWhiteSpace(segment.Text))
+            .ToArray();
+        var runId = BuildStage1RunId(anchorId, sourceHash);
+        await UpsertStage1RunAsync(
+            connection,
+            transaction,
+            anchorId,
+            runId,
+            now,
+            sentenceSegments.Length,
+            cancellationToken);
+
+        var count = 0;
+        foreach (var segment in sentenceSegments)
+        {
+            var nodeId = BuildTextNodeId(segment.SegmentId);
+            var rhythm = BuildDeterministicRhythm(segment.Text);
+            await ReferenceCorpusObservationWriter.UpsertAsync(
+                connection,
+                transaction,
+                new ReferenceCorpusFeatureObservation(
+                    NodeId: nodeId,
+                    NodeType: ReferenceCorpusNodeTypes.Sentence,
+                    RunId: runId,
+                    AnchorId: anchorId,
+                    FeatureFamily: "rhythm",
+                    FeatureKey: "length_band",
+                    ValueKind: "number",
+                    ValueText: rhythm.Label,
+                    ValueNum: rhythm.CharCount,
+                    ValueBool: null,
+                    ValueJson: JsonSerializer.Serialize(
+                        new
+                        {
+                            feature_key = "length_band",
+                            label = rhythm.Label,
+                            char_count = rhythm.CharCount,
+                            cadence = rhythm.Cadence
+                        },
+                        JsonOptions),
+                    Intensity: null,
+                    Confidence: 0.95,
+                    EvidenceStart: 0,
+                    EvidenceEnd: segment.Text.Length,
+                    Explanation: "Deterministic sentence length extracted during Stage 1.",
+                    ReviewState: "unverified",
+                    ValidityState: "active",
+                    SupersededByRunId: null,
+                    CreatedAt: now),
+                cancellationToken);
+            count++;
+
+            var sensory = DetectSensory(segment.Text);
+            if (sensory.Count > 0)
+            {
+                var identity = await ReferenceCorpusObservationWriter.UpsertAsync(
+                    connection,
+                    transaction,
+                    new ReferenceCorpusFeatureObservation(
+                        NodeId: nodeId,
+                        NodeType: ReferenceCorpusNodeTypes.Sentence,
+                        RunId: runId,
+                        AnchorId: anchorId,
+                        FeatureFamily: "sensory",
+                        FeatureKey: "senses",
+                        ValueKind: "array",
+                        ValueText: string.Join(",", sensory.Select(item => item.Sense)),
+                        ValueNum: null,
+                        ValueBool: null,
+                        ValueJson: JsonSerializer.Serialize(
+                            sensory.Select(item => new { sense = item.Sense, intensity = item.Intensity }),
+                            JsonOptions),
+                        Intensity: sensory.Max(item => item.Intensity),
+                        Confidence: 0.72,
+                        EvidenceStart: 0,
+                        EvidenceEnd: segment.Text.Length,
+                        Explanation: "Rule-based sensory marker detection during Stage 1.",
+                        ReviewState: "unverified",
+                        ValidityState: "active",
+                        SupersededByRunId: null,
+                        CreatedAt: now),
+                    cancellationToken);
+                await ReplaceSensoryProjectionAsync(
+                    connection,
+                    transaction,
+                    identity.ObservationId,
+                    nodeId,
+                    anchorId,
+                    sensory,
+                    cancellationToken);
+                count++;
+            }
+
+            var emotion = DetectEmotion(segment.Text);
+            if (emotion.Length > 0)
+            {
+                var emotionObservation = MapDeterministicEmotion(emotion);
+                await ReferenceCorpusObservationWriter.UpsertAsync(
+                    connection,
+                    transaction,
+                    new ReferenceCorpusFeatureObservation(
+                        NodeId: nodeId,
+                        NodeType: ReferenceCorpusNodeTypes.Sentence,
+                        RunId: runId,
+                        AnchorId: anchorId,
+                        FeatureFamily: "emotion",
+                        FeatureKey: "emotion_state",
+                        ValueKind: "enum",
+                        ValueText: emotionObservation.Surface,
+                        ValueNum: null,
+                        ValueBool: null,
+                        ValueJson: JsonSerializer.Serialize(
+                            new
+                            {
+                                feature_key = "emotion_state",
+                                surface = emotionObservation.Surface,
+                                subtext = emotionObservation.Subtext,
+                                direction = emotionObservation.Direction,
+                                mode = emotionObservation.Mode,
+                                deterministic_marker = emotion
+                            },
+                            JsonOptions),
+                        Intensity: emotionObservation.Intensity,
+                        Confidence: 0.68,
+                        EvidenceStart: 0,
+                        EvidenceEnd: segment.Text.Length,
+                        Explanation: "Rule-based emotional surface marker detection during Stage 1.",
+                        ReviewState: "unverified",
+                        ValidityState: "active",
+                        SupersededByRunId: null,
+                        CreatedAt: now),
+                    cancellationToken);
+                count++;
+            }
+        }
+
+        await UpdateStage1ObservationCountAsync(
+            connection,
+            transaction,
+            runId,
+            count,
+            cancellationToken);
+        return count;
+    }
+
+    private static async ValueTask UpsertStage1RunAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        long anchorId,
+        string runId,
+        DateTimeOffset now,
+        int sentenceCount,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO reference_analysis_runs
+              (run_id, anchor_id, analyzer_version, schema_version, model_provider, model_id,
+               scope, status, token_budget, tokens_spent, resume_cursor, started_at, completed_at, observation_count)
+            VALUES
+              ($run_id, $anchor_id, 'deterministic-stage1-v1', 'corpus-v1', 'rule', 'deterministic-stage1',
+               'sentence', 'completed', NULL, 0, NULL, $started_at, $completed_at, $observation_count)
+            ON CONFLICT(run_id) DO UPDATE SET
+              status = 'completed',
+              completed_at = excluded.completed_at,
+              observation_count = excluded.observation_count;
+            """;
+        command.Parameters.AddWithValue("$run_id", runId);
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        command.Parameters.AddWithValue("$started_at", FormatTimestamp(now));
+        command.Parameters.AddWithValue("$completed_at", FormatTimestamp(now));
+        command.Parameters.AddWithValue("$observation_count", sentenceCount);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask UpdateStage1ObservationCountAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string runId,
+        int observationCount,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE reference_analysis_runs
+            SET observation_count = $observation_count
+            WHERE run_id = $run_id;
+            """;
+        command.Parameters.AddWithValue("$run_id", runId);
+        command.Parameters.AddWithValue("$observation_count", observationCount);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask ReplaceSensoryProjectionAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string observationId,
+        string nodeId,
+        long anchorId,
+        IReadOnlyList<SensoryDetection> sensory,
+        CancellationToken cancellationToken)
+    {
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM reference_obs_sensory WHERE observation_id = $observation_id;";
+            delete.Parameters.AddWithValue("$observation_id", observationId);
+            await delete.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        foreach (var item in sensory)
+        {
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO reference_obs_sensory
+                  (observation_id, node_id, anchor_id, sense, intensity)
+                VALUES
+                  ($observation_id, $node_id, $anchor_id, $sense, $intensity);
+                """;
+            insert.Parameters.AddWithValue("$observation_id", observationId);
+            insert.Parameters.AddWithValue("$node_id", nodeId);
+            insert.Parameters.AddWithValue("$anchor_id", anchorId);
+            insert.Parameters.AddWithValue("$sense", item.Sense);
+            insert.Parameters.AddWithValue("$intensity", item.Intensity);
+            await insert.ExecuteNonQueryAsync(cancellationToken);
         }
     }
 
@@ -5155,6 +5686,9 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
 
             CREATE INDEX IF NOT EXISTS idx_reference_technique_specimens_source
               ON reference_technique_specimens(source_anchor_id, source_node_id, validity_state);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_specimen_evidence_observation
+              ON reference_specimen_evidence(observation_id, specimen_id);
 
             CREATE INDEX IF NOT EXISTS idx_reference_aggregate_provenance_anchor_run
               ON reference_aggregate_provenance(anchor_id, run_id, aggregate_kind);
@@ -7589,6 +8123,195 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
             $"{anchorId}:{chapterIndex}:{type}:{segmentIndex}:{hash[..16]}");
     }
 
+    private static string BuildTextNodeId(string segmentId)
+    {
+        return "node-" + HashText(segmentId);
+    }
+
+    private static string BuildStage1RunId(long anchorId, string sourceHash)
+    {
+        return "stage1-" + anchorId.ToString(CultureInfo.InvariantCulture) + "-" + sourceHash[..16];
+    }
+
+    private static string BuildDefaultCorpusLibraryId(long? storedNovelId, string visibility)
+    {
+        return string.Equals(visibility, ReferenceCorpusVisibilities.Workspace, StringComparison.Ordinal)
+            ? "global:workspace"
+            : "project:" + (storedNovelId ?? 0).ToString(CultureInfo.InvariantCulture) + ":default";
+    }
+
+    private static CorpusLicenseGateMapping MapLicenseStatus(string licenseStatus)
+    {
+        return licenseStatus.Trim().ToLowerInvariant() switch
+        {
+            "public_domain" => new CorpusLicenseGateMapping(
+                ReferenceCorpusLicenseStates.PublicDomain,
+                ReferenceCorpusReusePolicies.VerbatimOk,
+                0.90,
+                true),
+            "licensed" => new CorpusLicenseGateMapping(
+                ReferenceCorpusLicenseStates.Authorized,
+                ReferenceCorpusReusePolicies.AdaptedOnly,
+                0.42,
+                true),
+            "user_provided" => new CorpusLicenseGateMapping(
+                ReferenceCorpusLicenseStates.Authorized,
+                ReferenceCorpusReusePolicies.AdaptedOnly,
+                0.42,
+                true),
+            _ => new CorpusLicenseGateMapping(
+                ReferenceCorpusLicenseStates.Unknown,
+                ReferenceCorpusReusePolicies.ReferenceOnly,
+                null,
+                false)
+        };
+    }
+
+    private static string MapSourceQuality(string sourceTrust)
+    {
+        return sourceTrust.Trim().ToLowerInvariant() switch
+        {
+            ReferenceSourceTrustLevels.UserVerified => "trusted",
+            ReferenceSourceTrustLevels.Imported => "normal",
+            ReferenceSourceTrustLevels.Unverified => "low",
+            _ => "normal"
+        };
+    }
+
+    private static string MapTextNodeType(string segmentType)
+    {
+        return segmentType switch
+        {
+            "chapter" => ReferenceCorpusNodeTypes.Chapter,
+            "scene" => ReferenceCorpusNodeTypes.Scene,
+            "sentence" => ReferenceCorpusNodeTypes.Sentence,
+            "paragraph" => ReferenceCorpusNodeTypes.Passage,
+            "beat" => ReferenceCorpusNodeTypes.Passage,
+            "dialogue_exchange" => ReferenceCorpusNodeTypes.Passage,
+            "action_afterbeat" => ReferenceCorpusNodeTypes.Passage,
+            "image_motif" => ReferenceCorpusNodeTypes.Passage,
+            "hook" => ReferenceCorpusNodeTypes.Passage,
+            "payoff" => ReferenceCorpusNodeTypes.Passage,
+            "transition" => ReferenceCorpusNodeTypes.Passage,
+            _ => ReferenceCorpusNodeTypes.Passage
+        };
+    }
+
+    private static IReadOnlyDictionary<string, int> BuildSegmentDepths(IReadOnlyList<ReferenceSourceSegment> segments)
+    {
+        var depths = new Dictionary<string, int>(StringComparer.Ordinal);
+        var byId = segments.ToDictionary(segment => segment.SegmentId, StringComparer.Ordinal);
+        foreach (var segment in segments)
+        {
+            _ = ResolveSegmentDepth(segment.SegmentId, byId, depths, []);
+        }
+
+        return depths;
+    }
+
+    private static int ResolveSegmentDepth(
+        string segmentId,
+        IReadOnlyDictionary<string, ReferenceSourceSegment> byId,
+        Dictionary<string, int> depths,
+        HashSet<string> visiting)
+    {
+        if (depths.TryGetValue(segmentId, out var existing))
+        {
+            return existing;
+        }
+
+        if (!byId.TryGetValue(segmentId, out var segment) ||
+            string.IsNullOrWhiteSpace(segment.ParentSegmentId) ||
+            !byId.ContainsKey(segment.ParentSegmentId) ||
+            !visiting.Add(segmentId))
+        {
+            depths[segmentId] = 0;
+            return 0;
+        }
+
+        var depth = ResolveSegmentDepth(segment.ParentSegmentId, byId, depths, visiting) + 1;
+        visiting.Remove(segmentId);
+        depths[segmentId] = depth;
+        return depth;
+    }
+
+    private static IReadOnlyList<SensoryDetection> DetectSensory(string text)
+    {
+        var detections = new List<SensoryDetection>();
+        if (ContainsAny(text, ["声", "响", "听", "雨声", "风声"]))
+        {
+            detections.Add(new SensoryDetection("auditory", 0.72));
+        }
+
+        if (ContainsAny(text, ["光", "影", "灯", "黑", "白", "看", "眼"]))
+        {
+            detections.Add(new SensoryDetection("visual", 0.62));
+        }
+
+        if (ContainsAny(text, ["指尖", "掌心", "捏", "握", "扣", "贴", "挤"]))
+        {
+            detections.Add(new SensoryDetection("tactile", 0.66));
+        }
+
+        if (ContainsAny(text, ["冷", "热", "烫", "凉", "寒"]))
+        {
+            detections.Add(new SensoryDetection("temperature", 0.64));
+        }
+
+        return detections
+            .GroupBy(item => item.Sense, StringComparer.Ordinal)
+            .Select(group => group.OrderByDescending(item => item.Intensity).First())
+            .ToArray();
+    }
+
+    private static DeterministicRhythmObservation BuildDeterministicRhythm(string text)
+    {
+        var charCount = text.Length;
+        var label = charCount switch
+        {
+            <= 12 => "short",
+            <= 32 => "medium",
+            _ => "long"
+        };
+        var pauseCount = text.Count(static value => value is '，' or '、' or '；' or ';' or ',' or '。' or '！' or '？' or '!' or '?');
+        var cadence = pauseCount >= 3
+            ? "staccato"
+            : text.Contains('，', StringComparison.Ordinal) || text.Contains('、', StringComparison.Ordinal)
+                ? "flowing"
+                : "steady";
+        return new DeterministicRhythmObservation(label, charCount, cadence);
+    }
+
+    private static string DetectEmotion(string text)
+    {
+        if (ContainsAny(text, ["没有立刻开口", "没有说话", "不开口", "沉默"]))
+        {
+            return "withheld_answer";
+        }
+
+        if (ContainsAny(text, ["攥", "咬", "捏", "拳", "扣在掌心"]))
+        {
+            return "restrained_pressure";
+        }
+
+        if (ContainsAny(text, ["笑", "松了口气", "放心"]))
+        {
+            return "surface_relief";
+        }
+
+        return string.Empty;
+    }
+
+    private static DeterministicEmotionObservation MapDeterministicEmotion(string marker)
+    {
+        return marker switch
+        {
+            "restrained_pressure" => new DeterministicEmotionObservation("anger", "restrained", "rising", "suppressed", 6.0),
+            "surface_relief" => new DeterministicEmotionObservation("relief", "masking", "falling", "indirect", 4.0),
+            _ => new DeterministicEmotionObservation("calm", "restrained", "stable", "suppressed", 5.0)
+        };
+    }
+
     private static string BuildMaterialId(long anchorId, string type, int segmentIndex, string hash)
     {
         return string.Create(
@@ -7858,6 +8581,26 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
         double PovConfidence);
 
     private sealed record ReferenceMaterialHashKey(string MaterialType, string SourceHash);
+
+    private sealed record CorpusLicenseGateMapping(
+        string LicenseState,
+        string ReusePolicy,
+        double? MaxVerbatimRatio,
+        bool ClearedForInsertion);
+
+    private sealed record DeterministicRhythmObservation(
+        string Label,
+        int CharCount,
+        string Cadence);
+
+    private sealed record DeterministicEmotionObservation(
+        string Surface,
+        string Subtext,
+        string Direction,
+        string Mode,
+        double Intensity);
+
+    private sealed record SensoryDetection(string Sense, double Intensity);
 
     private sealed record ReferenceProcessingAffectedIds(
         string MaterialId,

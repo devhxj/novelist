@@ -35,7 +35,7 @@
                 "text": "雨声贴着门缝往里挤。",
                 "feature_tags": {
                   "feature_family": "sensory",
-                  "feature_key": "auditory_pressure",
+                  "feature_key": "senses",
                   "pacing": "slow_tension"
                 }
               },
@@ -48,7 +48,7 @@
                 "text": "她没有立刻开口，只把钥匙扣在掌心。",
                 "feature_tags": {
                   "feature_family": "emotion",
-                  "feature_key": "restrained_pressure",
+                  "feature_key": "emotion_state",
                   "pov": "close_limited"
                 }
               },
@@ -84,9 +84,9 @@
                 "run_id": "run-stage1-rain-doorway",
                 "node_id": "node-rain-doorway-s1",
                 "feature_family": "sensory",
-                "feature_key": "auditory_pressure",
-                "value_kind": "enum",
-                "value_text": "rain_at_threshold",
+                "feature_key": "senses",
+                "value_kind": "array",
+                "value_text": "auditory",
                 "confidence": 0.92
               },
               {
@@ -94,9 +94,9 @@
                 "run_id": "run-stage1-rain-doorway",
                 "node_id": "node-rain-doorway-s2",
                 "feature_family": "emotion",
-                "feature_key": "restrained_pressure",
+                "feature_key": "emotion_state",
                 "value_kind": "enum",
-                "value_text": "withheld_answer",
+                "value_text": "calm",
                 "confidence": 0.89
               }
             ]

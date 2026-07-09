@@ -975,6 +975,51 @@ export namespace reference {
     page_request: storage.PageRequest
   }
 
+  export type CorpusFeatureAnalysisScope = 'sentence' | 'passage'
+
+  export type CorpusFeatureAnalysisStatus =
+    | 'running'
+    | 'paused'
+    | 'budget_exhausted'
+    | 'partial_completed'
+    | 'completed'
+    | 'failed'
+
+  export interface StartCorpusFeatureAnalysisInput {
+    novel_id: number
+    anchor_id: number
+    scope: CorpusFeatureAnalysisScope
+    token_budget?: number | null
+    resume: boolean
+    run_id?: string | null
+  }
+
+  export interface GetCorpusFeatureAnalysisRunInput {
+    novel_id: number
+    run_id: string
+  }
+
+  export interface CorpusFeatureAnalysisRun {
+    run_id: string
+    novel_id: number
+    anchor_id: number
+    scope: CorpusFeatureAnalysisScope
+    families: string[]
+    status: CorpusFeatureAnalysisStatus
+    token_budget?: number | null
+    tokens_spent: number
+    resume_cursor?: string | null
+    observation_count: number
+    processed_work_items: number
+    analyzer_version: string
+    schema_version: string
+    model_provider: string
+    model_id: string
+    started_at: Timestamp
+    completed_at?: Timestamp | null
+    diagnostics: string[]
+  }
+
   export interface CorpusCandidateEvidence {
     observation_id: string
     feature_family: string
@@ -996,6 +1041,87 @@ export namespace reference {
     score_components: Record<string, number>
     fit_explanation: string
     evidence: CorpusCandidateEvidence[]
+  }
+
+  export interface GenerateCorpusInsertionDraftInput {
+    natural_language_goal: string
+    chapter_context: CurrentChapterContext
+    scope: CorpusScope
+    slot_values: Record<string, string>
+  }
+
+  export interface CorpusInsertionBlueprint {
+    blueprint_id: string
+    query_context_hash: string
+    strategy: string
+    beats: CorpusInsertionBlueprintBeat[]
+  }
+
+  export interface CorpusInsertionBlueprintBeat {
+    beat_id: string
+    beat_index: number
+    role_in_beat: string
+    narrative_function: string
+    node_ids: string[]
+  }
+
+  export interface CorpusSlotReplacement {
+    slot_name: string
+    source_value: string
+    replacement_value: string
+    source_start: number
+    source_end: number
+    output_start: number
+    output_end: number
+  }
+
+  export interface CorpusInsertionPiece {
+    piece_id: string
+    beat_id: string
+    candidate_id: string
+    node_id: string
+    anchor_id: number
+    library_id: string
+    text_hash: string
+    reuse_policy: CorpusReusePolicy
+    license_state: CorpusLicenseState
+    output_text: string
+    preserved_text_hash: string
+    preserved_hash_matches: boolean
+    slot_replacements: CorpusSlotReplacement[]
+  }
+
+  export interface CorpusInsertionGateViolation {
+    metric: string
+    actual: number
+    threshold: number
+  }
+
+  export interface CorpusInsertionGatePiece {
+    piece_id: string
+    node_id: string
+    should_block: boolean
+    four_gram_containment_ratio: number
+    longest_common_substring_ratio: number
+    violations: CorpusInsertionGateViolation[]
+  }
+
+  export interface CorpusInsertionGate {
+    passed: boolean
+    status: string
+    errors: string[]
+    pieces: CorpusInsertionGatePiece[]
+  }
+
+  export interface CorpusInsertionDraft {
+    query_context: CorpusQueryContext
+    blueprint: CorpusInsertionBlueprint
+    pieces: CorpusInsertionPiece[]
+    slot_replacements: CorpusSlotReplacement[]
+    assembled_text: string
+    chapter_text_after_insertion: string
+    ready_for_insertion: boolean
+    gate: CorpusInsertionGate
   }
 
   export interface Material {

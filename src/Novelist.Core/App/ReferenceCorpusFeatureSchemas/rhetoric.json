@@ -1,0 +1,17 @@
+{
+  "schema_id": "reference-corpus.feature.rhetoric.v1",
+  "schema_version": "reference-corpus-feature-family-v1",
+  "family": "rhetoric",
+  "node_type": "sentence",
+  "max_observations": 12,
+  "required_observation_fields": ["feature_key", "type", "narrative_function", "confidence", "evidence_start", "evidence_end", "explanation"],
+  "observation_fields": {
+    "feature_key": { "type": "enum", "enum": ["rhetorical_device"] },
+    "type": { "type": "enum", "enum": ["metaphor", "simile", "personification", "contrast", "repetition", "ellipsis", "understatement", "parallelism"] },
+    "narrative_function": { "type": "enum", "enum": ["amplify_emotion", "compress_action", "delay_answer", "sharpen_image", "establish_motif"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 0.95 },
+    "evidence_start": { "type": "integer", "minimum": 0 },
+    "evidence_end": { "type": "integer", "minimum": 1 },
+    "explanation": { "type": "string", "max_length": 360 }
+  }
+}

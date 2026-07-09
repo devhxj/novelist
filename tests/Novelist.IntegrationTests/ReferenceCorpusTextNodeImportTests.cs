@@ -1,6 +1,8 @@
 using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
+using Novelist.Core.App;
 using Novelist.Infrastructure.App;
+using Novelist.IntegrationTests.TestDoubles;
 
 namespace Novelist.IntegrationTests;
 
@@ -40,10 +42,30 @@ public sealed class ReferenceCorpusTextNodeImportTests : IDisposable
         Assert.Contains(nodes, node => node.NodeType == ReferenceCorpusNodeTypes.Chapter && node.Text.Contains("雨声贴着门缝", StringComparison.Ordinal));
         Assert.Contains(nodes, node => node.NodeType == ReferenceCorpusNodeTypes.Passage && node.Text == "雨声贴着门缝往里挤。");
         var firstSentence = Assert.Single(nodes, node => node.NodeType == ReferenceCorpusNodeTypes.Sentence && node.Text == "雨声贴着门缝往里挤。");
-        var firstPassage = Assert.Single(nodes, node => node.NodeType == ReferenceCorpusNodeTypes.Passage && node.Text == "雨声贴着门缝往里挤。");
-        Assert.Equal(firstPassage.NodeId, firstSentence.ParentNodeId);
+        var firstPassage = Assert.Single(nodes, node => node.NodeId == firstSentence.ParentNodeId);
+        Assert.Equal(ReferenceCorpusNodeTypes.Passage, firstPassage.NodeType);
         Assert.Equal(firstSentence.TextHash, await ReadSourceSegmentNodeTextHashAsync(options, firstSentence.NodeId));
         Assert.True(await MaterialNodeExistsAsync(options, firstSentence.NodeId));
+        Assert.True(await ObservationExistsAsync(options, firstSentence.NodeId, "rhythm", "length_band"));
+        Assert.True(await ObservationExistsAsync(options, firstSentence.NodeId, "sensory", "senses"));
+
+        var libraryId = await ReadDefaultLibraryIdAsync(options, anchor.AnchorId);
+        Assert.Equal("project:" + novel.Id + ":default", libraryId);
+        var license = await ReadSourceLicenseAsync(options, anchor.AnchorId);
+        Assert.Equal(ReferenceCorpusLicenseStates.Authorized, license.LicenseState);
+        Assert.Equal(ReferenceCorpusReusePolicies.AdaptedOnly, license.ReusePolicy);
+        Assert.True(license.ClearedForInsertion);
+
+        var corpus = new SqliteReferenceCorpusService(
+            options,
+            new StaticEmbeddingConfigurationService(CreateEmbeddingOptions()),
+            new DeterministicHashEmbeddingClient(defaultDimensions: 8));
+        var search = await corpus.SearchCandidatesAsync(
+            BuildSearchPayload(novel.Id, libraryId),
+            CancellationToken.None);
+
+        var candidate = Assert.Single(search.Items, item => item.NodeId == firstSentence.NodeId);
+        Assert.Contains(candidate.Evidence, item => item.FeatureFamily == "sensory" && item.FeatureKey == "senses");
     }
 
     public void Dispose()
@@ -139,6 +161,110 @@ public sealed class ReferenceCorpusTextNodeImportTests : IDisposable
         return Convert.ToInt32(await command.ExecuteScalarAsync()) > 0;
     }
 
+    private static async ValueTask<bool> ObservationExistsAsync(
+        AppInitializationOptions options,
+        string nodeId,
+        string featureFamily,
+        string featureKey)
+    {
+        await using var connection = await OpenReferenceConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM reference_feature_observations
+            WHERE node_id = $node_id
+              AND feature_family = $feature_family
+              AND feature_key = $feature_key
+              AND validity_state = 'active';
+            """;
+        command.Parameters.AddWithValue("$node_id", nodeId);
+        command.Parameters.AddWithValue("$feature_family", featureFamily);
+        command.Parameters.AddWithValue("$feature_key", featureKey);
+        return Convert.ToInt32(await command.ExecuteScalarAsync()) > 0;
+    }
+
+    private static async ValueTask<string> ReadDefaultLibraryIdAsync(
+        AppInitializationOptions options,
+        long anchorId)
+    {
+        await using var connection = await OpenReferenceConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT library_id
+            FROM reference_library_members
+            WHERE anchor_id = $anchor_id
+            ORDER BY library_id
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        return Convert.ToString(await command.ExecuteScalarAsync()) ?? string.Empty;
+    }
+
+    private static async ValueTask<SourceLicenseRow> ReadSourceLicenseAsync(
+        AppInitializationOptions options,
+        long anchorId)
+    {
+        await using var connection = await OpenReferenceConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT license_state, reuse_policy, cleared_for_insertion
+            FROM reference_source_license
+            WHERE anchor_id = $anchor_id;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        return new SourceLicenseRow(
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.GetInt32(2) != 0);
+    }
+
+    private static EmbeddingRequestOptions CreateEmbeddingOptions()
+    {
+        return new EmbeddingRequestOptions(
+            ProviderKey: "fake",
+            EndpointUrl: string.Empty,
+            ApiKey: string.Empty,
+            ModelId: "hash-model",
+            Dimensions: 8,
+            User: null,
+            NormalizeEmbeddings: true);
+    }
+
+    private static SearchReferenceCorpusCandidatesPayload BuildSearchPayload(
+        long novelId,
+        string libraryId)
+    {
+        return new SearchReferenceCorpusCandidatesPayload(
+            new ReferenceCorpusQueryContextPayload(
+                SceneType: "doorway_confrontation",
+                EmotionTarget: "restrained_pressure",
+                PacingTarget: "slow_tension",
+                NarrativePosition: "pre-reveal",
+                CommercialMechanic: "withheld-answer-hook",
+                CharacterStates: ["林岚 guarded"],
+                RequiredNarrativeFunctions: ["raise_pressure"],
+                ChapterContext: new CurrentChapterContextPayload(
+                    NovelId: novelId,
+                    ChapterNumber: 1,
+                    CurrentDraftText: "林岚停在门里，指尖还按着锁。",
+                    InsertionOffset: 8,
+                    PreviousChapterSummary: "有人在雨夜靠近。",
+                    CharacterSnapshots: []),
+                Scope: new ReferenceCorpusScopePayload(
+                    LibraryIds: [libraryId],
+                    ReusePolicies: [ReferenceCorpusReusePolicies.AdaptedOnly],
+                    IncludeAnchorIds: [],
+                    ExcludeAnchorIds: [])),
+            new PageRequestPayload(
+                Cursor: null,
+                PageSize: 10,
+                SortBy: "score",
+                SortDir: "desc",
+                Filters: new Dictionary<string, string> { ["node_type"] = ReferenceCorpusNodeTypes.Sentence }));
+    }
+
     private static async ValueTask<SqliteConnection> OpenReferenceConnectionAsync(AppInitializationOptions options)
     {
         var databasePath = Path.Combine(options.DefaultDataDirectory, "reference-anchor", "index.sqlite");
@@ -154,4 +280,25 @@ public sealed class ReferenceCorpusTextNodeImportTests : IDisposable
         int SequenceIndex,
         string TextHash,
         string Text);
+
+    private sealed record SourceLicenseRow(
+        string LicenseState,
+        string ReusePolicy,
+        bool ClearedForInsertion);
+
+    private sealed class StaticEmbeddingConfigurationService : IEmbeddingConfigurationService
+    {
+        private readonly EmbeddingRequestOptions _options;
+
+        public StaticEmbeddingConfigurationService(EmbeddingRequestOptions options)
+        {
+            _options = options;
+        }
+
+        public ValueTask<EmbeddingRequestOptions?> GetActiveEmbeddingOptionsAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult<EmbeddingRequestOptions?>(_options);
+        }
+    }
 }

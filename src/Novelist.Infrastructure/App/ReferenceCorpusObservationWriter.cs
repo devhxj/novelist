@@ -10,6 +10,15 @@ internal static class ReferenceCorpusObservationWriter
         ReferenceCorpusFeatureObservation observation,
         CancellationToken cancellationToken)
     {
+        return await UpsertAsync(connection, transaction: null, observation, cancellationToken);
+    }
+
+    public static async ValueTask<ReferenceCorpusObservationIdentity> UpsertAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        ReferenceCorpusFeatureObservation observation,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(observation);
         cancellationToken.ThrowIfCancellationRequested();
@@ -23,6 +32,7 @@ internal static class ReferenceCorpusObservationWriter
             observation.EvidenceEnd);
 
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO reference_feature_observations
               (observation_id, node_id, node_type, run_id, anchor_id, feature_family, feature_key,

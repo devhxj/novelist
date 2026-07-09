@@ -35,7 +35,7 @@ public sealed class ReferenceCorpusObservationWriterTests
         var second = first with
         {
             ValueText = "auditory_pressure_retry",
-            ValueJson = """[{"sense":"听觉","intensity":8}]"""
+            ValueJson = """[{"sense":"auditory","intensity":8}]"""
         };
 
         var firstIdentity = await ReferenceCorpusObservationWriter.UpsertAsync(connection, first, CancellationToken.None);
@@ -189,7 +189,7 @@ public sealed class ReferenceCorpusObservationWriterTests
             ValueText: valueText,
             ValueNum: null,
             ValueBool: null,
-            ValueJson: """[{"sense":"听觉","intensity":7}]""",
+            ValueJson: """[{"sense":"auditory","intensity":7}]""",
             Intensity: 0.7,
             confidence,
             evidenceStart,

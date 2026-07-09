@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { AlertTriangle, Copy, CornerDownLeft, FileSearch, ListEnd, Loader2, Replace, Search, Wand2, X } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import { copyTextToClipboard } from '@/lib/clipboard'
@@ -16,6 +17,11 @@ type ActiveChapterContext = {
   viewMode: string
 }
 
+type EditorSnapshot = {
+  currentDraftText: string
+  insertionOffset: number
+}
+
 type ReferenceErrorState = {
   title: string
   message: string
@@ -26,6 +32,8 @@ interface Props {
   novelId: number
   activeChapter: ActiveChapterContext | null
   onInsertCandidate: (text: string, mode: CandidateInsertMode) => boolean
+  getEditorSnapshot: () => EditorSnapshot | null
+  onApplyChapterText: (nextContent: string) => boolean
   onClose: () => void
 }
 
@@ -100,7 +108,37 @@ function decisionPayloadFor(run: reference.OrchestrationRun, decision: reference
   return 'confirmed'
 }
 
-export default function ChapterReferencePanel({ novelId, activeChapter, onInsertCandidate, onClose }: Props) {
+function defaultCorpusLibraryIds(novelId: number): string[] {
+  return [`project:${novelId}:default`, 'global:workspace']
+}
+
+function inferPrimaryCharacterSnapshot(
+  goal: string,
+  draftText: string,
+  forbiddenFacts: string[],
+): reference.CharacterStateSnapshot[] {
+  const source = `${goal}\n${draftText}`
+  const actionPrefix = '在|正|刚|又|已|把|将|没有|没|不|只|先|重新|压|停|看|说|问|走|坐|站|抬|低|握|捏|笑|开口|回头|伸手|按|扣|盯|望|转身|沉默'
+  const match = source.match(new RegExp(`(?:^|[\\n。！？；，])([\\u4e00-\\u9fff]{2,3})(?=(?:${actionPrefix}))`))
+  const character = match?.[1]?.trim()
+  if (!character) return []
+
+  return [{
+    character,
+    state: 'current_chapter_focus',
+    allowed_knowledge: [],
+    forbidden_knowledge: forbiddenFacts,
+  }]
+}
+
+export default function ChapterReferencePanel({
+  novelId,
+  activeChapter,
+  onInsertCandidate,
+  getEditorSnapshot,
+  onApplyChapterText,
+  onClose,
+}: Props) {
   const app = useApp()
   const activePath = activeChapter?.path ?? ''
   const activeTitle = activeChapter?.title ?? ''
@@ -133,6 +171,12 @@ export default function ChapterReferencePanel({ novelId, activeChapter, onInsert
   const [candidateLoading, setCandidateLoading] = useState(false)
   const [candidateError, setCandidateError] = useState<ReferenceErrorState | null>(null)
   const [candidateActionMessage, setCandidateActionMessage] = useState('')
+  const [corpusDraftPath, setCorpusDraftPath] = useState('')
+  const [corpusDraft, setCorpusDraft] = useState<reference.CorpusInsertionDraft | null>(null)
+  const [corpusDraftLoading, setCorpusDraftLoading] = useState(false)
+  const [corpusDraftError, setCorpusDraftError] = useState<ReferenceErrorState | null>(null)
+  const [corpusDraftActionMessage, setCorpusDraftActionMessage] = useState('')
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const contextSummary = useMemo(() => {
     if (!activeChapter) return '未打开章节'
@@ -281,20 +325,20 @@ export default function ChapterReferencePanel({ novelId, activeChapter, onInsert
   }, [])
 
   useEffect(() => {
-    if (!activePath || !hasValidChapter) return
+    if (!activePath || !hasValidChapter || !advancedOpen) return
     const timer = window.setTimeout(() => {
       void searchMaterials('auto')
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [activePath, hasValidChapter, searchMaterials])
+  }, [activePath, advancedOpen, hasValidChapter, searchMaterials])
 
   useEffect(() => {
-    if (!activePath || !hasValidChapter) return
+    if (!activePath || !hasValidChapter || !advancedOpen) return
     const timer = window.setTimeout(() => {
       void loadLatestRun()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [activePath, hasValidChapter, loadLatestRun])
+  }, [activePath, advancedOpen, hasValidChapter, loadLatestRun])
 
   const startOrchestration = useCallback(async () => {
     if (!activePath || !hasValidChapter) return
@@ -358,6 +402,9 @@ export default function ChapterReferencePanel({ novelId, activeChapter, onInsert
     : ''
   const visibleDraftCandidates = finalCandidateKey && candidateContextKey === finalCandidateKey ? draftCandidates : []
   const visibleDraftAudits = finalCandidateKey && candidateContextKey === finalCandidateKey ? draftAudits : []
+  const visibleCorpusDraft = corpusDraftPath === activePath ? corpusDraft : null
+  const visibleCorpusDraftError = corpusDraftPath === activePath ? corpusDraftError : null
+  const visibleCorpusDraftActionMessage = corpusDraftPath === activePath ? corpusDraftActionMessage : ''
 
   const resumeOrchestration = useCallback(async () => {
     if (!visibleRun || !visibleDecision || cannotResumeFinalInsertion) return
@@ -543,6 +590,115 @@ export default function ChapterReferencePanel({ novelId, activeChapter, onInsert
       : '无法插入候选，请切回正文编辑器并确认光标或选区。')
   }, [onInsertCandidate])
 
+  const generateCorpusDraft = useCallback(async () => {
+    if (!activePath || !hasValidChapter) return
+    const snapshot = getEditorSnapshot()
+    if (!snapshot) {
+      const fallbackMessage = '语料草稿生成失败'
+      setCorpusDraftPath(activePath)
+      setCorpusDraft(null)
+      setCorpusDraftActionMessage('')
+      setCorpusDraftError({
+        title: fallbackMessage,
+        message: '无法读取当前正文缓冲区。请切回章节正文编辑器后重试。',
+        diagnostic: buildCopyableDiagnostic({
+          fallbackMessage,
+          operation: '生成语料驱动插入草稿',
+          bridgeMethod: 'GenerateReferenceCorpusInsertionDraft',
+          detail: {
+            novel_id: novelId,
+            chapter_number: chapterNumber,
+            chapter_path: activePath,
+          },
+        }),
+      })
+      return
+    }
+
+    const known = inputLines(knownFacts)
+    const forbidden = inputLines(forbiddenFacts)
+    const naturalGoal = goal.trim() || activeTitle || `第 ${chapterNumber} 章`
+    setCorpusDraftLoading(true)
+    setCorpusDraftPath(activePath)
+    setCorpusDraftError(null)
+    setCorpusDraftActionMessage('')
+    try {
+      const draft = await app.GenerateReferenceCorpusInsertionDraft({
+        natural_language_goal: naturalGoal,
+        chapter_context: {
+          novel_id: novelId,
+          chapter_number: chapterNumber,
+          current_draft_text: snapshot.currentDraftText,
+          insertion_offset: snapshot.insertionOffset,
+          previous_chapter_summary: known.length > 0 ? known.join('；') : null,
+          character_snapshots: inferPrimaryCharacterSnapshot(naturalGoal, snapshot.currentDraftText, forbidden),
+        },
+        scope: {
+          library_ids: defaultCorpusLibraryIds(novelId),
+          reuse_policies: ['verbatim_ok', 'adapted_only'],
+          include_anchor_ids: [],
+          exclude_anchor_ids: [],
+        },
+        slot_values: {},
+      })
+      setCorpusDraft(draft)
+    } catch (caught) {
+      const fallbackMessage = '语料草稿生成失败'
+      setCorpusDraft(null)
+      setCorpusDraftError({
+        title: fallbackMessage,
+        message: diagnosticMessage(caught, fallbackMessage),
+        diagnostic: buildCopyableDiagnostic({
+          error: caught,
+          fallbackMessage,
+          operation: '生成语料驱动插入草稿',
+          bridgeMethod: 'GenerateReferenceCorpusInsertionDraft',
+          detail: {
+            novel_id: novelId,
+            chapter_number: chapterNumber,
+            chapter_path: activePath,
+            library_ids: defaultCorpusLibraryIds(novelId),
+          },
+        }),
+      })
+    } finally {
+      setCorpusDraftLoading(false)
+    }
+  }, [activePath, activeTitle, app, chapterNumber, forbiddenFacts, getEditorSnapshot, goal, hasValidChapter, knownFacts, novelId])
+
+  const applyCorpusDraft = useCallback(() => {
+    if (!visibleCorpusDraft) return
+    const applied = onApplyChapterText(visibleCorpusDraft.chapter_text_after_insertion)
+    setCorpusDraftActionMessage(applied
+      ? '已应用到当前章节编辑器缓冲区。'
+      : '无法应用草稿，请切回正文编辑器后重试。')
+  }, [onApplyChapterText, visibleCorpusDraft])
+
+  const copyCorpusDraft = useCallback(async () => {
+    if (!visibleCorpusDraft) return
+    try {
+      await copyTextToClipboard(visibleCorpusDraft.assembled_text)
+      setCorpusDraftActionMessage('已复制语料草稿片段。')
+    } catch (caught) {
+      const fallbackMessage = '语料草稿复制失败'
+      setCorpusDraftError({
+        title: fallbackMessage,
+        message: diagnosticMessage(caught, fallbackMessage),
+        diagnostic: buildCopyableDiagnostic({
+          error: caught,
+          fallbackMessage,
+          operation: '复制语料驱动插入草稿',
+          bridgeMethod: 'clipboard.writeText',
+          detail: {
+            novel_id: novelId,
+            chapter_number: chapterNumber,
+            chapter_path: activePath,
+          },
+        }),
+      })
+    }
+  }, [activePath, chapterNumber, novelId, visibleCorpusDraft])
+
   return (
     <aside
       data-testid="chapter-reference-panel"
@@ -571,25 +727,9 @@ export default function ChapterReferencePanel({ novelId, activeChapter, onInsert
           </div>
         )}
 
-        {visibleError && (
-          <ErrorCallout
-            compact
-            title={visibleError.title}
-            message={visibleError.message}
-            diagnostic={visibleError.diagnostic}
-            className="rounded-md"
-            onRetry={() => {
-              void searchMaterials('manual', goal)
-            }}
-            retryLabel="重试检索"
-            onClose={() => setError(null)}
-          />
-        )}
-
         <section className="space-y-2">
-          <h3 className="text-xs font-semibold text-foreground">章节上下文</h3>
+          <h3 className="text-xs font-semibold text-foreground">章节目标</h3>
           <label className="block text-xs text-muted-foreground">
-            章节目标
             <textarea
               value={goal}
               onChange={event => setGoal(event.target.value)}
@@ -597,220 +737,302 @@ export default function ChapterReferencePanel({ novelId, activeChapter, onInsert
               placeholder="可留空，系统会先按章节标题和可访问素材推荐"
             />
           </label>
-          <label className="block text-xs text-muted-foreground">
-            已知事实
-            <textarea
-              value={knownFacts}
-              onChange={event => setKnownFacts(event.target.value)}
-              className="mt-1 min-h-14 w-full resize-y rounded border border-input bg-background px-2 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
-              placeholder="每行一条，可留空"
-            />
-          </label>
-          <label className="block text-xs text-muted-foreground">
-            禁止事实
-            <textarea
-              value={forbiddenFacts}
-              onChange={event => setForbiddenFacts(event.target.value)}
-              className="mt-1 min-h-14 w-full resize-y rounded border border-input bg-background px-2 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
-              placeholder="每行一条，可留空"
-            />
-          </label>
         </section>
 
-        <section className="space-y-2">
+        <section data-testid="chapter-corpus-insertion" className="space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-xs font-semibold text-foreground">推荐素材</h3>
+            <h3 className="text-xs font-semibold text-foreground">语料驱动草稿</h3>
             <button
               type="button"
               onClick={() => {
-                void searchMaterials('manual', goal)
+                void generateCorpusDraft()
               }}
-              disabled={!hasValidChapter || loading}
-              className="inline-flex items-center gap-1 rounded bg-secondary px-2 py-1 text-xs text-foreground hover:bg-secondary/80 disabled:opacity-50"
+              disabled={!hasValidChapter || corpusDraftLoading}
+              className="inline-flex items-center gap-1 rounded bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
             >
-              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-              重新推荐
+              {corpusDraftLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+              生成插入草稿
             </button>
           </div>
 
-          {loading ? (
-            <div className="rounded border border-border bg-background px-3 py-4 text-center text-xs text-muted-foreground">
-              正在检索可访问素材...
-            </div>
-          ) : visibleMaterials.length > 0 ? (
-            <div className="space-y-2" aria-label="章节推荐素材结果">
-              {visibleMaterials.map(material => {
-                const preview = boundedPreview(material.text_preview)
-                const isTruncated = material.text_truncated || preview.truncated
-
-                return (
-                  <article key={material.material_id} data-testid="chapter-reference-material-card" className="rounded border border-border bg-background px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-                        {material.material_id} · {materialTags(material)}
-                      </span>
-                      <span className="flex shrink-0 items-center gap-1">
-                        {material.user_verified && <span className="text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void openMaterialDetail(material.material_id)
-                          }}
-                          disabled={materialDetailLoading && materialDetailId === material.material_id}
-                          className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] leading-none text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
-                          aria-label={`查看 ${material.material_id} 的材料明细`}
-                        >
-                          <FileSearch className="h-3.5 w-3.5" />
-                          明细
-                        </button>
-                      </span>
-                    </div>
-                    <p className="mt-1 text-xs leading-relaxed text-foreground">{preview.text}</p>
-                    {isTruncated && (
-                      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                        预览已截断，不显示全文
-                      </p>
-                    )}
-                    <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">
-                      来源 {material.source_segment_id} · {material.source_hash}
-                    </p>
-                    <p className="mt-2 rounded bg-secondary/60 px-2 py-1 text-[11px] leading-relaxed text-muted-foreground">
-                      候选由“启动参考流程”自动完成蓝图、绑定和审计后生成；推荐卡不直接改写或插入正文。
-                    </p>
-                  </article>
-                )
-              })}
-            </div>
-          ) : visibleHasSearched ? (
-            <div className="rounded border border-dashed border-border bg-background px-3 py-4 text-xs leading-relaxed text-muted-foreground">
-              当前没有可用参考素材。请到素材库导入并处理语料，处理完成后回到本章重新推荐。
-            </div>
-          ) : (
-            <div className="rounded border border-border bg-background px-3 py-4 text-xs text-muted-foreground">
-              打开面板后会自动推荐可访问素材。
-            </div>
-          )}
-        </section>
-
-        <section className="space-y-2">
-          <h3 className="text-xs font-semibold text-foreground">严格流程</h3>
-          <div className="rounded border border-border bg-background px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-            候选生成只通过下方参考流程推进：来源和事实边界确认、自动蓝图、材料绑定、审计通过后才进入最终插入决策。本面板不会从推荐素材直接生成可插入候选，也不会自动保存正文。
-          </div>
-          {runError && (
+          {visibleCorpusDraftError && (
             <ErrorCallout
               compact
-              title={runError.title}
-              message={runError.message}
-              diagnostic={runError.diagnostic}
+              title={visibleCorpusDraftError.title}
+              message={visibleCorpusDraftError.message}
+              diagnostic={visibleCorpusDraftError.diagnostic}
               className="rounded-md"
-              onRetry={retryRunError}
-              retryLabel={runErrorAction === 'load' ? '重试加载流程记录' : runErrorAction === 'resume' ? '重试继续流程' : runErrorAction === 'cancel' ? '重试取消流程' : '重试启动流程'}
-              onClose={() => setRunError(null)}
+              onRetry={() => {
+                void generateCorpusDraft()
+              }}
+              retryLabel="重试生成草稿"
+              onClose={() => setCorpusDraftError(null)}
             />
           )}
-          <button
-            type="button"
-            onClick={() => {
-              void startOrchestration()
-            }}
-            disabled={!hasValidChapter || runLoading}
-            className="inline-flex w-full items-center justify-center gap-1.5 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-          >
-            {runLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-            启动参考流程
-          </button>
-          {visibleRun && (
-            <div data-testid="chapter-reference-orchestration-run" className="space-y-2 rounded border border-border bg-background px-3 py-2 text-xs">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-medium text-foreground">流程 {visibleRun.run_id}</span>
-                <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                  {visibleRun.status} · {visibleRun.stage}
-                </span>
+
+          {visibleCorpusDraftActionMessage && (
+            <p className="rounded bg-secondary/70 px-2 py-1 text-[11px] text-muted-foreground">{visibleCorpusDraftActionMessage}</p>
+          )}
+
+          {visibleCorpusDraft ? (
+            <CorpusInsertionDraftPreview
+              draft={visibleCorpusDraft}
+              insertionDisabled={insertionDisabled}
+              onApply={applyCorpusDraft}
+              onCopy={() => {
+                void copyCorpusDraft()
+              }}
+            />
+          ) : !corpusDraftLoading && !visibleCorpusDraftError ? (
+            <div className="rounded border border-dashed border-border bg-background px-3 py-3 text-xs leading-relaxed text-muted-foreground">
+              输入章节目标后可直接生成一份蓝图和可插入草稿；默认检索当前项目库与工作区公用语料。
+            </div>
+          ) : null}
+        </section>
+
+        <details
+          data-testid="chapter-reference-advanced"
+          open={advancedOpen}
+          onToggle={event => setAdvancedOpen(event.currentTarget.open)}
+          className="rounded border border-border bg-background"
+        >
+          <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-foreground">
+            高级参考流程
+          </summary>
+          <div className="space-y-3 border-t border-border px-3 py-3">
+            <section className="space-y-2">
+              <h3 className="text-xs font-semibold text-foreground">事实边界</h3>
+              <label className="block text-xs text-muted-foreground">
+                已知事实
+                <textarea
+                  value={knownFacts}
+                  onChange={event => setKnownFacts(event.target.value)}
+                  className="mt-1 min-h-14 w-full resize-y rounded border border-input bg-background px-2 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+                  placeholder="每行一条，可留空"
+                />
+              </label>
+              <label className="block text-xs text-muted-foreground">
+                禁止事实
+                <textarea
+                  value={forbiddenFacts}
+                  onChange={event => setForbiddenFacts(event.target.value)}
+                  className="mt-1 min-h-14 w-full resize-y rounded border border-input bg-background px-2 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+                  placeholder="每行一条，可留空"
+                />
+              </label>
+            </section>
+
+            {visibleError && (
+              <ErrorCallout
+                compact
+                title={visibleError.title}
+                message={visibleError.message}
+                diagnostic={visibleError.diagnostic}
+                className="rounded-md"
+                onRetry={() => {
+                  void searchMaterials('manual', goal)
+                }}
+                retryLabel="重试检索"
+                onClose={() => setError(null)}
+              />
+            )}
+
+            <section className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-semibold text-foreground">推荐素材</h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void searchMaterials('manual', goal)
+                  }}
+                  disabled={!hasValidChapter || loading}
+                  className="inline-flex items-center gap-1 rounded bg-secondary px-2 py-1 text-xs text-foreground hover:bg-secondary/80 disabled:opacity-50"
+                >
+                  {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                  重新推荐
+                </button>
               </div>
-              <p className="text-muted-foreground">
-                第 {visibleRun.chapter_number} 章 · 候选 {visibleRun.candidate_ids.length} 个 · 蓝图 {visibleRun.blueprint_id || '待生成'}
-              </p>
-              {visibleDecision && (
-                <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-amber-800 dark:text-amber-200">
-                  <p className="font-medium">{visibleDecision.summary}</p>
-                  {visibleDecision.required_actions.length > 0 && (
-                    <p className="mt-1">{visibleDecision.required_actions.join('；')}</p>
-                  )}
-                  <div className="mt-2 space-y-1 text-[11px] leading-relaxed">
-                    <p>章节功能：{visibleDecision.approval_summary.chapter_function || '待确认'}</p>
-                    <p>视角：{visibleDecision.approval_summary.pov || '待确认'} · 情绪：{visibleDecision.approval_summary.emotional_trajectory || '待确认'}</p>
-                    <p>素材计划：{visibleDecision.approval_summary.material_use_plan || '待确认'}</p>
-                    <p>改写预算：{visibleDecision.approval_summary.rewrite_budget || '待确认'}</p>
-                    {visibleDecision.approval_summary.fact_boundary_changes.length > 0 && (
-                      <p>事实边界：{visibleDecision.approval_summary.fact_boundary_changes.join('；')}</p>
-                    )}
-                    {visibleDecision.approval_summary.high_risk_findings.length > 0 && (
-                      <p>高风险：{visibleDecision.approval_summary.high_risk_findings.join('；')}</p>
-                    )}
-                  </div>
+
+              {loading ? (
+                <div className="rounded border border-border bg-background px-3 py-4 text-center text-xs text-muted-foreground">
+                  正在检索可访问素材...
+                </div>
+              ) : visibleMaterials.length > 0 ? (
+                <div className="space-y-2" aria-label="章节推荐素材结果">
+                  {visibleMaterials.map(material => {
+                    const preview = boundedPreview(material.text_preview)
+                    const isTruncated = material.text_truncated || preview.truncated
+
+                    return (
+                      <article key={material.material_id} data-testid="chapter-reference-material-card" className="rounded border border-border bg-background px-2.5 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                            {material.material_id} · {materialTags(material)}
+                          </span>
+                          <span className="flex shrink-0 items-center gap-1">
+                            {material.user_verified && <span className="text-[11px] text-emerald-600 dark:text-emerald-400">已校正</span>}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void openMaterialDetail(material.material_id)
+                              }}
+                              disabled={materialDetailLoading && materialDetailId === material.material_id}
+                              className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] leading-none text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                              aria-label={`查看 ${material.material_id} 的材料明细`}
+                            >
+                              <FileSearch className="h-3.5 w-3.5" />
+                              明细
+                            </button>
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs leading-relaxed text-foreground">{preview.text}</p>
+                        {isTruncated && (
+                          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                            预览已截断，不显示全文
+                          </p>
+                        )}
+                        <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">
+                          来源 {material.source_segment_id} · {material.source_hash}
+                        </p>
+                        <p className="mt-2 rounded bg-secondary/60 px-2 py-1 text-[11px] leading-relaxed text-muted-foreground">
+                          候选由“启动参考流程”自动完成蓝图、绑定和审计后生成；推荐卡不直接改写或插入正文。
+                        </p>
+                      </article>
+                    )
+                  })}
+                </div>
+              ) : visibleHasSearched ? (
+                <div className="rounded border border-dashed border-border bg-background px-3 py-4 text-xs leading-relaxed text-muted-foreground">
+                  当前没有可用参考素材。请到素材库导入并处理语料，处理完成后回到本章重新推荐。
+                </div>
+              ) : (
+                <div className="rounded border border-border bg-background px-3 py-4 text-xs text-muted-foreground">
+                  展开后会自动推荐可访问素材。
                 </div>
               )}
-              {cannotResumeFinalInsertion && (
-                <div className="rounded border border-border bg-card px-2 py-1.5 text-muted-foreground">
-                  最终插入需要进入独立候选审查或正文编辑流程显式执行；参考流程不会自动保存正文。
-                </div>
-              )}
-              {cannotResumeFinalInsertion && (
-                <CandidatePreviewList
-                  candidates={visibleDraftCandidates}
-                  audits={visibleDraftAudits}
-                  loading={candidateLoading}
-                  error={candidateError}
-                  actionMessage={candidateActionMessage}
-                  insertionDisabled={insertionDisabled}
-                  onRetry={() => {
-                    if (visibleRun && finalCandidateKey) {
-                      void loadDraftCandidates(visibleRun, finalCandidateKey)
-                    }
-                  }}
-                  onCopy={candidate => {
-                    void copyCandidate(candidate)
-                  }}
-                  onInsert={insertCandidate}
-                  onDismissError={() => setCandidateError(null)}
+            </section>
+
+            <section className="space-y-2">
+              <h3 className="text-xs font-semibold text-foreground">严格流程</h3>
+              <div className="rounded border border-border bg-background px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                候选生成只通过下方参考流程推进：来源和事实边界确认、自动蓝图、材料绑定、审计通过后才进入最终插入决策。本面板不会从推荐素材直接生成可插入候选，也不会自动保存正文。
+              </div>
+              {runError && (
+                <ErrorCallout
+                  compact
+                  title={runError.title}
+                  message={runError.message}
+                  diagnostic={runError.diagnostic}
+                  className="rounded-md"
+                  onRetry={retryRunError}
+                  retryLabel={runErrorAction === 'load' ? '重试加载流程记录' : runErrorAction === 'resume' ? '重试继续流程' : runErrorAction === 'cancel' ? '重试取消流程' : '重试启动流程'}
+                  onClose={() => setRunError(null)}
                 />
               )}
-              {canActOnRun && (
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void resumeOrchestration()
-                    }}
-                    disabled={!visibleDecision || cannotResumeFinalInsertion || runActionBusy}
-                    className="inline-flex flex-1 items-center justify-center gap-1 rounded bg-secondary px-2 py-1 text-xs text-foreground hover:bg-secondary/80 disabled:opacity-50"
-                  >
-                    {runActionLoading === 'resume' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    确认并继续
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void cancelOrchestration()
-                    }}
-                    disabled={runActionBusy}
-                    className="inline-flex items-center justify-center gap-1 rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
-                  >
-                    {runActionLoading === 'cancel' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                    取消流程
-                  </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void startOrchestration()
+                }}
+                disabled={!hasValidChapter || runLoading}
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                {runLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                启动参考流程
+              </button>
+              {visibleRun && (
+                <div data-testid="chapter-reference-orchestration-run" className="space-y-2 rounded border border-border bg-background px-3 py-2 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium text-foreground">流程 {visibleRun.run_id}</span>
+                    <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                      {visibleRun.status} · {visibleRun.stage}
+                    </span>
+                  </div>
+                  <p className="text-muted-foreground">
+                    第 {visibleRun.chapter_number} 章 · 候选 {visibleRun.candidate_ids.length} 个 · 蓝图 {visibleRun.blueprint_id || '待生成'}
+                  </p>
+                  {visibleDecision && (
+                    <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-amber-800 dark:text-amber-200">
+                      <p className="font-medium">{visibleDecision.summary}</p>
+                      {visibleDecision.required_actions.length > 0 && (
+                        <p className="mt-1">{visibleDecision.required_actions.join('；')}</p>
+                      )}
+                      <div className="mt-2 space-y-1 text-[11px] leading-relaxed">
+                        <p>章节功能：{visibleDecision.approval_summary.chapter_function || '待确认'}</p>
+                        <p>视角：{visibleDecision.approval_summary.pov || '待确认'} · 情绪：{visibleDecision.approval_summary.emotional_trajectory || '待确认'}</p>
+                        <p>素材计划：{visibleDecision.approval_summary.material_use_plan || '待确认'}</p>
+                        <p>改写预算：{visibleDecision.approval_summary.rewrite_budget || '待确认'}</p>
+                        {visibleDecision.approval_summary.fact_boundary_changes.length > 0 && (
+                          <p>事实边界：{visibleDecision.approval_summary.fact_boundary_changes.join('；')}</p>
+                        )}
+                        {visibleDecision.approval_summary.high_risk_findings.length > 0 && (
+                          <p>高风险：{visibleDecision.approval_summary.high_risk_findings.join('；')}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {cannotResumeFinalInsertion && (
+                    <div className="rounded border border-border bg-card px-2 py-1.5 text-muted-foreground">
+                      最终插入需要进入独立候选审查或正文编辑流程显式执行；参考流程不会自动保存正文。
+                    </div>
+                  )}
+                  {cannotResumeFinalInsertion && (
+                    <CandidatePreviewList
+                      candidates={visibleDraftCandidates}
+                      audits={visibleDraftAudits}
+                      loading={candidateLoading}
+                      error={candidateError}
+                      actionMessage={candidateActionMessage}
+                      insertionDisabled={insertionDisabled}
+                      onRetry={() => {
+                        if (visibleRun && finalCandidateKey) {
+                          void loadDraftCandidates(visibleRun, finalCandidateKey)
+                        }
+                      }}
+                      onCopy={candidate => {
+                        void copyCandidate(candidate)
+                      }}
+                      onInsert={insertCandidate}
+                      onDismissError={() => setCandidateError(null)}
+                    />
+                  )}
+                  {canActOnRun && (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void resumeOrchestration()
+                        }}
+                        disabled={!visibleDecision || cannotResumeFinalInsertion || runActionBusy}
+                        className="inline-flex flex-1 items-center justify-center gap-1 rounded bg-secondary px-2 py-1 text-xs text-foreground hover:bg-secondary/80 disabled:opacity-50"
+                      >
+                        {runActionLoading === 'resume' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        确认并继续
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void cancelOrchestration()
+                        }}
+                        disabled={runActionBusy}
+                        className="inline-flex items-center justify-center gap-1 rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                      >
+                        {runActionLoading === 'cancel' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        取消流程
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
-          {insertionDisabled && (
-            <div className="flex gap-2 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              大纲视图下仅可查看和推进参考流程；正文写入需要切回正文编辑器并经过独立候选审查。
-            </div>
-          )}
-        </section>
+              {insertionDisabled && (
+                <div className="flex gap-2 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  大纲视图下仅可查看和推进参考流程；正文写入需要切回正文编辑器并经过独立候选审查。
+                </div>
+              )}
+            </section>
+          </div>
+        </details>
       </div>
       {materialDetailId && (
         <ChapterMaterialDetailDrawer
@@ -826,6 +1048,159 @@ export default function ChapterReferencePanel({ novelId, activeChapter, onInsert
       )}
     </aside>
   )
+}
+
+function CorpusInsertionDraftPreview({
+  draft,
+  insertionDisabled,
+  onApply,
+  onCopy,
+}: {
+  draft: reference.CorpusInsertionDraft
+  insertionDisabled: boolean
+  onApply: () => void
+  onCopy: () => void
+}) {
+  const canApply = draft.ready_for_insertion && draft.gate.passed && !insertionDisabled
+  const gateLabel = draft.gate.passed ? '闸门通过' : draft.gate.status || '闸门阻断'
+
+  return (
+    <article data-testid="chapter-corpus-draft-preview" className="space-y-2 rounded border border-border bg-background px-2.5 py-2 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium text-foreground">{draft.blueprint.strategy || '自动蓝图'}</span>
+        <span className={`rounded px-1.5 py-0.5 text-[11px] ${draft.ready_for_insertion ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-amber-500/10 text-amber-800 dark:text-amber-200'}`}>
+          {gateLabel}
+        </span>
+      </div>
+
+      <div
+        data-testid="chapter-corpus-draft-diff"
+        className="space-y-1 rounded border border-border bg-card px-2 py-2 leading-relaxed text-foreground"
+      >
+        {draft.pieces.length > 0 ? (
+          draft.pieces.map(piece => (
+            <p key={piece.piece_id} className="whitespace-pre-wrap">
+              {renderCorpusPieceText(piece.output_text, piece.slot_replacements)}
+            </p>
+          ))
+        ) : (
+          <p className="whitespace-pre-wrap">{draft.assembled_text || '未生成可插入文本'}</p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-1.5">
+        <button
+          type="button"
+          onClick={onCopy}
+          disabled={!draft.assembled_text}
+          className="inline-flex items-center justify-center gap-1 rounded border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
+        >
+          <Copy className="h-3.5 w-3.5" />
+          复制片段
+        </button>
+        <button
+          type="button"
+          onClick={onApply}
+          disabled={!canApply}
+          className="inline-flex items-center justify-center gap-1 rounded bg-secondary px-2 py-1 text-xs text-foreground hover:bg-secondary/80 disabled:opacity-50"
+        >
+          <CornerDownLeft className="h-3.5 w-3.5" />
+          应用到编辑器
+        </button>
+      </div>
+
+      {!draft.ready_for_insertion && (
+        <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
+          {draft.gate.errors.length > 0
+            ? draft.gate.errors.join('；')
+            : '当前草稿未通过授权、相似度或保留文本校验，不能写入编辑器。'}
+        </div>
+      )}
+
+      <div className="space-y-1 text-[11px] leading-relaxed text-muted-foreground">
+        <p>蓝图：{draft.blueprint.blueprint_id} · beats={draft.blueprint.beats.length} · pieces={draft.pieces.length}</p>
+        {draft.blueprint.beats.map(beat => (
+          <p key={beat.beat_id} className="break-all">
+            {beat.beat_index + 1}. {beat.narrative_function} · {beat.role_in_beat} · {beat.node_ids.join(', ')}
+          </p>
+        ))}
+        {draft.slot_replacements.length > 0 && (
+          <div className="rounded border border-border bg-card px-2 py-1.5">
+            {draft.slot_replacements.map((replacement, index) => (
+              <p key={`${replacement.slot_name}-${replacement.source_start}-${index}`} className="break-all">
+                槽位 {replacement.slot_name}: {replacement.source_value}{' -> '}{replacement.replacement_value}
+              </p>
+            ))}
+          </div>
+        )}
+        {draft.gate.pieces.length > 0 && (
+          <div className="rounded border border-border bg-card px-2 py-1.5">
+            {draft.gate.pieces.map(piece => (
+              <p key={piece.piece_id} className="break-all">
+                {piece.node_id} · 4gram {piece.four_gram_containment_ratio.toFixed(2)} · LCS {piece.longest_common_substring_ratio.toFixed(2)}
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {insertionDisabled && (
+        <p className="text-[11px] text-muted-foreground">
+          大纲视图下不能应用到正文编辑器。
+        </p>
+      )}
+    </article>
+  )
+}
+
+function renderCorpusPieceText(
+  text: string,
+  replacements: reference.CorpusSlotReplacement[],
+): ReactNode {
+  if (replacements.length === 0) {
+    return <span data-testid="chapter-corpus-diff-preserved">{text}</span>
+  }
+
+  const parts: ReactNode[] = []
+  let cursor = 0
+  const spans = replacements
+    .filter(replacement =>
+      replacement.output_start >= 0 &&
+      replacement.output_end > replacement.output_start &&
+      replacement.output_end <= text.length)
+    .sort((left, right) => left.output_start - right.output_start)
+
+  spans.forEach((replacement, index) => {
+    if (replacement.output_start > cursor) {
+      parts.push(
+        <span key={`preserved-${index}`} data-testid="chapter-corpus-diff-preserved">
+          {text.slice(cursor, replacement.output_start)}
+        </span>,
+      )
+    }
+
+    parts.push(
+      <mark
+        key={`replacement-${replacement.output_start}-${index}`}
+        data-testid="chapter-corpus-diff-slot-replacement"
+        className="rounded bg-amber-200 px-0.5 text-amber-950 dark:bg-amber-400/30 dark:text-amber-100"
+        title={`${replacement.source_value} -> ${replacement.replacement_value}`}
+      >
+        {text.slice(replacement.output_start, replacement.output_end)}
+      </mark>,
+    )
+    cursor = replacement.output_end
+  })
+
+  if (cursor < text.length) {
+    parts.push(
+      <span key="preserved-tail" data-testid="chapter-corpus-diff-preserved">
+        {text.slice(cursor)}
+      </span>,
+    )
+  }
+
+  return parts
 }
 
 function CandidatePreviewList({

@@ -218,12 +218,12 @@ public sealed class ReferenceCorpusServiceTests : IDisposable
                    superseded_by_run_id, created_at)
                 VALUES
                   ('obs-rain-doorway-sensory', 'node-rain-doorway-s1', 'sentence',
-                   'run-stage1-rain-doorway', 101, 'sensory', 'auditory_pressure',
-                   'enum', 'rain_at_threshold', NULL, NULL, NULL, 0.80, 0.92,
+                   'run-stage1-rain-doorway', 101, 'sensory', 'senses',
+                   'array', 'auditory', NULL, NULL, '[{"sense":"auditory","intensity":0.8}]', 0.80, 0.92,
                    0, 10, '雨声门缝形成阈值压迫。', 'confirmed', 'active', NULL, '2026-07-09T00:00:00Z'),
                   ('obs-rain-doorway-emotion', 'node-rain-doorway-s2', 'sentence',
-                   'run-stage1-rain-doorway', 101, 'emotion', 'restrained_pressure',
-                   'enum', 'withheld_answer', NULL, NULL, NULL, 0.72, 0.89,
+                   'run-stage1-rain-doorway', 101, 'emotion', 'emotion_state',
+                   'enum', 'calm', NULL, NULL, '{"surface":"calm","subtext":"restrained","direction":"stable","mode":"suppressed"}', 0.72, 0.89,
                    0, 18, '不开口用动作压住答案。', 'confirmed', 'active', NULL, '2026-07-09T00:00:00Z');
                 """;
             await command.ExecuteNonQueryAsync();

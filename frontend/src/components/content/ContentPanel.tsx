@@ -26,6 +26,10 @@ type MonacoEditor = Parameters<OnMount>[0]
 type MonacoApi = Parameters<OnMount>[1]
 type SearchDecorations = ReturnType<MonacoEditor['createDecorationsCollection']>
 type ReferenceCandidateInsertMode = 'cursor' | 'append' | 'replace'
+type ReferenceEditorSnapshot = {
+  currentDraftText: string
+  insertionOffset: number
+}
 
 interface FileChangedEvent {
   novel_id?: number
@@ -314,6 +318,55 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
     editor.executeEdits('chapter-reference-candidate', [{
       range,
       text: nextText,
+      forceMoveMarkers: true,
+    }])
+    editor.pushUndoStop()
+
+    const content = model.getValue()
+    updateTab(activeTab.id, { content, isDirty: true })
+    onContentChange?.(content)
+    return true
+  }, [activeTab, onContentChange, updateTab])
+
+  const getReferenceEditorSnapshot = useCallback((): ReferenceEditorSnapshot | null => {
+    if (!activeTab || activeTab.type !== 'file' || !isChapterPath(activeTab.path) || activeTab.viewMode === 'outline') {
+      return null
+    }
+
+    const editor = editorRef.current
+    const model = editor?.getModel()
+    const currentDraftText = model?.getValue() ?? activeTab.content ?? ''
+    const position = editor?.getPosition()
+    const insertionOffset = model && position
+      ? Math.max(0, Math.min(currentDraftText.length, model.getOffsetAt(position)))
+      : currentDraftText.length
+
+    return { currentDraftText, insertionOffset }
+  }, [activeTab])
+
+  const applyReferenceChapterText = useCallback((nextContent: string): boolean => {
+    if (!activeTab || activeTab.type !== 'file' || !isChapterPath(activeTab.path) || activeTab.viewMode === 'outline') {
+      return false
+    }
+
+    const editor = editorRef.current
+    const model = editor?.getModel()
+    if (!editor || !model) {
+      return false
+    }
+
+    suppressAutosaveUntilRef.current = Date.now() + 5_000
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    savingRef.current = null
+
+    editor.focus()
+    editor.pushUndoStop()
+    editor.executeEdits('chapter-reference-corpus-draft', [{
+      range: model.getFullModelRange(),
+      text: nextContent,
       forceMoveMarkers: true,
     }])
     editor.pushUndoStop()
@@ -764,6 +817,8 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
             novelId={novelId}
             activeChapter={activeChapter}
             onInsertCandidate={insertReferenceCandidate}
+            getEditorSnapshot={getReferenceEditorSnapshot}
+            onApplyChapterText={applyReferenceChapterText}
             onClose={() => setReferencePanelOpen(false)}
           />
         )}

@@ -187,7 +187,7 @@ CREATE TABLE reference_obs_sensory (
     observation_id TEXT NOT NULL REFERENCES reference_feature_observations(observation_id),
     node_id        TEXT NOT NULL,
     anchor_id      INTEGER NOT NULL,
-    sense          TEXT NOT NULL,   -- 视觉|听觉|触觉|嗅觉|温度|重量|湿度|空间压迫|身体反应
+    sense          TEXT NOT NULL,   -- visual|auditory|tactile|temperature|smell|taste|kinesthetic
     intensity      REAL NOT NULL,
     PRIMARY KEY (observation_id, sense)
 );
@@ -235,6 +235,8 @@ CREATE TABLE reference_specimen_evidence (
     observation_id TEXT NOT NULL REFERENCES reference_feature_observations(observation_id),
     PRIMARY KEY (specimen_id, observation_id)
 );
+CREATE INDEX idx_reference_specimen_evidence_observation
+    ON reference_specimen_evidence(observation_id, specimen_id);
 CREATE TABLE reference_template_examples (
     template_id TEXT NOT NULL,
     node_id     TEXT NOT NULL REFERENCES reference_text_nodes(node_id),
@@ -290,6 +292,8 @@ CREATE TABLE reference_analysis_runs (
 - `completed` / `failed` → 终态
 
 `resume_cursor` 记录最后完成的 `(node_id, feature_family)`；续跑从游标之后开始，配合 G1 幂等写入，重复覆盖已完成 node 也不产生脏数据。查询"分析完成度"= 已完成 node / 总 node，实时可见。
+
+**产品触发入口（M2.2 薄入口）**：`StartReferenceCorpusFeatureAnalysis` 接收 `novel_id/anchor_id/scope/token_budget/resume/run_id`，后端按 `scope=sentence|passage` 派生默认 family 组，读取 selected model，校验 anchor 可访问性，然后启动对应 run；`GetReferenceCorpusFeatureAnalysisRun` 只按 `novel_id + run_id` 返回运行元数据（families/status/tokens/resume_cursor/observation_count/diagnostics）。bridge 返回体禁止包含 `node_text/source_text/raw_text/prompt/model_output_json/embedding` 等源文或模型内部字段。当前 M2.2 入口是一次调用内执行的薄触发，用于产品面接入和回归闭环；后台队列、章节优先级调度、取消状态属于后续调度层，不能在 UI 或文档中误标为已完成。
 
 **重跑语义（修复 #2）**：旧 observation **不删除**。新 run 完成后，被取代的旧 observation 置 `validity_state='superseded'`、`superseded_by_run_id=新run`，但 **`review_state` 原样保留**——用户确认过的判断不被污染。依赖旧 observation 的 specimen 触发 invalidation check：证据边全部 superseded 则 specimen 也标 superseded。查询默认 `validity_state='active'`。
 
@@ -393,6 +397,8 @@ public sealed record PageResult<T>(
 | Stage 2-段落 LLM | 全书所有段落 → narrative/pov/action/character/commercial | Stage 1 后，异步 |
 | Stage 2-句级 LLM | 全书所有句子 → rhythm/syntax/sensory/emotion/rhetoric | 异步、按章节优先级排队、per-run token_budget 上限、可续跑 |
 | Stage 3 综合推理 | 高置信度 / 用户标记节点 → TechniqueSpecimen | Stage 2 后 |
+
+**Task B 段落边界**：`reference_text_nodes.node_type='passage'` 只是分析层级，不等于真实段落；hook/beat/dialogue_exchange/action_afterbeat 等派生窗口也会映射为 passage。段落级 LLM 只分析 `reference_source_segments.segment_type='paragraph'` 且已回填 `node_id` 的节点；上下文（parent chapter / containing scene / previous/next paragraph）只辅助判断，`evidence_start/end` 永远相对当前 `node_text`，不能引用上下文 preview。旧库缺 `reference_source_segments.node_id` 时先诊断并要求 rebuild/backfill，不做 hash/offset 猜测锚定。
 
 句级 LLM 全量但不阻塞：Stage 0-1 完成即可进入纵向闭环（M1 用基础特征就能检索）；Stage 2 句级分析在后台逐章补齐，完成度实时可见。中断从已完成 node 之后续跑（复用 reconcile）。
 

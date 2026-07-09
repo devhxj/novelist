@@ -174,6 +174,7 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         Assert.Contains("superseded_by_run_id", observationColumns);
 
         Assert.Contains("ux_obs_generation_key", await ReadIndexNamesAsync(options, "reference_feature_observations"));
+        Assert.Contains("idx_reference_specimen_evidence_observation", await ReadIndexNamesAsync(options, "reference_specimen_evidence"));
 
         await InsertCorpusObservationFixtureAsync(options, anchor.AnchorId, "obs-1");
         var exception = await Assert.ThrowsAsync<SqliteException>(

@@ -192,6 +192,7 @@ export async function verifyChapterReferenceBridgeCalls(page) {
     'GetReferenceOrchestrationRuns',
     'StartReferenceOrchestrationRun',
     'ResumeReferenceOrchestrationRun',
+    'GenerateReferenceCorpusInsertionDraft',
     'GetReferenceDraftCandidates',
     'GetReferenceAnchoredDraftAudits',
     'CancelReferenceOrchestrationRun',
@@ -215,6 +216,25 @@ export async function verifyChapterReferenceBridgeCalls(page) {
   const resumeCall = calls.find((call) => call.method === 'ResumeReferenceOrchestrationRun')
   assert(resumeCall, 'chapter reference drawer must resume the current orchestration decision in place')
   assert.equal(resumeCall.args?.[0]?.decision_type, 'confirm_source_and_facts', 'chapter reference resume must use stable backend decision type')
+
+  const insertionDraftCall = calls.find((call) => call.method === 'GenerateReferenceCorpusInsertionDraft')
+  assert(insertionDraftCall, 'chapter reference drawer must generate a corpus insertion draft')
+  const insertionDraftPayload = insertionDraftCall.args?.[0]
+  const insertionDraftLibraryIds = insertionDraftPayload?.scope?.library_ids
+  assert(Array.isArray(insertionDraftLibraryIds), 'chapter reference insertion draft must send scope.library_ids as an array')
+  for (const libraryId of ['project:42:default', 'global:workspace']) {
+    assert(
+      insertionDraftLibraryIds.includes(libraryId),
+      `chapter reference insertion draft scope.library_ids must include ${libraryId}; got ${JSON.stringify(insertionDraftLibraryIds)}`)
+  }
+  assert.equal(
+    typeof insertionDraftPayload?.chapter_context?.current_draft_text,
+    'string',
+    `chapter reference insertion draft chapter_context.current_draft_text must be a string; got ${typeof insertionDraftPayload?.chapter_context?.current_draft_text}`)
+  assert.equal(
+    typeof insertionDraftPayload?.chapter_context?.insertion_offset,
+    'number',
+    `chapter reference insertion draft chapter_context.insertion_offset must be a number; got ${typeof insertionDraftPayload?.chapter_context?.insertion_offset}`)
 
   const saveContentCalls = calls.filter((call) => call.method === 'SaveContent')
   assert.deepEqual(saveContentCalls, [], 'chapter reference drawer must not save chapter content directly')

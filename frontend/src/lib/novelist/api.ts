@@ -129,6 +129,9 @@ export interface NovelistAppApi {
   ExtractStyle: AppMethod<[app.ExtractStyleInput], app.ExtractStyleResult>
   GenerateReferenceAnchoredDraft: AppMethod<[reference.GenerateAnchoredDraftInput], reference.AnchoredDraft>
   GenerateReferenceChapterBlueprint: AppMethod<[reference.GenerateChapterBlueprintInput], reference.ChapterBlueprint>
+  GenerateReferenceCorpusInsertionDraft: AppMethod<[reference.GenerateCorpusInsertionDraftInput], reference.CorpusInsertionDraft>
+  StartReferenceCorpusFeatureAnalysis: AppMethod<[reference.StartCorpusFeatureAnalysisInput], reference.CorpusFeatureAnalysisRun>
+  GetReferenceCorpusFeatureAnalysisRun: AppMethod<[reference.GetCorpusFeatureAnalysisRunInput], reference.CorpusFeatureAnalysisRun | null>
   GetAppConfig: AppMethod<[], config.AppConfig>
   GetArcNodes: AppMethod<[number, number, number], storyarc.ArcNode[]>
   GetChapterPlans: AppMethod<[number], timeline.ChapterPlan[]>
@@ -326,6 +329,9 @@ export const appApi: NovelistAppApi = {
   ExtractStyle: appMethod<NovelistAppApi['ExtractStyle']>('ExtractStyle'),
   GenerateReferenceAnchoredDraft: appMethod<NovelistAppApi['GenerateReferenceAnchoredDraft']>('GenerateReferenceAnchoredDraft'),
   GenerateReferenceChapterBlueprint: appMethod<NovelistAppApi['GenerateReferenceChapterBlueprint']>('GenerateReferenceChapterBlueprint'),
+  GenerateReferenceCorpusInsertionDraft: appMethod<NovelistAppApi['GenerateReferenceCorpusInsertionDraft']>('GenerateReferenceCorpusInsertionDraft'),
+  StartReferenceCorpusFeatureAnalysis: ((...args) => invokeAppArgs('StartReferenceCorpusFeatureAnalysis', args, { timeoutMs: null })) as NovelistAppApi['StartReferenceCorpusFeatureAnalysis'],
+  GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorpusFeatureAnalysisRun']>('GetReferenceCorpusFeatureAnalysisRun'),
   GetAppConfig: appMethod<NovelistAppApi['GetAppConfig']>('GetAppConfig'),
   GetArcNodes: appMethod<NovelistAppApi['GetArcNodes']>('GetArcNodes'),
   GetChapterPlans: appMethod<NovelistAppApi['GetChapterPlans']>('GetChapterPlans'),
