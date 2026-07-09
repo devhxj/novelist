@@ -1174,13 +1174,46 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
                     var failedAt = DateTimeOffset.UtcNow;
+                    var retainedSegmentCount = hasPreviousMaterials ? previousCorpus.Segments.Count : segments.Count;
+                    var retainedMaterialCount = hasPreviousMaterials ? previousCorpus.Materials.Count : materials.Count;
+                    var retainedSlotCount = hasPreviousMaterials
+                        ? previousBuildStatus?.SlotCount ?? CountMaterialSlots(previousCorpus.SlotsByMaterial)
+                        : 0;
+                    var retainedVectorCount = hasPreviousMaterials ? previousBuildStatus?.VectorCount ?? 0 : 0;
+                    var affectedIds = hasPreviousMaterials
+                        ? BuildAffectedProcessingIds(previousCorpus.Materials, previousCorpus.SlotsByMaterial)
+                        : materialAffectedIds;
                     var failedAnchor = anchor with
                     {
-                        SourceFileHash = source.Hash,
+                        SourceFileHash = hasPreviousMaterials ? previousAnchor.SourceFileHash : source.Hash,
                         Status = ReferenceAnchorBuildStates.FailedSlotting,
                         UpdatedAt = failedAt
                     };
                     await using var failureTransaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                    if (hasPreviousMaterials)
+                    {
+                        await ReplaceSegmentsAsync(
+                            connection,
+                            failureTransaction,
+                            anchor.AnchorId,
+                            previousCorpus.Segments,
+                            cancellationToken);
+                        await ReplaceMaterialRowsAsync(
+                            connection,
+                            failureTransaction,
+                            anchor.AnchorId,
+                            previousCorpus.Materials,
+                            cancellationToken,
+                            previousCorpus.ArchivedMaterialTimestamps);
+                        await ReplaceMaterialSlotsAsync(
+                            connection,
+                            failureTransaction,
+                            anchor.AnchorId,
+                            previousCorpus.SlotsByMaterial,
+                            BuildMaterialCreatedAt(previousCorpus.Materials),
+                            cancellationToken);
+                    }
+
                     var lastError = RedactError(exception.Message);
                     await UpdateAnchorBuildResultAsync(
                         connection,
@@ -1188,24 +1221,25 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                         failedAnchor,
                         ReferenceAnchorBuildStates.FailedSlotting,
                         ReferenceAnchorBuildStates.FailedSlotting,
-                        segments.Count,
-                        materials.Count,
-                        0,
+                        retainedSegmentCount,
+                        retainedMaterialCount,
+                        retainedSlotCount,
                         lastError,
                         failedAt,
                         cancellationToken,
-                        vectorCount: 0,
-                        affectedIds: materialAffectedIds);
+                        vectorCount: retainedVectorCount,
+                        affectedIds: affectedIds);
                     await failureTransaction.CommitAsync(cancellationToken);
                     return BuildStatus(
                         failedAnchor,
                         ReferenceAnchorBuildStates.FailedSlotting,
                         ReferenceAnchorBuildStates.FailedSlotting,
-                        segments.Count,
-                        materials.Count,
-                        0,
+                        retainedSegmentCount,
+                        retainedMaterialCount,
+                        retainedSlotCount,
                         lastError,
-                        failedAt);
+                        failedAt,
+                        retainedVectorCount);
                 }
             }
             catch (Exception exception) when (exception is not OperationCanceledException)

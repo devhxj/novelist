@@ -45,11 +45,24 @@ Current view components:
 
 ```text
 frontend/src/components/reference-anchor/ReferenceAnchorView.tsx
+frontend/src/components/reference-use/ChapterReferencePanel.tsx
+frontend/src/components/content/ContentPanel.tsx
 frontend/src/components/reference-anchor/OrchestrationPanel.tsx
 frontend/src/components/reference-anchor/BlueprintDetail.tsx
 frontend/src/components/reference-anchor/blueprintRevision.ts
 frontend/src/components/reference-anchor/referenceAnchorStyles.ts
 ```
+
+## Phase 16 Current Boundary
+
+Phase 16 splits the reference-anchor UI into two default product surfaces:
+
+- `ReferenceAnchorView.tsx` is the shared `素材库` activity. It owns source import, batch/library-pack import, source list and processing detail, material browse/detail, source-segment detail, tag review, archive/restore, source metadata, rebuild/retry affordances, and style-profile library work. It must not expose current-chapter orchestration, blueprint generation, candidate generation, or final insertion controls in the default path.
+- `ChapterReferencePanel.tsx` is mounted from `ContentPanel.tsx` for chapter editor tabs. It owns current-chapter context detection, material recommendations, orchestration start/resume/cancel, blueprint/high-risk decisions, audited candidate preview, and explicit editor-buffer copy/insert/append/replace actions. It must not mutate corpus metadata, import source files, update material tags, archive/restore materials, rebuild anchors, or call backend chapter save as part of reference use.
+- Dormant activity-level chapter-writing/debug controls, if still compiled during migration, must stay behind the explicit development flag `VITE_REFERENCE_ACTIVITY_CHAPTER_DEBUG=true`. Browser guardrails must prove they are not reachable from the default `素材库` activity, including the `高级` corpus tab.
+- `GetReferenceMaterialTagReviewQueue` is the only frontend source for tag-review queue eligibility, counts, and pagination. The UI must not reconstruct that queue from the currently visible material search page. Current queue eligibility is unverified, low-confidence, or unknown tags; conflict entries require a durable analyzer conflict signal before they can be displayed or asserted.
+- `GetReferenceMaterialDetail`, `GetReferenceSourceProcessingDetail`, and `GetReferenceSourceSegmentDetail` are read-only inspection helpers. Detail drawers must display bounded previews, source/provenance ids, counts, attempts, affected ids, and redacted diagnostics without showing `source_path`, raw source text, `source_text`, `candidate_text`, prompts, local paths, full source text, or full chapter content.
+- Final candidate use from the chapter panel is UI/editor-buffer only. Copy, insert-at-cursor, append, and replace-selection may update the active Monaco model and dirty state; they must not call `SaveContent`, `GenerateReferenceAnchoredDraft`, or direct material adaptation as an implicit write path.
 
 Current shell integration:
 

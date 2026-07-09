@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { BookOpen, Wrench, Bot, Wand2, Cpu, Zap, ShieldCheck } from 'lucide-react'
+import { BookOpen, Wrench, Bot, Wand2, Cpu, Zap, ShieldCheck, Library } from 'lucide-react'
 
-type Tab = 'quickstart' | 'phase15' | 'tools' | 'subagents' | 'skills' | 'llm' | 'context' | 'approval'
+type Tab = 'quickstart' | 'phase15' | 'reference' | 'tools' | 'subagents' | 'skills' | 'llm' | 'context' | 'approval'
 
 interface Props {
   open: boolean
@@ -88,6 +88,7 @@ const subAgentCards = [
 const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'quickstart', label: '快速入门', icon: <BookOpen className="w-4 h-4" /> },
   { id: 'phase15', label: '导入与素材', icon: <BookOpen className="w-4 h-4" /> },
+  { id: 'reference', label: '素材库/参考', icon: <Library className="w-4 h-4" /> },
   { id: 'tools', label: '工具参考', icon: <Wrench className="w-4 h-4" /> },
   { id: 'subagents', label: '子代理', icon: <Bot className="w-4 h-4" /> },
   { id: 'skills', label: '技能系统', icon: <Wand2 className="w-4 h-4" /> },
@@ -138,6 +139,7 @@ export default function HelpDialog({ open, onClose }: Props) {
           <div className="flex-1 overflow-y-auto p-6">
             {activeTab === 'quickstart' && <QuickStartTab />}
             {activeTab === 'phase15' && <ImportStylePatternTab />}
+            {activeTab === 'reference' && <ReferenceAnchorSplitTab />}
             {activeTab === 'tools' && <ToolsTab />}
             {activeTab === 'subagents' && <SubAgentsTab />}
             {activeTab === 'skills' && <SkillsTab />}
@@ -255,6 +257,45 @@ function ImportStylePatternTab() {
           <p>应用使用内置 LibGit2Sharp/libgit2 读取和写入本地版本历史，不要求额外安装系统 Git。</p>
           <p>设置里的 Git 作者名称和邮箱会写入 repo-local Git config；留空时使用安全默认身份。导入提交和普通保存提交都会使用这组设置。</p>
           <p>更新检查需要配置 HTTPS release endpoint。自动检查默认关闭且不会阻塞启动；打开发布页必须由你显式点击。</p>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function ReferenceAnchorSplitTab() {
+  return (
+    <div className="space-y-6 max-w-none">
+      <section>
+        <h2 className="text-lg font-semibold mb-2">素材库与章节参考素材</h2>
+        <p className="text-muted-foreground leading-relaxed">
+          参考锚定分成两个工作区：先把参考来源处理成可搜索、可审计的素材库，再在章节编辑器中使用这些素材生成候选。这样可以让素材准备和章节写作互不打扰。
+        </p>
+      </section>
+
+      <section>
+        <h3 className="text-base font-medium mb-2">素材库做什么</h3>
+        <div className="space-y-2 text-sm text-muted-foreground leading-relaxed">
+          <p>素材库用于导入参考来源，自动完成解析、分段、材料抽取、标签置信度判断和索引。成功材料会直接进入可搜索结果，不需要手动拆文本或创建材料。</p>
+          <p>你可以在素材库查看来源处理记录、材料明细和来源片段明细。明细只显示受限预览、来源摘要、hash、offset、处理记录和诊断，不显示本地路径、完整来源正文、Prompt 或候选正文。</p>
+          <p>需要人工处理的内容会集中到队列里：未校正、低置信或 unknown 标签进入标签校正；失败、取消或部分恢复的来源进入处理记录和重试/重建路径。</p>
+        </div>
+      </section>
+
+      <section>
+        <h3 className="text-base font-medium mb-2">章节参考素材做什么</h3>
+        <div className="space-y-2 text-sm text-muted-foreground leading-relaxed">
+          <p>章节参考素材面板从当前章节编辑器打开，自动带入章节上下文，并从可访问素材库推荐相关材料。普通路径不需要先手动选择锚点。</p>
+          <p>章节级流程会生成蓝图、绑定材料、生成候选并执行草稿审计。高风险、事实边界、蓝图审批和最终正文插入都停下来等待作者确认。</p>
+          <p>最终候选只能复制或插入当前编辑器缓冲区，参与普通撤销/保存流程；参考锚定流程本身不会直接调用章节保存。</p>
+        </div>
+      </section>
+
+      <section>
+        <h3 className="text-base font-medium mb-2">什么时候需要你介入</h3>
+        <div className="space-y-2 text-sm text-muted-foreground leading-relaxed">
+          <p>高置信材料会自动可搜索。你主要需要处理低置信标签、未知标签、来源授权/可见性决策、处理失败恢复、高风险章节审批，以及最终是否把候选放入正文。</p>
+          <p>如果导入或处理失败，先打开处理记录查看阶段、affected ids、尝试次数和脱敏诊断；能定位到材料或来源片段时，界面会提供明细入口。</p>
         </div>
       </section>
     </div>

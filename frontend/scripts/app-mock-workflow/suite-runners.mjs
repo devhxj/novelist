@@ -559,6 +559,437 @@ async function verifyCorpusLibraryWorkflow(page) {
   assert.equal(await page.getByLabel('锚点搜索').inputValue(), '101', 'affected source locate must filter by source id')
   await expectVisible(page.getByTestId('reference-anchor-row').filter({ hasText: '全局雨夜参考' }).first(), 'affected source located in source list')
 
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const restartRecoveryDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByRole('button', { name: /查看 重启恢复参考 的处理详情与失败记录/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', restartRecoveryDetailCountBefore)
+  const restartRecoveryDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(restartRecoveryDrawer, 'restart recovery source processing drawer')
+  const restartRecoveryDrawerText = await restartRecoveryDrawer.innerText()
+  for (const expectedText of [
+    '重启恢复参考',
+    'embedding · ready',
+    'segments=2 · materials=1 · slots=1 · vectors=1',
+    'recovered from interrupted embedding after app restart',
+    '第 2 次 · embedding · ready',
+    '恢复自 anchor:104:attempt:1 · anchor:104:build:1',
+    '历史尝试：2 次',
+    '第 1 次 · embedding · interrupted',
+    'app_restart_during_embedding',
+    'event-interrupted-embedding',
+    'event-startup-recovered-embedding',
+    'affected: 104 · mock-mat-restart-001 · mock-seg-restart-001 · object',
+    '当前无失败重试项',
+    '重建语料',
+  ]) {
+    assert(restartRecoveryDrawerText.includes(expectedText), `restart recovery source drawer must render ${expectedText}`)
+  }
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!restartRecoveryDrawerText.includes(sensitiveText), `restart recovery source drawer must not render ${sensitiveText}`)
+  }
+
+  await page.evaluate(() => { window.__appMockClipboardText = '' })
+  await restartRecoveryDrawer.getByTestId('reference-source-processing-copy-diagnostic').click()
+  await page.waitForFunction(() => window.__appMockClipboardText?.includes('处理记录: 重启恢复参考'), null, { timeout: 12_000 })
+  const copiedRestartRecoveryDiagnostic = await page.evaluate(() => window.__appMockClipboardText)
+  assert(copiedRestartRecoveryDiagnostic.includes('current=embedding/ready'), 'restart recovery copied diagnostic must include ready current status')
+  assert(copiedRestartRecoveryDiagnostic.includes('current_attempt=2 anchor:104:attempt:2 embedding/ready'), 'restart recovery copied diagnostic must include recovered attempt')
+  assert(copiedRestartRecoveryDiagnostic.includes('recovered_from=anchor:104:attempt:1 build=anchor:104:build:1'), 'restart recovery copied diagnostic must include recovered-from ids')
+  assert(copiedRestartRecoveryDiagnostic.includes('prior_attempt=1 anchor:104:attempt:1 embedding/interrupted'), 'restart recovery copied diagnostic must include prior interrupted attempt')
+  assert(copiedRestartRecoveryDiagnostic.includes('blocked_reason=app_restart_during_embedding'), 'restart recovery copied diagnostic must include restart blocked reason')
+  assert(copiedRestartRecoveryDiagnostic.includes('affected=104 · mock-mat-restart-001 · mock-seg-restart-001 · object'), 'restart recovery copied diagnostic must include affected ids')
+  assert(copiedRestartRecoveryDiagnostic.includes('actions=rebuild:yes retry:no'), 'restart recovery copied diagnostic must include resolved retry availability')
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!copiedRestartRecoveryDiagnostic.includes(sensitiveText), `restart recovery copied diagnostic must not include ${sensitiveText}`)
+  }
+
+  const restartRecoveryRebuildCountBefore = await bridgeCallCount(page, 'RebuildReferenceAnchor')
+  const restartRecoveryRefreshBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await restartRecoveryDrawer.getByRole('button', { name: /重建语料 重启恢复参考/ }).click()
+  await waitForBridgeCallCountAfter(page, 'RebuildReferenceAnchor', restartRecoveryRebuildCountBefore)
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', restartRecoveryRefreshBefore)
+  await page.waitForFunction(() =>
+    document.querySelector('[data-testid="reference-source-processing-drawer"]')?.innerText.includes('mock-mat-restart-001'),
+  null, { timeout: 12_000 })
+  const restartMaterialLocateSearchBefore = await bridgeCallCount(page, 'SearchReferenceMaterials')
+  await restartRecoveryDrawer.getByRole('button', { name: /在材料库筛选 mock-mat-restart-001/ }).first().click()
+  await waitForBridgeCallCountAfter(page, 'SearchReferenceMaterials', restartMaterialLocateSearchBefore)
+  await expectHidden(restartRecoveryDrawer, 'restart recovery source drawer after affected material locate')
+  assert.equal(await page.getByLabel('材料库搜索').inputValue(), 'mock-mat-restart-001', 'restart recovery affected material locate must fill material library query')
+  assert.equal(
+    await page.getByTestId('reference-material-library-card').filter({ hasText: 'mock-mat-restart-001' }).count(),
+    1,
+    'restart recovery rebuild must keep one searchable material row for the recovered material id',
+  )
+
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const restartSegmentDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByRole('button', { name: /查看 重启恢复参考 的处理详情与失败记录/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', restartSegmentDetailCountBefore)
+  const restartSegmentDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(restartSegmentDrawer, 'restart recovery source drawer before source-segment detail')
+  const restartSegmentBridgeCountBefore = await bridgeCallCount(page, 'GetReferenceSourceSegmentDetail')
+  await restartSegmentDrawer.getByRole('button', { name: /查看 mock-seg-restart-001 的来源片段明细/ }).first().click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceSegmentDetail', restartSegmentBridgeCountBefore)
+  await expectHidden(restartSegmentDrawer, 'restart recovery drawer after opening affected source segment')
+  const restartSourceSegmentDrawer = page.getByTestId('reference-source-segment-detail-drawer')
+  await expectVisible(restartSourceSegmentDrawer, 'restart recovery affected source segment detail drawer')
+  const restartSourceSegmentText = await restartSourceSegmentDrawer.innerText()
+  assert(restartSourceSegmentText.includes('重启恢复参考'), 'restart recovery source segment drawer must render source title')
+  assert(restartSourceSegmentText.includes('mock-seg-restart-001'), 'restart recovery source segment drawer must render segment id')
+  assert(restartSourceSegmentText.includes('预览已截断，不显示全文'), 'restart recovery source segment drawer must mark bounded preview')
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!restartSourceSegmentText.includes(sensitiveText), `restart recovery source segment drawer must not render ${sensitiveText}`)
+  }
+  await restartSourceSegmentDrawer.getByRole('button', { name: '关闭来源片段明细' }).click()
+  await expectHidden(restartSourceSegmentDrawer, 'restart recovery affected source segment drawer after close')
+
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const extractionFailureDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByRole('button', { name: /查看 抽取失败参考 的处理详情与失败记录/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', extractionFailureDetailCountBefore)
+  const extractionFailureDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(extractionFailureDrawer, 'failed extraction source processing drawer')
+  const extractionFailureDrawerText = await extractionFailureDrawer.innerText()
+  for (const expectedText of [
+    '抽取失败参考',
+    'extracting_materials · failed_extraction',
+    'segments=2 · materials=0 · slots=0 · vectors=0',
+    '第 1 次 · extracting_materials · failed_extraction',
+    'attempt=anchor:105:attempt:1 · build=anchor:105:build:1',
+    'extractor_output_empty_redacted',
+    '材料抽取未产生可用输出；来源片段可检查，正文已脱敏。',
+    'event-failed-extraction-current',
+    'affected: 105 · mock-seg-extract-001',
+    '失败状态可恢复',
+    '重建语料',
+  ]) {
+    assert(extractionFailureDrawerText.includes(expectedText), `failed extraction drawer must render ${expectedText}`)
+  }
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!extractionFailureDrawerText.includes(sensitiveText), `failed extraction drawer must not render ${sensitiveText}`)
+  }
+
+  await page.evaluate(() => { window.__appMockClipboardText = '' })
+  await extractionFailureDrawer.getByTestId('reference-source-processing-copy-diagnostic').click()
+  await page.waitForFunction(() => window.__appMockClipboardText?.includes('处理记录: 抽取失败参考'), null, { timeout: 12_000 })
+  const copiedExtractionFailureDiagnostic = await page.evaluate(() => window.__appMockClipboardText)
+  assert(copiedExtractionFailureDiagnostic.includes('current=extracting_materials/failed_extraction'), 'failed extraction copied diagnostic must include current status')
+  assert(copiedExtractionFailureDiagnostic.includes('current_attempt=1 anchor:105:attempt:1 extracting_materials/failed_extraction'), 'failed extraction copied diagnostic must include failed attempt')
+  assert(copiedExtractionFailureDiagnostic.includes('blocked_reason=extractor_output_empty_redacted'), 'failed extraction copied diagnostic must include blocked reason')
+  assert(copiedExtractionFailureDiagnostic.includes('affected=105 · mock-seg-extract-001'), 'failed extraction copied diagnostic must include affected source segment')
+  assert(copiedExtractionFailureDiagnostic.includes('actions=rebuild:yes retry:yes'), 'failed extraction copied diagnostic must include retry/rebuild availability')
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!copiedExtractionFailureDiagnostic.includes(sensitiveText), `failed extraction copied diagnostic must not include ${sensitiveText}`)
+  }
+
+  const failedExtractionSegmentCountBefore = await bridgeCallCount(page, 'GetReferenceSourceSegmentDetail')
+  await extractionFailureDrawer.getByRole('button', { name: /查看 mock-seg-extract-001 的来源片段明细/ }).first().click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceSegmentDetail', failedExtractionSegmentCountBefore)
+  await expectHidden(extractionFailureDrawer, 'failed extraction drawer after opening source segment detail')
+  const failedExtractionSegmentDrawer = page.getByTestId('reference-source-segment-detail-drawer')
+  await expectVisible(failedExtractionSegmentDrawer, 'failed extraction source segment detail drawer')
+  const failedExtractionSegmentText = await failedExtractionSegmentDrawer.innerText()
+  assert(failedExtractionSegmentText.includes('抽取失败参考'), 'failed extraction source segment drawer must render source title')
+  assert(failedExtractionSegmentText.includes('mock-seg-extract-001'), 'failed extraction source segment drawer must render segment id')
+  assert(failedExtractionSegmentText.includes('failed_extraction'), 'failed extraction source segment drawer must render failed processing note')
+  assert(failedExtractionSegmentText.includes('预览已截断，不显示全文'), 'failed extraction source segment drawer must mark bounded preview')
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!failedExtractionSegmentText.includes(sensitiveText), `failed extraction source segment drawer must not render ${sensitiveText}`)
+  }
+  await failedExtractionSegmentDrawer.getByRole('button', { name: '关闭来源片段明细' }).click()
+  await expectHidden(failedExtractionSegmentDrawer, 'failed extraction source segment drawer after close')
+
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const extractionRecoveryDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByRole('button', { name: /查看 抽取失败参考 的处理详情与失败记录/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', extractionRecoveryDetailCountBefore)
+  const extractionRecoveryDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(extractionRecoveryDrawer, 'failed extraction drawer before explicit rebuild')
+  const extractionRebuildCountBefore = await bridgeCallCount(page, 'RebuildReferenceAnchor')
+  const extractionRecoveryRefreshBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await extractionRecoveryDrawer.getByRole('button', { name: /重建语料 抽取失败参考/ }).click()
+  await waitForBridgeCallCountAfter(page, 'RebuildReferenceAnchor', extractionRebuildCountBefore)
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', extractionRecoveryRefreshBefore)
+  await page.waitForFunction(() =>
+    document.querySelector('[data-testid="reference-source-processing-drawer"]')?.innerText.includes('恢复自 anchor:105:attempt:1 · anchor:105:build:1'),
+  null, { timeout: 12_000 })
+  const extractionRecoveryText = await extractionRecoveryDrawer.innerText()
+  for (const expectedText of [
+    '抽取失败参考',
+    'embedding · ready',
+    'segments=2 · materials=1 · slots=1 · vectors=1',
+    'recovered from failed_extraction',
+    '第 2 次 · embedding · ready',
+    '恢复自 anchor:105:attempt:1 · anchor:105:build:1',
+    '历史尝试：2 次',
+    '第 1 次 · extracting_materials · failed_extraction',
+    'event-recovered-extraction',
+    'affected: 105 · mock-mat-extract-001 · mock-seg-extract-001 · object',
+    '当前无失败重试项',
+  ]) {
+    assert(extractionRecoveryText.includes(expectedText), `recovered extraction drawer must render ${expectedText}`)
+  }
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!extractionRecoveryText.includes(sensitiveText), `recovered extraction drawer must not render ${sensitiveText}`)
+  }
+
+  const extractionMaterialLocateSearchBefore = await bridgeCallCount(page, 'SearchReferenceMaterials')
+  await extractionRecoveryDrawer.getByRole('button', { name: /在材料库筛选 mock-mat-extract-001/ }).first().click()
+  await waitForBridgeCallCountAfter(page, 'SearchReferenceMaterials', extractionMaterialLocateSearchBefore)
+  await expectHidden(extractionRecoveryDrawer, 'recovered extraction drawer after affected material locate')
+  assert.equal(await page.getByLabel('材料库搜索').inputValue(), 'mock-mat-extract-001', 'recovered extraction affected material locate must fill material library query')
+  assert.equal(
+    await page.getByTestId('reference-material-library-card').filter({ hasText: 'mock-mat-extract-001' }).count(),
+    1,
+    'recovered extraction rebuild must create exactly one searchable material row for the recovered material id',
+  )
+
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const slottingFailureDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByRole('button', { name: /查看 槽位失败参考 的处理详情与失败记录/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', slottingFailureDetailCountBefore)
+  const slottingFailureDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(slottingFailureDrawer, 'failed slotting source processing drawer')
+  const slottingFailureDrawerText = await slottingFailureDrawer.innerText()
+  for (const expectedText of [
+    '槽位失败参考',
+    'detecting_slots · failed_slotting',
+    'segments=2 · materials=1 · slots=0 · vectors=0',
+    '第 1 次 · detecting_slots · failed_slotting',
+    'slot_detection_failed_redacted',
+    '槽位检测失败；已生成材料保留，可查看材料明细。',
+    'event-failed-slotting-current',
+    'affected: 106 · mock-mat-slot-001 · mock-seg-slot-001',
+    '失败状态可恢复',
+    '重建语料',
+  ]) {
+    assert(slottingFailureDrawerText.includes(expectedText), `failed slotting drawer must render ${expectedText}`)
+  }
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!slottingFailureDrawerText.includes(sensitiveText), `failed slotting drawer must not render ${sensitiveText}`)
+  }
+
+  await page.evaluate(() => { window.__appMockClipboardText = '' })
+  await slottingFailureDrawer.getByTestId('reference-source-processing-copy-diagnostic').click()
+  await page.waitForFunction(() => window.__appMockClipboardText?.includes('处理记录: 槽位失败参考'), null, { timeout: 12_000 })
+  const copiedSlottingFailureDiagnostic = await page.evaluate(() => window.__appMockClipboardText)
+  assert(copiedSlottingFailureDiagnostic.includes('current=detecting_slots/failed_slotting'), 'failed slotting copied diagnostic must include current status')
+  assert(copiedSlottingFailureDiagnostic.includes('current_attempt=1 anchor:106:attempt:1 detecting_slots/failed_slotting'), 'failed slotting copied diagnostic must include failed attempt')
+  assert(copiedSlottingFailureDiagnostic.includes('blocked_reason=slot_detection_failed_redacted'), 'failed slotting copied diagnostic must include blocked reason')
+  assert(copiedSlottingFailureDiagnostic.includes('affected=106 · mock-mat-slot-001 · mock-seg-slot-001'), 'failed slotting copied diagnostic must include retained material id')
+  assert(copiedSlottingFailureDiagnostic.includes('actions=rebuild:yes retry:yes'), 'failed slotting copied diagnostic must include retry/rebuild availability')
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!copiedSlottingFailureDiagnostic.includes(sensitiveText), `failed slotting copied diagnostic must not include ${sensitiveText}`)
+  }
+
+  const failedSlottingMaterialDetailBefore = await bridgeCallCount(page, 'GetReferenceMaterialDetail')
+  await slottingFailureDrawer.getByRole('button', { name: /查看 mock-mat-slot-001 的材料明细/ }).first().click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceMaterialDetail', failedSlottingMaterialDetailBefore)
+  await expectHidden(slottingFailureDrawer, 'failed slotting drawer after opening retained material detail')
+  const failedSlottingMaterialDrawer = page.getByTestId('reference-material-detail-drawer')
+  await expectVisible(failedSlottingMaterialDrawer, 'failed slotting retained material detail drawer')
+  const failedSlottingMaterialText = await failedSlottingMaterialDrawer.innerText()
+  assert(failedSlottingMaterialText.includes('mock-mat-slot-001'), 'failed slotting material detail must render material id')
+  assert(failedSlottingMaterialText.includes('槽位失败参考'), 'failed slotting material detail must render source title')
+  assert(failedSlottingMaterialText.includes('failed_slotting'), 'failed slotting material detail must render failed processing note')
+  assert(failedSlottingMaterialText.includes('预览已截断，不显示全文'), 'failed slotting material detail must mark bounded preview')
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!failedSlottingMaterialText.includes(sensitiveText), `failed slotting material detail must not render ${sensitiveText}`)
+  }
+  await failedSlottingMaterialDrawer.getByRole('button', { name: '关闭材料明细' }).click()
+  await expectHidden(failedSlottingMaterialDrawer, 'failed slotting retained material drawer after close')
+
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const slottingRecoveryDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByRole('button', { name: /查看 槽位失败参考 的处理详情与失败记录/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', slottingRecoveryDetailCountBefore)
+  const slottingRecoveryDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(slottingRecoveryDrawer, 'failed slotting drawer before explicit rebuild')
+  const slottingRebuildCountBefore = await bridgeCallCount(page, 'RebuildReferenceAnchor')
+  const slottingRecoveryRefreshBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await slottingRecoveryDrawer.getByRole('button', { name: /重建语料 槽位失败参考/ }).click()
+  await waitForBridgeCallCountAfter(page, 'RebuildReferenceAnchor', slottingRebuildCountBefore)
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', slottingRecoveryRefreshBefore)
+  await page.waitForFunction(() =>
+    document.querySelector('[data-testid="reference-source-processing-drawer"]')?.innerText.includes('恢复自 anchor:106:attempt:1 · anchor:106:build:1'),
+  null, { timeout: 12_000 })
+  const slottingRecoveryText = await slottingRecoveryDrawer.innerText()
+  for (const expectedText of [
+    '槽位失败参考',
+    'embedding · ready',
+    'segments=2 · materials=1 · slots=1 · vectors=1',
+    'recovered from failed_slotting',
+    '第 2 次 · embedding · ready',
+    '恢复自 anchor:106:attempt:1 · anchor:106:build:1',
+    '历史尝试：2 次',
+    '第 1 次 · detecting_slots · failed_slotting',
+    'event-recovered-slotting',
+    'affected: 106 · mock-mat-slot-001 · mock-seg-slot-001 · object',
+    '当前无失败重试项',
+  ]) {
+    assert(slottingRecoveryText.includes(expectedText), `recovered slotting drawer must render ${expectedText}`)
+  }
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!slottingRecoveryText.includes(sensitiveText), `recovered slotting drawer must not render ${sensitiveText}`)
+  }
+
+  const slottingMaterialLocateSearchBefore = await bridgeCallCount(page, 'SearchReferenceMaterials')
+  await slottingRecoveryDrawer.getByRole('button', { name: /在材料库筛选 mock-mat-slot-001/ }).first().click()
+  await waitForBridgeCallCountAfter(page, 'SearchReferenceMaterials', slottingMaterialLocateSearchBefore)
+  await expectHidden(slottingRecoveryDrawer, 'recovered slotting drawer after affected material locate')
+  assert.equal(await page.getByLabel('材料库搜索').inputValue(), 'mock-mat-slot-001', 'recovered slotting affected material locate must fill material library query')
+  assert.equal(
+    await page.getByTestId('reference-material-library-card').filter({ hasText: 'mock-mat-slot-001' }).count(),
+    1,
+    'recovered slotting rebuild must keep exactly one searchable material row for the retained material id',
+  )
+
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const failedProcessingDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByRole('button', { name: /查看 失败导入参考 的处理详情与失败记录/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', failedProcessingDetailCountBefore)
+  const failedProcessingDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(failedProcessingDrawer, 'failed source processing drawer')
+  const failedProcessingDrawerText = await failedProcessingDrawer.innerText()
+  for (const expectedText of [
+    '失败导入参考',
+    'failed_import · failed_import',
+    'segments=0 · materials=0 · slots=0 · vectors=0',
+    '第 1 次 · failed_import · failed_import',
+    'attempt=anchor:102:attempt:1 · build=anchor:102:build:1',
+    'source_unavailable_redacted',
+    '失败状态可恢复',
+    '无法读取来源；本地路径已脱敏。',
+    'event-failed-import',
+    'affected: 102',
+    '重建语料',
+  ]) {
+    assert(failedProcessingDrawerText.includes(expectedText), `failed source processing drawer must render ${expectedText}`)
+  }
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!failedProcessingDrawerText.includes(sensitiveText), `failed source processing drawer must not render ${sensitiveText}`)
+  }
+
+  await page.evaluate(() => { window.__appMockClipboardText = '' })
+  await failedProcessingDrawer.getByTestId('reference-source-processing-copy-diagnostic').click()
+  await page.waitForFunction(() => window.__appMockClipboardText?.includes('处理记录: 失败导入参考'), null, { timeout: 12_000 })
+  const copiedFailedProcessingDiagnostic = await page.evaluate(() => window.__appMockClipboardText)
+  assert(copiedFailedProcessingDiagnostic.includes('current=failed_import/failed_import'), 'failed source copied diagnostic must include failed current status')
+  assert(copiedFailedProcessingDiagnostic.includes('current_attempt=1 anchor:102:attempt:1 failed_import/failed_import'), 'failed source copied diagnostic must include failed attempt')
+  assert(copiedFailedProcessingDiagnostic.includes('blocked_reason=source_unavailable_redacted'), 'failed source copied diagnostic must include blocked reason')
+  assert(copiedFailedProcessingDiagnostic.includes('actions=rebuild:yes retry:yes'), 'failed source copied diagnostic must include retry/rebuild availability')
+  assert(copiedFailedProcessingDiagnostic.includes('affected=102'), 'failed source copied diagnostic must include affected source id')
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!copiedFailedProcessingDiagnostic.includes(sensitiveText), `failed source copied diagnostic must not include ${sensitiveText}`)
+  }
+
+  const failedRebuildCountBefore = await bridgeCallCount(page, 'RebuildReferenceAnchor')
+  const failedProcessingDetailRefreshBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await failedProcessingDrawer.getByRole('button', { name: /重建语料 失败导入参考/ }).click()
+  await waitForBridgeCallCountAfter(page, 'RebuildReferenceAnchor', failedRebuildCountBefore)
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', failedProcessingDetailRefreshBefore)
+  await page.waitForFunction(() =>
+    document.querySelector('[data-testid="reference-source-processing-drawer"]')?.innerText.includes('恢复自 anchor:102:attempt:1 · anchor:102:build:1'),
+  null, { timeout: 12_000 })
+  const recoveredProcessingDrawerText = await failedProcessingDrawer.innerText()
+  for (const expectedText of [
+    '失败导入参考',
+    'embedding · ready',
+    'segments=3 · materials=2 · slots=1 · vectors=2',
+    'recovered from failed_import',
+    '第 2 次 · embedding · ready',
+    '恢复自 anchor:102:attempt:1 · anchor:102:build:1',
+    '历史尝试：2 次',
+    '第 1 次 · failed_import · failed_import',
+    '当前无失败重试项',
+    'event-recovered-import',
+    'affected: 102 · mock-mat-rain-001 · mock-seg-rain-001 · object',
+  ]) {
+    assert(recoveredProcessingDrawerText.includes(expectedText), `recovered source processing drawer must render ${expectedText}`)
+  }
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!recoveredProcessingDrawerText.includes(sensitiveText), `recovered source processing drawer must not render ${sensitiveText}`)
+  }
+
+  await page.evaluate(() => { window.__appMockClipboardText = '' })
+  await failedProcessingDrawer.getByTestId('reference-source-processing-copy-diagnostic').click()
+  await page.waitForFunction(() => window.__appMockClipboardText?.includes('处理记录: 失败导入参考'), null, { timeout: 12_000 })
+  const copiedRecoveredProcessingDiagnostic = await page.evaluate(() => window.__appMockClipboardText)
+  assert(copiedRecoveredProcessingDiagnostic.includes('current=embedding/ready'), 'recovered source copied diagnostic must include ready current status')
+  assert(copiedRecoveredProcessingDiagnostic.includes('current_attempt=2 anchor:102:attempt:2 embedding/ready'), 'recovered source copied diagnostic must include recovered attempt')
+  assert(copiedRecoveredProcessingDiagnostic.includes('recovered_from=anchor:102:attempt:1 build=anchor:102:build:1'), 'recovered source copied diagnostic must include recovered-from ids')
+  assert(copiedRecoveredProcessingDiagnostic.includes('prior_attempt=1 anchor:102:attempt:1 failed_import/failed_import'), 'recovered source copied diagnostic must include prior failed attempt')
+  assert(copiedRecoveredProcessingDiagnostic.includes('actions=rebuild:yes retry:no'), 'recovered source copied diagnostic must include resolved retry availability')
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!copiedRecoveredProcessingDiagnostic.includes(sensitiveText), `recovered source copied diagnostic must not include ${sensitiveText}`)
+  }
+  await failedProcessingDrawer.getByRole('button', { name: '关闭处理记录' }).click()
+  await expectHidden(failedProcessingDrawer, 'failed source processing drawer after close')
+
+  await corpusTabs.getByRole('tab', { name: '处理记录' }).click()
+  const retryFailureDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await page.getByRole('button', { name: /查看 重试仍失败参考 的处理详情与失败记录/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', retryFailureDetailCountBefore)
+  const retryFailureDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(retryFailureDrawer, 'retry-failure source processing drawer')
+  const retryFailureInitialText = await retryFailureDrawer.innerText()
+  for (const expectedText of [
+    '重试仍失败参考',
+    'failed_import · failed_import',
+    '第 1 次 · failed_import · failed_import',
+    'source_unavailable_redacted',
+    '失败状态可恢复',
+    '重建语料',
+  ]) {
+    assert(retryFailureInitialText.includes(expectedText), `retry-failure source drawer must render initial ${expectedText}`)
+  }
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!retryFailureInitialText.includes(sensitiveText), `retry-failure initial drawer must not render ${sensitiveText}`)
+  }
+
+  const retryFailureRebuildCountBefore = await bridgeCallCount(page, 'RebuildReferenceAnchor')
+  const retryFailureRefreshBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await retryFailureDrawer.getByRole('button', { name: /重建语料 重试仍失败参考/ }).click()
+  await waitForBridgeCallCountAfter(page, 'RebuildReferenceAnchor', retryFailureRebuildCountBefore)
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', retryFailureRefreshBefore)
+  await page.waitForFunction(() =>
+    document.querySelector('[data-testid="reference-source-processing-drawer"]')?.innerText.includes('第 2 次 · failed_import · failed_import'),
+  null, { timeout: 12_000 })
+  const retryFailureAfterText = await retryFailureDrawer.innerText()
+  for (const expectedText of [
+    '重试仍失败参考',
+    '重试仍失败；本地路径已脱敏。',
+    '第 2 次 · failed_import · failed_import',
+    'attempt=anchor:103:attempt:2 · build=anchor:103:build:2',
+    'source_unavailable_after_retry_redacted',
+    '历史尝试：2 次',
+    '第 1 次 · failed_import · failed_import',
+    'event-retry-failed-import',
+    'affected: 103',
+    '失败状态可恢复',
+  ]) {
+    assert(retryFailureAfterText.includes(expectedText), `retry-failure source drawer must render retry failure ${expectedText}`)
+  }
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!retryFailureAfterText.includes(sensitiveText), `retry-failure drawer after retry must not render ${sensitiveText}`)
+  }
+
+  await page.evaluate(() => { window.__appMockClipboardText = '' })
+  await retryFailureDrawer.getByTestId('reference-source-processing-copy-diagnostic').click()
+  await page.waitForFunction(() => window.__appMockClipboardText?.includes('处理记录: 重试仍失败参考'), null, { timeout: 12_000 })
+  const copiedRetryFailureDiagnostic = await page.evaluate(() => window.__appMockClipboardText)
+  assert(copiedRetryFailureDiagnostic.includes('current=failed_import/failed_import'), 'retry-failure copied diagnostic must include failed current status')
+  assert(copiedRetryFailureDiagnostic.includes('current_attempt=2 anchor:103:attempt:2 failed_import/failed_import'), 'retry-failure copied diagnostic must include current retry attempt')
+  assert(copiedRetryFailureDiagnostic.includes('prior_attempt=1 anchor:103:attempt:1 failed_import/failed_import'), 'retry-failure copied diagnostic must include prior failed attempt')
+  assert(copiedRetryFailureDiagnostic.includes('blocked_reason=source_unavailable_after_retry_redacted'), 'retry-failure copied diagnostic must include updated blocked reason')
+  assert(copiedRetryFailureDiagnostic.includes('actions=rebuild:yes retry:yes'), 'retry-failure copied diagnostic must keep retry availability')
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!copiedRetryFailureDiagnostic.includes(sensitiveText), `retry-failure copied diagnostic must not include ${sensitiveText}`)
+  }
+  await retryFailureDrawer.getByRole('button', { name: '关闭处理记录' }).click()
+  await expectHidden(retryFailureDrawer, 'retry-failure source processing drawer after close')
+
   await assertCorpusLibraryLegacyWritingEntrypointsHidden(page, 'corpus library workflow completion')
   await assertCorpusLibraryNoChapterWritingBridgeCalls(page, 'corpus library workflow completion')
 }
@@ -582,12 +1013,19 @@ async function verifyCorpusLibraryPartialImportFailure(page) {
   assert.equal(createCall.result?.succeeded_count, 1, 'partial corpus import must keep the successful source')
   assert.equal(createCall.result?.failed_count, 1, 'partial corpus import must report one failed source')
   assert(!JSON.stringify(createCall.result?.failed ?? []).includes('D:\\books'), 'partial corpus import failure result must not expose local source paths')
+  const firstPartialImportAnchorId = createCall.result?.succeeded?.[0]?.anchor_id
+  assert(Number.isInteger(firstPartialImportAnchorId), 'partial corpus import must return a stable successful anchor id')
 
   await expectVisible(page.getByText('已批量导入 1/2 个语料来源'), 'partial corpus import success count message')
   await expectVisible(
     page.getByTestId('reference-anchor-row').filter({ hasText: '部分失败导入 1' }).first(),
     'partial corpus import successful source row',
   )
+  const partialFailedSourceRow = page.getByTestId('reference-anchor-row').filter({ hasText: '部分失败导入 2' })
+  await expectVisible(partialFailedSourceRow.first(), 'partial corpus import failed source row')
+  const partialFailedSourceRowText = await partialFailedSourceRow.first().innerText()
+  assert(partialFailedSourceRowText.includes('failed_import'), 'partial corpus import failed source row must persist failed_import status')
+  assert(!partialFailedSourceRowText.includes('D:\\books'), 'partial corpus import failed source row must not expose local source paths')
   assert.equal(await importPanel.getByPlaceholder('参考书名').inputValue(), partialImportTitle, 'partial corpus import must keep title input')
   assert.equal(await importPanel.getByPlaceholder('可选').inputValue(), 'Partial Import Author', 'partial corpus import must keep author input')
   assert.equal(await importPanel.getByLabel('用户标签').inputValue(), 'partial;failure', 'partial corpus import must keep tag input')
@@ -611,6 +1049,46 @@ async function verifyCorpusLibraryPartialImportFailure(page) {
   const diagnosticDetail = JSON.parse(parsedDiagnostic.detail)
   assert.equal(diagnosticDetail.succeeded_count, 1, 'partial corpus import diagnostic must include succeeded count')
   assert.equal(diagnosticDetail.failed_count, 1, 'partial corpus import diagnostic must include failed count')
+
+  const duplicateCreateCountBefore = await bridgeCallCount(page, 'CreateReferenceAnchorsWithResult')
+  await importPanel.getByRole('button', { name: /^批量导入$/ }).click()
+  const duplicateCreateCall = await waitForLatestBridgeCallWithResult(page, 'CreateReferenceAnchorsWithResult', duplicateCreateCountBefore)
+  assert.equal(duplicateCreateCall.result?.total_count, 2, 'duplicate partial corpus import must report both attempted sources')
+  assert.equal(duplicateCreateCall.result?.succeeded_count, 1, 'duplicate partial corpus import must report the reusable successful source')
+  assert.equal(duplicateCreateCall.result?.failed_count, 1, 'duplicate partial corpus import must keep reporting the failed source')
+  assert.equal(duplicateCreateCall.result?.succeeded?.[0]?.anchor_id, firstPartialImportAnchorId, 'duplicate corpus import must reuse the existing anchor id')
+  assert(!JSON.stringify(duplicateCreateCall.result).includes('D:\\books'), 'duplicate corpus import result must not expose local source paths')
+  assert.equal(
+    await page.getByTestId('reference-anchor-row').filter({ hasText: '部分失败导入 1' }).count(),
+    1,
+    'duplicate corpus import must not render a second source row for the same stable source identity',
+  )
+  assert.equal(
+    await page.getByTestId('reference-anchor-row').filter({ hasText: '部分失败导入 2' }).count(),
+    1,
+    'duplicate corpus import must not render a second failed source row for the same terminal failed identity',
+  )
+
+  const partialFailureDetailCountBefore = await bridgeCallCount(page, 'GetReferenceSourceProcessingDetail')
+  await partialFailedSourceRow.first().getByRole('button', { name: /查看 部分失败导入 2 的处理记录/ }).click()
+  await waitForBridgeCallCountAfter(page, 'GetReferenceSourceProcessingDetail', partialFailureDetailCountBefore)
+  const partialFailureProcessingDrawer = page.getByTestId('reference-source-processing-drawer')
+  await expectVisible(partialFailureProcessingDrawer, 'partial failed source processing drawer')
+  const partialFailureProcessingText = await partialFailureProcessingDrawer.innerText()
+  for (const expectedText of [
+    '部分失败导入 2',
+    'failed_import · failed_import',
+    'segments=0 · materials=0 · slots=0 · vectors=0',
+    '失败状态可恢复',
+    'source_unavailable_redacted',
+  ]) {
+    assert(partialFailureProcessingText.includes(expectedText), `partial failed source processing drawer must render ${expectedText}`)
+  }
+  for (const sensitiveText of ['D:\\books', 'source_text', 'prompt', 'candidate_text', FULL_MATERIAL_LEAK_SENTINEL]) {
+    assert(!partialFailureProcessingText.includes(sensitiveText), `partial failed source processing drawer must not render ${sensitiveText}`)
+  }
+  await partialFailureProcessingDrawer.getByRole('button', { name: '关闭处理记录' }).click()
+  await expectHidden(partialFailureProcessingDrawer, 'partial failed source processing drawer after close')
 }
 
 async function verifyChapterReferenceWorkflow(page) {
