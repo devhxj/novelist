@@ -834,6 +834,63 @@ export namespace reader {
 }
 
 export namespace reference {
+ export interface CorpusGovernanceMember {
+ anchor_id: number
+ title: string
+ enabled: boolean
+ source_quality?: string | null
+ disabled_reason?: string | null
+ dedup_group_id?: string | null
+ license_state: string
+ reuse_policy: string
+ max_verbatim_ratio?: number | null
+ cleared_for_insertion: boolean
+ }
+ export interface CorpusGovernanceLibrary {
+ library_id: string
+ scope: string
+ novel_id?: number | null
+ name: string
+ bound_to_session: boolean
+ members: CorpusGovernanceMember[]
+ }
+ export interface CorpusGovernance {
+ session_id?: string | null
+ libraries: CorpusGovernanceLibrary[]
+ pending_review_count: number
+ stale_aggregate_count: number
+ insertion_audit_count: number
+ }
+ export interface CorpusAggregate {
+ aggregate_id: string
+ aggregate_type: string
+ name: string
+ summary: string
+ sample_count: number
+ validity_state: string
+ library_ids: string[]
+ anchor_ids: number[]
+ updated_at: Timestamp
+ }
+ export interface CorpusReviewQueueItem {
+ queue_id: string
+ item_type: string
+ item_id: string
+ anchor_id: number
+ node_id: string
+ reason: string
+ review_state: string
+ confidence: number
+ feature_family?: string | null
+ created_at: Timestamp
+ }
+ export interface CorpusReviewQueuePage {
+ items: CorpusReviewQueueItem[]
+ total: number
+ page: number
+ size: number
+ has_more: boolean
+ }
   export interface Anchor {
     anchor_id: number
     novel_id: number
@@ -1044,12 +1101,14 @@ export namespace reference {
 
   export type CorpusTechniqueSpecimenAnalysisScope = 'technique_specimen'
 
-  export interface StartCorpusTechniqueSpecimenAnalysisInput {
-    novel_id: number
-    anchor_id: number
-    source_node_type: CorpusNodeType
-    min_observation_confidence?: number
-    run_id?: string | null
+ export interface StartCorpusTechniqueSpecimenAnalysisInput {
+ novel_id: number
+ anchor_id: number
+ source_node_type: CorpusNodeType
+ min_observation_confidence?: number
+ run_id?: string | null
+ token_budget?: number | null
+ resume?: boolean
   }
 
   export interface GetCorpusTechniqueSpecimenAnalysisRunInput {
@@ -1061,10 +1120,12 @@ export namespace reference {
     run_id: string
     novel_id: number
     anchor_id: number
-    scope: CorpusTechniqueSpecimenAnalysisScope
-    status: CorpusFeatureAnalysisStatus
-    tokens_spent: number
-    specimen_count: number
+ scope: CorpusTechniqueSpecimenAnalysisScope
+ status: CorpusFeatureAnalysisStatus
+ token_budget?: number | null
+ tokens_spent: number
+ resume_cursor?: string | null
+ specimen_count: number
     processed_nodes: number
     analyzer_version: string
     schema_version: string

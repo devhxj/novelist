@@ -1,0 +1,1753 @@
+{
+  "schema_version": "corpus-driven-writing-m1-cross-library-closed-loop-golden-v1",
+  "fixtures": [
+    {
+      "fixture_id": "m1-cross-library-blueprints-and-drafts",
+      "description": "M1 golden fixture for the intended chapter workflow: two enabled corpus libraries, cross-library blueprint candidates, feedback iteration, disabled-library change, and selected-blueprint-locked insertion draft candidates.",
+      "novel": {
+        "title": "跨库语料闭环 golden",
+        "description": "M1 corpus-driven-writing cross-library closed-loop fixture"
+      },
+      "current_chapter": {
+        "title": "第一章",
+        "current_draft_text": "秦砚停在旧市集边缘。",
+        "insertion_offset": 10
+      },
+      "corpus": {
+        "libraries": [
+          {
+            "library_id": "project:{novel_id}:default",
+            "scope": "project",
+            "novel_id_scope": "project",
+            "name": "Project doorway corpus"
+          },
+          {
+            "library_id": "global:workspace",
+            "scope": "global",
+            "novel_id_scope": "none",
+            "name": "Workspace market corpus"
+          }
+        ],
+        "session_bindings": [
+          {
+            "session_id": "project:{novel_id}:default",
+            "library_id": "project:{novel_id}:default"
+          },
+          {
+            "session_id": "project:{novel_id}:default",
+            "library_id": "global:workspace"
+          }
+        ],
+        "sources": [
+          {
+            "anchor_id": 201,
+            "library_id": "project:{novel_id}:default",
+            "novel_id_scope": "project",
+            "title": "项目门口 golden 语料",
+            "source_path": "project-doorway-golden.md",
+            "source_kind": "markdown",
+            "license_status": "public_domain",
+            "corpus_visibility": "private",
+            "source_quality": "trusted",
+            "dedup_group_id": "project-doorway-golden",
+            "license_gate": {
+              "license_state": "public_domain",
+              "reuse_policy": "verbatim_ok",
+              "cleared_for_insertion": true,
+              "max_verbatim_ratio": 1
+            },
+            "nodes": [
+              {
+                "node_id": "node-project-doorway-s1",
+                "sequence_index": 1,
+                "chapter_index": 1,
+                "start_offset": 0,
+                "end_offset": 18,
+                "text_hash": "sha256-project-doorway-s1",
+                "text": "她没有立刻开口，只把钥匙扣在掌心。"
+              },
+              {
+                "node_id": "node-project-doorway-s2",
+                "sequence_index": 2,
+                "chapter_index": 1,
+                "start_offset": 19,
+                "end_offset": 34,
+                "text_hash": "sha256-project-doorway-s2",
+                "text": "她把门栓慢慢推回去。"
+              },
+              {
+                "node_id": "node-project-doorway-s3",
+                "sequence_index": 3,
+                "chapter_index": 1,
+                "start_offset": 35,
+                "end_offset": 51,
+                "text_hash": "sha256-project-doorway-s3",
+                "text": "她的影子贴在门槛内侧。"
+              },
+              {
+                "node_id": "node-project-doorway-s4",
+                "sequence_index": 4,
+                "chapter_index": 1,
+                "start_offset": 52,
+                "end_offset": 69,
+                "text_hash": "sha256-project-doorway-s4",
+                "text": "她只垂眼看着掌心旧痕。"
+              }
+            ]
+          },
+          {
+            "anchor_id": 202,
+            "library_id": "global:workspace",
+            "novel_id_scope": "none",
+            "title": "工作区火市 golden 语料",
+            "source_path": "workspace-market-golden.md",
+            "source_kind": "markdown",
+            "license_status": "public_domain",
+            "corpus_visibility": "workspace",
+            "source_quality": "trusted",
+            "dedup_group_id": "workspace-market-golden",
+            "license_gate": {
+              "license_state": "public_domain",
+              "reuse_policy": "verbatim_ok",
+              "cleared_for_insertion": true,
+              "max_verbatim_ratio": 1
+            },
+            "nodes": [
+              {
+                "node_id": "node-workspace-market-s1",
+                "sequence_index": 1,
+                "chapter_index": 1,
+                "start_offset": 0,
+                "end_offset": 21,
+                "text_hash": "sha256-workspace-market-s1",
+                "text": "火光在旧市集尽头一压，他没有立刻回头。"
+              },
+              {
+                "node_id": "node-workspace-market-s2",
+                "sequence_index": 2,
+                "chapter_index": 1,
+                "start_offset": 22,
+                "end_offset": 39,
+                "text_hash": "sha256-workspace-market-s2",
+                "text": "摊棚的灰烬沿着鞋边滚。"
+              }
+            ]
+          }
+        ]
+      },
+      "request": {
+        "natural_language_goal": "写旧市集门口对峙，秦砚压住怒意，不立刻开口。",
+        "previous_chapter_summary": "旧市集起火，有人在火光里靠近。",
+        "reuse_policies": [
+          "verbatim_ok"
+        ],
+        "requested_blueprint_count": 3,
+        "requested_draft_count": 3,
+        "character_snapshots": [
+          {
+            "character": "秦砚",
+            "state": "guarded",
+            "allowed_knowledge": [
+              "市集起火"
+            ],
+            "forbidden_knowledge": [
+              "对方真实目的"
+            ]
+          }
+        ],
+        "slot_values": {
+          "她": "秦砚",
+          "他": "秦砚"
+        }
+      },
+      "feedback": {
+        "avoid_library_ids": [
+          "global:workspace"
+        ],
+        "avoid_anchor_ids": [
+          202
+        ],
+        "problem_tags": [
+          "too_fast"
+        ],
+        "notes": "prefer project corpus for this pass"
+      },
+      "disabled_library_id": "global:workspace",
+      "expected_closed_loop": {
+        "enabled_blueprint_candidates": {
+          "query_context": {
+            "scene_type": "doorway_confrontation",
+            "emotion_target": "restrained_pressure",
+            "pacing_target": "slow_tension",
+            "narrative_position": "current_insertion",
+            "commercial_mechanic": "withheld-answer-hook",
+            "character_states": [
+              "秦砚 guarded"
+            ],
+            "required_narrative_functions": [
+              "support_current_chapter",
+              "raise_pressure",
+              "withhold_answer"
+            ],
+            "chapter_context": {
+              "chapter_number": 1,
+              "current_draft_text": "秦砚停在旧市集边缘。",
+              "insertion_offset": 10,
+              "previous_chapter_summary": "旧市集起火，有人在火光里靠近。",
+              "character_snapshots": [
+                {
+                  "character": "秦砚",
+                  "state": "guarded",
+                  "allowed_knowledge": [
+                    "市集起火"
+                  ],
+                  "forbidden_knowledge": [
+                    "对方真实目的"
+                  ]
+                }
+              ]
+            },
+            "scope": {
+              "library_ids": [],
+              "reuse_policies": [
+                "verbatim_ok"
+              ],
+              "include_anchor_ids_count": 0,
+              "exclude_anchor_ids_count": 0
+            }
+          },
+          "feedback_applied": false,
+          "feedback_summary": "none",
+          "candidates": [
+            {
+              "blueprint_alias": "item-1",
+              "strategy": "score_focus_m1",
+              "beats": [
+                {
+                  "beat_alias": "item-1",
+                  "beat_index": 0,
+                  "role_in_beat": "opening_source_sentence",
+                  "narrative_function": "support_current_chapter",
+                  "node_aliases": [
+                    "item-1"
+                  ]
+                },
+                {
+                  "beat_alias": "item-2",
+                  "beat_index": 1,
+                  "role_in_beat": "supporting_source_sentence",
+                  "narrative_function": "raise_pressure",
+                  "node_aliases": [
+                    "item-2"
+                  ]
+                },
+                {
+                  "beat_alias": "item-3",
+                  "beat_index": 2,
+                  "role_in_beat": "supporting_source_sentence",
+                  "narrative_function": "withhold_answer",
+                  "node_aliases": [
+                    "item-3"
+                  ]
+                }
+              ],
+              "source_distribution": [
+                {
+                  "library_alias": "item-1",
+                  "anchor_id": 202,
+                  "node_count": 1
+                },
+                {
+                  "library_alias": "item-2",
+                  "anchor_id": 201,
+                  "node_count": 2
+                }
+              ],
+              "coverage_score": 0.65329,
+              "gap_reasons": [],
+              "feedback_reason": "initial_candidate"
+            },
+            {
+              "blueprint_alias": "item-2",
+              "strategy": "source_diversity_m1",
+              "beats": [
+                {
+                  "beat_alias": "item-4",
+                  "beat_index": 0,
+                  "role_in_beat": "opening_source_sentence",
+                  "narrative_function": "support_current_chapter",
+                  "node_aliases": [
+                    "item-1"
+                  ]
+                },
+                {
+                  "beat_alias": "item-5",
+                  "beat_index": 1,
+                  "role_in_beat": "supporting_source_sentence",
+                  "narrative_function": "raise_pressure",
+                  "node_aliases": [
+                    "item-2"
+                  ]
+                }
+              ],
+              "source_distribution": [
+                {
+                  "library_alias": "item-1",
+                  "anchor_id": 202,
+                  "node_count": 1
+                },
+                {
+                  "library_alias": "item-2",
+                  "anchor_id": 201,
+                  "node_count": 1
+                }
+              ],
+              "coverage_score": 0.649481,
+              "gap_reasons": [],
+              "feedback_reason": "initial_candidate"
+            },
+            {
+              "blueprint_alias": "item-3",
+              "strategy": "withheld_hook_m1",
+              "beats": [
+                {
+                  "beat_alias": "item-6",
+                  "beat_index": 0,
+                  "role_in_beat": "opening_source_sentence",
+                  "narrative_function": "support_current_chapter",
+                  "node_aliases": [
+                    "item-1"
+                  ]
+                },
+                {
+                  "beat_alias": "item-7",
+                  "beat_index": 1,
+                  "role_in_beat": "supporting_source_sentence",
+                  "narrative_function": "raise_pressure",
+                  "node_aliases": [
+                    "item-4"
+                  ]
+                }
+              ],
+              "source_distribution": [
+                {
+                  "library_alias": "item-1",
+                  "anchor_id": 202,
+                  "node_count": 1
+                },
+                {
+                  "library_alias": "item-2",
+                  "anchor_id": 201,
+                  "node_count": 1
+                }
+              ],
+              "coverage_score": 0.64935,
+              "gap_reasons": [],
+              "feedback_reason": "initial_candidate"
+            }
+          ]
+        },
+        "feedback_blueprint_candidates": {
+          "query_context": {
+            "scene_type": "doorway_confrontation",
+            "emotion_target": "restrained_pressure",
+            "pacing_target": "slow_tension",
+            "narrative_position": "current_insertion",
+            "commercial_mechanic": "withheld-answer-hook",
+            "character_states": [
+              "秦砚 guarded"
+            ],
+            "required_narrative_functions": [
+              "support_current_chapter",
+              "raise_pressure",
+              "withhold_answer"
+            ],
+            "chapter_context": {
+              "chapter_number": 1,
+              "current_draft_text": "秦砚停在旧市集边缘。",
+              "insertion_offset": 10,
+              "previous_chapter_summary": "旧市集起火，有人在火光里靠近。",
+              "character_snapshots": [
+                {
+                  "character": "秦砚",
+                  "state": "guarded",
+                  "allowed_knowledge": [
+                    "市集起火"
+                  ],
+                  "forbidden_knowledge": [
+                    "对方真实目的"
+                  ]
+                }
+              ]
+            },
+            "scope": {
+              "library_ids": [],
+              "reuse_policies": [
+                "verbatim_ok"
+              ],
+              "include_anchor_ids_count": 0,
+              "exclude_anchor_ids_count": 0
+            }
+          },
+          "feedback_applied": true,
+          "feedback_summary": "rejected_blueprints:1;rejected_nodes:3;avoid_libraries:1;avoid_anchors:1;problems:too_fast;fallback:feedback_filters_no_matches,fallback_to_base_filters",
+          "candidates": [
+            {
+              "blueprint_alias": "item-1",
+              "strategy": "rhythm_slow_m1",
+              "beats": [
+                {
+                  "beat_alias": "item-1",
+                  "beat_index": 0,
+                  "role_in_beat": "opening_source_sentence",
+                  "narrative_function": "support_current_chapter",
+                  "node_aliases": [
+                    "item-1"
+                  ]
+                },
+                {
+                  "beat_alias": "item-2",
+                  "beat_index": 1,
+                  "role_in_beat": "supporting_source_sentence",
+                  "narrative_function": "raise_pressure",
+                  "node_aliases": [
+                    "item-2"
+                  ]
+                }
+              ],
+              "source_distribution": [
+                {
+                  "library_alias": "item-1",
+                  "anchor_id": 201,
+                  "node_count": 2
+                }
+              ],
+              "coverage_score": 0.358774,
+              "gap_reasons": [
+                "feedback_filters_no_matches",
+                "fallback_to_base_filters",
+                "single_library_source",
+                "single_anchor_source"
+              ],
+              "feedback_reason": "rejected_blueprints:1;rejected_nodes:3;avoid_libraries:1;avoid_anchors:1;problems:too_fast;fallback:feedback_filters_no_matches,fallback_to_base_filters"
+            },
+            {
+              "blueprint_alias": "item-2",
+              "strategy": "source_diversity_m1",
+              "beats": [
+                {
+                  "beat_alias": "item-3",
+                  "beat_index": 0,
+                  "role_in_beat": "opening_source_sentence",
+                  "narrative_function": "support_current_chapter",
+                  "node_aliases": [
+                    "item-1"
+                  ]
+                }
+              ],
+              "source_distribution": [
+                {
+                  "library_alias": "item-1",
+                  "anchor_id": 201,
+                  "node_count": 1
+                }
+              ],
+              "coverage_score": 0.310647,
+              "gap_reasons": [
+                "feedback_filters_no_matches",
+                "fallback_to_base_filters",
+                "insufficient_beats",
+                "single_library_source",
+                "single_anchor_source"
+              ],
+              "feedback_reason": "rejected_blueprints:1;rejected_nodes:3;avoid_libraries:1;avoid_anchors:1;problems:too_fast;fallback:feedback_filters_no_matches,fallback_to_base_filters"
+            },
+            {
+              "blueprint_alias": "item-3",
+              "strategy": "fallback_single_source_m1",
+              "beats": [
+                {
+                  "beat_alias": "item-4",
+                  "beat_index": 0,
+                  "role_in_beat": "opening_source_sentence",
+                  "narrative_function": "support_current_chapter",
+                  "node_aliases": [
+                    "item-2"
+                  ]
+                }
+              ],
+              "source_distribution": [
+                {
+                  "library_alias": "item-1",
+                  "anchor_id": 201,
+                  "node_count": 1
+                }
+              ],
+              "coverage_score": 0.3069,
+              "gap_reasons": [
+                "feedback_filters_no_matches",
+                "fallback_to_base_filters",
+                "insufficient_beats",
+                "single_library_source",
+                "single_anchor_source"
+              ],
+              "feedback_reason": "rejected_blueprints:1;rejected_nodes:3;avoid_libraries:1;avoid_anchors:1;problems:too_fast;fallback:feedback_filters_no_matches,fallback_to_base_filters"
+            }
+          ]
+        },
+        "enabled_selected_draft": {
+          "query_context": {
+            "scene_type": "doorway_confrontation",
+            "emotion_target": "restrained_pressure",
+            "pacing_target": "slow_tension",
+            "narrative_position": "current_insertion",
+            "commercial_mechanic": "withheld-answer-hook",
+            "character_states": [
+              "秦砚 guarded"
+            ],
+            "required_narrative_functions": [
+              "support_current_chapter",
+              "raise_pressure",
+              "withhold_answer"
+            ],
+            "chapter_context": {
+              "chapter_number": 1,
+              "current_draft_text": "秦砚停在旧市集边缘。",
+              "insertion_offset": 10,
+              "previous_chapter_summary": "旧市集起火，有人在火光里靠近。",
+              "character_snapshots": [
+                {
+                  "character": "秦砚",
+                  "state": "guarded",
+                  "allowed_knowledge": [
+                    "市集起火"
+                  ],
+                  "forbidden_knowledge": [
+                    "对方真实目的"
+                  ]
+                }
+              ]
+            },
+            "scope": {
+              "library_ids": [],
+              "reuse_policies": [
+                "verbatim_ok"
+              ],
+              "include_anchor_ids_count": 0,
+              "exclude_anchor_ids_count": 0
+            }
+          },
+          "blueprint": {
+            "strategy": "score_focus_m1",
+            "beats": [
+              {
+                "beat_alias": "item-1",
+                "beat_index": 0,
+                "role_in_beat": "opening_source_sentence",
+                "narrative_function": "support_current_chapter",
+                "node_aliases": [
+                  "item-1"
+                ]
+              },
+              {
+                "beat_alias": "item-2",
+                "beat_index": 1,
+                "role_in_beat": "supporting_source_sentence",
+                "narrative_function": "raise_pressure",
+                "node_aliases": [
+                  "item-2"
+                ]
+              },
+              {
+                "beat_alias": "item-3",
+                "beat_index": 2,
+                "role_in_beat": "supporting_source_sentence",
+                "narrative_function": "withhold_answer",
+                "node_aliases": [
+                  "item-3"
+                ]
+              }
+            ]
+          },
+          "pieces": [
+            {
+              "piece_alias": "item-1",
+              "beat_alias": "item-1",
+              "candidate_alias": "item-1",
+              "node_alias": "item-1",
+              "library_alias": "item-1",
+              "text_hash": "sha256-workspace-market-s1",
+              "reuse_policy": "verbatim_ok",
+              "license_state": "public_domain",
+              "output_text": "火光在旧市集尽头一压，秦砚没有立刻回头。",
+              "preserved_text_hash": "bf6bc14c737d3c6e84f99f7a4f40b23cafe5a1834c714686f1883931d381a69e",
+              "preserved_hash_matches": true,
+              "preserved_spans": [
+                {
+                  "span_alias": "item-1",
+                  "source_start": 0,
+                  "source_end": 11,
+                  "output_start": 0,
+                  "output_end": 11,
+                  "source_text_hash": "41643cf0aa7ef457b0cf97738a52516eabc628180f8288162cd283c609fe1158",
+                  "output_text_hash": "41643cf0aa7ef457b0cf97738a52516eabc628180f8288162cd283c609fe1158",
+                  "matches": true
+                },
+                {
+                  "span_alias": "item-2",
+                  "source_start": 12,
+                  "source_end": 19,
+                  "output_start": 13,
+                  "output_end": 20,
+                  "source_text_hash": "ecf050ee13b6ec24d4db1cfbbb508fb4168677677d5b0df45046ca63f827c201",
+                  "output_text_hash": "ecf050ee13b6ec24d4db1cfbbb508fb4168677677d5b0df45046ca63f827c201",
+                  "matches": true
+                }
+              ],
+              "slot_replacements": [
+                {
+                  "slot_name": "character",
+                  "source_value": "他",
+                  "replacement_value": "秦砚",
+                  "source_start": 11,
+                  "source_end": 12,
+                  "output_start": 11,
+                  "output_end": 13
+                }
+              ]
+            },
+            {
+              "piece_alias": "item-2",
+              "beat_alias": "item-2",
+              "candidate_alias": "item-2",
+              "node_alias": "item-2",
+              "library_alias": "item-2",
+              "text_hash": "sha256-project-doorway-s3",
+              "reuse_policy": "verbatim_ok",
+              "license_state": "public_domain",
+              "output_text": "秦砚的影子贴在门槛内侧。",
+              "preserved_text_hash": "f4099924c155542706a2a5ddb63af97e015768ab40fab029ee104b4f0b31a29f",
+              "preserved_hash_matches": true,
+              "preserved_spans": [
+                {
+                  "span_alias": "item-3",
+                  "source_start": 1,
+                  "source_end": 11,
+                  "output_start": 2,
+                  "output_end": 12,
+                  "source_text_hash": "f4099924c155542706a2a5ddb63af97e015768ab40fab029ee104b4f0b31a29f",
+                  "output_text_hash": "f4099924c155542706a2a5ddb63af97e015768ab40fab029ee104b4f0b31a29f",
+                  "matches": true
+                }
+              ],
+              "slot_replacements": [
+                {
+                  "slot_name": "character",
+                  "source_value": "她",
+                  "replacement_value": "秦砚",
+                  "source_start": 0,
+                  "source_end": 1,
+                  "output_start": 0,
+                  "output_end": 2
+                }
+              ]
+            },
+            {
+              "piece_alias": "item-3",
+              "beat_alias": "item-3",
+              "candidate_alias": "item-3",
+              "node_alias": "item-3",
+              "library_alias": "item-2",
+              "text_hash": "sha256-project-doorway-s4",
+              "reuse_policy": "verbatim_ok",
+              "license_state": "public_domain",
+              "output_text": "秦砚只垂眼看着掌心旧痕。",
+              "preserved_text_hash": "6a312094077af129fb07434677f1aad1f4f91484822867a540c640d67f9fa23f",
+              "preserved_hash_matches": true,
+              "preserved_spans": [
+                {
+                  "span_alias": "item-4",
+                  "source_start": 1,
+                  "source_end": 11,
+                  "output_start": 2,
+                  "output_end": 12,
+                  "source_text_hash": "6a312094077af129fb07434677f1aad1f4f91484822867a540c640d67f9fa23f",
+                  "output_text_hash": "6a312094077af129fb07434677f1aad1f4f91484822867a540c640d67f9fa23f",
+                  "matches": true
+                }
+              ],
+              "slot_replacements": [
+                {
+                  "slot_name": "character",
+                  "source_value": "她",
+                  "replacement_value": "秦砚",
+                  "source_start": 0,
+                  "source_end": 1,
+                  "output_start": 0,
+                  "output_end": 2
+                }
+              ]
+            }
+          ],
+          "slot_replacements": [
+            {
+              "slot_name": "character",
+              "source_value": "他",
+              "replacement_value": "秦砚",
+              "source_start": 11,
+              "source_end": 12,
+              "output_start": 11,
+              "output_end": 13
+            },
+            {
+              "slot_name": "character",
+              "source_value": "她",
+              "replacement_value": "秦砚",
+              "source_start": 0,
+              "source_end": 1,
+              "output_start": 0,
+              "output_end": 2
+            },
+            {
+              "slot_name": "character",
+              "source_value": "她",
+              "replacement_value": "秦砚",
+              "source_start": 0,
+              "source_end": 1,
+              "output_start": 0,
+              "output_end": 2
+            }
+          ],
+          "transitions": [
+            {
+              "transition_alias": "item-1",
+              "gap_alias": "item-1",
+              "after_piece_alias": "item-1",
+              "before_piece_alias": "item-2",
+              "decision": "direct_join",
+              "strategy": "direct_join",
+              "text": "",
+              "text_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "output_start": 20,
+              "output_end": 20,
+              "approved": true,
+              "reason": "direct join between selected blueprint pieces",
+              "replacement_piece_alias": null,
+              "replacement_node_alias": null
+            },
+            {
+              "transition_alias": "item-2",
+              "gap_alias": "item-2",
+              "after_piece_alias": "item-2",
+              "before_piece_alias": "item-3",
+              "decision": "insert_transition",
+              "strategy": "heuristic_bridge_sentence",
+              "text": "沉默在两人之间又压低了一寸。",
+              "text_hash": "5ce95beaf0ab0d042b0becb4e2493ccf0e0a3c6935505c4336799fc70c52f894",
+              "output_start": 36,
+              "output_end": 50,
+              "approved": true,
+              "reason": "bridge pressure beat into withheld-answer beat",
+              "replacement_piece_alias": null,
+              "replacement_node_alias": null
+            }
+          ],
+          "assembled_text": "火光在旧市集尽头一压，秦砚没有立刻回头。\n秦砚的影子贴在门槛内侧。\n沉默在两人之间又压低了一寸。\n秦砚只垂眼看着掌心旧痕。",
+          "chapter_text_after_insertion": "秦砚停在旧市集边缘。\n火光在旧市集尽头一压，秦砚没有立刻回头。\n秦砚的影子贴在门槛内侧。\n沉默在两人之间又压低了一寸。\n秦砚只垂眼看着掌心旧痕。",
+          "ready_for_insertion": true,
+          "gate": {
+            "passed": true,
+            "status": "passed",
+            "errors": [],
+            "pieces": [
+              {
+                "piece_alias": "item-1",
+                "node_alias": "item-1",
+                "should_block": false,
+                "four_gram_containment_ratio": 0.705882,
+                "longest_common_substring_ratio": 0.55,
+                "violations": []
+              },
+              {
+                "piece_alias": "item-2",
+                "node_alias": "item-2",
+                "should_block": false,
+                "four_gram_containment_ratio": 0.777778,
+                "longest_common_substring_ratio": 0.833333,
+                "violations": []
+              },
+              {
+                "piece_alias": "item-3",
+                "node_alias": "item-3",
+                "should_block": false,
+                "four_gram_containment_ratio": 0.777778,
+                "longest_common_substring_ratio": 0.833333,
+                "violations": []
+              }
+            ]
+          },
+          "audit": {
+            "passed": true,
+            "status": "passed",
+            "errors": [],
+            "pieces": [
+              {
+                "piece_alias": "item-1",
+                "node_alias": "item-1",
+                "passed": true,
+                "preserved_span_count": 2,
+                "mismatched_span_count": 0,
+                "violations": []
+              },
+              {
+                "piece_alias": "item-2",
+                "node_alias": "item-2",
+                "passed": true,
+                "preserved_span_count": 1,
+                "mismatched_span_count": 0,
+                "violations": []
+              },
+              {
+                "piece_alias": "item-3",
+                "node_alias": "item-3",
+                "passed": true,
+                "preserved_span_count": 1,
+                "mismatched_span_count": 0,
+                "violations": []
+              }
+            ],
+            "transitions": [
+              {
+                "transition_alias": "item-1",
+                "gap_alias": "item-1",
+                "after_piece_alias": "item-1",
+                "before_piece_alias": "item-2",
+                "decision": "direct_join",
+                "passed": true,
+                "violations": []
+              },
+              {
+                "transition_alias": "item-2",
+                "gap_alias": "item-2",
+                "after_piece_alias": "item-2",
+                "before_piece_alias": "item-3",
+                "decision": "insert_transition",
+                "passed": true,
+                "violations": []
+              }
+            ]
+          }
+        },
+        "disabled_blueprint_candidates": {
+          "query_context": {
+            "scene_type": "doorway_confrontation",
+            "emotion_target": "restrained_pressure",
+            "pacing_target": "slow_tension",
+            "narrative_position": "current_insertion",
+            "commercial_mechanic": "withheld-answer-hook",
+            "character_states": [
+              "秦砚 guarded"
+            ],
+            "required_narrative_functions": [
+              "support_current_chapter",
+              "raise_pressure",
+              "withhold_answer"
+            ],
+            "chapter_context": {
+              "chapter_number": 1,
+              "current_draft_text": "秦砚停在旧市集边缘。",
+              "insertion_offset": 10,
+              "previous_chapter_summary": "旧市集起火，有人在火光里靠近。",
+              "character_snapshots": [
+                {
+                  "character": "秦砚",
+                  "state": "guarded",
+                  "allowed_knowledge": [
+                    "市集起火"
+                  ],
+                  "forbidden_knowledge": [
+                    "对方真实目的"
+                  ]
+                }
+              ]
+            },
+            "scope": {
+              "library_ids": [],
+              "reuse_policies": [
+                "verbatim_ok"
+              ],
+              "include_anchor_ids_count": 0,
+              "exclude_anchor_ids_count": 0
+            }
+          },
+          "feedback_applied": false,
+          "feedback_summary": "none",
+          "candidates": [
+            {
+              "blueprint_alias": "item-1",
+              "strategy": "score_focus_m1",
+              "beats": [
+                {
+                  "beat_alias": "item-1",
+                  "beat_index": 0,
+                  "role_in_beat": "opening_source_sentence",
+                  "narrative_function": "support_current_chapter",
+                  "node_aliases": [
+                    "item-1"
+                  ]
+                },
+                {
+                  "beat_alias": "item-2",
+                  "beat_index": 1,
+                  "role_in_beat": "supporting_source_sentence",
+                  "narrative_function": "raise_pressure",
+                  "node_aliases": [
+                    "item-2"
+                  ]
+                },
+                {
+                  "beat_alias": "item-3",
+                  "beat_index": 2,
+                  "role_in_beat": "supporting_source_sentence",
+                  "narrative_function": "withhold_answer",
+                  "node_aliases": [
+                    "item-3"
+                  ]
+                }
+              ],
+              "source_distribution": [
+                {
+                  "library_alias": "item-1",
+                  "anchor_id": 201,
+                  "node_count": 3
+                }
+              ],
+              "coverage_score": 0.409485,
+              "gap_reasons": [
+                "single_library_source",
+                "single_anchor_source"
+              ],
+              "feedback_reason": "initial_candidate"
+            },
+            {
+              "blueprint_alias": "item-2",
+              "strategy": "source_diversity_m1",
+              "beats": [
+                {
+                  "beat_alias": "item-4",
+                  "beat_index": 0,
+                  "role_in_beat": "opening_source_sentence",
+                  "narrative_function": "support_current_chapter",
+                  "node_aliases": [
+                    "item-1"
+                  ]
+                }
+              ],
+              "source_distribution": [
+                {
+                  "library_alias": "item-1",
+                  "anchor_id": 201,
+                  "node_count": 1
+                }
+              ],
+              "coverage_score": 0.310647,
+              "gap_reasons": [
+                "insufficient_beats",
+                "single_library_source",
+                "single_anchor_source"
+              ],
+              "feedback_reason": "initial_candidate"
+            },
+            {
+              "blueprint_alias": "item-3",
+              "strategy": "fallback_single_source_m1",
+              "beats": [
+                {
+                  "beat_alias": "item-5",
+                  "beat_index": 0,
+                  "role_in_beat": "opening_source_sentence",
+                  "narrative_function": "support_current_chapter",
+                  "node_aliases": [
+                    "item-2"
+                  ]
+                }
+              ],
+              "source_distribution": [
+                {
+                  "library_alias": "item-1",
+                  "anchor_id": 201,
+                  "node_count": 1
+                }
+              ],
+              "coverage_score": 0.3069,
+              "gap_reasons": [
+                "insufficient_beats",
+                "single_library_source",
+                "single_anchor_source"
+              ],
+              "feedback_reason": "initial_candidate"
+            }
+          ]
+        },
+        "disabled_selected_draft": {
+          "query_context": {
+            "scene_type": "doorway_confrontation",
+            "emotion_target": "restrained_pressure",
+            "pacing_target": "slow_tension",
+            "narrative_position": "current_insertion",
+            "commercial_mechanic": "withheld-answer-hook",
+            "character_states": [
+              "秦砚 guarded"
+            ],
+            "required_narrative_functions": [
+              "support_current_chapter",
+              "raise_pressure",
+              "withhold_answer"
+            ],
+            "chapter_context": {
+              "chapter_number": 1,
+              "current_draft_text": "秦砚停在旧市集边缘。",
+              "insertion_offset": 10,
+              "previous_chapter_summary": "旧市集起火，有人在火光里靠近。",
+              "character_snapshots": [
+                {
+                  "character": "秦砚",
+                  "state": "guarded",
+                  "allowed_knowledge": [
+                    "市集起火"
+                  ],
+                  "forbidden_knowledge": [
+                    "对方真实目的"
+                  ]
+                }
+              ]
+            },
+            "scope": {
+              "library_ids": [],
+              "reuse_policies": [
+                "verbatim_ok"
+              ],
+              "include_anchor_ids_count": 0,
+              "exclude_anchor_ids_count": 0
+            }
+          },
+          "blueprint": {
+            "strategy": "score_focus_m1",
+            "beats": [
+              {
+                "beat_alias": "item-1",
+                "beat_index": 0,
+                "role_in_beat": "opening_source_sentence",
+                "narrative_function": "support_current_chapter",
+                "node_aliases": [
+                  "item-1"
+                ]
+              },
+              {
+                "beat_alias": "item-2",
+                "beat_index": 1,
+                "role_in_beat": "supporting_source_sentence",
+                "narrative_function": "raise_pressure",
+                "node_aliases": [
+                  "item-2"
+                ]
+              },
+              {
+                "beat_alias": "item-3",
+                "beat_index": 2,
+                "role_in_beat": "supporting_source_sentence",
+                "narrative_function": "withhold_answer",
+                "node_aliases": [
+                  "item-3"
+                ]
+              }
+            ]
+          },
+          "pieces": [
+            {
+              "piece_alias": "item-1",
+              "beat_alias": "item-1",
+              "candidate_alias": "item-1",
+              "node_alias": "item-1",
+              "library_alias": "item-1",
+              "text_hash": "sha256-project-doorway-s1",
+              "reuse_policy": "verbatim_ok",
+              "license_state": "public_domain",
+              "output_text": "秦砚没有立刻开口，只把钥匙扣在掌心。",
+              "preserved_text_hash": "527d2653fce533c62273c76f1725d1c986d29906732d277e83669b5f322c7dce",
+              "preserved_hash_matches": true,
+              "preserved_spans": [
+                {
+                  "span_alias": "item-1",
+                  "source_start": 1,
+                  "source_end": 17,
+                  "output_start": 2,
+                  "output_end": 18,
+                  "source_text_hash": "527d2653fce533c62273c76f1725d1c986d29906732d277e83669b5f322c7dce",
+                  "output_text_hash": "527d2653fce533c62273c76f1725d1c986d29906732d277e83669b5f322c7dce",
+                  "matches": true
+                }
+              ],
+              "slot_replacements": [
+                {
+                  "slot_name": "character",
+                  "source_value": "她",
+                  "replacement_value": "秦砚",
+                  "source_start": 0,
+                  "source_end": 1,
+                  "output_start": 0,
+                  "output_end": 2
+                }
+              ]
+            },
+            {
+              "piece_alias": "item-2",
+              "beat_alias": "item-2",
+              "candidate_alias": "item-2",
+              "node_alias": "item-2",
+              "library_alias": "item-1",
+              "text_hash": "sha256-project-doorway-s2",
+              "reuse_policy": "verbatim_ok",
+              "license_state": "public_domain",
+              "output_text": "秦砚把门栓慢慢推回去。",
+              "preserved_text_hash": "9adb11e14b87f054644a1806bd5e595b14046e8017053c956e170047f777b221",
+              "preserved_hash_matches": true,
+              "preserved_spans": [
+                {
+                  "span_alias": "item-2",
+                  "source_start": 1,
+                  "source_end": 10,
+                  "output_start": 2,
+                  "output_end": 11,
+                  "source_text_hash": "9adb11e14b87f054644a1806bd5e595b14046e8017053c956e170047f777b221",
+                  "output_text_hash": "9adb11e14b87f054644a1806bd5e595b14046e8017053c956e170047f777b221",
+                  "matches": true
+                }
+              ],
+              "slot_replacements": [
+                {
+                  "slot_name": "character",
+                  "source_value": "她",
+                  "replacement_value": "秦砚",
+                  "source_start": 0,
+                  "source_end": 1,
+                  "output_start": 0,
+                  "output_end": 2
+                }
+              ]
+            },
+            {
+              "piece_alias": "item-3",
+              "beat_alias": "item-3",
+              "candidate_alias": "item-3",
+              "node_alias": "item-3",
+              "library_alias": "item-1",
+              "text_hash": "sha256-project-doorway-s3",
+              "reuse_policy": "verbatim_ok",
+              "license_state": "public_domain",
+              "output_text": "秦砚的影子贴在门槛内侧。",
+              "preserved_text_hash": "f4099924c155542706a2a5ddb63af97e015768ab40fab029ee104b4f0b31a29f",
+              "preserved_hash_matches": true,
+              "preserved_spans": [
+                {
+                  "span_alias": "item-3",
+                  "source_start": 1,
+                  "source_end": 11,
+                  "output_start": 2,
+                  "output_end": 12,
+                  "source_text_hash": "f4099924c155542706a2a5ddb63af97e015768ab40fab029ee104b4f0b31a29f",
+                  "output_text_hash": "f4099924c155542706a2a5ddb63af97e015768ab40fab029ee104b4f0b31a29f",
+                  "matches": true
+                }
+              ],
+              "slot_replacements": [
+                {
+                  "slot_name": "character",
+                  "source_value": "她",
+                  "replacement_value": "秦砚",
+                  "source_start": 0,
+                  "source_end": 1,
+                  "output_start": 0,
+                  "output_end": 2
+                }
+              ]
+            }
+          ],
+          "slot_replacements": [
+            {
+              "slot_name": "character",
+              "source_value": "她",
+              "replacement_value": "秦砚",
+              "source_start": 0,
+              "source_end": 1,
+              "output_start": 0,
+              "output_end": 2
+            },
+            {
+              "slot_name": "character",
+              "source_value": "她",
+              "replacement_value": "秦砚",
+              "source_start": 0,
+              "source_end": 1,
+              "output_start": 0,
+              "output_end": 2
+            },
+            {
+              "slot_name": "character",
+              "source_value": "她",
+              "replacement_value": "秦砚",
+              "source_start": 0,
+              "source_end": 1,
+              "output_start": 0,
+              "output_end": 2
+            }
+          ],
+          "transitions": [
+            {
+              "transition_alias": "item-1",
+              "gap_alias": "item-1",
+              "after_piece_alias": "item-1",
+              "before_piece_alias": "item-2",
+              "decision": "direct_join",
+              "strategy": "direct_join",
+              "text": "",
+              "text_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "output_start": 18,
+              "output_end": 18,
+              "approved": true,
+              "reason": "direct join between selected blueprint pieces",
+              "replacement_piece_alias": null,
+              "replacement_node_alias": null
+            },
+            {
+              "transition_alias": "item-2",
+              "gap_alias": "item-2",
+              "after_piece_alias": "item-2",
+              "before_piece_alias": "item-3",
+              "decision": "insert_transition",
+              "strategy": "heuristic_bridge_sentence",
+              "text": "沉默在两人之间又压低了一寸。",
+              "text_hash": "5ce95beaf0ab0d042b0becb4e2493ccf0e0a3c6935505c4336799fc70c52f894",
+              "output_start": 33,
+              "output_end": 47,
+              "approved": true,
+              "reason": "bridge pressure beat into withheld-answer beat",
+              "replacement_piece_alias": null,
+              "replacement_node_alias": null
+            }
+          ],
+          "assembled_text": "秦砚没有立刻开口，只把钥匙扣在掌心。\n秦砚把门栓慢慢推回去。\n沉默在两人之间又压低了一寸。\n秦砚的影子贴在门槛内侧。",
+          "chapter_text_after_insertion": "秦砚停在旧市集边缘。\n秦砚没有立刻开口，只把钥匙扣在掌心。\n秦砚把门栓慢慢推回去。\n沉默在两人之间又压低了一寸。\n秦砚的影子贴在门槛内侧。",
+          "ready_for_insertion": true,
+          "gate": {
+            "passed": true,
+            "status": "passed",
+            "errors": [],
+            "pieces": [
+              {
+                "piece_alias": "item-1",
+                "node_alias": "item-1",
+                "should_block": false,
+                "four_gram_containment_ratio": 0.866667,
+                "longest_common_substring_ratio": 0.888889,
+                "violations": []
+              },
+              {
+                "piece_alias": "item-2",
+                "node_alias": "item-2",
+                "should_block": false,
+                "four_gram_containment_ratio": 0.75,
+                "longest_common_substring_ratio": 0.818182,
+                "violations": []
+              },
+              {
+                "piece_alias": "item-3",
+                "node_alias": "item-3",
+                "should_block": false,
+                "four_gram_containment_ratio": 0.777778,
+                "longest_common_substring_ratio": 0.833333,
+                "violations": []
+              }
+            ]
+          },
+          "audit": {
+            "passed": true,
+            "status": "passed",
+            "errors": [],
+            "pieces": [
+              {
+                "piece_alias": "item-1",
+                "node_alias": "item-1",
+                "passed": true,
+                "preserved_span_count": 1,
+                "mismatched_span_count": 0,
+                "violations": []
+              },
+              {
+                "piece_alias": "item-2",
+                "node_alias": "item-2",
+                "passed": true,
+                "preserved_span_count": 1,
+                "mismatched_span_count": 0,
+                "violations": []
+              },
+              {
+                "piece_alias": "item-3",
+                "node_alias": "item-3",
+                "passed": true,
+                "preserved_span_count": 1,
+                "mismatched_span_count": 0,
+                "violations": []
+              }
+            ],
+            "transitions": [
+              {
+                "transition_alias": "item-1",
+                "gap_alias": "item-1",
+                "after_piece_alias": "item-1",
+                "before_piece_alias": "item-2",
+                "decision": "direct_join",
+                "passed": true,
+                "violations": []
+              },
+              {
+                "transition_alias": "item-2",
+                "gap_alias": "item-2",
+                "after_piece_alias": "item-2",
+                "before_piece_alias": "item-3",
+                "decision": "insert_transition",
+                "passed": true,
+                "violations": []
+              }
+            ]
+          }
+        },
+        "draft_candidates": {
+          "query_context": {
+            "scene_type": "doorway_confrontation",
+            "emotion_target": "restrained_pressure",
+            "pacing_target": "slow_tension",
+            "narrative_position": "current_insertion",
+            "commercial_mechanic": "withheld-answer-hook",
+            "character_states": [
+              "秦砚 guarded"
+            ],
+            "required_narrative_functions": [
+              "support_current_chapter",
+              "raise_pressure",
+              "withhold_answer"
+            ],
+            "chapter_context": {
+              "chapter_number": 1,
+              "current_draft_text": "秦砚停在旧市集边缘。",
+              "insertion_offset": 10,
+              "previous_chapter_summary": "旧市集起火，有人在火光里靠近。",
+              "character_snapshots": [
+                {
+                  "character": "秦砚",
+                  "state": "guarded",
+                  "allowed_knowledge": [
+                    "市集起火"
+                  ],
+                  "forbidden_knowledge": [
+                    "对方真实目的"
+                  ]
+                }
+              ]
+            },
+            "scope": {
+              "library_ids": [],
+              "reuse_policies": [
+                "verbatim_ok"
+              ],
+              "include_anchor_ids_count": 0,
+              "exclude_anchor_ids_count": 0
+            }
+          },
+          "selected_blueprint": {
+            "strategy": "score_focus_m1",
+            "beats": [
+              {
+                "beat_alias": "item-1",
+                "beat_index": 0,
+                "role_in_beat": "opening_source_sentence",
+                "narrative_function": "support_current_chapter",
+                "node_aliases": [
+                  "item-1"
+                ]
+              },
+              {
+                "beat_alias": "item-2",
+                "beat_index": 1,
+                "role_in_beat": "supporting_source_sentence",
+                "narrative_function": "raise_pressure",
+                "node_aliases": [
+                  "item-2"
+                ]
+              },
+              {
+                "beat_alias": "item-3",
+                "beat_index": 2,
+                "role_in_beat": "supporting_source_sentence",
+                "narrative_function": "withhold_answer",
+                "node_aliases": [
+                  "item-3"
+                ]
+              }
+            ]
+          },
+          "candidates": [
+            {
+              "candidate_alias": "item-1",
+              "strategy": "source_variant_1",
+              "explanation": "Uses the selected blueprint's primary source nodes with slot-only transfer.",
+              "draft": {
+                "query_context": {
+                  "scene_type": "doorway_confrontation",
+                  "emotion_target": "restrained_pressure",
+                  "pacing_target": "slow_tension",
+                  "narrative_position": "current_insertion",
+                  "commercial_mechanic": "withheld-answer-hook",
+                  "character_states": [
+                    "秦砚 guarded"
+                  ],
+                  "required_narrative_functions": [
+                    "support_current_chapter",
+                    "raise_pressure",
+                    "withhold_answer"
+                  ],
+                  "chapter_context": {
+                    "chapter_number": 1,
+                    "current_draft_text": "秦砚停在旧市集边缘。",
+                    "insertion_offset": 10,
+                    "previous_chapter_summary": "旧市集起火，有人在火光里靠近。",
+                    "character_snapshots": [
+                      {
+                        "character": "秦砚",
+                        "state": "guarded",
+                        "allowed_knowledge": [
+                          "市集起火"
+                        ],
+                        "forbidden_knowledge": [
+                          "对方真实目的"
+                        ]
+                      }
+                    ]
+                  },
+                  "scope": {
+                    "library_ids": [],
+                    "reuse_policies": [
+                      "verbatim_ok"
+                    ],
+                    "include_anchor_ids_count": 0,
+                    "exclude_anchor_ids_count": 0
+                  }
+                },
+                "blueprint": {
+                  "strategy": "score_focus_m1:source_variant_1",
+                  "beats": [
+                    {
+                      "beat_alias": "item-1",
+                      "beat_index": 0,
+                      "role_in_beat": "opening_source_sentence",
+                      "narrative_function": "support_current_chapter",
+                      "node_aliases": [
+                        "item-1"
+                      ]
+                    },
+                    {
+                      "beat_alias": "item-2",
+                      "beat_index": 1,
+                      "role_in_beat": "supporting_source_sentence",
+                      "narrative_function": "raise_pressure",
+                      "node_aliases": [
+                        "item-2"
+                      ]
+                    },
+                    {
+                      "beat_alias": "item-3",
+                      "beat_index": 2,
+                      "role_in_beat": "supporting_source_sentence",
+                      "narrative_function": "withhold_answer",
+                      "node_aliases": [
+                        "item-3"
+                      ]
+                    }
+                  ]
+                },
+                "pieces": [
+                  {
+                    "piece_alias": "item-1",
+                    "beat_alias": "item-1",
+                    "candidate_alias": "item-1",
+                    "node_alias": "item-1",
+                    "library_alias": "item-1",
+                    "text_hash": "sha256-workspace-market-s1",
+                    "reuse_policy": "verbatim_ok",
+                    "license_state": "public_domain",
+                    "output_text": "火光在旧市集尽头一压，秦砚没有立刻回头。",
+                    "preserved_text_hash": "bf6bc14c737d3c6e84f99f7a4f40b23cafe5a1834c714686f1883931d381a69e",
+                    "preserved_hash_matches": true,
+                    "preserved_spans": [
+                      {
+                        "span_alias": "item-1",
+                        "source_start": 0,
+                        "source_end": 11,
+                        "output_start": 0,
+                        "output_end": 11,
+                        "source_text_hash": "41643cf0aa7ef457b0cf97738a52516eabc628180f8288162cd283c609fe1158",
+                        "output_text_hash": "41643cf0aa7ef457b0cf97738a52516eabc628180f8288162cd283c609fe1158",
+                        "matches": true
+                      },
+                      {
+                        "span_alias": "item-2",
+                        "source_start": 12,
+                        "source_end": 19,
+                        "output_start": 13,
+                        "output_end": 20,
+                        "source_text_hash": "ecf050ee13b6ec24d4db1cfbbb508fb4168677677d5b0df45046ca63f827c201",
+                        "output_text_hash": "ecf050ee13b6ec24d4db1cfbbb508fb4168677677d5b0df45046ca63f827c201",
+                        "matches": true
+                      }
+                    ],
+                    "slot_replacements": [
+                      {
+                        "slot_name": "character",
+                        "source_value": "他",
+                        "replacement_value": "秦砚",
+                        "source_start": 11,
+                        "source_end": 12,
+                        "output_start": 11,
+                        "output_end": 13
+                      }
+                    ]
+                  },
+                  {
+                    "piece_alias": "item-2",
+                    "beat_alias": "item-2",
+                    "candidate_alias": "item-2",
+                    "node_alias": "item-2",
+                    "library_alias": "item-2",
+                    "text_hash": "sha256-project-doorway-s3",
+                    "reuse_policy": "verbatim_ok",
+                    "license_state": "public_domain",
+                    "output_text": "秦砚的影子贴在门槛内侧。",
+                    "preserved_text_hash": "f4099924c155542706a2a5ddb63af97e015768ab40fab029ee104b4f0b31a29f",
+                    "preserved_hash_matches": true,
+                    "preserved_spans": [
+                      {
+                        "span_alias": "item-3",
+                        "source_start": 1,
+                        "source_end": 11,
+                        "output_start": 2,
+                        "output_end": 12,
+                        "source_text_hash": "f4099924c155542706a2a5ddb63af97e015768ab40fab029ee104b4f0b31a29f",
+                        "output_text_hash": "f4099924c155542706a2a5ddb63af97e015768ab40fab029ee104b4f0b31a29f",
+                        "matches": true
+                      }
+                    ],
+                    "slot_replacements": [
+                      {
+                        "slot_name": "character",
+                        "source_value": "她",
+                        "replacement_value": "秦砚",
+                        "source_start": 0,
+                        "source_end": 1,
+                        "output_start": 0,
+                        "output_end": 2
+                      }
+                    ]
+                  },
+                  {
+                    "piece_alias": "item-3",
+                    "beat_alias": "item-3",
+                    "candidate_alias": "item-3",
+                    "node_alias": "item-3",
+                    "library_alias": "item-2",
+                    "text_hash": "sha256-project-doorway-s4",
+                    "reuse_policy": "verbatim_ok",
+                    "license_state": "public_domain",
+                    "output_text": "秦砚只垂眼看着掌心旧痕。",
+                    "preserved_text_hash": "6a312094077af129fb07434677f1aad1f4f91484822867a540c640d67f9fa23f",
+                    "preserved_hash_matches": true,
+                    "preserved_spans": [
+                      {
+                        "span_alias": "item-4",
+                        "source_start": 1,
+                        "source_end": 11,
+                        "output_start": 2,
+                        "output_end": 12,
+                        "source_text_hash": "6a312094077af129fb07434677f1aad1f4f91484822867a540c640d67f9fa23f",
+                        "output_text_hash": "6a312094077af129fb07434677f1aad1f4f91484822867a540c640d67f9fa23f",
+                        "matches": true
+                      }
+                    ],
+                    "slot_replacements": [
+                      {
+                        "slot_name": "character",
+                        "source_value": "她",
+                        "replacement_value": "秦砚",
+                        "source_start": 0,
+                        "source_end": 1,
+                        "output_start": 0,
+                        "output_end": 2
+                      }
+                    ]
+                  }
+                ],
+                "slot_replacements": [
+                  {
+                    "slot_name": "character",
+                    "source_value": "他",
+                    "replacement_value": "秦砚",
+                    "source_start": 11,
+                    "source_end": 12,
+                    "output_start": 11,
+                    "output_end": 13
+                  },
+                  {
+                    "slot_name": "character",
+                    "source_value": "她",
+                    "replacement_value": "秦砚",
+                    "source_start": 0,
+                    "source_end": 1,
+                    "output_start": 0,
+                    "output_end": 2
+                  },
+                  {
+                    "slot_name": "character",
+                    "source_value": "她",
+                    "replacement_value": "秦砚",
+                    "source_start": 0,
+                    "source_end": 1,
+                    "output_start": 0,
+                    "output_end": 2
+                  }
+                ],
+                "transitions": [
+                  {
+                    "transition_alias": "item-1",
+                    "gap_alias": "item-1",
+                    "after_piece_alias": "item-1",
+                    "before_piece_alias": "item-2",
+                    "decision": "direct_join",
+                    "strategy": "direct_join",
+                    "text": "",
+                    "text_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                    "output_start": 20,
+                    "output_end": 20,
+                    "approved": true,
+                    "reason": "direct join between selected blueprint pieces",
+                    "replacement_piece_alias": null,
+                    "replacement_node_alias": null
+                  },
+                  {
+                    "transition_alias": "item-2",
+                    "gap_alias": "item-2",
+                    "after_piece_alias": "item-2",
+                    "before_piece_alias": "item-3",
+                    "decision": "insert_transition",
+                    "strategy": "heuristic_bridge_sentence",
+                    "text": "沉默在两人之间又压低了一寸。",
+                    "text_hash": "5ce95beaf0ab0d042b0becb4e2493ccf0e0a3c6935505c4336799fc70c52f894",
+                    "output_start": 36,
+                    "output_end": 50,
+                    "approved": true,
+                    "reason": "bridge pressure beat into withheld-answer beat",
+                    "replacement_piece_alias": null,
+                    "replacement_node_alias": null
+                  }
+                ],
+                "assembled_text": "火光在旧市集尽头一压，秦砚没有立刻回头。\n秦砚的影子贴在门槛内侧。\n沉默在两人之间又压低了一寸。\n秦砚只垂眼看着掌心旧痕。",
+                "chapter_text_after_insertion": "秦砚停在旧市集边缘。\n火光在旧市集尽头一压，秦砚没有立刻回头。\n秦砚的影子贴在门槛内侧。\n沉默在两人之间又压低了一寸。\n秦砚只垂眼看着掌心旧痕。",
+                "ready_for_insertion": true,
+                "gate": {
+                  "passed": true,
+                  "status": "passed",
+                  "errors": [],
+                  "pieces": [
+                    {
+                      "piece_alias": "item-1",
+                      "node_alias": "item-1",
+                      "should_block": false,
+                      "four_gram_containment_ratio": 0.705882,
+                      "longest_common_substring_ratio": 0.55,
+                      "violations": []
+                    },
+                    {
+                      "piece_alias": "item-2",
+                      "node_alias": "item-2",
+                      "should_block": false,
+                      "four_gram_containment_ratio": 0.777778,
+                      "longest_common_substring_ratio": 0.833333,
+                      "violations": []
+                    },
+                    {
+                      "piece_alias": "item-3",
+                      "node_alias": "item-3",
+                      "should_block": false,
+                      "four_gram_containment_ratio": 0.777778,
+                      "longest_common_substring_ratio": 0.833333,
+                      "violations": []
+                    }
+                  ]
+                },
+                "audit": {
+                  "passed": true,
+                  "status": "passed",
+                  "errors": [],
+                  "pieces": [
+                    {
+                      "piece_alias": "item-1",
+                      "node_alias": "item-1",
+                      "passed": true,
+                      "preserved_span_count": 2,
+                      "mismatched_span_count": 0,
+                      "violations": []
+                    },
+                    {
+                      "piece_alias": "item-2",
+                      "node_alias": "item-2",
+                      "passed": true,
+                      "preserved_span_count": 1,
+                      "mismatched_span_count": 0,
+                      "violations": []
+                    },
+                    {
+                      "piece_alias": "item-3",
+                      "node_alias": "item-3",
+                      "passed": true,
+                      "preserved_span_count": 1,
+                      "mismatched_span_count": 0,
+                      "violations": []
+                    }
+                  ],
+                  "transitions": [
+                    {
+                      "transition_alias": "item-1",
+                      "gap_alias": "item-1",
+                      "after_piece_alias": "item-1",
+                      "before_piece_alias": "item-2",
+                      "decision": "direct_join",
+                      "passed": true,
+                      "violations": []
+                    },
+                    {
+                      "transition_alias": "item-2",
+                      "gap_alias": "item-2",
+                      "after_piece_alias": "item-2",
+                      "before_piece_alias": "item-3",
+                      "decision": "insert_transition",
+                      "passed": true,
+                      "violations": []
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

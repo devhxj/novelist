@@ -1,0 +1,16 @@
+D:\repository\own\goink\src\Novelist.Core\bin\Release\net10.0\Novelist.Core.deps.json
+D:\repository\own\goink\src\Novelist.Core\bin\Release\net10.0\Novelist.Core.dll
+D:\repository\own\goink\src\Novelist.Core\bin\Release\net10.0\Novelist.Core.pdb
+D:\repository\own\goink\src\Novelist.Core\bin\Release\net10.0\Novelist.Contracts.dll
+D:\repository\own\goink\src\Novelist.Core\bin\Release\net10.0\Novelist.Contracts.pdb
+D:\repository\own\goink\src\Novelist.Core\obj\Release\net10.0\Novelist.Core.csproj.AssemblyReference.cache
+D:\repository\own\goink\src\Novelist.Core\obj\Release\net10.0\Novelist.Core.GeneratedMSBuildEditorConfig.editorconfig
+D:\repository\own\goink\src\Novelist.Core\obj\Release\net10.0\Novelist.Core.AssemblyInfoInputs.cache
+D:\repository\own\goink\src\Novelist.Core\obj\Release\net10.0\Novelist.Core.AssemblyInfo.cs
+D:\repository\own\goink\src\Novelist.Core\obj\Release\net10.0\Novelist.Core.csproj.CoreCompileInputs.cache
+D:\repository\own\goink\src\Novelist.Core\obj\Release\net10.0\Novelist.Core.sourcelink.json
+D:\repository\own\goink\src\Novelist.Core\obj\Release\net10.0\Novelist.7F7ADCC2.Up2Date
+D:\repository\own\goink\src\Novelist.Core\obj\Release\net10.0\Novelist.Core.dll
+D:\repository\own\goink\src\Novelist.Core\obj\Release\net10.0\refint\Novelist.Core.dll
+D:\repository\own\goink\src\Novelist.Core\obj\Release\net10.0\Novelist.Core.pdb
+D:\repository\own\goink\src\Novelist.Core\obj\Release\net10.0\ref\Novelist.Core.dll

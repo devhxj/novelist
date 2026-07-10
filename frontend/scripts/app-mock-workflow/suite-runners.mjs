@@ -383,8 +383,58 @@ async function verifyCorpusLibraryAnalysisResultsTab(page, corpusTabs) {
   await assertCorpusLibraryNoChapterWritingBridgeCalls(page, 'corpus library analysis results tab')
 }
 
+async function verifyTechniqueSpecimenBudgetResumeWorkflow(page) {
+ const exhausted = await page.evaluate(async () => window.novelist.invoke(
+ 'StartReferenceCorpusTechniqueSpecimenAnalysis',
+ {
+ args: [{
+ novel_id: 42,
+ anchor_id: 101,
+ source_node_type: 'passage',
+ min_observation_confidence: 0.7,
+ run_id: 'technique-budget-resume-mock',
+ token_budget: 24,
+ resume: false,
+ }],
+ },
+ { timeoutMs: null },
+ ))
+
+ assert.equal(exhausted.status, 'budget_exhausted')
+ assert.equal(exhausted.token_budget, 24)
+ assert.equal(exhausted.tokens_spent, 24)
+ assert.equal(exhausted.resume_cursor, 'passage:1')
+ assert.equal(exhausted.processed_nodes, 1)
+ assert.equal(exhausted.completed_at, null)
+
+ const resumed = await page.evaluate(async () => window.novelist.invoke(
+ 'StartReferenceCorpusTechniqueSpecimenAnalysis',
+ {
+ args: [{
+ novel_id: 42,
+ anchor_id: 101,
+ source_node_type: 'passage',
+ min_observation_confidence: 0.7,
+ run_id: 'technique-budget-resume-mock',
+ token_budget: 48,
+ resume: true,
+ }],
+ },
+ { timeoutMs: null },
+ ))
+
+ assert.equal(resumed.status, 'completed')
+ assert.equal(resumed.token_budget, 48)
+ assert.equal(resumed.tokens_spent, 48)
+ assert.equal(resumed.resume_cursor, 'passage:2')
+ assert.equal(resumed.processed_nodes, 2)
+ assert.equal(resumed.specimen_count, 2)
+ assert(resumed.completed_at, 'resumed technique specimen run must have a completion time')
+}
+
 async function verifyCorpusLibraryWorkflow(page) {
-  await clickActivity(page, '素材库')
+ await verifyTechniqueSpecimenBudgetResumeWorkflow(page)
+ await clickActivity(page, '素材库')
   await expectVisible(page.getByRole('heading', { name: '语料库管理' }), 'corpus library heading')
   const corpusTabs = page.getByTestId('corpus-library-tabs')
   await expectVisible(corpusTabs, 'corpus library task tabs')
@@ -1485,8 +1535,12 @@ async function verifyChapterReferenceWorkflow(page) {
   await expectVisible(drawer.getByTestId('chapter-corpus-draft-diff').getByText(selectedCorpusDraft.pieces[1].output_text), 'chapter corpus selected insertion preview second source text')
   await expectVisible(drawer.getByTestId('chapter-corpus-draft-transition').getByText(MOCK_CORPUS_TRANSITION_TEXT), 'chapter corpus selected transition preview text')
   assert.equal(await applyCorpusButton.isDisabled(), false, 'ready corpus draft apply button must be enabled')
-  await applyCorpusButton.click()
-  await page.waitForFunction(
+  const insertionAuditCountBefore = await bridgeCallCount(page, 'RecordReferenceCorpusInsertionAudit')
+ await applyCorpusButton.click()
+ const insertionAuditCall = await waitForLatestBridgeCallWithResult(page, 'RecordReferenceCorpusInsertionAudit', insertionAuditCountBefore)
+ assert.equal(insertionAuditCall.args?.[0]?.candidate_id, corpusDraftCall.result.candidates[selectedCorpusDraftIndex].candidate_id, 'corpus insertion audit must bind the selected candidate')
+ assert.deepEqual(insertionAuditCall.args?.[0]?.draft, selectedCorpusDraft, 'corpus insertion audit must submit the complete draft for server-side recomputation')
+   await page.waitForFunction(
     (expectedText) => window.__novelistEditor?.getValue?.() === expectedText,
     selectedCorpusDraft.chapter_text_after_insertion,
     { timeout: 12_000 },

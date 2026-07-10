@@ -1,0 +1,18 @@
+{
+  "schema_id": "reference-corpus.feature.syntax.v1",
+  "schema_version": "reference-corpus-feature-family-v1",
+  "family": "syntax",
+  "node_type": "sentence",
+  "max_observations": 8,
+  "required_observation_fields": ["feature_key", "label", "complexity", "confidence", "evidence_start", "evidence_end", "explanation"],
+  "observation_fields": {
+    "feature_key": { "type": "enum", "enum": ["sentence_pattern", "structure_complexity", "pos_profile"] },
+    "label": { "type": "enum", "enum": ["subject_predicate", "modifier_fronted", "serial_action", "fragment", "question", "exclamation", "mixed"] },
+    "complexity": { "type": "enum", "enum": ["simple", "compound", "complex", "fragment"] },
+    "pos_profile": { "type": "enum", "enum": ["noun_heavy", "verb_heavy", "adjective_heavy", "balanced"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 0.95 },
+    "evidence_start": { "type": "integer", "minimum": 0 },
+    "evidence_end": { "type": "integer", "minimum": 1 },
+    "explanation": { "type": "string", "max_length": 360 }
+  }
+}

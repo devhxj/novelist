@@ -62,9 +62,13 @@ public sealed record ReferenceCorpusFeatureAnalysisRunRequest(
     string ModelProvider,
     string ModelId,
     int? TokenBudget,
-    bool Resume,
-    DateTimeOffset StartedAt,
-    int MaxValidationAttempts = 2);
+bool Resume,
+DateTimeOffset StartedAt,
+ int MaxValidationAttempts = 2)
+{
+ public IReferenceCorpusAnalysisExecutionControl ExecutionControl { get; init; } =
+ ContinueReferenceCorpusAnalysisExecutionControl.Instance;
+}
 
 public sealed record ReferenceCorpusFeatureAnalysisRunResult(
     string RunId,

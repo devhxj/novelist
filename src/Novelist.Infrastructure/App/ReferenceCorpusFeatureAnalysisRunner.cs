@@ -37,9 +37,31 @@ internal sealed class ReferenceCorpusFeatureAnalysisRunner
         await UpsertRunAsync(connection, request, state, observationCount: existingState?.ObservationCount ?? 0, completedAt: null, cancellationToken);
         var startIndex = ResolveStartIndex(workItems, request.Resume ? state.ResumeCursor : null);
 
-        for (var index = startIndex; index < workItems.Count; index++)
-        {
-            var workItem = workItems[index];
+for (var index = startIndex; index < workItems.Count; index++)
+{
+ var executionAction = await request.ExecutionControl.CheckpointAsync(
+ request.RunId,
+ state.ResumeCursor,
+ cancellationToken);
+ if (!string.Equals(executionAction, ReferenceCorpusAnalysisExecutionActions.Proceed, StringComparison.Ordinal))
+ {
+ state = ApplyExecutionAction(state, executionAction);
+ await UpsertRunAsync(
+ connection,
+ request,
+ state,
+ await CountObservationsAsync(connection, request.RunId, cancellationToken),
+ completedAt: null,
+ cancellationToken);
+ return BuildResult(
+ request.RunId,
+ state,
+ await CountObservationsAsync(connection, request.RunId, cancellationToken),
+ processed,
+ diagnostics);
+ }
+
+var workItem = workItems[index];
             var schema = ReferenceCorpusFeatureFamilySchemaRegistry.Get(workItem.Family);
             var previousCursor = state.ResumeCursor;
             ReferenceCorpusFeatureFamilyValidationResult? validation = null;
@@ -167,7 +189,7 @@ internal sealed class ReferenceCorpusFeatureAnalysisRunner
         return BuildResult(request.RunId, state, await CountObservationsAsync(connection, request.RunId, cancellationToken), processed, diagnostics);
     }
 
-    private static bool IsAcceptedValidation(ReferenceCorpusFeatureFamilyValidationResult validation)
+private static bool IsAcceptedValidation(ReferenceCorpusFeatureFamilyValidationResult validation)
     {
         return validation.Status is
             ReferenceCorpusFeatureFamilyValidationStatuses.Passed or
@@ -899,10 +921,22 @@ internal sealed class ReferenceCorpusFeatureAnalysisRunner
         string Family,
         string Cursor);
 
-    private sealed record PersistedRunState(
-        string Status,
-        int? TokenBudget,
-        int TokensSpent,
-        string? ResumeCursor,
-        int ObservationCount);
+private sealed record PersistedRunState(
+string Status,
+int? TokenBudget,
+int TokensSpent,
+string? ResumeCursor,
+int ObservationCount);
+
+ private static ReferenceCorpusAnalysisRunState ApplyExecutionAction(
+ ReferenceCorpusAnalysisRunState state,
+ string action)
+ {
+ return action switch
+ {
+ ReferenceCorpusAnalysisExecutionActions.Pause => ReferenceCorpusAnalysisRunStateMachine.Pause(state),
+ ReferenceCorpusAnalysisExecutionActions.Cancel => ReferenceCorpusAnalysisRunStateMachine.MarkPartialCompleted(state),
+ _ => throw new InvalidOperationException($"Unknown analysis execution action '{action}'.")
+ };
+ }
 }

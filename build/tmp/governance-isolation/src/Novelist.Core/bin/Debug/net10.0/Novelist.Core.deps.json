@@ -1,0 +1,39 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {
+      "Novelist.Core/0.1.0-alpha.1.17": {
+        "dependencies": {
+          "Novelist.Contracts": "1.0.0"
+        },
+        "runtime": {
+          "Novelist.Core.dll": {}
+        }
+      },
+      "Novelist.Contracts/1.0.0": {
+        "runtime": {
+          "Novelist.Contracts.dll": {
+            "assemblyVersion": "0.0.0.0",
+            "fileVersion": "0.1.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Novelist.Core/0.1.0-alpha.1.17": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Novelist.Contracts/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

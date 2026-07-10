@@ -207,6 +207,7 @@ export async function verifyChapterReferenceBridgeCalls(page) {
     'ResumeReferenceOrchestrationRun',
     'GenerateReferenceCorpusBlueprintCandidates',
     'GenerateReferenceCorpusInsertionDraftCandidates',
+ 'RecordReferenceCorpusInsertionAudit',
     'GetReferenceDraftCandidates',
     'GetReferenceAnchoredDraftAudits',
     'CancelReferenceOrchestrationRun',

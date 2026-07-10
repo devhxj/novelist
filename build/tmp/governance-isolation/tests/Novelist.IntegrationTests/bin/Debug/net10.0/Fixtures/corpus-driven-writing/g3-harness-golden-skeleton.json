@@ -1,0 +1,297 @@
+{
+  "schema_version": "corpus-driven-writing-golden-fixtures-v1",
+  "fixtures": [
+    {
+      "fixture_id": "g3-small-rain-doorway",
+      "description": "Small M1-style golden skeleton for deterministic embedding and fake LLM harness tests.",
+      "corpus": {
+        "library_id": "library-rain-doorway",
+        "sources": [
+          {
+            "anchor_id": 101,
+            "title": "雨门小样",
+            "source_quality": "trusted",
+            "license_gate": {
+              "license_state": "authorized",
+              "reuse_policy": "adapted_only",
+              "cleared_for_insertion": true,
+              "max_verbatim_ratio": 0.42
+            },
+            "analysis_runs": [
+              {
+                "run_id": "run-stage1-rain-doorway",
+                "scope": "sentence",
+                "status": "completed",
+                "analyzer_version": "fake-stage1-v1"
+              }
+            ],
+            "text_nodes": [
+              {
+                "node_id": "node-rain-doorway-s1",
+                "node_type": "sentence",
+                "chapter_index": 1,
+                "sequence_index": 1,
+                "text_hash": "sha256-fixture-s1",
+                "text": "雨声贴着门缝往里挤。",
+                "feature_tags": {
+                  "feature_family": "sensory",
+                  "feature_key": "senses",
+                  "pacing": "slow_tension"
+                }
+              },
+              {
+                "node_id": "node-rain-doorway-s2",
+                "node_type": "sentence",
+                "chapter_index": 1,
+                "sequence_index": 2,
+                "text_hash": "sha256-fixture-s2",
+                "text": "她没有立刻开口，只把钥匙扣在掌心。",
+                "feature_tags": {
+                  "feature_family": "emotion",
+                  "feature_key": "emotion_state",
+                  "pov": "close_limited"
+                }
+              },
+              {
+                "node_id": "node-rain-doorway-p1",
+                "node_type": "passage",
+                "chapter_index": 1,
+                "sequence_index": 1,
+                "text_hash": "sha256-fixture-p1",
+                "text": "雨声贴着门缝往里挤。\n她没有立刻开口，只把钥匙扣在掌心。",
+                "feature_tags": {
+                  "feature_family": "narrative_function",
+                  "feature_key": "doorway_pressure",
+                  "technique": "delayed_response"
+                }
+              }
+            ],
+            "materials": [
+              {
+                "material_id": "mat-rain-doorway-s1",
+                "node_id": "node-rain-doorway-s1",
+                "material_type": "sentence"
+              },
+              {
+                "material_id": "mat-rain-doorway-s2",
+                "node_id": "node-rain-doorway-s2",
+                "material_type": "sentence"
+              }
+            ],
+            "feature_observations": [
+              {
+                "observation_id": "obs-rain-doorway-sensory",
+                "run_id": "run-stage1-rain-doorway",
+                "node_id": "node-rain-doorway-s1",
+                "feature_family": "sensory",
+                "feature_key": "senses",
+                "value_kind": "array",
+                "value_text": "auditory",
+                "confidence": 0.92
+              },
+              {
+                "observation_id": "obs-rain-doorway-emotion",
+                "run_id": "run-stage1-rain-doorway",
+                "node_id": "node-rain-doorway-s2",
+                "feature_family": "emotion",
+                "feature_key": "emotion_state",
+                "value_kind": "enum",
+                "value_text": "calm",
+                "confidence": 0.89
+              }
+            ]
+          }
+        ]
+      },
+      "current_chapter_contexts": [
+        {
+          "context_id": "ctx-chapter-3-doorway-offset",
+          "novel_id": 3001,
+          "chapter_number": 3,
+          "current_draft_text": "林岚停在门里，指尖还按着锁。",
+          "insertion_offset": 8,
+          "previous_chapter_summary": "周鸣失约，林岚只知道有人在雨夜靠近。",
+          "character_snapshots": [
+            {
+              "character": "林岚",
+              "state": "guarded",
+              "allowed_knowledge": [
+                "门外有人靠近",
+                "旧钥匙在她手里"
+              ],
+              "forbidden_knowledge": [
+                "周鸣的真实目的"
+              ]
+            }
+          ]
+        }
+      ],
+      "query_contexts": [
+        {
+          "query_id": "query-doorway-pressure",
+          "current_chapter_context_id": "ctx-chapter-3-doorway-offset",
+          "scene_type": "doorway_confrontation",
+          "emotion_target": "restrained_pressure",
+          "pacing_target": "slow_tension",
+          "narrative_position": "pre-reveal",
+          "commercial_mechanic": "withheld-answer-hook",
+          "character_states": [
+            "林岚 guarded"
+          ],
+          "required_narrative_functions": [
+            "raise_pressure",
+            "avoid_reveal"
+          ],
+          "scope": {
+            "library_ids": [
+              "library-rain-doorway"
+            ],
+            "reuse_policies": [
+              "adapted_only"
+            ]
+          }
+        }
+      ],
+      "expected_retrieval": {
+        "query_id": "query-doorway-pressure",
+        "embedding_client": "DeterministicHashEmbeddingClient",
+        "embedding_dimensions": 8,
+        "top_nodes": [
+          {
+            "rank": 1,
+            "node_id": "node-rain-doorway-s1",
+            "reason": "sensory doorway pressure matches the current insertion point",
+            "score": 0.91
+          },
+          {
+            "rank": 2,
+            "node_id": "node-rain-doorway-s2",
+            "reason": "withheld answer supports restrained emotion target",
+            "score": 0.87
+          }
+        ],
+        "excluded_nodes": [
+          {
+            "node_id": "node-hidden-reveal",
+            "reason": "not in fixture scope and would violate forbidden knowledge"
+          }
+        ]
+      },
+      "expected_blueprint": {
+        "blueprint_id": "bp-doorway-pressure-1",
+        "query_id": "query-doorway-pressure",
+        "beats": [
+          {
+            "beat_id": "beat-sensory-pressure",
+            "role": "sensory_anchor",
+            "source_node_ids": [
+              "node-rain-doorway-s1"
+            ],
+            "slot_plan": [
+              {
+                "slot": "threshold",
+                "source_value": "门缝",
+                "target_value": "锁舌边"
+              }
+            ],
+            "locked_phrase_policy": "preserve pressure cadence, not exact wording",
+            "no_reuse_reason": ""
+          },
+          {
+            "beat_id": "beat-withheld-answer",
+            "role": "emotion_turn",
+            "source_node_ids": [
+              "node-rain-doorway-s2"
+            ],
+            "slot_plan": [
+              {
+                "slot": "object",
+                "source_value": "钥匙",
+                "target_value": "门链"
+              }
+            ],
+            "locked_phrase_policy": "replace concrete nouns before insertion",
+            "no_reuse_reason": ""
+          }
+        ],
+        "execution_contract": {
+          "paragraph_intentions": [
+            "hold on the doorway before dialogue"
+          ],
+          "execution_modes": [
+            "minimal-slot-rewrite"
+          ],
+          "anti_screenplay_duties": [
+            "include close sensory pressure, not only blocking"
+          ],
+          "source_backed_detail_targets": [
+            "rain sound at threshold",
+            "hand pressure on small object"
+          ],
+          "candidate_rejection_rules": [
+            "reject if the hidden motive is revealed"
+          ]
+        }
+      },
+      "expected_insertion": {
+        "draft_id": "draft-doorway-pressure-1",
+        "target_context_id": "ctx-chapter-3-doorway-offset",
+        "pieces": [
+          {
+            "piece_id": "piece-sensory-pressure",
+            "source_node_id": "node-rain-doorway-s1",
+            "rewrite_level": "slot_replace",
+            "text_intention": "carry rain pressure into the insertion point",
+            "preserved_span_hashes": [
+              "span-pressure-cadence"
+            ]
+          },
+          {
+            "piece_id": "piece-withheld-answer",
+            "source_node_id": "node-rain-doorway-s2",
+            "rewrite_level": "slot_replace",
+            "text_intention": "show withheld answer through hand action",
+            "preserved_span_hashes": [
+              "span-withheld-action"
+            ]
+          }
+        ],
+        "similarity_gate": {
+          "granularity": "piece",
+          "normalized_char_4gram_containment_max": 0.42,
+          "longest_common_substring_ratio_max": 0.25,
+          "expected_status": "passed"
+        },
+        "audit_expectations": {
+          "must_not_contain": [
+            "周鸣的真实目的"
+          ],
+          "must_reference_source_node_ids": [
+            "node-rain-doorway-s1",
+            "node-rain-doorway-s2"
+          ]
+        }
+      },
+      "fake_llm_responses": [
+        {
+          "prompt_key": "parse-query-context",
+          "scenario": "happy-path",
+          "response_kind": "json",
+          "fixture_pointer": "/fixtures/0/query_contexts/0"
+        },
+        {
+          "prompt_key": "assemble-blueprint",
+          "scenario": "single-beat",
+          "response_kind": "json",
+          "fixture_pointer": "/fixtures/0/expected_blueprint"
+        },
+        {
+          "prompt_key": "assemble-draft-piece",
+          "scenario": "slot-rewrite",
+          "response_kind": "text",
+          "fixture_pointer": "/fixtures/0/expected_insertion/pieces/0/text_intention"
+        }
+      ]
+    }
+  ]
+}

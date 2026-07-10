@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Novelist.Agent/Novelist.Agent.csproj" />
+    <Project Path="src/Novelist.App/Novelist.App.csproj" />
+    <Project Path="src/Novelist.Contracts/Novelist.Contracts.csproj" />
+    <Project Path="src/Novelist.Core/Novelist.Core.csproj" />
+    <Project Path="src/Novelist.Infrastructure/Novelist.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Novelist.IntegrationTests/Novelist.IntegrationTests.csproj" />
+    <Project Path="tests/Novelist.Tests/Novelist.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,320 @@
+{
+  "schema_version": "corpus-driven-writing-m3-retrieval-golden-v1",
+  "fixtures": [
+    {
+      "fixture_id": "m3-rain-doorway-basic-search",
+      "description": "M3 retrieval golden for licensed scoped sentence search, evidence projection, and backend embedding cache behavior.",
+      "expected_retrieval": {
+        "page": {
+          "total": 4,
+          "size": 10,
+          "has_more": false,
+          "total_estimate": 4
+        },
+        "ranked_node_ids": [
+          "node-rain-doorway-s4",
+          "node-rain-doorway-s1",
+          "node-rain-doorway-s3",
+          "node-rain-doorway-s2"
+        ],
+        "candidates": [
+          {
+            "rank": 1,
+            "candidate_id": "corpus-node:node-rain-doorway-s4",
+            "node_id": "node-rain-doorway-s4",
+            "anchor_id": 101,
+            "library_id": "library-rain-doorway",
+            "node_type": "sentence",
+            "text_hash": "sha256-fixture-s4",
+            "text_preview_hash": "sha256:87444d501cd5cd68414ed6ffb494c317dab98c9982886e14b50586638b9aaf3e",
+            "text_preview_char_len": 12,
+            "license_state": "authorized",
+            "reuse_policy": "adapted_only",
+            "fit_explanation": "emotion:emotion_state supports current chapter fit",
+            "score_component_keys": [
+              "chapter_fit",
+              "local_context_fit",
+              "observation_fit",
+              "position_fit",
+              "semantic",
+              "source_quality",
+              "technique_fit"
+            ],
+            "route_components": {},
+            "evidence": [
+              {
+                "observation_id": "obs-rain-doorway-direct-anger",
+                "feature_family": "emotion",
+                "feature_key": "emotion_state",
+                "confidence": 0.91
+              }
+            ]
+          },
+          {
+            "rank": 2,
+            "candidate_id": "corpus-node:node-rain-doorway-s1",
+            "node_id": "node-rain-doorway-s1",
+            "anchor_id": 101,
+            "library_id": "library-rain-doorway",
+            "node_type": "sentence",
+            "text_hash": "sha256-fixture-s1",
+            "text_preview_hash": "sha256:221560f672ccea4bb45c226442a6f6bea55d9236c8639d083a74d249da939eda",
+            "text_preview_char_len": 10,
+            "license_state": "authorized",
+            "reuse_policy": "adapted_only",
+            "fit_explanation": "sensory:senses supports current chapter fit",
+            "score_component_keys": [
+              "chapter_fit",
+              "local_context_fit",
+              "observation_fit",
+              "position_fit",
+              "recall_text_semantic",
+              "semantic",
+              "source_quality",
+              "technique_fit"
+            ],
+            "route_components": {
+              "recall_text_semantic": 1
+            },
+            "evidence": [
+              {
+                "observation_id": "obs-rain-doorway-sensory",
+                "feature_family": "sensory",
+                "feature_key": "senses",
+                "confidence": 0.92
+              }
+            ]
+          },
+          {
+            "rank": 3,
+            "candidate_id": "corpus-node:node-rain-doorway-s3",
+            "node_id": "node-rain-doorway-s3",
+            "anchor_id": 101,
+            "library_id": "library-rain-doorway",
+            "node_type": "sentence",
+            "text_hash": "sha256-fixture-s3",
+            "text_preview_hash": "sha256:721ee2db9de0724a2d506c2dea0aaa86553115d8116542dc30be179f556cd74a",
+            "text_preview_char_len": 15,
+            "license_state": "authorized",
+            "reuse_policy": "adapted_only",
+            "fit_explanation": "action:emotion_carrier supports current chapter fit",
+            "score_component_keys": [
+              "chapter_fit",
+              "local_context_fit",
+              "observation_fit",
+              "position_fit",
+              "semantic",
+              "source_quality",
+              "technique_fit"
+            ],
+            "route_components": {},
+            "evidence": [
+              {
+                "observation_id": "obs-rain-doorway-action-carrier",
+                "feature_family": "action",
+                "feature_key": "emotion_carrier",
+                "confidence": 0.94
+              },
+              {
+                "observation_id": "obs-rain-doorway-touch",
+                "feature_family": "sensory",
+                "feature_key": "senses",
+                "confidence": 0.93
+              }
+            ]
+          },
+          {
+            "rank": 4,
+            "candidate_id": "corpus-node:node-rain-doorway-s2",
+            "node_id": "node-rain-doorway-s2",
+            "anchor_id": 101,
+            "library_id": "library-rain-doorway",
+            "node_type": "sentence",
+            "text_hash": "sha256-fixture-s2",
+            "text_preview_hash": "sha256:8beeea8fff7366c234127a285ff7d3317805139b6d5dcb46b7a4a990b37a6069",
+            "text_preview_char_len": 17,
+            "license_state": "authorized",
+            "reuse_policy": "adapted_only",
+            "fit_explanation": "emotion:emotion_state supports current chapter fit",
+            "score_component_keys": [
+              "chapter_fit",
+              "local_context_fit",
+              "observation_fit",
+              "position_fit",
+              "semantic",
+              "source_quality",
+              "technique_fit"
+            ],
+            "route_components": {},
+            "evidence": [
+              {
+                "observation_id": "obs-rain-doorway-emotion",
+                "feature_family": "emotion",
+                "feature_key": "emotion_state",
+                "confidence": 0.89
+              }
+            ]
+          }
+        ],
+        "excluded_node_ids": [
+          "node-hidden-reveal",
+          "node-unknown-license"
+        ],
+        "cache_expectations": {
+          "node_embedding_count": 4,
+          "current_chapter_embedding_cache_count": 1,
+          "technique_vector_count": 0
+        }
+      }
+    },
+    {
+      "fixture_id": "m3-four-way-recall-diagnostics",
+      "description": "M3 retrieval golden for text semantic, technique semantic, structured observation, and chapter context recall diagnostics after safe scope filtering.",
+      "expected_retrieval": {
+        "page": {
+          "total": 20,
+          "size": 4,
+          "has_more": true,
+          "total_estimate": 20
+        },
+        "ranked_node_ids": [
+          "node-fourway-technique",
+          "node-fourway-context",
+          "node-fourway-observation",
+          "node-fourway-semantic"
+        ],
+        "candidates": [
+          {
+            "rank": 1,
+            "candidate_id": "corpus-node:node-fourway-technique",
+            "node_id": "node-fourway-technique",
+            "anchor_id": 202,
+            "library_id": "library-fourway-recall",
+            "node_type": "sentence",
+            "text_hash": "sha256-fourway-technique",
+            "text_preview_hash": "sha256:a48b14008b45abca85006105c6111bc1df9e83d37c11c68423665fb29903291e",
+            "text_preview_char_len": 17,
+            "license_state": "authorized",
+            "reuse_policy": "adapted_only",
+            "fit_explanation": "text node is licensed and semantically close to the current chapter context",
+            "score_component_keys": [
+              "chapter_fit",
+              "local_context_fit",
+              "observation_fit",
+              "position_fit",
+              "recall_technique_semantic",
+              "semantic",
+              "source_quality",
+              "technique_fit"
+            ],
+            "route_components": {
+              "recall_technique_semantic": 1
+            },
+            "evidence": []
+          },
+          {
+            "rank": 2,
+            "candidate_id": "corpus-node:node-fourway-context",
+            "node_id": "node-fourway-context",
+            "anchor_id": 202,
+            "library_id": "library-fourway-recall",
+            "node_type": "sentence",
+            "text_hash": "sha256-fourway-context",
+            "text_preview_hash": "sha256:dff4b04b58a5aeeb3e6f34c07e5497c19c03d48a099c3246de1ab4422886a5d3",
+            "text_preview_char_len": 20,
+            "license_state": "authorized",
+            "reuse_policy": "adapted_only",
+            "fit_explanation": "text node is licensed and semantically close to the current chapter context",
+            "score_component_keys": [
+              "chapter_fit",
+              "local_context_fit",
+              "observation_fit",
+              "position_fit",
+              "recall_chapter_context",
+              "semantic",
+              "source_quality",
+              "technique_fit"
+            ],
+            "route_components": {
+              "recall_chapter_context": 1
+            },
+            "evidence": []
+          },
+          {
+            "rank": 3,
+            "candidate_id": "corpus-node:node-fourway-observation",
+            "node_id": "node-fourway-observation",
+            "anchor_id": 202,
+            "library_id": "library-fourway-recall",
+            "node_type": "sentence",
+            "text_hash": "sha256-fourway-observation",
+            "text_preview_hash": "sha256:f5ec571e37251fed54cf6c79dff8309831072450d73a944930d52ef1486da920",
+            "text_preview_char_len": 11,
+            "license_state": "authorized",
+            "reuse_policy": "adapted_only",
+            "fit_explanation": "narrative_function:function supports current chapter fit",
+            "score_component_keys": [
+              "chapter_fit",
+              "local_context_fit",
+              "observation_fit",
+              "position_fit",
+              "recall_structured_observation",
+              "semantic",
+              "source_quality",
+              "technique_fit"
+            ],
+            "route_components": {
+              "recall_structured_observation": 1
+            },
+            "evidence": [
+              {
+                "observation_id": "obs-fourway-observation-route",
+                "feature_family": "narrative_function",
+                "feature_key": "function",
+                "confidence": 0.99
+              }
+            ]
+          },
+          {
+            "rank": 4,
+            "candidate_id": "corpus-node:node-fourway-semantic",
+            "node_id": "node-fourway-semantic",
+            "anchor_id": 202,
+            "library_id": "library-fourway-recall",
+            "node_type": "sentence",
+            "text_hash": "sha256-fourway-semantic",
+            "text_preview_hash": "sha256:ad6b0d49e2e476310b77e1c06fe3799ad5c6be85d718159d17aad5a40c3b6ebf",
+            "text_preview_char_len": 13,
+            "license_state": "authorized",
+            "reuse_policy": "adapted_only",
+            "fit_explanation": "text node is licensed and semantically close to the current chapter context",
+            "score_component_keys": [
+              "chapter_fit",
+              "local_context_fit",
+              "observation_fit",
+              "position_fit",
+              "recall_text_semantic",
+              "semantic",
+              "source_quality",
+              "technique_fit"
+            ],
+            "route_components": {
+              "recall_text_semantic": 1
+            },
+            "evidence": []
+          }
+        ],
+        "excluded_node_ids": [
+          "node-fourway-excluded-semantic",
+          "node-fourway-forbidden-context",
+          "node-fourway-dedup-loser-context"
+        ],
+        "cache_expectations": {
+          "node_embedding_count": 20,
+          "current_chapter_embedding_cache_count": 1,
+          "technique_vector_count": 1
+        }
+      }
+    }
+  ]
+}

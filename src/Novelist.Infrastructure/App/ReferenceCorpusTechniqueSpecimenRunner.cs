@@ -26,21 +26,78 @@ internal sealed class ReferenceCorpusTechniqueSpecimenRunner
         ValidateRequest(request);
         cancellationToken.ThrowIfCancellationRequested();
 
+        var nodes = await ReadNodesWithEvidenceAsync(connection, request, cancellationToken);
+        var existingState = await ReadRunStateAsync(connection, request.RunId, cancellationToken);
+        var state = BuildInitialState(existingState, request);
         var diagnostics = new List<string>();
         var processed = 0;
-        var tokensSpent = 0;
-        await UpsertRunAsync(
-            connection,
-            request,
-            ReferenceCorpusAnalysisRunStatuses.Running,
-            tokensSpent,
-            specimenCount: 0,
-            completedAt: null,
-            cancellationToken);
-
-        var nodes = await ReadNodesWithEvidenceAsync(connection, request, cancellationToken);
-        foreach (var node in nodes)
+        if (nodes.Count == 0)
         {
+            diagnostics.Add("no_eligible_technique_specimen_nodes");
+        }
+
+        if (nodes.Count == 0 && existingState is not null)
+        {
+            throw new ReferenceCorpusAnalysisRunPreconditionException(
+             "Cannot resume a technique specimen run after its eligible evidence set became empty.");
+        }
+
+        var startIndex = ResolveStartIndex(nodes, request.Resume ? state.ResumeCursor : null);
+
+        await UpsertRunAsync(
+         connection,
+         request,
+         state,
+         specimenCount: await CountSpecimensAsync(connection, request.RunId, cancellationToken),
+         completedAt: null,
+         transaction: null,
+         cancellationToken);
+        if (startIndex < nodes.Count && IsBudgetExhausted(state))
+        {
+            state = ReferenceCorpusAnalysisRunStateMachine.RecordProgress(state, 0, state.ResumeCursor);
+            await UpsertRunAsync(
+             connection,
+             request,
+             state,
+             specimenCount: await CountSpecimensAsync(connection, request.RunId, cancellationToken),
+             completedAt: null,
+             transaction: null,
+             cancellationToken);
+            return BuildResult(
+             request,
+             state,
+             await CountSpecimensAsync(connection, request.RunId, cancellationToken),
+             processed,
+             diagnostics);
+        }
+
+for (var index = startIndex; index < nodes.Count; index++)
+{
+ var executionAction = await request.ExecutionControl.CheckpointAsync(
+ request.RunId,
+ state.ResumeCursor,
+ cancellationToken);
+ if (!string.Equals(executionAction, ReferenceCorpusAnalysisExecutionActions.Proceed, StringComparison.Ordinal))
+ {
+ state = ApplyExecutionAction(state, executionAction);
+ await UpsertRunAsync(
+ connection,
+ request,
+ state,
+ specimenCount: await CountSpecimensAsync(connection, request.RunId, cancellationToken),
+ completedAt: null,
+ transaction: null,
+ cancellationToken);
+ return BuildResult(
+ request,
+ state,
+ await CountSpecimensAsync(connection, request.RunId, cancellationToken),
+ processed,
+ diagnostics);
+ }
+
+var node = nodes[index];
+            var previousCursor = state.ResumeCursor;
             var output = await _analyzer.AnalyzeAsync(
                 new ReferenceCorpusTechniqueSpecimenAnalysisInput(
                     request.RunId,
@@ -50,7 +107,7 @@ internal sealed class ReferenceCorpusTechniqueSpecimenRunner
                     node.Text,
                     node.Observations),
                 cancellationToken);
-            tokensSpent += Math.Max(0, output.TokensSpent);
+            var outputTokens = Math.Max(0, output.TokensSpent);
 
             var validation = ReferenceCorpusTechniqueSpecimenOutputValidator.Validate(
                 output.ModelOutputJson,
@@ -61,39 +118,62 @@ internal sealed class ReferenceCorpusTechniqueSpecimenRunner
             if (validation.Status != ReferenceCorpusTechniqueSpecimenValidationStatuses.Passed ||
                 validation.Candidate is null)
             {
+                if (outputTokens > 0)
+                {
+                    state = ReferenceCorpusAnalysisRunStateMachine.RecordProgress(
+                        state,
+                        outputTokens,
+                        previousCursor);
+                }
+
+                state = ReferenceCorpusAnalysisRunStateMachine.Fail(state);
                 await UpsertRunAsync(
-                    connection,
-                    request,
-                    ReferenceCorpusAnalysisRunStatuses.Failed,
-                    tokensSpent,
-                    specimenCount: await CountSpecimensAsync(connection, request.RunId, cancellationToken),
-                    completedAt: request.StartedAt,
-                    cancellationToken);
+                connection,
+                request,
+                state,
+                specimenCount: await CountSpecimensAsync(connection, request.RunId, cancellationToken),
+                completedAt: request.StartedAt,
+                transaction: null,
+                cancellationToken);
                 return BuildResult(
                     request,
-                    ReferenceCorpusAnalysisRunStatuses.Failed,
-                    tokensSpent,
+                    state,
                     await CountSpecimensAsync(connection, request.RunId, cancellationToken),
                     processed,
                     diagnostics);
             }
 
-            await PersistSpecimenAsync(connection, request, validation.Candidate, cancellationToken);
+            state = ReferenceCorpusAnalysisRunStateMachine.RecordProgress(
+            state,
+            outputTokens,
+            node.NodeId);
+            await PersistSpecimenAndProgressAsync(connection, request, validation.Candidate, state, cancellationToken);
             processed++;
+
+            if (string.Equals(state.Status, ReferenceCorpusAnalysisRunStatuses.BudgetExhausted, StringComparison.Ordinal) &&
+                index < nodes.Count - 1)
+            {
+                return BuildResult(
+                    request,
+                    state,
+                    await CountSpecimensAsync(connection, request.RunId, cancellationToken),
+                    processed,
+                    diagnostics);
+            }
         }
 
+        state = ReferenceCorpusAnalysisRunStateMachine.Complete(state);
         await UpsertRunAsync(
-            connection,
-            request,
-            ReferenceCorpusAnalysisRunStatuses.Completed,
-            tokensSpent,
-            specimenCount: await CountSpecimensAsync(connection, request.RunId, cancellationToken),
-            completedAt: request.StartedAt,
-            cancellationToken);
+        connection,
+        request,
+        state,
+        specimenCount: await CountSpecimensAsync(connection, request.RunId, cancellationToken),
+        completedAt: request.StartedAt,
+        transaction: null,
+        cancellationToken);
         return BuildResult(
             request,
-            ReferenceCorpusAnalysisRunStatuses.Completed,
-            tokensSpent,
+            state,
             await CountSpecimensAsync(connection, request.RunId, cancellationToken),
             processed,
             diagnostics);
@@ -130,12 +210,96 @@ internal sealed class ReferenceCorpusTechniqueSpecimenRunner
         {
             throw new ArgumentOutOfRangeException(nameof(request), request.MinObservationConfidence, "Observation confidence threshold must be between 0 and 0.95.");
         }
+
+        if (request.TokenBudget < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), request.TokenBudget, "Token budget cannot be negative.");
+        }
+    }
+
+    private static ReferenceCorpusAnalysisRunState BuildInitialState(
+     PersistedRunState? existingState,
+     ReferenceCorpusTechniqueSpecimenRunRequest request)
+    {
+        if (existingState is null)
+        {
+            if (request.Resume)
+            {
+                throw new ReferenceCorpusAnalysisRunPreconditionException(
+                 "Cannot resume a technique specimen run that does not exist.");
+            }
+
+            return ReferenceCorpusAnalysisRunStateMachine.Start(request.TokenBudget);
+        }
+
+        if (!string.Equals(existingState.Scope, "technique_specimen", StringComparison.Ordinal) ||
+         existingState.AnchorId != request.AnchorId)
+        {
+            throw new ReferenceCorpusAnalysisRunPreconditionException(
+             "Technique specimen run ids cannot be reused across analysis scopes or corpus anchors.");
+        }
+
+        if (!request.Resume)
+        {
+            throw new ReferenceCorpusAnalysisRunPreconditionException(
+             "An existing technique specimen run requires resume=true; run ids cannot be restarted.");
+        }
+
+        var state = new ReferenceCorpusAnalysisRunState(
+         existingState.Status,
+         existingState.TokenBudget,
+         existingState.TokensSpent,
+         existingState.ResumeCursor);
+        if (string.Equals(state.Status, ReferenceCorpusAnalysisRunStatuses.Running, StringComparison.Ordinal))
+        {
+            var tokenBudget = request.TokenBudget ?? state.TokenBudget;
+            if (tokenBudget is { } budget && budget <= state.TokensSpent)
+            {
+                throw new ReferenceCorpusAnalysisRunPreconditionException(
+                 "A running technique specimen run requires a token budget greater than tokens already spent.");
+            }
+
+            return state with { TokenBudget = tokenBudget };
+        }
+
+        try
+        {
+            return ReferenceCorpusAnalysisRunStateMachine.Resume(state, request.TokenBudget);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new ReferenceCorpusAnalysisRunPreconditionException(exception.Message, exception);
+        }
+    }
+
+    private static int ResolveStartIndex(IReadOnlyList<TechniqueSpecimenNode> nodes, string? resumeCursor)
+    {
+        if (string.IsNullOrWhiteSpace(resumeCursor))
+        {
+            return 0;
+        }
+
+        for (var index = 0; index < nodes.Count; index++)
+        {
+            if (string.Equals(nodes[index].NodeId, resumeCursor, StringComparison.Ordinal))
+            {
+                return index + 1;
+            }
+        }
+
+        throw new ReferenceCorpusAnalysisRunPreconditionException(
+         $"Technique specimen resume cursor '{resumeCursor}' is no longer present in the eligible node set.");
+    }
+
+private static bool IsBudgetExhausted(ReferenceCorpusAnalysisRunState state)
+    {
+        return state.TokenBudget is { } budget && state.TokensSpent >= budget;
     }
 
     private static async ValueTask<IReadOnlyList<TechniqueSpecimenNode>> ReadNodesWithEvidenceAsync(
-        SqliteConnection connection,
-        ReferenceCorpusTechniqueSpecimenRunRequest request,
-        CancellationToken cancellationToken)
+     SqliteConnection connection,
+     ReferenceCorpusTechniqueSpecimenRunRequest request,
+     CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
@@ -155,17 +319,18 @@ internal sealed class ReferenceCorpusTechniqueSpecimenRunner
                    o.evidence_start,
                    o.evidence_end,
                    o.explanation
-            FROM reference_text_nodes n
-            INNER JOIN reference_feature_observations o ON o.node_id = n.node_id
-            WHERE n.anchor_id = $anchor_id
-              AND n.node_type = $node_type
-              AND o.anchor_id = n.anchor_id
-              AND o.node_type = n.node_type
-              AND o.validity_state = 'active'
-              AND o.confidence >= $min_confidence
-            ORDER BY n.chapter_index, n.start_offset, n.sequence_index, n.node_id,
-                     o.feature_family, o.feature_key, o.observation_id;
-            """;
+ FROM reference_text_nodes n
+ INNER JOIN reference_feature_observations o ON o.node_id = n.node_id
+ WHERE n.anchor_id = $anchor_id
+ AND n.node_type = $node_type
+ AND o.anchor_id = n.anchor_id
+ AND o.node_type = n.node_type
+ AND o.validity_state = 'active'
+ AND o.review_state <> 'rejected'
+ AND o.confidence >= $min_confidence
+ORDER BY n.chapter_index, n.start_offset, n.sequence_index, n.node_id,
+o.feature_family, o.feature_key, o.observation_id;
+""";
         command.Parameters.AddWithValue("$anchor_id", request.AnchorId);
         command.Parameters.AddWithValue("$node_type", request.SourceNodeType);
         command.Parameters.AddWithValue("$min_confidence", request.MinObservationConfidence);
@@ -206,11 +371,12 @@ internal sealed class ReferenceCorpusTechniqueSpecimenRunner
             .ToArray();
     }
 
-    private static async ValueTask PersistSpecimenAsync(
-        SqliteConnection connection,
-        ReferenceCorpusTechniqueSpecimenRunRequest request,
-        ReferenceCorpusTechniqueSpecimenCandidate candidate,
-        CancellationToken cancellationToken)
+    private static async ValueTask PersistSpecimenAndProgressAsync(
+    SqliteConnection connection,
+    ReferenceCorpusTechniqueSpecimenRunRequest request,
+    ReferenceCorpusTechniqueSpecimenCandidate candidate,
+    ReferenceCorpusAnalysisRunState state,
+    CancellationToken cancellationToken)
     {
         var specimenId = BuildSpecimenId(request.RunId, candidate.SourceNodeId, candidate.TechniqueFamily);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
@@ -291,26 +457,37 @@ internal sealed class ReferenceCorpusTechniqueSpecimenRunner
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        var specimenCount = await CountSpecimensAsync(connection, request.RunId, transaction, cancellationToken);
+        await UpsertRunAsync(
+        connection,
+        request,
+        state,
+        specimenCount,
+        completedAt: null,
+        transaction,
+        cancellationToken);
+
         await transaction.CommitAsync(cancellationToken);
     }
 
     private static async ValueTask UpsertRunAsync(
-        SqliteConnection connection,
-        ReferenceCorpusTechniqueSpecimenRunRequest request,
-        string status,
-        int tokensSpent,
-        int specimenCount,
-        DateTimeOffset? completedAt,
-        CancellationToken cancellationToken)
+    SqliteConnection connection,
+    ReferenceCorpusTechniqueSpecimenRunRequest request,
+    ReferenceCorpusAnalysisRunState state,
+    int specimenCount,
+    DateTimeOffset? completedAt,
+    SqliteTransaction? transaction,
+    CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO reference_analysis_runs
               (run_id, anchor_id, analyzer_version, schema_version, model_provider, model_id,
                scope, status, token_budget, tokens_spent, resume_cursor, started_at, completed_at, observation_count)
             VALUES
               ($run_id, $anchor_id, $analyzer_version, $schema_version, $model_provider, $model_id,
-               'technique_specimen', $status, NULL, $tokens_spent, NULL, $started_at, $completed_at, $observation_count)
+               'technique_specimen', $status, $token_budget, $tokens_spent, $resume_cursor, $started_at, $completed_at, $observation_count)
             ON CONFLICT(run_id) DO UPDATE SET
               analyzer_version = excluded.analyzer_version,
               schema_version = excluded.schema_version,
@@ -318,7 +495,9 @@ internal sealed class ReferenceCorpusTechniqueSpecimenRunner
               model_id = excluded.model_id,
               scope = excluded.scope,
               status = excluded.status,
+              token_budget = excluded.token_budget,
               tokens_spent = excluded.tokens_spent,
+              resume_cursor = excluded.resume_cursor,
               completed_at = excluded.completed_at,
               observation_count = excluded.observation_count;
             """;
@@ -328,20 +507,60 @@ internal sealed class ReferenceCorpusTechniqueSpecimenRunner
         command.Parameters.AddWithValue("$schema_version", ReferenceCorpusTechniqueSpecimenSchemaVersions.V1);
         command.Parameters.AddWithValue("$model_provider", request.ModelProvider);
         command.Parameters.AddWithValue("$model_id", request.ModelId);
-        command.Parameters.AddWithValue("$status", status);
-        command.Parameters.AddWithValue("$tokens_spent", tokensSpent);
+        command.Parameters.AddWithValue("$status", state.Status);
+        command.Parameters.AddWithValue("$token_budget", state.TokenBudget is null ? DBNull.Value : state.TokenBudget.Value);
+        command.Parameters.AddWithValue("$tokens_spent", state.TokensSpent);
+        command.Parameters.AddWithValue("$resume_cursor", state.ResumeCursor is null ? DBNull.Value : state.ResumeCursor);
         command.Parameters.AddWithValue("$started_at", FormatTimestamp(request.StartedAt));
         command.Parameters.AddWithValue("$completed_at", completedAt is null ? DBNull.Value : FormatTimestamp(completedAt.Value));
         command.Parameters.AddWithValue("$observation_count", specimenCount);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static async ValueTask<int> CountSpecimensAsync(
+    private static async ValueTask<PersistedRunState?> ReadRunStateAsync(
         SqliteConnection connection,
         string runId,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
+        command.CommandText = """
+SELECT anchor_id, scope, status, token_budget, tokens_spent, resume_cursor, observation_count
+FROM reference_analysis_runs
+WHERE run_id = $run_id;
+""";
+        command.Parameters.AddWithValue("$run_id", runId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new PersistedRunState(
+         reader.GetInt64(0),
+         reader.GetString(1),
+         reader.GetString(2),
+         reader.IsDBNull(3) ? null : reader.GetInt32(3),
+         reader.GetInt32(4),
+         reader.IsDBNull(5) ? null : reader.GetString(5),
+         reader.GetInt32(6));
+    }
+
+    private static async ValueTask<int> CountSpecimensAsync(
+     SqliteConnection connection,
+     string runId,
+     CancellationToken cancellationToken)
+    {
+        return await CountSpecimensAsync(connection, runId, transaction: null, cancellationToken);
+    }
+
+    private static async ValueTask<int> CountSpecimensAsync(
+     SqliteConnection connection,
+     string runId,
+     SqliteTransaction? transaction,
+     CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             SELECT COUNT(*)
             FROM reference_technique_specimens
@@ -353,16 +572,17 @@ internal sealed class ReferenceCorpusTechniqueSpecimenRunner
 
     private static ReferenceCorpusTechniqueSpecimenRunResult BuildResult(
         ReferenceCorpusTechniqueSpecimenRunRequest request,
-        string status,
-        int tokensSpent,
+        ReferenceCorpusAnalysisRunState state,
         int specimenCount,
         int processed,
         IReadOnlyList<string> diagnostics)
     {
         return new ReferenceCorpusTechniqueSpecimenRunResult(
             request.RunId,
-            status,
-            tokensSpent,
+            state.Status,
+            state.TokenBudget,
+            state.TokensSpent,
+            state.ResumeCursor,
             specimenCount,
             processed,
             SanitizeDiagnostics(diagnostics));
@@ -417,4 +637,38 @@ internal sealed class ReferenceCorpusTechniqueSpecimenRunner
     {
         public List<ReferenceCorpusTechniqueObservationEvidence> Observations { get; } = [];
     }
+
+    private sealed record PersistedRunState(
+     long AnchorId,
+     string Scope,
+     string Status,
+     int? TokenBudget,
+     int TokensSpent,
+     string? ResumeCursor,
+     int SpecimenCount);
+
+internal sealed class ReferenceCorpusAnalysisRunPreconditionException : InvalidOperationException
+    {
+        public ReferenceCorpusAnalysisRunPreconditionException(string message)
+         : base(message)
+        {
+        }
+
+        public ReferenceCorpusAnalysisRunPreconditionException(string message, Exception innerException)
+         : base(message, innerException)
+        {
+}
+}
+
+ private static ReferenceCorpusAnalysisRunState ApplyExecutionAction(
+ ReferenceCorpusAnalysisRunState state,
+ string action)
+ {
+ return action switch
+ {
+ ReferenceCorpusAnalysisExecutionActions.Pause => ReferenceCorpusAnalysisRunStateMachine.Pause(state),
+ ReferenceCorpusAnalysisExecutionActions.Cancel => ReferenceCorpusAnalysisRunStateMachine.MarkPartialCompleted(state),
+ _ => throw new InvalidOperationException($"Unknown analysis execution action '{action}'.")
+ };
+ }
 }

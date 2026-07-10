@@ -7,6 +7,39 @@ namespace Novelist.IntegrationTests;
 
 public sealed class ReferenceCorpusFeatureAnalysisRunnerTests
 {
+ [Fact]
+ public async Task RunAsyncPausesAtWorkItemBoundaryWithoutCallingNextAnalysis()
+ {
+ await using var connection = await OpenFixtureConnectionAsync();
+ var analyzer = new RecordingFeatureFamilyAnalyzer(tokensPerCall: 10);
+ var runner = new ReferenceCorpusFeatureAnalysisRunner(analyzer);
+
+ var result = await runner.RunAsync(
+ connection,
+ new ReferenceCorpusFeatureAnalysisRunRequest(
+ RunId: "llm-pause-run-1",
+ AnchorId: 101,
+ NodeType: ReferenceCorpusNodeTypes.Sentence,
+ Families: [ReferenceCorpusFeatureFamilies.Syntax],
+ AnalyzerVersion: "llm-feature-v1",
+ ModelProvider: "fake",
+ ModelId: "fake-model",
+ TokenBudget: null,
+ Resume: false,
+ StartedAt: DateTimeOffset.Parse("2026-07-09T00:00:00Z"))
+ {
+ ExecutionControl = new SequenceExecutionControl(
+ ReferenceCorpusAnalysisExecutionActions.Proceed,
+ ReferenceCorpusAnalysisExecutionActions.Pause)
+ },
+ CancellationToken.None);
+
+ Assert.Equal(ReferenceCorpusAnalysisRunStatuses.Paused, result.Status);
+ Assert.Equal(1, result.ProcessedWorkItems);
+ Assert.Single(analyzer.Calls);
+ Assert.Equal("node-a|syntax", result.ResumeCursor);
+ }
+
     [Fact]
     public async Task RunAsyncPersistsValidatedObservationsAndResumesAfterBudgetCursor()
     {
@@ -477,7 +510,19 @@ public sealed class ReferenceCorpusFeatureAnalysisRunnerTests
         return result.ToArray();
     }
 
-    private sealed class RecordingFeatureFamilyAnalyzer : IReferenceCorpusFeatureFamilyAnalyzer
+ private sealed class SequenceExecutionControl(params string[] actions) : IReferenceCorpusAnalysisExecutionControl
+ {
+ private int _index;
+
+ public ValueTask<string> CheckpointAsync(string runId, string? resumeCursor, CancellationToken cancellationToken)
+ {
+ cancellationToken.ThrowIfCancellationRequested();
+ var index = Math.Min(Interlocked.Increment(ref _index) - 1, actions.Length - 1);
+ return ValueTask.FromResult(actions[index]);
+ }
+ }
+
+ private sealed class RecordingFeatureFamilyAnalyzer : IReferenceCorpusFeatureFamilyAnalyzer
     {
         private readonly int _tokensPerCall;
 

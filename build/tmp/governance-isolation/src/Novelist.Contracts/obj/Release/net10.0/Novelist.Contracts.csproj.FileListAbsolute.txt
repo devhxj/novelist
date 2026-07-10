@@ -1,0 +1,12 @@
+D:\repository\own\goink\src\Novelist.Contracts\bin\Release\net10.0\Novelist.Contracts.deps.json
+D:\repository\own\goink\src\Novelist.Contracts\bin\Release\net10.0\Novelist.Contracts.dll
+D:\repository\own\goink\src\Novelist.Contracts\bin\Release\net10.0\Novelist.Contracts.pdb
+D:\repository\own\goink\src\Novelist.Contracts\obj\Release\net10.0\Novelist.Contracts.GeneratedMSBuildEditorConfig.editorconfig
+D:\repository\own\goink\src\Novelist.Contracts\obj\Release\net10.0\Novelist.Contracts.AssemblyInfoInputs.cache
+D:\repository\own\goink\src\Novelist.Contracts\obj\Release\net10.0\Novelist.Contracts.AssemblyInfo.cs
+D:\repository\own\goink\src\Novelist.Contracts\obj\Release\net10.0\Novelist.Contracts.csproj.CoreCompileInputs.cache
+D:\repository\own\goink\src\Novelist.Contracts\obj\Release\net10.0\Novelist.Contracts.sourcelink.json
+D:\repository\own\goink\src\Novelist.Contracts\obj\Release\net10.0\Novelist.Contracts.dll
+D:\repository\own\goink\src\Novelist.Contracts\obj\Release\net10.0\refint\Novelist.Contracts.dll
+D:\repository\own\goink\src\Novelist.Contracts\obj\Release\net10.0\Novelist.Contracts.pdb
+D:\repository\own\goink\src\Novelist.Contracts\obj\Release\net10.0\ref\Novelist.Contracts.dll

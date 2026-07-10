@@ -256,8 +256,39 @@ export default function ChapterReferencePanel({
   const [corpusDraftError, setCorpusDraftError] = useState<ReferenceErrorState | null>(null)
   const [corpusDraftActionMessage, setCorpusDraftActionMessage] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
+ const [writingMode, setWritingMode] = useState<'auto' | 'expert'>('auto')
+ const [governance, setGovernance] = useState<reference.CorpusGovernance | null>(null)
 
-  const contextSummary = useMemo(() => {
+  const recoveryKey = `novelist:corpus-writing:${novelId}:${chapterNumber}:${activePath}`
+
+ useEffect(() => {
+ if (!hasValidChapter) return
+ queueMicrotask(() => {
+ try {
+ const saved = window.sessionStorage.getItem(recoveryKey)
+ if (!saved) return
+ const state = JSON.parse(saved) as { goal?: string; writingMode?: 'auto' | 'expert'; blueprint?: reference.CorpusBlueprintCandidates; selectedBlueprintId?: string; drafts?: reference.CorpusInsertionDraftCandidates; selectedDraftId?: string }
+ setGoal(state.goal ?? '')
+ setWritingMode(state.writingMode ?? 'auto')
+ if (state.blueprint) { setCorpusBlueprintPath(activePath); setCorpusBlueprintCandidates(state.blueprint) }
+ setSelectedCorpusBlueprintId(state.selectedBlueprintId ?? '')
+ if (state.drafts) { setCorpusDraftPath(activePath); setCorpusDraftCandidates(state.drafts) }
+ setSelectedCorpusDraftCandidateId(state.selectedDraftId ?? '')
+ } catch { window.sessionStorage.removeItem(recoveryKey) }
+ })
+ }, [activePath, hasValidChapter, recoveryKey])
+
+ useEffect(() => {
+ if (!hasValidChapter) return
+ window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, blueprint: corpusBlueprintPath === activePath ? corpusBlueprintCandidates : null, selectedBlueprintId: selectedCorpusBlueprintId, drafts: corpusDraftPath === activePath ? corpusDraftCandidates : null, selectedDraftId: selectedCorpusDraftCandidateId }))
+ }, [activePath, corpusBlueprintCandidates, corpusBlueprintPath, corpusDraftCandidates, corpusDraftPath, goal, hasValidChapter, recoveryKey, selectedCorpusBlueprintId, selectedCorpusDraftCandidateId, writingMode])
+
+ useEffect(() => {
+ if (writingMode !== 'expert' || !hasValidChapter) return
+ void app.GetReferenceCorpusGovernance({ session_id: `project:${novelId}:default` }).then(setGovernance).catch(() => setGovernance(null))
+ }, [app, hasValidChapter, novelId, writingMode])
+
+ const contextSummary = useMemo(() => {
     if (!activeChapter) return '未打开章节'
     if (!hasValidChapter) return `${activeTitle} · 需要确认章节`
     return `第 ${chapterNumber} 章 · ${activeTitle}`
@@ -968,20 +999,31 @@ export default function ChapterReferencePanel({
     }
   }, [activePath, app, buildCorpusWritingRequestContext, chapterNumber, hasValidChapter, novelId, selectedCorpusBlueprintCandidate])
 
-  const applyCorpusDraft = useCallback(() => {
-    if (!visibleCorpusDraft) return
-    if (!corpusDraftCanApply(visibleCorpusDraft)) {
-      setCorpusDraftActionMessage('草稿审计未通过，不能应用到编辑器。')
-      return
-    }
+  const applyCorpusDraft = useCallback(async () => {
+ if (!visibleCorpusDraft || !selectedCorpusDraftCandidate) return
+ if (!corpusDraftCanApply(visibleCorpusDraft)) {
+ setCorpusDraftActionMessage('草稿审计未通过，不能应用到编辑器。')
+ return
+ }
 
-    const applied = onApplyChapterText(visibleCorpusDraft.chapter_text_after_insertion)
-    setCorpusDraftActionMessage(applied
-      ? '已应用到当前章节编辑器缓冲区。'
-      : '无法应用草稿，请切回正文编辑器后重试。')
-  }, [onApplyChapterText, visibleCorpusDraft])
+ setCorpusDraftActionMessage('正在执行服务端授权与相似度复核…')
+ try {
+ await app.RecordReferenceCorpusInsertionAudit({
+ audit_id: `chapter-${novelId}-${chapterNumber}-${selectedCorpusDraftCandidate.candidate_id}`,
+ session_id: `project:${novelId}:default`,
+ novel_id: novelId,
+ chapter_number: chapterNumber,
+ candidate_id: selectedCorpusDraftCandidate.candidate_id,
+ draft: visibleCorpusDraft,
+ })
+ const applied = onApplyChapterText(visibleCorpusDraft.chapter_text_after_insertion)
+ setCorpusDraftActionMessage(applied ? '服务端审计通过，已应用到当前章节编辑器缓冲区。' : '审计已记录，但无法应用草稿；请切回正文编辑器后重试。')
+ } catch (caught) {
+ setCorpusDraftActionMessage(`服务端审计拒绝应用：${diagnosticMessage(caught, '授权或相似度复核失败')}`)
+ }
+ }, [app, chapterNumber, novelId, onApplyChapterText, selectedCorpusDraftCandidate, visibleCorpusDraft])
 
-  const copyCorpusDraft = useCallback(async () => {
+ const copyCorpusDraft = useCallback(async () => {
     if (!visibleCorpusDraft) return
     try {
       await copyTextToClipboard(visibleCorpusDraft.assembled_text)
@@ -1014,7 +1056,7 @@ export default function ChapterReferencePanel({
   return (
     <aside
       data-testid="chapter-reference-panel"
-      className="flex h-full w-[360px] max-w-[40vw] shrink-0 flex-col border-l bg-card"
+      className={`flex h-full shrink-0 flex-col border-l bg-card ${writingMode === 'expert' ? 'w-[760px] max-w-[70vw]' : 'w-[360px] max-w-[40vw]'}`}
       aria-label="章节参考素材"
     >
       <div className="flex items-start justify-between gap-3 border-b px-3 py-2">
@@ -1033,7 +1075,15 @@ export default function ChapterReferencePanel({
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
-        {!hasValidChapter && (
+        {writingMode === 'expert' && (
+ <div data-testid="chapter-writing-expert-context" className="grid grid-cols-3 gap-2 rounded border bg-background p-2 text-[11px]">
+ <div><p className="font-semibold">阶段进度</p><p>目标 {goal.trim() ? '✓' : '○'} · 蓝图 {selectedCorpusBlueprintCandidate ? '✓' : '○'} · 正文 {visibleCorpusDraft ? '✓' : '○'} · 审计 {visibleCorpusDraft?.ready_for_insertion ? '待确认' : '○'}</p></div>
+ <div><p className="font-semibold">当前章节</p><p className="truncate">第 {chapterNumber || '—'} 章 · {activeTitle || activePath || '未选择'}</p></div>
+ <div><p className="font-semibold">生效语料库</p><p>{governance?.libraries.filter(library => library.bound_to_session).map(library => library.name).join('、') || '未加载'}</p></div>
+ </div>
+ )}
+
+ {!hasValidChapter && (
           <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
             当前文件无法可靠推导章节号。请切换到 `chapters/001.md` 这类章节正文后再使用参考素材。
           </div>
@@ -1163,7 +1213,7 @@ export default function ChapterReferencePanel({
                   <CorpusInsertionDraftPreview
                     draft={visibleCorpusDraft}
                     insertionDisabled={insertionDisabled}
-                    onApply={applyCorpusDraft}
+                    onApply={() => { void applyCorpusDraft() }}
                     onCopy={() => {
                       void copyCorpusDraft()
                     }}

@@ -1220,6 +1220,7 @@ export function installConfigurableAppMockBridge(options = {}) {
       case 'GenerateReferenceCorpusBlueprintCandidates': return generateReferenceCorpusBlueprintCandidates(args[0])
       case 'GenerateReferenceCorpusInsertionDraft': return generateReferenceCorpusInsertionDraft(args[0])
       case 'GenerateReferenceCorpusInsertionDraftCandidates': return generateReferenceCorpusInsertionDraftCandidates(args[0])
+ case 'RecordReferenceCorpusInsertionAudit': return args[0]?.draft?.ready_for_insertion === true && args[0]?.draft?.gate?.passed === true && args[0]?.draft?.audit?.passed === true
       case 'UpdateReferenceMaterialTags': return updateReferenceMaterialTags(args[0])
       case 'UpdateReferenceMaterialsTags': return updateReferenceMaterialsTags(args[0])
       case 'AdaptReferenceMaterial': return adaptReferenceMaterial(args[0])
@@ -5903,37 +5904,67 @@ export function installConfigurableAppMockBridge(options = {}) {
       run.run_id === runId && Number(run.novel_id) === novelId) ?? null
   }
 
-  function startReferenceCorpusTechniqueSpecimenAnalysis(input = {}) {
-    const sourceNodeType = normalizeReferenceCorpusTechniqueSpecimenSourceNodeType(input?.source_node_type)
-    const novelId = normalizeReferenceCorpusFeatureAnalysisId(input?.novel_id ?? state.activeNovelId, 'novel_id', true)
-    const anchorId = normalizeReferenceCorpusFeatureAnalysisId(input?.anchor_id ?? 101, 'anchor_id', false)
-    const requestedRunId = normalizeReferenceCorpusFeatureAnalysisRunId(input?.run_id)
-    const minObservationConfidence = normalizeReferenceCorpusTechniqueSpecimenConfidence(input?.min_observation_confidence)
+ function startReferenceCorpusTechniqueSpecimenAnalysis(input = {}) {
+ const sourceNodeType = normalizeReferenceCorpusTechniqueSpecimenSourceNodeType(input?.source_node_type)
+ const novelId = normalizeReferenceCorpusFeatureAnalysisId(input?.novel_id ?? state.activeNovelId, 'novel_id', true)
+ const anchorId = normalizeReferenceCorpusFeatureAnalysisId(input?.anchor_id ?? 101, 'anchor_id', false)
+ const requestedRunId = normalizeReferenceCorpusFeatureAnalysisRunId(input?.run_id)
+ const minObservationConfidence = normalizeReferenceCorpusTechniqueSpecimenConfidence(input?.min_observation_confidence)
+ const tokenBudget = normalizeReferenceCorpusFeatureAnalysisTokenBudget(input?.token_budget)
 
-    if (requestedRunId) {
-      const existing = getReferenceCorpusTechniqueSpecimenAnalysisRun({ novel_id: novelId, run_id: requestedRunId })
-      if (existing) return existing
-    }
+ if (input?.resume === true && !requestedRunId) {
+ throw new Error('Resume requires run_id.')
+ }
 
-    const runId = requestedRunId ??
-      `corpus-technique:${anchorId}:${sourceNodeType}:mock-${String(state.nextReferenceCorpusTechniqueSpecimenAnalysisRunId++).padStart(3, '0')}`
-    const run = {
-      run_id: runId,
-      novel_id: novelId,
-      anchor_id: anchorId,
-      scope: 'technique_specimen',
-      status: 'completed',
-      tokens_spent: 48,
-      specimen_count: sourceNodeType === 'passage' ? 2 : 1,
-      processed_nodes: sourceNodeType === 'passage' ? 2 : 1,
-      analyzer_version: 'reference-corpus-technique-specimen-llm-v1',
-      schema_version: 'reference-corpus-technique-specimen-v1',
-      model_provider: 'mock',
-      model_id: 'gpt',
-      started_at: now,
-      completed_at: now,
-      diagnostics: [`mock technique specimen analysis completed at min confidence ${minObservationConfidence}`],
-    }
+ const existing = requestedRunId
+ ? getReferenceCorpusTechniqueSpecimenAnalysisRun({ novel_id: novelId, run_id: requestedRunId })
+ : null
+ if (existing && input?.resume !== true) {
+ throw new Error('Existing technique specimen run requires resume=true.')
+ }
+ if (input?.resume === true && !existing) {
+ throw new Error('Technique specimen analysis run was not found.')
+ }
+ if (existing && existing.status !== 'budget_exhausted') {
+ throw new Error('Only budget-exhausted technique specimen runs can be resumed.')
+ }
+ if (existing && (tokenBudget == null || tokenBudget <= existing.tokens_spent)) {
+ throw new Error('Resume token_budget must be greater than tokens_spent.')
+ }
+
+ const runId = requestedRunId ??
+ `corpus-technique:${anchorId}:${sourceNodeType}:mock-${String(state.nextReferenceCorpusTechniqueSpecimenAnalysisRunId++).padStart(3, '0')}`
+ const totalNodes = sourceNodeType === 'passage' ? 2 : 1
+ const tokensPerNode = 24
+ const previousProcessedNodes = existing?.processed_nodes ?? 0
+ const previousTokensSpent = existing?.tokens_spent ?? 0
+ const effectiveBudget = tokenBudget ?? (totalNodes * tokensPerNode)
+ const affordableNodeCount = Math.floor(Math.max(0, effectiveBudget - previousTokensSpent) / tokensPerNode)
+ const processedNodes = Math.min(totalNodes, previousProcessedNodes + affordableNodeCount)
+ const newlyProcessedNodes = processedNodes - previousProcessedNodes
+ const tokensSpent = previousTokensSpent + (newlyProcessedNodes * tokensPerNode)
+ const budgetExhausted = processedNodes < totalNodes
+ const run = {
+ run_id: runId,
+ novel_id: novelId,
+ anchor_id: anchorId,
+ scope: 'technique_specimen',
+ status: budgetExhausted ? 'budget_exhausted' : 'completed',
+ token_budget: tokenBudget,
+ tokens_spent: tokensSpent,
+ resume_cursor: `${sourceNodeType}:${processedNodes}`,
+ specimen_count: processedNodes,
+ processed_nodes: processedNodes,
+ analyzer_version: 'reference-corpus-technique-specimen-llm-v1',
+ schema_version: 'reference-corpus-technique-specimen-v1',
+ model_provider: 'mock',
+ model_id: 'gpt',
+ started_at: existing?.started_at ?? now,
+ completed_at: budgetExhausted ? null : now,
+ diagnostics: budgetExhausted
+ ? [`mock technique specimen analysis stopped at ${processedNodes}/${totalNodes} nodes for min confidence ${minObservationConfidence}`]
+ : [`mock technique specimen analysis completed at min confidence ${minObservationConfidence}`],
+ }
 
     state.referenceCorpusTechniqueSpecimenAnalysisRuns = [
       run,

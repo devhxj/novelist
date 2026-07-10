@@ -27,4 +27,8 @@
     <Content Include="Fixtures\**\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+ <ItemGroup Condition="'$(ExcludeCorpusGovernanceTests)' == 'true'">
+ <Compile Remove="ReferenceCorpusGovernanceServiceTests.cs" />
+ </ItemGroup>
+
 </Project>

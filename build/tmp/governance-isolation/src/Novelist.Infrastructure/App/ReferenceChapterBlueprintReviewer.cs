@@ -1,0 +1,2853 @@
+using Novelist.Contracts.App;
+
+namespace Novelist.Infrastructure.App;
+
+internal static class ReferenceChapterBlueprintReviewer
+{
+    public const int CurrentReviewVersion = 63;
+
+    private const double StrongStyleMinimumFitFloor = 0.75;
+    private const double MaximumStyleFitThreshold = 10.0;
+    private static readonly HashSet<string> SupportedStyleEvidenceTypes = new(
+        ReferenceMaterialTypes.All.Concat(
+        [
+            "dialogue_exchange",
+            "interiority",
+            "sensory_detail",
+            "afterbeat",
+            "transition",
+            "hook_marker",
+            "length_sample",
+            "dominant_function",
+            "dominant_emotion",
+            "dominant_pov",
+            "dominant_technique"
+        ]),
+        StringComparer.Ordinal);
+
+    public static ReferenceChapterBlueprintReviewPayload BuildReview(
+        ReferenceChapterBlueprintPayload blueprint,
+        DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(blueprint);
+        var logicErrors = new List<string>();
+        var causalityErrors = new List<string>();
+        var emotionErrors = new List<string>();
+        var narrationErrors = new List<string>();
+        var executionErrors = new List<string>();
+        var characterStateErrors = new List<string>();
+        var povErrors = new List<string>();
+        var continuityErrors = new List<string>();
+        var transitionErrors = new List<string>();
+        var forbiddenFactErrors = new List<string>();
+        var referenceBindingErrors = new List<string>();
+        var materialFitErrors = new List<string>();
+        var screenplayRisks = new List<string>();
+        var aiRisks = new List<string>();
+        var novelisticNarrationErrors = new List<string>();
+        var defects = new List<ReferenceChapterBlueprintReviewDefectPayload>();
+
+        void AddDefect(
+            List<string> bucket,
+            string category,
+            string fieldPath,
+            string beatId,
+            string reason,
+            string requiredFix,
+            string severity = "error")
+        {
+            bucket.Add(reason);
+            defects.Add(new ReferenceChapterBlueprintReviewDefectPayload(
+                category,
+                fieldPath,
+                beatId,
+                severity,
+                reason,
+                requiredFix));
+        }
+
+        void AddBeatDefect(
+            List<string> bucket,
+            string category,
+            ReferenceChapterBlueprintBeatPayload beat,
+            string fieldName,
+            string reason,
+            string requiredFix)
+        {
+            AddDefect(bucket, category, "beat:" + beat.BeatId + ":" + fieldName, beat.BeatId, reason, requiredFix);
+        }
+
+        void AddWarningDefect(
+            string category,
+            string fieldPath,
+            string beatId,
+            string reason,
+            string requiredFix)
+        {
+            defects.Add(new ReferenceChapterBlueprintReviewDefectPayload(
+                category,
+                fieldPath,
+                beatId,
+                "warning",
+                reason,
+                requiredFix));
+        }
+
+        void AddUnsupportedAnalysisTrackFactDefects(
+            ReferenceChapterBlueprintAnalysisTrackPayload track,
+            List<string> bucket,
+            string category,
+            string fieldPath,
+            string displayName)
+        {
+            foreach (var unsupportedFact in FindUnsupportedAnalysisTrackSummaryFacts(blueprint, track))
+            {
+                AddDefect(
+                    bucket,
+                    category,
+                    fieldPath + ".summary",
+                    string.Empty,
+                    $"Blueprint contains unsupported {displayName} analysis fact: {unsupportedFact}",
+                    $"Set up the {fieldPath}.summary fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            foreach (var unsupportedFact in FindUnsupportedAnalysisTrackPointFacts(blueprint, track))
+            {
+                AddDefect(
+                    bucket,
+                    category,
+                    fieldPath + ".points",
+                    string.Empty,
+                    $"Blueprint contains unsupported {displayName} analysis point fact: {unsupportedFact}",
+                    $"Set up the {fieldPath}.points fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+        }
+
+        void AddForbiddenAnalysisTrackFactDefects(
+            ReferenceChapterBlueprintAnalysisTrackPayload track,
+            string fieldPath,
+            string displayName,
+            string forbidden)
+        {
+            if (ContainsForbidden(track.Summary, forbidden))
+            {
+                AddDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    fieldPath + ".summary",
+                    string.Empty,
+                    $"Forbidden fact appears in {displayName} analysis: {forbidden}",
+                    $"Remove the forbidden fact from {fieldPath}.summary or move it out of the forbidden fact set.");
+            }
+
+            foreach (var point in track.Points.Where(point => ContainsForbidden(point, forbidden)))
+            {
+                AddDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    fieldPath + ".points",
+                    string.Empty,
+                    $"Forbidden fact appears in {displayName} analysis point: {forbidden}",
+                    $"Remove the forbidden fact from {fieldPath}.points or move it out of the forbidden fact set.");
+            }
+        }
+
+        void AddUnsupportedExecutionContractFactDefects()
+        {
+            foreach (var unsupportedFact in FindUnsupportedExecutionContractSummaryFacts(blueprint))
+            {
+                AddDefect(
+                    executionErrors,
+                    "execution",
+                    "execution_contract.summary",
+                    string.Empty,
+                    $"Blueprint contains unsupported execution contract fact: {unsupportedFact}",
+                    "Set up the execution_contract.summary fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            foreach (var field in ExecutionContractListFields(blueprint.ExecutionContract))
+            {
+                foreach (var unsupportedFact in FindUnsupportedExecutionContractListFacts(blueprint, field.Values))
+                {
+                    AddDefect(
+                        executionErrors,
+                        "execution",
+                        "execution_contract." + field.FieldName,
+                        string.Empty,
+                        $"Blueprint contains unsupported execution contract {field.FieldName} fact: {unsupportedFact}",
+                        $"Set up the execution_contract.{field.FieldName} fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
+                }
+            }
+        }
+
+        void AddForbiddenExecutionContractFactDefects(string forbidden)
+        {
+            if (ContainsForbidden(blueprint.ExecutionContract.Summary, forbidden))
+            {
+                AddDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    "execution_contract.summary",
+                    string.Empty,
+                    $"Forbidden fact appears in execution contract: {forbidden}",
+                    "Remove the forbidden fact from execution_contract.summary or move it out of the forbidden fact set.");
+            }
+
+            foreach (var field in ExecutionContractListFields(blueprint.ExecutionContract))
+            {
+                foreach (var item in field.Values.Where(item => ContainsForbidden(item, forbidden)))
+                {
+                    AddDefect(
+                        forbiddenFactErrors,
+                        "forbidden_fact",
+                        "execution_contract." + field.FieldName,
+                        string.Empty,
+                        $"Forbidden fact appears in execution contract {field.FieldName}: {forbidden}",
+                        $"Remove the forbidden fact from execution_contract.{field.FieldName} or move it out of the forbidden fact set.");
+                }
+            }
+        }
+
+        void AddStyleContractDefects(ReferenceChapterBlueprintBeatPayload beat)
+        {
+            var styleContract = beat.StyleContract;
+            if (styleContract is null)
+            {
+                return;
+            }
+
+            var profileIds = styleContract.StyleProfileIds?
+                .Where(profileId => profileId > 0)
+                .Distinct()
+                .ToArray() ?? [];
+            var invalidProfileIds = styleContract.StyleProfileIds?
+                .Where(profileId => profileId <= 0)
+                .Distinct()
+                .ToArray() ?? [];
+            foreach (var invalidProfileId in invalidProfileIds)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.style_profile_ids",
+                    $"Beat {beat.BeatIndex} style contract uses invalid style profile id: {invalidProfileId}.",
+                    "Set style_contract.style_profile_ids to positive profile ids before review.");
+            }
+
+            var styleDimensions = NormalizeTags(styleContract.StyleDimensions).ToArray();
+            var requiredEvidenceTypes = NormalizeTags(styleContract.RequiredEvidenceTypes).ToArray();
+            if (profileIds.Length == 0)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.style_profile_ids",
+                    $"Beat {beat.BeatIndex} style contract declares style duties without style profile ids.",
+                    "Select at least one active style profile id before style-aware material binding.");
+            }
+
+            if (styleDimensions.Length == 0 && requiredEvidenceTypes.Length == 0)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.style_dimensions",
+                    $"Beat {beat.BeatIndex} style contract has no style duties.",
+                    "Add at least one style dimension or required evidence type so approval can review the style duty.");
+            }
+
+            var intensity = string.IsNullOrWhiteSpace(styleContract.ImitationIntensity)
+                ? string.Empty
+                : styleContract.ImitationIntensity.Trim();
+            var knownIntensity = ReferenceStyleImitationIntensities.All.Contains(intensity, StringComparer.Ordinal)
+                ? intensity
+                : string.Empty;
+            if (intensity.Length == 0)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.imitation_intensity",
+                    $"Beat {beat.BeatIndex} style contract is missing imitation_intensity.",
+                    "Set imitation_intensity to diagnostic_only, loose, moderate, or strong.");
+            }
+            else if (knownIntensity.Length == 0)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.imitation_intensity",
+                    $"Beat {beat.BeatIndex} style contract uses unsupported imitation_intensity: {intensity}.",
+                    "Set imitation_intensity to diagnostic_only, loose, moderate, or strong.");
+            }
+
+            if (double.IsNaN(styleContract.MinStyleFit) ||
+                double.IsInfinity(styleContract.MinStyleFit) ||
+                styleContract.MinStyleFit < 0 ||
+                styleContract.MinStyleFit > MaximumStyleFitThreshold)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.min_style_fit",
+                    $"Beat {beat.BeatIndex} style contract uses invalid min_style_fit: {styleContract.MinStyleFit}.",
+                    $"Set min_style_fit to a finite value between 0 and {MaximumStyleFitThreshold}.");
+            }
+            else if (string.Equals(knownIntensity, ReferenceStyleImitationIntensities.Strong, StringComparison.Ordinal) &&
+                styleContract.MinStyleFit < StrongStyleMinimumFitFloor)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.min_style_fit",
+                    $"Beat {beat.BeatIndex} strong style contract sets min_style_fit too low: {styleContract.MinStyleFit}.",
+                    $"Raise min_style_fit to at least {StrongStyleMinimumFitFloor} or lower imitation_intensity before approval.");
+            }
+            else if (string.Equals(knownIntensity, ReferenceStyleImitationIntensities.DiagnosticOnly, StringComparison.Ordinal) &&
+                styleContract.MinStyleFit > 0)
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "style_contract.min_style_fit",
+                    $"Beat {beat.BeatIndex} diagnostic-only style contract still enforces min_style_fit.",
+                    "Set min_style_fit to 0 for diagnostic_only, or choose loose, moderate, or strong if style fit should gate binding.");
+            }
+
+            foreach (var unsupportedEvidenceType in requiredEvidenceTypes
+                .Where(evidenceType => !SupportedStyleEvidenceTypes.Contains(evidenceType))
+                .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "style_contract.required_evidence_types",
+                    $"Beat {beat.BeatIndex} style contract uses unsupported required evidence type: {unsupportedEvidenceType}.",
+                    "Use a known deterministic style evidence label or reference material type before material binding.");
+            }
+
+            var materialTypes = NormalizeTags(beat.ReferenceQuery.MaterialTypes.Count > 0
+                    ? beat.ReferenceQuery.MaterialTypes
+                    : beat.RequiredMaterialTypes)
+                .ToHashSet(StringComparer.Ordinal);
+            foreach (var evidenceType in requiredEvidenceTypes
+                .Where(evidenceType => SupportedStyleEvidenceTypes.Contains(evidenceType))
+                .Where(evidenceType => materialTypes.Count > 0 && !IsStyleEvidenceCompatibleWithMaterialTypes(evidenceType, materialTypes))
+                .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "style_contract.required_evidence_types",
+                    $"Beat {beat.BeatIndex} requires style evidence type {evidenceType} that material search cannot return.",
+                    "Align style_contract.required_evidence_types with reference_query.material_types or required_material_types before binding.");
+            }
+        }
+
+        if (IsEmptyTrack(blueprint.LogicAnalysis) ||
+            IsEmptyTrack(blueprint.EmotionAnalysis) ||
+            IsEmptyTrack(blueprint.NarrationAnalysis) ||
+            IsEmptyTrack(blueprint.CharacterAnalysis) ||
+            IsEmptyTrack(blueprint.ReferenceAnalysis) ||
+            IsEmptyTrack(blueprint.TransitionPlan))
+        {
+            AddDefect(
+                logicErrors,
+                "logic",
+                "analysis_tracks",
+                string.Empty,
+                "Blueprint must contain complete logic, emotion, narration, character, reference, and transition tracks.",
+                "Complete the logic, emotion, narration, character, reference, and transition analysis tracks.");
+        }
+
+        if (IsEmptyExecutionTrack(blueprint.ExecutionContract))
+        {
+            AddDefect(
+                executionErrors,
+                "execution",
+                "execution_contract",
+                string.Empty,
+                "Blueprint must contain a complete execution track.",
+                "Complete paragraph intentions, execution modes, anti-screenplay duties, source-backed detail targets, and rejection rules.");
+        }
+
+        if (blueprint.Beats.Count == 0)
+        {
+            AddDefect(
+                causalityErrors,
+                "causality",
+                "beats",
+                string.Empty,
+                "Blueprint must contain at least one beat.",
+                "Add at least one reviewable beat before running blueprint review.");
+        }
+
+        foreach (var unsupportedChapterFunctionFact in FindUnsupportedChapterFunctionFacts(blueprint))
+        {
+            AddDefect(
+                logicErrors,
+                "logic",
+                "chapter_function",
+                string.Empty,
+                $"Blueprint contains unsupported chapter function fact: {unsupportedChapterFunctionFact}",
+                "Set up the chapter_function fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
+        }
+
+        foreach (var unsupportedLogicAnalysisFact in FindUnsupportedLogicAnalysisSummaryFacts(blueprint))
+        {
+            AddDefect(
+                logicErrors,
+                "logic",
+                "logic_analysis.summary",
+                string.Empty,
+                $"Blueprint contains unsupported logic analysis fact: {unsupportedLogicAnalysisFact}",
+                "Set up the logic_analysis.summary fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
+        }
+
+        foreach (var unsupportedLogicAnalysisPointFact in FindUnsupportedLogicAnalysisPointFacts(blueprint))
+        {
+            AddDefect(
+                logicErrors,
+                "logic",
+                "logic_analysis.points",
+                string.Empty,
+                $"Blueprint contains unsupported logic analysis point fact: {unsupportedLogicAnalysisPointFact}",
+                "Set up the logic_analysis.points fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
+        }
+
+        AddUnsupportedAnalysisTrackFactDefects(
+            blueprint.EmotionAnalysis,
+            emotionErrors,
+            "emotion",
+            "emotion_analysis",
+            "emotion");
+        AddUnsupportedAnalysisTrackFactDefects(
+            blueprint.NarrationAnalysis,
+            narrationErrors,
+            "narration",
+            "narration_analysis",
+            "narration");
+        AddUnsupportedAnalysisTrackFactDefects(
+            blueprint.CharacterAnalysis,
+            characterStateErrors,
+            "character_state",
+            "character_analysis",
+            "character");
+        AddUnsupportedAnalysisTrackFactDefects(
+            blueprint.ReferenceAnalysis,
+            referenceBindingErrors,
+            "reference_binding",
+            "reference_analysis",
+            "reference");
+        AddUnsupportedAnalysisTrackFactDefects(
+            blueprint.TransitionPlan,
+            transitionErrors,
+            "transition",
+            "transition_plan",
+            "transition");
+
+        AddUnsupportedExecutionContractFactDefects();
+
+        foreach (var unsupportedPreviousStateFact in FindUnsupportedPreviousStateFacts(blueprint))
+        {
+            AddDefect(
+                continuityErrors,
+                "continuity",
+                "previous_state",
+                string.Empty,
+                $"Blueprint contains unsupported previous state fact: {unsupportedPreviousStateFact}",
+                "Set up the previous_state fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
+        }
+
+        foreach (var unsupportedFinalStateFact in FindUnsupportedFinalStateFacts(blueprint))
+        {
+            AddDefect(
+                continuityErrors,
+                "continuity",
+                "final_state",
+                string.Empty,
+                $"Blueprint contains unsupported final state fact: {unsupportedFinalStateFact}",
+                "Set up the final_state fact in approved known facts, beat scene facts, viewpoint knowledge, or slot plan before drafting.");
+        }
+
+        foreach (var beat in blueprint.Beats.OrderBy(item => item.BeatIndex))
+        {
+            if (string.IsNullOrWhiteSpace(beat.NarrativeFunction))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "narrative_function",
+                    $"Beat {beat.BeatIndex} is missing intended use.",
+                    "Fill narrative_function so material links can record a concrete intended use before binding.");
+            }
+
+            foreach (var unsupportedNarrativeFunctionFact in FindUnsupportedNarrativeFunctionFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    logicErrors,
+                    "logic",
+                    beat,
+                    "narrative_function",
+                    $"Beat {beat.BeatIndex} contains unsupported narrative function fact: {unsupportedNarrativeFunctionFact}",
+                    "Set up the narrative_function fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            foreach (var unsupportedLogicPremiseFact in FindUnsupportedLogicPremiseFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    logicErrors,
+                    "logic",
+                    beat,
+                    "logic_premise",
+                    $"Beat {beat.BeatIndex} contains unsupported logic premise fact: {unsupportedLogicPremiseFact}",
+                    "Set up the logic_premise fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            foreach (var unsupportedConflictPressureFact in FindUnsupportedConflictPressureFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    logicErrors,
+                    "logic",
+                    beat,
+                    "conflict_pressure",
+                    $"Beat {beat.BeatIndex} contains unsupported conflict pressure fact: {unsupportedConflictPressureFact}",
+                    "Set up the conflict_pressure fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            if (beat.BeatIndex > 1 && string.IsNullOrWhiteSpace(beat.CausalityIn))
+            {
+                AddBeatDefect(
+                    causalityErrors,
+                    "causality",
+                    beat,
+                    "causality_in",
+                    $"Beat {beat.BeatIndex} is missing causality_in.",
+                    "Add causality_in showing why this beat follows from the previous beat.");
+            }
+
+            foreach (var unsupportedCausalityInFact in FindUnsupportedCausalityInFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    causalityErrors,
+                    "causality",
+                    beat,
+                    "causality_in",
+                    $"Beat {beat.BeatIndex} contains unsupported causality_in fact: {unsupportedCausalityInFact}",
+                    "Set up the causality_in fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            if (string.IsNullOrWhiteSpace(beat.CausalityOut))
+            {
+                AddBeatDefect(
+                    causalityErrors,
+                    "causality",
+                    beat,
+                    "causality_out",
+                    $"Beat {beat.BeatIndex} is missing causality_out.",
+                    "Add causality_out showing the consequence this beat creates for the next beat or hook.");
+            }
+
+            foreach (var unsupportedCausalityOutFact in FindUnsupportedCausalityOutFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    causalityErrors,
+                    "causality",
+                    beat,
+                    "causality_out",
+                    $"Beat {beat.BeatIndex} contains unsupported causality_out fact: {unsupportedCausalityOutFact}",
+                    "Set up the causality_out fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            if (string.IsNullOrWhiteSpace(beat.TransitionIn) || string.IsNullOrWhiteSpace(beat.TransitionOut))
+            {
+                AddBeatDefect(
+                    transitionErrors,
+                    "transition",
+                    beat,
+                    "transition",
+                    $"Beat {beat.BeatIndex} is missing transition reason.",
+                    "Fill transition_in and transition_out with causal, emotional, informational, or viewpoint pressure.");
+            }
+            else if (!HasTransitionPressure(beat.TransitionIn) || !HasTransitionPressure(beat.TransitionOut))
+            {
+                AddBeatDefect(
+                    transitionErrors,
+                    "transition",
+                    beat,
+                    "transition",
+                    $"Beat {beat.BeatIndex} transition lacks causal, emotional, informational, or viewpoint pressure.",
+                    "Rewrite transition_in and transition_out so the movement is forced by story pressure.");
+            }
+
+            foreach (var unsupportedTransitionInFact in FindUnsupportedTransitionInFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    transitionErrors,
+                    "transition",
+                    beat,
+                    "transition_in",
+                    $"Beat {beat.BeatIndex} contains unsupported transition_in fact: {unsupportedTransitionInFact}",
+                    "Set up the transition_in fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            foreach (var unsupportedTransitionOutFact in FindUnsupportedTransitionOutFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    transitionErrors,
+                    "transition",
+                    beat,
+                    "transition_out",
+                    $"Beat {beat.BeatIndex} contains unsupported transition_out fact: {unsupportedTransitionOutFact}",
+                    "Set up the transition_out fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            var emotionChanges = !string.Equals(beat.EmotionBefore, beat.EmotionAfter, StringComparison.Ordinal);
+            if (emotionChanges &&
+                (string.IsNullOrWhiteSpace(beat.EmotionTrigger) ||
+                    string.IsNullOrWhiteSpace(beat.SuppressedReaction) ||
+                    string.IsNullOrWhiteSpace(beat.ExternalEvidence)))
+            {
+                AddBeatDefect(
+                    emotionErrors,
+                    "emotion",
+                    beat,
+                    "emotion_mechanic",
+                    $"Beat {beat.BeatIndex} changes emotion without trigger, suppressed reaction, or external evidence.",
+                    "Add emotion_trigger, suppressed_reaction, and external_evidence for the declared emotion change.");
+            }
+
+            if (emotionChanges &&
+                (UsesFakeEmotionMechanic(beat.EmotionTrigger) ||
+                    UsesFakeEmotionMechanic(beat.SuppressedReaction) ||
+                    UsesFakeEmotionMechanic(beat.ExternalEvidence)))
+            {
+                AddBeatDefect(
+                    emotionErrors,
+                    "emotion",
+                    beat,
+                    "emotion_mechanic",
+                    $"Beat {beat.BeatIndex} uses fake emotion mechanic; trigger, suppressed reaction, and external evidence must be concrete.",
+                    "Replace generic emotion mechanics with concrete trigger, suppressed reaction, and observable evidence.");
+            }
+
+            foreach (var unsupportedExternalEvidenceFact in FindUnsupportedExternalEvidenceFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    emotionErrors,
+                    "emotion",
+                    beat,
+                    "external_evidence",
+                    $"Beat {beat.BeatIndex} contains unsupported external evidence fact: {unsupportedExternalEvidenceFact}",
+                    "Set up the external_evidence fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            foreach (var unsupportedEmotionTriggerFact in FindUnsupportedEmotionTriggerFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    emotionErrors,
+                    "emotion",
+                    beat,
+                    "emotion_trigger",
+                    $"Beat {beat.BeatIndex} contains unsupported emotion trigger fact: {unsupportedEmotionTriggerFact}",
+                    "Set up the emotion_trigger fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            foreach (var unsupportedSuppressedReactionFact in FindUnsupportedSuppressedReactionFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    emotionErrors,
+                    "emotion",
+                    beat,
+                    "suppressed_reaction",
+                    $"Beat {beat.BeatIndex} contains unsupported suppressed reaction fact: {unsupportedSuppressedReactionFact}",
+                    "Set up the suppressed_reaction fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            if (beat.CharacterGoals.Count == 0 || beat.CharacterStatesBefore.Count == 0 || beat.CharacterStatesAfter.Count == 0)
+            {
+                AddBeatDefect(
+                    characterStateErrors,
+                    "character_state",
+                    beat,
+                    "character_state",
+                    $"Beat {beat.BeatIndex} is missing character state mechanics.",
+                    "Fill character goals plus before/after state mechanics for this beat.");
+            }
+            else if (beat.CharacterMisbeliefs.Count == 0)
+            {
+                AddBeatDefect(
+                    characterStateErrors,
+                    "character_state",
+                    beat,
+                    "character_misbeliefs",
+                    $"Beat {beat.BeatIndex} is missing character misbelief mechanics.",
+                    "Fill character_misbeliefs so the beat exposes what the character misunderstands, avoids, or cannot yet see.");
+            }
+            else if (beat.RelationshipPressure.Count == 0)
+            {
+                AddBeatDefect(
+                    characterStateErrors,
+                    "character_state",
+                    beat,
+                    "relationship_pressure",
+                    $"Beat {beat.BeatIndex} is missing relationship pressure mechanics.",
+                    "Fill relationship_pressure so the beat exposes how the scene changes leverage, trust, distance, or obligation.");
+            }
+            else if (HasNoCharacterStateDelta(beat.CharacterStatesBefore, beat.CharacterStatesAfter))
+            {
+                AddBeatDefect(
+                    characterStateErrors,
+                    "character_state",
+                    beat,
+                    "character_state_delta",
+                    $"Beat {beat.BeatIndex} has no role-state delta between before and after states.",
+                    "Change character_states_after to show the pressure, leverage, knowledge, relationship, or role-state delta created by this beat.");
+            }
+
+            foreach (var unsupportedCharacterStateFact in FindUnsupportedCharacterStateFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    characterStateErrors,
+                    "character_state",
+                    beat,
+                    "character_states",
+                    $"Beat {beat.BeatIndex} contains unsupported character state fact: {unsupportedCharacterStateFact}",
+                    "Move the character state fact into approved known facts or scene facts before using it as role-state context.");
+            }
+
+            foreach (var unsupportedCharacterGoalFact in FindUnsupportedCharacterGoalFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    characterStateErrors,
+                    "character_state",
+                    beat,
+                    "character_goals",
+                    $"Beat {beat.BeatIndex} contains unsupported character goal fact: {unsupportedCharacterGoalFact}",
+                    "Move the character_goals fact into approved known facts or scene facts before using it as role-state motivation.");
+            }
+
+            foreach (var unsupportedCharacterMisbeliefFact in FindUnsupportedCharacterMisbeliefFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    characterStateErrors,
+                    "character_state",
+                    beat,
+                    "character_misbeliefs",
+                    $"Beat {beat.BeatIndex} contains unsupported character misbelief fact: {unsupportedCharacterMisbeliefFact}",
+                    "Move the character_misbeliefs fact into approved known facts or scene facts before using it as role-state pressure.");
+            }
+
+            foreach (var unsupportedRelationshipPressureFact in FindUnsupportedRelationshipPressureFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    characterStateErrors,
+                    "character_state",
+                    beat,
+                    "relationship_pressure",
+                    $"Beat {beat.BeatIndex} contains unsupported relationship pressure fact: {unsupportedRelationshipPressureFact}",
+                    "Move the relationship_pressure fact into approved known facts or scene facts before using it as relationship leverage.");
+            }
+
+            if (beat.ViewpointForbiddenKnowledge.Any(forbidden =>
+                    beat.ViewpointAllowedKnowledge.Contains(forbidden, StringComparer.OrdinalIgnoreCase)))
+            {
+                AddBeatDefect(
+                    povErrors,
+                    "pov",
+                    beat,
+                    "viewpoint_allowed_knowledge",
+                    $"Beat {beat.BeatIndex} allows viewpoint knowledge that is also forbidden.",
+                    "Remove forbidden knowledge from the allowed POV boundary.");
+            }
+
+            foreach (var unsupportedFact in FindUnsupportedViewpointFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    povErrors,
+                    "pov",
+                    beat,
+                    "viewpoint_allowed_knowledge",
+                    $"Beat {beat.BeatIndex} allows POV knowledge outside approved facts: {unsupportedFact}",
+                    "Remove the unsupported POV knowledge or add it to approved known/scene facts before review.");
+            }
+
+            foreach (var unsupportedFact in FindUnsupportedSceneFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    continuityErrors,
+                    "continuity",
+                    beat,
+                    "scene_facts",
+                    $"Beat {beat.BeatIndex} introduces unsupported scene fact: {unsupportedFact}",
+                    "Remove the unsupported scene fact or add it to known facts or declared slot values before review.");
+            }
+
+            foreach (var forbiddenFact in FindSceneFactsConflictingWithForbiddenPov(beat))
+            {
+                AddBeatDefect(
+                    povErrors,
+                    "pov",
+                    beat,
+                    "scene_facts",
+                    $"Beat {beat.BeatIndex} scene fact conflicts with forbidden POV knowledge: {forbiddenFact}",
+                    "Remove the forbidden POV fact from scene_facts or move the beat to a POV that may know it.");
+            }
+
+            foreach (var forbidden in beat.ForbiddenFacts.Where(item => !string.IsNullOrWhiteSpace(item)))
+            {
+                foreach (var field in FindBeatScopedForbiddenFactFields(beat, forbidden))
+                {
+                    AddBeatDefect(
+                        forbiddenFactErrors,
+                        "forbidden_fact",
+                        beat,
+                        field,
+                        $"Beat forbidden fact appears in {FormatFieldName(field)}: {forbidden}",
+                        $"Remove the beat forbidden fact from {field} before it becomes part of the draft contract.");
+                }
+            }
+
+            var proseDuties = beat.ProseDuties
+                .Where(duty => !string.IsNullOrWhiteSpace(duty))
+                .ToArray();
+            if (proseDuties.Length == 0)
+            {
+                AddBeatDefect(
+                    executionErrors,
+                    "execution",
+                    beat,
+                    "prose_duties",
+                    $"Beat {beat.BeatIndex} is missing prose duties.",
+                    "Add prose duties such as interiority, external_evidence, transition, subtext, or source_detail.");
+            }
+            else if (proseDuties.All(duty =>
+                    string.Equals(duty, "action", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(duty, "dialogue", StringComparison.OrdinalIgnoreCase)))
+            {
+                AddBeatDefect(
+                    screenplayRisks,
+                    "screenplay_drift",
+                    beat,
+                    "prose_duties",
+                    $"Beat {beat.BeatIndex} has only action/dialogue prose duties.",
+                    "Add a novelistic prose duty beyond action/dialogue, such as interiority, subtext, sensory pressure, or transition work.");
+            }
+
+            if (string.IsNullOrWhiteSpace(beat.ParagraphIntention) ||
+                string.IsNullOrWhiteSpace(beat.ExecutionMode) ||
+                string.IsNullOrWhiteSpace(beat.AntiScreenplayDuty) ||
+                string.IsNullOrWhiteSpace(beat.CandidateRejectionRule))
+            {
+                AddBeatDefect(
+                    executionErrors,
+                    "execution",
+                    beat,
+                    "execution_contract",
+                    $"Beat {beat.BeatIndex} is missing paragraph intention, execution mode, anti-screenplay duty, or rejection rule.",
+                    "Fill paragraph_intention, execution_mode, anti_screenplay_duty, and candidate_rejection_rule.");
+            }
+            else
+            {
+                if (UsesGenericParagraphIntention(beat.ParagraphIntention))
+                {
+                    AddBeatDefect(
+                        executionErrors,
+                        "execution",
+                        beat,
+                        "paragraph_intention",
+                        $"Beat {beat.BeatIndex} uses generic paragraph intention.",
+                        "Rewrite paragraph_intention as a concrete prose job, such as dwell, withhold, reveal, contrast, linger, or turn tied to this beat.");
+                }
+
+                foreach (var unsupportedParagraphIntentionFact in FindUnsupportedParagraphIntentionFacts(blueprint, beat))
+                {
+                    AddBeatDefect(
+                        executionErrors,
+                        "execution",
+                        beat,
+                        "paragraph_intention",
+                        $"Beat {beat.BeatIndex} contains unsupported paragraph intention fact: {unsupportedParagraphIntentionFact}",
+                        "Set up the paragraph_intention fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+                }
+
+                if (UsesGenericExecutionMode(beat.ExecutionMode))
+                {
+                    AddBeatDefect(
+                        executionErrors,
+                        "execution",
+                        beat,
+                        "execution_mode",
+                        $"Beat {beat.BeatIndex} uses generic execution mode.",
+                        "Rewrite execution_mode as a concrete drafting operation, such as dwell, compress, withhold, reveal, braid evidence, or stage interiority.");
+                }
+
+                foreach (var unsupportedExecutionModeFact in FindUnsupportedExecutionModeFacts(blueprint, beat))
+                {
+                    AddBeatDefect(
+                        executionErrors,
+                        "execution",
+                        beat,
+                        "execution_mode",
+                        $"Beat {beat.BeatIndex} contains unsupported execution mode fact: {unsupportedExecutionModeFact}",
+                        "Set up the execution_mode fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+                }
+
+                if (UsesGenericCandidateRejectionRule(beat.CandidateRejectionRule))
+                {
+                    AddBeatDefect(
+                        executionErrors,
+                        "execution",
+                        beat,
+                        "candidate_rejection_rule",
+                        $"Beat {beat.BeatIndex} uses generic candidate rejection rule.",
+                        "Rewrite candidate_rejection_rule as a concrete failure condition, such as action-only, dialogue-only, missing evidence, POV leak, or unsupported reveal.");
+                }
+
+                foreach (var unsupportedCandidateRejectionRuleFact in FindUnsupportedCandidateRejectionRuleFacts(blueprint, beat))
+                {
+                    AddBeatDefect(
+                        executionErrors,
+                        "execution",
+                        beat,
+                        "candidate_rejection_rule",
+                        $"Beat {beat.BeatIndex} contains unsupported candidate rejection rule fact: {unsupportedCandidateRejectionRuleFact}",
+                        "Set up the candidate_rejection_rule fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+                }
+
+                if (UsesGenericAntiScreenplayDuty(beat.AntiScreenplayDuty))
+                {
+                    AddBeatDefect(
+                        screenplayRisks,
+                        "screenplay_drift",
+                        beat,
+                        "anti_screenplay_duty",
+                        $"Beat {beat.BeatIndex} uses generic anti-screenplay duty.",
+                        "Rewrite anti_screenplay_duty as concrete prose work beyond stage directions, dialogue labels, or camera blocking.");
+                }
+
+                foreach (var unsupportedAntiScreenplayDutyFact in FindUnsupportedAntiScreenplayDutyFacts(blueprint, beat))
+                {
+                    AddBeatDefect(
+                        screenplayRisks,
+                        "screenplay_drift",
+                        beat,
+                        "anti_screenplay_duty",
+                        $"Beat {beat.BeatIndex} contains unsupported anti-screenplay duty fact: {unsupportedAntiScreenplayDutyFact}",
+                        "Set up the anti_screenplay_duty fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+                }
+            }
+
+            if ((string.Equals(beat.BeatType, ReferenceBlueprintBeatTypes.Action, StringComparison.Ordinal) ||
+                    string.Equals(beat.BeatType, ReferenceBlueprintBeatTypes.DialogueExchange, StringComparison.Ordinal)) &&
+                string.IsNullOrWhiteSpace(beat.SubtextPlan) &&
+                string.IsNullOrWhiteSpace(beat.SensoryAnchorTarget) &&
+                string.IsNullOrWhiteSpace(beat.SourceBackedDetailTarget))
+            {
+                AddBeatDefect(
+                    novelisticNarrationErrors,
+                    "novelistic_narration",
+                    beat,
+                    "novelistic_targets",
+                    $"Beat {beat.BeatIndex} reads like screenplay blocking without subtext, sensory anchor, or source-backed detail.",
+                    "Add subtext_plan, sensory_anchor_target, or source_backed_detail_target so the beat can draft as prose.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(beat.SourceBackedDetailTarget) &&
+                UsesGenericSourceBackedDetailTarget(beat.SourceBackedDetailTarget))
+            {
+                AddBeatDefect(
+                    novelisticNarrationErrors,
+                    "novelistic_narration",
+                    beat,
+                    "source_backed_detail_target",
+                    $"Beat {beat.BeatIndex} uses generic source-backed detail target.",
+                    "Rewrite source_backed_detail_target as a concrete detail from approved source material, such as an object, sensory cue, gesture, or environmental pressure.");
+            }
+
+            foreach (var unsupportedSourceDetailTargetFact in FindUnsupportedSourceBackedDetailTargetFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    novelisticNarrationErrors,
+                    "novelistic_narration",
+                    beat,
+                    "source_backed_detail_target",
+                    $"Beat {beat.BeatIndex} contains unsupported source-backed detail target fact: {unsupportedSourceDetailTargetFact}",
+                    "Set up the source_backed_detail_target fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            foreach (var unsupportedSensoryAnchorTargetFact in FindUnsupportedSensoryAnchorTargetFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    novelisticNarrationErrors,
+                    "novelistic_narration",
+                    beat,
+                    "sensory_anchor_target",
+                    $"Beat {beat.BeatIndex} contains unsupported sensory anchor target fact: {unsupportedSensoryAnchorTargetFact}",
+                    "Set up the sensory_anchor_target fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            foreach (var unsupportedSubtextPlanFact in FindUnsupportedSubtextPlanFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    novelisticNarrationErrors,
+                    "novelistic_narration",
+                    beat,
+                    "subtext_plan",
+                    $"Beat {beat.BeatIndex} contains unsupported subtext plan fact: {unsupportedSubtextPlanFact}",
+                    "Set up the subtext_plan fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            if (!ReferenceRewriteLevels.All.Contains(beat.MaxRewriteLevel, StringComparer.Ordinal))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "max_rewrite_level",
+                    $"Beat {beat.BeatIndex} uses unsupported max_rewrite_level: {beat.MaxRewriteLevel}",
+                    "Set max_rewrite_level to L0, L1, L2, L3, or L4 before material binding.");
+            }
+
+            foreach (var unsupportedMaterialType in FindUnsupportedMaterialTypes(beat.RequiredMaterialTypes))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "required_material_types",
+                    $"Beat {beat.BeatIndex} uses unsupported required_material_types value: {unsupportedMaterialType}",
+                    "Set required_material_types to chapter, paragraph, sentence, or passage before material binding.");
+            }
+
+            foreach (var unsupportedMaterialType in FindUnsupportedMaterialTypes(beat.ReferenceQuery.MaterialTypes))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "reference_query.material_types",
+                    $"Beat {beat.BeatIndex} uses unsupported reference_query.material_types value: {unsupportedMaterialType}",
+                    "Set reference_query.material_types to chapter, paragraph, sentence, or passage before material search.");
+            }
+
+            AddStyleContractDefects(beat);
+
+            if (string.IsNullOrWhiteSpace(beat.ReferenceQuery.Query) || beat.RequiredMaterialTypes.Count == 0)
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "reference_query",
+                    $"Beat {beat.BeatIndex} is missing reference query or material type.",
+                    "Fill reference_query.query and required material types before material binding.");
+            }
+            else if (!HasReferenceQueryBeatFit(beat))
+            {
+                AddBeatDefect(
+                    materialFitErrors,
+                    "material_fit",
+                    beat,
+                    "reference_query",
+                    $"Beat {beat.BeatIndex} reference query lacks material fit with beat function, emotion, POV, or prose duties.",
+                    "Align reference query tags with beat function, emotion, POV, technique, or prose duties.");
+            }
+
+            foreach (var unsupportedReferenceQueryFact in FindUnsupportedReferenceQueryFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "reference_query",
+                    $"Beat {beat.BeatIndex} contains unsupported reference query fact: {unsupportedReferenceQueryFact}",
+                    "Set up the reference_query fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before material binding.");
+            }
+
+            if (beat.SlotPlan.Any(slot => UsesGenericSlotPlan(slot.SlotName, slot.Value)))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "slot_plan",
+                    $"Beat {beat.BeatIndex} uses generic slot plan.",
+                    "Rewrite slot_plan values as concrete approved replacements, such as a named object, place, sensory cue, or evidence item.");
+            }
+
+            foreach (var unsupportedSlotPlanFact in FindUnsupportedSlotPlanFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "slot_plan",
+                    $"Beat {beat.BeatIndex} contains unsupported slot plan fact: {unsupportedSlotPlanFact}",
+                    "Move the slot_plan fact into approved known facts, scene facts, or viewpoint knowledge before using it as a replacement.");
+            }
+
+            foreach (var unsupportedNoReuseReasonFact in FindUnsupportedNoReuseReasonFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "no_reuse_reason",
+                    $"Beat {beat.BeatIndex} contains unsupported no_reuse_reason fact: {unsupportedNoReuseReasonFact}",
+                    "Set up the no_reuse_reason fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before skipping material binding.");
+            }
+
+            foreach (var unsupportedLockedPhrasePolicyFact in FindUnsupportedLockedPhrasePolicyFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    referenceBindingErrors,
+                    "reference_binding",
+                    beat,
+                    "locked_phrase_policy",
+                    $"Beat {beat.BeatIndex} contains unsupported locked_phrase_policy fact: {unsupportedLockedPhrasePolicyFact}",
+                    "Set up the locked_phrase_policy fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before freezing phrase reuse constraints.");
+            }
+
+            if (string.IsNullOrWhiteSpace(beat.NarrationStrategy))
+            {
+                AddBeatDefect(
+                    narrationErrors,
+                    "narration",
+                    beat,
+                    "narration_strategy",
+                    $"Beat {beat.BeatIndex} is missing narration strategy.",
+                    "Add a narration strategy that constrains POV, distance, and prose execution.");
+            }
+            else if (UsesGenericNarrationStrategy(beat.NarrationStrategy))
+            {
+                AddBeatDefect(
+                    narrationErrors,
+                    "narration",
+                    beat,
+                    "narration_strategy",
+                    $"Beat {beat.BeatIndex} uses generic narration strategy.",
+                    "Rewrite narration_strategy with concrete POV distance, sensory/interiority limits, and the narration work this beat must perform.");
+            }
+
+            foreach (var unsupportedNarrationStrategyFact in FindUnsupportedNarrationStrategyFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    narrationErrors,
+                    "narration",
+                    beat,
+                    "narration_strategy",
+                    $"Beat {beat.BeatIndex} contains unsupported narration strategy fact: {unsupportedNarrationStrategyFact}",
+                    "Set up the narration_strategy fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+
+            if (string.IsNullOrWhiteSpace(beat.RhythmStrategy))
+            {
+                AddBeatDefect(
+                    narrationErrors,
+                    "narration",
+                    beat,
+                    "rhythm_strategy",
+                    $"Beat {beat.BeatIndex} is missing rhythm strategy.",
+                    "Add a rhythm strategy that names pacing pressure, sentence movement, delay, turn, or release for this beat.");
+            }
+            else if (UsesGenericRhythmStrategy(beat.RhythmStrategy))
+            {
+                AddBeatDefect(
+                    narrationErrors,
+                    "narration",
+                    beat,
+                    "rhythm_strategy",
+                    $"Beat {beat.BeatIndex} uses generic rhythm strategy.",
+                    "Rewrite rhythm_strategy with concrete pacing pressure, sentence movement, delay, turn, or release for this beat.");
+            }
+
+            foreach (var unsupportedRhythmStrategyFact in FindUnsupportedRhythmStrategyFacts(blueprint, beat))
+            {
+                AddBeatDefect(
+                    narrationErrors,
+                    "narration",
+                    beat,
+                    "rhythm_strategy",
+                    $"Beat {beat.BeatIndex} contains unsupported rhythm strategy fact: {unsupportedRhythmStrategyFact}",
+                    "Set up the rhythm_strategy fact in approved known facts, scene facts, viewpoint knowledge, or slot plan before drafting.");
+            }
+        }
+
+        foreach (var forbidden in blueprint.ForbiddenFacts.Where(item => !string.IsNullOrWhiteSpace(item)))
+        {
+            if (ContainsForbidden(blueprint.ChapterFunction, forbidden))
+            {
+                AddDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    "chapter_function",
+                    string.Empty,
+                    $"Forbidden fact appears in chapter function: {forbidden}",
+                    "Remove the forbidden fact from the chapter function or move it out of the forbidden fact set.");
+            }
+
+            if (ContainsForbidden(blueprint.LogicAnalysis.Summary, forbidden))
+            {
+                AddDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    "logic_analysis.summary",
+                    string.Empty,
+                    $"Forbidden fact appears in logic analysis: {forbidden}",
+                    "Remove the forbidden fact from logic_analysis.summary or move it out of the forbidden fact set.");
+            }
+
+            foreach (var point in blueprint.LogicAnalysis.Points.Where(point => ContainsForbidden(point, forbidden)))
+            {
+                AddDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    "logic_analysis.points",
+                    string.Empty,
+                    $"Forbidden fact appears in logic analysis point: {forbidden}",
+                    "Remove the forbidden fact from logic_analysis.points or move it out of the forbidden fact set.");
+            }
+
+            AddForbiddenAnalysisTrackFactDefects(blueprint.EmotionAnalysis, "emotion_analysis", "emotion", forbidden);
+            AddForbiddenAnalysisTrackFactDefects(blueprint.NarrationAnalysis, "narration_analysis", "narration", forbidden);
+            AddForbiddenAnalysisTrackFactDefects(blueprint.CharacterAnalysis, "character_analysis", "character", forbidden);
+            AddForbiddenAnalysisTrackFactDefects(blueprint.ReferenceAnalysis, "reference_analysis", "reference", forbidden);
+            AddForbiddenAnalysisTrackFactDefects(blueprint.TransitionPlan, "transition_plan", "transition", forbidden);
+            AddForbiddenExecutionContractFactDefects(forbidden);
+
+            if (ContainsForbidden(blueprint.PreviousState, forbidden))
+            {
+                AddDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    "previous_state",
+                    string.Empty,
+                    $"Forbidden fact appears in previous state: {forbidden}",
+                    "Remove the forbidden fact from the previous state or move it out of the forbidden fact set.");
+            }
+
+            if (ContainsForbidden(blueprint.FinalState, forbidden))
+            {
+                AddDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    "final_state",
+                    string.Empty,
+                    $"Forbidden fact appears in final state: {forbidden}",
+                    "Remove the forbidden fact from the final state or move it out of the forbidden fact set.");
+            }
+
+            if (ContainsForbidden(blueprint.FinalHook, forbidden))
+            {
+                AddDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    "final_hook",
+                    string.Empty,
+                    $"Forbidden fact appears in blueprint: {forbidden}",
+                    "Remove the forbidden fact from the final hook or move it out of the forbidden fact set.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => beat.SceneFacts.Any(fact => ContainsForbidden(fact, forbidden))))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "scene_facts",
+                    $"Forbidden fact appears in blueprint: {forbidden}",
+                    "Remove the forbidden fact from beat scene facts or move it out of the forbidden fact set.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat =>
+                beat.CharacterStatesBefore.Concat(beat.CharacterStatesAfter).Any(state => ContainsForbidden(state, forbidden))))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "character_states",
+                    $"Forbidden fact appears in character state: {forbidden}",
+                    "Remove the forbidden fact from beat character_states before it is treated as role-state context.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => beat.CharacterGoals.Any(goal => ContainsForbidden(goal, forbidden))))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "character_goals",
+                    $"Forbidden fact appears in character goal: {forbidden}",
+                    "Remove the forbidden fact from beat character_goals before it is treated as role-state motivation.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => beat.CharacterMisbeliefs.Any(misbelief => ContainsForbidden(misbelief, forbidden))))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "character_misbeliefs",
+                    $"Forbidden fact appears in character misbelief: {forbidden}",
+                    "Remove the forbidden fact from beat character_misbeliefs before it is treated as role-state pressure.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => beat.RelationshipPressure.Any(pressure => ContainsForbidden(pressure, forbidden))))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "relationship_pressure",
+                    $"Forbidden fact appears in relationship pressure: {forbidden}",
+                    "Remove the forbidden fact from beat relationship_pressure before it is treated as relationship leverage.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => beat.ViewpointAllowedKnowledge.Any(fact => ContainsForbidden(fact, forbidden))))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "viewpoint_allowed_knowledge",
+                    $"Forbidden fact appears in viewpoint allowed knowledge: {forbidden}",
+                    "Remove the forbidden fact from beat viewpoint_allowed_knowledge before it is treated as POV-approved.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.ReferenceQuery.Query, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "reference_query",
+                    $"Forbidden fact appears in reference query: {forbidden}",
+                    "Remove the forbidden fact from beat reference_query before material binding.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => beat.SlotPlan.Any(slot => ContainsForbidden(slot.Value, forbidden))))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "slot_plan",
+                    $"Forbidden fact appears in slot plan: {forbidden}",
+                    "Remove the forbidden fact from beat slot_plan before using it as a replacement.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.NoReuseReason, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "no_reuse_reason",
+                    $"Forbidden fact appears in no_reuse_reason: {forbidden}",
+                    "Remove the forbidden fact from beat no_reuse_reason before skipping material binding.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.LockedPhrasePolicy, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "locked_phrase_policy",
+                    $"Forbidden fact appears in locked_phrase_policy: {forbidden}",
+                    "Remove the forbidden fact from beat locked_phrase_policy before freezing phrase reuse constraints.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.EmotionTrigger, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "emotion_trigger",
+                    $"Forbidden fact appears in emotion trigger: {forbidden}",
+                    "Remove the forbidden fact from beat emotion_trigger before drafting.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.SuppressedReaction, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "suppressed_reaction",
+                    $"Forbidden fact appears in suppressed reaction: {forbidden}",
+                    "Remove the forbidden fact from beat suppressed_reaction before drafting.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.ExternalEvidence, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "external_evidence",
+                    $"Forbidden fact appears in external evidence: {forbidden}",
+                    "Remove the forbidden fact from beat external_evidence before drafting.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.SourceBackedDetailTarget, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "source_backed_detail_target",
+                    $"Forbidden fact appears in source-backed detail target: {forbidden}",
+                    "Remove the forbidden fact from beat source_backed_detail_target before drafting.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.SensoryAnchorTarget, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "sensory_anchor_target",
+                    $"Forbidden fact appears in sensory anchor target: {forbidden}",
+                    "Remove the forbidden fact from beat sensory_anchor_target before drafting.");
+            }
+
+            foreach (var beat in blueprint.Beats.Where(beat => ContainsForbidden(beat.SubtextPlan, forbidden)))
+            {
+                AddBeatDefect(
+                    forbiddenFactErrors,
+                    "forbidden_fact",
+                    beat,
+                    "subtext_plan",
+                    $"Forbidden fact appears in subtext plan: {forbidden}",
+                    "Remove the forbidden fact from beat subtext_plan before drafting.");
+            }
+        }
+
+        foreach (var unsupportedFact in FindUnsupportedFinalHookFacts(blueprint))
+        {
+            AddDefect(
+                continuityErrors,
+                "continuity",
+                "final_hook",
+                string.Empty,
+                $"Final hook depends on unsupported fact: {unsupportedFact}",
+                "Set up the final hook fact in known facts, beat scene facts, or approved POV knowledge before review.");
+        }
+
+        if (blueprint.RiskFlags.Any(flag => flag.Contains("ai", StringComparison.OrdinalIgnoreCase)))
+        {
+            AddDefect(
+                aiRisks,
+                "ai_prose",
+                "risk_flags",
+                string.Empty,
+                "Blueprint already carries AI prose risk flags.",
+                "Clear or address AI prose risk flags before relying on this review for drafting.",
+                "warning");
+        }
+
+        var noReuseBeatCount = blueprint.Beats.Count(beat => !string.IsNullOrWhiteSpace(beat.NoReuseReason));
+        if (blueprint.Beats.Count >= 3 && noReuseBeatCount >= 2 && noReuseBeatCount * 2 > blueprint.Beats.Count)
+        {
+            AddWarningDefect(
+                "reference_binding",
+                "beats.no_reuse_reason",
+                string.Empty,
+                $"Too many beats choose no_reuse_reason ({noReuseBeatCount} of {blueprint.Beats.Count}), reducing the value of the anchor layer.",
+                "Review whether these beats can bind reference materials; keep no_reuse_reason only for approved transition or non-reuse beats.");
+        }
+
+        var materialTypeSignatures = blueprint.Beats
+            .Where(beat => string.IsNullOrWhiteSpace(beat.NoReuseReason))
+            .Select(beat => string.Join(
+                ",",
+                beat.ReferenceQuery.MaterialTypes
+                    .Where(type => !string.IsNullOrWhiteSpace(type))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Order(StringComparer.OrdinalIgnoreCase)))
+            .Where(signature => signature.Length > 0)
+            .ToArray();
+        if (materialTypeSignatures.Length >= 3 &&
+            materialTypeSignatures.Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1)
+        {
+            AddWarningDefect(
+                "reference_binding",
+                "beats.reference_query.material_types",
+                string.Empty,
+                $"Every reference-bound beat asks for the same reference material type: {materialTypeSignatures[0]}.",
+                "Review whether different beats need chapter, paragraph, sentence, or passage material types based on narrative function.");
+        }
+
+        var normalizedBeatDuties = blueprint.Beats
+            .Select(beat => NormalizeTags(beat.ProseDuties).ToArray())
+            .Where(duties => duties.Length > 0)
+            .ToArray();
+        var repeatedDuty = normalizedBeatDuties
+            .SelectMany(duties => duties)
+            .GroupBy(duty => duty, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new { Duty = group.Key, Count = group.Count() })
+            .OrderByDescending(item => item.Count)
+            .FirstOrDefault();
+        if (normalizedBeatDuties.Length >= 3 &&
+            repeatedDuty is not null &&
+            repeatedDuty.Count * 2 > normalizedBeatDuties.Length)
+        {
+            AddWarningDefect(
+                "execution",
+                "beats.prose_duties",
+                string.Empty,
+                $"Too many beats use the same narrative duty: {repeatedDuty.Duty} ({repeatedDuty.Count} of {normalizedBeatDuties.Length}).",
+                "Vary prose duties across beats so the blueprint distinguishes interiority, sensory pressure, subtext, transition, environment, or source detail work.");
+        }
+
+        var repeatedParagraphIntention = FindRepeatedAdjacentParagraphIntention(blueprint.Beats);
+        if (repeatedParagraphIntention is not null)
+        {
+            AddWarningDefect(
+                "execution",
+                "beats.paragraph_intention",
+                string.Empty,
+                $"Paragraph intentions repeat mechanically across adjacent beats: {repeatedParagraphIntention}.",
+                "Vary adjacent paragraph intentions so each beat has a distinct prose job instead of repeating the same execution instruction.");
+        }
+
+        foreach (var beat in blueprint.Beats.Where(beat => ExceedsDefaultRewriteLevel(beat.MaxRewriteLevel)))
+        {
+            AddWarningDefect(
+                "reference_binding",
+                "beat:" + beat.BeatId + ":max_rewrite_level",
+                beat.BeatId,
+                $"Beat {beat.BeatIndex} max_rewrite_level exceeds the project default L1: {beat.MaxRewriteLevel}.",
+                "Confirm the beat needs a higher rewrite budget, or lower max_rewrite_level to L1 before material binding.");
+        }
+
+        var emotionChangeBeats = blueprint.Beats
+            .Where(beat => !string.Equals(beat.EmotionBefore, beat.EmotionAfter, StringComparison.Ordinal))
+            .ToArray();
+        if (emotionChangeBeats.Length >= 3 &&
+            emotionChangeBeats.All(UsesImmediateEmotionTransition))
+        {
+            AddWarningDefect(
+                "emotion",
+                "beats.emotion_transition",
+                string.Empty,
+                "Emotion transitions are all direct and immediate, with no suppression, delay, or misdirection.",
+                "Add suppression, delayed release, restraint, misdirection, or withheld reaction to at least one emotion-changing beat.");
+        }
+
+        var pressureSignalBeats = blueprint.Beats
+            .Select(beat => new
+            {
+                Beat = beat,
+                PressureSignature = GetPressureSignature(beat)
+            })
+            .Where(item => item.PressureSignature.Length > 0)
+            .ToArray();
+        var pressureChangeSignatures = pressureSignalBeats
+            .Select(item => item.PressureSignature)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var narrativeDistanceSignatures = pressureSignalBeats
+            .Select(item => NormalizeComparableText(item.Beat.NarrativeDistance))
+            .Where(distance => distance.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (pressureSignalBeats.Length >= 3 &&
+            pressureChangeSignatures.Length > 1 &&
+            narrativeDistanceSignatures.Length == 1)
+        {
+            AddWarningDefect(
+                "narration",
+                "beats.narrative_distance",
+                string.Empty,
+                $"Narrative distance stays unchanged across pressure-changing beats: {narrativeDistanceSignatures[0]}.",
+                "Vary narrative_distance or explain the distance choice in narration_strategy when conflict, relationship, or emotion pressure changes across the chapter.");
+        }
+
+        var defectCount = logicErrors.Count + causalityErrors.Count + emotionErrors.Count +
+            narrationErrors.Count + executionErrors.Count + characterStateErrors.Count + povErrors.Count +
+            continuityErrors.Count + transitionErrors.Count + forbiddenFactErrors.Count +
+            referenceBindingErrors.Count + materialFitErrors.Count + screenplayRisks.Count +
+            novelisticNarrationErrors.Count;
+        var status = defectCount == 0
+            ? ReferenceBlueprintReviewStatuses.Passed
+            : ReferenceBlueprintReviewStatuses.Failed;
+        var requiredFixes = new[]
+        {
+            logicErrors,
+            causalityErrors,
+            emotionErrors,
+            narrationErrors,
+            executionErrors,
+            characterStateErrors,
+            povErrors,
+            continuityErrors,
+            transitionErrors,
+            forbiddenFactErrors,
+            referenceBindingErrors,
+            materialFitErrors,
+            screenplayRisks,
+            novelisticNarrationErrors
+        }.SelectMany(items => items).ToArray();
+
+        return new ReferenceChapterBlueprintReviewPayload(
+            "review-" + Guid.NewGuid().ToString("N"),
+            blueprint.BlueprintId,
+            blueprint.ContextHash,
+            blueprint.SourcePlanHash,
+            blueprint.AnalysisContractHash,
+            CurrentReviewVersion,
+            status,
+            Math.Max(0, 1.0 - defectCount * 0.1),
+            logicErrors,
+            causalityErrors,
+            emotionErrors,
+            narrationErrors,
+            executionErrors,
+            characterStateErrors,
+            povErrors,
+            continuityErrors,
+            transitionErrors,
+            forbiddenFactErrors,
+            referenceBindingErrors,
+            materialFitErrors,
+            screenplayRisks,
+            aiRisks,
+            novelisticNarrationErrors,
+            requiredFixes,
+            defects,
+            now);
+    }
+
+    private static bool IsEmptyTrack(ReferenceChapterBlueprintAnalysisTrackPayload track)
+    {
+        return string.IsNullOrWhiteSpace(track.Track) ||
+            string.IsNullOrWhiteSpace(track.Summary) ||
+            track.Points.Count == 0;
+    }
+
+    private static bool IsEmptyExecutionTrack(ReferenceChapterBlueprintExecutionTrackPayload track)
+    {
+        return string.IsNullOrWhiteSpace(track.Track) ||
+            string.IsNullOrWhiteSpace(track.Summary) ||
+            track.ParagraphIntentions.Count == 0 ||
+            track.ExecutionModes.Count == 0 ||
+            track.AntiScreenplayDuties.Count == 0 ||
+            track.CandidateRejectionRules.Count == 0;
+    }
+
+    private static bool ContainsForbidden(string value, string forbidden)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+            value.Contains(forbidden, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<(string FieldName, IReadOnlyList<string> Values)> ExecutionContractListFields(
+        ReferenceChapterBlueprintExecutionTrackPayload track)
+    {
+        yield return ("paragraph_intentions", track.ParagraphIntentions);
+        yield return ("execution_modes", track.ExecutionModes);
+        yield return ("anti_screenplay_duties", track.AntiScreenplayDuties);
+        yield return ("source_backed_detail_targets", track.SourceBackedDetailTargets);
+        yield return ("candidate_rejection_rules", track.CandidateRejectionRules);
+    }
+
+    private static IEnumerable<string> FindBeatScopedForbiddenFactFields(
+        ReferenceChapterBlueprintBeatPayload beat,
+        string forbidden)
+    {
+        if (beat.SceneFacts.Any(fact => ContainsForbidden(fact, forbidden)))
+        {
+            yield return "scene_facts";
+        }
+
+        if (beat.ViewpointAllowedKnowledge.Any(fact => ContainsForbidden(fact, forbidden)))
+        {
+            yield return "viewpoint_allowed_knowledge";
+        }
+
+        if (beat.CharacterStatesBefore.Concat(beat.CharacterStatesAfter).Any(state => ContainsForbidden(state, forbidden)))
+        {
+            yield return "character_states";
+        }
+
+        if (beat.CharacterGoals.Any(goal => ContainsForbidden(goal, forbidden)))
+        {
+            yield return "character_goals";
+        }
+
+        if (beat.CharacterMisbeliefs.Any(misbelief => ContainsForbidden(misbelief, forbidden)))
+        {
+            yield return "character_misbeliefs";
+        }
+
+        if (beat.RelationshipPressure.Any(pressure => ContainsForbidden(pressure, forbidden)))
+        {
+            yield return "relationship_pressure";
+        }
+
+        if (ContainsForbidden(beat.EmotionTrigger, forbidden))
+        {
+            yield return "emotion_trigger";
+        }
+
+        if (ContainsForbidden(beat.SuppressedReaction, forbidden))
+        {
+            yield return "suppressed_reaction";
+        }
+
+        if (ContainsForbidden(beat.ExternalEvidence, forbidden))
+        {
+            yield return "external_evidence";
+        }
+
+        if (ContainsForbidden(beat.SourceBackedDetailTarget, forbidden))
+        {
+            yield return "source_backed_detail_target";
+        }
+
+        if (ContainsForbidden(beat.SensoryAnchorTarget, forbidden))
+        {
+            yield return "sensory_anchor_target";
+        }
+
+        if (ContainsForbidden(beat.SubtextPlan, forbidden))
+        {
+            yield return "subtext_plan";
+        }
+
+        if (ContainsForbidden(beat.ReferenceQuery.Query, forbidden))
+        {
+            yield return "reference_query";
+        }
+
+        if (beat.SlotPlan.Any(slot => ContainsForbidden(slot.Value, forbidden)))
+        {
+            yield return "slot_plan";
+        }
+
+        if (ContainsForbidden(beat.NoReuseReason, forbidden))
+        {
+            yield return "no_reuse_reason";
+        }
+
+        if (ContainsForbidden(beat.LockedPhrasePolicy, forbidden))
+        {
+            yield return "locked_phrase_policy";
+        }
+    }
+
+    private static string FormatFieldName(string field)
+    {
+        return field.Replace('_', ' ');
+    }
+
+    private static bool HasTransitionPressure(string value)
+    {
+        return ContainsAny(
+            value,
+            [
+                "because", "therefore", "pressure", "conflict", "reveal", "transition",
+                "因为", "所以", "于是", "导致", "迫使", "逼", "压力", "冲突", "后果",
+                "代价", "线索", "证据", "发现", "意识", "怀疑", "秘密", "揭露", "追问",
+                "误会", "关系", "目的", "阻碍", "情绪", "视角", "信息", "余波", "承接"
+            ]);
+    }
+
+    private static bool UsesFakeEmotionMechanic(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ||
+            ContainsAny(
+                value,
+                [
+                    "plot needs", "generic emotion", "because the plot",
+                    "剧情需要", "为了剧情", "莫名", "突然情绪", "自然就", "情绪变化",
+                    "表现出", "有反应", "很痛苦", "很难过", "很愤怒", "很开心",
+                    "感觉不好", "说不清"
+                ]);
+    }
+
+    private static IEnumerable<string> FindUnsupportedCharacterStateFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var approvedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return beat.CharacterStatesBefore
+            .Concat(beat.CharacterStatesAfter)
+            .SelectMany(ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases)
+            .Where(fact => !IsAllowedFact(fact, approvedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedCharacterGoalFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var approvedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return beat.CharacterGoals
+            .SelectMany(ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases)
+            .Where(fact => !IsAllowedFact(fact, approvedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedCharacterMisbeliefFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var approvedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return beat.CharacterMisbeliefs
+            .SelectMany(ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases)
+            .Where(fact => !IsAllowedFact(fact, approvedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedRelationshipPressureFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var approvedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return beat.RelationshipPressure
+            .SelectMany(ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases)
+            .Where(fact => !IsAllowedFact(fact, approvedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedViewpointFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var approvedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        foreach (var allowedKnowledge in beat.ViewpointAllowedKnowledge.Where(item => !string.IsNullOrWhiteSpace(item)))
+        {
+            foreach (var auditableFact in ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(allowedKnowledge))
+            {
+                if (!approvedFacts.Any(approved => approved.Contains(auditableFact, StringComparison.OrdinalIgnoreCase) ||
+                        auditableFact.Contains(approved, StringComparison.OrdinalIgnoreCase)))
+                {
+                    yield return auditableFact;
+                }
+            }
+        }
+    }
+
+    private static bool HasNoCharacterStateDelta(
+        IReadOnlyList<string> statesBefore,
+        IReadOnlyList<string> statesAfter)
+    {
+        var before = NormalizeStateValues(statesBefore).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var after = NormalizeStateValues(statesAfter).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return before.Count > 0 && after.Count > 0 && before.SetEquals(after);
+    }
+
+    private static bool UsesGenericParagraphIntention(string value)
+    {
+        return ContainsAny(
+            value,
+            [
+                "make it better", "make it emotional", "more emotional", "more moving",
+                "写得更好", "写得好看", "更有代入感", "更有感染力", "更感人",
+                "加强情绪", "增强感染力", "润色一下", "优化一下", "情绪拉满", "氛围拉满"
+            ]);
+    }
+
+    private static bool UsesGenericExecutionMode(string value)
+    {
+        return ContainsAny(
+            value,
+            [
+                "write normally", "normal execution", "standard execution", "regular execution",
+                "execute normally", "as needed", "naturally", "smoothly",
+                "正常写", "正常执行", "常规执行", "按常规", "根据需要",
+                "自然展开", "自然推进", "顺着写", "流畅推进", "正常推进"
+            ]);
+    }
+
+    private static bool UsesGenericCandidateRejectionRule(string value)
+    {
+        return ContainsAny(
+            value,
+            [
+                "bad output", "low quality", "poor quality", "not good", "if bad",
+                "质量差", "不好的不要", "不好就拒绝", "写得不好", "不够好",
+                "效果不好", "不合适就拒绝", "不满意", "看起来不好", "泛泛而谈"
+            ]);
+    }
+
+    private static bool UsesGenericAntiScreenplayDuty(string value)
+    {
+        return ContainsAny(
+            value,
+            [
+                "avoid screenplay", "avoid script", "anti-screenplay", "not screenplay",
+                "not a script", "no camera", "不要剧本化", "避免剧本化", "防止剧本化",
+                "别写成剧本", "不要写成剧本", "不是剧本", "非剧本化", "不要镜头感"
+            ]);
+    }
+
+    private static bool UsesGenericNarrationStrategy(string value)
+    {
+        return ContainsAny(
+            value,
+            [
+                "normal narration", "standard narration", "regular narration", "write normally",
+                "make it vivid", "cinematic feel", "more immersive", "more visual",
+                "正常叙述", "常规叙述", "普通叙述", "自然叙述", "正常写",
+                "写得有画面感", "更有画面感", "有画面感", "更沉浸", "更流畅",
+                "代入感", "电影感"
+            ]);
+    }
+
+    private static bool UsesGenericRhythmStrategy(string value)
+    {
+        return ContainsAny(
+            value,
+            [
+                "normal rhythm", "normal pacing", "balanced pacing", "smooth pacing",
+                "keep rhythm", "control pacing", "fast and slow",
+                "正常节奏", "节奏正常", "常规节奏", "自然节奏", "节奏自然",
+                "节奏自然流畅", "自然流畅", "节奏流畅", "保持节奏", "控制节奏",
+                "快慢结合", "有张有弛", "张弛有度"
+            ]);
+    }
+
+    private static bool UsesGenericSourceBackedDetailTarget(string value)
+    {
+        return ContainsAny(
+            value,
+            [
+                "add detail", "add details", "more detail", "some detail", "make it detailed",
+                "rich detail", "richer detail", "具体一点", "加一点细节", "加点细节",
+                "加些细节", "增加细节", "补充细节", "丰富细节", "细节丰富",
+                "多写细节", "写得细一点", "写细一点", "加些描写", "画面更丰富"
+            ]);
+    }
+
+    private static bool UsesGenericSlotPlan(string slotName, string value)
+    {
+        if (string.IsNullOrWhiteSpace(slotName) || string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        return ContainsAny(
+            value,
+            [
+                "anything", "something", "placeholder", "replace later", "fill later",
+                "random", "whatever", "generic object", "generic place",
+                "随便", "任意", "某个", "某种", "一个东西", "某样东西", "占位",
+                "之后再填", "后面再填", "待定", "替换一下", "随便替换"
+            ]);
+    }
+
+    private static IEnumerable<string> FindUnsupportedExternalEvidenceFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ExternalEvidence)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedEmotionTriggerFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.EmotionTrigger)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedSuppressedReactionFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.SuppressedReaction)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedSourceBackedDetailTargetFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.SourceBackedDetailTarget)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedSensoryAnchorTargetFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.SensoryAnchorTarget)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedSubtextPlanFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.SubtextPlan)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedParagraphIntentionFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ParagraphIntention)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedChapterFunctionFacts(ReferenceChapterBlueprintPayload blueprint)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SceneFacts))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.ViewpointAllowedKnowledge))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SlotPlan.Select(slot => slot.Value)))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(blueprint.ChapterFunction)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedLogicAnalysisSummaryFacts(ReferenceChapterBlueprintPayload blueprint)
+    {
+        return FindUnsupportedAnalysisTrackSummaryFacts(blueprint, blueprint.LogicAnalysis);
+    }
+
+    private static IEnumerable<string> FindUnsupportedLogicAnalysisPointFacts(ReferenceChapterBlueprintPayload blueprint)
+    {
+        return FindUnsupportedAnalysisTrackPointFacts(blueprint, blueprint.LogicAnalysis);
+    }
+
+    private static IEnumerable<string> FindUnsupportedAnalysisTrackSummaryFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintAnalysisTrackPayload track)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SceneFacts))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.ViewpointAllowedKnowledge))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SlotPlan.Select(slot => slot.Value)))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(track.Summary)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedAnalysisTrackPointFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintAnalysisTrackPayload track)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SceneFacts))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.ViewpointAllowedKnowledge))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SlotPlan.Select(slot => slot.Value)))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return track.Points
+            .SelectMany(ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedExecutionContractSummaryFacts(ReferenceChapterBlueprintPayload blueprint)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SceneFacts))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.ViewpointAllowedKnowledge))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SlotPlan.Select(slot => slot.Value)))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(blueprint.ExecutionContract.Summary)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedExecutionContractListFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        IReadOnlyList<string> values)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SceneFacts))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.ViewpointAllowedKnowledge))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SlotPlan.Select(slot => slot.Value)))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return values
+            .SelectMany(ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedPreviousStateFacts(ReferenceChapterBlueprintPayload blueprint)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SceneFacts))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.ViewpointAllowedKnowledge))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SlotPlan.Select(slot => slot.Value)))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(blueprint.PreviousState)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedFinalStateFacts(ReferenceChapterBlueprintPayload blueprint)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SceneFacts))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.ViewpointAllowedKnowledge))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SlotPlan.Select(slot => slot.Value)))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(blueprint.FinalState)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedNarrativeFunctionFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.NarrativeFunction)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedLogicPremiseFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.LogicPremise)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedConflictPressureFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ConflictPressure)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedCausalityInFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.CausalityIn)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedCausalityOutFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.CausalityOut)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedTransitionInFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.TransitionIn)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedTransitionOutFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.TransitionOut)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedExecutionModeFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ExecutionMode)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedCandidateRejectionRuleFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.CandidateRejectionRule)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedAntiScreenplayDutyFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.AntiScreenplayDuty)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedNarrationStrategyFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.NarrationStrategy)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedRhythmStrategyFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.RhythmStrategy)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedReferenceQueryFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.ReferenceQuery.Query)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedSlotPlanFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return beat.SlotPlan
+            .Select(slot => slot.Value)
+            .SelectMany(ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedNoReuseReasonFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.NoReuseReason)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedMaterialTypes(IReadOnlyList<string> materialTypes)
+    {
+        return materialTypes
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Where(item => !ReferenceMaterialTypes.All.Contains(item, StringComparer.Ordinal))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedLockedPhrasePolicyFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SceneFacts)
+            .Concat(beat.ViewpointAllowedKnowledge)
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(beat.LockedPhrasePolicy)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindUnsupportedFinalHookFacts(ReferenceChapterBlueprintPayload blueprint)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(blueprint.Beats.SelectMany(beat => beat.SceneFacts))
+            .Concat(blueprint.Beats.SelectMany(beat => beat.ViewpointAllowedKnowledge))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        foreach (var fact in ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(blueprint.FinalHook))
+        {
+            if (!IsAllowedFact(fact, allowedFacts))
+            {
+                yield return fact;
+            }
+        }
+    }
+
+    private static IEnumerable<string> FindUnsupportedSceneFacts(
+        ReferenceChapterBlueprintPayload blueprint,
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var allowedFacts = blueprint.KnownFacts
+            .Concat(beat.SlotPlan.Select(slot => slot.Value))
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return beat.SceneFacts
+            .SelectMany(ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases)
+            .Where(fact => !IsAllowedFact(fact, allowedFacts))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IEnumerable<string> FindSceneFactsConflictingWithForbiddenPov(
+        ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var forbiddenKnowledge = beat.ViewpointForbiddenKnowledge
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        foreach (var sceneFact in beat.SceneFacts.Where(item => !string.IsNullOrWhiteSpace(item)))
+        {
+            foreach (var forbidden in forbiddenKnowledge)
+            {
+                if (ContainsForbidden(sceneFact, forbidden))
+                {
+                    yield return forbidden;
+                    continue;
+                }
+
+                var sceneAuditableFacts = ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(sceneFact);
+                var forbiddenAuditableFacts = ReferenceAnchoredDraftAuditor.ExtractAuditableFactPhrases(forbidden);
+                foreach (var fact in sceneAuditableFacts.Where(fact => IsAllowedFact(fact, forbiddenAuditableFacts)))
+                {
+                    yield return fact;
+                }
+            }
+        }
+    }
+
+    private static bool IsAllowedFact(string fact, IReadOnlyList<string> allowedFacts)
+    {
+        return allowedFacts.Any(allowed => allowed.Contains(fact, StringComparison.OrdinalIgnoreCase) ||
+            fact.Contains(allowed, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool HasReferenceQueryBeatFit(ReferenceChapterBlueprintBeatPayload beat)
+    {
+        if (ReferenceAnchoredDraftPreflight.AllowsNoReuseProvenance(beat))
+        {
+            return true;
+        }
+
+        var functionTags = NormalizeTags(beat.ReferenceQuery.FunctionTags).ToArray();
+        var emotionTags = NormalizeTags(beat.ReferenceQuery.EmotionTags).ToArray();
+        var povTags = NormalizeTags(beat.ReferenceQuery.PovTags).Where(tag => tag != "unknown").ToArray();
+        var techniqueTags = NormalizeTags(beat.ReferenceQuery.TechniqueTags).ToArray();
+        var proseDuties = NormalizeTags(beat.ProseDuties).ToArray();
+        var narrativeFunction = NormalizeToken(beat.NarrativeFunction);
+        var narrativeDistance = NormalizeToken(beat.NarrativeDistance);
+        var emotionContext = NormalizeToken(string.Join(" ", [beat.EmotionBefore, beat.EmotionAfter, beat.EmotionTrigger]));
+        var narrationContext = NormalizeToken(string.Join(" ", [beat.NarrationStrategy, beat.RhythmStrategy, beat.ParagraphIntention, beat.ExecutionMode]));
+
+        return functionTags.Any(tag =>
+                proseDuties.Contains(tag, StringComparer.OrdinalIgnoreCase) ||
+                narrativeFunction.Contains(tag, StringComparison.OrdinalIgnoreCase) ||
+                IsFunctionCompatibleWithProseDuty(tag, proseDuties)) ||
+            povTags.Any(tag => narrativeDistance.Contains(tag, StringComparison.OrdinalIgnoreCase)) ||
+            emotionTags.Any(tag => emotionContext.Contains(tag, StringComparison.OrdinalIgnoreCase)) ||
+            techniqueTags.Any(tag =>
+                proseDuties.Contains(tag, StringComparer.OrdinalIgnoreCase) ||
+                narrationContext.Contains(tag, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsFunctionCompatibleWithProseDuty(string functionTag, IReadOnlyList<string> proseDuties)
+    {
+        return functionTag switch
+        {
+            "environment" => ContainsAnyTag(proseDuties, ["external_evidence", "sensory", "sensory_anchor", "source_detail", "source_backed_detail"]),
+            "narration" => ContainsAnyTag(proseDuties, ["interiority", "transition", "causality", "subtext"]),
+            "interiority" => ContainsAnyTag(proseDuties, ["interiority"]),
+            "emotion" or "emotion_evidence" or "afterbeat" => ContainsAnyTag(proseDuties, ["interiority", "external_evidence", "subtext"]),
+            "transition" => ContainsAnyTag(proseDuties, ["transition", "causality"]),
+            "dialogue" => ContainsAnyTag(proseDuties, ["dialogue", "subtext"]),
+            "action" => ContainsAnyTag(proseDuties, ["action"]),
+            "reveal" or "identity_reveal" => ContainsAnyTag(proseDuties, ["source_detail", "source_backed_detail", "causality", "transition"]),
+            _ => false
+        };
+    }
+
+    private static IEnumerable<string> NormalizeTags(IEnumerable<string> tags)
+    {
+        return tags
+            .Select(NormalizeToken)
+            .Where(tag => tag.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> NormalizeStateValues(IEnumerable<string> values)
+    {
+        return values
+            .Select(value => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().ToLowerInvariant())
+            .Where(value => value.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeToken(string value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : value.Trim().Replace('-', '_').ToLowerInvariant();
+    }
+
+    private static string? FindRepeatedAdjacentParagraphIntention(IReadOnlyList<ReferenceChapterBlueprintBeatPayload> beats)
+    {
+        string? previous = null;
+        var runLength = 0;
+        foreach (var beat in beats.OrderBy(beat => beat.BeatIndex))
+        {
+            var intention = NormalizeComparableText(beat.ParagraphIntention);
+            if (intention.Length == 0)
+            {
+                previous = null;
+                runLength = 0;
+                continue;
+            }
+
+            if (string.Equals(previous, intention, StringComparison.OrdinalIgnoreCase))
+            {
+                runLength++;
+                if (runLength >= 3)
+                {
+                    return beat.ParagraphIntention;
+                }
+            }
+            else
+            {
+                previous = intention;
+                runLength = 1;
+            }
+        }
+
+        return null;
+    }
+
+    private static string NormalizeComparableText(string value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : string.Join(' ', value.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant();
+    }
+
+    private static bool ExceedsDefaultRewriteLevel(string rewriteLevel)
+    {
+        return rewriteLevel is ReferenceRewriteLevels.L2 or ReferenceRewriteLevels.L3 or ReferenceRewriteLevels.L4;
+    }
+
+    private static bool UsesImmediateEmotionTransition(ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var transitionPlan = string.Join(
+            " ",
+            [
+                beat.SuppressedReaction,
+                beat.RhythmStrategy,
+                beat.SubtextPlan,
+                beat.NarrationStrategy,
+                beat.ParagraphIntention,
+                beat.ExecutionMode
+            ]);
+        return !ContainsAny(
+            transitionPlan,
+            [
+                "delay", "delayed", "withhold", "withheld", "misdirect", "misdirection", "restrain", "restraint",
+                "suppress", "suppressed", "slow release", "defer", "deferred",
+                "延迟", "滞后", "压住", "克制", "误导", "保留", "不说破", "后拍", "迟疑", "隐忍"
+            ]);
+    }
+
+    private static string GetPressureSignature(ReferenceChapterBlueprintBeatPayload beat)
+    {
+        var conflictPressure = NormalizeComparableText(beat.ConflictPressure);
+        var relationshipPressure = beat.RelationshipPressure
+            .Select(NormalizeComparableText)
+            .Where(pressure => pressure.Length > 0)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var emotionShift = string.Equals(beat.EmotionBefore, beat.EmotionAfter, StringComparison.Ordinal)
+            ? string.Empty
+            : NormalizeComparableText(beat.EmotionBefore) + ">" + NormalizeComparableText(beat.EmotionAfter);
+        return string.Join(
+            "|",
+            new[] { conflictPressure }
+                .Concat(relationshipPressure)
+                .Concat([emotionShift])
+                .Where(signal => signal.Length > 0));
+    }
+
+    private static bool ContainsAnyTag(IReadOnlyList<string> values, IReadOnlyList<string> candidates)
+    {
+        return values.Any(value => candidates.Contains(value, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static bool IsStyleEvidenceCompatibleWithMaterialTypes(
+        string evidenceType,
+        IReadOnlySet<string> materialTypes)
+    {
+        return StyleEvidenceCompatibleMaterialTypes(evidenceType)
+            .Any(materialTypes.Contains);
+    }
+
+    private static IReadOnlyList<string> StyleEvidenceCompatibleMaterialTypes(string evidenceType)
+    {
+        return evidenceType switch
+        {
+            "dialogue_exchange" =>
+            [
+                ReferenceMaterialTypes.Sentence,
+                ReferenceMaterialTypes.Paragraph,
+                ReferenceMaterialTypes.Passage,
+                ReferenceMaterialTypes.DialogueExchange,
+                ReferenceMaterialTypes.Beat,
+                ReferenceMaterialTypes.Scene,
+                ReferenceMaterialTypes.Chapter
+            ],
+            "interiority" =>
+            [
+                ReferenceMaterialTypes.Sentence,
+                ReferenceMaterialTypes.Paragraph,
+                ReferenceMaterialTypes.Passage,
+                ReferenceMaterialTypes.Beat,
+                ReferenceMaterialTypes.Scene,
+                ReferenceMaterialTypes.Chapter
+            ],
+            "sensory_detail" =>
+            [
+                ReferenceMaterialTypes.Sentence,
+                ReferenceMaterialTypes.Paragraph,
+                ReferenceMaterialTypes.Passage,
+                ReferenceMaterialTypes.ImageMotif,
+                ReferenceMaterialTypes.Beat,
+                ReferenceMaterialTypes.Scene,
+                ReferenceMaterialTypes.Chapter
+            ],
+            "afterbeat" =>
+            [
+                ReferenceMaterialTypes.Sentence,
+                ReferenceMaterialTypes.Paragraph,
+                ReferenceMaterialTypes.Passage,
+                ReferenceMaterialTypes.ActionAfterbeat,
+                ReferenceMaterialTypes.Beat,
+                ReferenceMaterialTypes.Scene,
+                ReferenceMaterialTypes.Chapter
+            ],
+            "transition" =>
+            [
+                ReferenceMaterialTypes.Sentence,
+                ReferenceMaterialTypes.Paragraph,
+                ReferenceMaterialTypes.Passage,
+                ReferenceMaterialTypes.Transition,
+                ReferenceMaterialTypes.Beat,
+                ReferenceMaterialTypes.Scene,
+                ReferenceMaterialTypes.Chapter
+            ],
+            "hook_marker" =>
+            [
+                ReferenceMaterialTypes.Sentence,
+                ReferenceMaterialTypes.Paragraph,
+                ReferenceMaterialTypes.Passage,
+                ReferenceMaterialTypes.Hook,
+                ReferenceMaterialTypes.Beat,
+                ReferenceMaterialTypes.Scene,
+                ReferenceMaterialTypes.Chapter
+            ],
+            "length_sample" =>
+            [
+                ReferenceMaterialTypes.Sentence,
+                ReferenceMaterialTypes.Paragraph,
+                ReferenceMaterialTypes.Passage
+            ],
+            "dominant_function" or "dominant_emotion" or "dominant_pov" or "dominant_technique" => ReferenceMaterialTypes.All,
+            _ => [evidenceType]
+        };
+    }
+
+    private static bool ContainsAny(string value, IReadOnlyList<string> markers)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+            markers.Any(marker => value.Contains(marker, StringComparison.OrdinalIgnoreCase));
+    }
+}

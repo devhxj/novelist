@@ -46,7 +46,7 @@ internal static class ReferenceCorpusSchemaProvisioner
               FOREIGN KEY(parent_node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE
             );
 
-            CREATE TABLE IF NOT EXISTS reference_analysis_runs (
+ CREATE TABLE IF NOT EXISTS reference_analysis_runs (
               run_id TEXT PRIMARY KEY,
               anchor_id INTEGER NOT NULL,
               analyzer_version TEXT NOT NULL,
@@ -62,8 +62,8 @@ internal static class ReferenceCorpusSchemaProvisioner
               completed_at TEXT,
               observation_count INTEGER NOT NULL DEFAULT 0,
               diagnostics_json TEXT NOT NULL DEFAULT '[]',
-              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
-            );
+ FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
+ );
 
             CREATE TABLE IF NOT EXISTS reference_feature_observations (
               observation_id TEXT PRIMARY KEY,
@@ -361,8 +361,8 @@ internal static class ReferenceCorpusSchemaProvisioner
             CREATE INDEX IF NOT EXISTS idx_reference_text_nodes_chapter
               ON reference_text_nodes(anchor_id, chapter_index, sequence_index);
 
-            CREATE INDEX IF NOT EXISTS idx_reference_observations_family
-              ON reference_feature_observations(anchor_id, feature_family, feature_key, value_text);
+ CREATE INDEX IF NOT EXISTS idx_reference_observations_family
+ ON reference_feature_observations(anchor_id, feature_family, feature_key, value_text);
 
             CREATE INDEX IF NOT EXISTS idx_reference_observations_num
               ON reference_feature_observations(anchor_id, feature_family, feature_key, value_num);
@@ -417,7 +417,128 @@ internal static class ReferenceCorpusSchemaProvisioner
 
             CREATE INDEX IF NOT EXISTS idx_reference_aggregate_provenance_anchor_run
               ON reference_aggregate_provenance(anchor_id, run_id, aggregate_kind);
-            """;
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
+""";
+await command.ExecuteNonQueryAsync(cancellationToken);
+ await EnsureAnalysisJobTablesAsync(connection, cancellationToken);
+ }
+
+ private static async ValueTask EnsureAnalysisJobTablesAsync(
+ SqliteConnection connection,
+ CancellationToken cancellationToken)
+ {
+ await using var command = connection.CreateCommand();
+ command.CommandText = """
+ CREATE TABLE IF NOT EXISTS reference_analysis_input_snapshots (
+ input_snapshot_id TEXT PRIMARY KEY,
+ anchor_id INTEGER NOT NULL,
+ analysis_stage TEXT NOT NULL,
+ scope TEXT NOT NULL,
+ node_set_hash TEXT NOT NULL,
+ family_set_json TEXT NOT NULL,
+ schema_version TEXT NOT NULL,
+ analyzer_version TEXT NOT NULL,
+ model_provider TEXT NOT NULL,
+ model_id TEXT NOT NULL,
+ total_nodes INTEGER NOT NULL CHECK(total_nodes > 0),
+ total_work_items INTEGER NOT NULL CHECK(total_work_items > 0),
+ created_at TEXT NOT NULL,
+ FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
+ );
+
+ CREATE TABLE IF NOT EXISTS reference_analysis_work_items (
+ input_snapshot_id TEXT NOT NULL,
+ ordinal INTEGER NOT NULL,
+ node_id TEXT NOT NULL,
+ chapter_node_id TEXT,
+ feature_family TEXT NOT NULL,
+ node_text_hash TEXT NOT NULL,
+ work_state TEXT NOT NULL DEFAULT 'pending',
+ committed_run_id TEXT,
+ committed_at TEXT,
+ PRIMARY KEY(input_snapshot_id, ordinal),
+ UNIQUE(input_snapshot_id, node_id, feature_family),
+ FOREIGN KEY(input_snapshot_id) REFERENCES reference_analysis_input_snapshots(input_snapshot_id) ON DELETE CASCADE,
+ FOREIGN KEY(node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE,
+ FOREIGN KEY(chapter_node_id) REFERENCES reference_text_nodes(node_id) ON DELETE SET NULL
+ );
+
+ CREATE TABLE IF NOT EXISTS reference_analysis_jobs (
+ job_id TEXT PRIMARY KEY,
+ run_id TEXT NOT NULL UNIQUE,
+ input_snapshot_id TEXT NOT NULL,
+ novel_id INTEGER NOT NULL,
+ anchor_id INTEGER NOT NULL,
+ job_kind TEXT NOT NULL,
+ input_json TEXT NOT NULL,
+ input_hash TEXT NOT NULL,
+ dependency_job_id TEXT,
+ priority_class TEXT NOT NULL,
+ priority_value INTEGER NOT NULL DEFAULT 0,
+ status TEXT NOT NULL,
+ total_nodes INTEGER NOT NULL CHECK(total_nodes > 0),
+ total_work_items INTEGER NOT NULL CHECK(total_work_items > 0),
+ processed_work_items INTEGER NOT NULL DEFAULT 0,
+ succeeded_work_items INTEGER NOT NULL DEFAULT 0,
+ skipped_work_items INTEGER NOT NULL DEFAULT 0,
+ failed_work_items INTEGER NOT NULL DEFAULT 0,
+ retrying_work_items INTEGER NOT NULL DEFAULT 0,
+ token_budget INTEGER CHECK(token_budget IS NULL OR token_budget >= 0),
+ tokens_spent INTEGER NOT NULL DEFAULT 0,
+ resume_cursor TEXT,
+ current_stage TEXT NOT NULL,
+ current_chapter INTEGER,
+ attempt_count INTEGER NOT NULL DEFAULT 0,
+ max_attempts INTEGER NOT NULL DEFAULT 3 CHECK(max_attempts > 0),
+ next_attempt_at TEXT,
+ lease_owner TEXT,
+ lease_token TEXT,
+ lease_acquired_at TEXT,
+ lease_expires_at TEXT,
+ heartbeat_at TEXT,
+ pause_requested_at TEXT,
+ cancel_requested_at TEXT,
+ queued_at TEXT NOT NULL,
+ started_at TEXT,
+ completed_at TEXT,
+ updated_at TEXT NOT NULL,
+ last_error_code TEXT,
+ last_error_message TEXT,
+ row_version INTEGER NOT NULL DEFAULT 0 CHECK(row_version >= 0),
+ FOREIGN KEY(input_snapshot_id) REFERENCES reference_analysis_input_snapshots(input_snapshot_id) ON DELETE RESTRICT,
+ FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
+ FOREIGN KEY(dependency_job_id) REFERENCES reference_analysis_jobs(job_id) ON DELETE RESTRICT
+ );
+
+ CREATE TABLE IF NOT EXISTS reference_analysis_job_attempts (
+ job_id TEXT NOT NULL,
+ attempt_no INTEGER NOT NULL,
+ worker_id TEXT NOT NULL,
+ lease_token TEXT NOT NULL,
+ started_at TEXT NOT NULL,
+ completed_at TEXT,
+ outcome TEXT,
+ error_code TEXT,
+ error_message TEXT,
+ tokens_spent INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY(job_id, attempt_no),
+ FOREIGN KEY(job_id) REFERENCES reference_analysis_jobs(job_id) ON DELETE CASCADE
+ );
+
+ CREATE INDEX IF NOT EXISTS idx_reference_analysis_jobs_claim
+ ON reference_analysis_jobs(status, next_attempt_at, priority_value DESC, queued_at, job_id);
+
+ CREATE INDEX IF NOT EXISTS idx_reference_analysis_jobs_anchor
+ ON reference_analysis_jobs(anchor_id, updated_at DESC, job_id);
+
+ CREATE INDEX IF NOT EXISTS idx_reference_analysis_jobs_dependency
+ ON reference_analysis_jobs(dependency_job_id, status);
+
+ CREATE INDEX IF NOT EXISTS idx_reference_analysis_jobs_lease
+ ON reference_analysis_jobs(status, lease_expires_at);
+
+ CREATE INDEX IF NOT EXISTS idx_reference_analysis_work_items_state
+ ON reference_analysis_work_items(input_snapshot_id, work_state, ordinal);
+ """;
+ await command.ExecuteNonQueryAsync(cancellationToken);
+ }
 }

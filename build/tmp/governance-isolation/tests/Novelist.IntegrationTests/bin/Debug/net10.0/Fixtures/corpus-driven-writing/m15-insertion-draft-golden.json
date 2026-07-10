@@ -1,0 +1,194 @@
+{
+  "schema_version": "corpus-driven-writing-m1-insertion-draft-golden-v1",
+  "fixtures": [
+    {
+      "fixture_id": "m1-rain-doorway-insertion-draft",
+      "description": "Golden M1 closed-loop fixture: import a small source, run deterministic retrieval, assemble one blueprint and produce an insertion-ready draft.",
+      "novel": {
+        "title": "语料闭环 golden",
+        "description": "M1 corpus-driven-writing closed-loop fixture"
+      },
+      "current_chapter": {
+        "title": "第一章",
+        "current_draft_text": "秦砚停在门里，指尖还按着锁。",
+        "insertion_offset": 14
+      },
+      "source": {
+        "file_name": "m1-rain-doorway.md",
+        "title": "雨门 golden 语料",
+        "format": "markdown",
+        "license_status": "public_domain",
+        "license_gate": {
+          "license_state": "public_domain",
+          "reuse_policy": "verbatim_ok",
+          "cleared_for_insertion": true,
+          "max_verbatim_ratio": 1.0
+        },
+        "content": "# 第一章 雨门\n\n雨声贴着门缝往里挤。\n\n她没有立刻开口，只把钥匙扣在掌心。\n"
+      },
+      "request": {
+        "natural_language_goal": "写雨夜门口对峙，秦砚压住怒意，不立刻开口。",
+        "previous_chapter_summary": "雨夜有人靠近门口。",
+        "reuse_policies": [
+          "verbatim_ok"
+        ],
+        "character_snapshots": [
+          {
+            "character": "秦砚",
+            "state": "guarded",
+            "allowed_knowledge": [
+              "门外有人靠近"
+            ],
+            "forbidden_knowledge": [
+              "对方真实目的"
+            ]
+          }
+        ],
+        "slot_values": {}
+      },
+      "expected_draft": {
+        "query_context": {
+          "scene_type": "doorway_confrontation",
+          "emotion_target": "restrained_pressure",
+          "pacing_target": "slow_tension",
+          "narrative_position": "current_insertion",
+          "commercial_mechanic": "withheld-answer-hook",
+          "character_states": [
+            "秦砚 guarded"
+          ],
+          "required_narrative_functions": [
+            "support_current_chapter",
+            "raise_pressure",
+            "withhold_answer"
+          ],
+          "chapter_context": {
+            "chapter_number": 1,
+            "current_draft_text": "秦砚停在门里，指尖还按着锁。",
+            "insertion_offset": 14,
+            "previous_chapter_summary": "雨夜有人靠近门口。",
+            "character_snapshots": [
+              {
+                "character": "秦砚",
+                "state": "guarded",
+                "allowed_knowledge": [
+                  "门外有人靠近"
+                ],
+                "forbidden_knowledge": [
+                  "对方真实目的"
+                ]
+              }
+            ]
+          },
+          "scope": {
+            "library_ids": [
+              "item-1"
+            ],
+            "reuse_policies": [
+              "verbatim_ok"
+            ],
+            "include_anchor_ids_count": 0,
+            "exclude_anchor_ids_count": 0
+          }
+        },
+        "blueprint": {
+          "strategy": "single_beat_m1",
+          "beats": [
+            {
+              "beat_alias": "item-1",
+              "beat_index": 0,
+              "role_in_beat": "source_sentence",
+              "narrative_function": "support_current_chapter",
+              "node_aliases": [
+                "item-1"
+              ]
+            }
+          ]
+        },
+        "pieces": [
+          {
+            "piece_alias": "item-1",
+            "beat_alias": "item-1",
+            "candidate_alias": "item-1",
+            "node_alias": "item-1",
+            "library_alias": "item-1",
+            "text_hash": "8beeea8fff7366c234127a285ff7d3317805139b6d5dcb46b7a4a990b37a6069",
+            "reuse_policy": "verbatim_ok",
+            "license_state": "public_domain",
+            "output_text": "秦砚没有立刻开口，只把钥匙扣在掌心。",
+            "preserved_text_hash": "527d2653fce533c62273c76f1725d1c986d29906732d277e83669b5f322c7dce",
+            "preserved_hash_matches": true,
+            "preserved_spans": [
+              {
+                "span_alias": "item-1",
+                "source_start": 1,
+                "source_end": 17,
+                "output_start": 2,
+                "output_end": 18,
+                "source_text_hash": "527d2653fce533c62273c76f1725d1c986d29906732d277e83669b5f322c7dce",
+                "output_text_hash": "527d2653fce533c62273c76f1725d1c986d29906732d277e83669b5f322c7dce",
+                "matches": true
+              }
+            ],
+            "slot_replacements": [
+              {
+                "slot_name": "character",
+                "source_value": "她",
+                "replacement_value": "秦砚",
+                "source_start": 0,
+                "source_end": 1,
+                "output_start": 0,
+                "output_end": 2
+              }
+            ]
+          }
+        ],
+        "slot_replacements": [
+          {
+            "slot_name": "character",
+            "source_value": "她",
+            "replacement_value": "秦砚",
+            "source_start": 0,
+            "source_end": 1,
+            "output_start": 0,
+            "output_end": 2
+          }
+        ],
+        "transitions": [],
+        "assembled_text": "秦砚没有立刻开口，只把钥匙扣在掌心。",
+        "chapter_text_after_insertion": "秦砚停在门里，指尖还按着锁。\n秦砚没有立刻开口，只把钥匙扣在掌心。",
+        "ready_for_insertion": true,
+        "gate": {
+          "passed": true,
+          "status": "passed",
+          "errors": [],
+          "pieces": [
+            {
+              "piece_alias": "item-1",
+              "node_alias": "item-1",
+              "should_block": false,
+              "four_gram_containment_ratio": 0.866667,
+              "longest_common_substring_ratio": 0.888889,
+              "violations": []
+            }
+          ]
+        },
+        "audit": {
+          "passed": true,
+          "status": "passed",
+          "errors": [],
+          "pieces": [
+            {
+              "piece_alias": "item-1",
+              "node_alias": "item-1",
+              "passed": true,
+              "preserved_span_count": 1,
+              "mismatched_span_count": 0,
+              "violations": []
+            }
+          ],
+          "transitions": []
+        }
+      }
+    }
+  ]
+}

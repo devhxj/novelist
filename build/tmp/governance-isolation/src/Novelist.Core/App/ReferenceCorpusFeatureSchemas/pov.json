@@ -1,0 +1,18 @@
+{
+  "schema_id": "reference-corpus.feature.pov.v1",
+  "schema_version": "reference-corpus-feature-family-v1",
+  "family": "pov",
+  "node_type": "passage",
+  "max_observations": 8,
+  "required_observation_fields": ["feature_key", "pov_type", "information_asymmetry", "focus_movement", "confidence", "evidence_start", "evidence_end", "explanation"],
+  "observation_fields": {
+    "feature_key": { "type": "enum", "enum": ["perspective"] },
+    "pov_type": { "type": "enum", "enum": ["close_limited", "omniscient", "external", "rotating"] },
+    "information_asymmetry": { "type": "enum", "enum": ["reader_knows_more", "character_knows_more", "aligned", "concealed"] },
+    "focus_movement": { "type": "enum", "enum": ["static", "object_to_character", "character_to_environment", "widening", "narrowing"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 0.95 },
+    "evidence_start": { "type": "integer", "minimum": 0 },
+    "evidence_end": { "type": "integer", "minimum": 1 },
+    "explanation": { "type": "string", "max_length": 360 }
+  }
+}

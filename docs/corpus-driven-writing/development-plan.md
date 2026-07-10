@@ -172,7 +172,7 @@ CREATE TABLE reference_feature_observations (
     evidence_start       INTEGER,         -- 相对 node text 的 offset
     evidence_end         INTEGER,
     explanation          TEXT,
-    review_state         TEXT NOT NULL DEFAULT 'unverified',  -- 人工：unverified|confirmed|rejected|conflicted（修复 #2）
+    review_state         TEXT NOT NULL DEFAULT 'unverified',  -- 复核状态：unverified|low_confidence|confirmed|rejected|conflicted（修复 #2；low_confidence 为自动复核路由信号）
     validity_state       TEXT NOT NULL DEFAULT 'active',       -- 机器：active|superseded（修复 #2）
     superseded_by_run_id TEXT,
     created_at           DATETIME NOT NULL
@@ -299,7 +299,9 @@ CREATE TABLE reference_aggregate_provenance (
 
 FK 保证可 join、可级联失效、可高效追溯。specimen/blueprint 失效时按 junction 精确定位受影响边。**聚合知识（护栏 G7）**：任一源 anchor 重跑（产生新 run），按 `reference_aggregate_provenance` 定位依赖它的 cross-corpus 模板/画像并标 stale，触发重建。
 
-### 5.5 分析运行与重跑语义（修复 #2）
+### 5.5 分析运行、后台调度与重跑语义（修复 #2）
+
+以下 `reference_analysis_runs` 是当前同步 runner 的兼容 schema，只用于描述已经交付的 runner 级预算与 cursor；它不是后台调度的目标模型。后台实现必须按后文拆成 run/job/attempt，不得继续向该表叠加队列生命周期。
 
 ```sql
 CREATE TABLE reference_analysis_runs (
@@ -331,11 +333,175 @@ CREATE TABLE reference_analysis_runs (
 
 **产品触发入口（M2.2 薄入口）**：`StartReferenceCorpusFeatureAnalysis` 接收 `novel_id/anchor_id/scope/token_budget/resume/run_id`，后端按 `scope=sentence|passage` 派生默认 family 组，读取 selected model，校验 anchor 可访问性，然后启动对应 run；`GetReferenceCorpusFeatureAnalysisRun` 只按 `novel_id + run_id` 返回运行元数据（families/status/tokens/resume_cursor/observation_count/diagnostics）。bridge 返回体禁止包含 `node_text/source_text/raw_text/prompt/model_output_json/embedding` 等源文或模型内部字段。当前 M2.2 入口是一次调用内执行的薄触发，用于产品面接入和回归闭环；后台队列、章节优先级调度、取消状态属于后续调度层，不能在 UI 或文档中误标为已完成。
 
-**技法标本触发入口（M2.3 薄入口）**：`StartReferenceCorpusTechniqueSpecimenAnalysis` 接收 `novel_id/anchor_id/source_node_type/min_observation_confidence/run_id`，后端读取 selected model，校验 anchor 可访问性，然后启动 Stage 3 runner；`GetReferenceCorpusTechniqueSpecimenAnalysisRun` 返回运行元数据（scope/status/tokens/specimen_count/processed_nodes/diagnostics）。该入口不暴露 `token_budget/resume`，因为当前 Stage 3 runner 尚未定义预算与 cursor 语义；后台队列、章节优先级、取消和续跑仍属后续调度层。bridge 返回体禁止包含 `node_text/source_text/raw_text/raw_source/prompt/model_output_json/embedding/value_json` 等源文、观察明细或模型内部字段。
+**技法标本触发入口（M2.3 薄入口）**：`StartReferenceCorpusTechniqueSpecimenAnalysis` 接收 `novel_id/anchor_id/source_node_type/min_observation_confidence/token_budget/resume/run_id`，后端读取 selected model，校验 anchor 可访问性，然后启动 Stage 3 runner；`GetReferenceCorpusTechniqueSpecimenAnalysisRun` 返回运行元数据（scope/status/token_budget/tokens_spent/resume_cursor/specimen_count/processed_nodes/diagnostics）。Stage 3 已定义单次调用内的预算耗尽与续跑语义：零预算不调用模型，预算耗尽返回 `budget_exhausted`，补充总预算后从最后成功提交的 node 继续；标本、evidence、tokens 和 cursor 在同一 SQLite 事务中推进，非法 terminal resume、陈旧 cursor、跨 scope/anchor run_id 在写入前拒绝。该能力仍是同步薄触发，不代表后台队列、章节优先级、暂停、取消、重启恢复或任务巡检已完成。bridge 返回体禁止包含 `node_text/source_text/raw_text/raw_source/prompt/model_output_json/embedding/value_json` 等源文、观察明细或模型内部字段。
 
-**分析查阅入口（M2.4 薄入口）**：`ListReferenceCorpusFeatureObservations` / `ListReferenceCorpusTechniqueSpecimens` 接收 `novel_id + anchor_id + node_id/source_node_id + PageRequest`。后端默认只读 `validity_state='active'`，filter/sort 白名单在 bridge 和 service 双层校验，pageSize/cursor/filter 错误统一返回 validation error。Observation payload 只返回展示安全字段（`value_preview/value_text/value_num/value_bool/text_hash/evidence_preview`），不暴露 `value_json` 或 node 全文；TechniqueSpecimen payload 将 slots、条件、failure/anti-pattern、why_it_works 解析为 typed shape，并通过 `reference_specimen_evidence` junction 回填 evidence trace。章节侧只读嵌入基于当前插入草稿 pieces 的 `anchor_id/node_id`；素材库处理侧提供独立“分析结果”tab，用于按 anchor/node/filter 查阅 observation/specimen，不混入章节蓝图、候选生成或插入动作。
+#### 5.5.1 目标分层：Run、Job、Attempt
 
-**重跑语义（修复 #2）**：旧 observation **不删除**。新 run 完成后，被取代的旧 observation 置 `validity_state='superseded'`、`superseded_by_run_id=新run`，但 **`review_state` 原样保留**——用户确认过的判断不被污染。依赖旧 observation 的 specimen 触发 invalidation check：证据边全部 superseded 则 specimen 也标 superseded。查询默认 `validity_state='active'`。
+后台系统必须把三个概念分开：`run` 固定分析输入、版本、预算与产物边界；`job` 承担用户可见的排队和控制生命周期；`attempt` 记录 worker 的一次实际执行。不得使用进程内 `Task` 冒充持久化队列。
+
+```sql
+CREATE TABLE reference_analysis_input_snapshots (
+ input_snapshot_id TEXT PRIMARY KEY,
+ anchor_id INTEGER NOT NULL,
+ analysis_stage TEXT NOT NULL, -- stage2_feature|stage3_specimen
+ scope TEXT NOT NULL, -- sentence|passage|chapter|full
+ node_set_hash TEXT NOT NULL,
+ family_set_json TEXT NOT NULL,
+ schema_version TEXT NOT NULL,
+ analyzer_version TEXT NOT NULL,
+ model_provider TEXT NOT NULL,
+ model_id TEXT NOT NULL,
+ total_nodes INTEGER NOT NULL,
+ total_work_items INTEGER NOT NULL,
+ created_at DATETIME NOT NULL
+);
+
+CREATE TABLE reference_analysis_work_items (
+ input_snapshot_id TEXT NOT NULL REFERENCES reference_analysis_input_snapshots(input_snapshot_id),
+ ordinal INTEGER NOT NULL,
+ node_id TEXT NOT NULL REFERENCES reference_text_nodes(node_id),
+ chapter_node_id TEXT,
+ feature_family TEXT NOT NULL, -- Stage 2 为锁定 family；Stage 3 固定 sentinel `__specimen__`
+ node_text_hash TEXT NOT NULL,
+ work_state TEXT NOT NULL DEFAULT 'pending', -- pending|running|retrying|succeeded|skipped|failed
+ committed_run_id TEXT,
+ committed_at DATETIME,
+ PRIMARY KEY (input_snapshot_id, ordinal),
+ UNIQUE (input_snapshot_id, node_id, feature_family)
+);
+
+CREATE TABLE reference_analysis_run_v2 (
+run_id TEXT PRIMARY KEY,
+ generation_key TEXT NOT NULL UNIQUE, -- hash(anchor,stage,scope,snapshot,schema,analyzer,model)
+ anchor_id INTEGER NOT NULL,
+ analysis_stage TEXT NOT NULL,
+ scope TEXT NOT NULL,
+ input_snapshot_id TEXT NOT NULL REFERENCES reference_analysis_input_snapshots(input_snapshot_id),
+ analyzer_version TEXT NOT NULL,
+ schema_version TEXT NOT NULL,
+ model_provider TEXT NOT NULL,
+ model_id TEXT NOT NULL,
+ run_state TEXT NOT NULL, -- active|completed|failed|superseded
+ token_budget INTEGER,
+ tokens_spent INTEGER NOT NULL DEFAULT 0,
+ tokens_reserved INTEGER NOT NULL DEFAULT 0,
+ resume_cursor_json TEXT,
+ observation_count INTEGER NOT NULL DEFAULT 0,
+ specimen_count INTEGER NOT NULL DEFAULT 0,
+ created_at DATETIME NOT NULL,
+ completed_at DATETIME,
+ failure_code TEXT
+);
+
+CREATE TABLE reference_analysis_jobs (
+job_id TEXT PRIMARY KEY,
+run_id TEXT NOT NULL REFERENCES reference_analysis_run_v2(run_id),
+ idempotency_key TEXT NOT NULL UNIQUE,
+ status TEXT NOT NULL, -- queued|running|pause_requested|paused|cancel_requested|cancelled|retry_wait|budget_exhausted|completed|failed
+ priority_class TEXT NOT NULL, -- current_chapter|adjacent_chapter|normal|maintenance
+ priority_value INTEGER NOT NULL DEFAULT 0,
+ enqueued_at DATETIME NOT NULL,
+ next_attempt_at DATETIME,
+ version INTEGER NOT NULL DEFAULT 0,
+ lease_owner TEXT,
+ lease_token TEXT,
+ lease_expires_at DATETIME,
+ heartbeat_at DATETIME,
+attempt_count INTEGER NOT NULL DEFAULT 0,
+ current_chapter_node_id TEXT,
+processed_work_items INTEGER NOT NULL DEFAULT 0,
+succeeded_work_items INTEGER NOT NULL DEFAULT 0,
+skipped_work_items INTEGER NOT NULL DEFAULT 0,
+failed_work_items INTEGER NOT NULL DEFAULT 0,
+ retrying_work_items INTEGER NOT NULL DEFAULT 0,
+ created_at DATETIME NOT NULL,
+ started_at DATETIME,
+ updated_at DATETIME NOT NULL,
+ completed_at DATETIME,
+ last_error_code TEXT,
+ last_error_summary TEXT
+);
+
+CREATE UNIQUE INDEX ux_reference_analysis_active_job ON reference_analysis_jobs(run_id)
+WHERE status IN ('queued','running','pause_requested','paused','cancel_requested','retry_wait','budget_exhausted');
+
+CREATE TABLE reference_analysis_attempts (
+ attempt_id TEXT PRIMARY KEY,
+ job_id TEXT NOT NULL REFERENCES reference_analysis_jobs(job_id),
+ attempt_number INTEGER NOT NULL,
+ worker_id TEXT NOT NULL,
+ lease_token TEXT NOT NULL,
+ status TEXT NOT NULL, -- running|succeeded|retryable_failed|permanent_failed|abandoned
+ started_at DATETIME NOT NULL,
+ heartbeat_at DATETIME NOT NULL,
+ finished_at DATETIME,
+ tokens_spent INTEGER NOT NULL DEFAULT 0,
+ error_class TEXT,
+ error_code TEXT,
+ error_summary TEXT,
+ UNIQUE (job_id, attempt_number)
+);
+```
+
+`reference_analysis_run_v2` 表名仅表示迁移设计稿；实施时应 additive migration 现有 `reference_analysis_runs`，迁移完成后仍以原正式表名为准，不并行维护两套 canonical run。
+
+#### 5.5.2 输入快照、预算与进度分母
+
+- 入队时冻结 node 稳定顺序、章节归属、family 集、文本 hash、schema/analyzer/model 版本。Stage 2 的 work item 是 `node × feature_family`；Stage 3 是满足依赖门槛的 node，并以 `feature_family='__specimen__'` 保证 SQLite UNIQUE 真正去重。不能用 observation/specimen 数量作为进度分母。
+- scope 语义固定：`sentence` 是 anchor 内全部 sentence × 五个句级 family；`passage` 是全部真实 paragraph × 五个段落级 family；`chapter` 必须携带 chapter node id，只包含该稳定子树中与 stage 匹配的 work item；`full` 是同一 anchor 的 sentence 与 paragraph 两个依赖 job 组成的 job group，不把两种 family 混进一个 cursor。Task A、Task B、Stage 3 均适用同一套 per-run 总预算规则。
+- 持久化并返回 `total/processed/succeeded/skipped/failed/retrying` work items 和 `total_nodes/processed_nodes`。合法空 observation 计为 succeeded；Task B 只快照真实 paragraph，上下文不进入分母，evidence offset 仍相对当前节点。
+- `run_id` 创建后，anchor/scope/stage/family/schema/analyzer/model/snapshot 不可变。新增节点、正文 hash 变化或版本升级创建新快照和新 run，并显式 supersede 旧 run，禁止修改旧分母。
+- `generation_key` 保证相同冻结输入只有一个 canonical run；同一 run 同时最多一个 active job。重复 enqueue 由 `idempotency_key` 返回原 job，不重复创建快照或预算账本。
+- Stage 2 cursor 精确到稳定序 `(ordinal,node_id,feature_family)`；Stage 3 精确到 `(ordinal,node_id)`。只有产物、projection/evidence、token 结转在同一成功提交边界后才推进。cursor 不属于快照时拒绝，禁止静默从头重放。
+- `token_budget` 是 run 累计总预算。调用模型前事务性预留最大 token；仅当 `tokens_spent + tokens_reserved + reservation <= token_budget` 才能调用。返回后按实际 usage 结转；无 usage 时按保守上界计费。失败、schema retry 和取消中的在途调用均计费。
+- `run_state` 不承担 pause/cancel/retry。目标模型不使用含义模糊的 `partial_completed`；部分产物由 job 状态和稳定进度计数表达。
+
+#### 5.5.3 Job 状态机与 CAS
+
+所有控制命令必须携带 `expected_version`，用 `UPDATE ... WHERE job_id=? AND version=?` 做 CAS，成功后 `version=version+1`。零行更新返回 `analysis_job_version_conflict`，客户端刷新后重试。
+
+| 当前状态 | 命令/事件 | 目标状态 | 语义 |
+|---|---|---|---|
+| `queued` | worker claim | `running` | 原子写 lease、attempt、started_at |
+| `queued` | pause | `paused` | 未执行时直接暂停 |
+| `running` | pause | `pause_requested` | 当前 work-item 提交边界生效 |
+| `pause_requested` | worker 确认 | `paused` | 清 lease，保留 cursor 与产物 |
+| `queued/paused/retry_wait/budget_exhausted` | cancel | `cancelled` | 无在途调用，直接终止 job |
+| `running/pause_requested` | cancel | `cancel_requested` | 停止领取新 work item |
+| `cancel_requested` | worker 确认 | `cancelled` | 在途调用结算后清 lease |
+| `paused` | resume | `queued` | 校验快照、cursor、version 后排队 |
+| `budget_exhausted` | raise budget + resume | `queued` | 新总预算必须高于已用与预留 |
+| `running` | retryable failure | `retry_wait` | 写 next_attempt_at，清 lease |
+| `retry_wait` | backoff 到期 | `queued` | watchdog 用 CAS 重新入队 |
+| `running` | 全 work item 提交 | `completed` | 与 run 收口同事务或 reconcile |
+| `running` | 永久失败或重试耗尽 | `failed` | 保留产物和安全诊断 |
+
+终态是 `cancelled/completed/failed`。pause/cancel/resume 重复请求幂等；非法转换返回 `analysis_job_invalid_transition`。取消保留已提交产物且不退还 token，不允许把 cancelled 偷改回 queued；继续分析须显式创建新 job，并校验原快照是否仍可复用。
+
+时间语义固定：`created_at` 是资源持久化时间，`enqueued_at` 是本轮进入队列时间，`started_at` 只在首次成功 claim 时写入，`updated_at` 每次 CAS/heartbeat/进度提交更新，`completed_at` 只在终态写入；resume 不重写 created/started，新的 attempt 有独立起止时间。
+
+#### 5.5.4 Lease、Heartbeat、Watchdog、优先级与 Retry
+
+- worker 事务性 claim `queued AND next_attempt_at<=now`，固定排序 `effective_priority DESC, enqueued_at ASC, job_id ASC`。默认 `effective_priority = priority_value + min(100, floor(wait_minutes/5))`。当前章节、相邻章节、普通、维护任务基础值建议为 `300/200/100/0`；aging 防止远章节永久饥饿。当前章节来源于写作 session 明确绑定，不由模型猜测。
+- claim 生成不可复用 lease token。默认 heartbeat 10 秒、lease 45 秒，长 LLM 调用独立 heartbeat；任何产物提交都校验 job/owner/token/status，失去 lease 的 worker 不得写入。
+- watchdog 每 15 秒以数据库时间巡检，仅用 CAS 回收过期 lease；attempt 标 abandoned 后进入 retry_wait 或 failed。应用启动 reconcile 陈旧 lease、已提交 work item 与 job 计数、全部完成但未收口状态；无法证明提交的在途 work item 回 pending 并依赖幂等键重试。
+- schema validation 同一 work item 最多 3 次，退避 0/1/3 秒；provider transient（超时、429、5xx）最多 5 个 attempt，full-jitter 指数退避 `min(5 分钟, 2^n×2 秒)`，合法 Retry-After 取较大值。sqlite busy/lease lost 不重复调用已返回模型；永久输入错误、版本不兼容、模型不可用、授权撤销不自动重试。budget/pause/cancel 不计失败或重试次数。
+- Stage 3 仅快照所需 Stage 2 family 均 active、未 rejected 且达到阈值，或有明确人工 confirmed 的 node。依赖不足显式 blocked，不轮询碰运气；用户标记只指结构化 review_state。
+
+#### 5.5.5 后台 API、UI 与安全契约
+
+- `EnqueueReferenceCorpusAnalysis` 请求至少包含 `novel_id/anchor_id/analysis_stage/scope/chapter_node_id?/families?/token_budget/priority_class/idempotency_key`；后端解析 selected model、冻结快照并返回 run/job。相同 idempotency key + 相同规范化请求返回原 active job；key 相同但请求 hash 不同返回 `analysis_job_idempotency_conflict`。
+- `ListReferenceCorpusAnalysisJobs(PageRequest, filters)` 返回稳定排序 `PageResult`；`GetReferenceCorpusAnalysisJob` 返回 version、node/work-item 双进度、token、当前章节、下一重试时间、allowed actions 和安全诊断。
+- `PauseReferenceCorpusAnalysisJob`、`CancelReferenceCorpusAnalysisJob`、`ResumeReferenceCorpusAnalysisJob` 接收 job id 与 expected version；resume 可提高总预算。`RetryReferenceCorpusAnalysisJob` 仅从 failed 创建新的 job 链。
+- UI 区分排队中、运行中、暂停请求中、已暂停、取消请求中、已取消、等待重试、预算已用尽、已完成、失败；显示双进度、token、当前章节和重试倒计时。按钮仅消费后端 `allowed_actions[]`，不在前端复制状态机。按 version 增量轮询，应用重启后显示同一持久 job。
+- diagnostics 只返回稳定错误码和有限长度摘要，禁止源文、prompt、模型原始输出、embedding、内部 JSON 和密钥。
+- 稳定错误语义至少包括 `analysis_job_not_found`、`analysis_job_version_conflict`、`analysis_job_invalid_transition`、`analysis_job_idempotency_conflict`、`analysis_snapshot_stale`、`analysis_cursor_stale`、`analysis_budget_not_increased`、`analysis_dependency_not_ready`、`analysis_license_revoked`；bridge 不透传 provider 原始错误。
+
+**实施边界**：现有 M2.2/M2.3 同步入口只证明 runner 级预算、cursor 和幂等提交。job/attempt、CAS、持久化 priority、pause/cancel、lease/watchdog、重启恢复和任务列表尚未实现。后台实现必须复用 runner，不能把同步入口包装成内存线程后宣称完成。
+
+**分析查阅入口（M2.4 薄入口）**：`ListReferenceCorpusFeatureObservations` / `ListReferenceCorpusTechniqueSpecimens` 接收 `novel_id + anchor_id + node_id/source_node_id + PageRequest`。后端默认只读 `validity_state='active'`，filter/sort 白名单在 bridge 和 service 双层校验，pageSize/cursor/filter 错误统一返回 validation error。Observation payload 只返回展示安全字段（`value_preview/value_text/value_num/value_bool/text_hash/evidence_preview`），不暴露 `value_json` 或 node 全文；`confidence < 0.70` 的 observation 初始化为 `review_state='low_confidence'`，可通过同一列表过滤，作为 M8 ReviewQueue 的输入信号而不是完整人工状态机。TechniqueSpecimen payload 将 slots、条件、failure/anti-pattern、why_it_works 解析为 typed shape，并通过 `reference_specimen_evidence` junction 回填 evidence trace。章节侧只读嵌入基于当前插入草稿 pieces 的 `anchor_id/node_id`；素材库处理侧提供独立“分析结果”tab，用于按 anchor/node/filter 查阅 observation/specimen，不混入章节蓝图、候选生成或插入动作。
+
+**重跑语义（修复 #2）**：旧 observation **不删除**。新 run 完成后，被取代的旧 observation 置 `validity_state='superseded'`、`superseded_by_run_id=新run`，但 **`review_state` 原样保留**——用户确认过的判断不被污染，自动 `low_confidence` 路由信号也不会被重跑静默改写。依赖旧 observation 的 specimen 触发 invalidation check：证据边全部 superseded 则 specimen 也标 superseded。查询默认 `validity_state='active'`。
 
 ### 5.6 语料库与授权（修复 #4 #6）
 
@@ -446,6 +612,24 @@ public sealed record PageResult<T>(
 - **正确性轨**：固定小 golden 书（约 500 句），全量跑，比对 golden JSON
 - **规模轨**：合成 200 万字级 fixture，验证异步续跑、预算上限、章节窗口查询性能、中断恢复，不要求逐句人工核对
 
+**可自动判定的 M2 后台验收门槛**：
+
+| 维度 | 通过门槛 |
+|---|---|
+| Golden 正确性 | 约 500 句固定书的 work-item 集合、状态、observation/specimen 规范化 JSON 与 golden 完全一致；零未知 family、零越界 evidence、零未授权节点 |
+| 幂等与原子性 | 在模型调用前、返回后、产物事务中、cursor 提交后、job 完成前分别注入故障；恢复后 active observation 重复数=0、specimen evidence 重复数=0、已提交产物丢失数=0 |
+| Pause/Cancel | 发出命令后最多完成当前 1 个 work item，P95 进入 paused/cancelled ≤ 60 秒；已提交 cursor 不回退，取消后不再领取新 work item |
+| 重启恢复 | 使用真实桌面进程强杀并重启至少 2 次；启动后 30 秒内回收 stale lease，cursor 单调前进，重复模型调用 ≤ 每个中断点 1 个在途 work item，整章重放次数=0 |
+| Lease/并发 | 2 个 worker 并发 claim 10,000 次，同一 job 同时有效 lease 数=1；失去 lease 的 worker 成功提交数=0 |
+| Retry | 429/5xx/timeout 遵守 Retry-After 与退避，自动 attempt 不超过 5；永久错误自动重试数=0；budget/pause/cancel 不增加 failure retry count |
+| 预算 | `tokens_spent` 与 fake provider 实际 usage 完全一致；任何时点 `spent+reserved <= budget`；预算穿透 token=0；无 usage provider 使用保守上界且有稳定诊断 |
+| 调度 | 当前章节 job 在无占用 worker 时 P95 claim ≤ 2 秒；持续注入当前章节任务时，normal job 等待 ≤ 15 分钟，证明 aging 无饥饿 |
+| 200 万字规模 | 至少 2 anchors、2 libraries、句/段两级全量快照；单 worker 吞吐 ≥ 20 fake-LLM work items/秒，claim P95 ≤ 100 ms，job 列表 P95 ≤ 200 ms，章节进度查询 P95 ≤ 200 ms |
+| 资源与恢复 | 调度器常驻内存增量 ≤ 256 MiB；SQLite 增长有逐表报告且无未清 lease/reservation；强杀后可证明未结转 token reservation 被 reconcile，不永久占用预算 |
+| UI/API | 所有 10 个 job 状态均有中文显示和 allowed action 契约测试；分页稳定、CAS 冲突、应用重启后任务可见均由 bridge + UI workflow 自动断言 |
+
+规模阈值使用 fake LLM 隔离 provider 网络波动；另设真实 provider 长跑报告观察吞吐和成本，但不得用外部服务抖动否决本地调度正确性。任何一项缺证据，M2 只能保持“薄切片完成”，不能升级为产品闭环或规模化完成。
+
 ---
 
 ## 七、授权与插入闸门（修复 #4）
@@ -508,6 +692,42 @@ QueryContext 确认、来源选择、gap 处理、槽位表、过渡清单、锁
 9. **M8 复核工作流** — review/validity 状态机、重跑语义
 10. **M9 专家 UI + 打磨**
 
+### 9.1 里程碑状态治理（M0-M5）
+
+原子任务继续使用 `[x]` / `[ ]`，但复选框只回答“这条任务是否已有实现与定向验证”，不能回答“整个里程碑是否可用于真实生产”。从本次治理起，M0-M5 统一使用以下四级成熟度；升级必须有对应证据，不能因演示路径跑通或测试数量增加而自动升级。
+
+| 状态 | 定义 | 最低证据 | 禁止误读 |
+|---|---|---|---|
+| **未开始** | 尚无可执行纵向路径，或只有设计/契约占位 | 无 | 不能用“已建表/已定义接口”替代可运行能力 |
+| **薄切片完成** | 在受控 fixture、fake model 或有限路径上证明关键契约和算法可工作 | 定向测试、golden 小样、明确适用边界 | 不等于后台运行、不等于真实长篇效果、不等于用户可持续使用 |
+| **产品闭环完成** | 默认用户流程可端到端使用，异常、恢复、反馈、审计和关键负例闭合 | 真实 UI/bridge/backend 闭环、恢复与失败路径、用户可见反馈 | 不等于几十万至两百万字规模下质量和性能达标 |
+| **规模化完成** | 在目标数据量和持续运行条件下，质量、性能、成本、恢复均达到预设预算 | 规模 fixture、真实语料评测集、质量指标、性能与恢复报告 | 不能只凭单元/集成测试总数或小 golden 宣称完成 |
+
+**当前治理快照以 [tasks.md](./tasks.md) 的数量和证据表为准。** M0-M5 均已有薄切片，其中 M1 已接近产品闭环；没有任何一个里程碑达到规模化完成。M0 的 schema/契约覆盖不代表基础债务已清零，M2 的同步触发入口不代表后台分析系统，M3 的四路 route provenance 不代表真实长篇检索质量，M4 的策略 profile 不代表多蓝图存在稳定且显著的结构差异，M5 的审计深度不代表拼装正文自然。
+
+### 9.2 M0-M5 收口顺序与停止线
+
+后续主线限定在 M0-M5，按以下阶段门推进；M6-M9 保留规划，不以前置实现稀释当前收口。
+
+1. **先清 M0 基础债务**：migration/存量升级、projection 重建、resume cursor 管线、级联失效、完整 golden 与规模 fixture 必须先形成可重复地基。M0 未达到产品闭环前，不允许用更多上层规则掩盖恢复和数据一致性缺口。
+2. **再完成 M2 后台运行能力**：把一次调用内薄触发升级为持久化后台队列，具备优先级、暂停、取消、续跑、重试、巡检、重启恢复、预算记账和进度反馈。Stage 2/3 的幂等与恢复必须通过故障注入验证。
+3. **随后证明 M3 规模效果**：在几十万至两百万字、跨多本小说的启用库中验证四路召回覆盖率、相关性、延迟、去重和授权过滤；建立人工标注 query 集，不能只验证 route 被调用。
+4. **再证明 M4 蓝图真实区分**：同一目标的多份蓝图必须在 beat 结构、来源组合、节奏/情绪策略和 gap 处理上有可度量差异，同时保持目标覆盖；用户反馈循环应减少重复方案，而非只改变 id 或摘要。
+5. **最后以效果证据收口 M5**：验证正文候选的原句/结构保真、剧情适配、过渡自然和修改成本。**停止继续堆 M5 审计规则**，除非新规则来自已复现的安全漏洞、授权绕过或真实语料评测失败，并附失败 fixture；否则优先补 M0/M2/M3/M4 与 M5 自然拼装证据。
+
+**阶段门约束：** M0 基础债务和 M2 后台调度未形成产品闭环前，M3-M5 只能修阻断性缺陷和补验收资产；M3 未取得规模检索证据前，不把 M4/M5 的启发式调优宣称为质量提升；M4 未证明蓝图区分度前，不以增加正文候选数量替代有效多稿；M5 未取得盲评和修改量证据前，不宣称“高质量正文可用”。
+
+### 9.3 M0-M5 验收证据分层
+
+每个里程碑的“当前检查点”必须按以下证据层记录，避免实现描述替代验收结论：
+
+- **契约/安全证据**：schema、DTO、bridge、幂等、授权、审计与负例不可绕过。
+- **闭环证据**：用户从导入/分析到章节目标、检索、蓝图反馈、正文候选、插入的默认路径可完成，失败后可恢复或回到上一阶段。
+- **效果证据**：人工标注 query、蓝图区分度、正文盲评、原句保真率、剧情适配率、过渡自然度、用户修改字符比例。
+- **规模证据**：目标字数、多库并发、运行时长、token/成本预算、P50/P95 延迟、暂停/重启/断点恢复、结果确定性或可解释波动。
+
+状态升级时必须同时列出“已有证据”和“仍缺证据”。测试总数只能作为回归范围说明，不能单独作为效果或规模证据。
+
 **当前实现检查点（M3/M4 薄切片）：** 候选检索已支持 `feature_filter_{n}_family/key/value_text/value_num_min|max` 多 observation 条件，按 AND 语义叠加在 session/library/license/dedup 安全过滤之后；旧 `feature_family/key/value_*` 单条件过滤仍兼容。章节蓝图反馈中，`too_direct_emotion` 会约束到 `action.emotion_carrier=action_over_psychology`，`too_fast` 会约束到 `rhythm.length_band` 的中长句节点；当 `too_fast` 命中慢节奏候选时，蓝图组装优先使用 `rhythm_slow_m1`，按 rhythm evidence、句长和跨库来源选取中长慢压迫节点。当语料缺少对应 observation 导致强约束无命中时，系统退回目标基础检索并把 `feedback_filters_no_matches` / `fallback_to_base_filters` 写进 `feedback_summary`、候选 `feedback_reason` 与 `gap_reasons`，不再让用户误以为反馈已精准命中。若避开来源会耗尽候选，则系统会放宽 avoid 来源并标注 `avoid_sources_no_alternatives` / `fallback_ignored_avoid_sources`。二轮蓝图反馈已写入 `reference_user_feedback`，以被拒蓝图 id 为 target，记录 problem/fallback、rejected node、avoid library、avoid anchor 等信号，并用确定性 feedback id 做幂等。无显式反馈或空 feedback object 的后续轮次会读取同一小说内的 rejected node/library/anchor 信号，对相同素材组合软降权，避免上一轮拒绝过的蓝图默认再次排第一；这不是跨项目长期偏好学习。`rejected_blueprint_ids` 已按稳定 source node set 去重，避免用户只拒绝蓝图 id 时同一组素材换一个反馈摘要再次出现。`source_repetition` 已有第一层可用性策略：反馈命中时第一候选优先跨库/跨 anchor 取材，而不是继续按分数堆同一来源。`SearchCandidatesRanksInsertionWindowAndAllowedKnowledgeContext` 已新增 `local_context_fit`：候选排序会消费 insertion offset 周边窗口、previous summary、人物名/state 与 allowed knowledge，且 `ForbiddenKnowledge` 不进入正向命中，避免把角色未知事实带入检索。`SearchCandidatesMergesFourRecallRoutesWithDiagnostics` 已把 M3 route union 推进一步：在安全 scope 后，base prefetch window 外的文本语义、技法语义、结构化 observation、章节上下文代表可补入候选池，并用 `recall_text_semantic` / `recall_technique_semantic` / `recall_structured_observation` / `recall_chapter_context` 标注来源；`SearchCandidatesStructuredObservationRecallDoesNotDependOnBasePrefetchWindow` 和 `SearchCandidatesStructuredObservationRecallUsesExplicitFeatureFiltersBeyondPrefetchWindow` 证明结构化 observation 已拆出独立 SQL route，能分别按 QueryContext term 与显式 feature filter 召回远位置节点，且 `recall_structured_observation` 只表示真实 route hit；`SearchCandidatesChapterContextRecallMarksEveryRouteHitBeyondScoreWinner` 证明章节上下文也已拆出独立 SQL route，能给多个 context route hit 写入真实 `recall_chapter_context`，并用最小加权阈值避免弱泛词误标；`SearchCandidatesChapterContextRecallHonorsStructuredFiltersBeforeRouteLimit` 证明 context route 在 route topK 前应用结构化 filters，避免不满足 filters 的上下文噪声占满召回额度；`SearchCandidatesMergedRecallRoutesHonorScopeLicenseAndDedup` 证明这些 route 不能绕过 excluded anchor、forbidden license 或 dedup representative。`m3-retrieval-golden.json` 已固化基础授权检索和四路召回诊断，expected 只保存 hash/长度、component key、route marker、evidence 和 cache count，并由 fixture 自检阻止 raw source、embedding、prompt、`value_json` 泄露；这仍不是完整四路独立索引取数或完整权重标定。M4 策略权重已有第一条 profile 化实现，并已抽入可替换的 `IReferenceCorpusBlueprintCandidateAssembler` / `MultiStrategyReferenceCorpusBlueprintCandidateAssembler`：候选池同时具备 emotion/rhythm/narrative/technique 信号时，会按 evidence 与 score_components 生成 `emotion_priority_m4` / `rhythm_priority_m4` / `technique_diversity_m4` / `scene_template_m4` 四类蓝图候选，并用跨 library/anchor 代表选择避免只改策略名不换素材；`SqliteReferenceCorpusWritingService` 保持检索、反馈读写、蓝图持久化和返回编排职责。M4 profile 选材已开始 coverage-aware：保留 profile 头部素材后，会主动补齐缺失的 emotion/rhythm/narrative/technique 证据，并优先选择能增加 library/anchor 覆盖的候选；历史反馈 penalty 仍优先于覆盖强度。`gap_reasons` 已补上 `single_anchor_source`，可把“多句/多策略但实际都来自同一参考 anchor”的退化暴露给用户，并已进入 cross-library golden。`coverage_score` 已开始消费 M4 evidence：候选存在 M4 证据时，会把 emotion/rhythm/narrative/technique 覆盖纳入评分，并用 `missing_*_evidence` / `missing_technique_coverage` 暴露维度缺口；候选返回体也新增 `gap_positions[]`，把全局缺失维度定位到具体 beat，完整覆盖的蓝图不会误报位置缺口。候选生成阶段已写入 `reference_corpus_blueprints`、`reference_corpus_blueprint_beats` 和 `reference_blueprint_beat_pieces`，assembly strategy、coverage、gap positions、query context、source distribution、beat 元数据与 beat→node 边均可追溯，不再等到正文草稿阶段才有追溯边。前端候选卡会把 fallback/gap code 与 beat 级缺口翻译为中文诊断，mock workflow 已覆盖二轮反馈后诊断可见。该检查点只解决“检查表反馈能进入检索约束 + 反馈回退可诊断 + 反馈可持久追溯 + 历史拒绝软降权 + 拒绝蓝图不复现 + 来源重复反馈能改变第一候选 + M3 retrieval golden + M3 native topK + native backfill API 薄切片 + M3 structured observation 独立 route 薄切片 + M3 chapter context 独立 route 薄切片 + M4 profile 策略可断言变化 + 单 anchor 塌缩可诊断 + coverage 初步证据化 + profile 主动补齐覆盖 + beat 级缺口返回 + 候选蓝图持久化 + 多候选 assembler 地基”的第一步，不代表 M4 完成；仍需文本语义完整独立 topK、结构化 observation/context 热路径排序、情绪弧、真正的多轮会话状态、专家 UI 和更深的蓝图策略模型。
 
 **M3 native topK 补充：** `reference_technique_vectors` 仍是 JSON canonical cache，`reference_technique_vector_rows` / `reference_technique_vector_index_state` 只保存 vec0 rowid 映射和索引状态；native 命中只作为 `scoped_nodes.node_id IN (...)` 召回 hint，仍被 session/library/license/dedup/include/exclude/reuse 与结构化 filters 过滤；native provision/query 失败回退 JSON fallback。row 映射会按当前 entries 逐行校验，stale hash、伪造 row mapping、rejected/superseded specimen 都不能穿透；必要时清理或重建该 scope 的 native rows/state。当前已新增 `BackfillReferenceCorpusTechniqueVectorIndex` / `BackfillTechniqueVectorIndexAsync` 薄切片，可在不调用 `SearchCandidates` 的情况下显式预热 scoped technique vec0 index，返回 `ready/empty/skipped/failed`、provider/model/dim、source/vector/skipped 计数和诊断；搜索会复用已回填 rows/state，不重复 provision。结构化 observation 与章节上下文已有独立 SQL route，但还不是 projection/FTS/热路径排序的规模化索引。仍未完成：native 回填队列化、全量/增量调度、失败重试/巡检、文本语义独立 topK、结构化 observation/context 热路径排序、规模 fixture 与性能预算。
@@ -538,7 +758,7 @@ QueryContext 确认、来源选择、gap 处理、槽位表、过渡清单、锁
 | # | 护栏 | 要点 | 必须解决时点 |
 |---|---|---|---|
 | G1 | **幂等写入** | observation 生成键 + UNIQUE + upsert；并发/重试/续跑不重复写（§5.2） | **M0 前** |
-| G2 | **预算续跑状态** | run status 加 `paused`/`budget_exhausted`/`partial_completed` + `resume_cursor`（§5.5） | **M0 前** |
+| G2 | **预算续跑与后台状态分层** | runner 兼容状态保留 `budget_exhausted + resume_cursor`；生产目标拆 run/job/attempt，pause/cancel/retry 只属于 job，移除含义模糊的 `partial_completed`（§5.5） | **runner 地基 M0 前；后台协议 M2 前** |
 | G3 | **fake embedding harness** | node/material embedding 构建任务 + 确定性假 embedding，golden 测试才可回归 | **M1 前** |
 | G4 | **章节 embedding 后端算** | 前端只传 draft text/chapter id/offset，embedding 由后端算并缓存（§5.7） | M1 |
 | G5 | **相似度算法** | 4-gram 容器度 + LCS 比，piece-level，归一化规则、中文专名处理明确（§7.1） | **M1 前** |

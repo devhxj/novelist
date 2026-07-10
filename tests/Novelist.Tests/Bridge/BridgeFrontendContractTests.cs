@@ -110,7 +110,7 @@ public sealed class BridgeFrontendContractTests
     private static SortedSet<string> ExtractFrontendAppMethods()
     {
         var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "frontend", "src", "lib", "novelist", "api.ts"));
-        var matches = Regex.Matches(source, @"^\s{2}([A-Za-z][A-Za-z0-9]*): AppMethod<", RegexOptions.Multiline);
+ var matches = Regex.Matches(source, @"^\s+([A-Za-z][A-Za-z0-9]*): AppMethod<", RegexOptions.Multiline);
         return new SortedSet<string>(
             matches.Select(match => match.Groups[1].Value),
             StringComparer.Ordinal);

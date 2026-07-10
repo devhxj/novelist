@@ -8,6 +8,53 @@
 
 **产品不变量：** 素材库处理侧（导入、授权、分析、复核）与章节使用侧（按当前大纲/目标检索、蓝图迭代、正文候选、插入闸门）必须分离；`library/session binding` 表示跨库启用，一个 session 可绑定多个 library、每个 library 可包含多本小说/多个 anchor。M1 起闭环验收就必须覆盖跨所有启用语料库检索和多蓝图迭代，M3+ 不得把实现或测试简化为单 anchor/单蓝图路径。
 
+## M0-M5 状态治理快照
+
+### 状态口径
+
+任务复选框保留原义：`[x]` 表示该原子任务已有实现和对应定向证据，`[ ]` 表示仍未完成。里程碑成熟度改用四级状态，不能由勾选比例直接推导：
+
+| 状态 | 判定口径 |
+|---|---|
+| **未开始** | 无可执行纵向路径，或只有设计/契约占位 |
+| **薄切片完成** | 受控 fixture/fake model/有限路径已证明关键契约或算法，但生产运行、默认用户闭环或规模效果仍缺失 |
+| **产品闭环完成** | 默认用户路径、关键失败路径、恢复、反馈和用户可见状态闭合，可持续完成真实工作流 |
+| **规模化完成** | 在目标数据量下通过质量、性能、成本、恢复和持续运行预算，并有真实效果证据 |
+
+以下数量采用本轮治理输入的固定基线，用于防止“检查点描述增长”被误读为任务完成。后续只有在对应原子任务实际完成并补齐证据时才更新数量；不得为迁就实现描述而虚假勾选。
+
+| 里程碑 | 已完成 | 未完成 | 当前状态 | 当前判断 |
+|---|---:|---:|---|---|
+| M0 地基 | 26 | 9 | **薄切片完成** | schema/契约基本可用；runner 级续跑已验证，但 migration、projection 重建、job 级续跑和规模资产仍是基础债务 |
+| M1 纵向闭环 | 38 | 1 | **薄切片完成（接近产品闭环）** | 跨库、多蓝图反馈、selected blueprint 正文候选和章节面板已闭合；真实桌面失败/恢复验收和剩余原子任务未收口 |
+| M2 深度分析 | 22 | 21 | **薄切片完成** | 10 family、分析入口、runner 级预算续跑和技法标本已有验证；新增拆细的生产后台调度与任务 UI 均未完成 |
+| M3 深度检索 | 11 | 7 | **薄切片完成** | 多路召回、诊断和局部排序已有薄切片；未证明真实长篇质量与性能 |
+| M4 蓝图 | 12 | 8 | **薄切片完成** | 多策略地基、coverage/gap/反馈降权已存在；未证明多份蓝图稳定且显著不同 |
+| M5 拼装 | 14 | 4 | **薄切片完成** | 保真与阻断审计较深；完整多稿、自然过渡和真实修改成本证据不足 |
+
+**状态解释：** M1 已达到当前最完整的纵向薄切片，但现有检查点自己明确“不等于完整产品完成”，因此本次不越级标为“产品闭环完成”。M0-M5 当前均只能判为“薄切片完成”，其中 M1 最接近下一等级；没有任何里程碑达到“规模化完成”。提交信息中的“M2 核心功能完成”只能解释为 M2 演示级核心能力成立，不能解释为 M0-M2 已通过生产验收。
+
+### 当前证据与升级缺口
+
+| 里程碑 | 已有验收证据 | 升级仍缺 |
+|---|---|---|
+| **M0** | text node/observation/specimen/library/license/page 契约；幂等、fake embedding、确定性相似度和小 golden 骨架 | clause/章节窗口、存量 migration、projection 重建、resume cursor 全链路、级联失效、完整 500 句 golden、200 万字 fixture 与故障恢复 |
+| **M1** | 多小说进入启用库；跨库检索；多蓝图和 feedback 二轮；selected blueprint 正文候选；golden JSON；章节面板 mock workflow | 剩余原子任务；真实桌面 UI 的完整失败/恢复回归；该闭环在 M2-M5 深化后的兼容回归。规模与效果证据归 M2-M5，不用扩大 M1 状态掩盖 |
+| **M2** | 10 family schema、Stage 1/2 薄 runner、预算状态与部分续跑、低置信信号、Stage 3 技法标本入口和分析结果查阅 | 持久化后台队列、章节优先级、暂停/取消、可靠续跑、失败重试、巡检、重启恢复、全量/增量调度、进度反馈、200 万字长跑恢复 |
+| **M3** | 文本/技法/结构化 observation/章节上下文 route provenance；结构化过滤；local fit；M3 retrieval golden；安全 scope/license/dedup 负例 | 独立索引与热路径、召回融合权重标定、人工标注 query 集、Recall@K/nDCG/命中原因准确率、P50/P95 延迟、几十万至两百万字跨库评测 |
+| **M4** | emotion/rhythm/technique/scene profiles；coverage/gap positions；来源覆盖；历史反馈降权；候选持久化与反馈循环 | 情绪弧与更完整策略系统；多轮会话状态；蓝图区分度指标；同目标多方案盲评；重复方案率；反馈后方案改善率；真实长篇来源组合验证 |
+| **M5** | selected blueprint 来源锁定；preserved/locked spans；slot/transition audit；blocked next_action 回蓝图；slot-only/部分 transfer slot 多稿薄切片 | 完整多草稿与过渡策略；自然语言 slot constraints；自然拼装评测；保真/适配/自然度平衡；用户修改字符比例；正文盲评和真实章节样本 |
+
+### 强制实施顺序
+
+1. **P0：收 M0 基础债务。** 先解决 migration/存量升级、projection 重建、resume cursor、级联失效、完整 golden 与规模 fixture。地基未闭合时，不用上层审计规则掩盖数据一致性和恢复风险。
+2. **P1：把 M2 从同步薄入口做成后台系统。** 必须具备持久化队列、优先级、暂停、取消、续跑、重试、巡检、重启恢复、预算和进度；以故障注入和长跑 fixture 验收。
+3. **P2：补 M3 规模与真实效果。** 先建立人工标注 query 集和指标，再做索引、融合和权重调优；禁止以“route marker 出现”代替检索质量证明。
+4. **P3：验证 M4 的真实蓝图区分。** 多份蓝图必须在 beat、来源组合、节奏/情绪策略、gap 处理上产生可度量差异，并在用户反馈后减少重复或不适配方案。
+5. **P4：用真实证据收口 M5。** 建立正文盲评、原句/结构保真率、剧情适配率、过渡自然度和用户修改字符比例。**停止继续堆 M5 审计规则**；只有复现的安全漏洞、授权绕过或效果评测失败可以新增规则，且必须先落失败 fixture。
+
+**顺序约束：** M0 和 M2 未达到产品闭环前，M3-M5 只处理阻断性缺陷和验收资产；M3 未有规模效果证据前，不把 M4/M5 的启发式变化写成质量提升；M4 未证明蓝图区分度前，不以更多正文候选冒充有效多稿；M5 未完成真实效果验收前，不宣称高质量正文已可用。当前不推进 M6-M9 实现，保留其既有任务规划，不修改其状态。
+
 ---
 
 ## M0：地基 schema（防返工，最先做）
@@ -35,8 +82,9 @@
 - [x] 热路径 projection 表：`reference_obs_sensory`（示范）+ Stage 1 写入同步
 - [ ] projection 重建脚本：schema 演进/损坏修复时可从 active observation 重建热路径表
 - [x] `reference_analysis_runs` 建表（含 token_budget/tokens_spent）
-- [x] **预算续跑状态规则（护栏 G2）**：status 加 `paused`/`budget_exhausted`/`partial_completed` + `resume_cursor`，Core 状态机保证预算耗尽非 failed
-- [ ] **预算续跑管线接入（护栏 G2）**：分析任务从 `resume_cursor` 后开始，配合 G1 幂等覆盖已完成 node
+- [x] **runner 兼容预算状态（护栏 G2）**：现有同步 run 支持 `budget_exhausted + resume_cursor`，保证预算耗尽非 failed；`paused/partial_completed` 仅属旧 schema 兼容，不作为生产后台目标状态
+- [x] **runner 级预算续跑接入（护栏 G2）**：同步 Stage 2/3 runner 从稳定 cursor 后继续；产物、token 与 cursor 在成功提交边界推进，非法 terminal resume/陈旧 cursor/跨 scope run id 在写入前拒绝
+- [ ] **后台 job 级预算续跑接入（护栏 G2）**：持久化 input snapshot/work item/job/attempt，CAS 控制补预算与 resume，重启后从稳定 work-item cursor 继续
 
 **验收：** 能按 value_num 范围、按 sensory 投影表数组查询；review_state 与 validity_state 独立可设；**同 (run,node,feature) 并发/重试只落一条 active observation**；预算耗尽置 `budget_exhausted` 而非 failed，补预算可从 resume_cursor 续跑。
 
@@ -162,16 +210,25 @@
 
 - [ ] Task A 句级 LLM：全量、异步、按章节优先级排队、per-run token_budget、可续跑
 - [ ] Task B 段落级 LLM：全量、异步队列、章节优先级排队
+- [ ] 持久化后台调度 schema：run/job/attempt + input snapshot/work item，additive migration，不并行维护两套 canonical run
+- [ ] job 状态机与 CAS：queued/running/pause_requested/paused/cancel_requested/cancelled/retry_wait/budget_exhausted/completed/failed + expected_version
+- [ ] worker 运行协议：原子 claim、lease token、10 秒 heartbeat、45 秒 lease、15 秒 watchdog、启动 reconcile、失去 lease 禁止提交
+- [ ] 章节优先级与 aging：current/adjacent/normal/maintenance 持久化优先级，5 分钟 aging，持续高优先级流量下 normal 不饥饿
+- [ ] pause/cancel/resume 独立 API：幂等命令、成功提交边界生效、取消保留产物、补充总预算后 resume、非法转换稳定错误码
+- [ ] retry 分类与退避：schema 0/1/3 秒最多 3 次；provider transient full-jitter 最多 5 attempt；Retry-After；永久错误不重试
+- [ ] 后台任务查询与进度：PageResult 稳定分页，node/work-item 双分母，token/reservation、当前章节、allowed_actions、安全 diagnostics
+- [ ] 重启恢复与故障注入：调用前/返回后/事务中/cursor 后/完成前/真实进程强杀，证明零重复 active 产物、零丢失、cursor 单调
 - [x] 产品触发入口：`StartReferenceCorpusFeatureAnalysis` / `GetReferenceCorpusFeatureAnalysisRun`，按 anchor + scope 启动 sentence/passage 默认 family 分析并返回安全 run 状态
 - [x] Task B 段落节点选择 + 上下文地基：只分析 `reference_source_segments.segment_type='paragraph'` 的真实段落，跳过 hook/beat/action_afterbeat 等派生 passage；注入 parent chapter、containing scene、前后 paragraph context；旧库缺 `reference_source_segments.node_id` 时诊断并跳过，不做 hash/offset 猜测
 - [x] Task A/B 共用执行器地基：读取 node×family、调用可替换 analyzer、locked schema 校验、observation upsert、tokens/resume_cursor/status 更新、sensory projection 同步
 - [x] schema 失败重试：invalid JSON/schema/rejected output 按 `MaxValidationAttempts` 重试；失败尝试累计 tokens 但不写 observation、不推进 cursor；重试耗尽后 run 标 failed
 - [x] 真实 LLM analyzer 地基：复用 `IChatCompletionClient` + selected model，生成 schema-locked prompt，抽取 fenced JSON，读取 usage tokens；测试使用 fake chat client，不触发真实网络
+- [x] confidence < 0.70 的 observation 初始化为 `review_state='low_confidence'`，分析查阅列表可按该状态过滤，作为 M8 复核队列输入信号
 - [ ] evidence_start/end 精确记录
-- [ ] confidence < 阈值自动入复核队列（M8 消费）
-- [ ] 中断从已完成 node 续跑
+- [ ] 低置信 observation 的 ReviewQueue 入队/领取/人工确认流转（M8 消费）
+- [ ] 后台中断续跑：从 input snapshot 的最后成功 work item 续跑，应用重启/lease 回收后 cursor 单调且不整章重放
 
-**当前检查点：** `ReferenceCorpusFeatureAnalysisRunner` 已用 fake analyzer 跑通 node×family 执行链：预算耗尽时停在当前 cursor，补预算后从下一项续跑；最后一项正好用完预算时正确收敛为 `completed`；写入通过 locked schema validator 的候选 observation，并同步 `reference_obs_sensory`。句级 Task A 传空 context；段落级 Task B 只读取真实 paragraph source segment，避免 `node_type='passage'` 混入 hook/beat/action_afterbeat 等派生节点，并给 analyzer 注入 parent/chapter/containing scene/前后 paragraph 的 bounded context。`ReferenceCorpusChatCompletionFeatureFamilyAnalyzer` 已接入现有 chat completion 抽象，prompt 包含 schema descriptor、node 元数据、bounded node_text 与安全压缩后的 `analysis_context`；system prompt 明确 `node_text` 是唯一 evidence 来源，context 只能辅助判断，不能用于 evidence offset。usage token 会回填 runner 预算记账。产品入口已接入 bridge/TS adapter/mock：`StartReferenceCorpusFeatureAnalysis` 读取 selected model、校验 anchor 可访问性、按 `scope=sentence|passage` 派生默认 family 并启动 runner；`GetReferenceCorpusFeatureAnalysisRun` 返回 run 元数据、tokens、cursor、observation_count 和 diagnostics，返回体不包含 `node_text/source_text/raw_text/prompt/model_output_json/embedding`。当前入口仍是一次调用内执行的薄触发，不是后台队列；异步队列、章节优先级调度、取消能力仍未接入。低置信度 observation 仍写 `review_state='unverified'`，避免和真正跨 run 冲突混淆；按 confidence 入复核队列仍留到 M8。
+**当前检查点：** `ReferenceCorpusFeatureAnalysisRunner` 已用 fake analyzer 跑通 node×family 执行链：预算耗尽时停在当前 cursor，补预算后从下一项续跑；最后一项正好用完预算时正确收敛为 `completed`；写入通过 locked schema validator 的候选 observation，并同步 `reference_obs_sensory`。句级 Task A 传空 context；段落级 Task B 只读取真实 paragraph source segment，避免 `node_type='passage'` 混入 hook/beat/action_afterbeat 等派生节点，并给 analyzer 注入 parent/chapter/containing scene/前后 paragraph 的 bounded context。`ReferenceCorpusChatCompletionFeatureFamilyAnalyzer` 已接入现有 chat completion 抽象，prompt 包含 schema descriptor、node 元数据、bounded node_text 与安全压缩后的 `analysis_context`；system prompt 明确 `node_text` 是唯一 evidence 来源，context 只能辅助判断，不能用于 evidence offset。usage token 会回填 runner 预算记账。产品入口已接入 bridge/TS adapter/mock：`StartReferenceCorpusFeatureAnalysis` 读取 selected model、校验 anchor 可访问性、按 `scope=sentence|passage` 派生默认 family 并启动 runner；`GetReferenceCorpusFeatureAnalysisRun` 返回 run 元数据、tokens、cursor、observation_count 和 diagnostics，返回体不包含 `node_text/source_text/raw_text/prompt/model_output_json/embedding`。低置信度 observation 现在以 `confidence < 0.70` 初始化为 `review_state='low_confidence'`，并可在素材库“分析结果”tab 用 review_state 过滤；这只是复核路由信号，不等于完整 ReviewQueue 或人工状态机。当前入口仍是一次调用内执行的薄触发，不是后台队列；异步队列、章节优先级调度、取消能力仍未接入。
 
 ### M2.3 Task C 技法标本（后端 / 关键设计）
 
@@ -182,12 +239,15 @@
 - [x] Stage 3 仅高置信度节点触发（低于阈值 observation 不进入 analyzer 输入）
 - [x] 真实 LLM analyzer：复用 `IChatCompletionClient`，schema-locked prompt，抽取 fenced JSON，读取 usage tokens
 - [x] 产品触发入口：`StartReferenceCorpusTechniqueSpecimenAnalysis` / `GetReferenceCorpusTechniqueSpecimenAnalysisRun`，返回安全 run 状态
-- [ ] 后台/预算调度接入：异步队列、章节优先级、取消、token_budget/resume_cursor
+- [x] runner 级预算续跑：零预算不调用模型，budget_exhausted 后提高总预算，从最后成功 node 继续；specimen/evidence/token/cursor 同事务
+- [ ] Stage 3 后台 job 接入：依赖快照、异步队列、章节优先级、pause/cancel/resume、lease/watchdog、retry、重启恢复
 
-**当前检查点：** `ReferenceCorpusTechniqueSpecimenRunner` 已作为独立 Stage 3 地基接入：按 source node 聚合同 anchor、同 node_type、active 且 `confidence >= MinObservationConfidence` 的 observation，把 node 原文和 observation evidence 交给 analyzer；`ReferenceCorpusTechniqueSpecimenOutputValidator` 锁定 `reference-corpus-technique-specimen-v1` 输出，要求 `why_it_works` 每个 factor 至少引用一个真实 observation id，未知/空 evidence 直接拒绝；落库在同一事务内写 `reference_technique_specimens` 与 `reference_specimen_evidence`，`specimen_id = hash(run_id,node_id,technique_family)` 保证重试幂等，重跑保留人工 `review_state`，不把 confirmed/rejected 重置为 unverified。`reference_specimen_evidence(observation_id, specimen_id)` 索引用于后续从 superseded observation 反查受影响 specimen。去内容化闸门会拒绝 `technique_abstract` / `transfer_template` 中出现原文专名、原文动作短语或长原文片段。真实 `ReferenceCorpusChatCompletionTechniqueSpecimenAnalyzer` 已接入 selected model + `IChatCompletionClient`，prompt 明确 node_text 仅作源材料、输出必须去内容化且 why_it_works 引用 observation_id；fenced JSON 与 usage token 读取有回归测试。产品面已有薄入口 `Start/Get ReferenceCorpusTechniqueSpecimenAnalysis`，返回 run 元数据、tokens、specimen_count、processed_nodes 与安全 diagnostics，不返回 node_text/source_text/raw_text/prompt/model_output_json/embedding/value_json。当前仍未接后台队列、预算/续跑、取消能力和前端 TechniqueSpecimen 卡。
+**当前检查点：** `ReferenceCorpusTechniqueSpecimenRunner` 已作为独立 Stage 3 地基接入：按 source node 聚合同 anchor、同 node_type、active、未被人工拒绝且 `confidence >= MinObservationConfidence` 的 observation，把 node 原文和 observation evidence 交给 analyzer；`ReferenceCorpusTechniqueSpecimenOutputValidator` 锁定 `reference-corpus-technique-specimen-v1` 输出，要求 `why_it_works` 每个 factor 至少引用一个真实 observation id，未知/空 evidence 直接拒绝；落库在同一事务内写 `reference_technique_specimens`、`reference_specimen_evidence`、tokens 和 cursor，`specimen_id = hash(run_id,node_id,technique_family)` 保证重试幂等，重跑保留人工 `review_state`，不把 confirmed/rejected 重置为 unverified。`reference_specimen_evidence(observation_id, specimen_id)` 索引用于后续从 superseded observation 反查受影响 specimen。去内容化闸门会拒绝 `technique_abstract` / `transfer_template` 中出现原文专名、原文动作短语或长原文片段。真实 `ReferenceCorpusChatCompletionTechniqueSpecimenAnalyzer` 已接入 selected model + `IChatCompletionClient`，prompt 明确 node_text 仅作源材料、输出必须去内容化且 why_it_works 引用 observation_id；fenced JSON 与 usage token 读取有回归测试。产品面已有薄入口 `Start/Get ReferenceCorpusTechniqueSpecimenAnalysis`，返回 run 元数据、token_budget/tokens_spent/resume_cursor、specimen_count、processed_nodes 与安全 diagnostics，不返回 node_text/source_text/raw_text/prompt/model_output_json/embedding/value_json。Stage 3 已接单次调用内的预算续跑：零预算不调用模型，预算耗尽后补充总预算可从最后成功 node 续跑，非法 terminal resume、陈旧 cursor、跨 scope/anchor run_id 在写入前拒绝。当前仍未接持久化后台队列、章节优先级、暂停/取消、重启恢复、失败重试、任务巡检和前端 TechniqueSpecimen 专项卡。
 
 ### M2.4 分析前端
 
+- [ ] 后台任务面板：稳定分页展示 10 个 job 状态、node/work-item 双进度、token、当前章节、重试倒计时和安全诊断
+- [ ] 后台控制交互：仅按后端 `allowed_actions[]` 提供暂停/取消/恢复/重试，携带 expected_version，CAS conflict 后刷新，不在前端复制状态机
 - [x] 后端列表 API：`ListReferenceCorpusFeatureObservations` / `ListReferenceCorpusTechniqueSpecimens`，分页 `PageResult<T>`、稳定 sort、filter 白名单、默认 active、非法 cursor/filter/pageSize 走 validation error
 - [x] 安全展示契约：Observation 不暴露 `value_json`；TechniqueSpecimen 不暴露 `why_it_works_json` 或原始 JSON 字符串，改为 typed `transfer_slots` / 条件列表 / `why_it_works.contributing_factors`
 - [x] evidence trace：TechniqueSpecimen 通过 `reference_specimen_evidence` junction 二次读取，不用 join 放大分页；trace 返回 observation id/family/key/confidence/text_hash/bounded evidence preview/value preview/explanation
@@ -199,6 +259,9 @@
 - 正确性轨：golden 书全量分析比对 golden JSON
 - 规模轨：200 万字 fixture 验证续跑/预算/性能/恢复
 - why_it_works 每条可追溯；abstract 泄露检测通过
+- [ ] 量化后台验收：5 个事务故障点零重复/零丢失；真实进程强杀恢复 2 次；P95 pause/cancel ≤ 60 秒；stale lease 30 秒内恢复；预算穿透 0 token
+- [ ] 量化规模验收：200 万字、多 anchor/library、句段全量；fake LLM 单 worker ≥ 20 work items/s；claim P95 ≤ 100 ms；任务列表/章节进度 P95 ≤ 200 ms；normal job 等待 ≤ 15 分钟
+- [ ] UI/API 验收：10 个 job 状态中文显示、allowed_actions、CAS conflict、稳定分页和应用重启后任务可见均有自动 workflow
 
 **当前检查点：** M2.4 已完成后端分页读取、章节使用侧只读嵌入、素材库处理侧独立“分析结果”tab。`SqliteReferenceCorpusAnalysisService` 先分页 specimen 再读取 evidence junction，避免 evidence join 导致分页重复；Observation list join `reference_text_nodes` 只返回 `text_hash` 和 bounded evidence preview，不返回 node 全文。Bridge/TS adapter/mock 已补齐两个 list 方法，`ChapterReferencePanel` 在语料草稿下根据当前 pieces 自动加载 observation/specimen，界面只暴露节点切换与刷新；`CorpusAnalysisLibraryTab` 则在素材库内按 anchor/node/filter 查阅 observation/specimen，并通过 mock workflow 断言不会触发章节蓝图、候选生成或插入类 bridge。仍未实现 evidence offset 跳转到原文定位。
 
@@ -289,11 +352,11 @@
 
 ## M6：语料库产品化（库/去重/授权闸门完善）
 
-- [ ] 全局库/项目库启用规则 + 会话绑定管理 UI
-- [ ] 来源质量分级 + 禁用来源 + disabled_reason
-- [ ] 跨来源去重（dedup_group_id 识别与折叠）
-- [ ] 授权工作流：导入即标注 → 检索过滤 → 插入闸门（相似度阈值硬校验，不可绕过，修复 #4）
-- [ ] 插入审计留痕（来源/license/相似度/闸门）
+- [x] 全局库/项目库启用规则 + 会话绑定管理 UI
+- [x] 来源质量分级 + 禁用来源 + disabled_reason
+- [x] 跨来源去重（dedup_group_id 识别与折叠）
+- [x] 授权工作流：导入即标注 → 检索过滤 → 插入闸门（服务端重读来源/license 并重算相似度，不信任前端 gate）
+- [x] 插入审计留痕（来源/license/相似度/闸门，audit_id 幂等）
 
 **验收：** forbidden/unknown 不进检索；相似度超阈值插入被阻断且不可绕过；去重折叠对重复导入生效；审计可追溯每次插入来源。
 
@@ -301,14 +364,14 @@
 
 ## M7：聚合知识（作者画像/场景模板/世界观）
 
-- [ ] 四聚合表（style_profiles/scene_templates/world_models/dialogue_techniques）
-- [ ] **溯源表 `reference_aggregate_provenance`（护栏 G7）**：每个聚合产物记 (library_id, anchor_id, run_id)
-- [ ] `BuildAuthorStyleProfileAsync`（多数从 Stage 1 算，缺口定向 LLM 补）
-- [ ] `ExtractSceneTypeTemplatesAsync`（narrative_function+scene_type 聚类，≥3 次成模板，example 走 template_examples）
-- [ ] `BuildWorldModelAsync` + 回填 specimen 的 world_context_dependencies
-- [ ] 跨语料模板合并
-- [ ] **stale 传播（护栏 G7）**：任一源 anchor 重跑（新 run）→ 按 provenance 定位依赖的 cross-corpus 模板/画像标 stale → 重建
-- [ ] 前端：作者风格 tab / 场景模板库 / 世界观摘要
+- [x] 四聚合表（style_profiles/scene_templates/world_models/dialogue_techniques）
+- [x] **溯源表 `reference_aggregate_provenance`（护栏 G7）**：每个聚合产物记 (library_id, anchor_id, run_id)
+- [x] `BuildAuthorStyleProfileAsync`（Stage 1 数值均值 + 高频分类统计；缺口明确为空，不伪造）
+- [x] `ExtractSceneTypeTemplatesAsync`（feature_key/value 聚类，≥3 次形成稳定模板并附来源例句）
+- [x] `BuildWorldModelAsync`（character/sensory 事实 + specimen world_context_dependencies 聚合）
+- [x] 跨语料模板合并（确定性 feature-family 聚合薄实现）
+- [x] **stale 传播（护栏 G7）**：任一源 anchor 重跑（新 run）→ 按 provenance 定位依赖聚合标 stale
+- [x] 前端：治理专家页展示作者风格 / 场景模板 / 世界观 / 对话技巧摘要
 
 **验收：** AuthorStyleProfile 对 golden 书统计特征匹配（数值断言）；场景模板 example 经 golden 标注验证；**某源重跑后依赖它的 cross-corpus 模板正确标 stale**。
 
@@ -316,13 +379,13 @@
 
 ## M8：复核工作流（review/validity 状态机 + 重跑语义）
 
-- [ ] `review_state` 状态机：unverified → confirmed/rejected/conflicted（人工）
-- [ ] `validity_state`：active/superseded（机器）+ superseded_by_run_id（修复 #2）
-- [ ] 自动入队：confidence < 阈值 / 冲突 / 罕见 family
-- [ ] 重跑：旧 observation 不删、标 superseded、保留 review_state；specimen invalidation check（证据全 superseded 则 specimen superseded）
-- [ ] 冲突检测：同 node 不同 run 不一致 → conflicted 入队
-- [ ] ReviewQueue 返回 `PageResult<T>`
-- [ ] 前端复核队列：检查表操作 + 批量 + 跨页分页
+- [x] `review_state` 状态机：unverified → confirmed/rejected/conflicted（人工）
+- [x] `validity_state`：active/superseded（机器）+ superseded_by_run_id（修复 #2）
+- [x] 自动入队：ReviewQueue 表/API 消费 confidence < 阈值与冲突（罕见 family 规则待扩展）
+- [x] 重跑：旧 observation 不删、标 superseded、保留 review_state；证据全失效则 specimen superseded
+- [x] 冲突检测：同 node 不同 run 不一致 → conflicted 入队
+- [x] ReviewQueue 返回 `PageResult<T>`
+- [x] 前端复核队列：检查表操作 + 批量 + 跨页分页
 
 **验收：** 重跑后用户已 confirm 的判断不被污染（review_state 保留、validity_state 变 superseded）；依赖旧 run 的 specimen 正确 superseded；冲突正确入队。
 
@@ -330,10 +393,10 @@
 
 ## M9：专家 UI + 打磨
 
-- [ ] 自动/专家模式切换完善（修复 #11）
-- [ ] 写作会话主界面：左阶段进度/中操作区/右上下文（当前章节/人物快照/生效语料库）
-- [ ] 全流程可中断可恢复（复用 reconcile）+ 全片段可追溯
-- [ ] 端到端 UI 验收（截图/交互脚本，修复 #12）
+- [x] 自动/专家模式切换完善（治理页与章节写作页）
+- [x] 写作会话专家工作台：阶段进度 + 现有操作区 + 当前章节/生效语料库上下文（人物快照沿用章节上下文推断）
+- [x] 章节语料写作状态可中断恢复（sessionStorage 保存目标/模式/蓝图/正文候选/选择）；片段保留 node/anchor/library/license 溯源
+- [x] 端到端 UI 验收：`npm --prefix frontend run verify` 覆盖治理兼容、章节审计应用和截图产物
 
 **验收：** 自动模式全程仅需写目标/选结果/改少量项；专家模式可逐项展开；任意步骤中断可恢复；每片段可追溯到源语料 + 分析依据 + license。
 

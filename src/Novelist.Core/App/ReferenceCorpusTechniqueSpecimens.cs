@@ -46,12 +46,20 @@ public sealed record ReferenceCorpusTechniqueSpecimenRunRequest(
     string ModelProvider,
     string ModelId,
     double MinObservationConfidence,
-    DateTimeOffset StartedAt);
+int? TokenBudget,
+bool Resume,
+ DateTimeOffset StartedAt)
+{
+ public IReferenceCorpusAnalysisExecutionControl ExecutionControl { get; init; } =
+ ContinueReferenceCorpusAnalysisExecutionControl.Instance;
+}
 
 public sealed record ReferenceCorpusTechniqueSpecimenRunResult(
     string RunId,
     string Status,
+    int? TokenBudget,
     int TokensSpent,
+    string? ResumeCursor,
     int SpecimenCount,
     int ProcessedNodes,
     IReadOnlyList<string> Diagnostics);

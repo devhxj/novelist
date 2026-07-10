@@ -8,6 +8,38 @@ namespace Novelist.IntegrationTests;
 
 public sealed class ReferenceCorpusTechniqueSpecimenRunnerTests
 {
+ [Fact]
+ public async Task RunAsyncStopsAsPartialCompletedWhenCancellationIsRequestedAtNodeBoundary()
+ {
+ await using var connection = await OpenFixtureConnectionAsync();
+ var observationIds = await SeedFeatureObservationsAsync(connection);
+ var analyzer = new RecordingTechniqueSpecimenAnalyzer(observationIds);
+ var runner = new ReferenceCorpusTechniqueSpecimenRunner(analyzer);
+
+ var result = await runner.RunAsync(
+ connection,
+ new ReferenceCorpusTechniqueSpecimenRunRequest(
+ RunId: "technique-cancel-run-1",
+ AnchorId: 101,
+ SourceNodeType: ReferenceCorpusNodeTypes.Sentence,
+ AnalyzerVersion: "technique-specimen-v1",
+ ModelProvider: "fake",
+ ModelId: "fake-model",
+ MinObservationConfidence: 0.70,
+ TokenBudget: null,
+ Resume: false,
+ StartedAt: DateTimeOffset.Parse("2026-07-09T00:00:00Z"))
+ {
+ ExecutionControl = new ConstantExecutionControl(ReferenceCorpusAnalysisExecutionActions.Cancel)
+ },
+ CancellationToken.None);
+
+ Assert.Equal(ReferenceCorpusAnalysisRunStatuses.PartialCompleted, result.Status);
+ Assert.Equal(0, result.ProcessedNodes);
+ Assert.Empty(analyzer.Calls);
+ Assert.Equal(0, await ReadSpecimenCountAsync(connection));
+ }
+
     [Fact]
     public async Task RunAsyncPersistsTechniqueSpecimenAndEvidenceJunctions()
     {
@@ -26,6 +58,8 @@ public sealed class ReferenceCorpusTechniqueSpecimenRunnerTests
                 ModelProvider: "fake",
                 ModelId: "fake-model",
                 MinObservationConfidence: 0.70,
+                TokenBudget: null,
+                Resume: false,
                 StartedAt: DateTimeOffset.Parse("2026-07-09T00:00:00Z")),
             CancellationToken.None);
 
@@ -37,7 +71,7 @@ public sealed class ReferenceCorpusTechniqueSpecimenRunnerTests
         Assert.Single(analyzer.Calls);
         Assert.Equal("node-tech-1", analyzer.Calls[0].NodeId);
         Assert.Equal(observationIds.Order(StringComparer.Ordinal), analyzer.Calls[0].Observations.Select(item => item.ObservationId).Order(StringComparer.Ordinal));
-        Assert.DoesNotContain(analyzer.Calls[0].Observations, item => item.ObservationId == "obs_low_confidence");
+        Assert.DoesNotContain(analyzer.Calls[0].Observations, item => item.FeatureFamily == ReferenceCorpusFeatureFamilies.Syntax);
 
         var specimen = await ReadSpecimenAsync(connection);
         Assert.Equal("node-tech-1", specimen.SourceNodeId);
@@ -55,21 +89,125 @@ public sealed class ReferenceCorpusTechniqueSpecimenRunnerTests
         Assert.All(factors, factor => Assert.NotEmpty(factor.GetProperty("observation_ids").EnumerateArray()));
 
         await UpdateSpecimenReviewStateAsync(connection, specimen.SpecimenId, "confirmed");
-        var rerun = await runner.RunAsync(
-            connection,
-            new ReferenceCorpusTechniqueSpecimenRunRequest(
-                RunId: "technique-run-1",
-                AnchorId: 101,
-                SourceNodeType: ReferenceCorpusNodeTypes.Sentence,
-                AnalyzerVersion: "technique-specimen-v1",
-                ModelProvider: "fake",
-                ModelId: "fake-model",
-                MinObservationConfidence: 0.70,
-                StartedAt: DateTimeOffset.Parse("2026-07-09T00:01:00Z")),
-            CancellationToken.None);
+ await Assert.ThrowsAsync<ReferenceCorpusTechniqueSpecimenRunner.ReferenceCorpusAnalysisRunPreconditionException>(async () =>
+        await runner.RunAsync(
+        connection,
+        new ReferenceCorpusTechniqueSpecimenRunRequest(
+        RunId: "technique-run-1",
+        AnchorId: 101,
+        SourceNodeType: ReferenceCorpusNodeTypes.Sentence,
+        AnalyzerVersion: "technique-specimen-v1",
+        ModelProvider: "fake",
+        ModelId: "fake-model",
+        MinObservationConfidence: 0.70,
+        TokenBudget: null,
+        Resume: false,
+        StartedAt: DateTimeOffset.Parse("2026-07-09T00:01:00Z")),
+        CancellationToken.None));
 
-        Assert.Equal(ReferenceCorpusAnalysisRunStatuses.Completed, rerun.Status);
+        Assert.Single(analyzer.Calls);
         Assert.Equal("confirmed", await ReadSpecimenReviewStateAsync(connection, specimen.SpecimenId));
+    }
+
+    [Fact]
+    public async Task RunAsyncDoesNotCallAnalyzerWhenTokenBudgetIsZero()
+    {
+        await using var connection = await OpenFixtureConnectionAsync();
+        var observationIds = await SeedFeatureObservationsAsync(connection);
+        var analyzer = new RecordingTechniqueSpecimenAnalyzer(observationIds);
+        var runner = new ReferenceCorpusTechniqueSpecimenRunner(analyzer);
+
+        var result = await runner.RunAsync(
+        connection,
+        new ReferenceCorpusTechniqueSpecimenRunRequest(
+        RunId: "technique-zero-budget-run-1",
+        AnchorId: 101,
+        SourceNodeType: ReferenceCorpusNodeTypes.Sentence,
+        AnalyzerVersion: "technique-specimen-v1",
+        ModelProvider: "fake",
+        ModelId: "fake-model",
+        MinObservationConfidence: 0.70,
+        TokenBudget: 0,
+        Resume: false,
+        StartedAt: DateTimeOffset.Parse("2026-07-09T00:00:00Z")),
+        CancellationToken.None);
+
+        Assert.Equal(ReferenceCorpusAnalysisRunStatuses.BudgetExhausted, result.Status);
+        Assert.Equal(0, result.TokensSpent);
+        Assert.Null(result.ResumeCursor);
+        Assert.Equal(0, result.ProcessedNodes);
+        Assert.Empty(analyzer.Calls);
+        Assert.Equal(0, await ReadSpecimenCountAsync(connection));
+    }
+
+    [Fact]
+    public async Task RunAsyncRejectsStaleResumeCursorWithoutMutatingPersistedRun()
+    {
+        await using var connection = await OpenFixtureConnectionAsync();
+        var observationIds = await SeedFeatureObservationsAsync(connection);
+        await SeedTechniqueRunAsync(
+        connection,
+        runId: "technique-stale-cursor-run-1",
+        scope: "technique_specimen",
+        status: ReferenceCorpusAnalysisRunStatuses.BudgetExhausted,
+        tokenBudget: 17,
+        tokensSpent: 17,
+        resumeCursor: "node-removed");
+        var analyzer = new RecordingTechniqueSpecimenAnalyzer(observationIds);
+        var runner = new ReferenceCorpusTechniqueSpecimenRunner(analyzer);
+
+ await Assert.ThrowsAsync<ReferenceCorpusTechniqueSpecimenRunner.ReferenceCorpusAnalysisRunPreconditionException>(async () =>
+        await runner.RunAsync(
+        connection,
+        new ReferenceCorpusTechniqueSpecimenRunRequest(
+        RunId: "technique-stale-cursor-run-1",
+        AnchorId: 101,
+        SourceNodeType: ReferenceCorpusNodeTypes.Sentence,
+        AnalyzerVersion: "technique-specimen-v1",
+        ModelProvider: "fake",
+        ModelId: "fake-model",
+        MinObservationConfidence: 0.70,
+        TokenBudget: 34,
+        Resume: true,
+        StartedAt: DateTimeOffset.Parse("2026-07-09T00:01:00Z")),
+        CancellationToken.None));
+
+        Assert.Empty(analyzer.Calls);
+        var state = await ReadRunStateAsync(connection, "technique-stale-cursor-run-1");
+        Assert.Equal(ReferenceCorpusAnalysisRunStatuses.BudgetExhausted, state.Status);
+        Assert.Equal(17, state.TokenBudget);
+        Assert.Equal(17, state.TokensSpent);
+        Assert.Equal("node-removed", state.ResumeCursor);
+    }
+
+    [Fact]
+    public async Task RunAsyncRejectsRunIdOwnedByAnotherAnalysisScope()
+    {
+        await using var connection = await OpenFixtureConnectionAsync();
+        var observationIds = await SeedFeatureObservationsAsync(connection);
+        var analyzer = new RecordingTechniqueSpecimenAnalyzer(observationIds);
+        var runner = new ReferenceCorpusTechniqueSpecimenRunner(analyzer);
+
+ await Assert.ThrowsAsync<ReferenceCorpusTechniqueSpecimenRunner.ReferenceCorpusAnalysisRunPreconditionException>(async () =>
+        await runner.RunAsync(
+        connection,
+        new ReferenceCorpusTechniqueSpecimenRunRequest(
+        RunId: "feature-run-1",
+        AnchorId: 101,
+        SourceNodeType: ReferenceCorpusNodeTypes.Sentence,
+        AnalyzerVersion: "technique-specimen-v1",
+        ModelProvider: "fake",
+        ModelId: "fake-model",
+        MinObservationConfidence: 0.70,
+        TokenBudget: 34,
+        Resume: true,
+        StartedAt: DateTimeOffset.Parse("2026-07-09T00:01:00Z")),
+        CancellationToken.None));
+
+        Assert.Empty(analyzer.Calls);
+        var state = await ReadRunStateAsync(connection, "feature-run-1");
+        Assert.Equal("sentence", state.Scope);
+        Assert.Equal(ReferenceCorpusAnalysisRunStatuses.Completed, state.Status);
     }
 
     [Fact]
@@ -90,6 +228,8 @@ public sealed class ReferenceCorpusTechniqueSpecimenRunnerTests
                 ModelProvider: "fake",
                 ModelId: "fake-model",
                 MinObservationConfidence: 0.70,
+                TokenBudget: null,
+                Resume: false,
                 StartedAt: DateTimeOffset.Parse("2026-07-09T00:00:00Z")),
             CancellationToken.None);
 
@@ -116,6 +256,8 @@ public sealed class ReferenceCorpusTechniqueSpecimenRunnerTests
                 ModelProvider: "fake",
                 ModelId: "fake-model",
                 MinObservationConfidence: 0.70,
+                TokenBudget: null,
+                Resume: false,
                 StartedAt: DateTimeOffset.Parse("2026-07-09T00:00:00Z")),
             CancellationToken.None);
 
@@ -236,11 +378,11 @@ public sealed class ReferenceCorpusTechniqueSpecimenRunnerTests
                 ValueBool: null,
                 ValueJson: null,
                 Intensity: null,
-                Confidence: 0.42,
+ Confidence: 0.90,
                 EvidenceStart: 0,
                 EvidenceEnd: 4,
-                Explanation: "低置信度 observation 不应触发技法合成。",
-                ReviewState: "unverified",
+ Explanation: "人工拒绝的 observation 不应触发技法合成。",
+ ReviewState: "rejected",
                 ValidityState: "active",
                 SupersededByRunId: null,
                 CreatedAt: createdAt),
@@ -275,6 +417,52 @@ public sealed class ReferenceCorpusTechniqueSpecimenRunnerTests
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM reference_technique_specimens;";
         return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
+
+    private static async ValueTask SeedTechniqueRunAsync(
+    SqliteConnection connection,
+    string runId,
+    string scope,
+    string status,
+    int? tokenBudget,
+    int tokensSpent,
+    string? resumeCursor)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+ INSERT INTO reference_analysis_runs
+ (run_id, anchor_id, analyzer_version, schema_version, model_provider, model_id,
+ scope, status, token_budget, tokens_spent, resume_cursor, started_at, completed_at, observation_count)
+ VALUES
+ ($run_id, 101, 'technique-specimen-v1', 'reference-corpus-technique-specimen-v1', 'fake', 'fake-model',
+ $scope, $status, $token_budget, $tokens_spent, $resume_cursor, '2026-07-09T00:00:00Z', NULL, 0);
+ """;
+        command.Parameters.AddWithValue("$run_id", runId);
+        command.Parameters.AddWithValue("$scope", scope);
+        command.Parameters.AddWithValue("$status", status);
+        command.Parameters.AddWithValue("$token_budget", tokenBudget is null ? DBNull.Value : tokenBudget.Value);
+        command.Parameters.AddWithValue("$tokens_spent", tokensSpent);
+        command.Parameters.AddWithValue("$resume_cursor", resumeCursor is null ? DBNull.Value : resumeCursor);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async ValueTask<PersistedRunState> ReadRunStateAsync(SqliteConnection connection, string runId)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+ SELECT scope, status, token_budget, tokens_spent, resume_cursor
+ FROM reference_analysis_runs
+ WHERE run_id = $run_id;
+ """;
+        command.Parameters.AddWithValue("$run_id", runId);
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        return new PersistedRunState(
+        reader.GetString(0),
+        reader.GetString(1),
+        reader.IsDBNull(2) ? null : reader.GetInt32(2),
+        reader.GetInt32(3),
+        reader.IsDBNull(4) ? null : reader.GetString(4));
     }
 
     private static async ValueTask<string[]> ReadEvidenceIdsAsync(SqliteConnection connection, string specimenId)
@@ -338,7 +526,16 @@ public sealed class ReferenceCorpusTechniqueSpecimenRunnerTests
             .ToArray();
     }
 
-    private sealed class RecordingTechniqueSpecimenAnalyzer(IReadOnlyList<string> observationIds)
+ private sealed class ConstantExecutionControl(string action) : IReferenceCorpusAnalysisExecutionControl
+ {
+ public ValueTask<string> CheckpointAsync(string runId, string? resumeCursor, CancellationToken cancellationToken)
+ {
+ cancellationToken.ThrowIfCancellationRequested();
+ return ValueTask.FromResult(action);
+ }
+ }
+
+ private sealed class RecordingTechniqueSpecimenAnalyzer(IReadOnlyList<string> observationIds)
         : IReferenceCorpusTechniqueSpecimenAnalyzer
     {
         public List<ReferenceCorpusTechniqueSpecimenAnalysisInput> Calls { get; } = [];
@@ -423,12 +620,19 @@ public sealed class ReferenceCorpusTechniqueSpecimenRunnerTests
     }
 
     private sealed record PersistedSpecimen(
-        string SpecimenId,
-        string SourceNodeId,
-        string AnalysisRunId,
-        string TechniqueFamily,
-        string TechniqueAbstract,
-        string TransferTemplate,
-        string TransferSlotsJson,
-        string WhyItWorksJson);
+            string SpecimenId,
+            string SourceNodeId,
+            string AnalysisRunId,
+            string TechniqueFamily,
+            string TechniqueAbstract,
+            string TransferTemplate,
+    string TransferSlotsJson,
+    string WhyItWorksJson);
+
+    private sealed record PersistedRunState(
+    string Scope,
+    string Status,
+    int? TokenBudget,
+    int TokensSpent,
+    string? ResumeCursor);
 }

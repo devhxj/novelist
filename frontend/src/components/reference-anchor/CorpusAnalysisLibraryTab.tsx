@@ -80,6 +80,22 @@ const EMPTY_SPECIMEN_PAGE: AnalysisPageState<reference.CorpusTechniqueSpecimen> 
   hasMore: false,
 }
 
+const REVIEW_STATE_OPTIONS = [
+  { value: '', label: '全部' },
+  { value: 'unverified', label: '未复核' },
+  { value: 'low_confidence', label: '低置信' },
+  { value: 'confirmed', label: '已确认' },
+  { value: 'rejected', label: '已拒绝' },
+  { value: 'conflicted', label: '有冲突' },
+] as const
+
+const VALIDITY_STATE_OPTIONS = [
+  { value: 'active', label: '有效' },
+  { value: '', label: '全部' },
+  { value: 'stale', label: '已过期' },
+  { value: 'invalid', label: '无效' },
+] as const
+
 export function CorpusAnalysisLibraryTab({ novelId, anchors }: Props) {
   const app = useApp()
   const requestRef = useRef({ observations: 0, specimens: 0 })
@@ -307,10 +323,9 @@ export function CorpusAnalysisLibraryTab({ novelId, anchors }: Props) {
                 className={inputClass}
                 aria-label="分析结果有效性"
               >
-                <option value="active">active</option>
-                <option value="">全部</option>
-                <option value="stale">stale</option>
-                <option value="invalid">invalid</option>
+                {VALIDITY_STATE_OPTIONS.map(option => (
+                  <option key={option.value || 'all'} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </Field>
             <Field label="审核">
@@ -324,11 +339,9 @@ export function CorpusAnalysisLibraryTab({ novelId, anchors }: Props) {
                 className={inputClass}
                 aria-label="分析结果审核状态"
               >
-                <option value="">全部</option>
-                <option value="unverified">unverified</option>
-                <option value="low_confidence">low_confidence</option>
-                <option value="confirmed">confirmed</option>
-                <option value="rejected">rejected</option>
+                {REVIEW_STATE_OPTIONS.map(option => (
+                  <option key={option.value || 'all'} value={option.value}>{option.label}</option>
+                ))}
               </select>
             </Field>
           </div>
@@ -538,8 +551,8 @@ function ObservationCard({ observation }: { observation: reference.CorpusFeature
       </div>
       <div className="flex flex-wrap gap-1">
         <Chip>{observation.node_type}</Chip>
-        <Chip>{observation.review_state}</Chip>
-        <Chip>{observation.validity_state}</Chip>
+        <Chip>{formatReviewState(observation.review_state)}</Chip>
+        <Chip>{formatValidityState(observation.validity_state)}</Chip>
         <Chip>{observation.value_kind}</Chip>
       </div>
       {observation.value_preview && (
@@ -565,9 +578,9 @@ function SpecimenCard({ specimen }: { specimen: reference.CorpusTechniqueSpecime
         <span className="shrink-0 text-[11px] text-muted-foreground">{formatConfidence(specimen.confidence)}</span>
       </div>
       <div className="flex flex-wrap gap-1">
-        <Chip>{specimen.review_state}</Chip>
-        <Chip>{specimen.validity_state}</Chip>
-        <Chip>{specimen.why_it_works.trace_complete ? 'trace_complete' : 'trace_partial'}</Chip>
+        <Chip>{formatReviewState(specimen.review_state)}</Chip>
+        <Chip>{formatValidityState(specimen.validity_state)}</Chip>
+        <Chip>{specimen.why_it_works.trace_complete ? '证据完整' : '证据不足'}</Chip>
       </div>
       <p className="break-words leading-relaxed text-foreground">{boundedText(specimen.technique_abstract, 220)}</p>
       <p className="break-words rounded bg-secondary/60 px-2 py-1.5 leading-relaxed text-muted-foreground">
@@ -687,6 +700,14 @@ function anchorScopeLabel(scope: string): string {
 
 function formatConfidence(value: number): string {
   return Number.isFinite(value) ? value.toFixed(2) : '0.00'
+}
+
+function formatReviewState(value: string): string {
+  return REVIEW_STATE_OPTIONS.find(option => option.value === value)?.label ?? value
+}
+
+function formatValidityState(value: string): string {
+  return VALIDITY_STATE_OPTIONS.find(option => option.value === value)?.label ?? value
 }
 
 function boundedText(value: string, limit: number): string {

@@ -26,6 +26,7 @@ import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
 import type { diagnostics, reference } from '@/lib/novelist/types'
 import { BlueprintDetail } from './BlueprintDetail'
 import { CorpusAnalysisLibraryTab } from './CorpusAnalysisLibraryTab'
+import { CorpusGovernancePanel } from './CorpusGovernancePanel'
 import { OrchestrationPanel } from './OrchestrationPanel'
 import { StyleProfileLibraryPanel } from './StyleProfileLibraryPanel'
 import {
@@ -83,7 +84,7 @@ type MaterialSearchFilters = {
 type AnchorScopeFilter = 'all' | 'novel' | 'workspace_corpus'
 type MaterialPreviewSort = 'default' | 'score_desc' | 'material_id_asc'
 type MaterialArchiveFilter = 'active' | 'archived'
-type CorpusLibraryTab = 'materials' | 'analysis_results' | 'sources' | 'tag_review' | 'style_profiles' | 'processing_records' | 'advanced'
+type CorpusLibraryTab = 'materials' | 'analysis_results' | 'governance' | 'sources' | 'tag_review' | 'style_profiles' | 'processing_records' | 'advanced'
 
 type MaterialPreviewState = {
   items: reference.MaterialSummary[]
@@ -197,7 +198,8 @@ const ENABLE_REFERENCE_ACTIVITY_CHAPTER_DEBUG =
   import.meta.env.DEV && import.meta.env.VITE_REFERENCE_ACTIVITY_CHAPTER_DEBUG === 'true'
 const CORPUS_LIBRARY_TABS: Array<{ id: CorpusLibraryTab; label: string }> = [
   { id: 'materials', label: '处理后语料' },
-  { id: 'analysis_results', label: '分析结果' },
+{ id: 'analysis_results', label: '分析结果' },
+ { id: 'governance', label: '治理与复核' },
   { id: 'sources', label: '素材来源' },
   { id: 'tag_review', label: '标签校正' },
   { id: 'style_profiles', label: '风格画像' },
@@ -2976,9 +2978,13 @@ export default function ReferenceAnchorView({ novelId }: Props) {
             </>
             )}
 
-            {activeCorpusTab === 'analysis_results' && (
-              <CorpusAnalysisLibraryTab novelId={novelId} anchors={anchors} />
-            )}
+{activeCorpusTab === 'analysis_results' && (
+<CorpusAnalysisLibraryTab novelId={novelId} anchors={anchors} />
+)}
+
+ {activeCorpusTab === 'governance' && (
+ <CorpusGovernancePanel novelId={novelId} />
+ )}
 
             {(activeCorpusTab === 'materials' || activeCorpusTab === 'tag_review') && (
             <>

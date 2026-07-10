@@ -1,0 +1,40 @@
+[
+  {
+    "ContainingType": "Novelist.App.Hosting.NovelistAppBuilder\u002B\u003C\u003Ec__DisplayClass0_0",
+    "Method": "\u003CBuild\u003Eb__2",
+    "RelativePath": "covers/{novelId:long}",
+    "HttpMethod": "GET",
+    "IsController": false,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "novelId",
+        "Type": "System.Int64",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": [
+      {
+        "Type": "System.Void",
+        "MediaTypes": [],
+        "StatusCode": 200
+      }
+    ]
+  },
+  {
+    "ContainingType": "Novelist.App.Hosting.NovelistAppBuilder\u002B\u003C\u003Ec",
+    "Method": "\u003CBuild\u003Eb__0_1",
+    "RelativePath": "health",
+    "HttpMethod": "GET",
+    "IsController": false,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": [
+      {
+        "Type": "System.Void",
+        "MediaTypes": [],
+        "StatusCode": 200
+      }
+    ]
+  }
+]
