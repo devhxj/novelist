@@ -33,6 +33,32 @@ internal static class PhotinoWindowPlacement
         return ClampLocationToWorkArea(location, size, workArea);
     }
 
+    public static bool TryResolveStoredBounds(
+        Point location,
+        Size size,
+        IReadOnlyList<Rectangle> workAreas,
+        out Point resolvedLocation,
+        out Size resolvedSize)
+    {
+        ArgumentNullException.ThrowIfNull(workAreas);
+        var validWorkAreas = workAreas
+            .Where(area => area.Width > 0 && area.Height > 0)
+            .ToArray();
+        if (validWorkAreas.Length == 0)
+        {
+            resolvedLocation = default;
+            resolvedSize = default;
+            return false;
+        }
+
+        var workArea = SelectWorkAreaForLocation(location, validWorkAreas);
+        resolvedSize = new Size(
+            Math.Clamp(size.Width, 1, workArea.Width),
+            Math.Clamp(size.Height, 1, workArea.Height));
+        resolvedLocation = ClampLocationToWorkArea(location, resolvedSize, workArea);
+        return true;
+    }
+
     public static Size ResolveDefaultLaunchSize(
         IReadOnlyList<Rectangle> workAreas,
         Size fallback,

@@ -6,6 +6,8 @@ namespace Novelist.App.Desktop;
 
 public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
 {
+    private static readonly Size SafeInitialWindowSize = new(1280, 840);
+
     public IPhotinoWindow Create(PhotinoWindowSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -24,31 +26,68 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             DesktopLaunchLog.Write("Photino temporary files path not configured; using platform default.");
         }
         var adapter = new PhotinoWindowAdapter(window);
- var runtime = DesktopBridgeComposition.CreateRuntime(adapter, settings.AppOptions);
- var bridge = runtime.Bridge;
+        var runtime = DesktopBridgeComposition.CreateRuntime(adapter, settings.AppOptions);
+        var bridge = runtime.Bridge;
 
-        var hasStoredLocation = settings.X.HasValue && settings.Y.HasValue;
-        var workAreas = SafeMonitorWorkAreas(window).ToArray();
-        var launchSize = ResolveLaunchSize(settings, workAreas, hasStoredLocation);
-        var restoreStoredLocation = hasStoredLocation && !settings.Maximized;
         window
             .SetTitle(settings.Title)
             .SetChromeless(!OperatingSystem.IsMacOS())
             .SetUseOsDefaultSize(false)
-            .SetSize(launchSize)
-            .SetUseOsDefaultLocation(!restoreStoredLocation)
+            .SetSize(SafeInitialWindowSize)
+            .SetUseOsDefaultLocation(false)
             .SetResizable(true)
             .RegisterWebMessageReceivedHandler((_, message) => bridge.Post(message));
-        if (restoreStoredLocation)
+        // Photino exposes monitor geometry only after the native window is created.
+        window.WindowCreatedHandler = (_, _) => RestorePlacementAfterWindowCreation(window, settings);
+        window.Center();
+        window.Load(settings.StartUrl);
+        window.Maximized = false;
+
+        runtime.StartAsync().AsTask().GetAwaiter().GetResult();
+        return new RuntimeOwnedWindow(adapter, runtime);
+    }
+
+    private static void RestorePlacementAfterWindowCreation(
+        PhotinoWindow window,
+        PhotinoWindowSettings settings)
+    {
+        try
         {
-            window.MoveTo(ResolveLaunchLocation(settings, launchSize, workAreas), allowOutsideWorkArea: false);
-        }
-        else if (hasStoredLocation && settings.Maximized)
-        {
+            var workAreas = window.Monitors
+                .Select(monitor => monitor.WorkArea)
+                .Where(area => area.Width > 0 && area.Height > 0)
+                .ToArray();
+            if (workAreas.Length == 0)
+            {
+                DesktopLaunchLog.Write("No visible monitor work area was available; keeping the safe initial window placement.");
+                return;
+            }
+
+            if (!settings.Maximized && settings.X is { } x && settings.Y is { } y &&
+                PhotinoWindowPlacement.TryResolveStoredBounds(
+                    new Point(x, y),
+                    new Size(settings.Width, settings.Height),
+                    workAreas,
+                    out var storedLocation,
+                    out var storedSize))
+            {
+                window.SetSize(storedSize);
+                window.MoveTo(storedLocation, allowOutsideWorkArea: false);
+                return;
+            }
+
+            var preferredLocation = settings.X is { } preferredX && settings.Y is { } preferredY
+                ? new Point(preferredX, preferredY)
+                : (Point?)null;
+            var launchSize = PhotinoWindowPlacement.ResolveDefaultLaunchSize(
+                workAreas,
+                new Size(settings.Width, settings.Height),
+                preferredLocation);
             var centeredLocation = PhotinoWindowPlacement.CenterInVisibleWorkArea(
                 launchSize,
                 workAreas,
-                new Point(settings.X!.Value, settings.Y!.Value));
+                preferredLocation);
+            window.SetSize(launchSize);
             if (centeredLocation is { } location)
             {
                 window.MoveTo(location, allowOutsideWorkArea: false);
@@ -58,59 +97,9 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
                 window.Center();
             }
         }
-        else
-        {
-            window.Center();
-        }
-        window.Load(settings.StartUrl);
-        window.Maximized = false;
-
- runtime.StartAsync().AsTask().GetAwaiter().GetResult();
- return new RuntimeOwnedWindow(adapter, runtime);
-    }
-
-    private static Size ResolveLaunchSize(
-        PhotinoWindowSettings settings,
-        IReadOnlyList<Rectangle> workAreas,
-        bool hasStoredLocation)
-    {
-        var fallback = new Size(settings.Width, settings.Height);
-        if (hasStoredLocation && !settings.Maximized)
-        {
-            return fallback;
-        }
-
-        var preferredLocation = hasStoredLocation
-            ? new Point(settings.X!.Value, settings.Y!.Value)
-            : (Point?)null;
-        return PhotinoWindowPlacement.ResolveDefaultLaunchSize(workAreas, fallback, preferredLocation);
-    }
-
-    private static Point ResolveLaunchLocation(
-        PhotinoWindowSettings settings,
-        Size launchSize,
-        IReadOnlyList<Rectangle> workAreas)
-    {
-        var requested = new Point(settings.X!.Value, settings.Y!.Value);
-        return PhotinoWindowPlacement.ClampLocationToVisibleWorkArea(
-            requested,
-            launchSize,
-            workAreas);
-    }
-
-    private static IEnumerable<Rectangle> SafeMonitorWorkAreas(PhotinoWindow window)
-    {
-        try
-        {
-            return window.Monitors
-                .Select(monitor => monitor.WorkArea)
-                .Where(area => area.Width > 0 && area.Height > 0)
-                .ToArray();
-        }
         catch (Exception exception)
         {
-            DesktopLaunchLog.Write("Unable to read monitor work areas; using stored window location without pre-clamp.", exception);
-            return [];
+            DesktopLaunchLog.Write("Unable to restore window placement after initialization; keeping the safe initial window placement.", exception);
         }
     }
 

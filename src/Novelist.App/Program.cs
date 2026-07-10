@@ -12,17 +12,9 @@ public partial class Program
                 eventArgs.ExceptionObject as Exception);
         };
 
-        try
-        {
-            DesktopLaunchLog.Write("Launching desktop mode");
-            var desktopApplication = new PhotinoDesktopApplication(new PhotinoWindowFactory());
-            desktopApplication.Run(args);
-            DesktopLaunchLog.Write("Desktop mode exited normally");
-        }
-        catch (Exception exception)
-        {
-            DesktopLaunchLog.Write("Fatal startup exception", exception);
-            throw;
-        }
+        DesktopApplicationEntryPoint.Run(
+            args,
+            static applicationArgs => new PhotinoDesktopApplication(new PhotinoWindowFactory()).Run(applicationArgs),
+            DesktopStartupFailurePresenter.Show);
     }
 }

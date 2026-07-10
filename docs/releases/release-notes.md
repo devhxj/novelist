@@ -2,6 +2,7 @@
 
 ### 2026-07-11
 
+- 桌面应用现在会在当前显示器工作区内恢复并夹紧已保存的窗口位置和尺寸；显示器布局变化后不会因旧位置让窗口不可见。启动失败会显示可关闭的图形错误页并指向本地诊断日志，安装包启动也不再额外打开控制台窗口。
 - Chapter-level `参考素材` now keeps the default writing path focused on “goal → choose a writing blueprint → review prose → explicitly insert”. Source details, identifiers, and manual controls remain available as progressive expert detail instead of competing entry points.
 - A chosen corpus-writing blueprint is now restored from the server-owned chapter session after the panel or app is reopened, so authors can continue from the selected plan without rebuilding the same step.
 - `素材库` can start analysis as a persistent background task, let authors leave the page, and return to the same task with its progress and a clear recovery action for paused, failed, exhausted, or blocked work.

@@ -15,7 +15,7 @@ public sealed class SolutionReferenceTests
     }
 
     [Fact]
-    public void AppProjectIsRunnableDesktopExecutable()
+    public void AppProjectUsesWindowedDesktopExecutable()
     {
         var project = XDocument.Load(Path.Combine(FindRepositoryRoot(), "src", "Novelist.App", "Novelist.App.csproj"));
         var outputType = project
@@ -23,7 +23,7 @@ public sealed class SolutionReferenceTests
             .Select(element => element.Value)
             .FirstOrDefault();
 
-        Assert.Equal("Exe", outputType);
+        Assert.Equal("WinExe", outputType);
     }
 
     [Fact]

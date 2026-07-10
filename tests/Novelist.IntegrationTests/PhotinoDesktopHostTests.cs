@@ -199,6 +199,61 @@ public sealed class PhotinoDesktopHostTests
     }
 
     [Fact]
+    public void WindowPlacementRestoresSavedBoundsWithinNearestVisibleWorkArea()
+    {
+        var restored = PhotinoWindowPlacement.TryResolveStoredBounds(
+            new Point(5000, -200),
+            new Size(2500, 1600),
+            [new Rectangle(0, 0, 1920, 1040)],
+            out var location,
+            out var size);
+
+        Assert.True(restored);
+        Assert.Equal(new Point(0, 0), location);
+        Assert.Equal(new Size(1920, 1040), size);
+    }
+
+    [Fact]
+    public void WindowPlacementDoesNotResolveSavedBoundsWithoutAVisibleWorkArea()
+    {
+        var restored = PhotinoWindowPlacement.TryResolveStoredBounds(
+            new Point(5000, -200),
+            new Size(2500, 1600),
+            [],
+            out _,
+            out _);
+
+        Assert.False(restored);
+    }
+
+    [Fact]
+    public void StartupFailurePageProvidesActionsWithoutExposingExceptionDetails()
+    {
+        var page = DesktopStartupFailurePresenter.CreatePage();
+
+        Assert.Contains("Novelist", page, StringComparison.Ordinal);
+        Assert.Contains("npm --prefix frontend run build", page, StringComparison.Ordinal);
+        Assert.Contains("desktop.log", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Exception", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("stack", page, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void StartupFailureIsPresentedInsteadOfBeingRethrown()
+    {
+        var expected = new InvalidOperationException("startup failed");
+        Exception? presented = null;
+
+        DesktopApplicationEntryPoint.Run(
+            [],
+            _ => throw expected,
+            exception => presented = exception,
+            static (_, _) => { });
+
+        Assert.Same(expected, presented);
+    }
+
+    [Fact]
     public void HasStartUrlOverrideDetectsViteDebugUrl()
     {
         Assert.False(PhotinoLaunchMode.HasStartUrlOverride([PhotinoLaunchMode.DesktopFlag]));
