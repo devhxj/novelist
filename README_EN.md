@@ -119,7 +119,17 @@ The current Phase 15 line ports user-facing behavior from the legacy `goink-mast
 
 Skills store writing methods. Reference anchoring constrains material use and risk. Sources, factual boundaries, POV, blueprints, material bindings, and draft audits leave records here, so the model does not invent freely, leak source text, or write risky prose directly into the manuscript.
 
-Default flow:
+The current automatic chapter path is:
+
+```text
+enter a chapter target
+  -> generate multiple blueprints across enabled corpora
+  -> select a blueprint or request a feedback-driven regroup
+  -> generate and select a prose candidate
+  -> explicitly insert an audited candidate into the editor buffer
+```
+
+The advanced reference workflow remains available when source policy, fact boundaries, material binding, and approvals need explicit review:
 
 ```text
 author confirms source policy, chapter target, known facts, and forbidden facts
@@ -132,6 +142,8 @@ author confirms source policy, chapter target, known facts, and forbidden facts
   -> run draft audit
   -> stop at final chapter-insertion confirmation
 ```
+
+The default chapter UI now uses the persistent blueprint session. Server state restores the target, iterations, and selected blueprint after refresh or restart, and browser automation covers the single automatic path plus long-task and error recovery. Unmoderated target-user walks and writing-effect evaluation remain open, so the current slice is not presented as product completion.
 
 The workflow stops for author confirmation when:
 
@@ -201,7 +213,11 @@ Adjust narrative pacing according to the current chapter target.
     </tr>
     <tr>
       <td><strong>Reference anchoring</strong></td>
-      <td>Phases 0-14 are complete at the current implementation boundary, including material understanding, style profiles, style-aware retrieval, imitation candidates, and audit.</td>
+      <td>Shared corpus processing and chapter-level reference use have a separated thin slice. The default chapter path now uses the persistent session, with automated restart, long-task, and error-recovery coverage. Unmoderated target-user validation remains open.</td>
+    </tr>
+    <tr>
+      <td><strong>Corpus-driven writing</strong></td>
+      <td>The M1 product thin slice is established; the M2 50K full-pipeline standard gate has passed; M3-M5 await real-effect evidence; M6-M8 are frozen; M9 automated experience closure is complete, with target-user task validation still open. The system remains at S maturity, not production P or scale L.</td>
     </tr>
     <tr>
       <td><strong>Phase 15</strong></td>
@@ -220,24 +236,11 @@ Adjust narrative pacing according to the current chapter target.
 
 ## Latest Updates
 
-### 2026-07-07
+### 2026-07-11
 
-- The bookshelf can now import local EPUB/TXT/Markdown files through the desktop picker or drag and drop. Unsupported dropped content shows immediate feedback.
-- The desktop update-check endpoint now comes from app build configuration or launch arguments. No live release URL is baked in by default, and automatic checks stay disabled by default.
-- Reference-anchor orchestration can select the active style profile and tune imitation intensity, fit, evidence, and risk policy. The policy is written into the pending blueprint `style_contract`.
-- When orchestration hits material gaps, weak retrieval, provenance gaps, or source-leak risk, it reports concrete recovery actions such as adding material, relaxing filters, rebinding stronger material, lowering imitation strength, or regenerating the candidate.
-- Draft audit now blocks high whole-candidate/source similarity. Reports show ratios and thresholds, not source prose or candidate prose.
-- Draft audit also checks style-quality risks under imitation pressure, including abstract summary, direct emotion telling, mechanical connectors, three-part structures, and formulaic phrases.
-- Reference-style profiles now have a 10 MB browser stress regression covering large-corpus build progress, profile detail, and material-library paging.
-- The style profile library shows build progress, diagnostics, and error states, supports canceling a running build, and can refresh after failure or cancellation.
-- Reference-style profile builds now persist recoverable build state. State records do not store source prose, candidate prose, prompts, or file paths.
-- Agent reference tools can no longer approve blueprints with a `style_contract`. AI may propose and review style-contract changes, but approval remains a user action.
-- Style and source-leak audit findings can be read through the desktop bridge and Agent tools. They do not return candidate prose, source prose, prompts, or chapter-write capability.
-- Draft audit blocks candidates that carry long source passages. Reports show reuse length and ratio without echoing source sentences.
-- The reference-style golden suite now covers eight style categories and generates reports without source prose or candidate prose.
-- Draft audit reports are visible in the candidate area with candidate ID, finding category, severity, and required action.
-- Draft generation and manual audit both persist audit reports with candidate IDs. Reports do not add candidate prose, source prose, or prompts.
-- Persisted audit reports can be read through the desktop bridge and Agent tools by blueprint, candidate ID, and limit. They do not provide prose-write or approval capability.
+- The chapter-level `Reference Materials` automatic path now stays focused on “goal → choose a writing blueprint → prose candidate → explicit insert”, with source details and manual controls available as progressive expert detail.
+- The selected writing blueprint is restored from the server-owned chapter session after reopening, so authors can continue without recreating the same step.
+- `Corpus Library` analysis runs as a persistent background task: authors can return to its progress and receive one clear recovery action for paused, failed, exhausted, or blocked work.
 
 See [Release Notes](docs/releases/release-notes.md) for the full change history.
 
@@ -363,7 +366,11 @@ Starting only Vite leaves desktop bridge APIs unavailable. To use the bridge aga
     </tr>
     <tr>
       <td><code>npm&nbsp;--prefix&nbsp;frontend&nbsp;run&nbsp;verify</code></td>
-      <td>Run frontend build, lint, reference-anchor workflow, and baseline app-wide smoke test.</td>
+      <td>Run frontend build, lint, corpus/chapter/reference workflows, and the baseline app-wide smoke test.</td>
+    </tr>
+    <tr>
+      <td><code>npm&nbsp;--prefix&nbsp;frontend&nbsp;run&nbsp;test:phase16</code></td>
+      <td>Run the corpus-library and chapter-reference browser workflows.</td>
     </tr>
     <tr>
       <td><code>dotnet&nbsp;test&nbsp;Novelist.slnx&nbsp;--no-restore&nbsp;-v&nbsp;minimal</code></td>
@@ -387,6 +394,9 @@ When developing or reviewing this codebase, preserve these boundaries:
 
 - [Reference Anchor Technical Baseline](docs/reference-anchor-layer-plan.md)
 - [Reference Anchor Implementation Plan](docs/reference-anchor-implementation-plan.md)
+- [Corpus-Driven Writing Development Plan](docs/corpus-driven-writing/development-plan.md)
+- [Corpus-Driven Writing Tasks And Current Status](docs/corpus-driven-writing/tasks.md)
+- [Corpus-Driven Writing Progress Audit (2026-07-10)](docs/corpus-driven-writing/progress-audit-2026-07-10.md)
 - [Photino Bridge Contract](docs/novelist-photino-bridge-contract.md)
 - [Release Notes](docs/releases/release-notes.md)
 

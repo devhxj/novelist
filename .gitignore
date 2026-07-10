@@ -30,6 +30,8 @@ src/**/bin/
 src/**/obj/
 tests/**/bin/
 tests/**/obj/
+scripts/**/bin/
+scripts/**/obj/
 
 # Go
 *.mod.cache

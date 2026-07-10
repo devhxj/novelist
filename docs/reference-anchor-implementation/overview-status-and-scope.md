@@ -4,9 +4,9 @@
 
 ## Status
 
-Phases 0-15 are complete at the current implementation boundary. Phase 16 is proposed and tracked in `tasks-and-verification.md` as the reference-anchor product information-architecture correction for separating shared corpus-library processing from current-chapter reference use.
+Phases 0-16 have implementation evidence at their recorded thin-slice boundaries. Phase 16 established the reference-corpus/chapter surface split; M9 has since added persistent default-session use, restart recovery, and a single primary chapter path with automated browser evidence. Real-user usability evidence remains open.
 
-This plan is still the source of truth for the target design. Treat Phase 16 as the proposed usability and information-architecture phase unless contracts, storage, bridge, agent, or frontend behavior regresses.
+This plan is the source of truth for reference-anchor design constraints. Current status and M9 experience closure live in `docs/corpus-driven-writing/development-plan.md` and `tasks.md`.
 
 ## Date
 

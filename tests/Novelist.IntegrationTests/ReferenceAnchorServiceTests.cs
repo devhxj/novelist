@@ -6205,7 +6205,7 @@ Assert.Empty(vec.SearchRequests);
 }
 
  [Fact]
- public async Task BackfillMaterialEmbeddingsAlignsLegacyRowsAndIsIdempotent()
+ public async Task BackfillMaterialEmbeddingsRepairsLegacyRowsAndIsIdempotent()
  {
  var options = CreateOptions();
  await InitializeAsync(options);
@@ -6256,9 +6256,7 @@ Assert.Empty(vec.SearchRequests);
  Assert.True(first.MaterialCount > 0);
  Assert.Equal(first.MaterialCount, first.BuiltCount);
  Assert.Equal(0, first.ReusedCount);
- Assert.True(first.AlignedSourceSegmentCount > 0);
- Assert.True(first.AlignedMaterialCount > 0);
- Assert.Equal(first.MaterialCount, first.ProjectionCount);
+Assert.Equal(first.MaterialCount, first.ProjectionCount);
  Assert.All(first.Items, item =>
  {
  Assert.Equal("custom", item.ProviderKey);
@@ -6269,9 +6267,21 @@ Assert.Empty(vec.SearchRequests);
  Assert.Equal(64, item.EmbeddingHash.Length);
  Assert.Equal("built", item.Status);
  });
- Assert.Single(vec.Provisions);
- Assert.Equal(first.MaterialCount, vec.Provisions[0].Vectors.Count);
- var requestCount = embeddings.Requests.Count;
+Assert.Single(vec.Provisions);
+Assert.Equal(first.MaterialCount, vec.Provisions[0].Vectors.Count);
+ await using (var connection = new SqliteConnection(
+ new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString()))
+ {
+ await connection.OpenAsync();
+ await using var aligned = connection.CreateCommand();
+ aligned.CommandText = "SELECT (SELECT COUNT(*) FROM reference_source_segments WHERE anchor_id=$anchor_id AND node_id IS NULL), (SELECT COUNT(*) FROM reference_materials WHERE anchor_id=$anchor_id AND archived_at IS NULL AND node_id IS NULL);";
+ aligned.Parameters.AddWithValue("$anchor_id", anchor.AnchorId);
+ await using var reader = await aligned.ExecuteReaderAsync();
+ Assert.True(await reader.ReadAsync());
+ Assert.Equal(0, reader.GetInt32(0));
+ Assert.Equal(0, reader.GetInt32(1));
+ }
+var requestCount = embeddings.Requests.Count;
 
  var second = await service.BackfillMaterialEmbeddingsAsync(
  new BackfillReferenceMaterialEmbeddingsPayload(novel.Id),

@@ -4,7 +4,7 @@ This implementation plan has been split into focused companion documents so each
 
 ## Status
 
-Core implementation phases 0-15 are complete at the current implementation boundary. Phase 16 is proposed as the reference-anchor product information-architecture correction: split shared corpus-library processing from current-chapter reference use, move chapter use into the chapter editor surface, and preserve the existing provenance, blueprint, material binding, draft audit, and no-implicit-save guardrails.
+Phases 0-16 have implementation and regression evidence at their recorded thin-slice boundaries. The Phase 16 corpus/chapter surface split, persistent blueprint-session default path, restart recovery, and automated long-task UX are now implemented; the remaining M9 evidence is a real-user walk-through, not more parallel controls. Active status and experience closure are governed by `docs/corpus-driven-writing/development-plan.md` and `tasks.md`; this document remains the historical reference-anchor design and implementation index.
 
 ## Date
 
@@ -15,7 +15,7 @@ Core implementation phases 0-15 are complete at the current implementation bound
 - [Overview and architecture](reference-anchor-implementation/overview.md): stable overview index for status/scope, planning updates, and architecture map.
 - [Implementation decisions](reference-anchor-implementation/decisions.md): stable decisions index for foundation, pipeline, quality, material, and audit decisions.
 - [Schema and integration plan](reference-anchor-implementation/schema-and-integration.md): stable integration index for database, bridge, desktop/agent, and frontend surfaces.
-- [Tasks, tests, and guardrails](reference-anchor-implementation/tasks-and-verification.md): stable task index for phase breakdowns, test matrix, guardrails, and open Phase 15 work.
+- [Tasks, tests, and guardrails](reference-anchor-implementation/tasks-and-verification.md): stable task index for historical phase breakdowns, test matrix, guardrails, and current regression boundaries.
 
 ## Topic Documents
 

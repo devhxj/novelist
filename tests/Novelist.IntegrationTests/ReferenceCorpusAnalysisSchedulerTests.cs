@@ -46,6 +46,30 @@ public sealed class ReferenceCorpusAnalysisSchedulerTests : IAsyncLifetime
  }
 
  [Fact]
+ public async Task TechniqueEnqueueRequiresCompletedFeatureDependency()
+ {
+ await SeedAsync();
+ var scheduler = CreateScheduler();
+
+ await Assert.ThrowsAsync<ArgumentException>(async () =>
+ await scheduler.EnqueueAsync(new(
+ "scheduler-technique-missing-dependency", 1, 101, ReferenceCorpusAnalysisJobKinds.TechniqueSpecimen,
+ ReferenceCorpusNodeTypes.Sentence, ReferenceCorpusAnalysisPriorityClasses.Normal, 100, 1000),
+ CancellationToken.None));
+
+ var queuedFeature = await scheduler.EnqueueAsync(new(
+ "scheduler-feature-pending-dependency", 1, 101, ReferenceCorpusAnalysisJobKinds.FeatureAnalysis,
+ ReferenceCorpusNodeTypes.Sentence, ReferenceCorpusAnalysisPriorityClasses.Normal, 100, 1000),
+ CancellationToken.None);
+
+ await Assert.ThrowsAsync<ArgumentException>(async () =>
+ await scheduler.EnqueueAsync(new(
+ "scheduler-technique-pending-dependency", 1, 101, ReferenceCorpusAnalysisJobKinds.TechniqueSpecimen,
+ ReferenceCorpusNodeTypes.Sentence, ReferenceCorpusAnalysisPriorityClasses.Normal, 100, 1000,
+ DependencyJobId: queuedFeature.JobId), CancellationToken.None));
+ }
+
+ [Fact]
 public async Task ControlOperationsUsePersistentCasVersions()
  {
  await SeedAsync();

@@ -2,6 +2,8 @@
 
 [Back to implementation index](../reference-anchor-implementation-plan.md) | [Back to schema and integration index](schema-and-integration.md).
 
+> **Current status (2026-07-10):** The corpus-library/chapter-editor split below exists as a thin slice. The later “main-panel workflow” and “current frontend status” sections record the older reference-panel implementation for regression history. `ChapterReferencePanel` now uses the persistent blueprint session for the default path; automatic and expert controls are layered rather than concurrent defaults. `ReferenceAnchorView` owns the persistent background-analysis start and recovery surface. Current M9 acceptance is defined in the corpus-driven writing plan, with real-user evidence still open.
+
 ## Frontend Surface
 
 Current API/type layer:
@@ -53,11 +55,11 @@ frontend/src/components/reference-anchor/blueprintRevision.ts
 frontend/src/components/reference-anchor/referenceAnchorStyles.ts
 ```
 
-## Phase 16 Current Boundary
+## Phase 16 Target And Thin-Slice Boundary
 
 Phase 16 splits the reference-anchor UI into two default product surfaces:
 
-- `ReferenceAnchorView.tsx` is the shared `素材库` activity. It owns source import, batch/library-pack import, source list and processing detail, material browse/detail, source-segment detail, tag review, archive/restore, source metadata, rebuild/retry affordances, and style-profile library work. It must not expose current-chapter orchestration, blueprint generation, candidate generation, or final insertion controls in the default path.
+- `ReferenceAnchorView.tsx` is the shared `素材库` activity. It owns source import, batch/library-pack import, source list and processing detail, material browse/detail, source-segment detail, tag review, archive/restore, source metadata, rebuild/retry affordances, style-profile library work, and the ready-source “开始分析” action. That action calls `EnqueueReferenceCorpusAnalysisJob` for the standard feature-analysis job and moves the user to the persistent task view; it must not expose current-chapter orchestration, blueprint generation, candidate generation, or final insertion controls in the default path.
 - `ChapterReferencePanel.tsx` is mounted from `ContentPanel.tsx` for chapter editor tabs. It owns current-chapter context detection, material recommendations, orchestration start/resume/cancel, blueprint/high-risk decisions, audited candidate preview, and explicit editor-buffer copy/insert/append/replace actions. It must not mutate corpus metadata, import source files, update material tags, archive/restore materials, rebuild anchors, or call backend chapter save as part of reference use.
 - Dormant activity-level chapter-writing/debug controls, if still compiled during migration, must stay behind the explicit development flag `VITE_REFERENCE_ACTIVITY_CHAPTER_DEBUG=true`. Browser guardrails must prove they are not reachable from the default `素材库` activity, including the `高级` corpus tab.
 - `GetReferenceMaterialTagReviewQueue` is the only frontend source for tag-review queue eligibility, counts, and pagination. The UI must not reconstruct that queue from the currently visible material search page. Current queue eligibility is unverified, low-confidence, or unknown tags; conflict entries require a durable analyzer conflict signal before they can be displayed or asserted.
@@ -71,7 +73,7 @@ frontend/src/components/shell/ActivityBar.tsx
 frontend/src/views/WorkspaceView.tsx
 ```
 
-Current main-panel workflow:
+Historical reference-main-panel workflow:
 
 - separate the current page into a left-side corpus-library management area and a right-side reference-writing retrieval area
 - list anchors for active novel
@@ -105,7 +107,7 @@ Current main-panel workflow:
 - stop at final insertion with candidate ids visible; the final-insertion decision is not resumable from the panel, and no frontend path automatically inserts candidate prose into chapter content
 - keep manual material search plus blueprint generate/revise/review/approve/bind/draft controls behind `高级模式` so the default surface stays orchestration-first while debugging and strict editorial review workflows remain available
 
-Current frontend status:
+Historical Phase 11/12 frontend status:
 
 - `frontend/src/components/reference-anchor/ReferenceAnchorView.tsx` exists as the first full main-panel implementation.
 - `OrchestrationPanel.tsx` is mounted at the top of the reference-anchor main panel as the default Phase 11 workflow entry.

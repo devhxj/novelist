@@ -106,7 +106,7 @@ The workflow should be:
 chapter plan / user goal / world state / previous state
   -> detailed chapter blueprint IR
   -> deterministic blueprint review
-  -> explicit user or agent approval
+  -> explicit user approval
   -> reference material binding per beat
   -> beat-level paragraph candidate generation
   -> draft audit

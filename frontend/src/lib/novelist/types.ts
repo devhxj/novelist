@@ -1405,7 +1405,7 @@ notes: string
  export interface AdvanceCorpusBlueprintSessionInput {
  session_id: string
  request_id: string
- action: 'generate' | 'revise' | 'accept'
+ action: 'generate' | 'select' | 'revise' | 'accept'
  generation_input?: GenerateCorpusBlueprintCandidatesInput | null
  selected_blueprint_id?: string | null
  checklist?: CorpusBlueprintChecklistItem[] | null
@@ -1429,6 +1429,7 @@ notes: string
  strategy_coverage: string[]
  candidates: CorpusBlueprintCandidates
  updated_at: string
+ natural_language_goal?: string | null
  }
 
  export interface GetCorpusCascadeImpactInput {

@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | 1 | Critical | TextTree 未真正落库 | 新增 `reference_text_nodes` 稳定节点表（父子/顺序/offset/text_hash），所有分析以 node_id 为锚 | §5.1 |
 | 2 | Critical | AnalysisRun/stale/复核状态混淆 | 拆分 `review_state`（人工）/ `validity_state`（机器生命周期）/ `superseded_by_run_id` | §5.2 §5.5 |
-| 3 | Critical | 管线边界自相矛盾、200 万字不可验证 | 明确分层：确定性全量 + 段落 LLM 全量 + 句级 LLM 全量但异步/续跑/预算上限；双轨验收 | §6 |
+| 3 | Critical | 管线边界自相矛盾、固定 200 万字常规验收耗时过长 | 明确分层：确定性全量 + 段落 LLM 全量 + 句级 LLM 全量但异步/续跑/预算上限；500 句正确性、1K 微基准、50K 全管线、可选 2M 长跑四层证据 | §6 |
 | 4 | Critical | 版权/授权无工程边界 | 新增 license gate 模型 + 插入前相似度阈值 + 硬性插入闸门 | §5.6 §7 |
 | 5 | High | 当前章节上下文未进检索核心 | `CorpusQueryContext` 内嵌 `CurrentChapterContext`，参与后端排序 | §5.7 |
 | 6 | High | 公共库仍是 anchor/source 思维 | 新增语料库/成员/会话绑定模型 + 启用规则/去重/来源质量 | §5.6 |
@@ -60,7 +60,7 @@
 1. **素材库处理侧与章节使用侧分离**：导入、授权、切分、分析、复核属于素材库处理侧；当前章节的大纲/目标解析、跨库检索、蓝图迭代、草稿候选与插入闸门属于章节使用侧。章节侧只能消费已处理语料和安全展示契约，不能把“处理某本参考书”的流程混进写作面板。
 2. **语料库是多小说共用资产**：一个 `reference_corpus_library` 可以由多本小说/多个 anchor 注册为成员；同一个写作 session 可绑定多个 library。检索作用域是所有已绑定且启用、授权允许、去重后有效的 library 成员，不是某一本参考小说，也不是单个 anchor。
 3. **写作检索按当前目标跨库召回**：系统根据当前大纲、目标、章节上下文和插入位置构造 `CorpusQueryContext`，在所有启用语料库中检索可复用片段、技法和结构。默认行为不得退化为“用户手选一本参考再生成”。
-4. **先多蓝图迭代，再正文候选**：章节使用侧必须生成多份参考剧本蓝图/剧情结构候选，允许用户选择、拒绝、勾选问题后再次检索和重组，循环到用户满意。正文候选只能从被接受或继续迭代的蓝图派生。
+4. **先多蓝图迭代，再正文候选**：章节使用侧必须生成多份参考写作蓝图/剧情结构候选，允许用户选择、拒绝、勾选问题后再次检索和重组，循环到用户满意。正文候选只能从被接受或继续迭代的蓝图派生。
 5. **正文生成最大化复用语料**：正文候选尽可能复用来源语料的原句、段落结构、节奏和技法骨架，只按当前剧情做槽位替换、顺序调整、过渡补齐和必要微调；授权与相似度闸门仍是硬约束。
 6. **选定蓝图是正文来源边界**：用户选定蓝图后，正文候选只能消费该蓝图锁定的来源片段、技法证据和允许的备选槽位；需要换料时必须返回蓝图检索/重组循环，不能在正文阶段静默重新检索或替换来源。
 7. **AI 不自由补写正文**：结构化 AI 可用于目标解析、语料分析、召回融合、蓝图编排、槽位约束推理和受审计过渡，但不得脱离启用语料库、选定蓝图和可追溯证据自由生成叙述。确定性实现可作为 fallback 和测试替身，不应被误标为最终写作质量。
@@ -333,7 +333,7 @@ CREATE TABLE reference_analysis_runs (
 
 `resume_cursor` 记录最后完成的 `(node_id, feature_family)`；续跑从游标之后开始，配合 G1 幂等写入，重复覆盖已完成 node 也不产生脏数据。查询"分析完成度"= 已完成 node / 总 node，实时可见。
 
-**产品触发入口（M2.2 薄入口）**：`StartReferenceCorpusFeatureAnalysis` 接收 `novel_id/anchor_id/scope/token_budget/resume/run_id`，后端按 `scope=sentence|passage` 派生默认 family 组，读取 selected model，校验 anchor 可访问性，然后启动对应 run；`GetReferenceCorpusFeatureAnalysisRun` 只按 `novel_id + run_id` 返回运行元数据（families/status/tokens/resume_cursor/observation_count/diagnostics）。bridge 返回体禁止包含 `node_text/source_text/raw_text/prompt/model_output_json/embedding` 等源文或模型内部字段。当前 M2.2 入口是一次调用内执行的薄触发，用于产品面接入和回归闭环；后台队列、章节优先级调度、取消状态属于后续调度层，不能在 UI 或文档中误标为已完成。
+**产品触发入口（M2.2 当前边界）**：`StartReferenceCorpusFeatureAnalysis` / `GetReferenceCorpusFeatureAnalysisRun` 保留同步兼容入口和既有 run 元数据；生产后台入口使用 `Enqueue/Get/ListReferenceCorpusAnalysisJob` 及 pause/resume/cancel/reprioritize CAS 方法，按 sentence/passage 构建冻结 work items，并由持久 worker 执行。bridge 返回体禁止包含 `node_text/source_text/raw_text/prompt/model_output_json/embedding` 等源文或模型内部字段。当前后台已覆盖 priority aging、retry、进度、控制、恢复、Stage 3 和 50K 全管线标准轨；这些证据仍不能把同步兼容入口或局部 job 测试表述为 M2 产品完成，默认用户闭环、真实 provider 和持续运行证据仍待后续阶段补齐。
 
 **技法标本触发入口（M2.3 薄入口）**：`StartReferenceCorpusTechniqueSpecimenAnalysis` 接收 `novel_id/anchor_id/source_node_type/min_observation_confidence/token_budget/resume/run_id`，后端读取 selected model，校验 anchor 可访问性，然后启动 Stage 3 runner；`GetReferenceCorpusTechniqueSpecimenAnalysisRun` 返回运行元数据（scope/status/token_budget/tokens_spent/resume_cursor/specimen_count/processed_nodes/diagnostics）。Stage 3 已定义单次调用内的预算耗尽与续跑语义：零预算不调用模型，预算耗尽返回 `budget_exhausted`，补充总预算后从最后成功提交的 node 继续；标本、evidence、tokens 和 cursor 在同一 SQLite 事务中推进，非法 terminal resume、陈旧 cursor、跨 scope/anchor run_id 在写入前拒绝。该能力仍是同步薄触发，不代表后台队列、章节优先级、暂停、取消、重启恢复或任务巡检已完成。bridge 返回体禁止包含 `node_text/source_text/raw_text/raw_source/prompt/model_output_json/embedding/value_json` 等源文、观察明细或模型内部字段。
 
@@ -499,7 +499,7 @@ CREATE TABLE reference_analysis_attempts (
 - diagnostics 只返回稳定错误码和有限长度摘要，禁止源文、prompt、模型原始输出、embedding、内部 JSON 和密钥。
 - 稳定错误语义至少包括 `analysis_job_not_found`、`analysis_job_version_conflict`、`analysis_job_invalid_transition`、`analysis_job_idempotency_conflict`、`analysis_snapshot_stale`、`analysis_cursor_stale`、`analysis_budget_not_increased`、`analysis_dependency_not_ready`、`analysis_license_revoked`；bridge 不透传 provider 原始错误。
 
-**实施边界（2026-07-10）**：持久化后台第一可靠薄切片已实现 canonical run/input snapshot/work item/job/attempt、完整冻结 snapshot builder、CAS pause/resume/cancel/reprioritize、priority、claim/lease/heartbeat、启动 reconcile、过期 reclaim、retry requeue、token reservation、单 worker 桌面 loop，以及产物/work item/job/attempt/run 的 fenced 同事务 commit/settlement。模型调用期间的 pause/cancel 不再丢弃成功产物；冻结 token policy 驱动 reservation/validation/output/unknown-usage 计费；损坏或 legacy snapshot 可在 reservation 前 fenced fail。Bridge 已接入 enqueue/get/list/control，worker 由 Photino window runtime 持有并随窗口关闭释放。该进展仍只达到 `S`：章节优先级 aging、15 秒独立 watchdog、显式 shutdown abandon、SQLite commit uncertainty reconcile、Retry-After/调用级 attempt 审计、data-dir 重绑定协调、allowed_actions/UI 进度闭环、强杀故障矩阵和 200 万字规模验收尚未完成。后台路径不得回退到重读 live node/context/evidence 的 runner，也不得据此宣称生产后台完成。
+**实施边界（2026-07-10 审计后）**：持久化后台第一可靠薄切片已实现 canonical run/input snapshot/work item/job/attempt、完整冻结 snapshot builder、CAS pause/resume/cancel/reprioritize、priority aging、claim/lease/heartbeat、启动 reconcile、过期 reclaim、完整 retry 分类与 Retry-After、token reservation、单 worker 桌面 loop，以及产物/work item/job/attempt/run 的 fenced 同事务 commit/settlement。模型调用期间的 pause/cancel 不再丢弃成功产物；冻结 token policy 驱动 reservation/validation/output/unknown-usage 计费；损坏或 legacy snapshot 可在 reservation 前 fenced fail。Bridge 已接入 enqueue/get/list/control，worker 由 Photino window runtime 持有并随窗口关闭释放；后台任务 UI 已覆盖 10 态、allowed actions、CAS conflict 和稳定分页的 mock workflow。Stage 3 已接入同一持久 job，真实 worker-loop/子进程 recovery harness 已取得 pause/cancel 与 stale lease 的墙钟证据；Release 50K 全管线 metrics 也已通过：50,015 字、16 anchors、4 libraries、32 jobs、13,385 work items，吞吐 29.16/s，claim/list/progress P95=10.12/27.04/3.51 ms，零重复、零预算穿透、零活动 lease，数据库 29,433,856→47,398,912 bytes。该进展仍只达到 `S`，因为真实 provider、持续运行和默认用户闭环尚无证据。历史 2M 首轮只保留为性能基线，不再是 M2 收口门槛。后台路径不得回退到重读 live node/context/evidence 的 runner，也不得据此宣称生产后台完成。
 
 **分析查阅入口（M2.4 薄入口）**：`ListReferenceCorpusFeatureObservations` / `ListReferenceCorpusTechniqueSpecimens` 接收 `novel_id + anchor_id + node_id/source_node_id + PageRequest`。后端默认只读 `validity_state='active'`，filter/sort 白名单在 bridge 和 service 双层校验，pageSize/cursor/filter 错误统一返回 validation error。Observation payload 只返回展示安全字段（`value_preview/value_text/value_num/value_bool/text_hash/evidence_preview`），不暴露 `value_json` 或 node 全文；`confidence < 0.70` 的 observation 初始化为 `review_state='low_confidence'`，可通过同一列表过滤，作为 M8 ReviewQueue 的输入信号而不是完整人工状态机。TechniqueSpecimen payload 将 slots、条件、failure/anti-pattern、why_it_works 解析为 typed shape，并通过 `reference_specimen_evidence` junction 回填 evidence trace。章节侧只读嵌入基于当前插入草稿 pieces 的 `anchor_id/node_id`；素材库处理侧提供独立“分析结果”tab，用于按 anchor/node/filter 查阅 observation/specimen，不混入章节蓝图、候选生成或插入动作。
 
@@ -610,9 +610,11 @@ public sealed record PageResult<T>(
 
 句级 LLM 全量但不阻塞：Stage 0-1 完成即可进入纵向闭环（M1 用基础特征就能检索）；Stage 2 句级分析在后台逐章补齐，完成度实时可见。中断从已完成 node 之后续跑（复用 reconcile）。
 
-**验收双轨（修复 #3 #12）**：
-- **正确性轨**：固定小 golden 书（约 500 句），全量跑，比对 golden JSON
-- **规模轨**：合成 200 万字级 fixture，验证异步续跑、预算上限、章节窗口查询性能、中断恢复，不要求逐句人工核对
+**验收分层（修复 #3 #12，2026-07-10 调整）**：
+- **正确性轨**：固定小 golden 书（约 500 句），全量跑，比对 golden JSON；用于 schema、projection、幂等和确定性回归
+- **调度器微基准（强制、快速）**：保留现有 1,000 work-item job-store benchmark，用于 claim/finalize/list 热路径回归；它不经过 scheduler/snapshot builder/worker，不得冒充 Task A/B 全管线证据
+- **标准规模轨（强制）**：合成 50,000 字 fake-LLM fixture，真实经过 scheduler → sentence/passage snapshot builder → worker → fake analyzer，验证异步续跑、预算上限、完整输出、延迟、短时吞吐和恢复；作为日常开发、CI 或 M2 收口的阻断门槛
+- **长跑轨（可选）**：2,000,000 字由显式参数手工触发，只用于发布前、专项性能诊断或百万字能力声明；不阻塞 P0-P4，也不得用其旧阈值失败反向驱动无证据优化
 
 **可自动判定的 M2 后台验收门槛**：
 
@@ -626,11 +628,12 @@ public sealed record PageResult<T>(
 | Retry | 429/5xx/timeout 遵守 Retry-After 与退避，自动 attempt 不超过 5；永久错误自动重试数=0；budget/pause/cancel 不增加 failure retry count |
 | 预算 | `tokens_spent` 与 fake provider 实际 usage 完全一致；任何时点 `spent+reserved <= budget`；预算穿透 token=0；无 usage provider 使用保守上界且有稳定诊断 |
 | 调度 | 当前章节 job 在无占用 worker 时 P95 claim ≤ 2 秒；持续注入当前章节任务时，normal job 等待 ≤ 15 分钟，证明 aging 无饥饿 |
-| 200 万字规模 | 至少 2 anchors、2 libraries、句/段两级全量快照；单 worker 吞吐 ≥ 20 fake-LLM work items/秒，claim P95 ≤ 100 ms，job 列表 P95 ≤ 200 ms，章节进度查询 P95 ≤ 200 ms |
-| 资源与恢复 | 调度器常驻内存增量 ≤ 256 MiB；SQLite 增长有逐表报告且无未清 lease/reservation；强杀后可证明未结转 token reservation 被 reconcile，不永久占用预算 |
+| 50K 标准规模 | 50,000 字、至少 2 anchors、2 libraries、句/段两级全量快照；必须走 scheduler/builder/worker/fake analyzer 全管线；单 worker吞吐 ≥ 20 fake-LLM work items/秒，claim P95 ≤ 100 ms，job 列表 P95 ≤ 200 ms，章节进度查询 P95 ≤ 200 ms；output rows 与 work items 相等，duplicate outputs=0 |
+| 规模证据真实性 | harness 必须按 fixture 的 source/library 实际建 anchor、membership 与 session binding；budget/reservation 从持久状态读取，不得在 report 中硬编码；50K 至少采集 30 个 list/claim/progress 样本，或重复 3 轮报告中位与最差值，并记录 sample_count |
+| 资源与恢复 | 标准轨记录调度器托管内存、SQLite 文件与关键 work-item/completion/observation 表行数，结束时无未清 lease/reservation；强杀后可证明未结转 token reservation 被 reconcile，不永久占用预算。持续内存增长只由可选长跑轨证明，50K 不替代该结论 |
 | UI/API | 所有 10 个 job 状态均有中文显示和 allowed action 契约测试；分页稳定、CAS 冲突、应用重启后任务可见均由 bridge + UI workflow 自动断言 |
 
-规模阈值使用 fake LLM 隔离 provider 网络波动；另设真实 provider 长跑报告观察吞吐和成本，但不得用外部服务抖动否决本地调度正确性。任何一项缺证据，M2 只能保持“薄切片完成”，不能升级为产品闭环或规模化完成。
+规模阈值使用 fake LLM 隔离 provider 网络波动；另设真实 provider 长跑报告观察吞吐和成本，但不得用外部服务抖动否决本地调度正确性。50K 通过可关闭 M2 的标准规模任务，但不能单独把系统升级到 `L`，更不能表述为“已证明 2M 持续运行”。任何强制项缺证据，M2 只能保持“薄切片完成”，不能升级为产品闭环或规模化完成。
 
 ---
 
@@ -675,7 +678,17 @@ QueryContext 确认、来源选择、gap 处理、槽位表、过渡清单、锁
 
 **核心交互原则**：问题优先（不是搜索优先）；可追溯（每片段可跳原文 + 分析依据）；渐进展示（先简洁结果，想深入再展开）。
 
-**阻断候选的下一步动作契约**：自动模式下，正文候选如果因 `replace_piece` 无法在 selected blueprint 同 beat 内修复，不能只显示错误。候选必须保持 blocked、`ready_for_insertion=false`、章节正文不变，并提供 `next_action`：`action=regenerate_blueprint`，`feedback` 与 `GenerateReferenceCorpusBlueprintCandidates` 的 `feedback` 入参同构，前端可一键原样带回蓝图重组；feedback 只包含结构化诊断、problem tags、rejected/avoid 信号、blueprint/beat/gap/node/source 标识和用户可见摘要，不包含源文、raw text、prompt、model output 或 embedding。
+**默认体验必须收敛为一条主路径**：`写章节目标 → 比较并选择蓝图 → 比较并选择正文 → 明确插入编辑器 buffer`。自动模式每个阶段只显示一个主操作，不能让直接候选生成、持久 blueprint session 和旧 orchestration 在同一层级形成三套并行入口；内部 id、route marker、hash、raw diagnostics、手工 slot/transition 参数只在专家模式或诊断展开中出现。用户不需要理解 run/job/attempt、anchor 或检索 route 才能完成写作。
+
+**长任务与恢复体验**：每个已准备就绪的素材来源行提供唯一主操作“开始分析”；它只提交标准 sentence `feature_analysis` job，并在成功后把焦点带到“后台任务”tab，不向普通用户暴露 run/job/attempt 参数。素材处理和分析允许离开当前页面；返回后从统一后台任务入口看到当前状态、完成比例、预计下一步和唯一主操作。暂停、失败、预算耗尽、CAS 冲突、授权变化和 blocked candidate 必须给出面向任务的解释与一个首选恢复动作，技术诊断折叠展示。蓝图迭代以服务端持久 session 为恢复来源，`sessionStorage` 只能缓存瞬时 UI，不能承担跨重启的产品状态。
+
+**界面层级与可访问性**：沿用现有 Tailwind/shadcn token、Button 与 Lucide 图标，素材库保持工作型密度，章节侧优先展示目标、候选差异和下一步，不用多层卡片重复包裹。核心流程必须支持键盘、可见焦点、打开/关闭后的焦点回位、ARIA 状态播报；在 1280x720、1440x900 以及 125%/150% 缩放下不得重叠、截断或把主操作挤出可见区域。
+
+**体验性能观察**：当前 Vite 构建对 `WorkspaceView` 给出约 5.5 MiB（压缩前）chunk 警告。这是测量触发信号，不是“用户已经感到卡顿”的证据。真实走查前应在目标设备记录章节面板冷打开至目标输入可用、首个主操作至可见状态反馈的耗时，并保留 bundle 分解与主线程长任务记录；只有测量确认默认路径存在可感知等待，才按瓶颈对罕用功能做懒加载或拆分。不得为消除构建警告而盲目打散当前写作主路径。
+
+**易用性证据**：固定五条核心任务——导入并启动分析、离开后查看/恢复任务、从章节目标得到并反馈蓝图、选择正文候选、从 blocked 状态恢复并插入。每条都有真实浏览器 workflow 和截图；至少 5 名目标用户中 4 名能在不看说明文档且无人提示下完成自动模式主流程，并记录完成时间、回退次数、失败点和主观难度。未取得这些证据，不使用“易用”“好用”作为完成结论。
+
+**阻断候选的下一步动作契约**：自动模式下，正文候选如果因 `replace_piece` 无法在 selected blueprint 同 beat 内修复，不能只显示错误。候选必须保持 blocked、`ready_for_insertion=false`、章节正文不变，并提供 `next_action`：`action=regenerate_blueprint`；默认 UI 将其结构化 `feedback` 映射为 `AdvanceReferenceCorpusBlueprintSession(action=revise)` 的 checklist，用户可一键回到同一持久会话重组蓝图。feedback 只包含结构化诊断、problem tags、rejected/avoid 信号、blueprint/beat/gap/node/source 标识和用户可见摘要，不包含源文、raw text、prompt、model output 或 embedding。
 
 ---
 
@@ -692,7 +705,7 @@ QueryContext 确认、来源选择、gap 处理、槽位表、过渡清单、锁
 7. **M6 语料库产品化** — 库/成员/去重/授权闸门完善
 8. **M7 聚合知识** — 作者画像/场景模板/世界观
 9. **M8 复核工作流** — review/validity 状态机、重跑语义
-10. **M9 专家 UI + 打磨**
+10. **M9 默认体验 + 专家 UI 收口**
 
 ### 9.1 里程碑状态治理（M0-M9）
 
@@ -705,23 +718,23 @@ QueryContext 确认、来源选择、gap 处理、槽位表、过渡清单、锁
 | `P` | **产品闭环完成** | 默认用户流程可端到端使用，异常、恢复、反馈、审计和关键负例闭合 | 真实 UI/bridge/backend 闭环、恢复与失败路径、用户可见反馈 | 不等于几十万至两百万字规模下质量和性能达标 |
 | `L` | **规模化完成** | 在目标数据量和持续运行条件下，质量、性能、成本、恢复均达到预设预算 | 规模 fixture、真实语料评测集、质量指标、性能与恢复报告 | 不能只凭单元/集成测试总数或小 golden 宣称完成 |
 
-**当前治理快照以 [tasks.md](./tasks.md) 的数量和证据表为准。** M0-M9 当前均为 `S`，没有任何里程碑达到 `P` 或 `L`。M1 明确为“产品薄切片完成”；M2-M5 正在加深；M6-M9 虽已有治理、聚合、复核和专家 UI 薄切片，但依赖的 M2-M5 尚未成熟，因此冻结功能扩张。M0 的 schema/契约覆盖不代表基础债务已清零，M2 的 runner/入口不代表生产后台，M3 的 route provenance 不代表真实长篇检索质量，M4 的策略 profile 不代表多蓝图存在稳定且显著的结构差异，M5 的审计深度不代表拼装正文自然，M6-M9 的全勾选也不代表产品完成。
+**当前治理快照以 [tasks.md](./tasks.md) 的数量和证据表为准。** M0-M9 当前均为 `S`，没有任何里程碑达到 `P` 或 `L`。M1 明确为“产品薄切片完成”；M2 的后台标准轨已关闭但仍不是产品闭环，M3-M5 正在加深；M6-M8 冻结功能扩张；M9 的自动化默认体验收口已完成，但不得新增专家功能，后续只补真实用户走查。M0 的 schema/契约覆盖不代表基础债务已清零，M2 的 runner/入口和 50K fake-LLM 证据不代表生产后台，M3 的 route provenance 不代表真实长篇检索质量，M4 的策略 profile 不代表多蓝图存在稳定且显著的结构差异，M5 的审计深度不代表拼装正文自然，自动/专家界面的浏览器 workflow 也不代表用户能无指导完成任务。
 
-**统一对外状态：** “M1 产品薄切片完成，M2-M5 加深中，M6-M9 已有薄切片但冻结扩张；整体尚未达到生产完成或规模化完成。”不得再使用“语料驱动写作系统已完成”“M2 生产能力完成”等超出证据的表述。
+**统一对外状态：** “M1 产品薄切片完成，M2-M5 加深中，M6-M8 冻结扩张，M9 聚焦默认体验收口；整体尚未达到生产完成或规模化完成。”不得再使用“语料驱动写作系统已完成”“M2 生产能力完成”“已易用好用”等超出证据的表述。
 
 ### 9.2 正确收口顺序与停止线
 
-后续主线限定在 M0-M5 的生产与效果收口；M6-M9 保留已有薄切片，冻结新增功能，只修阻断性缺陷、安全问题和与主线兼容相关的回归。
+后续主线限定在 M0-M5 的生产/效果收口和 M9 的默认体验收口；M6-M8 保留已有薄切片，冻结新增功能，只修阻断性缺陷、安全问题和与主线兼容相关的回归。
 
 1. **P0 恢复交付基线**：全套构建与测试必须可编译、可通过；清理误入版本控制的 `build/tmp`、`bin/obj`、PDB 等生成产物。该项是继续开发的入口条件，不得以局部定向测试替代。
-2. **P1 以 M2 后台系统为唯一生产主线**：完成持久化 job/run/attempt、冻结 work item、lease/CAS、fenced commit、token 预留与结算、暂停/取消、预算续跑、retry/watchdog、重启 reconcile 和可见进度；同时补齐其依赖的 M0 migration、projection 重建、幂等和事务一致性。禁止把现有同步 runner 包进内存后台任务冒充可靠队列。
-3. **P2 建立规模与效果证据资产**：补齐 500 句标注集、200 万字跨库 fixture、故障注入与重启恢复脚本，并固定检索 P50/P95、token/成本、蓝图区分度、原句保真率、剧情适配率、过渡自然度和用户修改字符比例。没有这些证据，不升级到 `L`，也不宣称写作质量提升。
+2. **P1 已关闭 M2 后台标准轨**：保留 1,000 work-item job-store micro-benchmark，并以 50K scheduler/builder/worker/fake analyzer 全管线正式轨作为常规门禁。现有 aging、Retry-After、allowed actions、CAS、稳定分页和强杀恢复保持回归，不重复列作新开发。禁止把同步 runner 或直接 job-store 循环冒充完整后台管线。
+3. **P2 建立效果与体验证据资产**：保留已有 500 句 synthetic golden；补 50-100 条人工标注 query、20-30 组同目标多蓝图、20-30 个真实章节插入样本，以及五条核心用户任务。固定检索 P50/P95、token/成本、蓝图区分度、原句保真率、剧情适配率、过渡自然度、用户修改字符比例、完成时间和回退次数；同时建立默认章节路径的冷打开和首个主操作性能基线。没有这些证据，不升级到 `L`，也不宣称写作质量或易用性提升。
 4. **P3 加深 M3 检索**：基于人工标注 query 集验证多路召回覆盖率、相关性、融合排序、去重、授权过滤和当前章节 local fit；结构化 AI 可替换默认规则 parser，但输出必须锁 schema、可审计，并保留确定性 fallback。
-5. **P4 加深 M4/M5 写作效果**：先证明同一目标的多份蓝图在 beat、来源组合、节奏/情绪策略和 gap 处理上有可度量差异，再验证选定蓝图内的最大保真拼装、受控槽位/过渡和多正文候选。**停止继续堆 M5 审计规则**，除非新规则来自已复现的安全漏洞、授权绕过或真实语料评测失败，并附失败 fixture。
+5. **P4 加深 M4/M5 写作效果并完成 M9 真实走查**：持久 blueprint session、单一默认路径、错误恢复和视口/键盘自动检查已完成；接下来证明同一目标的多份蓝图在 beat、来源组合、节奏/情绪策略和 gap 处理上有可度量差异，并验证选定蓝图内的最大保真拼装、受控槽位/过渡和多正文候选，以及至少 5 名目标用户中的 4 名可无指导完成主流程。**停止继续堆 M5 审计规则和专家控件**，除非新增项来自已复现的安全漏洞、授权绕过、真实语料评测失败或核心任务可用性失败，并附失败 fixture/workflow。
 
-**阶段门约束：** P0 未满足不得继续扩张；M2 后台调度与恢复未形成产品闭环前，M3-M5 只处理阻断性缺陷和验收资产；M3 未取得规模检索证据前，不把 M4/M5 的启发式调优宣称为质量提升；M4 未证明蓝图区分度前，不以增加正文候选数量替代有效多稿；M5 未取得盲评和修改量证据前，不宣称“高质量正文可用”。任何 AI 升级都必须服从“跨库检索、多蓝图循环、选定蓝图锁源、原句最大保真、最小适配、不自由补写”的产品不变量。
+**阶段门约束：** P0 未满足不得继续扩张；M2 后台调度与恢复未形成产品闭环前，M3-M5 只处理阻断性缺陷和验收资产；M3 未取得规模检索证据前，不把 M4/M5 的启发式调优宣称为质量提升；M4 未证明蓝图区分度前，不以增加正文候选数量替代有效多稿；M5 未取得盲评和修改量证据前，不宣称“高质量正文可用”；M9 的恢复、视口和可访问性自动验证已通过，但未完成真实目标用户核心任务走查前，仍不得宣称“易用好用”。任何 AI 升级都必须服从“跨库检索、多蓝图循环、选定蓝图锁源、原句最大保真、最小适配、不自由补写”的产品不变量。
 
-### 9.3 M0-M5 验收证据分层
+### 9.3 M0-M5 与 M9 验收证据分层
 
 每个里程碑的“当前检查点”必须按以下证据层记录，避免实现描述替代验收结论：
 
@@ -729,16 +742,19 @@ QueryContext 确认、来源选择、gap 处理、槽位表、过渡清单、锁
 - **闭环证据**：用户从导入/分析到章节目标、检索、蓝图反馈、正文候选、插入的默认路径可完成，失败后可恢复或回到上一阶段。
 - **效果证据**：人工标注 query、蓝图区分度、正文盲评、原句保真率、剧情适配率、过渡自然度、用户修改字符比例。
 - **规模证据**：目标字数、多库并发、运行时长、token/成本预算、P50/P95 延迟、暂停/重启/断点恢复、结果确定性或可解释波动。
+- **体验证据**：核心任务完成率、完成时间、回退次数、错误恢复、跨重启续接、键盘/焦点/缩放/视口检查和真实用户走查。
 
 状态升级时必须同时列出“已有证据”和“仍缺证据”。测试总数只能作为回归范围说明，不能单独作为效果或规模证据。
 
 **当前实现检查点（M3/M4 薄切片）：** 候选检索已支持 `feature_filter_{n}_family/key/value_text/value_num_min|max` 多 observation 条件，按 AND 语义叠加在 session/library/license/dedup 安全过滤之后；旧 `feature_family/key/value_*` 单条件过滤仍兼容。章节蓝图反馈中，`too_direct_emotion` 会约束到 `action.emotion_carrier=action_over_psychology`，`too_fast` 会约束到 `rhythm.length_band` 的中长句节点；当 `too_fast` 命中慢节奏候选时，蓝图组装优先使用 `rhythm_slow_m1`，按 rhythm evidence、句长和跨库来源选取中长慢压迫节点。当语料缺少对应 observation 导致强约束无命中时，系统退回目标基础检索并把 `feedback_filters_no_matches` / `fallback_to_base_filters` 写进 `feedback_summary`、候选 `feedback_reason` 与 `gap_reasons`，不再让用户误以为反馈已精准命中。若避开来源会耗尽候选，则系统会放宽 avoid 来源并标注 `avoid_sources_no_alternatives` / `fallback_ignored_avoid_sources`。二轮蓝图反馈已写入 `reference_user_feedback`，以被拒蓝图 id 为 target，记录 problem/fallback、rejected node、avoid library、avoid anchor 等信号，并用确定性 feedback id 做幂等。无显式反馈或空 feedback object 的后续轮次会读取同一小说内的 rejected node/library/anchor 信号，对相同素材组合软降权，避免上一轮拒绝过的蓝图默认再次排第一；这不是跨项目长期偏好学习。`rejected_blueprint_ids` 已按稳定 source node set 去重，避免用户只拒绝蓝图 id 时同一组素材换一个反馈摘要再次出现。`source_repetition` 已有第一层可用性策略：反馈命中时第一候选优先跨库/跨 anchor 取材，而不是继续按分数堆同一来源。`SearchCandidatesRanksInsertionWindowAndAllowedKnowledgeContext` 已新增 `local_context_fit`：候选排序会消费 insertion offset 周边窗口、previous summary、人物名/state 与 allowed knowledge，且 `ForbiddenKnowledge` 不进入正向命中，避免把角色未知事实带入检索。`SearchCandidatesMergesFourRecallRoutesWithDiagnostics` 已把 M3 route union 推进一步：在安全 scope 后，base prefetch window 外的文本语义、技法语义、结构化 observation、章节上下文代表可补入候选池，并用 `recall_text_semantic` / `recall_technique_semantic` / `recall_structured_observation` / `recall_chapter_context` 标注来源；`SearchCandidatesStructuredObservationRecallDoesNotDependOnBasePrefetchWindow` 和 `SearchCandidatesStructuredObservationRecallUsesExplicitFeatureFiltersBeyondPrefetchWindow` 证明结构化 observation 已拆出独立 SQL route，能分别按 QueryContext term 与显式 feature filter 召回远位置节点，且 `recall_structured_observation` 只表示真实 route hit；`SearchCandidatesChapterContextRecallMarksEveryRouteHitBeyondScoreWinner` 证明章节上下文也已拆出独立 SQL route，能给多个 context route hit 写入真实 `recall_chapter_context`，并用最小加权阈值避免弱泛词误标；`SearchCandidatesChapterContextRecallHonorsStructuredFiltersBeforeRouteLimit` 证明 context route 在 route topK 前应用结构化 filters，避免不满足 filters 的上下文噪声占满召回额度；`SearchCandidatesMergedRecallRoutesHonorScopeLicenseAndDedup` 证明这些 route 不能绕过 excluded anchor、forbidden license 或 dedup representative。`m3-retrieval-golden.json` 已固化基础授权检索和四路召回诊断，expected 只保存 hash/长度、component key、route marker、evidence 和 cache count，并由 fixture 自检阻止 raw source、embedding、prompt、`value_json` 泄露；这仍不是完整四路独立索引取数或完整权重标定。M4 策略权重已有第一条 profile 化实现，并已抽入可替换的 `IReferenceCorpusBlueprintCandidateAssembler` / `MultiStrategyReferenceCorpusBlueprintCandidateAssembler`：候选池同时具备 emotion/rhythm/narrative/technique 信号时，会按 evidence 与 score_components 生成 `emotion_priority_m4` / `rhythm_priority_m4` / `technique_diversity_m4` / `scene_template_m4` 四类蓝图候选，并用跨 library/anchor 代表选择避免只改策略名不换素材；`SqliteReferenceCorpusWritingService` 保持检索、反馈读写、蓝图持久化和返回编排职责。M4 profile 选材已开始 coverage-aware：保留 profile 头部素材后，会主动补齐缺失的 emotion/rhythm/narrative/technique 证据，并优先选择能增加 library/anchor 覆盖的候选；历史反馈 penalty 仍优先于覆盖强度。`gap_reasons` 已补上 `single_anchor_source`，可把“多句/多策略但实际都来自同一参考 anchor”的退化暴露给用户，并已进入 cross-library golden。`coverage_score` 已开始消费 M4 evidence：候选存在 M4 证据时，会把 emotion/rhythm/narrative/technique 覆盖纳入评分，并用 `missing_*_evidence` / `missing_technique_coverage` 暴露维度缺口；候选返回体也新增 `gap_positions[]`，把全局缺失维度定位到具体 beat，完整覆盖的蓝图不会误报位置缺口。候选生成阶段已写入 `reference_corpus_blueprints`、`reference_corpus_blueprint_beats` 和 `reference_blueprint_beat_pieces`，assembly strategy、coverage、gap positions、query context、source distribution、beat 元数据与 beat→node 边均可追溯，不再等到正文草稿阶段才有追溯边。前端候选卡会把 fallback/gap code 与 beat 级缺口翻译为中文诊断，mock workflow 已覆盖二轮反馈后诊断可见。该检查点只解决“检查表反馈能进入检索约束 + 反馈回退可诊断 + 反馈可持久追溯 + 历史拒绝软降权 + 拒绝蓝图不复现 + 来源重复反馈能改变第一候选 + M3 retrieval golden + M3 native topK + native backfill API 薄切片 + M3 structured observation 独立 route 薄切片 + M3 chapter context 独立 route 薄切片 + M4 profile 策略可断言变化 + 单 anchor 塌缩可诊断 + coverage 初步证据化 + profile 主动补齐覆盖 + beat 级缺口返回 + 候选蓝图持久化 + 多候选 assembler 地基”的第一步，不代表 M4 完成；仍需文本语义完整独立 topK、结构化 observation/context 热路径排序、情绪弧、真正的多轮会话状态、专家 UI 和更深的蓝图策略模型。
 
-**M3 native topK 补充：** `reference_technique_vectors` 仍是 JSON canonical cache，`reference_technique_vector_rows` / `reference_technique_vector_index_state` 只保存 vec0 rowid 映射和索引状态；native 命中只作为 `scoped_nodes.node_id IN (...)` 召回 hint，仍被 session/library/license/dedup/include/exclude/reuse 与结构化 filters 过滤；native provision/query 失败回退 JSON fallback。row 映射会按当前 entries 逐行校验，stale hash、伪造 row mapping、rejected/superseded specimen 都不能穿透；必要时清理或重建该 scope 的 native rows/state。当前已新增 `BackfillReferenceCorpusTechniqueVectorIndex` / `BackfillTechniqueVectorIndexAsync` 薄切片，可在不调用 `SearchCandidates` 的情况下显式预热 scoped technique vec0 index，返回 `ready/empty/skipped/failed`、provider/model/dim、source/vector/skipped 计数和诊断；搜索会复用已回填 rows/state，不重复 provision。结构化 observation 与章节上下文已有独立 SQL route，但还不是 projection/FTS/热路径排序的规模化索引。仍未完成：native 回填队列化、全量/增量调度、失败重试/巡检、文本语义独立 topK、结构化 observation/context 热路径排序、规模 fixture 与性能预算。
+**审计修订（2026-07-11）**：上方 M3/M4 长检查点的末尾缺口清单保留了早期薄切片口径。当前受控实现已覆盖四路独立 topK、热路径索引/排序、maintenance scheduler，以及持久 blueprint coordinator；章节默认 UI 已使用 `Get/AdvanceReferenceCorpusBlueprintSession`，并以服务端状态恢复目标、迭代和选定蓝图。`ReferenceCorpusTechniqueVectorMaintenanceLoop` 已进入 desktop composition，并随初始化、数据目录重绑和 runtime release 启停；仍未建立默认产品路径的例行 maintenance job 入队策略，前端也不暴露 schedule/pump 专家控制。每次 `SearchCandidates` 已在当前 scope 内校验并按需重建 native 技法索引，故不能再把搜索结束当作自动入队点，否则只会重复 provision；未来入队必须由技法产物变化触发，并明确携带 session/library scope、成本和重试预算。其余边界是 M3 跨库检索专属的 50K SLA，以及人工质量/真实用户易用性证据未建立。后续以本节 9.2、9.3 和第十三节为准。
+
+**M3 native topK 补充：** `reference_technique_vectors` 仍是 JSON canonical cache，`reference_technique_vector_rows` / `reference_technique_vector_index_state` 只保存 vec0 rowid 映射和索引状态；native 命中只作为 `scoped_nodes.node_id IN (...)` 召回 hint，仍被 session/library/license/dedup/include/exclude/reuse 与结构化 filters 过滤；native provision/query 失败回退 JSON fallback。row 映射会按当前 entries 逐行校验，stale hash、伪造 row mapping、rejected/superseded specimen 都不能穿透；必要时清理或重建该 scope 的 native rows/state。当前已新增 `BackfillReferenceCorpusTechniqueVectorIndex` / `BackfillTechniqueVectorIndexAsync` 薄切片，可在不调用 `SearchCandidates` 的情况下显式预热 scoped technique vec0 index，返回 `ready/empty/skipped/failed`、provider/model/dim、source/vector/skipped 计数和诊断；搜索会复用已回填 rows/state，不重复 provision。`SqliteReferenceCorpusTechniqueVectorMaintenanceScheduler` 与 maintenance loop 已实现持久调度/手工 pump，desktop composition 现在也会启动、重绑和释放该 loop；但默认产品路径尚无例行 job 入队策略，TS 产品 API 仍不暴露 schedule/pump，故不能称为完整默认后台。结构化 observation 与章节上下文已有独立 SQL route 和受控热路径证据，但真实语料标定与 M3 跨库检索专属的 50K 性能预算仍未建立。
 
 **当前实现检查点（M5 拼装薄切片）：** 正文候选已开始锁定 selected blueprint 来源边界：`GenerateInsertionDraftCandidatesAsync` 只能在每个 beat 自己声明的 `NodeIds` 内生成 source variant，不再从重新检索结果、同 library/anchor 邻近句或其它 beat 拉替代 node；若 selected blueprint 请求的任一 node 因 scope/library/授权检索结果变化无法读到 source piece，则返回 blocked `source_node_missing`，保持章节正文不变，不残缺生成可插入正文。每个 insertion piece 现在返回结构化 `preserved_spans`，以稳定 `span_id` 记录非槽位保留片段的 source/output offset、source/output hash 与 matches；contract/bridge/TS 类型、前端 diff、mock workflow guardrail 与 M1 golden fixture 已同步。`ICorpusSlotResolver` 已补第一层 typed slot 能力：显式 `character/place/honorific/plot_object` 槽位归一化，代词/人名/地名/称谓/道具启发式识别；书名号/引号等受保护范围会进入 `locked_spans`，同样带 source/output offset 与 hash。`DraftAudit` 已消费这些证据：source 缺失、piece preserved hash mismatch、span offset 越界、source/output span hash 不一致、span.matches=false 都会进入 audit errors/violations；`locked_spans` 若 hash 不一致或被 slot replacement 相交，会以 `locked_span_hash_mismatch` / `slot_replacement_locked_range` 阻断；`ready_for_insertion` 已收紧为 `gate.passed && audit.passed`，因此 gate 通过但保留片段或锁定片段被篡改时仍拒绝插入并保持章节正文不变。审计外层包络也已补上第一层：输出 pieces 必须与 selected blueprint source pieces 一一对应，重复/缺失/身份错配会阻断；每个 piece 输出必须由 `preserved_spans` 或 `slot_replacements` 完整覆盖，piece 内额外新增的未审计文本会阻断；slot replacement 必须是安全短槽位，source/output range 与记录值一致，整句伪槽位替换会阻断；`assembled_text` 必须等于已审计 piece/transition 输出的换行拼接，额外未审计正文会阻断。过渡已从隐藏正文变成一等审计对象，不再是可选装饰：默认 `HeuristicReferenceCorpusTransitionResolver` 已具备第一层三决策，安全相邻 gap 返回 `direct_join`，`raise_pressure -> withhold_answer` 生成审计过的 `insert_transition`，重复/同源相邻 piece 生成 `replace_piece` 阻断；transition payload 包含 `transition_id/gap_id/decision/text_hash/output_start/output_end/approved`，`DraftAudit` 生成 `audit.transitions` 并校验 `gap_id` 绑定的相邻 piece 对、hash、approval、decision 与 output range，缺失/伪造/错配都会阻断。`replace_piece` 在单草稿路径仍阻断，避免静默换掉用户选定来源；在正文候选路径已接入第一层重组：若 replacement node 属于 selected blueprint 同一 beat 的备选 node，则生成 `transition_repair` 蓝图变体并重新通过 gate/audit 后才返回；若 replacement node 不在该 beat 备选内，或同 beat repair 仍未通过审计，则保留 blocked 诊断与 `next_action.feedback`，不从重新检索结果或邻近句偷换。M5 golden/验收口径已固化 `transitions`、`audit.transitions`、blocked candidate `next_action`，以及第三轮蓝图再派生正文候选：用 `next_action.feedback` 生成的新蓝图重新进入 `GenerateInsertionDraftCandidatesAsync` 后，必须得到不含被拒 node 且 `gate/audit/ready` 全通过的正文候选。请求侧 slot-only 多草稿已有第一层：`slot_value_variants` 可让同一 selected blueprint 和同一 primary source nodes 生成 `slot_variant_1..N`，候选之间保持 source node/source hash/preserved span source range/locked span source range 一致，只按槽位值产生正文差异；C# contract、TS 类型、mock bridge 与集成测试已同步。候选集差异审计也已有第一层：同一 source node set 的多份正文候选在返回前会校验 slot replacement 是否属于各自 `slot_values` 映射；若候选把非槽位改动伪装成 slot replacement，会以 `draft_candidate_set_non_slot_difference` 阻断该候选、保持章节正文不变，同时不影响合法候选；若不同 slot 参数最终生成完全相同正文，后续重复候选会以 `draft_candidate_set_duplicate_text` 阻断，避免把无差异结果展示成可选多稿。`transfer_slots` 写作侧消费已有第一层：正文拼装会读取 selected source node 的 active 且未 rejected `reference_technique_specimens.transfer_slots_json`，将对象数组或旧字符串数组里的槽位名归一化到 `character/place/honorific/plot_object`；未声明槽位会以 `slot_replacement_transfer_slot_disallowed` 阻断，人工 rejected specimen 不再约束正文。`transfer_slots` 自动派生已有第一层：请求没有显式 `slot_value_variants` 时，active 且未 rejected 的 `character` transfer slot 会从当前章节人物快照派生 `auto_transfer_slot_1..N` 同源候选，只替换源文开头人称代词，保持 selected primary source nodes、source hash、preserved/locked 源证据稳定；rejected specimen 不参与自动派生。前端 mock workflow 已包含 piece audit blocked、ready transition、transition repair、replace_piece blocked + next_action 四类正文候选，断言候选卡和预览显示阻断/过渡，应用按钮禁用或放行符合 audit，编辑器正文不会写入未审计过渡；正文 diff 预览已消费 `locked_spans`，可见哪些片段被锁定保护；blocked 候选点击“回到蓝图重组”会以 `next_action.feedback` 触发第三轮蓝图候选，第三轮入参、`feedback_applied` 和反馈摘要均被 guardrail 固化。该检查点只解决章节使用侧的拼装审计加深，消费已处理语料、选中蓝图和正文候选，不把素材库导入/分析/授权复核管线或库管理界面混入正文生成流程；它不代表 M5 完成，仍需 `transfer_slots.constraints` 自然语言约束推理、地点/道具/称谓等完整自动槽位变体派生、过渡策略变体差异审计、跨蓝图/跨候选池 replacement 重组策略、重复候选 UI 聚合折叠和专家 UI。
 
-**M5 next_action 契约补充：** `replace_piece` 的分叉必须可验收：replacement 在 selected blueprint 同一 beat 的备选 node 内时，正文候选可生成 `transition_repair` 变体并重新 gate/audit；replacement 超出 selected blueprint 同 beat，或 `transition_repair` 仍未通过 transition/gate/audit 时，候选必须继续 blocked，返回 `next_action.action=regenerate_blueprint` 和可直接传给 `GenerateReferenceCorpusBlueprintCandidates` 的 `next_action.feedback`。前端 mock workflow/guardrail 要从该 blocked 候选一键触发第三轮蓝图调用，断言第三轮入参 feedback 与候选返回的 feedback 字段一致、第三轮结果标记 `feedback_applied=true` 且显示 `feedback_summary`，后续正文候选只能基于第三轮选中蓝图派生。
+**M5 next_action 契约补充：** `replace_piece` 的分叉必须可验收：replacement 在 selected blueprint 同一 beat 的备选 node 内时，正文候选可生成 `transition_repair` 变体并重新 gate/audit；replacement 超出 selected blueprint 同 beat，或 `transition_repair` 仍未通过 transition/gate/audit 时，候选必须继续 blocked，返回 `next_action.action=regenerate_blueprint` 和结构化 `next_action.feedback`。前端默认路径将其映射到同一 `AdvanceReferenceCorpusBlueprintSession(action=revise)` 会话；mock workflow/guardrail 要从该 blocked 候选一键触发第三轮蓝图调用，断言 checklist 保留 problem tags、第三轮结果标记 `feedback_applied=true` 且显示 `feedback_summary`，后续正文候选只能基于第三轮选中蓝图派生。
 
 ---
 
@@ -781,10 +797,107 @@ QueryContext 确认、来源选择、gap 处理、槽位表、过渡清单、锁
 
 ## 十二、功能封板流 C 产品化增强（2026-07-10）
 
-M6-M9 的任务清单保持已完成状态，本轮不调整里程碑勾选，只补齐实际使用中的产品闭环：
+本节记录当时的功能封板流 C 实现。M6-M8 继续保留这些薄切片并冻结扩张；M9 的“全部完成”口径已被第十三节审计后计划取代，现只开放默认体验收口，不扩张专家功能：
 
 - **后台任务面板整合**：语料工作区增加独立“后台任务”页签，稳定分页展示服务端 10 态 job、node/work-item 双进度、token 已用/预留/预算、当前章节、attempt、重试倒计时与安全诊断。操作按钮完全由后端 `allowed_actions` 驱动，并携带 `expected_version` 执行暂停、继续、取消和提权；冲突后刷新，不在前端复制状态机。
 - **复核证据与原文跳转**：ReviewQueue DTO/SQL 补齐锚点标题、证据起止 offset 和有界 preview。专家复核项直接展示证据摘要及字符范围，“定位原文”切回素材来源、展开对应锚点预览并滚动聚焦来源行，避免人工复核脱离上下文。
 - **专家治理 UI**：治理页保留会话库 binding，专家模式增加成员禁用原因、明确的授权确认与禁止使用动作；聚合知识支持按类型筛选，`stale` 聚合以独立视觉状态和数量指标突出，重建仍按当前会话生效库执行。
 - **契约与安全边界**：job diagnostics 只返回错误码和依赖 job id；ReviewQueue 只返回受限 preview，不返回完整节点正文。任务控制和 evidence 数据均由后端契约提供，前端只负责展示与命令分发。
 - **验证补强**：调度器覆盖 `allowed_actions`；治理集成测试覆盖复核项标题、offset 与 bounded preview；前端 mock bridge 提供带版本检查的任务控制状态，供后台任务页签 workflow 验证。
+
+---
+
+## 十三、审计后执行计划（2026-07-10）
+
+### 13.1 当前基线
+
+| 范围 | 当前结论 | 下一阶段门 |
+|---|---|---|
+| P0 交付 | **已通过** | 保持 Git 生成物清零、完整 .NET 与 frontend verify 绿色 |
+| M1 | `S`，受控纵向薄切片成立 | 保持跨库、多蓝图、选定蓝图锁源回归 |
+| M2 | `45/45`，`S，标准轨已关闭` | 真实 provider 成本/波动、持续运行与默认用户闭环证据 |
+| M3-M5 | 原子实现覆盖高，仍为 `S` | 真实效果集、默认后台维护和用户可采用的正文证据 |
+| M6-M8 | `S`，冻结扩张 | 仅修阻断缺陷和主线回归 |
+| M9 | `8/9`，`S，自动化体验收口完成` | 真实目标用户无指导完成率、完成时间、回退次数、失败点和主观难度记录 |
+
+依赖顺序固定为：`P0 绿色基线（已通过）→ M2 真实时限与 50K（已通过）→ M9 自动化默认体验（已通过）→ 效果/真实用户证据 → M3 标定 → M4/M5 写作效果`。视觉收口从 P0 就随每个主线切片验证，不等到最后统一“美化”。
+
+### 13.2 可实施任务包
+
+#### P0.1 清理仓库生成物（完成）
+
+- **验收**：`CorpusHarnessHost/bin`、`obj`、PDB 和运行产物不再被 Git 跟踪；构建后 `git status` 不产生这些噪声；适用 ignore 规则有回归检查。
+- **依赖**：无。
+- **可能文件**：`.gitignore`、harness project/config、被跟踪生成物索引。
+- **验证**：`git ls-files 'scripts/corpus-driven-writing/CorpusHarnessHost/bin/**' 'scripts/corpus-driven-writing/CorpusHarnessHost/obj/**'` 无输出。
+- **执行结果**：已从索引移除 111 项 harness 生成物，并以 `scripts/**/bin/`、`scripts/**/obj/` 防止回流；已跟踪的 `build/runtime/models/vocab.txt` 保持例外。
+
+#### P0.2 恢复全套测试基线（完成）
+
+- **验收**：ONNX bundled-model 测试不再因共享进程内存导致 OOM；语料后台任务 workflow 使用行级/任务级语义定位且无 strict locator 冲突；全套 .NET 和 frontend verify 可重复通过。
+- **依赖**：P0.1，避免构建噪声污染结论。
+- **可能文件**：ONNX 集成测试及测试宿主配置、`frontend/scripts/app-mock-workflow/`、后台任务组件。
+- **验证**：`dotnet test Novelist.slnx --no-restore -v minimal`；`npm --prefix frontend run verify`。
+- **执行结果**：ONNX client 释放已创建 runner，bundled-model 测试进入非并行 collection；后台任务 workflow 以任务行身份定位状态。桌面烟测改为释放其启动的 runtime worker 后再删除临时 SQLite 目录。当前复跑的 `dotnet test Novelist.slnx --no-restore -v minimal` 已通过 1,289 项，`npm --prefix frontend run verify` 已通过。
+
+#### P1.1 Stage 3 接入 canonical job（完成）
+
+- **验收**：technique job 使用冻结 dependency snapshot 和现有 run/job/attempt/work-item 协议；覆盖 enqueue → worker → specimen → retry/pause/restart；不读取变化后的 live observation/text。
+- **依赖**：P0；复用现有 M2 schema，不新建第二套队列。
+- **可能文件**：analysis scheduler、snapshot builder、technique processor/worker、定向集成测试。
+- **验证**：新增 Stage 3 过滤测试通过，并重跑 corpus 定向集成集。
+- **执行结果**：technique job 只接受同 novel/anchor/scope 的已完成 feature job，并冻结 dependency job/run/input snapshot 与 evidence；集成回归覆盖 enqueue → worker → specimen、live observation 变化隔离、pause/resume、worker 重启和瞬态 retry。
+
+#### P1.2 真实时钟控制与恢复时限（完成）
+
+- **验收**：子进程或真实 worker loop 下 pause/cancel P95 <= 60 秒；stale lease 在 30 秒内被 watchdog/reconcile 回收；失去 lease 的 worker 零提交。
+- **依赖**：P1.1；不能用人为推进时间并直接调用 store reclaim 代替运行时证据。
+- **可能文件**：worker loop/watchdog、recovery harness、host、集成测试。
+- **验证**：结构化 recovery metrics 包含 wall-clock sample、P95、reclaim deadline 和 fenced-commit 结果。
+- **执行结果**：worker 的生产默认仍为 45 秒 lease、10 秒 heartbeat；harness 通过显式 timing options 使用短 lease，而不篡改时间。`run-recovery-harness.ps1 -Rounds 2 -RuntimeSamples 30 -Configuration Release` 生成 `corpus-m2-recovery-metrics-v2`：5 个强杀事务点共 10/10 通过；真实 loop 的 pause P95=82.28 ms、cancel P95=87.68 ms、stale lease reclaim P95=37.17 ms。30/30 stale case 均将失租 attempt 标记为 `lease_expired` abandon，只有恢复 worker 写入 5 个 completion，满足 zero fenced commit。
+
+#### P1.3 50K 全管线标准规模档（完成）
+
+- **验收**：保留 1,000 item job-store micro-benchmark；50K 正式档真实建立至少 2 anchors/2 libraries 并经过 scheduler/builder/worker/fake analyzer；完整输出、零重复、持久预算零穿透、吞吐/P95 达标且样本数可信。
+- **依赖**：P1.2 已完成；恢复指标独立报告，不把所有故障注入塞进每次 50K。
+- **可能文件**：fixture generator、scale wrapper/host、metrics contract、harness tests。
+- **验证**：`./scripts/corpus-driven-writing/run-scale-harness.ps1 -Configuration Release` 生成 `scale-50k` formal metrics；默认命令必须走全管线，1K 仅通过 `-Mode JobStore` 运行，2M 也只接受显式参数。
+- **执行结果**：Release 正式 metrics 已通过：50,015 字、16 anchors、4 libraries、4 session bindings、32 jobs、13,385 work items/completion rows，fake analyzer calls=13,385；吞吐 29.16/s，claim/list/progress P95=10.12/27.04/3.51 ms（各 32 样本），重复输出、持久预算穿透、预留 token 和活动 lease 均为 0。数据库为 29,433,856→47,398,912 bytes，托管内存为 9,955,384→6,709,296 bytes。报告位于本机 `build/tmp/corpus-driven-writing/scale-50k-metrics.json`，不纳入 Git。
+
+#### P2.1 建立写作效果评测资产（M）
+
+- **验收**：50-100 条人工 query、20-30 组同目标蓝图、20-30 个真实章节插入样本均有版本化输入/标注/报告 schema；报告覆盖检索、蓝图、正文和用户修改量，不存源文泄露或本地路径。
+- **依赖**：P0；可与 P1 并行准备数据定义，但在 M3-M5 调参前冻结首版。
+- **可能文件**：`tests/.../Fixtures/corpus-driven-writing/`、评测脚本、`docs/corpus-driven-writing/evaluations/`。
+- **验证**：fixture schema 自检、可重复报告生成和脱敏负例通过。
+- **工具层执行结果（2026-07-11）**：已新增严格的 `corpus-writing-evaluation-fixtures-v1` schema、`run-writing-evaluation.ps1` 和独立 evaluation harness。它只接受规范化 ID、`sha256` 哈希、数值、固定 reason 码表和人工评分；未知字段、源文/路径字段、码表外 reason 以及同一 insertion case 内重复评审者哈希均会拒绝；输出仅含 Recall@K、nDCG@K、reason accuracy、P50/P95、蓝图来源集合区分度/重复率、反馈改善率、保真/适配/自然度、采用率、用户修改比例与迭代次数。[效果评测标注套件](./evaluations/writing-evaluation-kit.md)提供盲评、评分锚点、脱敏与导出规则。三案例 `contract` fixture 已覆盖稳定生成、脱敏拒绝和 human 数量下限，但它不是人工效果数据；P2.1 仍待按 `docs/corpus-driven-writing/evaluations/README.md` 收集并冻结真实 `human` 数据集。
+
+#### P2.2 建立核心用户任务与界面基线（自动化完成，真实走查待完成）
+
+- **验收**：五条核心任务有真实浏览器 workflow、关键状态截图和失败恢复断言；1280x720、1440x900、125%/150% 缩放及键盘路径无重叠/截断/焦点丢失；5 名目标用户至少 4 名无指导完成自动模式主流程。
+- **依赖**：P0.2；先记录现状基线，P4 再依据失败点改界面。
+- **可能文件**：frontend workflow、章节/后台任务组件、可版本化 UX 报告。
+- **验证**：`npm --prefix frontend run verify`、浏览器截图审查和用户任务记录齐全。
+- **执行结果**：五条任务的浏览器 workflow、故障恢复断言、焦点与视口/缩放检查已覆盖并随 `frontend verify` 通过；尚未取得 5 名目标用户中的 4 名无指导完成记录。
+- **真实走查协议**：让 5 名目标用户逐张阅读[用户走查执行套件](./evaluations/usability-study-kit.md)中的固定任务卡；主持人只能复述任务，不得解释按钮、界面层级或下一步。每个任务记录完成/放弃、开始和结束时间、回退次数、首次失败点、采用的恢复动作与 1-5 主观难度，证据仅保存脱敏事件和截图，不保存源文或本地路径。至少 4 人无提示完成自动模式主流程才可关闭本项；同一失败点出现两次，先形成 UX 修复和浏览器回归，再进行复测。
+- **工具层执行结果（2026-07-11）**：已新增 `corpus-writing-usability-fixtures-v1`、`run-usability-study-evaluation.ps1` 和独立 harness。它固定五条核心任务，只接受哈希化参与者 ID、完成/放弃、无提示标记、耗时、回退、固定码表内的失败/恢复码和 1-5 难度；未知字段、源文、路径、自由文本和码表外字符串均会拒绝。JSON/Markdown 报告同时聚合首次失败与恢复动作；[用户走查执行套件](./evaluations/usability-study-kit.md)提供无引导任务卡、主持人边界、脱敏记录与复测规则。`human` 数据集必须至少 5 人，报告只有在至少 4 人无提示完成全部任务时才返回 `acceptance_passed=true`。两参与者 `contract` fixture 覆盖稳定报告、脱敏拒绝和样本下限，但不是用户研究，P2.2 仍待真实走查。
+
+#### P3-P4 效果与真实用户证据（拆分为 M 级切片）
+
+- **M3 后台与标定**：desktop composition 的 technique maintenance lifecycle 已接入；下一步只补默认路径的例行 job 入队策略与必要状态，再用人工 query 集标定融合权重并报告 Recall@K/nDCG/P95。
+- **M4 持久蓝图体验（完成）**：章节默认 UI 已消费 `Get/AdvanceReferenceCorpusBlueprintSession`，自动模式并列入口已移除，跨关闭/刷新后的服务端恢复和失败重试已由浏览器 workflow 验证。
+- **M5 效果驱动收口**：只对已复现的正文盲评、适配率、自然度或用户修改量失败做规则/策略改动；每次改动附失败 fixture 和前后指标。
+- **依赖**：P1、P2；每个切片限制在约 3-5 个主要源文件，超过则按后台、契约、UI/测试继续拆分。
+
+### 13.3 检查点
+
+1. **Checkpoint A，交付基线**：**已通过。** Git 生成物清零；全套 .NET 与 frontend verify 通过。
+2. **Checkpoint B，M2 收口**：**已通过。** Stage 3、真实时限和 Release 50K 全管线报告均已通过；保留 1K micro-benchmark 作快速热路径回归；2M 不阻塞，也不构成百万字持续运行声明。
+3. **Checkpoint C，证据资产**：效果集和真实用户走查都有可重复、可版本化、脱敏报告；五条任务的浏览器自动化已完成，但不能替代用户走查。在此之前不调优 M3-M5。
+4. **Checkpoint D，产品闭环**：默认路径单一、持久可恢复、写作指标达标、核心任务可完成；此后才讨论 `P`。若要声明百万字持续运行，再单独执行 2M 长跑并定义对应 `L` 预算。
+
+### 13.4 明确不做
+
+- 不为把历史 2M 吞吐从 18.99 调到 20 而提前优化；50K 全管线证据已真实可信，2M 只在有明确性能诊断或百万字声明需求时执行。
+- 不扩张 M6-M8，不新增专家控制面，不用更多卡片、指标或技术字段替代清晰的默认下一步。
+- 不在现有超大文件中继续无边界堆叠；拆分必须服务 scheduler、evaluation、blueprint session 或 UI flow 的明确职责。

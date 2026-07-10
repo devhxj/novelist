@@ -30,7 +30,7 @@ public sealed record ReferenceCorpusFrozenFeatureWorkItem(
  ReferenceCorpusFeatureAnalysisContext Context,
 string AnalyzerVersion,
 string FeatureSchemaVersion,
- ReferenceCorpusFrozenModelSelection Model,
+ReferenceCorpusFrozenModelSelection Model,
  ReferenceCorpusFrozenTokenPolicy TokenPolicy);
 
 public sealed record ReferenceCorpusFrozenTechniqueWorkItem(
@@ -46,5 +46,8 @@ public sealed record ReferenceCorpusFrozenTechniqueWorkItem(
  string EvidenceSetHash,
 string AnalyzerVersion,
 string TechniqueSchemaVersion,
- ReferenceCorpusFrozenModelSelection Model,
- ReferenceCorpusFrozenTokenPolicy TokenPolicy);
+ReferenceCorpusFrozenModelSelection Model,
+ ReferenceCorpusFrozenTokenPolicy TokenPolicy,
+ string? DependencyJobId = null,
+ string? DependencyRunId = null,
+ string? DependencyInputSnapshotId = null);

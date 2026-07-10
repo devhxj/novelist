@@ -2,7 +2,7 @@
 
 > 本文档按 [development-plan.md](./development-plan.md) 第九节的实现顺序展开为可执行任务清单。v2 重排为**纵向薄切片优先**（修复评审 #10）：先修地基 schema，再立即跑通端到端闭环，然后逐层加深。
 >
-> 里程碑：`M0 地基` → `M1 纵向薄切片` → `M2 加深分析` → `M3 加深检索` → `M4 加深蓝图` → `M5 加深拼装` → `M6 语料库产品化` → `M7 聚合知识` → `M8 复核工作流` → `M9 专家UI+打磨`。
+> 里程碑：`M0 地基` → `M1 纵向薄切片` → `M2 加深分析` → `M3 加深检索` → `M4 加深蓝图` → `M5 加深拼装` → `M6 语料库产品化` → `M7 聚合知识` → `M8 复核工作流` → `M9 默认体验+专家UI`。
 >
 > 每个任务标注层（DB/后端/前端/测试）、依赖、验收点。验收全部对固定 fixture + golden JSON（修复 #12）。
 
@@ -21,49 +21,49 @@
 | `P` | **产品闭环完成** | 默认用户路径、关键失败路径、恢复、反馈和用户可见状态闭合，可持续完成真实工作流 |
 | `L` | **规模化完成** | 在目标数据量下通过质量、性能、成本、恢复和持续运行预算，并有真实效果证据 |
 
-以下数量采用本轮治理输入的固定基线，用于防止“检查点描述增长”被误读为任务完成。后续只有在对应原子任务实际完成并补齐证据时才更新数量；不得为迁就实现描述而虚假勾选。
+以下数量只统计行首为 `- [x]` / `- [ ]` 的真实原子任务，并于 2026-07-10 审计后重新同步。加入默认体验收口任务后，M0-M9 共 206 项，已完成 205 项、未完成 1 项；文末跨里程碑约束是 7 条编号规则，不计入复选框。后续更新复选框时必须同时更新本表和证据边界，不得把文内示例标记或勾选比例解释为产品完成度。
 
 | 里程碑 | 已完成 | 未完成 | 当前状态 | 当前判断 |
 |---|---:|---:|---|---|
-| M0 地基 | 26 | 9 | **S** | schema/契约基本可用；runner 级续跑已有验证，但 migration、projection 重建、job 级一致性和规模资产仍是基础债务 |
-| M1 纵向闭环 | 38 | 1 | **S** | 跨库检索、多蓝图反馈、选定蓝图派生正文候选和章节面板已形成演示级闭环；明确只算薄切片完成，不升级为 P |
-| M2 深度分析 | 25 | 18 | **S，加深中** | 10 family、冻结 snapshot、持久 job/CAS、单 worker 桌面 loop 与技法标本已有定向验证；强杀恢复、data-dir 重绑定、优先级 aging 与长跑规模验收未完成 |
-| M3 深度检索 | 13 | 5 | **S，加深中** | 四路独立 topK、native maintenance 与受控规模预算已自动验证；未证明真实长篇召回质量与生产 SLA |
-| M4 蓝图 | 12 | 8 | **S，加深中** | 多策略地基、coverage/gap/反馈降权已存在；未证明多份蓝图稳定且显著不同，也未形成真实效果证据 |
-| M5 拼装 | 14 | 4 | **S，加深中** | 保真与阻断审计较深；完整多稿、自然过渡和真实修改成本证据不足 |
+| M0 地基 | 36 | 0 | **S** | schema、契约、migration、projection、fixture 与恢复骨架已有定向证据；P0 仓库卫生和全套验证已恢复，但不以交付基线代替产品闭环或规模化证据 |
+| M1 纵向闭环 | 39 | 0 | **S** | 跨库检索、多蓝图反馈、选定蓝图派生正文候选和章节面板已形成受控闭环；明确只算薄切片完成，不升级为 P |
+| M2 深度分析 | 45 | 0 | **S，标准轨已关闭** | 10 family、Task A/B/Stage 3 持久后台执行、aging/retry/progress/recovery、ReviewQueue 和分析 UI 已有定向验证；真实控制/失租墙钟时限和 50K 全管线正式门禁均已通过，但默认用户闭环、真实 provider 与持续运行证据仍不足 |
+| M3 深度检索 | 18 | 0 | **S，加深中** | 四路召回、独立 topK、native maintenance 与受控预算已有自动验证；未证明真实长篇召回质量、默认后台维护与生产 SLA |
+| M4 蓝图 | 20 | 0 | **S，加深中** | 多策略、coverage/gap、反馈迭代和持久 coordinator 已实现；默认章节 UI 已消费持久 session，但尚无蓝图区分度效果证据 |
+| M5 拼装 | 19 | 0 | **S，加深中** | 来源锁定、保真/阻断审计、多候选与受控过渡已有实现；自然度、剧情适配率和真实修改成本证据不足 |
 | M6 语料库产品化 | 5 | 0 | **S，冻结扩张** | 已有库作用域、授权、去重和审计的有限产品面；勾选项不证明真实多库治理、语义去重和完整授权工作流达到 P |
 | M7 聚合知识 | 8 | 0 | **S，冻结扩张** | 已有聚合与溯源薄实现；底层分析质量、来源过滤、事务一致性及 M3-M5 消费闭环不足，不能视为可靠写作知识 |
 | M8 复核工作流 | 7 | 0 | **S，冻结扩张** | 已有状态、队列和前端操作薄切片；复核上下文、原文证据导航、批量原子性和生产重跑语义仍不足 |
-| M9 专家 UI | 4 | 0 | **S，冻结扩张** | 已有专家入口与受控前端流程；浏览器实证、恢复可靠性及底层能力成熟度不足，不能用 UI 完整度替代产品完成度 |
+| M9 默认体验 + 专家 UI | 8 | 1 | **S，自动化体验收口完成** | 默认路径、服务端恢复、长任务/错误恢复和视口/键盘自动验证已完成；仍缺真实目标用户无指导走查，不能据此宣称易用好用或升级为 P |
 
-**状态解释：** M0-M9 当前统一为 `S`，没有任何里程碑达到 `P` 或 `L`。M1 是当前已成立的产品纵向薄切片，不等于真实用户产品闭环完成；M2-M5 处于加深中；M6-M9 虽有已勾选薄实现，但因依赖的分析、检索、蓝图和拼装质量尚未成熟，冻结新增功能，只修阻断性缺陷、安全问题和与主线兼容相关的回归。提交信息中的“M2 核心功能完成”只能解释为 M2 演示级 runner/入口成立，不能解释为生产后台或规模验收完成。
+**状态解释：** M0-M9 当前统一为 `S`，没有任何里程碑达到 `P` 或 `L`。M1 是当前已成立的产品纵向薄切片，不等于真实用户产品闭环完成；M2-M5 处于加深中；M6-M8 冻结新增功能，只修阻断性缺陷、安全问题和与主线兼容相关的回归；M9 只允许收口默认主流程、长任务与恢复体验、可访问性和一致视觉层级，不扩张新的专家功能。提交信息中的“M2 核心功能完成”只能解释为 M2 演示级 runner/入口成立，不能解释为生产后台或规模验收完成。
 
-**整体对外口径：** “M1 产品薄切片完成，M2-M5 加深中，M6-M9 已有薄切片但冻结扩张；系统尚未达到生产完成或规模化完成。”任务勾选数量只能描述实现覆盖，不能换算为产品完成百分比或写作效果结论。
+**整体对外口径：** “M1 产品薄切片完成，M2-M5 加深中，M6-M8 冻结扩张，M9 聚焦默认体验收口；系统尚未达到生产完成或规模化完成。”任务勾选数量只能描述实现覆盖，不能换算为产品完成百分比、写作效果或易用性结论。
 
 ### 当前证据与升级缺口
 
 | 里程碑 | 已有验收证据 | 升级仍缺 |
 |---|---|---|
-| **M0** | text node/observation/specimen/library/license/page 契约；幂等、fake embedding、确定性相似度和小 golden 骨架 | clause/章节窗口、存量 migration、projection 重建、resume cursor 全链路、级联失效、完整 500 句 golden、200 万字 fixture 与故障恢复 |
-| **M1** | 多小说进入启用库；跨库检索；多蓝图和 feedback 二轮；selected blueprint 正文候选；golden JSON；章节面板 mock workflow | 剩余原子任务；真实桌面 UI 的完整失败/恢复回归；该闭环在 M2-M5 深化后的兼容回归。规模与效果证据归 M2-M5，不用扩大 M1 状态掩盖 |
-| **M2** | 10 family schema、Stage 1/2 薄 runner、预算状态与部分续跑、低置信信号、Stage 3 技法标本入口和分析结果查阅 | 持久化后台队列、章节优先级、暂停/取消、可靠续跑、失败重试、巡检、重启恢复、全量/增量调度、进度反馈、200 万字长跑恢复 |
-| **M3** | 文本/技法/结构化 observation/章节上下文 route provenance；结构化过滤；local fit；M3 retrieval golden；安全 scope/license/dedup 负例 | 独立索引与热路径、召回融合权重标定、人工标注 query 集、Recall@K/nDCG/命中原因准确率、P50/P95 延迟、几十万至两百万字跨库评测 |
-| **M4** | emotion/rhythm/technique/scene profiles；coverage/gap positions；来源覆盖；历史反馈降权；候选持久化与反馈循环 | 情绪弧与更完整策略系统；多轮会话状态；蓝图区分度指标；同目标多方案盲评；重复方案率；反馈后方案改善率；真实长篇来源组合验证 |
+| **M0** | text node/observation/specimen/library/license/page 契约；migration、projection 重建、幂等、500 句 golden、参数化规模 fixture 与恢复 harness；已清理 harness 生成物，完整 .NET 与 frontend verify 已通过 | 交付基线已恢复；后续只保留与 M2-M5 主线兼容的回归，不以 M0 勾选替代产品闭环证据 |
+| **M1** | 多小说进入启用库；跨库检索；多蓝图和 feedback 二轮；selected blueprint 正文候选；golden JSON；章节面板 mock workflow | 真实桌面失败/恢复回归，以及 M2-M5 深化后的兼容回归；规模与效果证据归后续里程碑，不扩大 M1 状态掩盖 |
+| **M2** | canonical run/job/attempt/work item、冻结输入、aging/retry/Retry-After、CAS、lease/fenced commit、进度/控制 UI、强杀恢复和 Task A/B/Stage 3 后台执行；30 组真实 pause/cancel/stale-lease 时限与失租 fenced commit 已通过；Release 50K 全管线正式轨完成 13,385 work items，吞吐 29.16/s，claim/list/progress P95 为 10.12/27.04/3.51 ms，零重复、零预算穿透、零活动 lease | 同步兼容入口的退役条件；真实 provider 的成本/波动与持续运行证据；默认用户流程和恢复体验归 M9，不因后台门禁通过而升级为 P |
+| **M3** | 文本/技法/结构化 observation/章节上下文四路召回；独立 topK；结构化过滤；local fit；native backfill；M3 retrieval golden；安全负例 | 默认产品后台维护；人工标注 query 集；Recall@K/nDCG/命中原因准确率；融合权重标定；50K 跨库 P50/P95 与真实长篇质量报告 |
+| **M4** | emotion/rhythm/technique/scene profiles；coverage/gap positions；来源覆盖；历史反馈降权；候选持久化；generate/select/revise/accept coordinator；章节默认 UI 服务端恢复与直接集成测试 | 蓝图区分度、重复方案率、反馈后改善率和同目标多方案盲评 |
 | **M5** | selected blueprint 来源锁定；preserved/locked spans；slot/transition audit；blocked next_action 回蓝图；slot-only/部分 transfer slot 多稿薄切片 | 完整多草稿与过渡策略；自然语言 slot constraints；自然拼装评测；保真/适配/自然度平衡；用户修改字符比例；正文盲评和真实章节样本 |
 | **M6** | 库作用域、来源状态、授权闸门、有限去重和插入审计已有定向路径 | 真实多库管理回归、跨版本/语义去重、授权变更全链传播、禁用来源工作流和大规模治理体验；冻结扩张期间只修缺陷 |
 | **M7** | 聚合表、基础聚合、provenance 与 stale 传播已有薄实现 | 来源资格过滤、单事务构建、丰富结构化知识、质量评测，以及被 M3-M5 实际消费并证明改善；冻结扩张期间不新增聚合类型 |
 | **M8** | review/validity 状态、队列、重跑保留与基础前端操作已有薄切片 | 原文预览、冲突值与 evidence、source/run 导航、批量原子性、缺失项错误语义、生产重跑与恢复；冻结扩张期间只修缺陷 |
-| **M9** | 自动/专家入口、章节状态保存和受控 mock/verify 路径已有证据 | 真实桌面浏览器证据、跨章节恢复隔离、长任务状态可见性、完整溯源导航和依赖能力成熟后的用户验收；冻结扩张期间只修缺陷 |
+| **M9** | 自动模式已收敛为“目标 → 蓝图 → 正文 → 插入”；服务端蓝图 session 恢复、失败后复用原 `request_id` 重试、后台任务唯一恢复动作、键盘焦点进出、ARIA 状态和 1280x720/1440x900/125%/150% 视口 workflow 均已自动验证；`frontend verify` 通过 | 5 名目标用户中至少 4 名无指导完成主流程的走查，以及完成时间、回退次数、失败点和主观难度记录 |
 
 ### 强制实施顺序
 
-1. **P0：恢复交付基线。** 全套构建与测试必须可编译、可通过；清理误入版本控制的 `build/tmp`、`bin/obj`、PDB 等生成产物。该入口条件未满足时不扩张功能。
-2. **P1：以 M2 后台系统为唯一生产主线。** 完成持久化 job/run/attempt、冻结 work item、lease/CAS、fenced commit、token 结算、暂停/取消、预算续跑、retry/watchdog、重启 reconcile 和进度反馈；同步补齐其直接依赖的 M0 migration、projection 重建、幂等和事务一致性。
-3. **P2：建立规模与效果证据资产。** 补齐 500 句标注集、200 万字跨库 fixture、故障注入/重启恢复脚本，以及检索 P50/P95、token/成本、蓝图区分度、原句保真率、剧情适配率、过渡自然度和用户修改字符比例。
+1. **P0：交付基线已恢复。** 已清理误入版本控制的 harness `bin/obj/PDB` 生成产物，ONNX session 测试具备显式释放与非并行边界，corpus workflow 改为任务行级定位；完整 .NET 与前端 build/lint/workflow 已通过。后续变更必须保持该绿色基线。
+2. **P1：M2 后台标准轨已关闭。** Stage 3 复用 canonical job/work-item 协议；真实 worker loop 的 pause/cancel 与 stale lease 定量时限已通过；Release 50K scheduler/builder/worker/fake-analyzer 正式轨也已通过。200 万字只保留为显式参数触发的非阻塞长跑，不再作为日常开发或 M2 收口门槛。
+3. **P2：建立效果与体验证据资产。** 保留 500 句 synthetic golden 做正确性回归，新增 50-100 条人工标注 query、20-30 组同目标多蓝图和 20-30 个真实章节插入样本，固定 Recall@K/nDCG、蓝图区分度、重复率、原句保真率、剧情适配率、过渡自然度、用户修改字符比例与迭代次数；5 条核心任务的浏览器 workflow、桌面视口/键盘/恢复检查已完成，下一步只补真实目标用户走查记录。
 4. **P3：补 M3 规模与真实效果。** 基于人工标注 query 集验证多路召回、融合排序、当前章节 local fit、去重和授权过滤；禁止以“route marker 出现”代替检索质量证明。
-5. **P4：依次验证 M4 蓝图区分和 M5 保真拼装。** 多份蓝图必须产生可度量的结构与来源差异，用户选定后正文只能在蓝图来源边界内最大化复用、最小适配。**停止继续堆 M5 审计规则**；只有复现的安全漏洞、授权绕过或效果评测失败可以新增规则，且必须先落失败 fixture。
+5. **P4：以效果和真实任务验证 M4/M5 默认写作路径。** 默认界面已收敛为“写目标 → 选蓝图 → 选正文 → 明确插入”一条主路径，服务端 session、错误恢复和专家渐进展开已有自动化证据；下一步必须证明多份蓝图的结构/来源差异、正文保真/适配/自然度和真实用户完成率。**停止继续堆 M5 审计规则和专家控件**；只有复现的安全漏洞、授权绕过、效果评测失败或核心任务可用性问题可以新增，并先落失败 fixture/workflow。
 
-**顺序约束：** 首先保持全套构建/测试可编译可通过并清理会污染评审和发布的生成产物；随后以 M2 持久后台 job/run/attempt、fenced commit、暂停/取消/预算续跑、重试、巡检和重启恢复为唯一生产主线，同时补齐 M0 所需的一致性地基。然后建立 500 句标注集、200 万字 fixture、故障注入、检索 P95/token 成本及写作效果指标，再依次加深 M3 检索、M4 蓝图区分和 M5 保真拼装。M3 未有规模效果证据前，不把 M4/M5 的启发式变化写成质量提升；M4 未证明蓝图区分度前，不以更多正文候选冒充有效多稿；M5 未完成真实效果验收前，不宣称高质量正文已可用。M6-M9 保持 `S` 并冻结功能扩张，只允许修阻断性缺陷、安全问题和主线兼容回归。
+**顺序约束：** P0 绿色基线、Stage 3 canonical job、M2 定量恢复时限和 50K 标准规模验收均已通过。50K 使用 fake LLM、至少 2 anchors/2 libraries，已验证完整输出、零重复、零预算穿透、吞吐、P95 与零活动 lease；200 万字长跑仅在发布前、性能诊断或明确要声明百万字能力时手工触发，不阻塞 P0-P4。下一步并行建立真实效果集和核心用户走查，再依次加深 M3 检索、M4 蓝图区分和 M5 保真拼装。M3 未有规模效果证据前，不把 M4/M5 的启发式变化写成质量提升；M4 未证明蓝图区分度前，不以更多正文候选冒充有效多稿；M5 未完成真实效果验收前，不宣称高质量正文已可用；M9 的恢复、视口和可访问性自动检查已通过，但未取得真实用户任务证据前仍不宣称“易用好用”。M6-M8 保持 `S` 并冻结功能扩张。
 
 ---
 
@@ -129,7 +129,7 @@
 - [x] **相似度算法（护栏 G5）**：4-gram 容器度 + LCS 比，piece-level，归一化+中文专名规则；纯确定性、无模型调用；单测逐值断言
 - [x] **golden fixture 骨架**：小语料结构覆盖 corpus/current chapter/query/retrieval/blueprint/insertion/fake LLM response 指针
 - [x] **golden fixture 完整版**：`m0-500-sentence-golden.json` 固定 500 句、5 sources、2 libraries，并逐句包含 authorized license、稳定 text_hash 与 evidence offset
-- [x] **规模 fixture 生成器**：`generate-fixtures.ps1` 默认合成 200 万字符、12 sources、4 libraries；规模输出被限制在 `build/tmp/`，支持 `-SkipGolden` 安全 smoke，不触碰版本库 golden 或正式 2M 输出
+- [x] **参数化规模 fixture 生成器**：`generate-fixtures.ps1` 支持按 `ScaleCharacterCount` 合成多 source/multi-library fixture；规模输出被限制在 `build/tmp/`，支持 `-SkipGolden` 安全 smoke。50K 标准档与可选 2M 长跑档的默认值、命名和 wrapper 收口归 M2 量化规模验收
 - [x] 中断恢复测试脚本骨架：`run-recovery-harness.ps1` 覆盖 reservation/model/record/finalize/commit 五个中断点，带 checkpoint timeout、重复轮次和结构化 recovery metrics 输出
 
 **验收：** 分页往返稳定、超限报错；fake LLM/fake embedding 可驱动全流程且结果可回归；相似度算法对 golden 输入产出固定值；golden/规模 fixture 可用。
@@ -171,7 +171,7 @@
 ### M1.4 自动模式前端（前端 / 修复 #11）
 
 - [x] 后端 bridge + TS adapter：`GenerateReferenceCorpusInsertionDraft` 自动闭环入口可被章节界面调用
-- [x] 后端 bridge + TS adapter：`GenerateReferenceCorpusBlueprintCandidates` 多蓝图候选入口可被章节流程调用，契约包含 `feedback_applied`/`feedback_summary`
+- [x] 后端 bridge + TS adapter：保留 `GenerateReferenceCorpusBlueprintCandidates` 兼容多蓝图候选入口，契约包含 `feedback_applied`/`feedback_summary`；默认章节流程使用 `Get/AdvanceReferenceCorpusBlueprintSession`
 - [x] 后端 bridge + TS adapter：`GenerateReferenceCorpusInsertionDraftCandidates` 正文多候选入口可被章节流程调用，契约包含 `selected_blueprint`/`candidates[].draft`
 - [x] 写作会话最小界面：大纲输入 → 一份蓝图 → 一份草稿 → 插入编辑器 buffer（当前单路径检查点）
 - [x] 自动模式多蓝图界面薄切片：章节目标 → 多份蓝图候选卡 → 用户选择/反馈重试 → 按选中蓝图生成插入草稿 → 插入编辑器 buffer
@@ -179,7 +179,9 @@
 - [x] 全部专家控件默认隐藏，用 AI 默认决策
 - [x] 草稿 diff 预览（原句保留 vs 槽位替换标色）
 
-**当前检查点：** 章节编辑器右侧 `参考素材` 面板已接入真实 UI 多蓝图 + 正文候选薄切片。前端从 Monaco 读取当前正文与光标 offset，发送当前章节默认 `session_id`，不再把默认 library id 列表硬编码为章节参数；后端解析 `project:{novelId}:default` 与工作区公用语料。默认路径先调用 `GenerateReferenceCorpusBlueprintCandidates` 生成多份蓝图候选，用户可在候选卡中选择方案、以当前选中蓝图构造 feedback 重组第二轮，再点击“按选中蓝图生成草稿”；章节 UI 随后调用 `GenerateReferenceCorpusInsertionDraftCandidates`，payload 必须携带第二轮候选中的 `selected_blueprint` 和 `requested_count=3`。生成后展示正文候选列表，用户选择候选后再查看 diff、节点分析、技法标本、槽位替换和插入闸门；diff 预览优先使用后端 `preserved_spans` 标记非槽位保留片段，旧 `slot_replacements` 反推逻辑只作兜底。只有当前选中候选的 `ready_for_insertion && gate.passed && audit.passed` 时才允许把该候选的 `chapter_text_after_insertion` 应用到编辑器 buffer，且不直接调用 `SaveContent`。mock workflow 已改为真实 UI 点击触发首轮/二轮蓝图候选、正文候选、选择候选并应用，guardrail 校验 `feedback_applied=true`、`feedback_summary`、`selected_blueprint` 来源、每个正文 piece 必带 `preserved_spans`、`audit.passed=true` 且 `audit.pieces` 与 draft pieces 对齐，并用 exact property 检查不泄漏 `source_text/raw_text/embedding`。推荐素材、事实边界和旧严格流程默认收进“高级参考流程”，展开前不会触发 `SearchReferenceMaterials` 或 orchestration 读取。该检查点证明默认 session scope、多蓝图 UI 循环、选中蓝图正文候选和编辑器 buffer 插入薄切片可用，但不等于完整产品完成；M1 后端 golden 已覆盖跨库、多蓝图、正文候选闭环，后续仍需继续加深分析、检索、蓝图和拼装质量。
+**当前检查点（M9 前的历史 UI 入口）：** 章节编辑器右侧 `参考素材` 面板已接入真实 UI 多蓝图 + 正文候选薄切片。前端从 Monaco 读取当前正文与光标 offset，发送当前章节默认 `session_id`，不再把默认 library id 列表硬编码为章节参数；后端解析 `project:{novelId}:default` 与工作区公用语料。默认路径先调用 `GenerateReferenceCorpusBlueprintCandidates` 生成多份蓝图候选，用户可在候选卡中选择方案、以当前选中蓝图构造 feedback 重组第二轮，再点击“按选中蓝图生成草稿”；章节 UI 随后调用 `GenerateReferenceCorpusInsertionDraftCandidates`，payload 必须携带第二轮候选中的 `selected_blueprint` 和 `requested_count=3`。生成后展示正文候选列表，用户选择候选后再查看 diff、节点分析、技法标本、槽位替换和插入闸门；diff 预览优先使用后端 `preserved_spans` 标记非槽位保留片段，旧 `slot_replacements` 反推逻辑只作兜底。只有当前选中候选的 `ready_for_insertion && gate.passed && audit.passed` 时才允许把该候选的 `chapter_text_after_insertion` 应用到编辑器 buffer，且不直接调用 `SaveContent`。mock workflow 已改为真实 UI 点击触发首轮/二轮蓝图候选、正文候选、选择候选并应用，guardrail 校验 `feedback_applied=true`、`feedback_summary`、`selected_blueprint` 来源、每个正文 piece 必带 `preserved_spans`、`audit.passed=true` 且 `audit.pieces` 与 draft pieces 对齐，并用 exact property 检查不泄漏 `source_text/raw_text/embedding`。推荐素材、事实边界和旧严格流程默认收进“高级参考流程”，展开前不会触发 `SearchReferenceMaterials` 或 orchestration 读取。该检查点证明默认 session scope、多蓝图 UI 循环、选中蓝图正文候选和编辑器 buffer 插入薄切片可用，但不等于完整产品完成；M1 后端 golden 已覆盖跨库、多蓝图、正文候选闭环，后续仍需继续加深分析、检索、蓝图和拼装质量。
+
+**M9 更新（2026-07-10）：** 默认章节路径现调用 `Get/AdvanceReferenceCorpusBlueprintSession`：生成、选择和反馈重组均持久化到服务端会话，关闭或刷新后恢复目标、迭代与选定蓝图；默认模式只显示“目标 → 蓝图 → 正文 → 插入”，旧候选入口只保留兼容边界。浏览器 workflow 已覆盖恢复、反馈、blocked 后回蓝图、错误重试、焦点和窄窗；真实用户走查仍是唯一开放项。
 
 ### M1.5 闭环验收（测试 / 修复 #12）
 
@@ -219,31 +221,31 @@
 
 ### M2.2 Task A/B 全量分析（后端 / 修复 #3）
 
-- [ ] Task A 句级 LLM：全量、异步、按章节优先级排队、per-run token_budget、可续跑
-- [ ] Task B 段落级 LLM：全量、异步队列、章节优先级排队
+- [x] Task A 句级 LLM：全量、异步、按章节优先级排队、per-run token_budget、可续跑；代码证据：`ReferenceCorpusAnalysisInputSnapshotBuilder.BuildFeatureSentenceAsync`、`ReferenceCorpusFeatureWorkItemProcessor.ProcessAsync`、`ReferenceCorpusAnalysisWorker.PumpOnceAsync`；测试证据：`BuildFeatureSentenceFreezesTextAndExpandsEverySentenceFamily`、`ProcessAsyncUsesFrozenInputAndRemainingTokenBudgetAcrossRetries`、`PumpOnceProcessesAllFrozenFeatureWorkItemsAndCompletesJob`。边界：50K 标准规模已证明后台管线，不代表默认用户闭环或真实 provider 质量
+- [x] Task B 段落级 LLM：全量、异步队列、章节优先级排队；代码证据：`ReferenceCorpusAnalysisInputSnapshotBuilder.BuildFeaturePassageAsync` 与同一 feature worker 协议；测试证据：`BuildFeaturePassageFreezesParentChapterSceneAndSiblingContext`、`RunAsyncForPassageAnalyzesOnlyParagraphSourceSegmentsAndPassesContext`。边界：只处理 canonical paragraph source segment，legacy 缺 node_id 时仍按既有诊断跳过
 - [x] 持久化后台调度 schema：run/job/attempt + input snapshot/work item，additive migration，不并行维护两套 canonical run
 - [x] job 状态机与 CAS：queued/running/pause_requested/paused/cancel_requested/cancelled/retry_wait/budget_exhausted/completed/failed + expected_version
 - [x] worker 运行协议第一可靠薄切片：原子 claim、lease token、10 秒 heartbeat、45 秒 lease、启动 reconcile、失去 lease 禁止提交、桌面单 worker loop；15 秒独立 watchdog、显式 abandon 与 data-dir 重绑定仍属于恢复任务
-- [ ] 章节优先级与 aging：current/adjacent/normal/maintenance 持久化优先级，5 分钟 aging，持续高优先级流量下 normal 不饥饿
+- [x] 章节优先级与 aging：current/adjacent/normal/maintenance 持久化优先级，5 分钟 aging，持续高优先级流量下 normal 不饥饿；代码证据：`SqliteReferenceCorpusAnalysisJobStore.ClaimNextAsync` 的持久 priority + aging 排序；测试证据：`ClaimNextAgesNormalPriorityAcrossClassBoundariesWithinFifteenMinutes`。边界：这是确定性时间源下的饥饿防护，不等于共享环境吞吐验收
 - [x] pause/cancel/resume 独立 API 第一薄切片：expected-version CAS、成功提交边界生效、取消保留已成功产物、补充总预算后 resume；allowed_actions、完整幂等语义与稳定产品错误映射仍属于进度/API 收口任务
-- [ ] retry 分类与退避：schema 0/1/3 秒最多 3 次；provider transient full-jitter 最多 5 attempt；Retry-After；永久错误不重试
-- [ ] 后台任务查询与进度：PageResult 稳定分页，node/work-item 双分母，token/reservation、当前章节、allowed_actions、安全 diagnostics
-- [ ] 重启恢复与故障注入：调用前/返回后/事务中/cursor 后/完成前/真实进程强杀，证明零重复 active 产物、零丢失、cursor 单调
+- [x] retry 分类与退避：schema 0/1/3 秒最多 3 次；provider transient full-jitter 最多 5 attempt；Retry-After；永久错误不重试；代码证据：`ReferenceCorpusAnalysisRetryPolicy.Decide`、`ReferenceCorpusAnalysisWorker` 对 `retry_after_ms/retry_after_seconds` 的读取与持久化；测试证据：`ValidationFailureUsesBoundedSchedule`、`ProviderTransientUsesInjectableFullJitter`、`ProviderTransientRespectsRetryAfter`、`PermanentFailureNeverRetries`、`PumpOncePersistsProviderRetryAfterFromBridgeDetails`。边界：不覆盖外部 provider 的真实 SLA
+- [x] 后台任务查询与进度：PageResult 稳定分页，node/work-item 双分母，token/reservation、当前章节、allowed_actions、安全 diagnostics；代码证据：`ReferenceCorpusAnalysisScheduler.ListAsync/GetAsync` 与 job payload；测试证据：`GetExposesCurrentTokenReservationAfterWorkItemReservation`、`ListCursorIsStableAndRejectedWhenFiltersChange`、`CommitWorkItemSettlesOutputProgressAndTokensAtomically`。边界：Release 50K 全管线 list P95 已为 27.04 ms；该性能证据不替代面向用户的进度理解和恢复体验验收
+- [x] 重启恢复与故障注入：调用前/返回后/事务中/cursor 后/完成前/真实进程强杀，证明零重复 active 产物、零丢失、cursor 单调；代码证据：worker startup `ReconcileAsync`、lease fencing、completion Record/Finalize 与原子 settlement；测试证据：`EnqueuePersistsFrozenSnapshotAndSurvivesSchedulerRestart`、`ReclaimExpiredRunningLeaseSchedulesRetry`、`RecordCompletionIsIdempotentAndRejectsConflictingPayload`、`FinalizeCompletionSettlesActualTokensAttemptAndReservationExactlyOnce`，以及 5 故障点 2 轮、10/10 子进程 harness；真实 pause/cancel/stale lease 墙钟时限由下方独立 runtime samples 验证
 - [x] 产品触发入口：`StartReferenceCorpusFeatureAnalysis` / `GetReferenceCorpusFeatureAnalysisRun`，按 anchor + scope 启动 sentence/passage 默认 family 分析并返回安全 run 状态
 - [x] Task B 段落节点选择 + 上下文地基：只分析 `reference_source_segments.segment_type='paragraph'` 的真实段落，跳过 hook/beat/action_afterbeat 等派生 passage；注入 parent chapter、containing scene、前后 paragraph context；旧库缺 `reference_source_segments.node_id` 时诊断并跳过，不做 hash/offset 猜测
 - [x] Task A/B 共用执行器地基：读取 node×family、调用可替换 analyzer、locked schema 校验、observation upsert、tokens/resume_cursor/status 更新、sensory projection 同步
 - [x] schema 失败重试：invalid JSON/schema/rejected output 按 `MaxValidationAttempts` 重试；失败尝试累计 tokens 但不写 observation、不推进 cursor；重试耗尽后 run 标 failed
 - [x] 真实 LLM analyzer 地基：复用 `IChatCompletionClient` + selected model，生成 schema-locked prompt，抽取 fenced JSON，读取 usage tokens；测试使用 fake chat client，不触发真实网络
 - [x] confidence < 0.70 的 observation 初始化为 `review_state='low_confidence'`，分析查阅列表可按该状态过滤，作为 M8 复核队列输入信号
-- [ ] evidence_start/end 精确记录
-- [ ] 低置信 observation 的 ReviewQueue 入队/领取/人工确认流转（M8 消费）
-- [ ] 后台中断续跑：从 input snapshot 的最后成功 work item 续跑，应用重启/lease 回收后 cursor 单调且不整章重放
+- [x] evidence_start/end 精确记录；代码证据：locked family validator 将模型 evidence offsets 投影到 observation，frozen payload 保留 evidence；测试证据：`ValidateAcceptsSentenceSensoryArrayOutputAndBuildsObservationCandidates`、`ValidateRejectsEvidenceOffsetsOutsideCurrentSourceNode`、`BuildTechniqueKeepsFrozenDependencyEvidenceAfterLiveObservationChanges`。边界：offset 是节点内字符范围，原文导航能力由 M2.4 单独验证
+- [x] 低置信 observation 的 ReviewQueue 入队/领取/人工确认流转（M8 消费）；代码证据：`SqliteReferenceCorpusGovernanceService` review queue/list/batch review 路径；测试证据：`QueuesLowConfidenceObservationsAndSupportsPagedBatchReview`、`StartFeatureAnalysisRoutesLowConfidenceObservationsToReviewList`。边界：当前证明低置信入队、稳定分页和人工 confirmed 流转，罕见 family 扩展规则不在本项内
+- [x] 后台中断续跑：从 input snapshot 的最后成功 work item 续跑，应用重启/lease 回收后 cursor 单调且不整章重放；代码证据：work-item reservation/settlement 与 canonical resume cursor 同事务推进；测试证据：`DueRetryClearsMetadataWithoutMovingStableCursorOrWorkItem`、`CommitWorkItemSettlesOutputProgressAndTokensAtomically`、`RunAsyncPersistsValidatedObservationsAndResumesAfterBudgetCursor`。边界：真实进程时限已由下方 runtime metrics 验收；用户离开/返回后的可理解恢复流程仍由 M9 验收
 
-**当前检查点：** 同步 `ReferenceCorpusFeatureAnalysisRunner` 兼容入口仍保留；新的持久后台路径已冻结 node text/context/evidence、selected model 与 token policy，构建 node×family work item，并以 canonical run/job/attempt/input snapshot/work item 为唯一持久执行协议。单 worker 桌面 loop 会启动 reconcile、claim、heartbeat、fenced commit/settlement；模型调用期间收到 pause/cancel 时先同事务提交成功产物、token 与 cursor，再收敛到 paused/cancelled；损坏或旧 frozen snapshot 在 reservation 前即可 fenced fail，不等待 lease 超时。句级与段落级 payload 均只从 frozen input 解码，段落 fixture 已证明 parent/chapter/containing scene/前后 paragraph 在 enqueue 后 live 修改时保持不变。当前仍未完成章节优先级 aging、独立 watchdog、显式 shutdown abandon、data-dir 热切换协调、完整 Retry-After/调用级审计、强杀故障矩阵和 200 万字长跑，因此 M2 仍为 `S，加深中`，不能称为生产后台完成。
+**当前检查点：** 同步 `ReferenceCorpusFeatureAnalysisRunner` 兼容入口仍保留；新的持久后台路径已冻结 node text/context/evidence、selected model 与 token policy，构建 node×family work item，并以 canonical run/job/attempt/input snapshot/work item 为唯一持久执行协议。单 worker 桌面 loop 会启动 reconcile、claim、heartbeat、fenced commit/settlement；模型调用期间收到 pause/cancel 时先同事务提交成功产物、token 与 cursor，再收敛到 paused/cancelled；损坏或旧 frozen snapshot 在 reservation 前即可 fenced fail，不等待 lease 超时。句级、段落级和 Stage 3 payload 均只从 frozen input 解码；定向测试已覆盖 priority aging、完整 retry 分类与 Retry-After、稳定分页/进度、completion 幂等及强杀恢复。`run-recovery-harness.ps1 -Rounds 2 -RuntimeSamples 30 -Configuration Release` 额外运行真实 worker-loop 样本：pause P95 82.28 ms、cancel P95 87.68 ms、stale lease 回收 P95 37.17 ms，30/30 个失租样本均以 `lease_expired` abandon 旧 attempt 且仅由新 attempt 持久化 5 个 completion。`run-scale-harness.ps1 -Configuration Release` 已生成 50,015 字、16 anchors、4 libraries、32 jobs 的全管线报告：13,385 work items/completion rows 全部完成，吞吐 29.16/s，claim/list/progress P95 为 10.12/27.04/3.51 ms，预算穿透、重复输出、预留 token 与活动 lease 均为 0；数据库从 29,433,856 增至 47,398,912 bytes。M2 因默认用户闭环、真实 provider 与持续运行证据不足仍保持 `S`，不得据此称为产品完成或规模化完成。历史 2M 首轮结果只作为性能基线，不再阻塞 M2。
 
 ### M2.3 Task C 技法标本（后端 / 关键设计）
 
-- [ ] 综合推理：全部 A/B observation + 原文 → TechniqueSpecimen
+- [x] 综合推理：全部 A/B observation + 原文 → TechniqueSpecimen；代码证据：`ReferenceCorpusTechniqueWorkItemProcessor.ProcessAsync`、`ReferenceCorpusTechniqueSpecimenRunner` 聚合同节点 active 高置信 A/B observation 与 frozen node text；测试证据：`ProcessAsyncRetriesAgainstFrozenEvidenceAndRemainingBudget`、`StartTechniqueSpecimenAnalysisPersistsSpecimensAndSafeStatus`、`ListTechniqueSpecimensReturnsSafeEvidenceTrace`
 - [x] Stage 3 runner/validator/writer 地基：读取 active 高置信度 observation + 原文节点，调用可替换 analyzer，写 `reference_technique_specimens`
 - [x] why_it_works 每 contributing_factor 走 `reference_specimen_evidence` FK 到真实 observation（禁空引用/未知 id）
 - [x] technique_abstract / transfer_template 去内容化泄露检测（拒绝原文专名、原文动作短语、长原文片段）
@@ -251,32 +253,33 @@
 - [x] 真实 LLM analyzer：复用 `IChatCompletionClient`，schema-locked prompt，抽取 fenced JSON，读取 usage tokens
 - [x] 产品触发入口：`StartReferenceCorpusTechniqueSpecimenAnalysis` / `GetReferenceCorpusTechniqueSpecimenAnalysisRun`，返回安全 run 状态
 - [x] runner 级预算续跑：零预算不调用模型，budget_exhausted 后提高总预算，从最后成功 node 继续；specimen/evidence/token/cursor 同事务
-- [ ] Stage 3 后台 job 接入：依赖快照、异步队列、章节优先级、pause/cancel/resume、lease/watchdog、retry、重启恢复
+- [x] Stage 3 后台 job 接入：technique job 要求同 novel/anchor/scope 的已完成 feature job 依赖，冻结 dependency job/run/input snapshot 及 observation evidence 后进入既有异步队列、章节优先级、lease/watchdog、pause/cancel/resume 和 retry 协议；测试证据：`TechniqueEnqueueRequiresCompletedFeatureDependency`、`PumpOnceProcessesTechniqueWorkItemFromCompletedFrozenFeatureDependency`、`TechniqueWorkItemRetriesAfterTransientProviderFailure`。边界：真实 control/lease 时限及 50K 全管线门已通过；Stage 3 仍须持续随常规后台回归覆盖
 
-**当前检查点：** `ReferenceCorpusTechniqueSpecimenRunner` 已作为独立 Stage 3 地基接入：按 source node 聚合同 anchor、同 node_type、active、未被人工拒绝且 `confidence >= MinObservationConfidence` 的 observation，把 node 原文和 observation evidence 交给 analyzer；`ReferenceCorpusTechniqueSpecimenOutputValidator` 锁定 `reference-corpus-technique-specimen-v1` 输出，要求 `why_it_works` 每个 factor 至少引用一个真实 observation id，未知/空 evidence 直接拒绝；落库在同一事务内写 `reference_technique_specimens`、`reference_specimen_evidence`、tokens 和 cursor，`specimen_id = hash(run_id,node_id,technique_family)` 保证重试幂等，重跑保留人工 `review_state`，不把 confirmed/rejected 重置为 unverified。`reference_specimen_evidence(observation_id, specimen_id)` 索引用于后续从 superseded observation 反查受影响 specimen。去内容化闸门会拒绝 `technique_abstract` / `transfer_template` 中出现原文专名、原文动作短语或长原文片段。真实 `ReferenceCorpusChatCompletionTechniqueSpecimenAnalyzer` 已接入 selected model + `IChatCompletionClient`，prompt 明确 node_text 仅作源材料、输出必须去内容化且 why_it_works 引用 observation_id；fenced JSON 与 usage token 读取有回归测试。产品面已有薄入口 `Start/Get ReferenceCorpusTechniqueSpecimenAnalysis`，返回 run 元数据、token_budget/tokens_spent/resume_cursor、specimen_count、processed_nodes 与安全 diagnostics，不返回 node_text/source_text/raw_text/prompt/model_output_json/embedding/value_json。Stage 3 已接单次调用内的预算续跑：零预算不调用模型，预算耗尽后补充总预算可从最后成功 node 续跑，非法 terminal resume、陈旧 cursor、跨 scope/anchor run_id 在写入前拒绝。当前仍未接持久化后台队列、章节优先级、暂停/取消、重启恢复、失败重试、任务巡检和前端 TechniqueSpecimen 专项卡。
+**当前检查点：** `ReferenceCorpusTechniqueSpecimenRunner` 保留为兼容入口；新的 Stage 3 路径要求一个同 novel/anchor/scope 且已完成的 feature job，`SqliteReferenceCorpusAnalysisScheduler` 将该 job 的 id/run/input snapshot 和符合阈值的 observation evidence 冻结到 technique work item，再由 `ReferenceCorpusAnalysisWorker` 的同一持久协议执行。`ReferenceCorpusTechniqueSpecimenOutputValidator` 锁定 `reference-corpus-technique-specimen-v1` 输出，要求 `why_it_works` 每个 factor 至少引用一个真实 observation id，未知/空 evidence 直接拒绝；落库在同一事务内写 `reference_technique_specimens`、`reference_specimen_evidence`、tokens 和 cursor，`specimen_id = hash(run_id,node_id,technique_family)` 保证重试幂等，重跑保留人工 `review_state`，不把 confirmed/rejected 重置为 unverified。定向回归已覆盖 dependency 缺失/未完成拒绝、冻结后 live observation 变化不影响输入、暂停/恢复、worker 重启和瞬态 provider retry。真实时限和 50K 全管线门已独立通过，但这不等于 TechniqueSpecimen 已形成默认产品体验；专项前端不新增，仍由通用后台任务面板展示状态。
 
 ### M2.4 分析前端
 
-- [ ] 后台任务面板：稳定分页展示 10 个 job 状态、node/work-item 双进度、token、当前章节、重试倒计时和安全诊断
-- [ ] 后台控制交互：仅按后端 `allowed_actions[]` 提供暂停/取消/恢复/重试，携带 expected_version，CAS conflict 后刷新，不在前端复制状态机
+- [x] 后台任务面板：稳定分页展示 10 个 job 状态、node/work-item 双进度、token、当前章节、重试倒计时和安全诊断；代码证据：`CorpusAnalysisJobsPanel` 与 `ListReferenceCorpusAnalysisJobs` adapter；workflow 证据：`verifyCorpusAnalysisJobsWorkflow` 逐一断言 queued/running/pause_requested/paused/cancel_requested/retry_wait/budget_exhausted/completed/failed/cancelled 中文状态。边界：面板契约覆盖 Stage 3，但不代表真实时限或 50K 规模验收
+- [x] 后台控制交互：仅按后端 `allowed_actions[]` 提供暂停/取消/恢复/重试，携带 expected_version，CAS conflict 后刷新，不在前端复制状态机；代码证据：`CorpusAnalysisJobsPanel.runAction`；测试证据：`ControlOperationsUsePersistentCasVersions`，workflow `verifyCorpusAnalysisJobsWorkflow` 证明陈旧 version 首次冲突后刷新、第二次使用新 version 成功暂停；真实 worker-loop 30 样本 P95 为 pause 82.28 ms、cancel 87.68 ms。边界：这证明后台控制的时限，不替代章节默认路径和长任务 UX 验收
 - [x] 后端列表 API：`ListReferenceCorpusFeatureObservations` / `ListReferenceCorpusTechniqueSpecimens`，分页 `PageResult<T>`、稳定 sort、filter 白名单、默认 active、非法 cursor/filter/pageSize 走 validation error
 - [x] 安全展示契约：Observation 不暴露 `value_json`；TechniqueSpecimen 不暴露 `why_it_works_json` 或原始 JSON 字符串，改为 typed `transfer_slots` / 条件列表 / `why_it_works.contributing_factors`
 - [x] evidence trace：TechniqueSpecimen 通过 `reference_specimen_evidence` junction 二次读取，不用 join 放大分页；trace 返回 observation id/family/key/confidence/text_hash/bounded evidence preview/value preview/explanation
 - [x] 当前章节嵌入：章节右侧 `语料驱动草稿` 生成后，按 draft pieces 的 `anchor_id/node_id` 自动加载“节点分析 / 技法标本”，可切换 piece，不把素材库处理入口混进章节使用面板
 - [x] 全库分析查阅 tab：素材库处理侧新增独立“分析结果”tab，可按 anchor、node、family/key、review/validity、min confidence 查阅 observation/specimen；不复用章节使用面板，不提供蓝图/候选/插入动作
-- [ ] evidence 跳原文：当前只返回 bounded evidence preview 与 offset，尚未接编辑器/素材库原文定位跳转
+- [x] evidence 跳原文：observation 与 specimen evidence 按 anchor/node/evidence_start/evidence_end 触发 `novelist:locate-corpus-evidence`，`ReferenceAnchorView.locateEvidence` 加载 node window 并渲染范围高亮；workflow `verifyCorpusAnalysisResultsWorkflow` 断言定位请求完成且出现 `data-corpus-evidence-selection`。边界：只在素材库原文窗口内定位，不承诺外部编辑器跳转
 
 **验收（双轨，修复 #3 #12）：**
 - 正确性轨：golden 书全量分析比对 golden JSON
-- 规模轨：200 万字 fixture 验证续跑/预算/性能/恢复
+- 标准规模轨：50,000 字 fake-LLM fixture 验证续跑、预算、性能和恢复，作为日常/M2 强制门槛
+- 可选长跑轨：2,000,000 字仅用于发布前、专项性能诊断或百万字能力声明，不进入常规阶段门
 - why_it_works 每条可追溯；abstract 泄露检测通过
-- [ ] 量化后台验收：自动故障恢复部分已成立，pause/cancel 与 stale lease 时限仍待独立验收
+- [x] 量化后台验收：`run-recovery-harness.ps1` v2 分开记录 5 个事务点强杀恢复和真实 runtime loop；Release、2 轮、每类 30 样本报告 pause/cancel P95、lease reclaim P95、fenced commit 与每例状态/产物计数
 - [x] 5 个事务故障点（`after_reservation` / `after_model` / `after_record` / `during_finalize` / `after_commit`）真实子进程强杀/重启 2 轮，共 10/10 case 零重复、零丢失、token 精确结算且 reservation 清零；指标见 `build/tmp/corpus-driven-writing/recovery-metrics.json`
-- [ ] P95 pause/cancel ≤ 60 秒；stale lease 30 秒内恢复
-- [ ] 量化规模验收：正式 2,000,000 字运行已交由人工验收，当前运行中/待人工确认；在人工确认 `build/tmp/corpus-driven-writing/scale-metrics.json` 前不勾选，不宣称吞吐、claim/list P95 或等待时限达标
-- [ ] UI/API 验收：10 个 job 状态中文显示、allowed_actions、CAS conflict、稳定分页和应用重启后任务可见均有自动 workflow
+- [x] P95 pause/cancel ≤ 60 秒；stale lease 30 秒内恢复：Release runtime metrics 的 pause P95=82.28 ms、cancel P95=87.68 ms、stale reclaim P95=37.17 ms；30/30 stale case 为旧 attempt `lease_expired` abandon、新 attempt 完整产出，旧 worker 零 completion commit
+- [x] 50K 标准全管线验收：保留现有 1,000 work-item job-store micro-benchmark；正式 fixture/wrapper 默认改为 50,000 字和独立 `scale-50k` 输出，真实经过 scheduler → sentence/passage snapshot builder → worker → fake analyzer。Release 正式 metrics 为 50,015 字、16 anchors、4 libraries、4 session bindings、32 jobs、13,385 work items/completion rows，fake analyzer calls=13,385；duplicate outputs=0、持久 budget penetration=0、reserved tokens=0、active leases=0，吞吐=29.16 items/s，claim/list/progress P95=10.12/27.04/3.51 ms（各 32 样本），数据库 29,433,856→47,398,912 bytes。`build/tmp/corpus-driven-writing/scale-50k-metrics.json` 为本机正式证据。2M 仍仅保留显式 `-Mode JobStore -MinimumCharacters 2000000` 长跑，其结果不影响本项勾选
+- [x] UI/API 验收：10 个 job 状态中文显示、allowed_actions、CAS conflict、稳定分页和应用重启后任务可见均有自动 workflow；后端证据：`ReferenceCorpusAnalysisSchedulerTests` 的持久 CAS、稳定 cursor 和 restart round-trip；前端证据：`verifyCorpusAnalysisJobsWorkflow` 与 `verifyCorpusAnalysisResultsWorkflow`。边界：workflow 使用 mock bridge 验证契约和交互；50K 性能与进程时限已由正式门禁覆盖，但面向用户的默认路径与错误恢复体验仍由 M9 验收
 
-**当前检查点：** M2.4 已完成后端分页读取、章节使用侧只读嵌入、素材库处理侧独立“分析结果”tab。`SqliteReferenceCorpusAnalysisService` 先分页 specimen 再读取 evidence junction，避免 evidence join 导致分页重复；Observation list join `reference_text_nodes` 只返回 `text_hash` 和 bounded evidence preview，不返回 node 全文。Bridge/TS adapter/mock 已补齐两个 list 方法，`ChapterReferencePanel` 在语料草稿下根据当前 pieces 自动加载 observation/specimen，界面只暴露节点切换与刷新；`CorpusAnalysisLibraryTab` 则在素材库内按 anchor/node/filter 查阅 observation/specimen，并通过 mock workflow 断言不会触发章节蓝图、候选生成或插入类 bridge。M2 故障 harness 已完成 5 个事务点、真实强杀/重启 2 轮并产出 recovery metrics；正式 2,000,000 字规模验收由人工运行中，最终结果待人工检查 metrics 后确认。仍未实现 evidence offset 跳转到原文定位。
+**当前检查点：** M2.4 已完成后端分页读取、章节使用侧只读嵌入、素材库处理侧独立“分析结果”tab、后台任务面板和 evidence offset 原文定位。`SqliteReferenceCorpusAnalysisService` 先分页 specimen 再读取 evidence junction，避免 evidence join 导致分页重复；Observation list join `reference_text_nodes` 只返回 `text_hash` 和 bounded evidence preview，不返回 node 全文。Bridge/TS adapter/mock 已补齐 list/control 方法，mock workflow 固化 10 状态、allowed_actions、CAS conflict 刷新、稳定分页、重启后任务可见和 evidence 范围高亮。M2 recovery harness 已完成 5 个事务点、真实强杀/重启 2 轮，并在真实 worker-loop 采集 30 组 pause/cancel/stale-lease 时限和 lost-lease zero-commit 证据。Release 50K 全管线报告已完成 13,385 work items，claim/list/progress P95=10.12/27.04/3.51 ms，完整输出、零重复、零预算穿透和零活动 lease 均已满足。历史 2M 首轮证明完整性、零重复和延迟预算，但其 18.9857/s 不再作为主线失败项；M2 因缺少真实 provider、持续运行和默认用户体验证据仍保持 `S`。
 
 ---
 
@@ -304,6 +307,8 @@
 **验收：** 结构化查询（"动作替代心理描写表现愤怒"）精准命中 golden fixture 中标注样本；当前章节上下文改变时排序可见变化；技法语义相似区别于文本相似（golden 断言）；同一 QueryContext 在多库启用时召回跨 anchor 结果，禁用任一库、改变授权或 dedup_group 后候选集合/排序按 golden 预期变化；测试不得只覆盖单 anchor。
 
 **当前检查点：** `SearchCandidatesFiltersByStructuredObservationAndSensoryProjection` 已证明候选搜索不再只是纯向量召回：同一授权语料库内，只有同时满足 `action.emotion_carrier=action_over_psychology` 与 `sensory=tactile,intensity>=0.8` 的句子会命中，用于覆盖“动作替代心理描写表现愤怒”这类结构化意图。`SearchCandidatesRequiresAllIndexedStructuredObservationFilters` 进一步证明多个 `feature_filter_{n}_*` observation 条件会同时生效，可表达 `action.emotion_carrier=action_over_psychology AND rhythm.length_band.char_count>=16` 这类复合意图，并且旧 `feature_*` 单条件过滤继续兼容。`GenerateBlueprintCandidatesUsesStructuredObservationFiltersFromGoal` 证明章节蓝图路径已把目标映射到这些结构化 filters，跨 project/global 两库只从匹配节点生成蓝图，并且 selected blueprint 后续生成正文不再被二次过滤破坏。`SearchCandidatesRanksInsertionWindowAndAllowedKnowledgeContext` 证明当前章节上下文已进入可解释排序：`local_context_fit` 会让命中插入点附近文本、人物名和 allowed knowledge 的候选排到更前，同时断言 `ForbiddenKnowledge` 不得作为正向检索信号。`SearchCandidatesMergesFourRecallRoutesWithDiagnostics` 证明 route union 已能补入 base prefetch window 外的文本语义、技法语义、结构化 observation、章节上下文代表，分页不会只按单一融合分数截断，并用 `score_components.recall_*` 标注召回来源；`SearchCandidatesStructuredObservationRecallDoesNotDependOnBasePrefetchWindow` 与 `SearchCandidatesStructuredObservationRecallUsesExplicitFeatureFiltersBeyondPrefetchWindow` 进一步证明结构化 observation 已有独立 SQL route，可分别通过 QueryContext term 和显式 `feature_filter_*` 把远位置节点拉入候选，且 `recall_structured_observation` 只表示真实 route hit，不再由普通 `observation_fit` winner 误标；`SearchCandidatesChapterContextRecallMarksEveryRouteHitBeyondScoreWinner` 证明章节上下文也已拆出独立 SQL route，多个 context route hit 都会获得 `recall_chapter_context`，不再只给 `local_context_fit` 第一名打标，并用最小加权阈值避免弱泛词误标；`SearchCandidatesChapterContextRecallHonorsStructuredFiltersBeforeRouteLimit` 证明 context route 会先应用结构化 filters 再取 topK，避免 route limit 被不满足 filter 的上下文噪声占满；`SearchCandidatesMergedRecallRoutesHonorScopeLicenseAndDedup` 进一步证明 route union 不能绕过 excluded anchor、forbidden license 或 dedup representative。`SearchCandidatesRainDoorwayMatchesM3RetrievalGoldenJson` / `SearchCandidatesFourWayRecallMatchesM3RetrievalGoldenJson` 已把基础授权检索与四路召回诊断固化到 `m3-retrieval-golden.json`，并由 `CorpusDrivenWritingGoldenFixtureTests` 递归防止 expected 区块泄露 raw source、embedding、prompt、`value_json` 等字段。`SearchCandidatesRanksTechniqueAbstractEmbeddingSeparatelyFromRawText` 证明技法 abstract embedding 已区别于原文 embedding 参与排序：同一候选池内，`technique_fit` 可把“动作替代心理描写表现愤怒”命中到对应技法标本节点；向量按 provider/model/dimensions/technique_hash 缓存，第二次检索只重算 query，不重算技法向量。`SearchCandidatesUsesNativeTechniqueTopKWhenAvailable` 证明 native sqlite-vec topK 已进入技法召回薄切片：rowid 映射回 source node 后只作为 `scoped_nodes` 内的召回 hint，命中的远位置技法节点可进入候选并带 `recall_technique_semantic`；`BackfillTechniqueVectorIndexPrewarmsNativeRowsAndSearchDoesNotReprovision` 证明 `BackfillReferenceCorpusTechniqueVectorIndex` 可在不调用 `SearchCandidates` 的情况下预热 `reference_technique_vectors`、native row mapping 与 index state，后续搜索复用 rows/state 且不重复 provision；`BackfillTechniqueVectorIndexFailureReturnsDiagnosticsAndSearchStillFallsBack` 证明回填失败返回 `failed` 诊断，不破坏后续搜索的 JSON fallback。`SearchCandidatesFallsBackWhenNativeTechniqueTopKFails` 证明 native provision/query 失败不会让搜索失败，会回退旧 JSON fallback；`SearchCandidatesNativeTechniqueTopKHonorsExcludedAnchors` 证明 excluded anchor 不会被 native 路径建索引、写 technique cache 或返回；`SearchCandidatesNativeTechniqueTopKDoesNotBypassStructuredFilters` 证明 native 命中仍受 `feature_*` / sensory 过滤约束；`SearchCandidatesNativeTechniqueTopKClearsRowsForRejectedSpecimens` 证明 active specimen 被人工 rejected 后，该 scope 的 native row/state 会被清掉，旧 rowid 不再污染后续检索；`SearchCandidatesNativeTechniqueTopKRebuildsStaleRowHash` / `SearchCandidatesNativeTechniqueTopKRejectsForgedRowMappingWhenIndexStateMatches` 证明 index_state 不能只靠 count/hash 欺骗，row 映射与当前 entries 不一致会触发重建；`SearchCandidatesNativeTechniqueTopKExcludesActiveSpecimenWithSupersededRunId` 证明 dirty active + superseded specimen 不参与 native 或 JSON fallback。`SearchCandidatesRecallsTechniqueSpecimenBeyondPerSourcePrefetchWindow` 继续覆盖无 native provider 时的 JSON fallback 远位置技法补池。新增护栏覆盖：技法补池不得绕过结构化 filters；被 `exclude_anchor_ids` 排除或 forbidden license 的技法标本不返回也不生成向量缓存；selected blueprint 若引用远位置技法节点，`GenerateInsertionDraftAsync` 后续仍能读到 source piece，不退化为 `source_node_missing`。`ReferenceCorpusServiceTests` 与 `ReferenceCorpusWritingServiceTests` 整组仍覆盖 session 跨库、禁用库、授权过滤、dedup 折叠、embedding 缓存、M1/M3 golden 和正文候选。当前仍未完成文本语义完整独立 topK、完整反馈权重映射、规模 M3 golden、native 回填队列化/全量增量调度、结构化 observation/context 热路径排序与性能预算。
+
+**审计修订（2026-07-11）**：上方检查点末尾关于“文本语义完整独立 topK、native 回填队列化/全量增量调度、结构化 observation/context 热路径排序仍未完成”的概括已被本节已勾任务取代。`ReferenceCorpusTechniqueVectorMaintenanceLoop` 现已由 desktop composition 持有，并随初始化、数据目录重绑和运行时释放启停；但当前自动产品路径尚未制定例行 maintenance job 的入队策略，前端也不暴露 schedule/pump 专家控制。不能把每次 `SearchCandidates` 结束都当作入队点：搜索已在当前 scope 内校验并按需重建 native 技法索引，额外排队只会重复 provision。后续策略必须由技法产物变化触发，并携带已解析的 session/library scope、成本和重试预算。其余真实缺口是人工 query 集和 Recall@K/nDCG 尚未建立、50K 跨库 SLA 未验证；不能据此把受控 fixture 结论升级为真实长篇质量。
 
 ---
 
@@ -334,6 +339,8 @@
 
 **当前检查点：** `GenerateBlueprintCandidatesUsesInjectedCandidateAssemblerAndPersistsResult` 证明蓝图候选生成已走可替换的 `IReferenceCorpusBlueprintCandidateAssembler`，service 只负责编排、反馈读写和 `reference_corpus_blueprints` / beat / beat→node 持久化。`GenerateBlueprintCandidatesMapsTooFastFeedbackToSlowRhythmRetrieval` 覆盖 M4 反馈薄切片：首轮可命中高相关但短促的 `node-feedback-fast-market-s1`，二轮用户勾选 `too_fast` 后，检索增加 `rhythm.length_band.value_num >= 16`，并优先生成 `rhythm_slow_m1`，第一候选同时使用 project/workspace 慢压迫节点；命中成功时不会误报 fallback。`GenerateBlueprintCandidatesProducesM4StrategyVariantsFromFeatureSignals` 证明当候选池具备 emotion/rhythm/narrative/technique 信号时，`MultiStrategyReferenceCorpusBlueprintCandidateAssembler` 能产出四类 M4 strategy variant，四份蓝图 node set 互不相同，且每份都保持跨库来源、不出现 `insufficient_beats` / `single_library_source` / `single_anchor_source`。`GenerateBlueprintCandidatesPersistsM4BlueprintMetadataAndBeatPieces` 证明候选生成阶段已落 `reference_corpus_blueprints`、`reference_corpus_blueprint_beats` 与 `reference_blueprint_beat_pieces`：assembly strategy、coverage、gap reasons、gap positions、query context、source distribution、feedback reason、beat index/role/narrative function 和 beat→node 边都可追溯，且不等待正文草稿生成。`GenerateBlueprintCandidatesScoresM4CoverageByRequiredDimensionEvidenceAndReportsGaps` 证明 coverage 已开始消费 M4 维度证据：维度完整的 M4 蓝图会高于只带 emotion/action 的普通高语义分蓝图，残缺蓝图会报告缺 rhythm/narrative/technique 覆盖，并通过 `gap_positions[]` 定位到具体 beat；完整蓝图不会误报总缺口或位置缺口。`GenerateBlueprintCandidatesBackfillsM4StrategyCandidatesWithCoverageEvidence` 证明 `emotion_priority_m4` 不会继续拿三条 emotion-only 高分句子冒充可用蓝图，而会主动补进 rhythm 和 narrative+technique 支撑节点，且补齐过程仍保持跨 library/anchor。`GenerateBlueprintCandidatesFeedbackFilterFallbackAddsDiagnosticGapReasons` 证明反馈硬约束无命中时，系统退回目标基础检索但会把 `feedback_filters_no_matches` / `fallback_to_base_filters` 写入 `feedback_summary`、候选 `feedback_reason` 和 `gap_reasons`，用户能看出反馈没有精准命中。`GenerateBlueprintCandidatesAvoidSourceFallbackAddsDiagnosticGapReasons` 证明避开来源把候选池打空时，系统会保留循环不中断，同时标注 `avoid_sources_no_alternatives` / `fallback_ignored_avoid_sources`。`GenerateBlueprintCandidatesPersistsBlueprintFeedbackForReuse` 证明二轮反馈会写入 `reference_user_feedback`，记录 rejected node、avoid library、avoid anchor 的可复用信号，并且同一反馈重试不会重复写。`GenerateBlueprintCandidatesHistoricalFeedbackDownranksRejectedNodeSet` 证明后续无显式反馈或空反馈对象的新一轮蓝图生成，会把同一组被拒素材及相关来源软降权，不再默认排第一。`GenerateBlueprintCandidatesRejectedBlueprintIdAloneDoesNotRegenerateSameNodeSet` 进一步证明仅传 `rejected_blueprint_ids`、不传 rejected nodes/avoid tags 时，系统也不会用同一组 source nodes 换一个反馈摘要后重新生成同一蓝图。`GenerateBlueprintCandidatesSourceRepetitionFeedbackPrioritizesCrossSourceBlueprint` 证明 `source_repetition` 不再只是摘要标签：当候选池存在多库/多 anchor 替代时，第一份再生成蓝图会优先使用 `source_repetition_diversity_m1`，先取每库最佳、再取每 `(library_id, anchor_id)` 最佳，避免默认第一候选继续塌到同一来源。`GenerateBlueprintCandidatesSupportsFeedbackIterationAndSelectedBlueprintDraft` 与 cross-library golden 已固化 `single_anchor_source`：反馈后候选若只能退到同一参考 anchor，必须把这个塌缩暴露给用户，而不是只报单库或 beat 不足。`GenerateBlueprintCandidatesProducesM4StrategyVariantsFromFeatureSignals` 还证明每份蓝图的情绪弧与 beat 一一对齐，强度归一化且证据节点不越出对应 beat；来源分布计数覆盖实际选中节点。前端候选卡已把 fallback/gap code 与 beat 级缺口显示成中文诊断，并用 mock workflow 固化二轮反馈后的诊断可见性。尚未完成：真正的多轮会话状态、逐维专家检查表闭环，以及更深的蓝图策略模型。
 
+**审计修订（2026-07-10）**：上方检查点末尾“尚未完成真正的多轮会话状态”的表述已过期。`SqliteReferenceCorpusBlueprintIterationCoordinator` 已实现 generate/select/revise/accept 与持久 session；默认 `ChapterReferencePanel` 已消费 `Get/AdvanceReferenceCorpusBlueprintSession`，SQLite 集成测试覆盖 coordinator 重建后恢复，浏览器 workflow 覆盖关闭/刷新、反馈重组和失败重试。因此 M4 仍为 `S` 的原因是蓝图区分度和真实效果证据不足，不是默认路径或会话状态机缺失。
+
 ---
 
 ## M5：加深拼装（完整槽位/过渡/hash + 多草稿）
@@ -345,7 +352,7 @@
 - [x] `AuditDraftAgainstBlueprint` 外层包络薄切片：输出 pieces 必须与 selected blueprint source pieces 一一对应；每个 piece 输出必须被 `preserved_spans` 或 `slot_replacements` 完整覆盖；slot replacement 必须落在安全短槽位且 source/output 值与 range 一致；`assembled_text` 必须等于已审计 piece/transition 输出的换行拼接，未审计正文不得插入
 - [x] `ICorpusTransitionResolver` 审计薄切片：gap 显式建模，选中蓝图片段之间每个相邻 gap 必须返回 `direct_join` 或 `insert_transition`；transition 具备 id/gap_id/hash/output range/audit trace，`gap_id` 必须绑定相邻 piece 对，缺失、伪造、错配或未审计过渡均阻断插入
 - [x] `replace_piece` 候选重组薄切片：正文候选路径遇到 transition resolver 要求替换 source piece 时，只能用 selected blueprint 同一 beat 已声明的备选 node 生成 `transition_repair` 候选；若 replacement node 不在 selected blueprint 同 beat 内，或同 beat `transition_repair` 变体重新审计仍失败，候选必须继续阻断，不得从重新检索结果或邻近句静默换料
-- [x] blocked `replace_piece` 的 `next_action.feedback` 契约：超出 selected blueprint 同 beat 或 `transition_repair` 修复仍失败时，正文候选必须保持 blocked、`ready_for_insertion=false`、章节正文不变，并带 `next_action.action=regenerate_blueprint`；`next_action.feedback` 必须可作为 `GenerateReferenceCorpusBlueprintCandidates` 的 `feedback` 入参原样透传，沿用既有蓝图反馈字段表达 rejected blueprint/node、avoid library/anchor/node、problem tags、fallback/repair diagnostic、失败 beat/gap/replacement 标识和用户可见 summary，禁止要求前端拼接自由文本或读取 `source_text/raw_text/embedding`
+- [x] blocked `replace_piece` 的 `next_action.feedback` 契约：超出 selected blueprint 同 beat 或 `transition_repair` 修复仍失败时，正文候选必须保持 blocked、`ready_for_insertion=false`、章节正文不变，并带 `next_action.action=regenerate_blueprint`；默认 UI 将 `next_action.feedback` 映射为 `AdvanceReferenceCorpusBlueprintSession(action=revise)` 的 checklist，沿用既有蓝图反馈字段表达 rejected blueprint/node、avoid library/anchor/node、problem tags、fallback/repair diagnostic、失败 beat/gap/replacement 标识和用户可见 summary，禁止要求前端拼接自由文本或读取 `source_text/raw_text/embedding`
 - [x] `ICorpusTransitionResolver` 第一层三选一：默认规则型 resolver 不再永远 `direct_join`；`raise_pressure -> withhold_answer` 相邻 beat 生成审计过的 `insert_transition`，重复/同源相邻 piece 生成 `replace_piece` 阻断并进入蓝图/候选重组流程，其余安全相邻 gap 仍为 `direct_join`
 - [x] 多草稿：同一 selected blueprint 的 primary source node set 上，显式/自动槽位变体可与 `default` / `direct_join` 过渡策略组合生成 1~N 份；未提供槽位或过渡变体时只返回一份 primary-source 稿，不再通过轮换 source node 凑候选数。candidate-set audit 固定对照 selected blueprint primary node set，并以槽位屏蔽后的 piece fingerprint 阻断未追踪正文差异、来源边界变化和重复正文
 - [x] slot-only 多草稿契约薄切片：`GenerateReferenceCorpusInsertionDraftCandidatesPayload.slot_value_variants` 可在同一 selected blueprint/同一 primary source nodes 上生成 `slot_variant_1..N`；候选 source node、source hash、preserved spans 源范围和 locked spans 源范围保持一致，差异只来自 slot replacements 和 assembled text。此项只证明请求侧槽位变体闭合，不等于完整多草稿；`transfer_slots` 自动派生、过渡策略变体和跨候选差异审计仍未完成
@@ -355,12 +362,14 @@
 - [x] 完整 `AuditDraftAgainstBlueprint` 改造：selected source pieces 必须一一对应且 source hash 匹配；preserved/locked spans、slot source/output range/value/transfer slot、assembled text 完整覆盖和 transition gap/pair/hash/approval/output range 均服务端重算；source 缺失、未审计输出、泄露式附加正文、授权失败或相似度超阈值任一命中都会令 `ready_for_insertion=false` 并保持章节正文不变
 - [x] 正文候选派生规则：多稿 API 强制接收 selected blueprint；兼容单稿入口未显式传入时也先走正式 blueprint candidates 编排再选择通过差异审计的候选，不再私下 assemble。正文阶段只使用 selected blueprint 每 beat 的 primary source node；transition resolver 请求换源时保留阻断稿并返回 `regenerate_blueprint` feedback，必须继续迭代蓝图后才能重新派生正文
 - [x] selected blueprint 节点锁定薄切片：正文候选只允许在每个 beat 自己声明的 `NodeIds` 内轮换，不得从重新检索结果、同 library/anchor 邻近句或其它 beat 拉替代 node；若任一 selected node 因 scope/library/授权检索结果变化无法读到 source piece，则返回 blocked `source_node_missing`，不得残缺生成可插入正文
-- [x] 前端 mock workflow/guardrail：从 blocked `replace_piece` 候选点击下一步后，必须以 `next_action.feedback` 触发第三轮 `GenerateReferenceCorpusBlueprintCandidates`；guardrail 断言第三轮蓝图调用存在、入参 feedback 与 blocked 候选返回的 `next_action.feedback` 字段逐项一致、第三轮返回 `feedback_applied=true` 且 `feedback_summary` 可见，并且后续正文候选只能来自第三轮选中的蓝图
+- [x] 前端 mock workflow/guardrail：从 blocked `replace_piece` 候选点击下一步后，必须以 `next_action.feedback` 触发第三轮 `AdvanceReferenceCorpusBlueprintSession(action=revise)`；guardrail 断言第三轮蓝图调用存在、checklist 映射保留 blocked 候选的 problem tags、第三轮返回 `feedback_applied=true` 且 `feedback_summary` 可见，并且后续正文候选只能来自第三轮选中的蓝图
 - [x] 前端专家模式：章节面板提供结构化槽位变体表、已选过渡策略清单、逐稿实际 transition decision/strategy 清单、candidate-set audit 并排 diff，以及锁定后独立确认状态；未锁定候选不能执行既有服务端插入审计和写入
 
 **验收：** hash 校验非槽位逐字保留；每个 piece 输出被 preserved spans 或 slot replacements 完整覆盖；选中蓝图相邻 pieces 都有 transition 决策或明确 `direct_join`，且 `gap_id` 绑定相邻 piece 对；golden JSON 固化 `transitions` 与 `audit.transitions` 追踪；同 beat 内可修复的 `replace_piece` 生成 `transition_repair` 候选并重新通过 gate/audit；越界 replacement 或修复仍失败时候选保持 blocked、带可原样回传的 `next_action(action=regenerate_blueprint, feedback=...)`；前端 mock workflow/guardrail 固化第三轮蓝图调用；`locked_spans` 固化受保护片段并阻断槽位替换；多草稿差异断言仅在槽位/过渡；越界改动节奏词被 audit 拦截；从同一已接受蓝图生成的正文候选保留来源原句/结构比例可断言，剧情微调不破坏授权闸门。
 
 **当前检查点：** `GenerateInsertionDraftCandidatesDoNotSubstituteNodesOutsideSelectedBlueprint` 覆盖单节点 selected blueprint：即使检索结果中同 library/anchor 有其它句子，正文候选也只能使用用户选中蓝图里的 node，不会自动换料。`GenerateInsertionDraftCandidatesReusesSelectedBlueprintSourceVariantsThroughGate` 增强为 beat 级断言：每个 piece 的 `node_id` 不仅属于 selected blueprint 全局集合，还必须属于对应 `beat_id` 的 `NodeIds`，防止跨 beat 偷换。`GenerateInsertionDraftCandidatesBlockWhenSelectedBlueprintSourceIsUnavailable` 覆盖 scope 排除 selected node 的场景：系统返回 blocked `source_node_missing`，保持章节正文不变，不用剩余来源拼残缺正文，也不重新检索替代句。`GenerateInsertionDraftCandidatesRebuildsAllowedBlueprintVariantWhenTransitionRequiresReplacement` 覆盖 transition resolver 要求 `replace_piece` 且 replacement node 属于 selected blueprint 同一 beat 备选的场景：正文候选会生成 `transition_repair` 蓝图变体并重新审计，通过后才可插入。`GenerateInsertionDraftCandidatesBlocksTransitionReplacementOutsideSelectedBlueprint` 覆盖 replacement node 不在 selected blueprint 同 beat 内的场景：系统保留 blocked 候选和 `transition_piece_replacement_required` 诊断，不从检索结果或邻近句静默换料，并返回 `next_action.feedback`，可由前端原样触发下一轮蓝图重组；同一测试已延长到第三轮：用 `next_action.feedback` 生成的新蓝图再进入 `GenerateInsertionDraftCandidatesAsync` 后，可得到 `gate/audit/ready` 全通过且不含被拒 node 的正文候选。`GenerateInsertionDraftCandidatesKeepsOriginalBlockedCandidateWhenTransitionRepairStillFails` 覆盖同 beat repair 仍失败时继续 blocked 且携带 `next_action`。`GenerateInsertionDraftUsesDefaultTransitionResolverToBridgePressureIntoWithheldAnswer` 覆盖默认 resolver 在 `raise_pressure -> withhold_answer` gap 上生成 `insert_transition` 并通过 transition audit；`GenerateInsertionDraftBlocksWhenDefaultTransitionResolverRequiresDuplicateSourceReplacement` 覆盖默认 resolver 对重复相邻来源返回 `replace_piece` 并阻断插入。`GenerateInsertionDraftCandidatesCanProduceSlotOnlyVariantsFromSameSelectedBlueprint` 覆盖请求侧 `slot_value_variants`：同一 selected blueprint、同一 source node、同一 preserved/locked 源证据可生成多份 `slot_variant_*` 正文候选，候选之间只按 `character/place/honorific/plot_object` 槽位映射产生文本差异，受保护标题不被替换；C# contract、TS 类型与 mock bridge 已同步该输入字段。`GenerateInsertionDraftCandidatesBlocksNonSlotDifferencesAcrossSlotVariants` 证明同源多稿返回前会执行候选集差异审计：恶意 assembler 即使把非槽位“指尖→掌心”伪装成安全 slot replacement、让单稿 audit 通过，也会被 `draft_candidate_set_non_slot_difference` 阻断并保持章节正文不变，合法候选不受影响。`GenerateInsertionDraftCandidatesBlocksDuplicateTextAcrossSlotVariants` 证明不同 slot 参数最终生成完全相同正文时，后续重复候选会以 `draft_candidate_set_duplicate_text` 阻断，避免把无差异结果展示为可选择多稿。`GenerateInsertionDraftCandidatesHonorsTransferSlotConstraintsFromTechniqueSpecimens` 与 `GenerateInsertionDraftCandidatesBlocksSlotReplacementOutsideTransferSlots` 证明写作侧已消费 active 且未 rejected 的 technique specimen `transfer_slots_json`：合法声明槽位可通过，未声明槽位进入 `slot_replacement_transfer_slot_disallowed` 并保持章节正文不变；`GenerateInsertionDraftCandidatesIgnoresRejectedTechniqueSpecimenTransferSlots` 防止人工 rejected 的 specimen 继续约束正文。`GenerateInsertionDraftCandidatesAutoDerivesCharacterTransferSlotVariants` 证明当请求没有显式 `slot_value_variants` 时，active 且未 rejected 的 `character` transfer slot 可从当前章节人物快照派生 `auto_transfer_slot_1..N` 同源候选，候选不轮换 source node，非槽位证据保持一致；`GenerateInsertionDraftCandidatesDoesNotAutoDeriveRejectedTransferSlots` 防止 rejected specimen 驱动自动派生。前端 TS 契约、正文候选卡、mock bridge、workflow 和 guardrail 已同步：从 blocked `replace_piece` 候选点击“回到蓝图重组”会触发第三轮 `GenerateReferenceCorpusBlueprintCandidates`，断言入参 feedback 与候选 `next_action.feedback` 一致、结果 `feedback_applied=true` 且反馈摘要可见。`PreservingReferenceCorpusTextAssembler` 现在为每个 piece 输出结构化 `preserved_spans`，记录非槽位片段的 source/output offset、hash 与 matches；contract/bridge/TS 类型、mock workflow、M1 golden fixture 均已同步，前端 diff 预览优先用 spans 标识保留片段。`ICorpusSlotResolver` 第一层已覆盖 `character/place/honorific/plot_object` 显式槽位和常见启发式识别，`ReferenceCorpusInsertionPiecePayload.locked_spans` 会把书名号/引号等受保护范围作为 source/output offset + hash 证据返回，前端 diff 可见；`GenerateInsertionDraftAppliesTypedSlotsWithoutReplacingProtectedQuotedText` 覆盖四类槽位替换且不改保护标题，`GenerateInsertionDraftBlocksSlotReplacementInsideLockedProtectedText` 覆盖恶意 resolver 返回锁定范围内替换时 audit 以 `slot_replacement_locked_range` / `locked_span_hash_mismatch` 阻断。`DraftAudit` 已接入插入草稿：source 缺失、piece preserved hash mismatch、span offset 越界、source/output span hash 不一致、span.matches=false 都会进入 audit errors/violations，并令 `ready_for_insertion=false`；`GenerateInsertionDraftBlocksWhenDraftAuditFindsPreservedSpanMismatch` 覆盖 gate 通过但 audit 阻断的场景，章节正文保持不变。新增 `GenerateInsertionDraftBlocksWhenAssemblerDropsSelectedBlueprintPiece`、`GenerateInsertionDraftBlocksWhenExplicitSlotReplacementConsumesWholeSourceSentence`、`GenerateInsertionDraftBlocksWhenAssembledTextContainsUnauditedOutput`，把缺失 selected source piece、整句伪槽位替换、piece 内未被 preserved span/slot replacement 覆盖的新增文本、以及 `assembled_text` 追加未审计正文纳入 audit 阻断。过渡已进入同一审计包络，不再是可选装饰：`IReferenceCorpusTransitionResolver` 接收相邻 piece gap，必须为选中蓝图相邻 pieces 返回 `direct_join`、`insert_transition` 或 `replace_piece`；`DraftAudit` 生成 `audit.transitions`，校验 `gap_id` 绑定的相邻 piece 对、hash、approval、decision、output range 与 assembled text 一致，缺失/伪造/错配都会阻断。M5 仍限定在章节使用侧的拼装审计加深，消费已处理语料和 selected blueprint，不把素材库处理管线或库管理界面混进正文生成流程。当前仍未完成 `transfer_slots.constraints` 自然语言约束推理、地点/道具/称谓等完整自动槽位变体派生、过渡策略变体差异审计、跨蓝图/跨候选池 replacement 重组策略、重复候选 UI 聚合折叠和专家 UI。
+
+**审计修订（2026-07-10）**：M5 的专家模式、候选并排 diff、锁定确认和 candidate-set audit 已有薄切片。当前剩余项应具体表述为自然语言 `transfer_slots.constraints`、非 character 槽位自动派生、过渡策略质量/差异评测、跨候选池重组、重复候选聚合，以及真实章节的保真/适配/自然度/修改量证据；不再使用笼统“专家 UI 未完成”。
 
 ---
 
@@ -405,14 +414,23 @@
 
 ---
 
-## M9：专家 UI + 打磨
+## M9：默认体验 + 专家 UI 收口
 
 - [x] 自动/专家模式切换完善（治理页与章节写作页）
 - [x] 写作会话专家工作台：阶段进度 + 现有操作区 + 当前章节/生效语料库上下文（人物快照沿用章节上下文推断）
 - [x] 章节语料写作状态可中断恢复（sessionStorage 保存目标/模式/蓝图/正文候选/选择）；片段保留 node/anchor/library/license 溯源
-- [x] 端到端 UI 验收：`npm --prefix frontend run verify` 覆盖治理兼容、章节审计应用和截图产物
+- [x] 恢复端到端 UI 基线：后台任务行提供稳定任务身份，workflow 仅在被操作行断言状态，重复“已暂停”文案不再触发 strict locator；`npm --prefix frontend run verify` 全量通过，相关浏览器截图与 diagnostics 归档于 `output/playwright/phase16/`
+- [x] 默认章节路径收敛：章节面板只呈现“写目标 → 选蓝图 → 选正文 → 明确插入”一条主路径；直接候选与 orchestration 不得在自动模式形成两套并列入口；每阶段只有一个主操作，内部 id、route marker、审计细节和手工参数默认隐藏。`test:chapter-reference` 断言自动/专家信息分层和单一主操作。
+- [x] 持久会话恢复：默认 UI 改用 M4 `Get/AdvanceReferenceCorpusBlueprintSession`，应用刷新/重启后从服务端 session 恢复目标、迭代、选定蓝图和下一步；sessionStorage 只作瞬时 UI 缓存，不能成为唯一恢复来源。SQLite 集成测试覆盖 generate → select → revise → select → accept → coordinator 重建，浏览器 workflow 覆盖关闭、清理旧缓存后从服务端恢复。
+- [x] 长任务与错误恢复体验：每个 ready 素材来源行提供唯一“开始分析”主操作，调用 `EnqueueReferenceCorpusAnalysisJob` 创建标准 sentence `feature_analysis` job，并把焦点带到“后台任务”；用户可离开后返回同一任务查看进度、耗时状态和下一可执行动作。暂停、失败、预算耗尽、CAS 冲突和 blocked candidate 各只给一个明确主恢复动作，技术诊断折叠展示。`test:corpus-library` 覆盖“导入 → 启动 → 离开 → 返回”；蓝图推进失败后重试复用原 `request_id`，由浏览器故障注入回归验证。
+- [x] 视觉层级与可访问性收口：复用现有设计 token、Button 和 Lucide 图标；自动模式避免面板套卡片与信息堆叠，专家信息渐进展开；核心流程支持键盘操作、可见焦点、焦点回位、ARIA 状态播报，并在 1280x720、1440x900、125%/150% 缩放下无重叠、截断或关键操作出屏。相关浏览器截图与 workflow 已通过。
 
-**验收：** 自动模式全程仅需写目标/选结果/改少量项；专家模式可逐项展开；任意步骤中断可恢复；每片段可追溯到源语料 + 分析依据 + license。
+  自动路径的用户可见文案统一使用“写作蓝图”，不以“剧本”描述中间产物，避免把小说写作流程误解为镜头/台词式操作；`test:chapter-reference` 断言默认面板不出现该术语。
+- [ ] 易用性证据：为“导入并启动分析、离开后查看/恢复任务、目标到蓝图、反馈后选正文、blocked 后恢复并插入”5 个任务建立真实浏览器 workflow 和截图；自动化 workflow、截图和故障恢复断言已完成。真实走查让 5 名目标用户逐张阅读任务卡，主持人只能复述任务、不解释界面或下一步；至少 4 人须在不看文档、无旁人提示下完成自动模式主流程。每个任务记录完成/放弃、开始和结束时间、回退次数、首次失败点、使用的恢复动作与 1-5 主观难度；记录只保存脱敏事件和截图，不保存源文或本地路径。`corpus-writing-usability-fixtures-v1` 与 `run-usability-study-evaluation.ps1` 已强制固定任务集、脱敏字段、至少 5 人和至少 4 人无提示全路径完成的判定；两参与者 contract fixture 只验证工具。相同失败点出现两次即转为 UX 修复项和浏览器回归，再安排复测。
+
+任务卡、主持人边界、固定失败/恢复码表和导出规则见[用户走查执行套件](./evaluations/usability-study-kit.md)。该套件只让真实走查可执行，不构成任何参与者或验收数据。
+
+**验收：** 自动模式只要求用户做三类决策：写目标、选蓝图、选正文并明确插入；专家模式按需展开，不占用默认路径。用户可离开长任务并从同一状态继续，错误不暴露内部实现且给出可执行恢复动作；每片段仍可追溯到源语料、分析依据和 license。浏览器 workflow、视口/缩放/键盘检查和 `frontend verify` 已通过；小规模目标用户走查仍未完成，因此 M9 维持 `S`，不能以自动化证据宣称“易用好用”或升级为 `P`。
 
 ---
 

@@ -38,7 +38,10 @@ dotnet test Novelist.slnx --no-restore -v minimal    # .NET unit + integration t
 npm --prefix frontend run lint                        # ESLint
 npm --prefix frontend run verify                      # build + lint + phase16 + reference-anchor + smoke tests
 npm --prefix frontend run test:app                    # frontend smoke suite (Playwright mock workflow)
+npm --prefix frontend run test:app:usability          # app usability workflow
 npm --prefix frontend run test:phase16                # corpus-library + chapter-reference suites
+npm --prefix frontend run test:corpus-library         # focused corpus-library workflow
+npm --prefix frontend run test:chapter-reference      # focused chapter-reference workflow
 npm --prefix frontend run test:reference-anchor       # reference anchor workflow
 ```
 
@@ -79,9 +82,9 @@ The app uses a **Photino bridge** as the IPC layer between .NET and the React fr
 - **ONNX Runtime**: local embeddings via `bge-small-zh-v1.5` int8 (512-dim, CLS pooling + L2 norm); requires model placed at `build/runtime/models/{model.onnx,vocab.txt}`. Online Embeddings API mode has no such requirement
 - **MinVer**: version derived from Git tags (`vX.Y.Z`); no manual version bumps needed
 
-### Data flow for reference anchoring
+### Reference anchoring and corpus-driven writing
 
-Reference anchoring is the core semantic search feature. The `SqliteReferenceAnchorService` in `Novelist.Infrastructure` stores embeddings in sqlite-vec and resolves chapter-level reference material. See `docs/reference-anchor-layer-plan.md` for the technical baseline.
+`SqliteReferenceAnchorService` owns the established material/provenance boundary; corpus-driven writing adds cross-library retrieval, multi-blueprint selection, source-locked candidates, and the analysis scheduler. Use `docs/reference-anchor-layer-plan.md` for the historical technical baseline and `docs/corpus-driven-writing/development-plan.md` plus `tasks.md` for the active plan/status. Preserve the evidence tiers: 1K job-store micro-benchmark, required 50K full pipeline (already passed), optional 2M long run. M9 automated default-path, accessibility, and recovery closure is complete; real-user validation remains open, and expert-feature expansion is out of scope.
 
 ## Coding Conventions
 
@@ -101,4 +104,4 @@ Concise English subjects with typed prefixes: `feat:`, `fix:`, `test:`, `docs:`,
 - API keys, local model paths, and user data must not enter git
 - Preserve `SafePath`, approval-flow, SSRF checks, and sandbox checks when touching file editing, web tools, or agent tool code
 - Migration operations must copy-first and leave the source untouched; write a manifest
-- Runtime assets (`build/runtime/`) are gitignored — never commit them
+- Runtime binaries, downloaded models, and machine-specific overrides under `build/runtime/` must stay untracked; preserve explicitly approved tracked assets such as `build/runtime/models/vocab.txt`

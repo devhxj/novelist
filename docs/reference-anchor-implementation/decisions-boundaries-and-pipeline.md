@@ -250,7 +250,8 @@ context_pack
   -> anti_screenplay_check
   -> deterministic_review
   -> optional_llm_critique
-  -> user_or_agent_revision
+  -> proposed_revision
+  -> user_approved_revision
   -> review_passed
   -> explicit_approval
   -> approved_execution_contract
@@ -286,7 +287,7 @@ State transitions must be explicit:
 | revise reviewed field | any non-superseded state | field is part of reviewed contract | approval invalidated; material links stale; requires re-review |
 | chapter plan changes | any non-superseded state | `source_plan_hash` differs | `stale` until regenerated or explicitly revised |
 
-`review_passed` is intentionally not enough to generate prose. It says the artifact is structurally acceptable; `approved` says the user or agent has accepted that exact artifact as the chapter execution contract. Material binding and draft generation must check the frozen hash rather than only checking a status string.
+`review_passed` is intentionally not enough to generate prose. It says the artifact is structurally acceptable; `approved` says the user has explicitly accepted that exact artifact as the chapter execution contract. An agent may propose a revision but cannot cross this approval boundary. Material binding and draft generation must check the frozen hash rather than only checking a status string.
 
 Context pack inputs:
 

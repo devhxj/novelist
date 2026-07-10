@@ -127,12 +127,15 @@ var referenceCorpusAnalysisWorker = new ReferenceCorpusAnalysisWorker(
 new ReferenceCorpusDatabasePathResolver(options),
 new ReferenceCorpusChatCompletionFeatureFamilyAnalyzer(settingsService, chatCompletionClient),
 new ReferenceCorpusChatCompletionTechniqueSpecimenAnalyzer(settingsService, chatCompletionClient));
+var referenceCorpusTechniqueVectorMaintenanceLoop = new ReferenceCorpusTechniqueVectorMaintenanceLoop(
+referenceCorpusService);
  var initializationService = new CoordinatedAppInitializationService(
  new FileSystemAppInitializationService(
  options,
  importRecovery: novelImportRecoveryService,
  referenceAnchorRecovery: referenceAnchorService),
- referenceCorpusAnalysisWorker);
+ referenceCorpusAnalysisWorker,
+ referenceCorpusTechniqueVectorMaintenanceLoop);
  var referenceCorpusGovernanceService = new SqliteReferenceCorpusGovernanceService(options);
         var referenceStyleProfileService = new SqliteReferenceStyleProfileService(
             options,
@@ -221,20 +224,29 @@ new ReferenceCorpusChatCompletionTechniqueSpecimenAnalyzer(settingsService, chat
 return new DesktopBridgeRuntime(
 new PhotinoWebMessageBridge(dispatcher, window),
  referenceCorpusAnalysisWorker,
+ referenceCorpusTechniqueVectorMaintenanceLoop,
  initializationService);
 }
 
  internal sealed record DesktopBridgeRuntime(
 PhotinoWebMessageBridge Bridge,
  ReferenceCorpusAnalysisWorker AnalysisWorker,
+ ReferenceCorpusTechniqueVectorMaintenanceLoop TechniqueVectorMaintenanceLoop,
  CoordinatedAppInitializationService InitializationService) : IAsyncDisposable
 {
 public ValueTask StartAsync(CancellationToken cancellationToken = default) =>
- InitializationService.StartWorkerIfInitializedAsync(cancellationToken);
+ InitializationService.StartBackgroundServicesIfInitializedAsync(cancellationToken);
 
  public async ValueTask DisposeAsync()
  {
+ try
+ {
+ await TechniqueVectorMaintenanceLoop.DisposeAsync();
+ }
+ finally
+ {
  await AnalysisWorker.DisposeAsync();
+ }
  }
  }
 

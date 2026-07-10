@@ -267,6 +267,11 @@ function isFailedAnchorStatus(status: string): boolean {
   return status.startsWith('failed_') || status === 'cancelled'
 }
 
+function createCorpusAnalysisRunId(anchorId: number): string {
+  const suffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `analysis:feature:${anchorId}:${suffix}`
+}
+
 function optionalManifestText(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
@@ -1063,6 +1068,40 @@ window.setTimeout(() => setFocusedEvidenceAnchorId(current => current === anchor
       }
       setAnchorForm(EMPTY_ANCHOR_FORM)
     }
+  }
+
+  async function startCorpusAnalysis(anchor: reference.Anchor) {
+    if (isFailedAnchorStatus(anchor.status)) {
+      setError('该来源尚未准备完成，请先查看处理记录并重建来源。')
+      return
+    }
+
+    const job = await run(() => app.EnqueueReferenceCorpusAnalysisJob({
+      run_id: createCorpusAnalysisRunId(anchor.anchor_id),
+      novel_id: novelId,
+      anchor_id: anchor.anchor_id,
+      job_kind: 'feature_analysis',
+      scope: 'sentence',
+      priority_class: 'normal',
+      priority_value: 10,
+      token_budget: null,
+      max_attempts: 3,
+      min_observation_confidence: 0.7,
+    }), `已开始分析「${anchor.title}」，可以离开此页，稍后在“后台任务”查看进度。`, {
+      fallbackMessage: '启动素材分析失败',
+      operation: 'EnqueueReferenceCorpusAnalysisJob',
+      bridgeMethod: 'EnqueueReferenceCorpusAnalysisJob',
+      detail: {
+        anchor_id: anchor.anchor_id,
+        job_kind: 'feature_analysis',
+        scope: 'sentence',
+      },
+    })
+
+    if (!job) return
+
+    setActiveCorpusTab('analysis_jobs')
+    window.requestAnimationFrame(() => document.getElementById('corpus-tab-analysis_jobs')?.focus())
   }
 
   async function importLibraryPack() {
@@ -2750,6 +2789,19 @@ window.setTimeout(() => setFocusedEvidenceAnchorId(current => current === anchor
                             </span>
                           </label>
                           <span className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              data-testid="reference-anchor-start-analysis-button"
+                              onClick={() => {
+                                void startCorpusAnalysis(anchor)
+                              }}
+                              disabled={loading || isFailedAnchorStatus(anchor.status)}
+                              className="inline-flex items-center gap-1 rounded bg-primary px-2 py-1 text-[11px] leading-none text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                              title={isFailedAnchorStatus(anchor.status) ? '来源未准备完成，先查看处理记录' : '开始后台分析'}
+                              aria-label={`开始分析 ${anchor.title}`}
+                            >
+                              <FileSearch className="h-3.5 w-3.5" />开始分析
+                            </button>
                             <button
                               type="button"
                               onClick={() => {

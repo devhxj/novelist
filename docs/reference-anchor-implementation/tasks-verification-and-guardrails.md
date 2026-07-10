@@ -2,6 +2,8 @@
 
 [Back to implementation index](../reference-anchor-implementation-plan.md) | [Back to tasks index](tasks-and-verification.md).
 
+> **Status boundary (2026-07-10):** “Default orchestration” evidence in this history refers to the older reference main panel unless a checkpoint explicitly names `ChapterReferencePanel`. It must not be used alone as proof that the current editor default path is unified or restart-safe; corpus-driven writing M9 supplies the automated evidence, while real-user validation remains open.
+
 ## Required Test Matrix
 
 Run after backend phases:
@@ -129,7 +131,7 @@ tests/Novelist.IntegrationTests/ReferenceAnchoredDraftBridgeTests.cs
 - Stale blueprint UX: resolved for the current implementation. Preserve stale blueprints read-only for comparison, keep them visible, disable review/approval/revision/material binding/candidate generation, and show a regeneration prompt.
 - Development workflow: resolved as explicit frontend build/Vite steps for faster backend-only loops.
 - Phase 10 runtime verification: resolved as layered coverage. Playwright mock-bridge tests own the full frontend workflow and screenshot/DOM state matrix. .NET integration tests own bridge/service behavior and production composition. Real Photino verification is a minimal runtime smoke, not a manual full-workflow requirement.
-- Advanced mode boundary: resolved for the current frontend surface. The reference panel defaults to the orchestration-first flow; manual material search and manual blueprint generate/revise/review/approve/bind/draft controls are hidden until `高级模式` is opened, and the Playwright reference workflow asserts both the hidden default and the advanced manual path.
+- Advanced mode boundary: this records the historical Phase 11 frontend surface. The current default chapter panel uses the persistent blueprint session and exposes the compact target → blueprint → draft → insert path; manual material search and manual blueprint generate/revise/review/approve/bind/draft controls remain expert-only, and the browser workflows assert both information layers.
 
 ## Phase 11 Automation Decisions Closed
 

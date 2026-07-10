@@ -25,6 +25,8 @@ public sealed class ReferenceCorpusTechniqueVectorMaintenanceLoop : IAsyncDispos
  if (_idleDelay <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(idleDelay));
  }
 
+ public bool IsRunning => _loop is { IsCompleted: false };
+
  public async ValueTask StartAsync(CancellationToken cancellationToken = default)
  {
  await _gate.WaitAsync(cancellationToken);

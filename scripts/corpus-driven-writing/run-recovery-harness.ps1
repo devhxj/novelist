@@ -1,5 +1,6 @@
 param(
  [int]$Rounds = 2,
+ [int]$RuntimeSamples = 30,
  [string]$Configuration = "Debug",
  [string]$Output = "build/tmp/corpus-driven-writing/recovery-metrics.json",
  [int]$CheckpointTimeoutSeconds = 30
@@ -73,15 +74,53 @@ try {
  Write-Output ("recovery round={0} point={1} passed={2} recovery_ms={3:N2}" -f $round, $point, $result.passed, $result.recovery_ms)
  }
  }
+
+ if ($RuntimeSamples -lt 1) { throw "RuntimeSamples must be at least 1." }
+ $controlRoot = Join-Path $workRoot "runtime-control"
+ $controlMetrics = Join-Path $workRoot "runtime-control-metrics.json"
+ $controlStdout = Join-Path $workRoot "runtime-control.stdout.json"
+ $controlStderr = Join-Path $workRoot "runtime-control.stderr.log"
+ $controlArgs = @(
+ $hostDll, "runtime-control", "--root", $controlRoot,
+ "--samples", $RuntimeSamples,
+ "--metrics-output", $controlMetrics
+ )
+ $controlProcess = Start-Process dotnet -ArgumentList $controlArgs -PassThru -Wait -WindowStyle Hidden -RedirectStandardOutput $controlStdout -RedirectStandardError $controlStderr
+ if ($controlProcess.ExitCode -ne 0) { throw "Runtime control harness failed. $(Get-Content $controlStderr -Raw)" }
+ if (-not (Test-Path -LiteralPath $controlMetrics)) { throw "Runtime control harness wrote no metrics. See $controlStderr" }
+ $runtimeControl = Get-Content -LiteralPath $controlMetrics -Raw | ConvertFrom-Json
+ if ($runtimeControl.schema_version -ne "corpus-m2-runtime-control-metrics-v1" -or -not $runtimeControl.passed) {
+ throw "Runtime control metrics failed. See $controlMetrics"
+ }
+
+ $staleRoot = Join-Path $workRoot "runtime-stale-lease"
+ $staleMetrics = Join-Path $workRoot "runtime-stale-lease-metrics.json"
+ $staleStdout = Join-Path $workRoot "runtime-stale-lease.stdout.json"
+ $staleStderr = Join-Path $workRoot "runtime-stale-lease.stderr.log"
+ $staleArgs = @(
+ $hostDll, "runtime-stale-lease", "--root", $staleRoot,
+ "--samples", $RuntimeSamples,
+ "--metrics-output", $staleMetrics
+ )
+ $staleProcess = Start-Process dotnet -ArgumentList $staleArgs -PassThru -Wait -WindowStyle Hidden -RedirectStandardOutput $staleStdout -RedirectStandardError $staleStderr
+ if ($staleProcess.ExitCode -ne 0) { throw "Runtime stale lease harness failed. $(Get-Content $staleStderr -Raw)" }
+ if (-not (Test-Path -LiteralPath $staleMetrics)) { throw "Runtime stale lease harness wrote no metrics. See $staleStderr" }
+ $runtimeStaleLease = Get-Content -LiteralPath $staleMetrics -Raw | ConvertFrom-Json
+ if ($runtimeStaleLease.schema_version -ne "corpus-m2-runtime-stale-lease-metrics-v1" -or -not $runtimeStaleLease.passed) {
+ throw "Runtime stale lease metrics failed. See $staleMetrics"
+ }
+
  $recoveryValues = @($results | ForEach-Object { [double]$_.recovery_ms } | Sort-Object)
  function Percentile([double[]]$Values, [double]$P) {
  if ($Values.Count -eq 0) { return 0 }
  $index = [math]::Max(0, [math]::Min($Values.Count - 1, [math]::Ceiling($P * $Values.Count) - 1))
  return $Values[$index]
  }
+ $checkpointPassed = @($results | Where-Object { -not $_.passed }).Count -eq 0
  $report = [ordered]@{
- schema_version = "corpus-m2-recovery-metrics-v1"
+ schema_version = "corpus-m2-recovery-metrics-v2"
  generated_at = [DateTimeOffset]::UtcNow.ToString("O")
+ checkpoint_recovery = [ordered]@{
  rounds = $Rounds
  fault_points = $points
  cases = $results
@@ -89,10 +128,18 @@ try {
  zero_duplicate_cases = @($results | Where-Object { $_.audit.duplicateOutputRows -eq 0 }).Count
  zero_loss_cases = @($results | Where-Object { $_.audit.outputRows -eq 1 -and $_.audit.succeededWorkItems -eq 1 }).Count
  exact_token_cases = @($results | Where-Object { $_.audit.tokensSpent -eq $_.audit.expectedTokensSpent -and $_.audit.tokensReserved -eq 0 }).Count
- passed = @($results | Where-Object { -not $_.passed }).Count -eq 0
+ passed = $checkpointPassed
+ }
+ runtime_wall_clock = [ordered]@{
+ samples_per_control = $RuntimeSamples
+ control = $runtimeControl
+ stale_lease = $runtimeStaleLease
+ }
+ passed = $checkpointPassed -and $runtimeControl.passed -and $runtimeStaleLease.passed
  }
  $report | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $outputPath -Encoding utf8
  if (-not $report.passed) { throw "Recovery harness failed. See $outputPath" }
+ Write-Output ("runtime pause p95_ms={0:N2} cancel p95_ms={1:N2} stale_reclaim p95_ms={2:N2}" -f $runtimeControl.pause.p95, $runtimeControl.cancel.p95, $runtimeStaleLease.reclaim_after_expiry_ms.p95)
  Write-Output "metrics=$outputPath"
 }
 finally {

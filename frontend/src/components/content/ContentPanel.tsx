@@ -93,6 +93,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
   const [isLoading, setIsLoading] = useState(false)
   const [saveError, setSaveError] = useState<SaveErrorState | null>(null)
   const [referencePanelOpen, setReferencePanelOpen] = useState(false)
+  const referencePanelTriggerRef = useRef<HTMLButtonElement | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
   const monacoRef = useRef<MonacoApi | null>(null)
@@ -720,6 +721,7 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
           {activeChapter && (
             <button
               type="button"
+              ref={referencePanelTriggerRef}
               onClick={() => setReferencePanelOpen(value => !value)}
               className={tabBtnClass(referencePanelOpen)}
               aria-pressed={referencePanelOpen}
@@ -819,7 +821,10 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
             onInsertCandidate={insertReferenceCandidate}
             getEditorSnapshot={getReferenceEditorSnapshot}
             onApplyChapterText={applyReferenceChapterText}
-            onClose={() => setReferencePanelOpen(false)}
+            onClose={() => {
+              setReferencePanelOpen(false)
+              window.requestAnimationFrame(() => referencePanelTriggerRef.current?.focus())
+            }}
           />
         )}
       </div>

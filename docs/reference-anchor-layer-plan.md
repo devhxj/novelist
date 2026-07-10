@@ -2,11 +2,11 @@
 
 ## Status
 
-Current technical baseline for the reference-anchor feature.
+Historical technical baseline for the reference-anchor feature and its non-negotiable provenance/approval boundaries.
 
-Implementation tracking lives in `docs/reference-anchor-implementation-plan.md` and its split companion files. Those files are the source of truth for phase status, schema details, bridge surface, tests, and open work.
+Reference-anchor implementation history lives in `docs/reference-anchor-implementation-plan.md` and its split companion files. Current milestone status and default-experience work live in `docs/corpus-driven-writing/development-plan.md` and `tasks.md`.
 
-Last updated: 2026-07-05.
+Status note updated: 2026-07-10.
 
 ## Product Shape
 
@@ -53,11 +53,24 @@ This remains an in-process desktop feature:
 - service interfaces live in `src/Novelist.Core/App/`;
 - SQLite implementations live in `src/Novelist.Infrastructure/App/`;
 - agent tools live in `src/Novelist.Agent/`;
-- React UI lives under `frontend/src/components/reference-anchor/`.
+- React UI spans `frontend/src/components/reference-anchor/` for corpus-library work and `frontend/src/components/reference-use/` for current-chapter reference use.
 
 Do not introduce ASP.NET Core, HTTP endpoints, or a separate service host for this feature.
 
-## Workflow
+## Current Default Chapter Experience
+
+The current M9 chapter UI intentionally exposes one short author-facing route:
+
+```text
+chapter goal
+  -> choose or revise a writing blueprint
+  -> preview a source-locked prose candidate
+  -> explicitly insert into the editor buffer
+```
+
+Retrieval, source binding, and deterministic audit run behind those steps. Internal ids, source-distribution diagnostics, and manual orchestration controls remain progressive expert detail; they are not parallel default entry points.
+
+## Service Orchestration Workflow
 
 Default low-intervention flow:
 
@@ -140,12 +153,12 @@ These rules should be enforced by tests and reviewed when changing contracts, st
 - agent tools can retrieve, adapt, audit, and propose but cannot mutate chapter text directly;
 - the workflow never calls `SaveContent` or inserts prose automatically.
 
-## Active Phase Direction
+## Implemented Direction And Current Gap
 
-Phase 10 closes runtime hardening with layered verification: Playwright mock-bridge tests cover the complete frontend workflow, .NET integration tests cover bridge/service behavior, and real Photino verification is a minimal runtime smoke.
+Phase 10 closed its runtime-hardening thin slice with layered verification: Playwright mock-bridge tests cover frontend workflows, .NET integration tests cover bridge/service behavior, and real Photino verification remains a minimal runtime smoke.
 
-Phase 11 builds the low-intervention orchestrator: one command should run safe stages automatically, persist status, resume after restart, and stop only for necessary human decisions.
+Phase 11 implemented the low-intervention orchestration and persistence skeleton. The newer corpus blueprint coordinator persists generate/revise/accept state, and the chapter default UI now consumes that persistent session; the older orchestration panel remains historical/expert context rather than the default-path claim.
 
-Phase 12 promotes the shared corpus model: reference sources and materials become workspace-level assets; AI retrieves relevant materials from the corpus by story context; per-novel binding becomes an auditable result of a run, not a manual prerequisite.
+Phase 12 established the shared-corpus thin slice: reference sources and materials can act as workspace-level assets, retrieval uses story context, and per-novel binding is auditable rather than a mandatory manual prerequisite.
 
-Use `docs/reference-anchor-implementation/tasks-phases-10-12.md` for the current acceptance criteria and verification matrix.
+Use `docs/reference-anchor-implementation/tasks-phases-10-12.md` for historical acceptance evidence and `docs/corpus-driven-writing/development-plan.md` for the active default-path, effect, scale, and usability gates.

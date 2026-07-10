@@ -42,6 +42,96 @@ Assert.Equal(1, await ScalarIntAsync("SELECT COUNT(*) FROM reference_feature_obs
 }
 
  [Fact]
+ public async Task PumpOnceProcessesTechniqueWorkItemFromCompletedFrozenFeatureDependency()
+ {
+ await SeedAsync();
+ var path = new FixedPathResolver(DatabasePath);
+ var scheduler = new SqliteReferenceCorpusAnalysisScheduler(path, new FixedSettingsService());
+ var feature = await scheduler.EnqueueAsync(new(
+ "worker-run-feature-dependency", 1, 101, ReferenceCorpusAnalysisJobKinds.FeatureAnalysis,
+ ReferenceCorpusNodeTypes.Sentence, ReferenceCorpusAnalysisPriorityClasses.Normal, 100, 1000),
+ CancellationToken.None);
+ var featureAnalyzer = new FrozenFeatureAnalyzer(tokensPerCall: 10);
+ var techniqueAnalyzer = new FrozenTechniqueAnalyzer(tokensPerCall: 19);
+ var featureWorker = new ReferenceCorpusAnalysisWorker(path, featureAnalyzer, new UnexpectedTechniqueAnalyzer(), "worker-feature-dependency");
+
+ Assert.True(await featureWorker.PumpOnceAsync(CancellationToken.None));
+ var completedFeature = await scheduler.GetAsync(new(feature.JobId), CancellationToken.None);
+ Assert.NotNull(completedFeature);
+ Assert.Equal(ReferenceCorpusAnalysisJobStatuses.Completed, completedFeature.Status);
+
+ var technique = await scheduler.EnqueueAsync(new(
+ "worker-run-technique-dependency", 1, 101, ReferenceCorpusAnalysisJobKinds.TechniqueSpecimen,
+ ReferenceCorpusNodeTypes.Sentence, ReferenceCorpusAnalysisPriorityClasses.Normal, 100, 1000,
+ DependencyJobId: feature.JobId), CancellationToken.None);
+ await ExecuteAsync("UPDATE reference_feature_observations SET review_state='rejected',value_text='changed live evidence';");
+ var paused = await scheduler.PauseAsync(new(technique.JobId, technique.Version), CancellationToken.None);
+ Assert.Equal(ReferenceCorpusAnalysisJobStatuses.Paused, paused.Status);
+ var restartedWorker = new ReferenceCorpusAnalysisWorker(path, new FrozenFeatureAnalyzer(10), techniqueAnalyzer, "worker-technique-restarted");
+ Assert.False(await restartedWorker.PumpOnceAsync(CancellationToken.None));
+ Assert.Empty(techniqueAnalyzer.Calls);
+ var resumed = await scheduler.ResumeAsync(new(paused.JobId, paused.Version), CancellationToken.None);
+ Assert.Equal(ReferenceCorpusAnalysisJobStatuses.Queued, resumed.Status);
+
+ Assert.True(await restartedWorker.PumpOnceAsync(CancellationToken.None));
+
+ var completedTechnique = await scheduler.GetAsync(new(technique.JobId), CancellationToken.None);
+ Assert.NotNull(completedTechnique);
+ Assert.Equal(ReferenceCorpusAnalysisJobStatuses.Completed, completedTechnique.Status);
+ Assert.Equal(1, completedTechnique.ProcessedWorkItems);
+ Assert.Equal(19, completedTechnique.TokensSpent);
+ var input = Assert.Single(techniqueAnalyzer.Calls);
+ Assert.Equal("冻结后台句子。", input.NodeText);
+ Assert.Single(input.Observations);
+ Assert.Equal(ReferenceCorpusFeatureFamilies.Syntax, input.Observations[0].FeatureFamily);
+ Assert.Equal("subject_predicate", input.Observations[0].ValueText);
+ Assert.Equal(1, await ScalarIntAsync("SELECT COUNT(*) FROM reference_technique_specimens;"));
+ }
+
+ [Fact]
+ public async Task TechniqueWorkItemRetriesAfterTransientProviderFailure()
+ {
+ await SeedAsync();
+ var path = new FixedPathResolver(DatabasePath);
+ var scheduler = new SqliteReferenceCorpusAnalysisScheduler(path, new FixedSettingsService());
+ var feature = await scheduler.EnqueueAsync(new(
+ "worker-run-feature-retry", 1, 101, ReferenceCorpusAnalysisJobKinds.FeatureAnalysis,
+ ReferenceCorpusNodeTypes.Sentence, ReferenceCorpusAnalysisPriorityClasses.Normal, 100, 1000),
+ CancellationToken.None);
+ var featureWorker = new ReferenceCorpusAnalysisWorker(path, new FrozenFeatureAnalyzer(10), new UnexpectedTechniqueAnalyzer(), "worker-feature-retry");
+ Assert.True(await featureWorker.PumpOnceAsync(CancellationToken.None));
+
+ var technique = await scheduler.EnqueueAsync(new(
+ "worker-run-technique-retry", 1, 101, ReferenceCorpusAnalysisJobKinds.TechniqueSpecimen,
+ ReferenceCorpusNodeTypes.Sentence, ReferenceCorpusAnalysisPriorityClasses.Normal, 100, 10_000,
+ MaxAttempts: 2, DependencyJobId: feature.JobId), CancellationToken.None);
+ var failingAnalyzer = new RetryableTechniqueAnalyzer();
+ var failingWorker = new ReferenceCorpusAnalysisWorker(path, new FrozenFeatureAnalyzer(10), failingAnalyzer, "worker-technique-retry");
+
+ Assert.True(await failingWorker.PumpOnceAsync(CancellationToken.None));
+ var retrying = await scheduler.GetAsync(new(technique.JobId), CancellationToken.None);
+ Assert.NotNull(retrying);
+ Assert.Equal(ReferenceCorpusAnalysisJobStatuses.RetryWait, retrying.Status);
+ Assert.Equal("provider_transient", retrying.ErrorCode);
+ Assert.Equal(1, retrying.FailureAttemptCount);
+ Assert.NotNull(retrying.NextAttemptAt);
+ Assert.Equal(1, failingAnalyzer.CallCount);
+
+ var store = new SqliteReferenceCorpusAnalysisJobStore(DatabasePath);
+ await store.RequeueDueRetriesAsync(retrying.NextAttemptAt.Value, CancellationToken.None);
+ var succeedingAnalyzer = new FrozenTechniqueAnalyzer(tokensPerCall: 19);
+ var retryWorker = new ReferenceCorpusAnalysisWorker(path, new FrozenFeatureAnalyzer(10), succeedingAnalyzer, "worker-technique-retry-success");
+
+ Assert.True(await retryWorker.PumpOnceAsync(CancellationToken.None));
+ var completed = await scheduler.GetAsync(new(technique.JobId), CancellationToken.None);
+ Assert.NotNull(completed);
+ Assert.Equal(ReferenceCorpusAnalysisJobStatuses.Completed, completed.Status);
+ Assert.Equal(2, completed.AttemptCount);
+ Assert.Equal(1, completed.FailureAttemptCount);
+ Assert.Single(succeedingAnalyzer.Calls);
+ }
+
+ [Fact]
  public async Task PumpOnceFailsCorruptFrozenSnapshotWithoutWaitingForLeaseExpiry()
  {
  await SeedAsync();
@@ -98,7 +188,7 @@ Assert.Equal(ReferenceCorpusFeatureFamilies.SentenceFamilies.Count, analyzer.Cal
 }
 
  [Fact]
-public async Task StopDuringModelCallAbandonsReservationWithoutWaitingForLeaseExpiry()
+ public async Task StopDuringModelCallAbandonsReservationWithoutWaitingForLeaseExpiry()
  {
  await SeedAsync();
  var path = new FixedPathResolver(DatabasePath);
@@ -123,6 +213,53 @@ public async Task StopDuringModelCallAbandonsReservationWithoutWaitingForLeaseEx
  Assert.Equal(0, abandoned.ProcessedWorkItems);
 Assert.Equal(("pending", 0), await ReadFirstWorkItemReservationAsync(queued.JobId));
 }
+
+ [Fact]
+ public async Task RealWorkerLoopReclaimsExpiredLeaseAndFencesLostWorkerCommit()
+ {
+ await SeedAsync();
+ var path = new FixedPathResolver(DatabasePath);
+ var scheduler = new SqliteReferenceCorpusAnalysisScheduler(path, new FixedSettingsService());
+ var staleAnalyzer = new BlockingFeatureAnalyzer(10);
+ var timing = new ReferenceCorpusAnalysisWorkerOptions(
+ TimeSpan.FromMilliseconds(250), TimeSpan.FromSeconds(10), TimeSpan.Zero);
+ await using var staleWorker = new ReferenceCorpusAnalysisWorker(
+ path, staleAnalyzer, new UnexpectedTechniqueAnalyzer(), "worker-stale-primary",
+ TimeSpan.FromMilliseconds(10), timing);
+ var recoveryAnalyzer = new FrozenFeatureAnalyzer(10, TimeSpan.FromMilliseconds(80));
+ await using var recoveryWorker = new ReferenceCorpusAnalysisWorker(
+ path, recoveryAnalyzer, new UnexpectedTechniqueAnalyzer(), "worker-stale-recovery",
+ TimeSpan.FromMilliseconds(10), timing);
+ var queued = await scheduler.EnqueueAsync(new(
+ "worker-run-stale-lease", 1, 101, ReferenceCorpusAnalysisJobKinds.FeatureAnalysis,
+ ReferenceCorpusNodeTypes.Sentence, ReferenceCorpusAnalysisPriorityClasses.Normal, 100, 20_000),
+ CancellationToken.None);
+
+ await staleWorker.StartAsync();
+ await staleAnalyzer.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+ var running = await WaitForJobAsync(scheduler, queued.JobId,
+ job => job.LeaseExpiresAt is not null, TimeSpan.FromSeconds(10));
+ var leaseExpiresAt = running.LeaseExpiresAt!.Value;
+ var remaining = leaseExpiresAt - DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(20);
+ if (remaining > TimeSpan.Zero) await Task.Delay(remaining);
+
+ Assert.True(await recoveryWorker.PumpOnceAsync(CancellationToken.None));
+ var recoveredAt = DateTimeOffset.UtcNow;
+ var completed = await WaitForJobAsync(scheduler, queued.JobId,
+ job => job.Status == ReferenceCorpusAnalysisJobStatuses.Completed, TimeSpan.FromSeconds(10));
+ staleAnalyzer.Release.TrySetResult();
+ await staleAnalyzer.Returned.Task.WaitAsync(TimeSpan.FromSeconds(10));
+ await Task.Delay(50);
+ await staleWorker.StopAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+
+ Assert.True(recoveredAt - leaseExpiresAt <= TimeSpan.FromSeconds(30));
+ Assert.Equal(2, completed.AttemptCount);
+ Assert.Equal(ReferenceCorpusFeatureFamilies.SentenceFamilies.Count, recoveryAnalyzer.Calls.Count);
+ Assert.Equal(ReferenceCorpusFeatureFamilies.SentenceFamilies.Count,
+ await ScalarIntAsync("SELECT COUNT(*) FROM reference_analysis_work_item_completions;"));
+ Assert.Equal(1, await ScalarIntAsync("SELECT COUNT(*) FROM reference_feature_observations;"));
+ Assert.Equal(1, await ScalarIntAsync("SELECT COUNT(*) FROM reference_analysis_job_attempts WHERE outcome='abandoned' AND error_code='lease_expired';"));
+ }
 
  [Fact]
  public async Task DisposeWaitsForInFlightManualPumpBeforeReleasingDatabase()
@@ -260,12 +397,28 @@ Assert.Equal(1, retrying.FailureAttemptCount);
  }
 
 private async ValueTask<int> ScalarIntAsync(string sql)
- {
+{
  await using var connection = await OpenAsync();
  await using var command = connection.CreateCommand();
  command.CommandText = sql;
 return Convert.ToInt32(await command.ExecuteScalarAsync());
 }
+
+ private static async Task<ReferenceCorpusAnalysisJobPayload> WaitForJobAsync(
+ SqliteReferenceCorpusAnalysisScheduler scheduler,
+ string jobId,
+ Func<ReferenceCorpusAnalysisJobPayload, bool> condition,
+ TimeSpan timeout)
+ {
+ var deadline = DateTimeOffset.UtcNow + timeout;
+ while (DateTimeOffset.UtcNow < deadline)
+ {
+ var job = await scheduler.GetAsync(new(jobId), CancellationToken.None);
+ if (job is not null && condition(job)) return job;
+ await Task.Delay(10);
+ }
+ throw new TimeoutException($"Analysis job '{jobId}' did not reach the expected state within {timeout}.");
+ }
 
 private async ValueTask ExecuteAsync(string sql)
  {
@@ -305,25 +458,28 @@ await command.ExecuteNonQueryAsync();
  return Task.CompletedTask;
  }
 
-private sealed class FrozenFeatureAnalyzer(int tokensPerCall) : IReferenceCorpusFeatureFamilyAnalyzer
+private sealed class FrozenFeatureAnalyzer(int tokensPerCall, TimeSpan? delay = null) : IReferenceCorpusFeatureFamilyAnalyzer
  {
  public List<ReferenceCorpusFeatureFamilyAnalysisInput> Calls { get; } = [];
- public ValueTask<ReferenceCorpusFeatureFamilyAnalysisOutput> AnalyzeAsync(ReferenceCorpusFeatureFamilyAnalysisInput input, CancellationToken cancellationToken)
+ public async ValueTask<ReferenceCorpusFeatureFamilyAnalysisOutput> AnalyzeAsync(ReferenceCorpusFeatureFamilyAnalysisInput input, CancellationToken cancellationToken)
  {
+ cancellationToken.ThrowIfCancellationRequested();
+ if (delay is { } configuredDelay) await Task.Delay(configuredDelay, cancellationToken);
  Calls.Add(input);
  var observations = input.Family == ReferenceCorpusFeatureFamilies.Syntax
  ? "[{\"feature_key\":\"sentence_pattern\",\"label\":\"subject_predicate\",\"complexity\":\"simple\",\"confidence\":0.8,\"evidence_start\":0,\"evidence_end\":4,\"explanation\":\"frozen worker fixture\"}]"
  : "[]";
- return ValueTask.FromResult(new ReferenceCorpusFeatureFamilyAnalysisOutput(
+ return new ReferenceCorpusFeatureFamilyAnalysisOutput(
  $"{{\"schema_version\":\"reference-corpus-feature-family-v1\",\"family\":\"{input.Family}\",\"node_type\":\"sentence\",\"observations\":{observations}}}",
- tokensPerCall));
+ tokensPerCall);
  }
  }
 
 private sealed class BlockingFeatureAnalyzer(int tokensPerCall) : IReferenceCorpusFeatureFamilyAnalyzer
- {
+{
  public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
  public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+ public TaskCompletionSource Returned { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
  public async ValueTask<ReferenceCorpusFeatureFamilyAnalysisOutput> AnalyzeAsync(
  ReferenceCorpusFeatureFamilyAnalysisInput input,
@@ -334,9 +490,11 @@ private sealed class BlockingFeatureAnalyzer(int tokensPerCall) : IReferenceCorp
  var observations = input.Family == ReferenceCorpusFeatureFamilies.Syntax
  ? "[{\"feature_key\":\"sentence_pattern\",\"label\":\"subject_predicate\",\"complexity\":\"simple\",\"confidence\":0.8,\"evidence_start\":0,\"evidence_end\":4,\"explanation\":\"control boundary fixture\"}]"
  : "[]";
- return new(
+ var output = new ReferenceCorpusFeatureFamilyAnalysisOutput(
  $"{{\"schema_version\":\"reference-corpus-feature-family-v1\",\"family\":\"{input.Family}\",\"node_type\":\"sentence\",\"observations\":{observations}}}",
  tokensPerCall);
+ Returned.TrySetResult();
+ return output;
  }
  }
 
@@ -358,6 +516,59 @@ private sealed class CancellationBlockingFeatureAnalyzer : IReferenceCorpusFeatu
  {
  public ValueTask<ReferenceCorpusTechniqueSpecimenAnalysisOutput> AnalyzeAsync(ReferenceCorpusTechniqueSpecimenAnalysisInput input, CancellationToken cancellationToken) =>
  throw new InvalidOperationException("Technique analyzer should not be called.");
+ }
+
+ private sealed class FrozenTechniqueAnalyzer(int tokensPerCall) : IReferenceCorpusTechniqueSpecimenAnalyzer
+ {
+ public List<ReferenceCorpusTechniqueSpecimenAnalysisInput> Calls { get; } = [];
+
+ public ValueTask<ReferenceCorpusTechniqueSpecimenAnalysisOutput> AnalyzeAsync(
+ ReferenceCorpusTechniqueSpecimenAnalysisInput input,
+ CancellationToken cancellationToken)
+ {
+ cancellationToken.ThrowIfCancellationRequested();
+ Calls.Add(input);
+ var observationId = input.Observations.Single().ObservationId;
+ return ValueTask.FromResult(new ReferenceCorpusTechniqueSpecimenAnalysisOutput(
+ $$"""
+ {
+   "schema_version": "reference-corpus-technique-specimen-v1",
+   "source_node_id": "{{input.NodeId}}",
+   "technique_family": "action_as_emotion",
+   "technique_abstract": "用可见动作承载压抑情绪，并以沉默留白放大张力",
+   "trigger_context": "角色有强烈情绪但不能直接说破的短句节点",
+   "transfer_template": "[角色] [外化细节动作]，随后留出沉默。",
+   "transfer_slots": [
+     { "slot_name": "role", "purpose": "当前承压角色", "constraints": "必须处在情绪压抑状态" }
+   ],
+   "effect_on_reader": "让读者从动作和空白中自行补全情绪",
+   "applicability_conditions": ["角色需要压住反应"],
+   "failure_modes": ["动作与情境没有因果时会显得装饰化"],
+   "anti_patterns": ["直接解释角色情绪"],
+   "world_context_dependencies": [],
+   "why_it_works": [
+     { "factor": "动作提供可见证据", "observation_ids": ["{{observationId}}"], "explanation": "特征证据来自冻结输入。" }
+   ],
+   "confidence": 0.86,
+   "mastery_notes": "适合短句。"
+ }
+ """,
+ tokensPerCall));
+ }
+ }
+
+ private sealed class RetryableTechniqueAnalyzer : IReferenceCorpusTechniqueSpecimenAnalyzer
+ {
+ public int CallCount { get; private set; }
+
+ public ValueTask<ReferenceCorpusTechniqueSpecimenAnalysisOutput> AnalyzeAsync(
+ ReferenceCorpusTechniqueSpecimenAnalysisInput input,
+ CancellationToken cancellationToken)
+ {
+ cancellationToken.ThrowIfCancellationRequested();
+ CallCount++;
+ throw new BridgeRequestException("provider_transient", "Temporary technique provider failure.", retryable: true);
+ }
  }
 
  private sealed class FixedPathResolver(string path) : IReferenceCorpusDatabasePathResolver

@@ -104,17 +104,32 @@ Assert.True(sentence.GetProperty("expected_evidence").GetProperty("end").GetInt3
 }
 
  [Fact]
- public void ScaleFixtureGeneratorKeepsTwoMillionDefaultAndTemporaryOutputBoundary()
+ public void ScaleFixtureGeneratorDefaultsToFiftyKAndKeepsTemporaryOutputBoundary()
  {
  var source = File.ReadAllText(Path.Combine(
  FindRepositoryRoot(), "scripts", "corpus-driven-writing", "generate-fixtures.ps1"));
 
- Assert.Contains("[int]$ScaleCharacterCount = 2000000", source, StringComparison.Ordinal);
- Assert.Contains("build/tmp/corpus-driven-writing/scale-2m.jsonl", source, StringComparison.Ordinal);
+ Assert.Contains("[int]$ScaleCharacterCount = 50000", source, StringComparison.Ordinal);
+ Assert.Contains("build/tmp/corpus-driven-writing/scale-50k.jsonl", source, StringComparison.Ordinal);
  Assert.Contains("ScaleOutput must stay under build/tmp/.", source, StringComparison.Ordinal);
  Assert.Contains("[switch]$SkipGolden", source, StringComparison.Ordinal);
+ Assert.Contains("$sourceIndex = $ordinal % 16", source, StringComparison.Ordinal);
  Assert.Contains("license_state =", source, StringComparison.Ordinal);
  Assert.Contains("authorized", source, StringComparison.Ordinal);
+ }
+
+ [Fact]
+ public void ScaleHarnessDefaultsToFiftyKFullPipelineAndLeavesJobStoreExplicit()
+ {
+ var source = File.ReadAllText(Path.Combine(
+ FindRepositoryRoot(), "scripts", "corpus-driven-writing", "run-scale-harness.ps1"));
+
+ Assert.Contains("[string]$Mode = \"FullPipeline\"", source, StringComparison.Ordinal);
+ Assert.Contains("[int]$MinimumCharacters = 50000", source, StringComparison.Ordinal);
+ Assert.Contains("\"scale-full\"", source, StringComparison.Ordinal);
+ Assert.Contains("\"JobStore\"", source, StringComparison.Ordinal);
+ Assert.Contains("scale-50k-metrics.json", source, StringComparison.Ordinal);
+ Assert.Contains("--minimum-latency-samples", source, StringComparison.Ordinal);
  }
 
  [Fact]
@@ -128,8 +143,11 @@ Assert.True(sentence.GetProperty("expected_evidence").GetProperty("end").GetInt3
  Assert.Contains(point, source, StringComparison.Ordinal);
  }
 
- Assert.Contains("corpus-m2-recovery-metrics-v1", source, StringComparison.Ordinal);
+ Assert.Contains("corpus-m2-recovery-metrics-v2", source, StringComparison.Ordinal);
  Assert.Contains("CheckpointTimeoutSeconds", source, StringComparison.Ordinal);
+ Assert.Contains("RuntimeSamples", source, StringComparison.Ordinal);
+ Assert.Contains("runtime-control", source, StringComparison.Ordinal);
+ Assert.Contains("runtime-stale-lease", source, StringComparison.Ordinal);
  }
 
  private static void AssertExpectedBlockDoesNotExposeForbiddenProperties(JsonElement element, string path)

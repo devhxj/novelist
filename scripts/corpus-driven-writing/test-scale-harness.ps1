@@ -23,6 +23,9 @@ try {
  $finalized = Join-Path $testRoot "finalized.json"
  $invalid = Join-Path $testRoot "incomplete.stdout.json"
  $invalidOutput = Join-Path $testRoot "invalid-metrics.json"
+ $fullDatabase = Join-Path $testRoot "full-pipeline.db"
+ $fullMetrics = Join-Path $testRoot "full-pipeline-metrics.json"
+ $fullProgress = Join-Path $testRoot "full-pipeline-progress.json"
 
  [IO.File]::WriteAllLines($fixture, @(
  '{"source_id":"source-1","library_id":"library-1","chapter_index":1,"sequence_index":1,"text":"alpha","license_state":"allowed"}',
@@ -45,6 +48,32 @@ Assert-True ($metricsJson.result.passed -eq $true) "Metrics did not pass."
  Assert-True ($progressJson.status -eq "completed") "Progress did not reach completed."
 Assert-True ($progressJson.processed_work_items -eq 2) "Progress work-item count mismatch."
  Assert-True (@(Get-ChildItem -LiteralPath $testRoot -Filter '*.tmp' -Force).Count -eq 0) "Atomic host writes left temporary files."
+
+ & dotnet $hostDll scale-full --database $fullDatabase --fixture $fixture --minimum-characters 9 `
+ --minimum-throughput 0 --maximum-claim-p95-ms 10000 --maximum-list-p95-ms 10000 `
+ --maximum-progress-p95-ms 10000 `
+ --minimum-latency-samples 1 `
+ --metrics-output $fullMetrics --progress-output $fullProgress | Out-Null
+ if ($LASTEXITCODE -ne 0) { throw "Full-pipeline scale host smoke run failed." }
+ $fullMetricsJson = Get-Content -LiteralPath $fullMetrics -Raw | ConvertFrom-Json
+ $fullProgressJson = Get-Content -LiteralPath $fullProgress -Raw | ConvertFrom-Json
+ Assert-True ($fullMetricsJson.schema_version -eq "corpus-m2-full-scale-metrics-v1") "Full-pipeline metrics schema mismatch."
+ Assert-True ($fullMetricsJson.result.passed -eq $true) "Full-pipeline metrics did not pass."
+ Assert-True ($fullMetricsJson.result.pipeline -eq "scheduler_snapshot_builder_worker_fake_analyzer") "Full-pipeline host skipped the worker path."
+ Assert-True ($fullMetricsJson.result.anchors -ge 2) "Full-pipeline fixture did not create two anchors."
+ Assert-True ($fullMetricsJson.result.libraries -ge 2) "Full-pipeline fixture did not create two libraries."
+ Assert-True ($fullMetricsJson.result.session_library_bindings -ge 2) "Full-pipeline fixture did not bind libraries to a session."
+ Assert-True ($fullMetricsJson.result.completion_rows -eq $fullMetricsJson.result.work_items) "Full-pipeline host lost work-item outputs."
+ Assert-True ($fullMetricsJson.result.duplicate_outputs -eq 0) "Full-pipeline host produced duplicate outputs."
+ Assert-True ($fullMetricsJson.result.fake_analyzer_calls -eq $fullMetricsJson.result.work_items) "Fake analyzer did not receive every frozen work item."
+ Assert-True ($fullMetricsJson.result.tokens.persisted_budget_penetration -eq 0) "Full-pipeline host exceeded persisted job budget."
+ Assert-True ($fullMetricsJson.result.claim_ms.count -ge 1) "Full-pipeline host did not collect claim latency samples."
+ Assert-True ($fullMetricsJson.result.task_list_ms.count -ge 1) "Full-pipeline host did not collect list latency samples."
+ Assert-True ($fullMetricsJson.result.job_progress_ms.count -ge 1) "Full-pipeline host did not collect job progress latency samples."
+ Assert-True ($fullMetricsJson.result.storage.active_leases -eq 0) "Full-pipeline host left an active lease."
+ Assert-True ($fullMetricsJson.result.storage.database_bytes_after -gt 0) "Full-pipeline host did not record database size."
+ Assert-True ($fullProgressJson.schema_version -eq "corpus-m2-full-scale-progress-v1") "Full-pipeline progress schema mismatch."
+ Assert-True ($fullProgressJson.status -eq "completed") "Full-pipeline progress did not reach completed."
 
  & $PSScriptRoot/finalize-existing-scale.ps1 -Stdout $stdout -Output $finalized | Out-Null
  $finalizedJson = Get-Content -LiteralPath $finalized -Raw | ConvertFrom-Json
@@ -73,7 +102,7 @@ Assert-True (-not (Test-Path -LiteralPath $invalidOutput)) "Incomplete stdout cr
  $writer.WriteLine((@{
  source_id = "benchmark-source-$index"
  library_id = "benchmark-library-$($index % 2)"
- chapter_index = 1 + [Math]::Floor($index / 100)
+ chapter_index = 1 + [int][Math]::Floor($index / 100)
  sequence_index = $index
  text = "benchmark item $index"
  license_state = "allowed"

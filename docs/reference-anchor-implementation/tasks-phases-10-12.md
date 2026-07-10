@@ -2,6 +2,8 @@
 
 [Back to implementation index](../reference-anchor-implementation-plan.md) | [Back to tasks index](tasks-and-verification.md).
 
+> **Historical boundary (2026-07-10):** These phases prove the persistent orchestration/backend and the then-current reference-panel workflow. They do not themselves prove that the chapter editor's current default UI consumes the persistent corpus blueprint session or exposes one primary path. Later corpus-driven writing M9 automation supplies that evidence; real-user task validation remains open.
+
 ## Phase 10: Product Hardening and Design Closure
 
 **Description:** Convert the remaining loose recommendations and open design questions into a final hardening phase. Phases 0-9 are considered the core implementation; Phase 10 is complete only when runtime verification, mocked frontend workflow coverage, UX decisions, and optional-expansion boundaries are explicit and tested.
@@ -79,7 +81,7 @@ confirm source + chapter target + known/forbidden facts
 - [x] The orchestrator automatically performs safe stages: blueprint generation, deterministic blueprint review, material binding after approval, beat candidate generation, and draft audit.
 - [x] The orchestrator stops for required human decisions: source/license confirmation, known/forbidden fact boundary changes, blueprint approval, AI-proposed blueprint revision application, and final chapter insertion.
 - [x] A compact approval summary shows chapter function, POV, fact boundary changes, emotional trajectory, material-use plan, rewrite budget, and high-risk findings without forcing users to inspect every field.
-- [x] Failed blueprint reviews can trigger AI-suggested field-level fixes, but suggested fixes are stored as proposed revisions and require user or explicit agent approval before application.
+- [x] Failed blueprint reviews can trigger AI-suggested field-level fixes, but suggested fixes are stored as proposed revisions and require explicit user approval before application; an agent may propose but cannot approve the change.
 - [x] Low-risk passing blueprints can proceed from approval to material binding and candidate generation without additional manual clicks.
 - [x] High-risk conditions require an explicit stop: stale blueprint, new facts outside approved boundary, forbidden fact pressure, missing material provenance, L3/L4 rewrite risk, POV leak risk, or audit failure.
 - [x] Advanced mode still exposes manual generate/review/revise/approve/bind/draft/audit controls for debugging and strict editorial review.
@@ -142,7 +144,7 @@ Targeted Phase 11 thin-slice checks completed:
 - [x] `npm --prefix frontend run build`
 - [x] `npm --prefix frontend run lint`
 
-Phase 11 is complete at the current implementation boundary: the proposal-provider path supports a production AI-backed provider using the selected chat model while preserving explicit approval and deterministic fallback, source/license/fact confirmation is explicit, high-risk recovery stops fail closed, and final insertion remains a separate user-confirmed edit/save path. Phase 12 then closes the shared-corpus storage, migration, scoped feedback, AI-assisted retrieval, and corpus-management UI boundary.
+Phase 11 is complete at its historical implementation boundary: the proposal-provider path supports a production AI-backed provider using the selected chat model while preserving explicit approval and deterministic fallback, source/license/fact confirmation is explicit, high-risk recovery stops fail closed, and final insertion remains a separate user-confirmed edit/save path. This does not claim that the old orchestration panel is the current default product path; current default-session and usability status is governed by corpus-driven writing M9. Phase 12 then closes the shared-corpus storage, migration, scoped feedback, AI-assisted retrieval, and corpus-management UI boundary.
 
 **Files likely touched:**
 
@@ -189,7 +191,7 @@ workspace/global reference corpus
 - [x] AI can explain why it selected each material and which story need it satisfies, without requiring the user to manually choose libraries first.
 - [x] User feedback is split into global corpus feedback and per-novel usage feedback: material tag corrections/user-verified status are corpus-level feedback, while accepted/rejected material usage feedback remains scoped to the current novel and does not silently make a material safe for another novel with different facts or POV.
 - [x] Agent tools search the shared corpus by injected novel context but do not expose arbitrary file reads or allow the model to bypass source/license filters.
-- [x] UI provides corpus management as a library feature and reference-anchored drafting as an automatic retrieval feature, not as a per-novel setup checklist. The current Phase 12 boundary names and separates `语料库管理` from `参考写作检索`, supports one-source, batch-path, and JSON library-pack manifest import through `CreateReferenceAnchors`, exposes row-level and selected-row promotion/archive actions, and provides an independent material-library search/filter/sort/cross-page correction/archive/restore surface that does not require selected anchors. Hard delete and deeper product IA remain future product work rather than Phase 12 blockers.
+- [x] UI provides corpus management as a library feature and reference-anchored drafting as an automatic retrieval feature, not as a per-novel setup checklist. The historical Phase 12 boundary named and separated `语料库管理` from `参考写作检索`, supported one-source, batch-path, and JSON library-pack manifest import through `CreateReferenceAnchors`, exposed row-level and selected-row promotion/archive actions, and provided an independent material-library search/filter/sort/cross-page correction/archive/restore surface that did not require selected anchors. The current product split moves chapter writing to `ChapterReferencePanel`; hard delete and deeper product IA remain future product work rather than Phase 12 blockers.
 
 **Verification:**
 

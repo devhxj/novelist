@@ -101,6 +101,7 @@ public sealed class SqliteReferenceCorpusBlueprintIterationCoordinator : IRefere
  var next = input.Action switch
  {
  ReferenceCorpusBlueprintSessionActions.Generate => await GenerateAsync(input, generationInput!, current, cancellationToken),
+ ReferenceCorpusBlueprintSessionActions.Select => Select(input, current!),
  ReferenceCorpusBlueprintSessionActions.Revise => await ReviseAsync(input, generationInput!, current, cancellationToken),
  ReferenceCorpusBlueprintSessionActions.Accept => Accept(input, current!),
  _ => throw new InvalidOperationException("Unsupported blueprint session action.")
@@ -129,7 +130,14 @@ public sealed class SqliteReferenceCorpusBlueprintIterationCoordinator : IRefere
  var candidates = await _writing.GenerateBlueprintCandidatesAsync(
  generationInput with { Feedback = null },
  cancellationToken);
- return BuildSession(input.SessionId, generationInput, candidates, iteration: 1, checklist: [], selectedBlueprintId: string.Empty);
+ return BuildSession(
+ input.SessionId,
+ generationInput,
+ candidates,
+ iteration: 1,
+ checklist: [],
+ selectedBlueprintId: string.Empty,
+ rejectedBlueprintIds: []);
  }
 
  private async ValueTask<ReferenceCorpusBlueprintSessionPayload> ReviseAsync(
@@ -171,7 +179,20 @@ public sealed class SqliteReferenceCorpusBlueprintIterationCoordinator : IRefere
  candidates,
  current.Iteration + 1,
  checklist,
- selected.Blueprint.BlueprintId);
+ selectedBlueprintId: string.Empty,
+ rejectedBlueprintIds: [selected.Blueprint.BlueprintId]);
+}
+
+ private static ReferenceCorpusBlueprintSessionPayload Select(
+ AdvanceReferenceCorpusBlueprintSessionPayload input,
+ ReferenceCorpusBlueprintSessionPayload current)
+ {
+ var selected = FindCandidate(current, input.SelectedBlueprintId);
+ return current with
+ {
+ SelectedBlueprintId = selected.Blueprint.BlueprintId,
+ UpdatedAt = DateTimeOffset.UtcNow
+ };
  }
 
  private static ReferenceCorpusBlueprintSessionPayload Accept(
@@ -202,7 +223,8 @@ public sealed class SqliteReferenceCorpusBlueprintIterationCoordinator : IRefere
  ReferenceCorpusBlueprintCandidatesPayload candidates,
  int iteration,
  IReadOnlyList<ReferenceCorpusBlueprintChecklistItemPayload> checklist,
- string selectedBlueprintId)
+ string selectedBlueprintId,
+ IReadOnlyList<string> rejectedBlueprintIds)
  {
  var normalizedCandidates = candidates with
  {
@@ -212,7 +234,7 @@ public sealed class SqliteReferenceCorpusBlueprintIterationCoordinator : IRefere
  iteration > 1,
  candidates.Candidates.Count,
  candidates.Candidates.Select(candidate => candidate.Blueprint.BlueprintId).Distinct(StringComparer.Ordinal).Count(),
- selectedBlueprintId.Length == 0 ? [] : [selectedBlueprintId],
+ rejectedBlueprintIds,
  candidates.Candidates.Count > 0,
  candidates.Candidates.Count > 0)
  };
@@ -227,8 +249,11 @@ public sealed class SqliteReferenceCorpusBlueprintIterationCoordinator : IRefere
  checklist,
  candidates.Candidates.Select(candidate => candidate.Blueprint.Strategy).Distinct(StringComparer.Ordinal).ToArray(),
  normalizedCandidates,
- DateTimeOffset.UtcNow);
- }
+ DateTimeOffset.UtcNow)
+ {
+ NaturalLanguageGoal = input.NaturalLanguageGoal
+ };
+}
 
  private static ReferenceCorpusBlueprintCandidatePayload FindCandidate(
  ReferenceCorpusBlueprintSessionPayload session,

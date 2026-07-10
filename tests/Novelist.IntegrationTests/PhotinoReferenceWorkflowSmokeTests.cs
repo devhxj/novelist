@@ -13,11 +13,41 @@ public sealed class PhotinoReferenceWorkflowSmokeTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "novelist-tests", Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public async Task DesktopCompositionStartsAndStopsTechniqueVectorMaintenanceWithInitialization()
+    {
+        var options = CreateOptions();
+        var window = new RecordingWindow();
+        var runtime = DesktopBridgeComposition.CreateRuntime(window, options);
+        var disposed = false;
+
+        try
+        {
+            Assert.False(runtime.TechniqueVectorMaintenanceLoop.IsRunning);
+
+            await SendAsync(runtime.Bridge, window, "Initialize", options.DefaultDataDirectory);
+
+            Assert.True(runtime.TechniqueVectorMaintenanceLoop.IsRunning);
+
+            await runtime.DisposeAsync();
+            disposed = true;
+            Assert.False(runtime.TechniqueVectorMaintenanceLoop.IsRunning);
+        }
+        finally
+        {
+            if (!disposed)
+            {
+                await runtime.DisposeAsync();
+            }
+        }
+    }
+
+    [Fact]
     public async Task DesktopCompositionRunsReferenceWorkflowThroughPhotinoWebMessageBridgeWithoutSavingChapterContent()
     {
         var options = CreateOptions();
         var window = new RecordingWindow();
-        var bridge = DesktopBridgeComposition.CreateBridge(window, options);
+        await using var runtime = DesktopBridgeComposition.CreateRuntime(window, options);
+        var bridge = runtime.Bridge;
 
         await SendAsync(bridge, window, "Initialize", options.DefaultDataDirectory);
         var novel = await SendAsync(bridge, window, "CreateNovel", new
@@ -143,7 +173,8 @@ public sealed class PhotinoReferenceWorkflowSmokeTests : IDisposable
     {
         var options = CreateOptions();
         var window = new RecordingWindow();
-        var bridge = DesktopBridgeComposition.CreateBridge(window, options);
+        await using var runtime = DesktopBridgeComposition.CreateRuntime(window, options);
+        var bridge = runtime.Bridge;
 
         await SendAsync(bridge, window, "Initialize", options.DefaultDataDirectory);
         var novel = await SendAsync(bridge, window, "CreateNovel", new

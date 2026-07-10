@@ -11,6 +11,27 @@ import { chapterNumFromPath, isChapterPath } from '@/components/content/types'
 const FINAL_INSERTION_DECISION = 'approve_final_insertion'
 type CandidateInsertMode = 'cursor' | 'append' | 'replace'
 
+const CORPUS_BLUEPRINT_CHECKLIST_DIMENSIONS = [
+  'emotion_arc',
+  'rhythm',
+  'technique_diversity',
+  'scene_template',
+  'source_distribution',
+] as const
+
+function corpusBlueprintChecklist(
+  decision: 'accepted' | 'revise',
+  problemTags: string[] = [],
+  notes: string | null = null,
+): reference.CorpusBlueprintChecklistItem[] {
+  return CORPUS_BLUEPRINT_CHECKLIST_DIMENSIONS.map(dimension => ({
+    dimension,
+    decision: dimension === 'source_distribution' ? decision : 'accepted',
+    problem_tags: dimension === 'source_distribution' ? problemTags : [],
+    notes: dimension === 'source_distribution' ? notes : null,
+  }))
+}
+
 type ActiveChapterContext = {
   path: string
   title: string
@@ -32,6 +53,11 @@ type CorpusWritingRequestContext = {
   naturalGoal: string
   chapterContext: reference.CurrentChapterContext
   scope: reference.CorpusScope
+}
+
+type CorpusBlueprintRetryAction = {
+  input: reference.AdvanceCorpusBlueprintSessionInput
+  feedbackLabel?: string
 }
 
 interface Props {
@@ -130,6 +156,36 @@ function formatCorpusDraftStrategy(value: string): string {
   const trimmed = value.trim()
   if (!trimmed) return '来源变体'
   return CORPUS_DRAFT_STRATEGY_LABELS[trimmed] ?? trimmed
+}
+
+const CORPUS_BLUEPRINT_STRATEGY_LABELS: Record<string, string> = {
+  emotion_priority_m4: '突出人物情绪变化',
+  rhythm_priority_m4: '调整叙事节奏与停顿',
+  technique_diversity_m4: '换用不同的叙事技法',
+  scene_template_m4: '按场景推进线索',
+  source_repetition_diversity_m1: '换用不同来源，保持线索推进',
+}
+
+function formatCorpusBlueprintStrategy(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return '按当前章节目标推进'
+  if (CORPUS_BLUEPRINT_STRATEGY_LABELS[trimmed]) {
+    return CORPUS_BLUEPRINT_STRATEGY_LABELS[trimmed]
+  }
+
+  return /^[a-z0-9_]+$/i.test(trimmed)
+    ? '按当前章节目标推进'
+    : trimmed
+}
+
+function corpusBlueprintBeatSummary(blueprint: reference.CorpusInsertionBlueprint): string {
+  const summary = blueprint.beats
+    .slice(0, 3)
+    .map((beat, index) => beat.narrative_function || beat.role_in_beat || `推进 ${index + 1}`)
+    .filter(Boolean)
+    .join(' → ')
+
+  return summary || '按当前章节线索推进'
 }
 
 type BoundedPreview = {
@@ -244,6 +300,8 @@ export default function ChapterReferencePanel({
   const [candidateError, setCandidateError] = useState<ReferenceErrorState | null>(null)
   const [candidateActionMessage, setCandidateActionMessage] = useState('')
   const [corpusBlueprintPath, setCorpusBlueprintPath] = useState('')
+  const [corpusBlueprintSession, setCorpusBlueprintSession] = useState<reference.CorpusBlueprintSession | null>(null)
+  const [corpusBlueprintSessionLoading, setCorpusBlueprintSessionLoading] = useState(false)
   const [corpusBlueprintCandidates, setCorpusBlueprintCandidates] = useState<reference.CorpusBlueprintCandidates | null>(null)
   const [corpusBlueprintLoading, setCorpusBlueprintLoading] = useState(false)
   const [corpusBlueprintError, setCorpusBlueprintError] = useState<ReferenceErrorState | null>(null)
@@ -261,10 +319,81 @@ const [corpusDraftActionMessage, setCorpusDraftActionMessage] = useState('')
  const [lockedCorpusDraftCandidateId, setLockedCorpusDraftCandidateId] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
  const [writingMode, setWritingMode] = useState<'auto' | 'expert'>('auto')
-const [governance, setGovernance] = useState<reference.CorpusGovernance | null>(null)
+  const [governance, setGovernance] = useState<reference.CorpusGovernance | null>(null)
  const [hydratedRecoveryKey, setHydratedRecoveryKey] = useState('')
+ const corpusBlueprintRequestSequenceRef = useRef(0)
+ const [corpusBlueprintRetry, setCorpusBlueprintRetry] = useState<CorpusBlueprintRetryAction | null>(null)
+ const goalInputRef = useRef<HTMLTextAreaElement | null>(null)
 
   const recoveryKey = `novelist:corpus-writing:${novelId}:${chapterNumber}:${activePath}`
+  const corpusLibrarySessionId = `project:${novelId}:default`
+  const corpusBlueprintSessionId = `chapter:${novelId}:${chapterNumber}`
+
+  const loadCorpusBlueprintSession = useCallback(async () => {
+    if (!hasValidChapter || !activePath) {
+      setCorpusBlueprintSession(null)
+      setCorpusBlueprintCandidates(null)
+      setSelectedCorpusBlueprintId('')
+      return
+    }
+
+    setCorpusBlueprintSessionLoading(true)
+    setCorpusBlueprintPath(activePath)
+    try {
+      const session = await app.GetReferenceCorpusBlueprintSession({
+        novel_id: novelId,
+        chapter_number: chapterNumber,
+        session_id: corpusBlueprintSessionId,
+      })
+      setCorpusBlueprintSession(session)
+      setCorpusBlueprintCandidates(session?.candidates ?? null)
+      setSelectedCorpusBlueprintId(session?.accepted_blueprint_id || session?.selected_blueprint_id || '')
+      if (session?.natural_language_goal?.trim()) {
+        setGoal(session.natural_language_goal)
+      }
+      setCorpusBlueprintError(null)
+      setCorpusBlueprintActionMessage(session
+        ? session.status === 'accepted'
+          ? '已从服务端恢复已确认蓝图，可继续生成正文候选。'
+          : `已从服务端恢复第 ${session.iteration} 轮蓝图。`
+        : '')
+    } catch (caught) {
+      const fallbackMessage = '蓝图会话恢复失败'
+      setCorpusBlueprintSession(null)
+      setCorpusBlueprintCandidates(null)
+      setSelectedCorpusBlueprintId('')
+      setCorpusBlueprintError({
+        title: fallbackMessage,
+        message: diagnosticMessage(caught, fallbackMessage),
+        diagnostic: buildCopyableDiagnostic({
+          error: caught,
+          fallbackMessage,
+          operation: '恢复语料蓝图会话',
+          bridgeMethod: 'GetReferenceCorpusBlueprintSession',
+          detail: {
+            novel_id: novelId,
+            chapter_number: chapterNumber,
+            chapter_path: activePath,
+            session_id: corpusBlueprintSessionId,
+          },
+        }),
+      })
+    } finally {
+      setCorpusBlueprintSessionLoading(false)
+    }
+  }, [activePath, app, chapterNumber, corpusBlueprintSessionId, hasValidChapter, novelId])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadCorpusBlueprintSession()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadCorpusBlueprintSession])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => goalInputRef.current?.focus())
+    return () => window.cancelAnimationFrame(frame)
+  }, [])
 
 useEffect(() => {
  queueMicrotask(() => {
@@ -272,12 +401,9 @@ useEffect(() => {
  try {
 const saved = window.sessionStorage.getItem(recoveryKey)
  if (saved) {
- const state = JSON.parse(saved) as { goal?: string; writingMode?: 'auto' | 'expert'; blueprint?: reference.CorpusBlueprintCandidates; selectedBlueprintId?: string; drafts?: reference.CorpusInsertionDraftCandidates; selectedDraftId?: string }
+ const state = JSON.parse(saved) as { goal?: string; writingMode?: 'auto' | 'expert'; selectedDraftId?: string }
  setGoal(state.goal ?? '')
  setWritingMode(state.writingMode ?? 'auto')
- if (state.blueprint) { setCorpusBlueprintPath(activePath); setCorpusBlueprintCandidates(state.blueprint) }
- setSelectedCorpusBlueprintId(state.selectedBlueprintId ?? '')
- if (state.drafts) { setCorpusDraftPath(activePath); setCorpusDraftCandidates(state.drafts) }
  setSelectedCorpusDraftCandidateId(state.selectedDraftId ?? '')
  }
  } catch { window.sessionStorage.removeItem(recoveryKey) }
@@ -285,10 +411,10 @@ const saved = window.sessionStorage.getItem(recoveryKey)
  })
 }, [activePath, hasValidChapter, recoveryKey])
 
- useEffect(() => {
+useEffect(() => {
  if (!hasValidChapter || hydratedRecoveryKey !== recoveryKey) return
-window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, blueprint: corpusBlueprintPath === activePath ? corpusBlueprintCandidates : null, selectedBlueprintId: selectedCorpusBlueprintId, drafts: corpusDraftPath === activePath ? corpusDraftCandidates : null, selectedDraftId: selectedCorpusDraftCandidateId }))
- }, [activePath, corpusBlueprintCandidates, corpusBlueprintPath, corpusDraftCandidates, corpusDraftPath, goal, hasValidChapter, hydratedRecoveryKey, recoveryKey, selectedCorpusBlueprintId, selectedCorpusDraftCandidateId, writingMode])
+window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, selectedDraftId: selectedCorpusDraftCandidateId }))
+ }, [goal, hasValidChapter, hydratedRecoveryKey, recoveryKey, selectedCorpusDraftCandidateId, writingMode])
 
  useEffect(() => {
  if (writingMode !== 'expert' || !hasValidChapter) return
@@ -524,8 +650,8 @@ window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, b
   const visibleCorpusBlueprintActionMessage = corpusBlueprintPath === activePath ? corpusBlueprintActionMessage : ''
   const selectedCorpusBlueprintCandidate = useMemo(() => {
     const candidates = visibleCorpusBlueprintCandidates?.candidates ?? []
-    if (candidates.length === 0) return null
-    return candidates.find(candidate => candidate.blueprint.blueprint_id === selectedCorpusBlueprintId) ?? candidates[0]
+    if (candidates.length === 0 || !selectedCorpusBlueprintId) return null
+    return candidates.find(candidate => candidate.blueprint.blueprint_id === selectedCorpusBlueprintId) ?? null
   }, [selectedCorpusBlueprintId, visibleCorpusBlueprintCandidates])
   const visibleCorpusDraftCandidates = corpusDraftPath === activePath ? corpusDraftCandidates : null
   const selectedCorpusDraftCandidate = useMemo(() => {
@@ -746,16 +872,97 @@ window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, b
         reuse_policies: ['verbatim_ok', 'adapted_only'],
         include_anchor_ids: [],
         exclude_anchor_ids: [],
-        session_id: `project:${novelId}:default`,
+        session_id: corpusLibrarySessionId,
       },
     }
-  }, [activePath, activeTitle, chapterNumber, forbiddenFacts, getEditorSnapshot, goal, hasValidChapter, knownFacts, novelId])
+  }, [activePath, activeTitle, chapterNumber, corpusLibrarySessionId, forbiddenFacts, getEditorSnapshot, goal, hasValidChapter, knownFacts, novelId])
+
+  const nextCorpusBlueprintRequestId = useCallback((action: string) => {
+    corpusBlueprintRequestSequenceRef.current += 1
+    return `${corpusBlueprintSessionId}:${action}:${Date.now().toString(36)}:${corpusBlueprintRequestSequenceRef.current}`
+  }, [corpusBlueprintSessionId])
+
+  const applyCorpusBlueprintSession = useCallback((session: reference.CorpusBlueprintSession, message: string) => {
+    setCorpusBlueprintRetry(null)
+    setCorpusBlueprintSession(session)
+    setCorpusBlueprintPath(activePath)
+    setCorpusBlueprintCandidates(session.candidates)
+    setSelectedCorpusBlueprintId(session.accepted_blueprint_id || session.selected_blueprint_id || '')
+    if (session.natural_language_goal?.trim()) {
+      setGoal(session.natural_language_goal)
+    }
+    setCorpusBlueprintError(null)
+    setCorpusBlueprintActionMessage(message)
+    setCorpusDraftPath(activePath)
+    setCorpusDraftCandidates(null)
+    setSelectedCorpusDraftCandidateId('')
+    setLockedCorpusDraftCandidateId('')
+    setCorpusDraftError(null)
+    setCorpusDraftActionMessage('')
+  }, [activePath])
+
+  const runCorpusBlueprintAction = useCallback(async (retry: CorpusBlueprintRetryAction) => {
+    const { input, feedbackLabel } = retry
+    setCorpusBlueprintRetry(retry)
+    setCorpusBlueprintLoading(true)
+    setCorpusBlueprintError(null)
+    try {
+      const session = await app.AdvanceReferenceCorpusBlueprintSession(input)
+      const message = input.action === 'select'
+        ? '已选择蓝图，服务端会话已保存。'
+        : input.action === 'revise'
+          ? `已按${feedbackLabel ?? '反馈'}重组第 ${session.iteration} 轮蓝图。`
+          : input.action === 'accept'
+            ? '蓝图已确认。'
+            : `已生成 ${session.candidates.candidates.length} 份蓝图候选。`
+      applyCorpusBlueprintSession(session, message)
+    } catch (caught) {
+      const failure = input.action === 'select'
+        ? { fallbackMessage: '蓝图选择保存失败', operation: '选择语料蓝图' }
+        : input.action === 'revise'
+          ? { fallbackMessage: '蓝图反馈重组失败', operation: '反馈重组语料蓝图候选' }
+          : input.action === 'accept'
+            ? { fallbackMessage: '蓝图确认失败', operation: '确认语料蓝图' }
+            : { fallbackMessage: '蓝图候选生成失败', operation: '生成语料蓝图候选' }
+      setCorpusBlueprintPath(activePath)
+      setCorpusBlueprintError({
+        title: failure.fallbackMessage,
+        message: diagnosticMessage(caught, failure.fallbackMessage),
+        diagnostic: buildCopyableDiagnostic({
+          error: caught,
+          fallbackMessage: failure.fallbackMessage,
+          operation: failure.operation,
+          bridgeMethod: 'AdvanceReferenceCorpusBlueprintSession',
+          detail: {
+            novel_id: novelId,
+            chapter_number: chapterNumber,
+            chapter_path: activePath,
+            session_id: input.session_id,
+            request_id: input.request_id,
+            action: input.action,
+            ...(input.selected_blueprint_id ? { blueprint_id: input.selected_blueprint_id } : {}),
+          },
+        }),
+      })
+    } finally {
+      setCorpusBlueprintLoading(false)
+    }
+  }, [activePath, app, applyCorpusBlueprintSession, chapterNumber, novelId])
+
+  const retryCorpusBlueprintAction = useCallback(() => {
+    if (corpusBlueprintRetry?.input.session_id === corpusBlueprintSessionId) {
+      void runCorpusBlueprintAction(corpusBlueprintRetry)
+      return
+    }
+    setCorpusBlueprintRetry(null)
+    void loadCorpusBlueprintSession()
+  }, [corpusBlueprintRetry, corpusBlueprintSessionId, loadCorpusBlueprintSession, runCorpusBlueprintAction])
 
   const generateCorpusBlueprintCandidates = useCallback(async (
     feedback: reference.CorpusBlueprintFeedback | null = null,
     feedbackLabel = '反馈',
   ) => {
-    if (!activePath || !hasValidChapter) return
+    if (!activePath || !hasValidChapter || corpusBlueprintSessionLoading) return
     const context = buildCorpusWritingRequestContext()
     if (!context) {
       const fallbackMessage = '蓝图候选生成失败'
@@ -769,75 +976,93 @@ window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, b
         diagnostic: buildCopyableDiagnostic({
           fallbackMessage,
           operation: '生成语料蓝图候选',
-          bridgeMethod: 'GenerateReferenceCorpusBlueprintCandidates',
+          bridgeMethod: 'AdvanceReferenceCorpusBlueprintSession',
           detail: {
             novel_id: novelId,
             chapter_number: chapterNumber,
             chapter_path: activePath,
+            session_id: corpusBlueprintSessionId,
           },
         }),
       })
       return
     }
 
-    setCorpusBlueprintLoading(true)
-    setCorpusBlueprintPath(activePath)
-    setCorpusBlueprintError(null)
-    setCorpusBlueprintActionMessage('')
-    setCorpusDraftPath(activePath)
-    setCorpusDraftCandidates(null)
-    setSelectedCorpusDraftCandidateId('')
-    setCorpusDraftError(null)
-    setCorpusDraftActionMessage('')
-    try {
-      const result = await app.GenerateReferenceCorpusBlueprintCandidates({
-        natural_language_goal: context.naturalGoal,
-        chapter_context: context.chapterContext,
-        scope: context.scope,
-        requested_count: 3,
-        feedback,
-      })
-      const firstCandidate = result.candidates[0] ?? null
-      setCorpusBlueprintCandidates(result)
-      setSelectedCorpusBlueprintId(firstCandidate?.blueprint.blueprint_id ?? '')
-      setCorpusBlueprintActionMessage(result.feedback_applied
-        ? `已按${feedbackLabel}重组蓝图：${result.feedback_summary || 'feedback_applied'}`
-        : `已生成 ${result.candidates.length} 份蓝图候选。`)
-    } catch (caught) {
-      const fallbackMessage = '蓝图候选生成失败'
-      setCorpusBlueprintCandidates(null)
-      setSelectedCorpusBlueprintId('')
+    const action = feedback ? 'revise' : 'generate'
+    if (!feedback && corpusBlueprintSession) {
+      setCorpusBlueprintPath(activePath)
       setCorpusBlueprintError({
-        title: fallbackMessage,
-        message: diagnosticMessage(caught, fallbackMessage),
+        title: '蓝图会话已存在',
+        message: corpusBlueprintSession.status === 'accepted'
+          ? '当前章节的蓝图已确认。请继续生成正文候选，或切换章节开始新的写作任务。'
+          : '当前章节已有可恢复蓝图。请先选择方案、反馈重组或继续生成正文候选。',
         diagnostic: buildCopyableDiagnostic({
-          error: caught,
-          fallbackMessage,
+          fallbackMessage: '蓝图会话已存在',
           operation: '生成语料蓝图候选',
-          bridgeMethod: 'GenerateReferenceCorpusBlueprintCandidates',
+          bridgeMethod: 'AdvanceReferenceCorpusBlueprintSession',
           detail: {
             novel_id: novelId,
             chapter_number: chapterNumber,
             chapter_path: activePath,
-            session_id: `project:${novelId}:default`,
+            session_id: corpusBlueprintSessionId,
+            status: corpusBlueprintSession.status,
           },
         }),
       })
-    } finally {
-      setCorpusBlueprintLoading(false)
+      return
     }
-  }, [activePath, app, buildCorpusWritingRequestContext, chapterNumber, hasValidChapter, novelId])
 
-const selectCorpusBlueprintCandidate = useCallback((candidate: reference.CorpusBlueprintCandidate) => {
-    setSelectedCorpusBlueprintId(candidate.blueprint.blueprint_id)
-    setCorpusBlueprintActionMessage(`已选择蓝图 ${candidate.blueprint.blueprint_id}`)
-    setCorpusDraftPath(activePath)
-    setCorpusDraftCandidates(null)
-setSelectedCorpusDraftCandidateId('')
- setLockedCorpusDraftCandidateId('')
-    setCorpusDraftError(null)
-    setCorpusDraftActionMessage('')
-  }, [activePath])
+    if (feedback && (!corpusBlueprintSession || corpusBlueprintSession.status === 'accepted' || !selectedCorpusBlueprintCandidate)) {
+      setCorpusBlueprintPath(activePath)
+      setCorpusBlueprintError({
+        title: '蓝图反馈重组失败',
+        message: '请先选择当前会话中的一份蓝图；已确认的蓝图不能再修改。',
+        diagnostic: buildCopyableDiagnostic({
+          fallbackMessage: '蓝图反馈重组失败',
+          operation: '反馈重组语料蓝图候选',
+          bridgeMethod: 'AdvanceReferenceCorpusBlueprintSession',
+          detail: {
+            novel_id: novelId,
+            chapter_number: chapterNumber,
+            chapter_path: activePath,
+            session_id: corpusBlueprintSessionId,
+          },
+        }),
+      })
+      return
+    }
+
+    const request: reference.AdvanceCorpusBlueprintSessionInput = {
+      session_id: corpusBlueprintSessionId,
+      request_id: nextCorpusBlueprintRequestId(action),
+      action,
+      generation_input: {
+        natural_language_goal: context.naturalGoal,
+        chapter_context: context.chapterContext,
+        scope: context.scope,
+        requested_count: 3,
+      },
+      selected_blueprint_id: feedback ? selectedCorpusBlueprintCandidate?.blueprint.blueprint_id ?? null : null,
+      checklist: feedback
+        ? corpusBlueprintChecklist('revise', feedback.problem_tags ?? [], feedback.notes || null)
+        : null,
+    }
+    await runCorpusBlueprintAction({
+      input: request,
+      feedbackLabel: feedback ? feedbackLabel : undefined,
+    })
+  }, [activePath, buildCorpusWritingRequestContext, chapterNumber, corpusBlueprintSession, corpusBlueprintSessionId, corpusBlueprintSessionLoading, hasValidChapter, nextCorpusBlueprintRequestId, novelId, runCorpusBlueprintAction, selectedCorpusBlueprintCandidate])
+
+  const selectCorpusBlueprintCandidate = useCallback(async (candidate: reference.CorpusBlueprintCandidate) => {
+    if (!corpusBlueprintSession || corpusBlueprintSession.status === 'accepted' || corpusBlueprintSessionLoading) return
+    const request: reference.AdvanceCorpusBlueprintSessionInput = {
+      session_id: corpusBlueprintSessionId,
+      request_id: nextCorpusBlueprintRequestId('select'),
+      action: 'select',
+      selected_blueprint_id: candidate.blueprint.blueprint_id,
+    }
+    await runCorpusBlueprintAction({ input: request })
+  }, [corpusBlueprintSession, corpusBlueprintSessionId, corpusBlueprintSessionLoading, nextCorpusBlueprintRequestId, runCorpusBlueprintAction])
 
   const regenerateCorpusBlueprintCandidatesFromSelection = useCallback(async () => {
     if (!selectedCorpusBlueprintCandidate) {
@@ -849,7 +1074,7 @@ setSelectedCorpusDraftCandidateId('')
         diagnostic: buildCopyableDiagnostic({
           fallbackMessage,
           operation: '反馈重组语料蓝图候选',
-          bridgeMethod: 'GenerateReferenceCorpusBlueprintCandidates',
+          bridgeMethod: 'AdvanceReferenceCorpusBlueprintSession',
           detail: {
             novel_id: novelId,
             chapter_number: chapterNumber,
@@ -860,27 +1085,11 @@ setSelectedCorpusDraftCandidateId('')
       return
     }
 
-    const rejectedNodeIds = Array.from(new Set(
-      selectedCorpusBlueprintCandidate.blueprint.beats
-        .flatMap(beat => beat.node_ids)
-        .filter(Boolean),
-    ))
-    const avoidLibraryIds = Array.from(new Set(
-      selectedCorpusBlueprintCandidate.source_distribution
-        .map(source => source.library_id)
-        .filter(Boolean),
-    ))
-    const avoidAnchorIds = Array.from(new Set(
-      selectedCorpusBlueprintCandidate.source_distribution
-        .map(source => source.anchor_id)
-        .filter(anchorId => Number.isFinite(anchorId)),
-    ))
-
     await generateCorpusBlueprintCandidates({
       rejected_blueprint_ids: [selectedCorpusBlueprintCandidate.blueprint.blueprint_id],
-      rejected_node_ids: rejectedNodeIds,
-      avoid_library_ids: avoidLibraryIds,
-      avoid_anchor_ids: avoidAnchorIds,
+      rejected_node_ids: [],
+      avoid_library_ids: [],
+      avoid_anchor_ids: [],
       problem_tags: ['source_repetition'],
       notes: '上一轮蓝图不合适，请换一组来源和节奏。',
     })
@@ -897,7 +1106,7 @@ setSelectedCorpusDraftCandidateId('')
         diagnostic: buildCopyableDiagnostic({
           fallbackMessage,
           operation: '按正文候选诊断重组语料蓝图候选',
-          bridgeMethod: 'GenerateReferenceCorpusBlueprintCandidates',
+          bridgeMethod: 'AdvanceReferenceCorpusBlueprintSession',
           detail: {
             novel_id: novelId,
             chapter_number: chapterNumber,
@@ -1082,7 +1291,7 @@ setCorpusDraftActionMessage(`已选择正文候选 ${candidate.candidate_id}`)
   return (
     <aside
       data-testid="chapter-reference-panel"
-      className={`flex h-full shrink-0 flex-col border-l bg-card ${writingMode === 'expert' ? 'w-[760px] max-w-[70vw]' : 'w-[360px] max-w-[40vw]'}`}
+      className={`flex h-full shrink-0 flex-col border-l bg-card max-[1100px]:fixed max-[1100px]:inset-x-0 max-[1100px]:top-11 max-[1100px]:bottom-6 max-[1100px]:z-40 max-[1100px]:h-auto max-[1100px]:w-auto max-[1100px]:max-w-none max-[1100px]:border-l-0 max-[1100px]:shadow-lg ${writingMode === 'expert' ? 'w-[760px] max-w-[70vw]' : 'w-[360px] max-w-[40vw]'}`}
       aria-label="章节参考素材"
     >
       <div className="flex items-start justify-between gap-3 border-b px-3 py-2">
@@ -1134,15 +1343,21 @@ setCorpusDraftActionMessage(`已选择正文候选 ${candidate.candidate_id}`)
           <h3 className="text-xs font-semibold text-foreground">章节目标</h3>
           <label className="block text-xs text-muted-foreground">
             <textarea
+              ref={goalInputRef}
               value={goal}
               onChange={event => setGoal(event.target.value)}
+              aria-label="章节目标"
               className="mt-1 min-h-16 w-full resize-y rounded border border-input bg-background px-2 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
               placeholder="可留空，系统会先按章节标题和可访问素材推荐"
             />
           </label>
         </section>
 
-        <section data-testid="chapter-corpus-insertion" className="space-y-2">
+        <section
+          data-testid="chapter-corpus-insertion"
+          className="space-y-2"
+          aria-busy={corpusBlueprintSessionLoading || corpusBlueprintLoading || corpusDraftLoading}
+        >
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-xs font-semibold text-foreground">语料驱动草稿</h3>
@@ -1152,17 +1367,34 @@ setCorpusDraftActionMessage(`已选择正文候选 ${candidate.candidate_id}`)
                 onClick={() => {
                   void generateCorpusBlueprintCandidates()
                 }}
-                disabled={!hasValidChapter || corpusBlueprintLoading || corpusDraftLoading}
+                disabled={!hasValidChapter || corpusBlueprintSessionLoading || corpusBlueprintLoading || corpusDraftLoading || Boolean(corpusBlueprintSession)}
                 className="inline-flex shrink-0 items-center gap-1 rounded bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
               >
-                {corpusBlueprintLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-                生成蓝图候选
+                {corpusBlueprintSessionLoading || corpusBlueprintLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+                {corpusBlueprintSessionLoading
+                  ? '正在恢复会话'
+                  : corpusBlueprintSession?.status === 'accepted'
+                    ? '蓝图已确认'
+                    : corpusBlueprintSession
+                      ? selectedCorpusBlueprintCandidate ? '已保存蓝图' : '请选择蓝图'
+                      : '生成蓝图候选'}
               </button>
             </div>
 
             <div className="rounded border border-border bg-background px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
               按当前章节会话跨已启用语料库检索，先生成多份蓝图；选中满意蓝图后再生成可插入草稿。
             </div>
+
+            {corpusBlueprintSessionLoading && (
+              <p
+                data-testid="chapter-corpus-blueprint-session-loading"
+                role="status"
+                aria-live="polite"
+                className="rounded bg-secondary/70 px-2 py-1 text-[11px] text-muted-foreground"
+              >
+                正在恢复本章上次未完成的写作会话…
+              </p>
+            )}
           </div>
 
           {visibleCorpusBlueprintError && (
@@ -1173,18 +1405,22 @@ setCorpusDraftActionMessage(`已选择正文候选 ${candidate.candidate_id}`)
               diagnostic={visibleCorpusBlueprintError.diagnostic}
               className="rounded-md"
               onRetry={() => {
-                void generateCorpusBlueprintCandidates()
+                retryCorpusBlueprintAction()
               }}
-              retryLabel="重试蓝图候选"
-              onClose={() => setCorpusBlueprintError(null)}
+              retryLabel="重试当前操作"
+              retrying={corpusBlueprintLoading || corpusBlueprintSessionLoading}
+              onClose={() => {
+                setCorpusBlueprintRetry(null)
+                setCorpusBlueprintError(null)
+              }}
             />
           )}
 
           {visibleCorpusBlueprintActionMessage && (
-            <p className="rounded bg-secondary/70 px-2 py-1 text-[11px] text-muted-foreground">{visibleCorpusBlueprintActionMessage}</p>
+            <p role="status" aria-live="polite" className="rounded bg-secondary/70 px-2 py-1 text-[11px] text-muted-foreground">{visibleCorpusBlueprintActionMessage}</p>
           )}
 
-          {visibleCorpusBlueprintCandidates?.feedback_applied && (
+          {writingMode === 'expert' && visibleCorpusBlueprintCandidates?.feedback_applied && (
             <p
               data-testid="chapter-corpus-blueprint-feedback-summary"
               className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[11px] leading-relaxed text-emerald-700 dark:text-emerald-300"
@@ -1197,7 +1433,8 @@ setCorpusDraftActionMessage(`已选择正文候选 ${candidate.candidate_id}`)
             <CorpusBlueprintCandidateList
               result={visibleCorpusBlueprintCandidates}
               selectedCandidate={selectedCorpusBlueprintCandidate}
-              loading={corpusBlueprintLoading}
+              loading={corpusBlueprintSessionLoading || corpusBlueprintLoading}
+              expert={writingMode === 'expert'}
               onSelect={selectCorpusBlueprintCandidate}
               onRegenerate={() => {
                 void regenerateCorpusBlueprintCandidatesFromSelection()
@@ -1205,7 +1442,7 @@ setCorpusDraftActionMessage(`已选择正文候选 ${candidate.candidate_id}`)
             />
 ) : !corpusBlueprintLoading && !visibleCorpusBlueprintError ? (
 <div className="rounded border border-dashed border-border bg-background px-3 py-3 text-xs leading-relaxed text-muted-foreground">
-输入章节目标后生成多份参考剧本蓝图。这里不会处理素材库，只消费当前章节会话可访问的公共语料库。
+输入章节目标后生成多份参考写作蓝图。这里不会处理素材库，只消费当前章节会话可访问的公共语料库。
 </div>
 ) : null}
 
@@ -1226,7 +1463,7 @@ setCorpusDraftActionMessage(`已选择正文候选 ${candidate.candidate_id}`)
             onClick={() => {
               void generateCorpusDraft()
             }}
-            disabled={!hasValidChapter || corpusDraftLoading || corpusBlueprintLoading || !selectedCorpusBlueprintCandidate}
+            disabled={!hasValidChapter || corpusBlueprintSessionLoading || corpusDraftLoading || corpusBlueprintLoading || !selectedCorpusBlueprintCandidate}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded bg-secondary px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary/80 disabled:opacity-50"
           >
             {corpusDraftLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CornerDownLeft className="h-3.5 w-3.5" />}
@@ -1257,6 +1494,7 @@ setCorpusDraftActionMessage(`已选择正文候选 ${candidate.candidate_id}`)
 <CorpusInsertionDraftCandidateList
 result={visibleCorpusDraftCandidates}
 selectedCandidate={selectedCorpusDraftCandidate}
+expert={writingMode === 'expert'}
 onSelect={selectCorpusDraftCandidate}
 onNextAction={regenerateCorpusBlueprintCandidatesFromDraftAction}
 />
@@ -1277,6 +1515,7 @@ onNextAction={regenerateCorpusBlueprintCandidatesFromDraftAction}
                 <>
                   <CorpusInsertionDraftPreview
                     draft={visibleCorpusDraft}
+                    expert={writingMode === 'expert'}
  insertionDisabled={insertionDisabled || (writingMode === 'expert' && lockedCorpusDraftCandidateId !== selectedCorpusDraftCandidate?.candidate_id)}
                     onApply={() => { void applyCorpusDraft() }}
                     onCopy={() => {
@@ -1830,12 +2069,14 @@ function CorpusBlueprintCandidateList({
   result,
   selectedCandidate,
   loading,
+  expert,
   onSelect,
   onRegenerate,
 }: {
   result: reference.CorpusBlueprintCandidates
   selectedCandidate: reference.CorpusBlueprintCandidate | null
   loading: boolean
+  expert: boolean
   onSelect: (candidate: reference.CorpusBlueprintCandidate) => void
   onRegenerate: () => void
 }) {
@@ -1843,12 +2084,18 @@ function CorpusBlueprintCandidateList({
   const candidates = result.candidates ?? []
 
   return (
-    <section data-testid="chapter-corpus-blueprint-candidates" className="rounded border border-border bg-background text-xs">
+    <section
+      data-testid="chapter-corpus-blueprint-candidates"
+      className="rounded border border-border bg-background text-xs"
+      aria-busy={loading}
+    >
       <div className="flex items-center justify-between gap-2 border-b border-border px-2.5 py-2">
         <div className="min-w-0">
           <h4 className="truncate font-semibold text-foreground">蓝图候选</h4>
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-            {result.query_context.scene_type || 'story_context'} · {result.query_context.pacing_target || 'auto'} · {candidates.length} 份
+            {expert
+              ? `${result.query_context.scene_type || 'story_context'} · ${result.query_context.pacing_target || 'auto'} · ${candidates.length} 份`
+              : `比较 ${candidates.length} 种推进方式，选择最适合本章的一种。`}
           </p>
         </div>
         <button
@@ -1859,11 +2106,11 @@ function CorpusBlueprintCandidateList({
           className="inline-flex shrink-0 items-center gap-1 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
         >
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          反馈重组
+          {expert ? '反馈重组' : '换一组方案'}
         </button>
 </div>
 
- {result.iteration && (
+ {expert && result.iteration && (
  <div data-testid="chapter-corpus-blueprint-iteration" className="border-b border-border px-2.5 py-1.5 text-[11px] text-muted-foreground">
  第 {result.iteration.iteration} 轮 · {result.iteration.state} · 独立候选 {result.iteration.distinct_candidate_count}/{result.iteration.candidate_count}
  </div>
@@ -1906,28 +2153,38 @@ function CorpusBlueprintCandidateList({
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-medium text-foreground">方案 {index + 1}</span>
                       <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                        {blueprint.strategy || 'auto'}
+                        {formatCorpusBlueprintStrategy(blueprint.strategy)}
                       </span>
-                      <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                        coverage {formatConfidence(candidate.coverage_score)}
-                      </span>
+                      {expert && (
+                        <span className="rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                          coverage {formatConfidence(candidate.coverage_score)}
+                        </span>
+                      )}
                     </div>
-                    <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">
-                      {blueprint.blueprint_id}
-                    </p>
+                    {expert ? (
+                      <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">
+                        {blueprint.blueprint_id}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                        推进：{corpusBlueprintBeatSummary(blueprint)}
+                      </p>
+                    )}
                   </div>
                   <button
                     type="button"
                     data-testid="chapter-corpus-blueprint-candidate-select"
                     onClick={() => onSelect(candidate)}
+                    disabled={loading}
+                    aria-pressed={isSelected}
                     className={`inline-flex shrink-0 items-center gap-1 rounded px-2 py-1 text-[11px] ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
                   >
                     {isSelected ? <Check className="h-3.5 w-3.5" /> : null}
-                    {isSelected ? '已选' : '选择'}
+                    {isSelected ? '已选' : '选用此方案'}
                   </button>
                 </div>
 
-{candidate.source_distribution.length > 0 && (
+{expert && candidate.source_distribution.length > 0 && (
                   <div className="space-y-1">
                     <p className="text-[11px] font-medium text-foreground">来源分布</p>
                     <div className="flex flex-wrap gap-1">
@@ -1943,7 +2200,7 @@ function CorpusBlueprintCandidateList({
                   </div>
 )}
 
- {candidate.difference_audit && (
+ {expert && candidate.difference_audit && (
  <div data-testid="chapter-corpus-blueprint-difference-audit" className={`rounded border px-2 py-1.5 text-[11px] ${candidate.difference_audit.passed ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-100'}`}>
  <div className="flex flex-wrap items-center justify-between gap-1">
  <span className="font-medium">{candidate.difference_audit.passed ? '差异审计通过' : '差异不足'}</span>
@@ -1955,21 +2212,21 @@ function CorpusBlueprintCandidateList({
  )}
 
 <div className="space-y-1">
-<p className="text-[11px] font-medium text-foreground">节拍</p>
+<p className="text-[11px] font-medium text-foreground">{expert ? '节拍' : '推进节奏'}</p>
  <div data-testid="chapter-corpus-blueprint-emotion-arc" className="flex min-h-8 items-end gap-1 rounded border border-border bg-card px-2 py-1">
  {blueprint.beats.map((beat, beatIndex) => {
  const height = corpusEmotionArcHeight(beat.narrative_function, beatIndex, blueprint.beats.length)
  return <span key={`${beat.beat_id}:arc`} title={`${beat.beat_index + 1}. ${beat.narrative_function}`} className="min-w-3 flex-1 bg-primary/60" style={{ height: `${height}%` }} />
  })}
  </div>
-                  {blueprint.beats.map(beat => (
+                  {expert && blueprint.beats.map(beat => (
                     <p key={beat.beat_id} className="break-all text-[11px] leading-relaxed text-muted-foreground">
                       {beat.beat_index + 1}. {beat.narrative_function || 'function'} · {beat.role_in_beat || 'role'} · {beat.node_ids.join(', ')}
                     </p>
                   ))}
                 </div>
 
-                {(gapReasons.length > 0 || gapPositions.length > 0 || feedbackReason) && (
+                {expert && (gapReasons.length > 0 || gapPositions.length > 0 || feedbackReason) && (
                   <div
                     data-testid="chapter-corpus-blueprint-diagnostics"
                     className="space-y-1 rounded border border-border bg-card px-2 py-1.5 text-[11px] leading-relaxed text-muted-foreground"
@@ -2009,7 +2266,9 @@ function CorpusBlueprintCandidateList({
 
       {selectedCandidate && (
         <div data-testid="chapter-corpus-blueprint-selected" className="border-t border-border px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
-          已选：{selectedCandidate.blueprint.blueprint_id} · beats={selectedCandidate.blueprint.beats.length}
+          {expert
+            ? `已选：${selectedCandidate.blueprint.blueprint_id} · beats=${selectedCandidate.blueprint.beats.length}`
+            : '已选此方案，可以继续生成正文候选。'}
         </div>
       )}
     </section>
@@ -2019,11 +2278,13 @@ function CorpusBlueprintCandidateList({
 function CorpusInsertionDraftCandidateList({
   result,
   selectedCandidate,
+  expert,
   onSelect,
   onNextAction,
 }: {
   result: reference.CorpusInsertionDraftCandidates
   selectedCandidate: reference.CorpusInsertionDraftCandidate | null
+  expert: boolean
   onSelect: (candidate: reference.CorpusInsertionDraftCandidate) => void
   onNextAction?: (candidate: reference.CorpusInsertionDraftCandidate) => void
 }) {
@@ -2035,7 +2296,9 @@ function CorpusInsertionDraftCandidateList({
       <div className="border-b border-border px-2.5 py-2">
         <h4 className="truncate font-semibold text-foreground">正文候选</h4>
         <p className="mt-0.5 break-all text-[11px] leading-relaxed text-muted-foreground">
-          selected {result.selected_blueprint.blueprint_id} · {candidates.length} 份
+          {expert
+            ? `selected ${result.selected_blueprint.blueprint_id} · ${candidates.length} 份`
+            : `比较 ${candidates.length} 个可插入版本，选一个继续预览。`}
         </p>
       </div>
 
@@ -2045,13 +2308,10 @@ function CorpusInsertionDraftCandidateList({
             const isSelected = candidate.candidate_id === selectedId
             const draft = candidate.draft
             const canInsert = corpusDraftCanApply(draft)
-            const transitionIssueMessages = corpusDraftTransitionIssueMessages(draft)
             const nextAction = candidate.next_action?.action === 'regenerate_blueprint'
               ? candidate.next_action
               : null
-            const statusLabel = canInsert
-              ? '可插入'
-              : transitionIssueMessages.length > 0 ? '过渡审计阻断' : draft.audit.passed ? draft.gate.status || '闸门阻断' : '审计阻断'
+            const statusLabel = corpusDraftStatusLabel(draft, expert)
 
             return (
               <article
@@ -2070,18 +2330,21 @@ function CorpusInsertionDraftCandidateList({
                         {statusLabel}
                       </span>
                     </div>
-                    <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">
-                      {candidate.candidate_id}
-                    </p>
+                    {expert && (
+                      <p className="mt-1 break-all text-[11px] leading-relaxed text-muted-foreground">
+                        {candidate.candidate_id}
+                      </p>
+                    )}
                   </div>
                   <button
                     type="button"
                     data-testid="chapter-corpus-draft-candidate-select"
                     onClick={() => onSelect(candidate)}
+                    aria-pressed={isSelected}
                     className={`inline-flex shrink-0 items-center gap-1 rounded px-2 py-1 text-[11px] ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}
                   >
                     {isSelected ? <Check className="h-3.5 w-3.5" /> : null}
-                    {isSelected ? '已选' : '选择'}
+                    {isSelected ? '已选' : '预览此稿'}
                   </button>
                 </div>
 
@@ -2094,10 +2357,12 @@ function CorpusInsertionDraftCandidateList({
                 {nextAction && onNextAction && (
                   <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-900 dark:text-amber-100">
                     <p className="break-all">
-                      {nextAction.message || '当前正文候选需要回到蓝图重组。'}
+                      {expert
+                        ? nextAction.message || '当前正文候选需要回到蓝图重组。'
+                        : '这份正文不能安全插入。请回到蓝图重组，或选择其他版本。'}
                     </p>
                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                      <span className="break-all text-muted-foreground">{nextAction.reason_code}</span>
+                      {expert && <span className="break-all text-muted-foreground">{nextAction.reason_code}</span>}
                       <button
                         type="button"
                         data-testid="chapter-corpus-draft-next-action-button"
@@ -2110,9 +2375,11 @@ function CorpusInsertionDraftCandidateList({
                     </div>
                   </div>
                 )}
-                <p className="text-[11px] text-muted-foreground">
-                  beats={draft.blueprint.beats.length} · pieces={draft.pieces.length} · transitions={(draft.transitions ?? []).length}
-                </p>
+                {expert && (
+                  <p className="text-[11px] text-muted-foreground">
+                    beats={draft.blueprint.beats.length} · pieces={draft.pieces.length} · transitions={(draft.transitions ?? []).length}
+                  </p>
+                )}
               </article>
             )
           })}
@@ -2274,6 +2541,30 @@ function corpusDraftCanApply(draft: reference.CorpusInsertionDraft): boolean {
     corpusDraftTransitionIssueMessages(draft).length === 0
 }
 
+function corpusDraftStatusLabel(draft: reference.CorpusInsertionDraft, expert: boolean): string {
+  if (corpusDraftCanApply(draft)) return '可插入'
+  if (corpusDraftTransitionIssueMessages(draft).length > 0) {
+    return expert ? '过渡审计阻断' : '需要重组蓝图'
+  }
+  if (!draft.audit.passed) {
+    return expert ? '审计阻断' : '暂不能插入'
+  }
+  return expert ? draft.gate.status || '闸门阻断' : '暂不能插入'
+}
+
+function corpusDraftBlockedMessage(
+  draft: reference.CorpusInsertionDraft,
+  transitionIssues: string[],
+): string {
+  if (transitionIssues.length > 0) {
+    return '这份正文的过渡不能安全拼接。请回到蓝图重组，或选择其他版本。'
+  }
+  if (!draft.audit.passed) {
+    return '这份正文未通过来源文本核验，不能插入。请选择其他版本。'
+  }
+  return '这份正文未通过写入检查，不能插入。请选择其他版本。'
+}
+
 function corpusDraftTransitionIssueMessages(draft: reference.CorpusInsertionDraft): string[] {
   const transitions = draft.transitions ?? []
   if (transitions.length === 0) return []
@@ -2321,11 +2612,13 @@ function corpusDraftTransitionAfterPiece(
 
 function CorpusInsertionDraftPreview({
   draft,
+  expert,
   insertionDisabled,
   onApply,
   onCopy,
 }: {
   draft: reference.CorpusInsertionDraft
+  expert: boolean
   insertionDisabled: boolean
   onApply: () => void
   onCopy: () => void
@@ -2333,9 +2626,7 @@ function CorpusInsertionDraftPreview({
   const transitionIssueMessages = corpusDraftTransitionIssueMessages(draft)
   const draftCanApply = corpusDraftCanApply(draft)
   const canApply = draftCanApply && !insertionDisabled
-  const gateLabel = draftCanApply
-    ? '闸门通过'
-    : transitionIssueMessages.length > 0 ? '过渡审计阻断' : draft.audit.passed ? draft.gate.status || '闸门阻断' : draft.audit.status || '审计阻断'
+  const gateLabel = draftCanApply ? '闸门通过' : corpusDraftStatusLabel(draft, expert)
   const blockingMessages = [
     ...draft.gate.errors,
     ...draft.audit.errors,
@@ -2362,15 +2653,15 @@ function CorpusInsertionDraftPreview({
             return (
               <Fragment key={piece.piece_id}>
                 <p className="whitespace-pre-wrap">
-                  {renderCorpusPieceText(piece)}
+                  {renderCorpusPieceText(piece, expert)}
                 </p>
                 {transition && transition.text.trim().length > 0 && (
                   <p
                     data-testid="chapter-corpus-draft-transition"
                     className="whitespace-pre-wrap rounded border border-dashed border-border bg-secondary/40 px-2 py-1 text-[11px] text-muted-foreground"
-                    title={`${transition.strategy}: ${transition.reason}`}
+                    title={expert ? `${transition.strategy}: ${transition.reason}` : undefined}
                   >
-                    {renderCorpusTransitionText(transition)}
+                    {renderCorpusTransitionText(transition, expert)}
                   </p>
                 )}
               </Fragment>
@@ -2404,12 +2695,15 @@ function CorpusInsertionDraftPreview({
 
       {!draftCanApply && (
         <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
-          {blockingMessages.length > 0
-            ? Array.from(new Set(blockingMessages)).join('；')
-            : '当前草稿未通过授权、相似度或保留文本校验，不能写入编辑器。'}
+          {expert
+            ? blockingMessages.length > 0
+              ? Array.from(new Set(blockingMessages)).join('；')
+              : '当前草稿未通过授权、相似度或保留文本校验，不能写入编辑器。'
+            : corpusDraftBlockedMessage(draft, transitionIssueMessages)}
         </div>
       )}
 
+      {expert && (
       <div className="space-y-1 text-[11px] leading-relaxed text-muted-foreground">
         <p>
           蓝图：{draft.blueprint.blueprint_id} · beats={draft.blueprint.beats.length} · pieces={draft.pieces.length} · locked={draft.pieces.reduce((total, piece) => total + piece.locked_spans.length, 0)} · transitions={(draft.transitions ?? []).length}
@@ -2456,6 +2750,7 @@ function CorpusInsertionDraftPreview({
           </div>
         )}
       </div>
+      )}
 
       {insertionDisabled && (
         <p className="text-[11px] text-muted-foreground">
@@ -2466,7 +2761,7 @@ function CorpusInsertionDraftPreview({
   )
 }
 
-function renderCorpusPieceText(piece: reference.CorpusInsertionPiece): ReactNode {
+function renderCorpusPieceText(piece: reference.CorpusInsertionPiece, expert: boolean): ReactNode {
   const text = piece.output_text
   const replacements = piece.slot_replacements
     .filter(replacement =>
@@ -2536,7 +2831,7 @@ function renderCorpusPieceText(piece: reference.CorpusInsertionPiece): ReactNode
           key={`locked-${start}-${index}`}
           data-testid="chapter-corpus-diff-locked-span"
           className="rounded bg-sky-100 px-0.5 text-sky-950 ring-1 ring-sky-300 dark:bg-sky-400/20 dark:text-sky-100 dark:ring-sky-400/40"
-          title={locked.reason}
+          title={expert ? locked.reason : '已锁定保留片段'}
         >
           {text.slice(start, end)}
         </mark>,
@@ -2559,12 +2854,14 @@ function renderCorpusPieceText(piece: reference.CorpusInsertionPiece): ReactNode
   return parts
 }
 
-function renderCorpusTransitionText(transition: reference.CorpusInsertionTransition): ReactNode {
+function renderCorpusTransitionText(transition: reference.CorpusInsertionTransition, expert: boolean): ReactNode {
   return (
     <span>
-      <span className="mr-1 rounded bg-secondary px-1 py-0.5 text-[10px] uppercase tracking-normal">
-        {transition.strategy || transition.decision}
-      </span>
+      {expert && (
+        <span className="mr-1 rounded bg-secondary px-1 py-0.5 text-[10px] uppercase tracking-normal">
+          {transition.strategy || transition.decision}
+        </span>
+      )}
       <span>{transition.text}</span>
     </span>
   )

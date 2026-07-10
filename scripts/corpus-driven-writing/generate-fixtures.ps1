@@ -1,7 +1,7 @@
 param(
 [int]$GoldenSentenceCount = 500,
-[int]$ScaleCharacterCount = 2000000,
- [string]$ScaleOutput = "build/tmp/corpus-driven-writing/scale-2m.jsonl",
+[int]$ScaleCharacterCount = 50000,
+ [string]$ScaleOutput = "build/tmp/corpus-driven-writing/scale-50k.jsonl",
  [switch]$SkipGolden,
  [switch]$SkipScale
 )
@@ -71,7 +71,7 @@ if (-not $SkipScale) {
  $characters = 0
  $ordinal = 0
  while ($characters -lt $ScaleCharacterCount) {
- $sourceIndex = $ordinal % 12
+ $sourceIndex = $ordinal % 16
  $text = $templates[$ordinal % $templates.Count] -f ("人物{0:D3}" -f ($ordinal % 113))
  $record = [ordered]@{
  source_id = "scale-source-$sourceIndex"

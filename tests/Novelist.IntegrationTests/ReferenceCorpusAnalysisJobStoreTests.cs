@@ -699,6 +699,76 @@ public async Task SettleWorkItemRejectsStaleInvocationWithZeroWrites()
  Assert.Equal((400, true, "abandoned", "worker_shutdown"),
  await fixture.ReadAttemptSettlementDetailsAsync($"job-{suffix}", 1));
  }
+ [Theory]
+ [InlineData(true)]
+ [InlineData(false)]
+ public async Task ControlRequestCommitBoundaryMeetsSixtySecondP95(bool pause)
+ {
+ await using var fixture = await JobStoreFixture.CreateAsync();
+ var origin = DateTimeOffset.Parse("2026-07-10T01:02:03Z");
+ var observedLatencies = new List<TimeSpan>();
+ for (var sample = 0; sample < 20; sample++)
+ {
+ var suffix = $"control-p95-{pause}-{sample}";
+ var requestedAt = origin.AddMinutes(sample);
+ var boundaryAt = requestedAt.AddSeconds(5 + (sample * 35d / 19d));
+ var reservation = await fixture.CreateReservationAsync(suffix, requestedAt.AddSeconds(-2), 400);
+ var running = await fixture.Store.GetAsync($"job-{suffix}");
+ Assert.NotNull(running);
+ if (pause) await fixture.Store.RequestPauseAsync(running.JobId, running.Version, requestedAt);
+ else await fixture.Store.RequestCancelAsync(running.JobId, running.Version, requestedAt);
+ var settled = await fixture.Store.CommitWorkItemAsync(reservation, 200, $"run-{suffix}", boundaryAt,
+ async (connection, transaction, cancellationToken) =>
+ {
+ await using var command = connection.CreateCommand();
+ command.Transaction = transaction;
+ command.CommandText = "INSERT INTO commit_probe(value) VALUES ($value);";
+ command.Parameters.AddWithValue("$value", suffix);
+ await command.ExecuteNonQueryAsync(cancellationToken);
+ });
+ Assert.Equal(pause ? ReferenceCorpusAnalysisJobStatuses.Paused : ReferenceCorpusAnalysisJobStatuses.Cancelled, settled.Status);
+ Assert.Equal(1, settled.ProcessedWorkItems);
+ Assert.Equal(1, settled.SucceededWorkItems);
+ Assert.Equal(200, settled.TokensSpent);
+ observedLatencies.Add(boundaryAt - requestedAt);
+ }
+ Assert.True(Percentile95(observedLatencies) <= TimeSpan.FromSeconds(60));
+ Assert.Equal(20, await fixture.CountRowsAsync("commit_probe"));
+ }
+
+ [Fact]
+ public async Task ExpiredLeaseIsReclaimedWithinThirtySecondsAndCanBeClaimedAgain()
+ {
+ await using var fixture = await JobStoreFixture.CreateAsync();
+ var claimedAt = DateTimeOffset.Parse("2026-07-10T01:02:03Z");
+ var leaseDuration = TimeSpan.FromSeconds(45);
+ var expiry = claimedAt.Add(leaseDuration);
+ var detectedAt = expiry.AddSeconds(29);
+ var reservation = await fixture.CreateReservationAsync("stale-p95", claimedAt, 400);
+ Assert.Equal(1, await fixture.Store.ReclaimExpiredLeasesAsync(detectedAt, detectedAt));
+ var reclaimed = await fixture.Store.GetAsync(reservation.JobId);
+ Assert.NotNull(reclaimed);
+ Assert.Equal(ReferenceCorpusAnalysisJobStatuses.RetryWait, reclaimed.Status);
+ Assert.Null(reclaimed.LeaseOwner);
+ Assert.Null(reclaimed.LeaseToken);
+ Assert.Equal(0, reclaimed.TokensReserved);
+ Assert.True(detectedAt - expiry <= TimeSpan.FromSeconds(30));
+ Assert.Equal(("pending", 0), await fixture.ReadWorkItemReservationAsync(reservation.InputSnapshotId, reservation.Ordinal));
+ var resumed = await fixture.Store.ResumeAsync(reclaimed.JobId, reclaimed.Version, null, detectedAt);
+ Assert.Equal(ReferenceCorpusAnalysisJobStatuses.Queued, resumed.Status);
+ var secondClaim = await fixture.Store.ClaimNextAsync("worker-2", detectedAt, leaseDuration);
+ Assert.NotNull(secondClaim);
+ Assert.Equal(2, secondClaim.Job.AttemptCount);
+ Assert.NotEqual(reservation.LeaseToken, secondClaim.LeaseToken);
+ }
+
+ private static TimeSpan Percentile95(IReadOnlyList<TimeSpan> values)
+ {
+ var ordered = values.OrderBy(value => value).ToArray();
+ var index = (int)Math.Ceiling(ordered.Length * 0.95) - 1;
+ return ordered[Math.Max(0, index)];
+ }
+
  private static ReferenceCorpusAnalysisInputSnapshot CreateSnapshot(string id, int workCount, DateTimeOffset at) =>
  new(id, 101, "stage_2", "sentence", "nodes-hash", "[\"syntax\",\"emotion\"]",
  "corpus-analysis-v2", "feature-v2", "fake", "fake-model", 2, workCount, at);

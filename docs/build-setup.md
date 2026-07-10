@@ -128,7 +128,8 @@ VERSION=1.0.0 bash scripts/novelist-package-windows.sh
 ## 清理
 
 ```bash
-rm -rf frontend/dist frontend/node_modules build/runtime build/dist build/bin build/version build/*.AppDir novelist novelist.exe
+git clean -fdX -- frontend/dist frontend/node_modules build/runtime build/dist build/bin build/version novelist novelist.exe
+rm -rf build/*.AppDir
 ```
 
-该命令会删除前端构建输出、前端依赖目录、发布目录和运行时缓存。用户数据目录不在仓库内，不会被清理。
+`git clean -fdX` 只删除上述路径内被 Git 忽略的前端构建输出、依赖、发布目录和运行时缓存，因此会保留已跟踪的 `build/runtime/models/vocab.txt`。第二行只清理 Linux 打包目录。用户数据目录不在仓库内，不会被清理；运行前仍应先用 `git status --short` 确认工作树。

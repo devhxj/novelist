@@ -1,0 +1,111 @@
+{
+  "schema_version": "corpus-writing-evaluation-fixtures-v1",
+  "dataset_id": "corpus-writing-contract-fixture",
+  "dataset_revision": "v1",
+  "dataset_kind": "contract",
+  "query_cases": [
+    {
+      "case_id": "query-01",
+      "query_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "top_k": 3,
+      "relevant_node_ids": ["node-a", "node-b"],
+      "ranked_node_ids": ["node-a", "node-x", "node-b"],
+      "expected_reason_codes": ["goal_match", "licensed"],
+      "returned_reason_codes": ["goal_match", "licensed"],
+      "latency_ms": 10
+    },
+    {
+      "case_id": "query-02",
+      "query_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "top_k": 3,
+      "relevant_node_ids": ["node-c"],
+      "ranked_node_ids": ["node-x", "node-c", "node-y"],
+      "expected_reason_codes": ["goal_match"],
+      "returned_reason_codes": ["goal_match"],
+      "latency_ms": 15
+    },
+    {
+      "case_id": "query-03",
+      "query_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "top_k": 3,
+      "relevant_node_ids": ["node-d", "node-e"],
+      "ranked_node_ids": ["node-d", "node-x", "node-y"],
+      "expected_reason_codes": ["goal_match", "context_match"],
+      "returned_reason_codes": ["goal_match"],
+      "latency_ms": 25
+    }
+  ],
+  "blueprint_cases": [
+    {
+      "case_id": "blueprint-01",
+      "goal_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "selected_candidate_id": "candidate-01a",
+      "feedback_improved": true,
+      "candidates": [
+        { "candidate_id": "candidate-01a", "source_node_ids": ["node-a", "node-b"] },
+        { "candidate_id": "candidate-01b", "source_node_ids": ["node-c", "node-d"] }
+      ]
+    },
+    {
+      "case_id": "blueprint-02",
+      "goal_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "selected_candidate_id": "candidate-02a",
+      "feedback_improved": true,
+      "candidates": [
+        { "candidate_id": "candidate-02a", "source_node_ids": ["node-e", "node-f"] },
+        { "candidate_id": "candidate-02b", "source_node_ids": ["node-e", "node-g"] }
+      ]
+    },
+    {
+      "case_id": "blueprint-03",
+      "goal_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "selected_candidate_id": "candidate-03a",
+      "feedback_improved": false,
+      "candidates": [
+        { "candidate_id": "candidate-03a", "source_node_ids": ["node-h"] },
+        { "candidate_id": "candidate-03b", "source_node_ids": ["node-h"] }
+      ]
+    }
+  ],
+  "insertion_cases": [
+    {
+      "case_id": "insertion-01",
+      "chapter_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "candidate_character_count": 100,
+      "user_edited_character_count": 10,
+      "iteration_count": 1,
+      "accepted": true,
+      "source_piece_count": 4,
+      "preserved_piece_count": 4,
+      "human_scores": [
+        { "reviewer_id_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fidelity": 5, "plot_fit": 4, "naturalness": 4 }
+      ]
+    },
+    {
+      "case_id": "insertion-02",
+      "chapter_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "candidate_character_count": 100,
+      "user_edited_character_count": 20,
+      "iteration_count": 2,
+      "accepted": true,
+      "source_piece_count": 5,
+      "preserved_piece_count": 4,
+      "human_scores": [
+        { "reviewer_id_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "fidelity": 4, "plot_fit": 4, "naturalness": 3 }
+      ]
+    },
+    {
+      "case_id": "insertion-03",
+      "chapter_hash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "candidate_character_count": 100,
+      "user_edited_character_count": 0,
+      "iteration_count": 3,
+      "accepted": false,
+      "source_piece_count": 2,
+      "preserved_piece_count": 1,
+      "human_scores": [
+        { "reviewer_id_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "fidelity": 3, "plot_fit": 2, "naturalness": 2 }
+      ]
+    }
+  ]
+}

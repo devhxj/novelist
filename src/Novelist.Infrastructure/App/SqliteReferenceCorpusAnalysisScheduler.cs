@@ -35,10 +35,13 @@ private static readonly ReferenceCorpusFrozenTokenPolicy DefaultTokenPolicy = ne
  await store.EnsureSchemaAsync(cancellationToken);
  var model = await ResolveFrozenModelAsync(cancellationToken);
  var now = DateTimeOffset.UtcNow;
- var snapshotId = $"analysis-snapshot:{Guid.NewGuid():N}";
- var jobId = $"analysis-job:{Guid.NewGuid():N}";
+var snapshotId = $"analysis-snapshot:{Guid.NewGuid():N}";
+var jobId = $"analysis-job:{Guid.NewGuid():N}";
+ var techniqueDependency = input.JobKind == ReferenceCorpusAnalysisJobKinds.TechniqueSpecimen
+ ? await GetRequiredTechniqueDependencyAsync(store, input, cancellationToken)
+ : null;
 
- await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
  var built = input.JobKind switch
  {
  ReferenceCorpusAnalysisJobKinds.FeatureAnalysis => await _snapshotBuilder.BuildFeatureAsync(
@@ -48,8 +51,9 @@ private static readonly ReferenceCorpusFrozenTokenPolicy DefaultTokenPolicy = ne
  cancellationToken),
  ReferenceCorpusAnalysisJobKinds.TechniqueSpecimen => await _snapshotBuilder.BuildTechniqueAsync(
  connection,
- new(snapshotId, input.RunId, input.AnchorId, input.Scope, input.MinObservationConfidence,
- "reference-technique-analyzer-v1", model.ProviderName, model.ModelId, model.ReasoningEffort, DefaultTokenPolicy, now),
+new(snapshotId, input.RunId, input.AnchorId, input.Scope, input.MinObservationConfidence,
+ "reference-technique-analyzer-v1", model.ProviderName, model.ModelId, model.ReasoningEffort, DefaultTokenPolicy, now,
+ techniqueDependency!.JobId, techniqueDependency.RunId, techniqueDependency.InputSnapshotId),
  cancellationToken),
  _ => throw new ArgumentOutOfRangeException(nameof(input), input.JobKind, "Unknown analysis job kind.")
  };
@@ -238,9 +242,27 @@ job.LastErrorCode, job.LastErrorMessage, job.CurrentChapter,
  throw new ArgumentOutOfRangeException(nameof(input), input.JobKind, "Unknown job kind.");
  if (!ReferenceCorpusAnalysisPriorityClasses.All.Contains(input.PriorityClass, StringComparer.Ordinal))
  throw new ArgumentOutOfRangeException(nameof(input), input.PriorityClass, "Unknown priority class.");
- if (input.Scope is not ReferenceCorpusNodeTypes.Sentence and not ReferenceCorpusNodeTypes.Passage ||
- input.TokenBudget is < 0 || input.MaxAttempts is < 1 or > 20 || input.MinObservationConfidence is < 0 or > 1)
- throw new ArgumentOutOfRangeException(nameof(input), "Analysis enqueue values are outside supported bounds.");
+if (input.Scope is not ReferenceCorpusNodeTypes.Sentence and not ReferenceCorpusNodeTypes.Passage ||
+input.TokenBudget is < 0 || input.MaxAttempts is < 1 or > 20 || input.MinObservationConfidence is < 0 or > 1)
+throw new ArgumentOutOfRangeException(nameof(input), "Analysis enqueue values are outside supported bounds.");
+ if (input.JobKind == ReferenceCorpusAnalysisJobKinds.TechniqueSpecimen && string.IsNullOrWhiteSpace(input.DependencyJobId))
+ throw new ArgumentException("Technique specimen jobs require a completed feature-analysis dependency.", nameof(input));
+}
+
+ private static async ValueTask<ReferenceCorpusAnalysisJob> GetRequiredTechniqueDependencyAsync(
+ SqliteReferenceCorpusAnalysisJobStore store,
+ EnqueueReferenceCorpusAnalysisJobPayload input,
+ CancellationToken cancellationToken)
+ {
+ var dependency = await store.GetAsync(input.DependencyJobId!, cancellationToken);
+ if (dependency is null)
+ throw new ArgumentException("Technique specimen dependency job was not found.", nameof(input));
+ if (dependency.JobKind != ReferenceCorpusAnalysisJobKinds.FeatureAnalysis ||
+ dependency.Status != ReferenceCorpusAnalysisJobStatuses.Completed ||
+ dependency.NovelId != input.NovelId || dependency.AnchorId != input.AnchorId ||
+ !string.Equals(ReadScope(dependency.InputJson), input.Scope, StringComparison.Ordinal))
+ throw new ArgumentException("Technique specimen dependency must be a completed feature-analysis job for the same novel, anchor, and scope.", nameof(input));
+ return dependency;
  }
 
  private static string ListFingerprint(long? novelId, long? anchorId, string? status, string sortBy, string sortDir)

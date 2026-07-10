@@ -34,7 +34,10 @@ string ModelProvider,
 string ModelId,
 string ReasoningEffort,
 ReferenceCorpusFrozenTokenPolicy TokenPolicy,
-DateTimeOffset CreatedAt);
+DateTimeOffset CreatedAt,
+string? DependencyJobId = null,
+string? DependencyRunId = null,
+string? DependencyInputSnapshotId = null);
 
 internal sealed class ReferenceCorpusAnalysisInputSnapshotBuilder
 {
@@ -138,8 +141,11 @@ ValidateTechnique(request);
  ReferenceCorpusAnalysisFrozenInputCodec.ComputeEvidenceSetHash(node.Observations),
 request.AnalyzerVersion,
 ReferenceCorpusTechniqueSpecimenSchemaVersions.V1,
- new(request.ModelProvider, request.ModelId, request.ReasoningEffort),
- request.TokenPolicy);
+new(request.ModelProvider, request.ModelId, request.ReasoningEffort),
+ request.TokenPolicy,
+ request.DependencyJobId,
+ request.DependencyRunId,
+ request.DependencyInputSnapshotId);
  var encoded = ReferenceCorpusAnalysisFrozenInputCodec.Serialize(payload);
  workItems.Add(new(
  workItems.Count,
@@ -374,12 +380,15 @@ await using var command = connection.CreateCommand();
  INNER JOIN reference_feature_observations o ON o.node_id=n.node_id
  WHERE n.anchor_id=$anchor_id AND n.node_type=$node_type
  AND o.anchor_id=n.anchor_id AND o.node_type=n.node_type
- AND o.validity_state='active' AND o.review_state<>'rejected' AND o.confidence>=$confidence
+ AND o.run_id=$dependency_run_id
+ AND o.validity_state='active' AND o.review_state<>'rejected'
+ AND o.superseded_by_run_id IS NULL AND o.confidence>=$confidence
  ORDER BY n.chapter_index,n.start_offset,n.sequence_index,n.node_id,o.feature_family,o.feature_key,o.observation_id;
  """;
  command.Parameters.AddWithValue("$anchor_id", request.AnchorId);
- command.Parameters.AddWithValue("$node_type", request.SourceNodeType);
- command.Parameters.AddWithValue("$confidence", request.MinObservationConfidence);
+command.Parameters.AddWithValue("$node_type", request.SourceNodeType);
+ command.Parameters.AddWithValue("$dependency_run_id", request.DependencyRunId!);
+command.Parameters.AddWithValue("$confidence", request.MinObservationConfidence);
  var builders = new Dictionary<string, TechniqueNodeBuilder>(StringComparer.Ordinal);
  await using var reader = await command.ExecuteReaderAsync(cancellationToken);
  while (await reader.ReadAsync(cancellationToken))
@@ -419,8 +428,9 @@ await using var command = connection.CreateCommand();
 
  private static void ValidateTechnique(ReferenceCorpusTechniqueSnapshotBuildRequest request)
  {
- if (request.AnchorId <= 0 || request.SourceNodeType is not ReferenceCorpusNodeTypes.Sentence and not ReferenceCorpusNodeTypes.Passage || request.MinObservationConfidence is < 0 or > 1)
- throw new ArgumentException("Technique snapshot request is invalid.", nameof(request));
+ if (request.AnchorId <= 0 || request.SourceNodeType is not ReferenceCorpusNodeTypes.Sentence and not ReferenceCorpusNodeTypes.Passage || request.MinObservationConfidence is < 0 or > 1 ||
+ string.IsNullOrWhiteSpace(request.DependencyJobId) || string.IsNullOrWhiteSpace(request.DependencyRunId) || string.IsNullOrWhiteSpace(request.DependencyInputSnapshotId))
+throw new ArgumentException("Technique snapshot request is invalid.", nameof(request));
  }
 
  private sealed record NodeRow(string NodeId,string? ParentNodeId,string NodeType,int? ChapterIndex,int StartOffset,int EndOffset,string TextHash,string Text,string? ChapterNodeId,string? SourceSegmentId,string? SourceSegmentType);

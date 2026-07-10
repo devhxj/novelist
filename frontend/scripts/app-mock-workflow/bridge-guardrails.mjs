@@ -205,7 +205,8 @@ export async function verifyChapterReferenceBridgeCalls(page) {
     'GetReferenceOrchestrationRuns',
     'StartReferenceOrchestrationRun',
     'ResumeReferenceOrchestrationRun',
-    'GenerateReferenceCorpusBlueprintCandidates',
+    'GetReferenceCorpusBlueprintSession',
+    'AdvanceReferenceCorpusBlueprintSession',
     'GenerateReferenceCorpusInsertionDraftCandidates',
  'RecordReferenceCorpusInsertionAudit',
     'GetReferenceDraftCandidates',
@@ -232,41 +233,65 @@ export async function verifyChapterReferenceBridgeCalls(page) {
   assert(resumeCall, 'chapter reference drawer must resume the current orchestration decision in place')
   assert.equal(resumeCall.args?.[0]?.decision_type, 'confirm_source_and_facts', 'chapter reference resume must use stable backend decision type')
 
-  const blueprintCandidateCalls = calls.filter((call) => call.method === 'GenerateReferenceCorpusBlueprintCandidates')
-  assert(blueprintCandidateCalls.length >= 3, 'chapter reference drawer must generate corpus blueprint candidates, support feedback regeneration, and support draft-diagnosis regeneration')
-  const firstBlueprintCandidateCall = blueprintCandidateCalls[0]
-  const secondBlueprintCandidateCall = blueprintCandidateCalls[1]
-  for (const [index, call] of blueprintCandidateCalls.entries()) {
-    const payload = call.args?.[0]
+  assert(!methods.includes('GenerateReferenceCorpusBlueprintCandidates'), 'chapter reference default path must not bypass the persisted blueprint session')
+  const blueprintSessionReads = calls.filter((call) => call.method === 'GetReferenceCorpusBlueprintSession')
+  assert(blueprintSessionReads.length >= 1, 'chapter reference drawer must recover the persisted blueprint session before presenting the default flow')
+  assert.equal(blueprintSessionReads[0].args?.[0]?.novel_id, 42, 'chapter reference blueprint session recovery must bind the active novel')
+  assert.equal(blueprintSessionReads[0].args?.[0]?.chapter_number, 1, 'chapter reference blueprint session recovery must bind the active chapter')
+  assert.equal(blueprintSessionReads[0].args?.[0]?.session_id, 'chapter:42:1', 'chapter reference blueprint session recovery must use a stable chapter session id')
+
+  const blueprintSessionCalls = calls.filter((call) => call.method === 'AdvanceReferenceCorpusBlueprintSession')
+  assert(blueprintSessionCalls.length >= 6, 'chapter reference drawer must generate, select, revise, recover from blocked drafts, and persist each transition')
+  const firstBlueprintSessionCall = blueprintSessionCalls.find((call) => call.args?.[0]?.action === 'generate')
+  assert(firstBlueprintSessionCall, 'chapter reference drawer must create the first blueprint iteration through the persisted session')
+  const blueprintSelectionCalls = blueprintSessionCalls.filter((call) => call.args?.[0]?.action === 'select')
+  assert(blueprintSelectionCalls.length >= 3, 'chapter reference drawer must persist every blueprint selection')
+  const blueprintRevisionCalls = blueprintSessionCalls.filter((call) => call.args?.[0]?.action === 'revise')
+  assert(blueprintRevisionCalls.length >= 2, 'chapter reference drawer must persist both feedback and blocked-draft revisions')
+
+  for (const [index, call] of blueprintSessionCalls.filter((item) => ['generate', 'revise'].includes(item.args?.[0]?.action)).entries()) {
+    const payload = call.args?.[0]?.generation_input
     const libraryIds = payload?.scope?.library_ids
-    assert(Array.isArray(libraryIds), `chapter reference blueprint candidate call ${index + 1} must send scope.library_ids as an array`)
+    assert(Array.isArray(libraryIds), `chapter reference blueprint session generation ${index + 1} must send scope.library_ids as an array`)
     assert.deepEqual(
       libraryIds,
       [],
-      `chapter reference blueprint candidate call ${index + 1} must let backend resolve default session libraries; got ${JSON.stringify(libraryIds)}`)
+      `chapter reference blueprint session generation ${index + 1} must let backend resolve default session libraries; got ${JSON.stringify(libraryIds)}`)
     assert.equal(
       payload?.scope?.session_id,
       'project:42:default',
-      `chapter reference blueprint candidate call ${index + 1} must send the current chapter default corpus session; got ${JSON.stringify(payload?.scope?.session_id)}`)
+      `chapter reference blueprint session generation ${index + 1} must send the current chapter default corpus session; got ${JSON.stringify(payload?.scope?.session_id)}`)
   }
-  assert(firstBlueprintCandidateCall.result?.candidates?.length >= 2, 'chapter reference blueprint candidate first round must return at least two candidates')
-  assert(secondBlueprintCandidateCall.args?.[0]?.feedback, 'chapter reference blueprint candidate second round must send feedback')
+
+  const firstBlueprintCandidates = firstBlueprintSessionCall.result?.candidates
+  assert(firstBlueprintCandidates?.candidates?.length >= 2, 'chapter reference blueprint session first round must return at least two candidates')
+  const firstSelectedBlueprintId = blueprintSelectionCalls[0].args?.[0]?.selected_blueprint_id
+  assert(firstSelectedBlueprintId, 'chapter reference first blueprint selection must identify the selected candidate')
+  assert.equal(blueprintSelectionCalls[0].result?.selected_blueprint_id, firstSelectedBlueprintId, 'chapter reference first blueprint selection must be persisted by the session')
+
+  const secondBlueprintSessionCall = blueprintRevisionCalls.find((call) =>
+    (call.args?.[0]?.checklist ?? []).some((item) =>
+      item?.decision === 'revise' && (item?.problem_tags ?? []).includes('source_repetition')))
+  assert(secondBlueprintSessionCall, 'chapter reference alternative-source action must revise the persisted blueprint session')
+  assert.equal(secondBlueprintSessionCall.args?.[0]?.selected_blueprint_id, firstSelectedBlueprintId, 'chapter reference feedback revision must target the selected blueprint')
   assert(
-    (secondBlueprintCandidateCall.args?.[0]?.feedback?.problem_tags ?? []).includes('source_repetition'),
-    'chapter reference blueprint candidate second round must send source_repetition feedback when the user asks for a different source mix',
+    (secondBlueprintSessionCall.args?.[0]?.checklist ?? []).some((item) =>
+      item?.decision === 'revise' && (item?.problem_tags ?? []).includes('source_repetition')),
+    'chapter reference blueprint second round must send source_repetition feedback through the persisted checklist',
   )
-  assert.equal(secondBlueprintCandidateCall.result?.feedback_applied, true, 'chapter reference blueprint candidate second round must report feedback_applied')
+  const secondBlueprintCandidates = secondBlueprintSessionCall.result?.candidates
+  assert.equal(secondBlueprintCandidates?.feedback_applied, true, 'chapter reference blueprint session second round must report feedback_applied')
   assert.match(
-    String(secondBlueprintCandidateCall.result?.feedback_summary ?? ''),
+    String(secondBlueprintCandidates?.feedback_summary ?? ''),
     /rejected_blueprints:1/,
-    'chapter reference blueprint candidate second round must report feedback_summary',
+    'chapter reference blueprint session second round must report feedback_summary',
   )
   assert.match(
-    String(secondBlueprintCandidateCall.result?.feedback_summary ?? ''),
+    String(secondBlueprintCandidates?.feedback_summary ?? ''),
     /fallback:feedback_filters_no_matches,fallback_to_base_filters/,
-    'chapter reference blueprint candidate second round must report fallback diagnostics when feedback constraints are relaxed',
+    'chapter reference blueprint session second round must report fallback diagnostics when feedback constraints are relaxed',
   )
-  const firstRegeneratedCandidate = secondBlueprintCandidateCall.result?.candidates?.[0]
+  const firstRegeneratedCandidate = secondBlueprintCandidates?.candidates?.[0]
   assert(
     (firstRegeneratedCandidate?.feedback_reason ?? '').includes('fallback:feedback_filters_no_matches,fallback_to_base_filters'),
     'chapter reference blueprint candidate feedback_reason must include fallback diagnostics',
@@ -282,33 +307,35 @@ export async function verifyChapterReferenceBridgeCalls(page) {
       (position?.missing_dimensions ?? []).includes('rhythm')),
     'chapter reference blueprint candidate gap_positions must expose beat-level missing dimension diagnostics',
   )
-  const firstRegeneratedSources = secondBlueprintCandidateCall.result?.candidates?.[0]?.source_distribution ?? []
+  const firstRegeneratedSources = secondBlueprintCandidates?.candidates?.[0]?.source_distribution ?? []
   assert(
     new Set(firstRegeneratedSources.map((source) => source.library_id)).size >= 2 ||
       new Set(firstRegeneratedSources.map((source) => source.anchor_id)).size >= 2,
     'chapter reference blueprint candidate source_repetition feedback must prioritize a cross-library or cross-anchor first regenerated candidate',
   )
-  const firstStrategies = firstBlueprintCandidateCall.result?.candidates?.map((candidate) => candidate.blueprint?.strategy) ?? []
-  const secondStrategies = secondBlueprintCandidateCall.result?.candidates?.map((candidate) => candidate.blueprint?.strategy) ?? []
-  const firstSources = firstBlueprintCandidateCall.result?.candidates?.map((candidate) => candidate.source_distribution) ?? []
-  const secondSources = secondBlueprintCandidateCall.result?.candidates?.map((candidate) => candidate.source_distribution) ?? []
+  const firstStrategies = firstBlueprintCandidates?.candidates?.map((candidate) => candidate.blueprint?.strategy) ?? []
+  const secondStrategies = secondBlueprintCandidates?.candidates?.map((candidate) => candidate.blueprint?.strategy) ?? []
+  const firstSources = firstBlueprintCandidates?.candidates?.map((candidate) => candidate.source_distribution) ?? []
+  const secondSources = secondBlueprintCandidates?.candidates?.map((candidate) => candidate.source_distribution) ?? []
   assert(
     JSON.stringify(firstStrategies) !== JSON.stringify(secondStrategies) ||
       JSON.stringify(firstSources) !== JSON.stringify(secondSources),
     'chapter reference blueprint candidate feedback regeneration must visibly change strategy or source distribution',
   )
-  const draftNextActionBlueprintCall = blueprintCandidateCalls.find((call) =>
-    (call.args?.[0]?.feedback?.problem_tags ?? []).includes('transition_replacement_required'))
-  assert(draftNextActionBlueprintCall, 'chapter reference draft next_action must trigger blueprint regeneration with transition_replacement_required feedback')
+  const draftNextActionBlueprintCall = blueprintRevisionCalls.find((call) =>
+    (call.args?.[0]?.checklist ?? []).some((item) =>
+      item?.decision === 'revise' && (item?.problem_tags ?? []).includes('transition_replacement_required')))
+  assert(draftNextActionBlueprintCall, 'chapter reference draft next_action must trigger persisted blueprint revision with transition_replacement_required feedback')
   assert(
-    (draftNextActionBlueprintCall.args?.[0]?.feedback?.problem_tags ?? []).includes('transition_replacement_outside_selected_blueprint'),
-    'chapter reference draft next_action feedback must include the concrete transition replacement failure reason',
+    (draftNextActionBlueprintCall.args?.[0]?.checklist ?? []).some((item) =>
+      item?.decision === 'revise' && (item?.problem_tags ?? []).includes('transition_replacement_outside_selected_blueprint')),
+    'chapter reference draft next_action revision must include the concrete transition replacement failure reason',
   )
   assert(
-    (draftNextActionBlueprintCall.args?.[0]?.feedback?.rejected_node_ids ?? []).length >= 1,
-    'chapter reference draft next_action feedback must carry rejected_node_ids for backend reranking',
+    String(draftNextActionBlueprintCall.result?.candidates?.feedback_summary ?? '').includes('rejected_nodes:'),
+    'chapter reference draft next_action revision must let the persisted coordinator derive rejected nodes for backend reranking',
   )
-  assert.equal(draftNextActionBlueprintCall.result?.feedback_applied, true, 'chapter reference draft next_action blueprint regeneration must report feedback_applied')
+  assert.equal(draftNextActionBlueprintCall.result?.candidates?.feedback_applied, true, 'chapter reference draft next_action blueprint revision must report feedback_applied')
 
   const insertionDraftCall = calls.find((call) => call.method === 'GenerateReferenceCorpusInsertionDraftCandidates')
   assert(insertionDraftCall, 'chapter reference drawer must generate corpus insertion draft candidates')
@@ -316,7 +343,7 @@ export async function verifyChapterReferenceBridgeCalls(page) {
   const insertionSelectedBlueprint = insertionDraftPayload?.selected_blueprint
   assert(insertionSelectedBlueprint && typeof insertionSelectedBlueprint === 'object', 'chapter reference insertion draft must send selected_blueprint')
   assert(insertionSelectedBlueprint.blueprint_id, 'chapter reference insertion draft selected_blueprint must include blueprint_id')
-  const selectedSecondRoundBlueprint = (secondBlueprintCandidateCall.result?.candidates ?? [])
+  const selectedSecondRoundBlueprint = (secondBlueprintCandidates?.candidates ?? [])
     .map((candidate) => candidate.blueprint)
     .find((blueprint) => blueprint?.blueprint_id === insertionSelectedBlueprint.blueprint_id)
   assert(

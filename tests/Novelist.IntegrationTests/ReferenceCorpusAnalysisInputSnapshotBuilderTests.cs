@@ -30,13 +30,13 @@ public sealed class ReferenceCorpusAnalysisInputSnapshotBuilderTests
  }
 
  [Fact]
- public async Task BuildTechniqueKeepsFrozenEvidenceAfterLiveObservationChanges()
+ public async Task BuildTechniqueKeepsFrozenDependencyEvidenceAfterLiveObservationChanges()
  {
  await using var connection = await OpenFixtureAsync();
  var builder = new ReferenceCorpusAnalysisInputSnapshotBuilder();
  var result = await builder.BuildTechniqueAsync(
  connection,
- new("snapshot-technique", "run-technique", 101, ReferenceCorpusNodeTypes.Sentence, 0.7, "technique-v1", "fake", "model-a", "medium", new(4, 512, 512, 4096), DateTimeOffset.Parse("2026-07-10T00:00:00Z")),
+ new("snapshot-technique", "run-technique", 101, ReferenceCorpusNodeTypes.Sentence, 0.7, "technique-v1", "fake", "model-a", "medium", new(4, 512, 512, 4096), DateTimeOffset.Parse("2026-07-10T00:00:00Z"), "feature-job", "source-run", "snapshot-feature"),
  CancellationToken.None);
  var workItem = Assert.Single(result.WorkItems);
 
@@ -46,6 +46,9 @@ public sealed class ReferenceCorpusAnalysisInputSnapshotBuilderTests
  Assert.Equal("原始冻结句子。", payload.NodeText);
  Assert.Equal(["obs-emotion", "obs-rhetoric"], payload.Observations.Select(item => item.ObservationId));
  Assert.Equal("suppressed", payload.Observations[0].ValueText);
+ Assert.Equal("feature-job", payload.DependencyJobId);
+ Assert.Equal("source-run", payload.DependencyRunId);
+ Assert.Equal("snapshot-feature", payload.DependencyInputSnapshotId);
 Assert.Equal(ReferenceCorpusAnalysisFrozenInputCodec.ComputeEvidenceSetHash(payload.Observations), payload.EvidenceSetHash);
 }
 

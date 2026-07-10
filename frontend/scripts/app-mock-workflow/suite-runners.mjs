@@ -402,30 +402,109 @@ async function verifyCorpusAnalysisJobsWorkflow(page, corpusTabs) {
  ]
  await page.evaluate((statuses) => {
  const base = window.__appMockState.referenceCorpusAnalysisJobs[0]
+ const allowedActions = {
+ running: ['pause', 'cancel', 'reprioritize'],
+ paused: ['resume', 'cancel'],
+ failed: ['resume'],
+ budget_exhausted: ['resume'],
+ }
  window.__appMockState.referenceCorpusAnalysisJobs = statuses.map(([status], index) => ({
  ...base,
  job_id: `mock-corpus-job-${index}`,
  status,
  version: 1,
- allowed_actions: status === 'running' ? ['pause', 'cancel', 'reprioritize'] : [],
+ allowed_actions: allowedActions[status] ?? [],
+ safe_diagnostics: ['lease_renewal_pending', 'worker_attempt_trace_internal'],
  }))
  }, statuses)
  await corpusTabs.getByRole('tab', { name: '后台任务' }).click()
 const panel = page.getByTestId('corpus-analysis-jobs-panel')
 await expectVisible(panel, 'corpus analysis jobs panel')
+ await page.waitForFunction(
+ () => document.querySelector('[data-testid="corpus-analysis-jobs-panel"]')?.textContent?.includes('排队中'),
+ null,
+ { timeout: 12_000 },
+ )
  const panelText = await panel.innerText()
  for (const [, label] of statuses) {
  if (!panelText.includes(label)) throw new Error(`Analysis job status ${label} missing from panel: ${panelText}`)
  }
 
+ const runningJob = panel.getByTestId('corpus-analysis-job-mock-corpus-job-1')
+ const pausedJob = panel.getByTestId('corpus-analysis-job-mock-corpus-job-3')
+ const retryWaitJob = panel.getByTestId('corpus-analysis-job-mock-corpus-job-5')
+ const budgetExhaustedJob = panel.getByTestId('corpus-analysis-job-mock-corpus-job-6')
+ const failedJob = panel.getByTestId('corpus-analysis-job-mock-corpus-job-8')
+ await expectVisible(runningJob.getByTestId('corpus-analysis-job-next-step'), 'running job leave-and-return guidance')
+ await expectVisible(pausedJob.getByTestId('corpus-analysis-job-next-step'), 'paused job recovery guidance')
+ await expectVisible(retryWaitJob.getByTestId('corpus-analysis-job-next-step'), 'retry-wait job recovery guidance')
+ await expectVisible(budgetExhaustedJob.getByTestId('corpus-analysis-job-next-step'), 'budget-exhausted job recovery guidance')
+ await expectVisible(failedJob.getByTestId('corpus-analysis-job-next-step'), 'failed job recovery guidance')
+ await expectVisible(pausedJob.getByRole('button', { name: '继续' }), 'paused job primary resume action')
+ await expectVisible(budgetExhaustedJob.getByRole('button', { name: '继续' }), 'budget-exhausted job primary resume action')
+ await expectVisible(failedJob.getByRole('button', { name: '继续' }), 'failed job primary resume action')
+ await expectHidden(panel.getByText('lease_renewal_pending').first(), 'collapsed background job diagnostics by default')
+
  await page.evaluate(() => { window.__appMockState.referenceCorpusAnalysisJobs[1].version = 2 })
  const listCalls = await bridgeCallCount(page, 'ListReferenceCorpusAnalysisJobs')
  await panel.getByRole('button', { name: '暂停' }).click()
  await waitForBridgeCallCountAfter(page, 'ListReferenceCorpusAnalysisJobs', listCalls)
- await expectVisible(panel.getByText('运行中', { exact: true }), 'analysis job refreshed after CAS conflict')
+ await expectVisible(runningJob.getByText('运行中', { exact: true }), 'analysis job refreshed after CAS conflict')
 
  await panel.getByRole('button', { name: '暂停' }).click()
- await expectVisible(panel.getByText('已暂停', { exact: true }), 'analysis job paused after refreshed CAS version')
+ await expectVisible(runningJob.getByText('已暂停', { exact: true }), 'analysis job paused after refreshed CAS version')
+}
+
+async function verifyCorpusAnalysisStartAndReturnWorkflow(page, corpusTabs) {
+  const importPanel = page.getByTestId('reference-import-panel')
+  const title = '后台分析入口回归'
+  const sourcePath = 'D:\\books\\analysis-start.md'
+  const createCountBefore = await bridgeCallCount(page, 'CreateReferenceAnchor')
+
+  await importPanel.getByPlaceholder('参考书名').fill(title)
+  await importPanel.getByLabel('本地路径').fill(sourcePath)
+  await importPanel.getByRole('button', { name: /^创建$/ }).click()
+
+  const createCall = await waitForLatestBridgeCallWithResult(page, 'CreateReferenceAnchor', createCountBefore)
+  const anchorId = createCall.result?.anchor_id
+  assert(anchorId, 'analysis start workflow must create a source anchor first')
+
+  const sourceRow = page
+    .getByTestId('reference-anchor-row')
+    .filter({ hasText: title })
+    .first()
+  await expectVisible(sourceRow, 'newly imported source row')
+  await page.screenshot({ path: path.join(outputDir, 'app-phase16-corpus-analysis-start.png'), fullPage: true })
+
+  const enqueueCountBefore = await bridgeCallCount(page, 'EnqueueReferenceCorpusAnalysisJob')
+  await sourceRow.getByRole('button', { name: `开始分析 ${title}` }).click()
+  const enqueueCall = await waitForLatestBridgeCallWithResult(page, 'EnqueueReferenceCorpusAnalysisJob', enqueueCountBefore)
+  const enqueueInput = enqueueCall.args?.[0] ?? {}
+  assert.equal(enqueueInput.novel_id, 42, 'analysis start must preserve the current novel')
+  assert.equal(enqueueInput.anchor_id, anchorId, 'analysis start must target the imported source')
+  assert.equal(enqueueInput.job_kind, 'feature_analysis', 'analysis start must enqueue the feature-analysis stage')
+  assert.equal(enqueueInput.scope, 'sentence', 'analysis start must use the standard sentence scope')
+  assert.equal(enqueueInput.priority_class, 'normal', 'analysis start must use the normal background priority')
+  assert.match(String(enqueueInput.run_id ?? ''), /^analysis:feature:/, 'analysis start must create a persistent run id')
+
+  const jobsTab = corpusTabs.getByRole('tab', { name: '后台任务' })
+  assert.equal(await jobsTab.getAttribute('aria-selected'), 'true', 'analysis start should take the user to the background task')
+  const jobsPanel = page.getByTestId('corpus-analysis-jobs-panel')
+  const jobId = enqueueCall.result?.job_id
+  assert(jobId, 'analysis start must return a persistent job id')
+  const createdJob = jobsPanel.getByTestId(`corpus-analysis-job-${jobId}`)
+  await expectVisible(createdJob, 'newly started background analysis job')
+  await expectVisible(createdJob.getByText('排队中', { exact: true }), 'newly started analysis job status')
+  await expectVisible(createdJob.getByTestId('corpus-analysis-job-next-step'), 'analysis job leave-and-return guidance')
+  await page.screenshot({ path: path.join(outputDir, 'app-phase16-corpus-analysis-job.png'), fullPage: true })
+
+  await corpusTabs.getByRole('tab', { name: '分析结果' }).click()
+  await corpusTabs.getByRole('tab', { name: '后台任务' }).click()
+  const restoredJob = page.getByTestId(`corpus-analysis-job-${jobId}`)
+  await expectVisible(restoredJob, 'analysis job restored after leaving the task view')
+  await expectVisible(restoredJob.getByText('排队中', { exact: true }), 'restored analysis job status')
+
+  await corpusTabs.getByRole('tab', { name: '分析结果' }).click()
 }
 
 async function verifyTechniqueSpecimenBudgetResumeWorkflow(page) {
@@ -491,6 +570,8 @@ async function verifyCorpusLibraryWorkflow(page) {
   await assertCorpusLibraryLegacyWritingEntrypointsHidden(page, 'corpus library default source tab')
   await assertCorpusLibraryNoChapterWritingBridgeCalls(page, 'corpus library default source tab')
   await verifyCorpusLibraryPartialImportFailure(page)
+
+  await verifyCorpusAnalysisStartAndReturnWorkflow(page, corpusTabs)
 
 await verifyCorpusLibraryAnalysisResultsTab(page, corpusTabs)
  await verifyCorpusAnalysisJobsWorkflow(page, corpusTabs)
@@ -1437,34 +1518,85 @@ async function verifyChapterReferenceWorkflow(page) {
   await waitForBridgeCallArg(page, 'GetContent', 1, 'chapters/1.md')
 
   const chapterSearchCountBefore = await bridgeCallCount(page, 'SearchReferenceMaterials')
+  const blueprintSessionLoadCountBefore = await bridgeCallCount(page, 'GetReferenceCorpusBlueprintSession')
   await page.getByRole('button', { name: /参考素材/ }).click()
   const drawer = page.getByTestId('chapter-reference-panel')
   await expectVisible(drawer, 'chapter reference drawer')
+  await waitForBridgeCallCountAfter(page, 'GetReferenceCorpusBlueprintSession', blueprintSessionLoadCountBefore)
+  await page.waitForFunction(
+    () => document.activeElement?.getAttribute('placeholder') === '可留空，系统会先按章节标题和可访问素材推荐',
+    null,
+    { timeout: 12_000 },
+  )
   await expectVisible(drawer.getByRole('heading', { name: '语料驱动草稿' }), 'corpus insertion draft heading')
   await expectHidden(drawer.getByRole('heading', { name: '推荐素材' }), 'advanced recommendation heading before expand')
   await expectHidden(drawer.getByRole('button', { name: '启动参考流程' }), 'advanced strict flow start before expand')
+  assert(!((await drawer.innerText()).includes('剧本')), 'automatic chapter path must describe the intermediate artifact as a blueprint, not a script')
   assert.equal(await bridgeCallCount(page, 'SearchReferenceMaterials'), chapterSearchCountBefore, 'chapter reference default path must not run material recommendation before advanced expansion')
 
-  const blueprintGenerateCountBefore = await bridgeCallCount(page, 'GenerateReferenceCorpusBlueprintCandidates')
+  const blueprintAdvanceCountBefore = await bridgeCallCount(page, 'AdvanceReferenceCorpusBlueprintSession')
   await drawer.getByTestId('chapter-corpus-blueprint-generate-button').click()
-  const firstBlueprintCandidateCall = await waitForLatestBridgeCallWithResult(page, 'GenerateReferenceCorpusBlueprintCandidates', blueprintGenerateCountBefore)
-  const firstBlueprintCandidates = firstBlueprintCandidateCall.result
+  const firstBlueprintSessionCall = await waitForLatestBridgeCallWithResult(page, 'AdvanceReferenceCorpusBlueprintSession', blueprintAdvanceCountBefore)
+  assert.equal(firstBlueprintSessionCall.args?.[0]?.action, 'generate', 'chapter corpus blueprint primary action must create a persisted session')
+  assert.equal(firstBlueprintSessionCall.args?.[0]?.generation_input?.chapter_context?.chapter_number, 1, 'chapter corpus blueprint session must bind the active chapter')
+  const firstBlueprintSession = firstBlueprintSessionCall.result
+  const firstBlueprintCandidates = firstBlueprintSession?.candidates
   assert(firstBlueprintCandidates?.candidates?.length >= 2, 'chapter corpus blueprint candidate mock must return at least two candidates')
-const blueprintCandidates = drawer.getByTestId('chapter-corpus-blueprint-candidates')
-await expectVisible(blueprintCandidates, 'chapter corpus blueprint candidates')
- await expectVisible(blueprintCandidates.getByTestId('chapter-corpus-blueprint-iteration'), 'chapter corpus blueprint iteration state')
- await expectVisible(blueprintCandidates.getByTestId('chapter-corpus-blueprint-difference-audit').first(), 'chapter corpus blueprint difference audit')
- await expectVisible(blueprintCandidates.getByTestId('chapter-corpus-blueprint-emotion-arc').first(), 'chapter corpus blueprint emotion arc')
+  const blueprintCandidates = drawer.getByTestId('chapter-corpus-blueprint-candidates')
+  await expectVisible(blueprintCandidates, 'chapter corpus blueprint candidates')
+  await expectHidden(blueprintCandidates.getByTestId('chapter-corpus-blueprint-iteration'), 'automatic blueprint iteration internals')
+  await expectHidden(blueprintCandidates.getByTestId('chapter-corpus-blueprint-difference-audit').first(), 'automatic blueprint difference audit internals')
+  await expectVisible(blueprintCandidates.getByTestId('chapter-corpus-blueprint-emotion-arc').first(), 'chapter corpus blueprint emotion arc')
+  const automaticBlueprintText = await blueprintCandidates.innerText()
+  assert(!automaticBlueprintText.includes('mock-corpus-blueprint-001'), 'automatic blueprint path must not expose blueprint identifiers')
+  assert(!automaticBlueprintText.includes('mock-node-'), 'automatic blueprint path must not expose node identifiers')
   await expectVisible(blueprintCandidates.locator('[data-testid="chapter-corpus-blueprint-candidate-select"]').first(), 'chapter corpus blueprint candidate select')
+  const firstBlueprintSelectionCountBefore = await bridgeCallCount(page, 'AdvanceReferenceCorpusBlueprintSession')
   await blueprintCandidates.locator('[data-testid="chapter-corpus-blueprint-candidate-select"]').first().click()
+  const firstBlueprintSelectionCall = await waitForLatestBridgeCallWithResult(page, 'AdvanceReferenceCorpusBlueprintSession', firstBlueprintSelectionCountBefore)
+  assert.equal(firstBlueprintSelectionCall.args?.[0]?.action, 'select', 'choosing an automatic blueprint must persist selection server-side')
+  const firstSelectedBlueprintId = firstBlueprintSelectionCall.args?.[0]?.selected_blueprint_id
+  assert(firstSelectedBlueprintId, 'blueprint selection must include the chosen blueprint id')
 
-  const secondBlueprintGenerateCountBefore = await bridgeCallCount(page, 'GenerateReferenceCorpusBlueprintCandidates')
+  const restoredBlueprintSessionCountBefore = await bridgeCallCount(page, 'GetReferenceCorpusBlueprintSession')
+  await drawer.getByRole('button', { name: '关闭参考素材面板' }).click()
+  await expectHidden(drawer, 'chapter reference drawer after close before blueprint recovery')
+  await page.waitForFunction(
+    () => document.activeElement?.getAttribute('title') === '打开章节参考素材',
+    null,
+    { timeout: 12_000 },
+  )
+  await page.evaluate(() => window.sessionStorage.setItem(
+    'novelist:corpus-writing:42:1:chapters/1.md',
+    JSON.stringify({
+      goal: '浏览器旧目标不应覆盖服务端会话',
+      writingMode: 'auto',
+      selectedDraftId: '',
+    }),
+  ))
+  await page.getByRole('button', { name: /参考素材/ }).click()
+  await expectVisible(drawer, 'chapter reference drawer after reopen for blueprint recovery')
+  await waitForBridgeCallCountAfter(page, 'GetReferenceCorpusBlueprintSession', restoredBlueprintSessionCountBefore)
+  await expectVisible(drawer.getByText('已从服务端恢复第 1 轮蓝图。'), 'persisted blueprint session recovery message')
+  await expectVisible(drawer.getByTestId('chapter-corpus-blueprint-selected'), 'persisted selected blueprint after reopen')
+  assert.equal(await drawer.getByTestId('chapter-corpus-blueprint-selected').innerText(), '已选此方案，可以继续生成正文候选。', 'chapter reference reopen must recover the selected blueprint without sessionStorage')
+  assert.equal(
+    await drawer.getByPlaceholder('可留空，系统会先按章节标题和可访问素材推荐').inputValue(),
+    '第1章 雨夜线索',
+    'server-restored blueprint goal must win over stale sessionStorage cache',
+  )
+
+  const secondBlueprintAdvanceCountBefore = await bridgeCallCount(page, 'AdvanceReferenceCorpusBlueprintSession')
   await drawer.getByTestId('chapter-corpus-blueprint-feedback-button').click()
-  const secondBlueprintCandidateCall = await waitForLatestBridgeCallWithResult(page, 'GenerateReferenceCorpusBlueprintCandidates', secondBlueprintGenerateCountBefore)
-  const secondBlueprintCandidates = secondBlueprintCandidateCall.result
+  const secondBlueprintSessionCall = await waitForLatestBridgeCallWithResult(page, 'AdvanceReferenceCorpusBlueprintSession', secondBlueprintAdvanceCountBefore)
+  const secondBlueprintSession = secondBlueprintSessionCall.result
+  const secondBlueprintCandidates = secondBlueprintSession?.candidates
+  assert.equal(secondBlueprintSessionCall.args?.[0]?.action, 'revise', 'choosing another automatic source mix must revise the persisted session')
+  assert.equal(secondBlueprintSessionCall.args?.[0]?.selected_blueprint_id, firstSelectedBlueprintId, 'blueprint revision must target the selected blueprint')
   assert(
-    (secondBlueprintCandidateCall.args?.[0]?.feedback?.problem_tags ?? []).includes('source_repetition'),
-    'chapter corpus blueprint candidate feedback button must send source_repetition problem tag',
+    (secondBlueprintSessionCall.args?.[0]?.checklist ?? []).some((item) =>
+      item?.decision === 'revise' && (item?.problem_tags ?? []).includes('source_repetition')),
+    'chapter corpus blueprint feedback button must send source_repetition through the revision checklist',
   )
   assert.equal(secondBlueprintCandidates?.feedback_applied, true, 'chapter corpus blueprint candidate mock must apply feedback on the second round')
   assert.match(
@@ -1501,16 +1633,15 @@ await expectVisible(blueprintCandidates, 'chapter corpus blueprint candidates')
         JSON.stringify(secondBlueprintCandidates.candidates.map((candidate) => candidate.source_distribution)),
     'chapter corpus blueprint candidate mock must visibly change strategy or source distribution after feedback',
   )
-  await expectVisible(drawer.getByTestId('chapter-corpus-blueprint-feedback-summary'), 'chapter corpus blueprint feedback summary')
-  await expectVisible(drawer.getByTestId('chapter-corpus-blueprint-feedback-reason').first(), 'chapter corpus blueprint feedback fallback reason')
-  await expectVisible(drawer.getByTestId('chapter-corpus-blueprint-gap-reasons').first(), 'chapter corpus blueprint fallback gap reasons')
-  await expectVisible(drawer.getByTestId('chapter-corpus-blueprint-gap-positions').first(), 'chapter corpus blueprint beat-level gap positions')
-  await expectVisible(
-    drawer.getByText('严格反馈约束没有命中可用语料').first(),
-    'chapter corpus blueprint readable fallback diagnostic',
-  )
+  await expectHidden(drawer.getByTestId('chapter-corpus-blueprint-feedback-summary'), 'automatic blueprint feedback internals')
+  await expectHidden(drawer.getByTestId('chapter-corpus-blueprint-feedback-reason').first(), 'automatic blueprint feedback reason')
+  await expectHidden(drawer.getByTestId('chapter-corpus-blueprint-gap-reasons').first(), 'automatic blueprint gap reasons')
+  await expectHidden(drawer.getByTestId('chapter-corpus-blueprint-gap-positions').first(), 'automatic blueprint beat diagnostics')
   await expectVisible(blueprintCandidates.locator('[data-testid="chapter-corpus-blueprint-candidate-select"]').first(), 'chapter corpus regenerated blueprint candidate select')
+  const secondBlueprintSelectionCountBefore = await bridgeCallCount(page, 'AdvanceReferenceCorpusBlueprintSession')
   await blueprintCandidates.locator('[data-testid="chapter-corpus-blueprint-candidate-select"]').first().click()
+  const secondBlueprintSelectionCall = await waitForLatestBridgeCallWithResult(page, 'AdvanceReferenceCorpusBlueprintSession', secondBlueprintSelectionCountBefore)
+  assert.equal(secondBlueprintSelectionCall.args?.[0]?.action, 'select', 'regenerated blueprint selection must persist server-side')
 
   const corpusDraftCountBefore = await bridgeCallCount(page, 'GenerateReferenceCorpusInsertionDraftCandidates')
   const saveCountBeforeCorpusDraft = await bridgeCallCount(page, 'SaveContent')
@@ -1546,9 +1677,9 @@ await expectVisible(blueprintCandidates, 'chapter corpus blueprint candidates')
     candidate.draft?.gate?.passed === true && candidate.draft?.audit?.passed === false)
   assert(blockedCorpusDraftIndex >= 0, 'chapter corpus insertion mock must include an audit-blocked draft candidate')
   assert.equal(corpusDraftCall.result.candidates[blockedCorpusDraftIndex].draft.ready_for_insertion, false, 'audit-blocked corpus draft must not be ready for insertion')
-  await expectVisible(corpusDraftCandidateCards.nth(blockedCorpusDraftIndex).getByText('审计阻断'), 'chapter corpus blocked draft card status')
-  await expectVisible(drawer.getByText('审计阻断').first(), 'chapter corpus blocked draft preview status')
-  await expectVisible(drawer.getByText('preserved_text_hash_mismatch').first(), 'chapter corpus blocked draft audit error')
+  await expectVisible(corpusDraftCandidateCards.nth(blockedCorpusDraftIndex).getByText('暂不能插入'), 'chapter corpus blocked draft card status')
+  await expectVisible(drawer.getByText('暂不能插入').first(), 'chapter corpus blocked draft preview status')
+  await expectHidden(drawer.getByText('preserved_text_hash_mismatch').first(), 'automatic corpus draft audit internals')
   const applyCorpusButton = drawer.getByRole('button', { name: '应用到编辑器' })
   assert.equal(await applyCorpusButton.isDisabled(), true, 'audit-blocked corpus draft apply button must be disabled')
   await assertEditorNotContains(page, MOCK_CORPUS_INSERTION_TEXT)
@@ -1557,8 +1688,8 @@ await expectVisible(blueprintCandidates, 'chapter corpus blueprint candidates')
     candidate.draft?.audit?.transitions?.some((transition) => transition.passed === false))
   assert(transitionBlockedCorpusDraftIndex >= 0, 'chapter corpus insertion mock must include a transition-audit-blocked draft candidate')
   await drawer.locator('[data-testid="chapter-corpus-draft-candidate-select"]').nth(transitionBlockedCorpusDraftIndex).click()
-  await expectVisible(drawer.getByText('过渡审计阻断').first(), 'chapter corpus transition blocked draft status')
-  await expectVisible(drawer.getByText('transition_piece_replacement_required').first(), 'chapter corpus transition replacement blocked draft audit error')
+  await expectVisible(drawer.getByText('需要重组蓝图').first(), 'chapter corpus transition blocked draft status')
+  await expectHidden(drawer.getByText('transition_piece_replacement_required').first(), 'automatic corpus transition audit internals')
   const transitionBlockedCorpusDraftCandidate = corpusDraftCall.result.candidates[transitionBlockedCorpusDraftIndex]
   const transitionNextAction = transitionBlockedCorpusDraftCandidate.next_action
   assert(transitionNextAction, 'chapter corpus transition blocked draft candidate must include next_action')
@@ -1601,25 +1732,34 @@ await expectVisible(blueprintCandidates, 'chapter corpus blueprint candidates')
   await assertEditorNotContains(page, MOCK_CORPUS_INSERTION_TEXT)
   await assertEditorNotContains(page, MOCK_CORPUS_TRANSITION_TEXT)
 
-  const draftNextActionBlueprintCountBefore = await bridgeCallCount(page, 'GenerateReferenceCorpusBlueprintCandidates')
+  const draftNextActionBlueprintCountBefore = await bridgeCallCount(page, 'AdvanceReferenceCorpusBlueprintSession')
   await transitionNextActionButton.click()
-  const draftNextActionBlueprintCall = await waitForLatestBridgeCallWithResult(page, 'GenerateReferenceCorpusBlueprintCandidates', draftNextActionBlueprintCountBefore)
-  assert.deepEqual(
-    draftNextActionBlueprintCall.args?.[0]?.feedback,
-    transitionNextAction.feedback,
-    'chapter corpus transition blocked draft next_action button must pass feedback through to blueprint regeneration',
-  )
+  const draftNextActionBlueprintCall = await waitForLatestBridgeCallWithResult(page, 'AdvanceReferenceCorpusBlueprintSession', draftNextActionBlueprintCountBefore)
+  assert.equal(draftNextActionBlueprintCall.args?.[0]?.action, 'revise', 'chapter corpus transition blocked next action must revise the persisted blueprint session')
   assert(
-    (draftNextActionBlueprintCall.args?.[0]?.feedback?.rejected_node_ids ?? []).includes(transitionNextAction.rejected_node_id),
-    'chapter corpus transition blocked draft next_action feedback must reject the blocked node',
+    (draftNextActionBlueprintCall.args?.[0]?.checklist ?? []).some((item) =>
+      item?.decision === 'revise' && (item?.problem_tags ?? []).includes('transition_replacement_required')),
+    'chapter corpus transition blocked draft next_action must pass its recovery reason through the revision checklist',
   )
-  assert.equal(draftNextActionBlueprintCall.result?.feedback_applied, true, 'chapter corpus transition blocked draft next_action must return feedback-applied blueprint candidates')
-await expectVisible(drawer.getByText('已按正文候选诊断重组蓝图').first(), 'chapter corpus draft next action blueprint regeneration message')
-await expectVisible(drawer.getByTestId('chapter-corpus-blueprint-feedback-summary'), 'chapter corpus draft next action blueprint feedback summary')
+  assert.equal(draftNextActionBlueprintCall.result?.candidates?.feedback_applied, true, 'chapter corpus transition blocked draft next_action must return feedback-applied blueprint candidates')
+  await expectVisible(drawer.getByText(/已按正文候选诊断重组第 \d+ 轮蓝图。/).first(), 'chapter corpus draft next action blueprint regeneration message')
 
- await drawer.getByTestId('chapter-corpus-blueprint-candidate-select').first().click()
-await drawer.getByTestId('chapter-writing-mode').getByRole('button', { name: '专家' }).click()
-await expectVisible(drawer.getByTestId('chapter-corpus-expert-controls'), 'chapter corpus expert slot and transition controls')
+  const thirdBlueprintSelectionCountBefore = await bridgeCallCount(page, 'AdvanceReferenceCorpusBlueprintSession')
+  await drawer.getByTestId('chapter-corpus-blueprint-candidate-select').first().click()
+  const thirdBlueprintSelectionCall = await waitForLatestBridgeCallWithResult(page, 'AdvanceReferenceCorpusBlueprintSession', thirdBlueprintSelectionCountBefore)
+  assert.equal(thirdBlueprintSelectionCall.args?.[0]?.action, 'select', 'blueprint selection after blocked recovery must persist server-side')
+ await drawer.getByTestId('chapter-writing-mode').getByRole('button', { name: '专家' }).click()
+ await expectVisible(blueprintCandidates.getByTestId('chapter-corpus-blueprint-iteration'), 'expert blueprint iteration state')
+ await expectVisible(blueprintCandidates.getByTestId('chapter-corpus-blueprint-difference-audit').first(), 'expert blueprint difference audit')
+ await expectVisible(drawer.getByTestId('chapter-corpus-blueprint-feedback-summary'), 'expert blueprint feedback summary')
+ await expectVisible(drawer.getByTestId('chapter-corpus-blueprint-feedback-reason').first(), 'expert blueprint feedback fallback reason')
+ await expectVisible(drawer.getByTestId('chapter-corpus-blueprint-gap-reasons').first(), 'expert blueprint fallback gap reasons')
+ await expectVisible(drawer.getByTestId('chapter-corpus-blueprint-gap-positions').first(), 'expert blueprint beat-level gap positions')
+ await expectVisible(
+   drawer.getByText('已避开上一轮拒绝的蓝图、节点或来源。').first(),
+   'expert blueprint readable feedback diagnostic',
+ )
+ await expectVisible(drawer.getByTestId('chapter-corpus-expert-controls'), 'chapter corpus expert slot and transition controls')
  await expectVisible(drawer.getByTestId('chapter-corpus-expert-slot-table'), 'chapter corpus expert slot table')
  await expectVisible(drawer.getByTestId('chapter-corpus-expert-transition-list'), 'chapter corpus expert selected transition list')
  const expertDraftCountBefore = await bridgeCallCount(page, 'GenerateReferenceCorpusInsertionDraftCandidates')
@@ -1779,6 +1919,124 @@ await drawer.getByText('高级参考流程').click()
   await expectHidden(drawer, 'chapter reference drawer after switching to non-chapter file')
 }
 
+async function assertInViewport(page, locator, description) {
+  await expectVisible(locator, description)
+  const box = await locator.boundingBox()
+  const viewport = page.viewportSize()
+  assert(box, `${description} must have a bounding box`)
+  assert(viewport, `${description} must run with a fixed viewport`)
+  assert(box.x >= -1 && box.y >= -1, `${description} must not start outside the viewport; got ${JSON.stringify(box)}`)
+  assert(
+    box.x + box.width <= viewport.width + 1 && box.y + box.height <= viewport.height + 1,
+    `${description} must remain inside ${viewport.width}x${viewport.height}; got ${JSON.stringify(box)}`,
+  )
+}
+
+async function verifyChapterReferenceViewportMatrix(browser, url, consoleErrors, pageErrors) {
+  const viewports = [
+    { width: 1280, height: 720, label: '1280x720' },
+    { width: 1024, height: 576, label: '1280x720-125' },
+    { width: 853, height: 480, label: '1280x720-150' },
+    { width: 1440, height: 900, label: '1440x900' },
+    { width: 1152, height: 720, label: '1440x900-125' },
+    { width: 960, height: 600, label: '1440x900-150' },
+  ]
+
+  for (const viewport of viewports) {
+    const matrixPage = await newAppPage(
+      browser,
+      consoleErrors,
+      pageErrors,
+      { initialized: true },
+      { width: viewport.width, height: viewport.height },
+      `chapter-reference-${viewport.label}`,
+    )
+    try {
+      await matrixPage.goto(url, { waitUntil: 'domcontentloaded' })
+      await clickActivity(matrixPage, '章节')
+      await ensureChapterBlockExpanded(matrixPage)
+      await chapterButton(matrixPage, '雨夜线索').click()
+      await expectVisible(matrixPage.locator('.monaco-editor').first(), `${viewport.label} chapter editor`)
+      await matrixPage.getByRole('button', { name: /参考素材/ }).click()
+
+      const drawer = matrixPage.getByTestId('chapter-reference-panel')
+      const goal = drawer.getByLabel('章节目标')
+      const primaryAction = drawer.getByTestId('chapter-corpus-blueprint-generate-button')
+      await assertInViewport(matrixPage, drawer, `${viewport.label} chapter reference drawer`)
+      await assertInViewport(matrixPage, goal, `${viewport.label} chapter goal input`)
+      await assertInViewport(matrixPage, primaryAction, `${viewport.label} chapter blueprint primary action`)
+      const drawerBox = await drawer.boundingBox()
+      const primaryActionBox = await primaryAction.boundingBox()
+      assert(drawerBox && primaryActionBox, `${viewport.label} chapter reference drawer and primary action must be measurable`)
+      assert(
+        primaryActionBox.x >= drawerBox.x - 1 && primaryActionBox.x + primaryActionBox.width <= drawerBox.x + drawerBox.width + 1,
+        `${viewport.label} chapter blueprint primary action must remain inside its panel; drawer=${JSON.stringify(drawerBox)}, action=${JSON.stringify(primaryActionBox)}`,
+      )
+      const primaryActionOverflow = await primaryAction.evaluate((element) => element.scrollWidth > element.clientWidth)
+      assert.equal(primaryActionOverflow, false, `${viewport.label} chapter blueprint primary action text must not be clipped`)
+      const primaryActionIsTopmost = await primaryAction.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const topmost = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+        return topmost === element || element.contains(topmost)
+      })
+      assert.equal(primaryActionIsTopmost, true, `${viewport.label} chapter blueprint primary action must not be covered by another panel`)
+      const horizontalOverflow = await drawer.evaluate((element) => element.scrollWidth > element.clientWidth)
+      assert.equal(horizontalOverflow, false, `${viewport.label} chapter reference drawer must not overflow horizontally`)
+      await matrixPage.screenshot({ path: path.join(outputDir, `app-phase16-chapter-reference-${viewport.label}.png`) })
+    } finally {
+      await matrixPage.close()
+    }
+  }
+}
+
+async function verifyChapterReferenceRetryWorkflow(browser, url, consoleErrors, pageErrors) {
+  const retryPage = await newAppPage(
+    browser,
+    consoleErrors,
+    pageErrors,
+    {
+      initialized: true,
+      allowSaveContent: true,
+      faults: {
+        AdvanceReferenceCorpusBlueprintSession: {
+          mode: 'storage',
+          code: 'BLUEPRINT_SESSION_WRITE_INTERRUPTED',
+          message: '蓝图会话写入暂时不可用',
+          retryable: true,
+        },
+      },
+    },
+    undefined,
+    'chapter-reference-retry',
+  )
+  try {
+    await retryPage.goto(url, { waitUntil: 'domcontentloaded' })
+    await clickActivity(retryPage, '章节')
+    await ensureChapterBlockExpanded(retryPage)
+    await chapterButton(retryPage, '雨夜线索').click()
+    await retryPage.getByRole('button', { name: /参考素材/ }).click()
+
+    const drawer = retryPage.getByTestId('chapter-reference-panel')
+    await expectVisible(drawer, 'chapter reference retry drawer')
+    const advanceCountBefore = await bridgeCallCount(retryPage, 'AdvanceReferenceCorpusBlueprintSession')
+    await drawer.getByTestId('chapter-corpus-blueprint-generate-button').click()
+    await waitForBridgeCallCountAfter(retryPage, 'AdvanceReferenceCorpusBlueprintSession', advanceCountBefore)
+    const failedAdvanceCall = await retryPage.evaluate((method) =>
+      window.__appMockState.calls.filter((call) => call.method === method).at(-1) ?? null,
+    'AdvanceReferenceCorpusBlueprintSession')
+    assert(failedAdvanceCall && !Object.hasOwn(failedAdvanceCall, 'result'), 'faulted blueprint advance must be recorded without a success result')
+    const retryAlert = drawer.getByRole('alert').filter({ hasText: '蓝图候选生成失败' })
+    await expectVisible(retryAlert, 'chapter reference retry error state')
+    const retryAdvanceCountBefore = await bridgeCallCount(retryPage, 'AdvanceReferenceCorpusBlueprintSession')
+    await retryAlert.getByRole('button', { name: '重试当前操作' }).click()
+    const retriedAdvanceCall = await waitForLatestBridgeCallWithResult(retryPage, 'AdvanceReferenceCorpusBlueprintSession', retryAdvanceCountBefore)
+    assert.equal(retriedAdvanceCall.args?.[0]?.request_id, failedAdvanceCall.args?.[0]?.request_id, 'blueprint retry must reuse the original idempotency request id')
+    await expectVisible(drawer.getByTestId('chapter-corpus-blueprint-candidates'), 'chapter reference retry candidates')
+  } finally {
+    await retryPage.close()
+  }
+}
+
 export async function runFullSuite(browser, url) {
   const { consoleErrors, pageErrors } = diagnostics
 
@@ -1827,6 +2085,10 @@ export async function runFullSuite(browser, url) {
     logStep('checking Phase 16 chapter reference drawer')
     await verifyChapterReferenceWorkflow(page)
     await page.screenshot({ path: path.join(outputDir, 'app-phase16-chapter-reference.png'), fullPage: true })
+    logStep('checking Phase 16 chapter reference viewport matrix')
+    await verifyChapterReferenceViewportMatrix(browser, url, consoleErrors, pageErrors)
+    logStep('checking Phase 16 chapter reference retry recovery')
+    await verifyChapterReferenceRetryWorkflow(browser, url, consoleErrors, pageErrors)
   }
 
   if (shouldRun('@surface')) {

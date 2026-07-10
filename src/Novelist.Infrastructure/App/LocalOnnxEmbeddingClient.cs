@@ -7,7 +7,7 @@ using Novelist.Core.Bridge;
 
 namespace Novelist.Infrastructure.App;
 
-public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient
+public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient, IDisposable
 {
     private const int MaxBatchSize = 512;
     private const int MaxInputLength = 200_000;
@@ -20,6 +20,8 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient
 
     private readonly ILocalOnnxEmbeddingRunnerFactory _runnerFactory;
     private readonly ConcurrentDictionary<string, Lazy<LocalOnnxModel>> _models = new(StringComparer.Ordinal);
+    private readonly object _modelGate = new();
+    private bool _disposed;
 
     public LocalOnnxEmbeddingClient(ILocalOnnxEmbeddingRunnerFactory? runnerFactory = null)
     {
@@ -35,9 +37,14 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient
         ArgumentNullException.ThrowIfNull(options);
         var normalizedInputs = NormalizeInputs(inputs);
         var normalizedOptions = NormalizeOptions(options);
-        var model = _models.GetOrAdd(
-            normalizedOptions.CacheKey,
-            _ => new Lazy<LocalOnnxModel>(() => CreateModel(normalizedOptions))).Value;
+        LocalOnnxModel model;
+        lock (_modelGate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            model = _models.GetOrAdd(
+                normalizedOptions.CacheKey,
+                _ => new Lazy<LocalOnnxModel>(() => CreateModel(normalizedOptions))).Value;
+        }
 
         var encoded = normalizedInputs
             .Select(input => model.Tokenizer.Encode(PrepareInput(input, normalizedOptions), normalizedOptions.MaxSequenceLength))
@@ -75,6 +82,30 @@ public sealed class LocalOnnxEmbeddingClient : IEmbeddingClient
             new EmbeddingUsage(
                 encoded.Sum(item => item.TokenCount),
                 encoded.Sum(item => item.TokenCount)));
+    }
+
+    public void Dispose()
+    {
+        Lazy<LocalOnnxModel>[] models;
+        lock (_modelGate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            models = _models.Values.ToArray();
+            _models.Clear();
+        }
+
+        foreach (var model in models)
+        {
+            if (model.IsValueCreated && model.Value.Runner is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+        }
     }
 
     private LocalOnnxModel CreateModel(LocalOnnxEmbeddingOptions options)

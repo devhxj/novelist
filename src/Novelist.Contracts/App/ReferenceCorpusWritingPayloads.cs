@@ -46,10 +46,11 @@ public sealed record ReferenceCorpusBlueprintFeedbackPayload(
 public static class ReferenceCorpusBlueprintSessionActions
 {
  public const string Generate = "generate";
+ public const string Select = "select";
  public const string Revise = "revise";
  public const string Accept = "accept";
 
- public static IReadOnlyList<string> All { get; } = [Generate, Revise, Accept];
+ public static IReadOnlyList<string> All { get; } = [Generate, Select, Revise, Accept];
 }
 
 public static class ReferenceCorpusBlueprintChecklistDimensions
@@ -115,7 +116,11 @@ public sealed record ReferenceCorpusBlueprintSessionPayload(
  [property: JsonPropertyName("checklist")] IReadOnlyList<ReferenceCorpusBlueprintChecklistItemPayload> Checklist,
  [property: JsonPropertyName("strategy_coverage")] IReadOnlyList<string> StrategyCoverage,
  [property: JsonPropertyName("candidates")] ReferenceCorpusBlueprintCandidatesPayload Candidates,
- [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt);
+ [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt)
+{
+ [JsonPropertyName("natural_language_goal")]
+ public string NaturalLanguageGoal { get; init; } = string.Empty;
+}
 
 public sealed record ReferenceCorpusInsertionBlueprintPayload(
     [property: JsonPropertyName("blueprint_id")] string BlueprintId,

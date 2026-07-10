@@ -11,14 +11,18 @@ npm ci
 npm run dev
 npm run build
 npm run lint
+npm run verify
+npm run test:chapter-reference
+npm run test:corpus-library
+npm run test:app:usability
 ```
 
-Root-level equivalents:
+Root-level equivalents use `--prefix frontend`:
 
 ```bash
-make frontend-dev
-make frontend-build
-make build
+npm --prefix frontend run dev
+npm --prefix frontend run build
+npm --prefix frontend run verify
 ```
 
 `npm run dev` starts Vite on `http://localhost:5173/`. It is only a frontend asset server; desktop bridge APIs are unavailable unless the Photino host is running with `--start-url=http://localhost:5173/`.
@@ -40,3 +44,10 @@ src/views/             Top-level views
 ```
 
 For the backend bridge contract, see `../docs/novelist-photino-bridge-contract.md`.
+
+## UI Rules
+
+- Reuse the existing tokens, shadcn/Radix patterns, shared `Button`, and Lucide icons.
+- Keep automatic workflows on one primary path and progressively disclose expert controls.
+- For user-facing changes, verify loading, empty, error, blocked, recovery, and completed states; include keyboard/focus behavior and narrow desktop layouts.
+- See `../docs/frontend/theme-rules.md`, `../docs/frontend/theme-design.md`, and `../docs/rules/frontend-crud-patterns.md`.

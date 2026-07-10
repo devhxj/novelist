@@ -1,0 +1,28 @@
+{
+  "schema_version": "corpus-writing-usability-fixtures-v1",
+  "study_id": "corpus-writing-usability-contract",
+  "study_revision": "v1",
+  "study_kind": "contract",
+  "participants": [
+    {
+      "participant_id_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "tasks": [
+        { "task_id": "import_start_analysis", "outcome": "completed", "completed_without_prompt": true, "duration_seconds": 90, "backtrack_count": 1, "first_failure_code": null, "recovery_action_code": null, "difficulty": 2 },
+        { "task_id": "leave_resume_analysis", "outcome": "completed", "completed_without_prompt": true, "duration_seconds": 45, "backtrack_count": 0, "first_failure_code": null, "recovery_action_code": null, "difficulty": 1 },
+        { "task_id": "target_to_blueprint", "outcome": "completed", "completed_without_prompt": true, "duration_seconds": 120, "backtrack_count": 1, "first_failure_code": null, "recovery_action_code": null, "difficulty": 3 },
+        { "task_id": "feedback_select_prose", "outcome": "completed", "completed_without_prompt": true, "duration_seconds": 95, "backtrack_count": 1, "first_failure_code": null, "recovery_action_code": null, "difficulty": 3 },
+        { "task_id": "blocked_recover_insert", "outcome": "completed", "completed_without_prompt": true, "duration_seconds": 110, "backtrack_count": 2, "first_failure_code": "transition_blocked", "recovery_action_code": "return_to_blueprint", "difficulty": 3 }
+      ]
+    },
+    {
+      "participant_id_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "tasks": [
+        { "task_id": "import_start_analysis", "outcome": "abandoned", "completed_without_prompt": false, "duration_seconds": 180, "backtrack_count": 3, "first_failure_code": "start_action_not_found", "recovery_action_code": null, "difficulty": 5 },
+        { "task_id": "leave_resume_analysis", "outcome": "completed", "completed_without_prompt": true, "duration_seconds": 70, "backtrack_count": 1, "first_failure_code": null, "recovery_action_code": null, "difficulty": 2 },
+        { "task_id": "target_to_blueprint", "outcome": "completed", "completed_without_prompt": true, "duration_seconds": 150, "backtrack_count": 2, "first_failure_code": null, "recovery_action_code": null, "difficulty": 3 },
+        { "task_id": "feedback_select_prose", "outcome": "completed", "completed_without_prompt": true, "duration_seconds": 130, "backtrack_count": 1, "first_failure_code": null, "recovery_action_code": null, "difficulty": 3 },
+        { "task_id": "blocked_recover_insert", "outcome": "completed", "completed_without_prompt": true, "duration_seconds": 145, "backtrack_count": 2, "first_failure_code": "transition_blocked", "recovery_action_code": "return_to_blueprint", "difficulty": 4 }
+      ]
+    }
+  ]
+}

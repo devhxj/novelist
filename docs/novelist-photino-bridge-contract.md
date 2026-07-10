@@ -118,7 +118,7 @@ Large binary payloads, such as avatar images or exports, should use file handles
 
 ## Compatibility Method Coverage
 
-All current frontend App API methods map to bridge methods with the same names:
+Frontend App API methods map to bridge methods with the same names. The block below is a historical core-method snapshot, not an exhaustive current inventory; the bridge method catalog/dispatcher registrations and their contract tests are authoritative, including newer reference-corpus analysis and blueprint-session methods.
 
 ```text
 ApproveTool, CancelChat, Chat, CompressContext,
@@ -217,9 +217,9 @@ The `AgentEvent.type` numeric enum remains unchanged: `0` thinking, `1` thinking
 - Update checks use configured release endpoints and explicit `ShellOpenExternal` for release pages; startup checks must remain timeout-bounded and non-blocking.
 - Agent tools must not expose Phase 15 import, file-picker, update, Git history, style-sample CRUD, style extraction, narrative pattern extraction, or final-insertion abilities unless a later authority design explicitly changes that boundary.
 
-Known deferred scope:
+Historical Phase 15 scope note:
 
-- Task 21 still tracks the broad legacy-surface error lifecycle audit; existing shared callouts and representative surfaces are covered, but unrelated legacy rerender paths should not be considered fully audited until that task is closed.
+- Task 21 is closed at its recorded Phase 15 boundary. New error-lifecycle and usability regressions are tracked by focused frontend workflows and the current feature plan rather than by reopening the legacy-surface checklist.
 
 ## Verification
 

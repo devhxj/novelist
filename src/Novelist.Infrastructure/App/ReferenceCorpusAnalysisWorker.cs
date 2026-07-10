@@ -1,14 +1,21 @@
 using System.Net.Http;
+using System.Diagnostics;
 using System.Text.Json;
 using Novelist.Core.App;
 using Novelist.Core.Bridge;
 
 namespace Novelist.Infrastructure.App;
 
+internal sealed record ReferenceCorpusAnalysisWorkerOptions(
+ TimeSpan LeaseDuration,
+ TimeSpan HeartbeatInterval,
+ TimeSpan ReclaimRetryDelay,
+ Action<TimeSpan>? ClaimLatencyObserver = null);
+
 public sealed class ReferenceCorpusAnalysisWorker : IAsyncDisposable
 {
- private static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(45);
- private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(10);
+ private static readonly ReferenceCorpusAnalysisWorkerOptions DefaultOptions = new(
+ TimeSpan.FromSeconds(45), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(1));
  private readonly IReferenceCorpusDatabasePathResolver _databasePathResolver;
  private readonly ReferenceCorpusFeatureWorkItemProcessor _featureProcessor;
  private readonly ReferenceCorpusTechniqueWorkItemProcessor _techniqueProcessor;
@@ -17,6 +24,10 @@ public sealed class ReferenceCorpusAnalysisWorker : IAsyncDisposable
  private readonly ReferenceCorpusAnalysisRetryPolicy _retryPolicy = new();
 private readonly string _workerId;
 private readonly TimeSpan _idleDelay;
+ private readonly TimeSpan _leaseDuration;
+ private readonly TimeSpan _heartbeatInterval;
+ private readonly TimeSpan _reclaimRetryDelay;
+ private readonly Action<TimeSpan>? _claimLatencyObserver;
 private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
  private readonly SemaphoreSlim _manualPumpGate = new(1, 1);
 private CancellationTokenSource? _loopCancellation;
@@ -26,17 +37,39 @@ private string? _boundDatabasePath;
 
  public ReferenceCorpusAnalysisWorker(
  IReferenceCorpusDatabasePathResolver databasePathResolver,
-IReferenceCorpusFeatureFamilyAnalyzer featureAnalyzer,
-IReferenceCorpusTechniqueSpecimenAnalyzer techniqueAnalyzer,
+ IReferenceCorpusFeatureFamilyAnalyzer featureAnalyzer,
+ IReferenceCorpusTechniqueSpecimenAnalyzer techniqueAnalyzer,
  string? workerId = null,
  TimeSpan? idleDelay = null)
+ : this(databasePathResolver, featureAnalyzer, techniqueAnalyzer, workerId, idleDelay, DefaultOptions)
+ {
+ }
+
+ internal ReferenceCorpusAnalysisWorker(
+ IReferenceCorpusDatabasePathResolver databasePathResolver,
+ IReferenceCorpusFeatureFamilyAnalyzer featureAnalyzer,
+ IReferenceCorpusTechniqueSpecimenAnalyzer techniqueAnalyzer,
+ string? workerId,
+ TimeSpan? idleDelay,
+ ReferenceCorpusAnalysisWorkerOptions options)
  {
  _databasePathResolver = databasePathResolver ?? throw new ArgumentNullException(nameof(databasePathResolver));
  _featureProcessor = new(featureAnalyzer ?? throw new ArgumentNullException(nameof(featureAnalyzer)));
 _techniqueProcessor = new(techniqueAnalyzer ?? throw new ArgumentNullException(nameof(techniqueAnalyzer)));
-_workerId = string.IsNullOrWhiteSpace(workerId) ? $"analysis-worker:{Environment.ProcessId}:{Guid.NewGuid():N}" : workerId;
+ _workerId = string.IsNullOrWhiteSpace(workerId) ? $"analysis-worker:{Environment.ProcessId}:{Guid.NewGuid():N}" : workerId;
  _idleDelay = idleDelay ?? TimeSpan.FromSeconds(1);
  if (_idleDelay <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(idleDelay));
+ var timing = options ?? throw new ArgumentNullException(nameof(options));
+ if (timing.LeaseDuration <= TimeSpan.Zero || timing.LeaseDuration > TimeSpan.FromMinutes(10))
+ throw new ArgumentOutOfRangeException(nameof(options), "Lease duration must be between zero and ten minutes.");
+ if (timing.HeartbeatInterval <= TimeSpan.Zero || timing.HeartbeatInterval > TimeSpan.FromMinutes(10))
+ throw new ArgumentOutOfRangeException(nameof(options), "Heartbeat interval must be between zero and ten minutes.");
+ if (timing.ReclaimRetryDelay < TimeSpan.Zero || timing.ReclaimRetryDelay > TimeSpan.FromMinutes(10))
+ throw new ArgumentOutOfRangeException(nameof(options), "Reclaim retry delay must be between zero and ten minutes.");
+ _leaseDuration = timing.LeaseDuration;
+ _heartbeatInterval = timing.HeartbeatInterval;
+ _reclaimRetryDelay = timing.ReclaimRetryDelay;
+ _claimLatencyObserver = timing.ClaimLatencyObserver;
 }
 
  public async ValueTask StartAsync(CancellationToken cancellationToken = default)
@@ -109,7 +142,14 @@ _loopCancellation = null;
  }
  catch
  {
+ try
+ {
  await Task.Delay(_idleDelay, cancellationToken);
+ }
+ catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+ {
+ break;
+ }
  }
  }
  }
@@ -157,7 +197,7 @@ await store.EnsureSchemaAsync(cancellationToken);
  await FinalizeRecordedCompletionAsync(store, completion, cancellationToken);
 var now = DateTimeOffset.UtcNow;
 await store.RequeueDueRetriesAsync(now, cancellationToken);
-await store.ReclaimExpiredLeasesAsync(now, now.AddSeconds(1), cancellationToken);
+await store.ReclaimExpiredLeasesAsync(now, now.Add(_reclaimRetryDelay), cancellationToken);
  }
 
 private async ValueTask<bool> PumpOnceCoreAsync(
@@ -173,8 +213,25 @@ CancellationToken cancellationToken)
 
 var now = DateTimeOffset.UtcNow;
  await store.RequeueDueRetriesAsync(now, cancellationToken);
- await store.ReclaimExpiredLeasesAsync(now, now.AddSeconds(1), cancellationToken);
-var claim = await store.ClaimNextAsync(_workerId, now, LeaseDuration, cancellationToken);
+await store.ReclaimExpiredLeasesAsync(now, now.Add(_reclaimRetryDelay), cancellationToken);
+ReferenceCorpusAnalysisJobClaim? claim;
+if (_claimLatencyObserver is null)
+{
+ claim = await store.ClaimNextAsync(_workerId, now, _leaseDuration, cancellationToken);
+}
+else
+{
+ var claimStarted = Stopwatch.GetTimestamp();
+ claim = await store.ClaimNextAsync(_workerId, now, _leaseDuration, cancellationToken);
+ try
+ {
+ _claimLatencyObserver(Stopwatch.GetElapsedTime(claimStarted));
+ }
+ catch
+ {
+ // Harness telemetry must not affect durable worker behavior.
+ }
+}
  if (claim is null) return false;
 
  while (true)
@@ -217,6 +274,9 @@ if (current.Status is ReferenceCorpusAnalysisJobStatuses.PauseRequested or Refer
  ReferenceCorpusAnalysisWorkItemReservation? reservation;
  try
  {
+ // Keep a fast sequence of work items fenced even when the periodic heartbeat is intentionally slow.
+ await store.HeartbeatAsync(current.JobId, _workerId, claim.LeaseToken,
+ DateTimeOffset.UtcNow, _leaseDuration, cancellationToken);
  reservation = await store.ReserveNextWorkItemAsync(
 current.JobId,
  _workerId,
@@ -233,6 +293,11 @@ current.JobId,
  var code = separator > 0 ? exception.Message[..separator] : "analysis_snapshot_corrupt";
  await store.FailClaimAsync(current.JobId, _workerId, claim.LeaseToken,
  code, Truncate(exception.Message), DateTimeOffset.UtcNow, cancellationToken);
+ return true;
+ }
+ catch (ReferenceCorpusAnalysisJobConflictException)
+ {
+ // A concurrent worker reclaimed this lease; the fencing boundary prevents a stale commit.
  return true;
  }
  if (reservation is null) return true;
@@ -478,9 +543,9 @@ WorkItemExecutionStatuses.Succeeded, featureResult.TokensSpent, string.Join(" | 
  string leaseToken,
  CancellationToken cancellationToken)
  {
- using var timer = new PeriodicTimer(HeartbeatInterval);
+ using var timer = new PeriodicTimer(_heartbeatInterval);
  while (await timer.WaitForNextTickAsync(cancellationToken))
- await store.HeartbeatAsync(jobId, _workerId, leaseToken, DateTimeOffset.UtcNow, LeaseDuration, cancellationToken);
+ await store.HeartbeatAsync(jobId, _workerId, leaseToken, DateTimeOffset.UtcNow, _leaseDuration, cancellationToken);
  }
 
  private static void ValidateFeaturePayload(ReferenceCorpusAnalysisWorkItemReservation reservation, ReferenceCorpusFrozenFeatureWorkItem payload)

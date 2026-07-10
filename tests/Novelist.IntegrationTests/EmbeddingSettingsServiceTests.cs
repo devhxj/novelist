@@ -8,6 +8,10 @@ using Novelist.Infrastructure.App;
 
 namespace Novelist.IntegrationTests;
 
+[CollectionDefinition("onnx-runtime", DisableParallelization = true)]
+public sealed class OnnxRuntimeCollection;
+
+[Collection("onnx-runtime")]
 public sealed class EmbeddingSettingsServiceTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "novelist-tests", Guid.NewGuid().ToString("N"));
@@ -236,6 +240,37 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task LocalOnnxEmbeddingClientDisposesCachedDisposableRunner()
+    {
+        var modelPath = Path.Combine(_root, "disposable-model.onnx");
+        var vocabPath = Path.Combine(_root, "disposable-vocab.txt");
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(modelPath, "fake", CancellationToken.None);
+        await File.WriteAllTextAsync(vocabPath, "[PAD]\n[UNK]\n[CLS]\n[SEP]\n你", CancellationToken.None);
+        var runner = new RecordingLocalOnnxRunner();
+        var client = new LocalOnnxEmbeddingClient(new StaticLocalOnnxRunnerFactory(runner));
+        var options = new EmbeddingRequestOptions(
+            ProviderKey: "onnx",
+            EndpointUrl: "",
+            ApiKey: "",
+            ModelId: "local-model",
+            Dimensions: null,
+            User: null,
+            ProviderType: "onnx",
+            OnnxModelPath: modelPath,
+            OnnxVocabPath: vocabPath,
+            MaxSequenceLength: 4);
+
+        await client.EmbedAsync(["你"], options, CancellationToken.None);
+
+        Assert.IsAssignableFrom<IDisposable>(client).Dispose();
+
+        Assert.True(runner.Disposed);
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () =>
+            await client.EmbedAsync(["你"], options, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task LocalOnnxEmbeddingClientAcceptsPooledEmbeddingOutput()
     {
         var modelPath = Path.Combine(_root, "pooled-model.onnx");
@@ -334,7 +369,7 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
             return;
         }
 
-        var client = new LocalOnnxEmbeddingClient();
+        using var client = new LocalOnnxEmbeddingClient();
 
         var result = await client.EmbedAsync(
             ["雨声压低了整条街的呼吸。", "旧城门下发现暗号。"],
@@ -588,9 +623,10 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
         }
     }
 
-    private sealed class RecordingLocalOnnxRunner : ILocalOnnxEmbeddingRunner
+    private sealed class RecordingLocalOnnxRunner : ILocalOnnxEmbeddingRunner, IDisposable
     {
         public LocalOnnxTensorInputs? LastInputs { get; private set; }
+        public bool Disposed { get; private set; }
 
         public ValueTask<LocalOnnxTensorOutput> RunAsync(
             LocalOnnxTensorInputs inputs,
@@ -614,6 +650,11 @@ public sealed class EmbeddingSettingsServiceTests : IDisposable
                 inputs.BatchSize,
                 inputs.SequenceLength,
                 2));
+        }
+
+        public void Dispose()
+        {
+            Disposed = true;
         }
     }
 

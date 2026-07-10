@@ -14,7 +14,7 @@ The resulting workflow is:
 chapter goal / existing chapter plan / known facts / previous state
   -> chapter scenario blueprint IR
   -> deterministic blueprint review
-  -> explicit user or agent approval
+  -> explicit user approval
   -> beat-level reference material binding
   -> beat-scoped paragraph candidates
   -> deterministic draft audit

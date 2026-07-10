@@ -743,10 +743,12 @@ export function installConfigurableAppMockBridge(options = {}) {
     nextReferenceStyleProfileId: 301,
     referenceBlueprints: {},
     nextReferenceBlueprintId: 701,
+    referenceCorpusBlueprintSessions: options.referenceCorpusBlueprintSessions ?? {},
     referenceCorpusFeatureAnalysisRuns: [],
     nextReferenceCorpusFeatureAnalysisRunId: 1,
 referenceCorpusTechniqueSpecimenAnalysisRuns: [],
-nextReferenceCorpusTechniqueSpecimenAnalysisRunId: 1,
+    nextReferenceCorpusTechniqueSpecimenAnalysisRunId: 1,
+    nextReferenceCorpusAnalysisJobId: 2,
  referenceCorpusAnalysisJobs: options.referenceCorpusAnalysisJobs ?? [{
  job_id: 'mock-corpus-job-001', run_id: 'mock-feature:101:sentence', novel_id: 42, anchor_id: 101,
  job_kind: 'feature_analysis', scope: 'sentence', status: 'running', version: 1,
@@ -1241,6 +1243,7 @@ case 'GetReferenceSourceProcessingDetail': return getReferenceSourceProcessingDe
       case 'GetReferenceCorpusTechniqueSpecimenAnalysisRun': return getReferenceCorpusTechniqueSpecimenAnalysisRun(args[0])
       case 'ListReferenceCorpusFeatureObservations': return listReferenceCorpusFeatureObservations(args[0])
 case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqueSpecimens(args[0])
+ case 'EnqueueReferenceCorpusAnalysisJob': return enqueueReferenceCorpusAnalysisJob(args[0])
  case 'ListReferenceCorpusAnalysisJobs': {
  const input = args[0] ?? {}
  const pageSize = Math.max(1, Number(input?.page_request?.page_size ?? 20))
@@ -1277,8 +1280,10 @@ case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqu
  return { ...job }
  }
       case 'GenerateReferenceCorpusBlueprintCandidates': return generateReferenceCorpusBlueprintCandidates(args[0])
+      case 'AdvanceReferenceCorpusBlueprintSession': return advanceReferenceCorpusBlueprintSession(args[0])
       case 'GenerateReferenceCorpusInsertionDraft': return generateReferenceCorpusInsertionDraft(args[0])
       case 'GenerateReferenceCorpusInsertionDraftCandidates': return generateReferenceCorpusInsertionDraftCandidates(args[0])
+      case 'GetReferenceCorpusBlueprintSession': return getReferenceCorpusBlueprintSession(args[0])
  case 'RecordReferenceCorpusInsertionAudit': return args[0]?.draft?.ready_for_insertion === true && args[0]?.draft?.gate?.passed === true && args[0]?.draft?.audit?.passed === true
       case 'UpdateReferenceMaterialTags': return updateReferenceMaterialTags(args[0])
       case 'UpdateReferenceMaterialsTags': return updateReferenceMaterialsTags(args[0])
@@ -3668,6 +3673,53 @@ function referenceAnchors() {
       succeeded_count: succeeded.length,
       failed_count: failed.length,
     }
+  }
+
+  function enqueueReferenceCorpusAnalysisJob(input = {}) {
+    const id = state.nextReferenceCorpusAnalysisJobId++
+    const job = {
+      job_id: `mock-corpus-job-enqueued-${id}`,
+      run_id: String(input.run_id ?? `mock-analysis-run-${id}`),
+      novel_id: Number(input.novel_id ?? state.activeNovelId),
+      anchor_id: Number(input.anchor_id ?? 0),
+      job_kind: String(input.job_kind ?? 'feature_analysis'),
+      scope: String(input.scope ?? 'sentence'),
+      status: 'queued',
+      version: 1,
+      priority_class: String(input.priority_class ?? 'normal'),
+      priority_value: Number(input.priority_value ?? 10),
+      total_nodes: 4,
+      total_work_items: 8,
+      processed_nodes: 0,
+      processed_work_items: 0,
+      succeeded_work_items: 0,
+      skipped_work_items: 0,
+      failed_work_items: 0,
+      retrying_work_items: 0,
+      token_budget: input.token_budget ?? null,
+      tokens_spent: 0,
+      tokens_reserved: 0,
+      resume_cursor: null,
+      attempt_count: 0,
+      failure_attempt_count: 0,
+      max_attempts: Number(input.max_attempts ?? 3),
+      next_attempt_at: null,
+      lease_heartbeat_at: null,
+      lease_expires_at: null,
+      dependency: null,
+      created_at: now,
+      queued_at: now,
+      started_at: null,
+      updated_at: now,
+      completed_at: null,
+      error_code: null,
+      error_message: null,
+      current_chapter: null,
+      allowed_actions: ['pause', 'cancel', 'reprioritize'],
+      safe_diagnostics: [],
+    }
+    state.referenceCorpusAnalysisJobs.unshift(job)
+    return { ...job }
   }
 
   function shouldMockReferenceAnchorPartialFailure(anchor) {
@@ -6473,6 +6525,163 @@ feedback_summary: feedbackSummary,
  can_select: candidates.length > 0,
  },
     }
+  }
+
+  function corpusBlueprintSessionKey(novelId, chapterNumber, sessionId) {
+    return `${novelId}:${chapterNumber}:${sessionId}`
+  }
+
+  function copyCorpusBlueprintSession(session) {
+    return session ? JSON.parse(JSON.stringify(session)) : null
+  }
+
+  function getReferenceCorpusBlueprintSession(input = {}) {
+    const novelId = Number(input?.novel_id ?? 0)
+    const chapterNumber = Number(input?.chapter_number ?? 0)
+    const sessionId = String(input?.session_id ?? '').trim()
+    if (!Number.isInteger(novelId) || novelId <= 0 || !Number.isInteger(chapterNumber) || chapterNumber <= 0 || !sessionId) {
+      throw new Error('novel_id, chapter_number, and session_id are required.')
+    }
+
+    return copyCorpusBlueprintSession(state.referenceCorpusBlueprintSessions[
+      corpusBlueprintSessionKey(novelId, chapterNumber, sessionId)
+    ])
+  }
+
+  function advanceReferenceCorpusBlueprintSession(input = {}) {
+    const sessionId = String(input?.session_id ?? '').trim()
+    const requestId = String(input?.request_id ?? '').trim()
+    const action = String(input?.action ?? '').trim()
+    const generationInput = input?.generation_input && typeof input.generation_input === 'object'
+      ? input.generation_input
+      : null
+    if (!sessionId || !requestId || !['generate', 'select', 'revise', 'accept'].includes(action)) {
+      throw new Error('session_id, request_id, and action are required.')
+    }
+
+    const chapterContext = generationInput?.chapter_context ?? {}
+    let novelId = Number(chapterContext.novel_id ?? 0)
+    let chapterNumber = Number(chapterContext.chapter_number ?? 0)
+    let key = ''
+    let current = null
+    if (generationInput) {
+      if (!Number.isInteger(novelId) || novelId <= 0 || !Number.isInteger(chapterNumber) || chapterNumber <= 0) {
+        throw new Error('generation_input must include a valid chapter context.')
+      }
+      key = corpusBlueprintSessionKey(novelId, chapterNumber, sessionId)
+      current = state.referenceCorpusBlueprintSessions[key] ?? null
+    } else {
+      const entries = Object.entries(state.referenceCorpusBlueprintSessions)
+      const found = entries.find(([, session]) => session.session_id === sessionId)
+      if (!found) throw new Error('Blueprint session does not exist.')
+      key = found[0]
+      current = found[1]
+      novelId = current.novel_id
+      chapterNumber = current.chapter_number
+    }
+
+    if (current?.status === 'accepted') {
+      throw new Error('Accepted blueprint sessions are terminal.')
+    }
+
+    let next
+    if (action === 'generate') {
+      if (current) throw new Error('Use revise for an existing blueprint session.')
+      if (!generationInput) throw new Error('generation_input is required for generate.')
+      const candidates = generateReferenceCorpusBlueprintCandidates({ ...generationInput, feedback: null })
+      next = {
+        session_id: sessionId,
+        novel_id: novelId,
+        chapter_number: chapterNumber,
+        natural_language_goal: String(generationInput.natural_language_goal ?? ''),
+        status: 'awaiting_feedback',
+        iteration: 1,
+        selected_blueprint_id: '',
+        accepted_blueprint_id: '',
+        checklist: [],
+        strategy_coverage: candidates.candidates.map((candidate) => candidate.blueprint.strategy),
+        candidates: {
+          ...candidates,
+          iteration: {
+            ...(candidates.iteration ?? {}),
+            iteration: 1,
+            state: 'awaiting_feedback',
+            feedback_applied: false,
+            rejected_blueprint_ids: [],
+          },
+        },
+        updated_at: new Date().toISOString(),
+      }
+    } else if (action === 'select') {
+      const selectedBlueprintId = String(input?.selected_blueprint_id ?? '').trim()
+      const selected = current?.candidates?.candidates?.find((candidate) => candidate.blueprint?.blueprint_id === selectedBlueprintId)
+      if (!selected) throw new Error('Selected blueprint is not part of the current session iteration.')
+      next = {
+        ...current,
+        selected_blueprint_id: selectedBlueprintId,
+        updated_at: new Date().toISOString(),
+      }
+    } else if (action === 'revise') {
+      if (!generationInput) throw new Error('generation_input is required for revise.')
+      const selectedBlueprintId = String(input?.selected_blueprint_id ?? '').trim()
+      const selected = current?.candidates?.candidates?.find((candidate) => candidate.blueprint?.blueprint_id === selectedBlueprintId)
+      if (!selected) throw new Error('Selected blueprint is not part of the current session iteration.')
+      const checklist = Array.isArray(input?.checklist) ? input.checklist : []
+      const revisedDimensions = checklist
+        .filter((item) => item?.decision === 'revise')
+        .map((item) => String(item.dimension ?? ''))
+        .filter(Boolean)
+      if (revisedDimensions.length === 0) throw new Error('Revision requires at least one revise decision.')
+      const feedback = {
+        rejected_blueprint_ids: [selectedBlueprintId],
+        rejected_node_ids: selected.blueprint?.beats?.flatMap((beat) => beat.node_ids ?? []) ?? [],
+        avoid_library_ids: selected.source_distribution?.map((source) => source.library_id) ?? [],
+        avoid_anchor_ids: selected.source_distribution?.map((source) => source.anchor_id) ?? [],
+        problem_tags: [...new Set([
+          ...checklist.flatMap((item) => item?.decision === 'revise' ? item.problem_tags ?? [] : []),
+          ...revisedDimensions.map((dimension) => `checklist:${dimension}`),
+        ])],
+        notes: checklist.map((item) => item?.notes).filter(Boolean).join(' | '),
+      }
+      const candidates = generateReferenceCorpusBlueprintCandidates({ ...generationInput, feedback })
+      next = {
+        ...current,
+        natural_language_goal: String(generationInput.natural_language_goal ?? current.natural_language_goal ?? ''),
+        iteration: Number(current.iteration ?? 1) + 1,
+        selected_blueprint_id: '',
+        checklist,
+        strategy_coverage: candidates.candidates.map((candidate) => candidate.blueprint.strategy),
+        candidates: {
+          ...candidates,
+          iteration: {
+            ...(candidates.iteration ?? {}),
+            iteration: Number(current.iteration ?? 1) + 1,
+            state: 'awaiting_feedback',
+            feedback_applied: true,
+            rejected_blueprint_ids: [selectedBlueprintId],
+          },
+        },
+        updated_at: new Date().toISOString(),
+      }
+    } else {
+      const selectedBlueprintId = String(input?.selected_blueprint_id ?? '').trim()
+      const selected = current?.candidates?.candidates?.find((candidate) => candidate.blueprint?.blueprint_id === selectedBlueprintId)
+      const checklist = Array.isArray(input?.checklist) ? input.checklist : []
+      if (!selected || checklist.length === 0 || checklist.some((item) => item?.decision !== 'accepted')) {
+        throw new Error('Accept requires the selected blueprint and an accepted checklist.')
+      }
+      next = {
+        ...current,
+        status: 'accepted',
+        selected_blueprint_id: selectedBlueprintId,
+        accepted_blueprint_id: selectedBlueprintId,
+        checklist,
+        updated_at: new Date().toISOString(),
+      }
+    }
+
+    state.referenceCorpusBlueprintSessions[key] = next
+    return copyCorpusBlueprintSession(next)
   }
 
   function hasCorpusBlueprintFeedback(feedback) {
