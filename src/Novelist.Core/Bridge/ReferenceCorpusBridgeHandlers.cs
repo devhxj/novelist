@@ -31,14 +31,33 @@ public static class ReferenceCorpusBridgeHandlers
                 throw Invalid("page_request", $"{exception.Code}: {exception.Message}");
             }
 
-            return await service.SearchCandidatesAsync(input, cancellationToken);
+ try
+ {
+ return await service.SearchCandidatesAsync(input, cancellationToken);
+ }
+ catch (ArgumentException exception)
+ {
+ throw Invalid("input", exception.Message);
+ }
         });
 
-        dispatcher.Register("BackfillReferenceCorpusTechniqueVectorIndex", async (context, cancellationToken) =>
+dispatcher.Register("BackfillReferenceCorpusTechniqueVectorIndex", async (context, cancellationToken) =>
         {
             var input = ReadObjectArg<BackfillReferenceCorpusTechniqueVectorIndexPayload>(context.Payload, 0, "input");
-            return await service.BackfillTechniqueVectorIndexAsync(input, cancellationToken);
-        });
+return await service.BackfillTechniqueVectorIndexAsync(input, cancellationToken);
+});
+
+dispatcher.Register("GetReferenceCorpusNodeWindow", async (context, cancellationToken) =>
+ {
+ var input = ReadObjectArg<GetReferenceCorpusNodeWindowPayload>(context.Payload, 0, "input");
+return await service.GetNodeWindowAsync(input, cancellationToken);
+});
+
+ dispatcher.Register("GetReferenceCorpusCascadeImpact", async (context, cancellationToken) =>
+ {
+ var input = ReadObjectArg<GetReferenceCorpusCascadeImpactPayload>(context.Payload, 0, "input");
+ return await service.GetCascadeImpactAsync(input, cancellationToken);
+ });
 
         return dispatcher;
     }

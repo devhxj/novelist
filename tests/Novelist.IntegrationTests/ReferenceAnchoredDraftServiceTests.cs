@@ -6691,11 +6691,17 @@ public sealed class ReferenceAnchoredDraftServiceTests : IDisposable
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
-        public ValueTask<ReferenceAnchorBuildStatusPayload?> GetBuildStatusAsync(
+public ValueTask<ReferenceAnchorBuildStatusPayload?> GetBuildStatusAsync(
             long novelId,
             long anchorId,
             CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
+throw new NotSupportedException();
+
+ public ValueTask<ReferenceMaterialEmbeddingBackfillPayload> BackfillMaterialEmbeddingsAsync(
+ BackfillReferenceMaterialEmbeddingsPayload input,
+ CancellationToken cancellationToken) =>
+ ValueTask.FromResult(new ReferenceMaterialEmbeddingBackfillPayload(
+ "test", "test", 1, 0, 0, 0, 0, 0, 0, []));
 
         public ValueTask<AdaptReferenceMaterialResultPayload> AdaptMaterialAsync(
             AdaptReferenceMaterialPayload input,

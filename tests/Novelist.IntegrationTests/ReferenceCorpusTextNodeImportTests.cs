@@ -24,8 +24,8 @@ public sealed class ReferenceCorpusTextNodeImportTests : IDisposable
 
             雨声贴着门缝往里挤。
 
-            她没有立刻开口，只把钥匙扣在掌心。
-            """);
+ 她没有立刻开口，只把钥匙扣在掌心。
+""");
         var service = new SqliteReferenceAnchorService(options, novels);
 
         var anchor = await service.CreateAnchorAsync(
@@ -47,7 +47,29 @@ public sealed class ReferenceCorpusTextNodeImportTests : IDisposable
         Assert.Equal(firstSentence.TextHash, await ReadSourceSegmentNodeTextHashAsync(options, firstSentence.NodeId));
         Assert.True(await MaterialNodeExistsAsync(options, firstSentence.NodeId));
         Assert.True(await ObservationExistsAsync(options, firstSentence.NodeId, "rhythm", "length_band"));
-        Assert.True(await ObservationExistsAsync(options, firstSentence.NodeId, "sensory", "senses"));
+Assert.True(await ObservationExistsAsync(options, firstSentence.NodeId, "sensory", "senses"));
+ var compoundSentence = Assert.Single(nodes, node =>
+ node.NodeType == ReferenceCorpusNodeTypes.Sentence && node.Text == "她没有立刻开口，只把钥匙扣在掌心。");
+ var clauses = nodes
+ .Where(node => node.NodeType == ReferenceCorpusNodeTypes.Clause && node.ParentNodeId == compoundSentence.NodeId)
+ .OrderBy(node => node.SequenceIndex)
+ .ToArray();
+ Assert.Equal(["她没有立刻开口，", "只把钥匙扣在掌心。"], clauses.Select(node => node.Text));
+ Assert.True(clauses[0].SequenceIndex < clauses[1].SequenceIndex);
+ var sourceText = await File.ReadAllTextAsync(sourcePath);
+ Assert.All(clauses, clause =>
+ {
+ Assert.Equal(clause.Text, sourceText[clause.StartOffset..clause.EndOffset]);
+ Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(clause.Text))).ToLowerInvariant(), clause.TextHash);
+ });
+
+ await service.RebuildAnchorAsync(novel.Id, anchor.AnchorId, CancellationToken.None);
+ var rebuiltClauses = (await ReadTextNodesAsync(options, anchor.AnchorId))
+ .Where(node => node.NodeType == ReferenceCorpusNodeTypes.Clause)
+ .OrderBy(node => node.SequenceIndex)
+ .Select(node => node.NodeId)
+ .ToArray();
+ Assert.Equal(nodes.Where(node => node.NodeType == ReferenceCorpusNodeTypes.Clause).OrderBy(node => node.SequenceIndex).Select(node => node.NodeId), rebuiltClauses);
 
         var libraryId = await ReadDefaultLibraryIdAsync(options, anchor.AnchorId);
         Assert.Equal("project:" + novel.Id + ":default", libraryId);
@@ -106,12 +128,10 @@ public sealed class ReferenceCorpusTextNodeImportTests : IDisposable
     {
         await using var connection = await OpenReferenceConnectionAsync(options);
         await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT node_id, parent_node_id, node_type, sequence_index, text_hash, text
-            FROM reference_text_nodes
-            WHERE anchor_id = $anchor_id
-            ORDER BY start_offset, depth, sequence_index, node_id;
-            """;
+ command.CommandText =
+ "SELECT node_id, parent_node_id, node_type, sequence_index, start_offset, end_offset, text_hash, text " +
+ "FROM reference_text_nodes WHERE anchor_id = $anchor_id " +
+ "ORDER BY start_offset, depth, sequence_index, node_id;";
         command.Parameters.AddWithValue("$anchor_id", anchorId);
         var nodes = new List<TextNodeRow>();
         await using var reader = await command.ExecuteReaderAsync();
@@ -120,10 +140,12 @@ public sealed class ReferenceCorpusTextNodeImportTests : IDisposable
             nodes.Add(new TextNodeRow(
                 reader.GetString(0),
                 reader.IsDBNull(1) ? null : reader.GetString(1),
-                reader.GetString(2),
-                reader.GetInt32(3),
-                reader.GetString(4),
-                reader.GetString(5)));
+reader.GetString(2),
+reader.GetInt32(3),
+ reader.GetInt32(4),
+ reader.GetInt32(5),
+ reader.GetString(6),
+ reader.GetString(7)));
         }
 
         return nodes;
@@ -275,10 +297,12 @@ public sealed class ReferenceCorpusTextNodeImportTests : IDisposable
 
     private sealed record TextNodeRow(
         string NodeId,
-        string? ParentNodeId,
-        string NodeType,
-        int SequenceIndex,
-        string TextHash,
+string? ParentNodeId,
+string NodeType,
+int SequenceIndex,
+ int StartOffset,
+ int EndOffset,
+string TextHash,
         string Text);
 
     private sealed record SourceLicenseRow(

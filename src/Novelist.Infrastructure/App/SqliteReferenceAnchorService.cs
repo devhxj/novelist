@@ -11,7 +11,7 @@ using Novelist.Core.App;
 
 namespace Novelist.Infrastructure.App;
 
-public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IReferenceAnchorProcessingRecoveryService
+public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorService, IReferenceAnchorProcessingRecoveryService
 {
     private const string BuildVersion = "reference-anchor-v1";
     private const long WorkspaceCorpusNovelId = 0;
@@ -3287,56 +3287,19 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
             updatedAt);
     }
 
-    private async ValueTask<int> ProvisionMaterialVectorsAsync(
-        string databasePath,
-        long anchorId,
-        IReadOnlyList<ReferenceMaterialPayload> materials,
-        EmbeddingRequestOptions embeddingOptions,
-        CancellationToken cancellationToken)
-    {
-        if (materials.Count == 0)
-        {
-            return 0;
-        }
-
-        var materialEmbeddings = await EmbedMaterialsAsync(materials, embeddingOptions, cancellationToken);
-        if (materialEmbeddings.Count == 0)
-        {
-            return 0;
-        }
-
-        var dimensions = materialEmbeddings[0].Vector.Count;
-        if (dimensions <= 0)
-        {
-            throw new InvalidOperationException("Reference material embedding dimensions must be positive.");
-        }
-
-        var rowIds = await ReadMaterialRowIdsAsync(databasePath, anchorId, cancellationToken);
-        var vectors = new List<SqliteVecVectorRecord>(materialEmbeddings.Count);
-        foreach (var item in materialEmbeddings)
-        {
-            if (item.Vector.Count != dimensions)
-            {
-                throw new InvalidOperationException("Reference material embedding dimensions are inconsistent.");
-            }
-
-            if (!rowIds.TryGetValue(item.Material.MaterialId, out var rowId))
-            {
-                throw new InvalidOperationException("Reference material row id was not found for vector provisioning.");
-            }
-
-            vectors.Add(new SqliteVecVectorRecord(rowId, item.Material.MaterialId, item.Vector));
-        }
-
-        var tableName = SqliteVecTableProvisioner.BuildReferenceAnchorVectorTableName(anchorId, dimensions);
-        var provisionRequest = new SqliteVecProvisionRequest(
-            tableName,
-            dimensions,
-            SqliteVecTableProvisioner.BuildCreateTableSql(tableName, dimensions),
-            vectors);
-        await _vecProvisioner.ProvisionAsync(databasePath, provisionRequest, cancellationToken);
-        return vectors.Count;
-    }
+private async ValueTask<int> ProvisionMaterialVectorsAsync(
+string databasePath,
+long anchorId,
+IReadOnlyList<ReferenceMaterialPayload> materials,
+EmbeddingRequestOptions embeddingOptions,
+CancellationToken cancellationToken)
+{
+ return await ProvisionCanonicalMaterialVectorsAsync(
+ databasePath,
+ anchorId,
+ embeddingOptions,
+ cancellationToken);
+}
 
     private async ValueTask<IReadOnlyList<ReferenceMaterialEmbedding>> EmbedMaterialsAsync(
         IReadOnlyList<ReferenceMaterialPayload> materials,
@@ -6359,8 +6322,9 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
         var chapters = SplitChapters(sourceText);
         var segments = new List<ReferenceSourceSegment>();
         var chapterIndex = 0;
-        var paragraphIndex = 0;
-        var sentenceIndex = 0;
+var paragraphIndex = 0;
+var sentenceIndex = 0;
+ var clauseIndex = 0;
 
         foreach (var chapter in chapters)
         {
@@ -6396,12 +6360,13 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                     paragraph.Text,
                     paragraphHash));
 
-                foreach (var sentence in SplitSentences(paragraph.Text, paragraph.StartOffset))
-                {
-                    sentenceIndex++;
-                    var sentenceHash = HashText(sentence.Text);
-                    segments.Add(new ReferenceSourceSegment(
-                        BuildSegmentId(anchorId, "sentence", chapterIndex, sentenceIndex, sentenceHash),
+foreach (var sentence in SplitSentences(paragraph.Text, paragraph.StartOffset))
+{
+sentenceIndex++;
+var sentenceHash = HashText(sentence.Text);
+ var sentenceId = BuildSegmentId(anchorId, "sentence", chapterIndex, sentenceIndex, sentenceHash);
+segments.Add(new ReferenceSourceSegment(
+ sentenceId,
                         chapterIndex,
                         chapter.Title,
                         "sentence",
@@ -6409,9 +6374,26 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
                         paragraphId,
                         sentence.StartOffset,
                         sentence.EndOffset,
-                        sentence.Text,
-                        sentenceHash));
-                }
+sentence.Text,
+sentenceHash));
+
+ foreach (var clause in SplitClauses(sentence.Text, sentence.StartOffset))
+ {
+ clauseIndex++;
+ var clauseHash = HashText(clause.Text);
+ segments.Add(new ReferenceSourceSegment(
+ BuildSegmentId(anchorId, "clause", chapterIndex, clauseIndex, clauseHash),
+ chapterIndex,
+ chapter.Title,
+ "clause",
+ clauseIndex,
+ sentenceId,
+ clause.StartOffset,
+ clause.EndOffset,
+ clause.Text,
+ clauseHash));
+ }
+}
             }
         }
 
@@ -7061,7 +7043,7 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
         }
     }
 
-    private static IEnumerable<TextSpan> SplitSentences(string paragraph, int baseOffset)
+private static IEnumerable<TextSpan> SplitSentences(string paragraph, int baseOffset)
     {
         var start = 0;
         for (var index = 0; index < paragraph.Length; index++)
@@ -7089,13 +7071,50 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
             var sentence = TrimSpan(paragraph, start, paragraph.Length);
             if (sentence.Text.Length > 0)
             {
-                yield return sentence with
-                {
-                    StartOffset = baseOffset + sentence.StartOffset,
-                    EndOffset = baseOffset + sentence.EndOffset
-                };
-            }
-        }
+yield return sentence with
+{
+StartOffset = baseOffset + sentence.StartOffset,
+EndOffset = baseOffset + sentence.EndOffset
+};
+ }
+ }
+ }
+
+ private static IEnumerable<TextSpan> SplitClauses(string sentence, int baseOffset)
+ {
+ var start = 0;
+ for (var index = 0; index < sentence.Length; index++)
+ {
+ if (!IsClauseTerminator(sentence[index]))
+ {
+ continue;
+ }
+
+ var clause = TrimSpan(sentence, start, index + 1);
+ if (clause.Text.Length > 0)
+ {
+ yield return clause with
+ {
+ StartOffset = baseOffset + clause.StartOffset,
+ EndOffset = baseOffset + clause.EndOffset
+ };
+ }
+
+ start = index + 1;
+ }
+
+ if (start < sentence.Length)
+ {
+ var clause = TrimSpan(sentence, start, sentence.Length);
+ if (clause.Text.Length > 0)
+ {
+ yield return clause with
+ {
+ StartOffset = baseOffset + clause.StartOffset,
+ EndOffset = baseOffset + clause.EndOffset
+ };
+ }
+ }
     }
 
     private static TextSpan TrimSpan(string text, int start, int end)
@@ -7995,10 +8014,16 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
         }
     }
 
-    private static bool IsSentenceTerminator(char value)
-    {
-        return value is '。' or '！' or '？' or '!' or '?' or '.';
-    }
+private static bool IsSentenceTerminator(char value)
+{
+return value is '。' or '！' or '？' or '!' or '?' or '.';
+}
+
+ private static bool IsClauseTerminator(char value)
+ {
+ return value is '，' or ',' or '；' or ';' or '：' or ':' or
+ '。' or '！' or '？' or '!' or '?' or '.';
+ }
 
     private static string ValidateSourcePath(string? sourcePath)
     {
@@ -8259,9 +8284,10 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
         return segmentType switch
         {
             "chapter" => ReferenceCorpusNodeTypes.Chapter,
-            "scene" => ReferenceCorpusNodeTypes.Scene,
-            "sentence" => ReferenceCorpusNodeTypes.Sentence,
-            "paragraph" => ReferenceCorpusNodeTypes.Passage,
+"scene" => ReferenceCorpusNodeTypes.Scene,
+"sentence" => ReferenceCorpusNodeTypes.Sentence,
+ "clause" => ReferenceCorpusNodeTypes.Clause,
+"paragraph" => ReferenceCorpusNodeTypes.Passage,
             "beat" => ReferenceCorpusNodeTypes.Passage,
             "dialogue_exchange" => ReferenceCorpusNodeTypes.Passage,
             "action_afterbeat" => ReferenceCorpusNodeTypes.Passage,
@@ -8609,13 +8635,13 @@ public sealed class SqliteReferenceAnchorService : IReferenceAnchorService, IRef
         }
     }
 
-    private static void ValidateAnchorId(long anchorId)
+private static void ValidateAnchorId(long anchorId)
     {
         if (anchorId <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(anchorId), anchorId, "Reference anchor id must be positive.");
-        }
-    }
+}
+}
 
     private sealed record SourceSnapshot(string Text, string Hash);
 

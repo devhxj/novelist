@@ -226,7 +226,37 @@ public sealed record UpdateReferenceAnchorMetadataPayload(
     [property: JsonPropertyName("license_status")] string LicenseStatus,
     [property: JsonPropertyName("visibility")] string Visibility,
     [property: JsonPropertyName("source_trust")] string SourceTrust,
-    [property: JsonPropertyName("user_tags")] IReadOnlyList<string> UserTags);
+[property: JsonPropertyName("user_tags")] IReadOnlyList<string> UserTags);
+
+public sealed record BackfillReferenceMaterialEmbeddingsPayload(
+ [property: JsonPropertyName("novel_id")] long NovelId,
+ [property: JsonPropertyName("anchor_ids")]
+ [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<long>? AnchorIds = null);
+
+public sealed record ReferenceMaterialEmbeddingInspectionPayload(
+ [property: JsonPropertyName("material_id")] string MaterialId,
+ [property: JsonPropertyName("anchor_id")] long AnchorId,
+ [property: JsonPropertyName("node_id")] string NodeId,
+ [property: JsonPropertyName("provider_key")] string ProviderKey,
+ [property: JsonPropertyName("model_id")] string ModelId,
+ [property: JsonPropertyName("dimensions")] int Dimensions,
+ [property: JsonPropertyName("material_hash")] string MaterialHash,
+ [property: JsonPropertyName("node_text_hash")] string NodeTextHash,
+ [property: JsonPropertyName("embedding_hash")] string EmbeddingHash,
+ [property: JsonPropertyName("status")] string Status,
+ [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt);
+
+public sealed record ReferenceMaterialEmbeddingBackfillPayload(
+ [property: JsonPropertyName("provider_key")] string ProviderKey,
+ [property: JsonPropertyName("model_id")] string ModelId,
+ [property: JsonPropertyName("dimensions")] int Dimensions,
+ [property: JsonPropertyName("material_count")] int MaterialCount,
+ [property: JsonPropertyName("built_count")] int BuiltCount,
+ [property: JsonPropertyName("reused_count")] int ReusedCount,
+ [property: JsonPropertyName("aligned_source_segment_count")] int AlignedSourceSegmentCount,
+ [property: JsonPropertyName("aligned_material_count")] int AlignedMaterialCount,
+ [property: JsonPropertyName("projection_count")] int ProjectionCount,
+ [property: JsonPropertyName("items")] IReadOnlyList<ReferenceMaterialEmbeddingInspectionPayload> Items);
 
 public sealed record ReferenceAnchorPayload(
     [property: JsonPropertyName("anchor_id")] long AnchorId,

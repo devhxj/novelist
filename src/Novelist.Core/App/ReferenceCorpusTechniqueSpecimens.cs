@@ -19,7 +19,9 @@ public sealed record ReferenceCorpusTechniqueSpecimenAnalysisInput(
     string NodeText,
  IReadOnlyList<ReferenceCorpusTechniqueObservationEvidence> Observations)
 {
-    public int? MaxOutputTokens { get; init; }
+public int? MaxOutputTokens { get; init; }
+
+ public ReferenceCorpusFrozenModelSelection? ModelSelection { get; init; }
 }
 
 public sealed record ReferenceCorpusTechniqueObservationEvidence(

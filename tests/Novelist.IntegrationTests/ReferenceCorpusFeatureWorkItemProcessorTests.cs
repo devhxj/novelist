@@ -17,9 +17,10 @@ public sealed class ReferenceCorpusFeatureWorkItemProcessorTests
  "node-1",
  "Frozen sentence.",
  ReferenceCorpusNodeTypes.Sentence,
- ReferenceCorpusFeatureFamilies.Syntax,
- ReferenceCorpusFeatureAnalysisContext.Empty,
- 4,
+ReferenceCorpusFeatureFamilies.Syntax,
+ReferenceCorpusFeatureAnalysisContext.Empty,
+ new ReferenceCorpusFrozenModelSelection("fake", "model-a", ""),
+4,
  new ReferenceCorpusFeatureTokenEnvelope(100, 100, 16));
 
  var result = await new ReferenceCorpusFeatureWorkItemProcessor(analyzer, delay)
@@ -57,9 +58,10 @@ public sealed class ReferenceCorpusFeatureWorkItemProcessorTests
  "node-1",
  "Frozen sentence.",
  ReferenceCorpusNodeTypes.Sentence,
- ReferenceCorpusFeatureFamilies.Syntax,
- ReferenceCorpusFeatureAnalysisContext.Empty,
- 4,
+ReferenceCorpusFeatureFamilies.Syntax,
+ReferenceCorpusFeatureAnalysisContext.Empty,
+ new ReferenceCorpusFrozenModelSelection("fake", "model-a", ""),
+4,
  new ReferenceCorpusFeatureTokenEnvelope(budget, budget, 16));
 
  private static string ValidJson() =>

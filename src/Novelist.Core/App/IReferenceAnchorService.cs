@@ -25,10 +25,14 @@ public interface IReferenceAnchorService
         long anchorId,
         CancellationToken cancellationToken);
 
-    ValueTask<ReferenceAnchorBuildStatusPayload?> GetBuildStatusAsync(
-        long novelId,
-        long anchorId,
-        CancellationToken cancellationToken);
+ValueTask<ReferenceAnchorBuildStatusPayload?> GetBuildStatusAsync(
+long novelId,
+long anchorId,
+CancellationToken cancellationToken);
+
+ ValueTask<ReferenceMaterialEmbeddingBackfillPayload> BackfillMaterialEmbeddingsAsync(
+ BackfillReferenceMaterialEmbeddingsPayload input,
+ CancellationToken cancellationToken);
 
     ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(
         SearchReferenceMaterialsPayload input,

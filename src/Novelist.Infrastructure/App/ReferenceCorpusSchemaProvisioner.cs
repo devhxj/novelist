@@ -505,6 +505,7 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  current_stage TEXT NOT NULL,
  current_chapter INTEGER,
  attempt_count INTEGER NOT NULL DEFAULT 0,
+ failure_attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(failure_attempt_count >= 0),
  max_attempts INTEGER NOT NULL DEFAULT 3 CHECK(max_attempts > 0),
  next_attempt_at TEXT,
  lease_owner TEXT,
@@ -542,6 +543,27 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  FOREIGN KEY(job_id) REFERENCES reference_analysis_jobs(job_id) ON DELETE CASCADE
  );
 
+ CREATE TABLE IF NOT EXISTS reference_analysis_work_item_completions (
+ completion_key TEXT PRIMARY KEY,
+ job_id TEXT NOT NULL,
+ run_id TEXT NOT NULL,
+ input_snapshot_id TEXT NOT NULL,
+ ordinal INTEGER NOT NULL,
+ invocation_no INTEGER NOT NULL,
+ attempt_no INTEGER NOT NULL,
+ reserved_tokens INTEGER NOT NULL CHECK(reserved_tokens > 0),
+ output_kind TEXT NOT NULL,
+ output_payload_json TEXT NOT NULL,
+ output_payload_hash TEXT NOT NULL,
+ tokens_spent INTEGER NOT NULL CHECK(tokens_spent >= 0),
+ diagnostics_json TEXT NOT NULL,
+ model_completed_at TEXT NOT NULL,
+ finalized_at TEXT,
+ UNIQUE(input_snapshot_id, ordinal, invocation_no),
+ FOREIGN KEY(job_id) REFERENCES reference_analysis_jobs(job_id) ON DELETE CASCADE,
+ FOREIGN KEY(input_snapshot_id, ordinal) REFERENCES reference_analysis_work_items(input_snapshot_id, ordinal) ON DELETE CASCADE
+ );
+
  CREATE INDEX IF NOT EXISTS idx_reference_analysis_jobs_claim
  ON reference_analysis_jobs(status, next_attempt_at, priority_value DESC, queued_at, job_id);
 
@@ -556,6 +578,9 @@ await command.ExecuteNonQueryAsync(cancellationToken);
 
  CREATE INDEX IF NOT EXISTS idx_reference_analysis_work_items_state
  ON reference_analysis_work_items(input_snapshot_id, work_state, ordinal);
+
+ CREATE INDEX IF NOT EXISTS idx_reference_analysis_completions_unfinalized
+ ON reference_analysis_work_item_completions(input_snapshot_id, finalized_at, ordinal);
  """;
  await command.ExecuteNonQueryAsync(cancellationToken);
  await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "execution_worker_id", "TEXT", cancellationToken);
@@ -566,6 +591,9 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "input_payload_json", "TEXT", cancellationToken);
  await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "input_payload_hash", "TEXT", cancellationToken);
  await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_jobs", "tokens_reserved", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+ await EnsureAnalysisJobColumnAsync(
+ connection, "reference_analysis_jobs", "failure_attempt_count",
+ "INTEGER NOT NULL DEFAULT 0", cancellationToken);
  }
 
  private static async ValueTask EnsureAnalysisJobColumnAsync(

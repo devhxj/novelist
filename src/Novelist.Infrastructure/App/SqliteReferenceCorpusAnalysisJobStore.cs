@@ -6,7 +6,7 @@ namespace Novelist.Infrastructure.App;
 
 internal sealed partial class SqliteReferenceCorpusAnalysisJobStore
 {
- private const int MaxPageSize = 200;
+ private const int MaxPageSize = 201;
  private const int MaxErrorCodeLength = 128;
  private const int MaxErrorMessageLength = 1_200;
  private readonly string _databasePath;
@@ -84,15 +84,22 @@ await InsertSnapshotAsync(connection, transaction, snapshot, cancellationToken);
  command.Parameters.AddWithValue("$anchor_id", anchorId);
  }
 
- if (!string.IsNullOrWhiteSpace(request.Status))
+if (!string.IsNullOrWhiteSpace(request.Status))
  {
  if (!ReferenceCorpusAnalysisJobStatuses.All.Contains(request.Status, StringComparer.Ordinal))
  {
  throw new ArgumentOutOfRangeException(nameof(request), request.Status, "Unknown analysis job status.");
  }
 
- predicates.Add("status = $status");
- command.Parameters.AddWithValue("$status", request.Status);
+predicates.Add("status = $status");
+command.Parameters.AddWithValue("$status", request.Status);
+}
+
+ if (request.UpdatedBefore is { } updatedBefore)
+ {
+ predicates.Add("(updated_at < $updated_before OR (updated_at = $updated_before AND job_id > $job_id_after))");
+ command.Parameters.AddWithValue("$updated_before", ToDb(updatedBefore));
+ command.Parameters.AddWithValue("$job_id_after", request.JobIdAfter ?? string.Empty);
  }
 
  command.CommandText = $"""

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CheckCircle2, Database, RefreshCcw, ShieldCheck, SlidersHorizontal } from 'lucide-react'
+import { CheckCircle2, Database, ExternalLink, RefreshCcw, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import type { reference } from '@/lib/novelist/types'
 
@@ -21,7 +21,8 @@ const labelOf = (value: string) => labels[value] ?? value
 export function CorpusGovernancePanel({ novelId }: Props) {
  const app = useApp()
  const sessionId = `project:${novelId}:default`
- const [expert, setExpert] = useState(false)
+const [expert, setExpert] = useState(false)
+ const [aggregateFilter, setAggregateFilter] = useState('all')
  const [governance, setGovernance] = useState<reference.CorpusGovernance | null>(null)
  const [aggregates, setAggregates] = useState<reference.CorpusAggregate[]>([])
  const [reviewPage, setReviewPage] = useState<reference.CorpusReviewQueuePage | null>(null)
@@ -57,9 +58,14 @@ export function CorpusGovernancePanel({ novelId }: Props) {
  queueMicrotask(() => { void load() })
  }, [load])
 
- const enabledLibraries = useMemo(
+const enabledLibraries = useMemo(
  () => governance?.libraries.filter(library => library.bound_to_session) ?? [],
  [governance],
+)
+ const aggregateTypes = useMemo(() => [...new Set(aggregates.map(item => item.aggregate_type))], [aggregates])
+ const visibleAggregates = useMemo(
+ () => aggregateFilter === 'all' ? aggregates : aggregates.filter(item => item.aggregate_type === aggregateFilter),
+ [aggregateFilter, aggregates],
  )
 
  const bindLibrary = async (library: reference.CorpusGovernanceLibrary) => {
@@ -74,7 +80,7 @@ export function CorpusGovernancePanel({ novelId }: Props) {
  disabled_reason: member.enabled ? '用户在治理面板禁用' : null,
  }))
  }
- const authorize = async (member: reference.CorpusGovernanceMember) => {
+const authorize = async (member: reference.CorpusGovernanceMember) => {
  setGovernance(await app.UpdateReferenceCorpusLicense({
  anchor_id: member.anchor_id, license_state: 'authorized', authorization_evidence: '用户在治理面板确认',
  reuse_policy: 'adapted_only', max_verbatim_ratio: 0.35, cleared_for_insertion: true,
@@ -106,10 +112,23 @@ export function CorpusGovernancePanel({ novelId }: Props) {
  setReviewHistory(history => history.slice(0, -1))
  setReviewCursor(previous)
  }
- const nextReviewPage = () => {
+const nextReviewPage = () => {
  if (!reviewPage?.next_cursor) return
  setReviewHistory(history => [...history, reviewCursor])
- setReviewCursor(reviewPage.next_cursor)
+setReviewCursor(reviewPage.next_cursor)
+}
+ const forbid = async (member: reference.CorpusGovernanceMember) => {
+ setGovernance(await app.UpdateReferenceCorpusLicense({
+ anchor_id: member.anchor_id, license_state: member.license_state,
+ authorization_evidence: '用户在治理面板禁止使用', reuse_policy: 'forbidden',
+ max_verbatim_ratio: 0, cleared_for_insertion: false,
+ }))
+ }
+ const locateEvidence = (item: reference.CorpusReviewQueueItem) => {
+ window.dispatchEvent(new CustomEvent('novelist:locate-corpus-evidence', { detail: {
+ anchorId: item.anchor_id, nodeId: item.node_id,
+ evidenceStart: item.evidence_start, evidenceEnd: item.evidence_end,
+ } }))
  }
 
  return <div className="space-y-4" data-testid="corpus-governance-panel">
@@ -118,11 +137,11 @@ export function CorpusGovernancePanel({ novelId }: Props) {
  <div><h3 className="text-sm font-semibold">语料治理与复核</h3><p className="mt-1 text-xs text-muted-foreground">管理生效语料库、授权、聚合知识与人工复核。</p></div>
  <div className="flex gap-2"><button className="rounded-md border px-3 py-1.5 text-xs" onClick={() => setExpert(value => !value)}><SlidersHorizontal className="mr-1 inline h-3.5 w-3.5" />{expert ? '自动模式' : '专家模式'}</button><button className="rounded-md border px-3 py-1.5 text-xs" onClick={() => void load()} disabled={busy}><RefreshCcw className="mr-1 inline h-3.5 w-3.5" />刷新</button></div>
  </div>
- <div className="grid gap-3 md:grid-cols-4"><Metric icon={<Database />} label="生效语料库" value={enabledLibraries.length} /><Metric icon={<ShieldCheck />} label="可插入来源" value={enabledLibraries.flatMap(library => library.members).filter(member => member.cleared_for_insertion).length} /><Metric icon={<CheckCircle2 />} label="待复核" value={reviewPage?.total ?? 0} /><Metric icon={<Database />} label="聚合知识" value={aggregates.length} /></div>
+ <div className="grid gap-3 md:grid-cols-4"><Metric icon={<Database />} label="生效语料库" value={enabledLibraries.length} /><Metric icon={<ShieldCheck />} label="可插入来源" value={enabledLibraries.flatMap(library => library.members).filter(member => member.cleared_for_insertion).length} /><Metric icon={<CheckCircle2 />} label="待复核" value={reviewPage?.total ?? 0} /><Metric icon={<Database />} label="待重建聚合" value={aggregates.filter(item => item.validity_state === 'stale').length} /></div>
  <section className="rounded-lg border border-border bg-card p-4"><div className="mb-3 flex items-center justify-between"><h4 className="text-xs font-semibold">会话生效语料库</h4><button className="text-xs text-primary" onClick={() => void rebuild()}>重建去重组</button></div>
- <div className="space-y-2">{governance?.libraries.map(library => <div key={library.library_id} className="rounded-md border p-3"><label className="flex items-center gap-2 text-xs font-medium"><input type="checkbox" checked={library.bound_to_session} onChange={() => void bindLibrary(library)} />{library.name}<span className="text-muted-foreground">{labelOf(library.scope)} · {library.members.length} 来源</span></label>{expert && <div className="mt-3 space-y-2">{library.members.map(member => <div key={member.anchor_id} className="flex flex-wrap items-center justify-between gap-2 rounded bg-muted/40 px-3 py-2 text-xs"><div><div className="font-medium">{member.title}</div><div className="text-muted-foreground">{labelOf(member.license_state)} / {labelOf(member.reuse_policy)} / {member.dedup_group_id ?? '未归入去重组'}</div></div><div className="flex gap-2"><button className="rounded border px-2 py-1" onClick={() => void authorize(member)}>确认授权</button><button className="rounded border px-2 py-1" onClick={() => void toggleMember(library, member)}>{member.enabled ? '禁用' : '启用'}</button></div></div>)}</div>}</div>)}</div>{message && <p className="mt-2 text-xs text-emerald-600">{message}</p>}</section>
- <section className="rounded-lg border border-border bg-card p-4"><div className="mb-3 flex items-center justify-between"><h4 className="text-xs font-semibold">聚合知识</h4><button className="text-xs text-primary disabled:opacity-50" disabled={enabledLibraries.length === 0} onClick={() => void buildAggregates()}>按生效库重建</button></div><div className="grid gap-2 md:grid-cols-2">{aggregates.map(item => <div key={item.aggregate_id} className="rounded-md border p-3"><div className="flex justify-between text-xs font-medium"><span>{item.name}</span><span>{labelOf(item.validity_state)}</span></div><p className="mt-1 text-xs text-muted-foreground">{item.summary}</p>{expert && <p className="mt-2 text-[11px] text-muted-foreground">{item.library_ids.length} 库 · {item.anchor_ids.length} 来源 · {item.sample_count} 证据</p>}</div>)}</div></section>
- {expert && <section className="rounded-lg border border-border bg-card p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h4 className="text-xs font-semibold">人工复核队列</h4><div className="flex gap-2"><button className="rounded border px-2 py-1 text-xs" onClick={() => void refreshReviews()}>刷新队列</button><button className="rounded border px-2 py-1 text-xs" disabled={selected.length === 0} onClick={() => void review('confirmed')}>批量确认</button><button className="rounded border px-2 py-1 text-xs" disabled={selected.length === 0} onClick={() => void review('rejected')}>批量拒绝</button></div></div><div className="space-y-2">{reviewPage?.items.map(item => <label key={item.queue_id} className="flex items-start gap-2 rounded-md border p-3 text-xs"><input type="checkbox" checked={selected.includes(item.queue_id)} onChange={() => setSelected(current => current.includes(item.queue_id) ? current.filter(id => id !== item.queue_id) : [...current, item.queue_id])} /><span><span className="font-medium">{labelOf(item.feature_family ?? item.item_type)} · {labelOf(item.reason)}</span><span className="block text-muted-foreground">节点 {item.node_id} · 置信度 {item.confidence.toFixed(2)}</span></span></label>)}</div><div className="mt-3 flex items-center justify-between text-xs"><button className="rounded border px-2 py-1 disabled:opacity-40" disabled={reviewHistory.length === 0} onClick={previousReviewPage}>上一页</button><span>第 {reviewPage?.page ?? 1} / {reviewPage?.total_pages ?? 1} 页 · 共 {reviewPage?.total ?? 0} 项</span><button className="rounded border px-2 py-1 disabled:opacity-40" disabled={!reviewPage?.has_more || !reviewPage.next_cursor} onClick={nextReviewPage}>下一页</button></div></section>}
+ <div className="space-y-2">{governance?.libraries.map(library => <div key={library.library_id} className="rounded-md border p-3"><label className="flex items-center gap-2 text-xs font-medium"><input type="checkbox" checked={library.bound_to_session} onChange={() => void bindLibrary(library)} />{library.name}<span className="text-muted-foreground">{labelOf(library.scope)} · {library.members.length} 来源</span></label>{expert && <div className="mt-3 space-y-2">{library.members.map(member => <div key={member.anchor_id} className="flex flex-wrap items-center justify-between gap-2 rounded bg-muted/40 px-3 py-2 text-xs"><div><div className="font-medium">{member.title}</div><div className="text-muted-foreground">{labelOf(member.license_state)} / {labelOf(member.reuse_policy)} / {member.dedup_group_id ?? '未归入去重组'}</div>{member.disabled_reason && <div className="mt-1 text-amber-700">禁用原因：{member.disabled_reason}</div>}</div><div className="flex gap-2"><button className="rounded border px-2 py-1" onClick={() => void authorize(member)}>确认授权</button><button className="rounded border px-2 py-1" onClick={() => void forbid(member)}>禁止使用</button><button className="rounded border px-2 py-1" onClick={() => void toggleMember(library, member)}>{member.enabled ? '禁用' : '启用'}</button></div></div>)}</div>}</div>)}</div>{message && <p className="mt-2 text-xs text-emerald-600">{message}</p>}</section>
+ <section className="rounded-lg border border-border bg-card p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h4 className="text-xs font-semibold">聚合知识</h4><div className="flex items-center gap-2"><select className="h-7 rounded border bg-background px-2 text-xs" value={aggregateFilter} onChange={event => setAggregateFilter(event.target.value)}><option value="all">全部类型</option>{aggregateTypes.map(type => <option key={type} value={type}>{labelOf(type)}</option>)}</select><button className="text-xs text-primary disabled:opacity-50" disabled={enabledLibraries.length === 0} onClick={() => void buildAggregates()}>按生效库重建</button></div></div><div className="grid gap-2 md:grid-cols-2">{visibleAggregates.map(item => <div key={item.aggregate_id} className={`rounded-md border p-3 ${item.validity_state === 'stale' ? 'border-amber-500/60 bg-amber-500/5' : ''}`}><div className="flex justify-between text-xs font-medium"><span>{item.name}</span><span className={item.validity_state === 'stale' ? 'text-amber-700' : ''}>{labelOf(item.validity_state)}</span></div><p className="mt-1 text-xs text-muted-foreground">{item.summary}</p>{expert && <p className="mt-2 text-[11px] text-muted-foreground">{labelOf(item.aggregate_type)} · {item.library_ids.length} 库 · {item.anchor_ids.length} 来源 · {item.sample_count} 证据</p>}</div>)}</div></section>
+ {expert && <section className="rounded-lg border border-border bg-card p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h4 className="text-xs font-semibold">人工复核队列</h4><div className="flex gap-2"><button className="rounded border px-2 py-1 text-xs" onClick={() => void refreshReviews()}>刷新队列</button><button className="rounded border px-2 py-1 text-xs" disabled={selected.length === 0} onClick={() => void review('confirmed')}>批量确认</button><button className="rounded border px-2 py-1 text-xs" disabled={selected.length === 0} onClick={() => void review('rejected')}>批量拒绝</button></div></div><div className="space-y-2">{reviewPage?.items.map(item => <div key={item.queue_id} className="flex items-start gap-2 rounded-md border p-3 text-xs"><input type="checkbox" checked={selected.includes(item.queue_id)} onChange={() => setSelected(current => current.includes(item.queue_id) ? current.filter(id => id !== item.queue_id) : [...current, item.queue_id])} /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-start justify-between gap-2"><span className="font-medium">{labelOf(item.feature_family ?? item.item_type)} · {labelOf(item.reason)}</span><button type="button" className="inline-flex items-center gap-1 text-primary" onClick={() => locateEvidence(item)}><ExternalLink className="h-3.5 w-3.5" />定位原文</button></div><span className="block text-muted-foreground">{item.anchor_title ?? `锚点 ${item.anchor_id}`} · 节点 {item.node_id} · 置信度 {item.confidence.toFixed(2)}</span>{item.evidence_preview && <blockquote className="mt-2 border-l-2 border-border pl-2 text-muted-foreground">{item.evidence_preview}</blockquote>}{item.evidence_start != null && <span className="mt-1 block text-[11px] text-muted-foreground">字符 {item.evidence_start}–{item.evidence_end ?? item.evidence_start}</span>}</div></div>)}</div><div className="mt-3 flex items-center justify-between text-xs"><button className="rounded border px-2 py-1 disabled:opacity-40" disabled={reviewHistory.length === 0} onClick={previousReviewPage}>上一页</button><span>第 {reviewPage?.page ?? 1} / {reviewPage?.total_pages ?? 1} 页 · 共 {reviewPage?.total ?? 0} 项</span><button className="rounded border px-2 py-1 disabled:opacity-40" disabled={!reviewPage?.has_more || !reviewPage.next_cursor} onClick={nextReviewPage}>下一页</button></div></section>}
  </div>
 }
 

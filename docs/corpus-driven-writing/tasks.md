@@ -27,7 +27,7 @@
 |---|---:|---:|---|---|
 | M0 地基 | 26 | 9 | **S** | schema/契约基本可用；runner 级续跑已有验证，但 migration、projection 重建、job 级一致性和规模资产仍是基础债务 |
 | M1 纵向闭环 | 38 | 1 | **S** | 跨库检索、多蓝图反馈、选定蓝图派生正文候选和章节面板已形成演示级闭环；明确只算薄切片完成，不升级为 P |
-| M2 深度分析 | 22 | 21 | **S，加深中** | 10 family、分析入口、runner 级预算续跑和技法标本已有验证；持久后台调度、可靠恢复与长跑验收未完成 |
+| M2 深度分析 | 25 | 18 | **S，加深中** | 10 family、冻结 snapshot、持久 job/CAS、单 worker 桌面 loop 与技法标本已有定向验证；强杀恢复、data-dir 重绑定、优先级 aging 与长跑规模验收未完成 |
 | M3 深度检索 | 11 | 7 | **S，加深中** | 多路召回、诊断和局部排序已有薄切片；未证明真实长篇召回质量、融合效果与性能 |
 | M4 蓝图 | 12 | 8 | **S，加深中** | 多策略地基、coverage/gap/反馈降权已存在；未证明多份蓝图稳定且显著不同，也未形成真实效果证据 |
 | M5 拼装 | 14 | 4 | **S，加深中** | 保真与阻断审计较深；完整多稿、自然过渡和真实修改成本证据不足 |
@@ -150,7 +150,7 @@
 ### M1.2 最小检索（后端 / 修复 #5 / 护栏 G3 G4）
 
 - [x] **node embedding 构建（护栏 G3，M1 最小版）**：复用 `IEmbeddingClient`，对 text_nodes 缺失向量懒构建并缓存；测试用 fake embedding 替身
-- [ ] material embedding 构建任务：Stage 0/legacy material 与 text_nodes 对齐后补齐 material 级索引
+- [x] material embedding 构建任务：新增 `reference_material_embeddings` canonical metadata，记录 material/node、provider/model/dimensions、material hash、node text hash、embedding hash/vector 与更新时间；正常 Stage 0 anchor 构建会同步写 canonical 行并投影 sqlite-vec，显式 `BackfillMaterialEmbeddingsAsync` 可按小说全量或指定 anchor 增量扫描。legacy `reference_source_segments.node_id` / `reference_materials.node_id` 缴空时先按 anchor+offset+text_hash 对齐 `reference_text_nodes`，generation 相同且 material/node hash 未变化则幂等复用，变化项才重算；每个目标 anchor 始终以完整 active material vector set 重建 sqlite-vec 投影。`BackfillMaterialEmbeddingsAlignsLegacyRowsAndIsIdempotent` / `BackfillMaterialEmbeddingsRebuildsOnlyChangedRequestedAnchor` 覆盖 Stage0、legacy 对齐、provider/model/dim/hash 巡检、重复运行零重算和 anchor 级增量
 - [x] `CorpusQueryContext` + `CurrentChapterContext` 契约（前端不传 embedding，护栏 G4）
 - [x] 章节 embedding 后端计算 + 缓存（key = draft text hash，前端不传 embedding）
 - [x] 最小 `IQueryContextParser`（M1 确定性 parser：自然语言目标 → 固定 QueryContext；后续 M2/M4 可替换为 structured LLM）
@@ -221,11 +221,11 @@
 
 - [ ] Task A 句级 LLM：全量、异步、按章节优先级排队、per-run token_budget、可续跑
 - [ ] Task B 段落级 LLM：全量、异步队列、章节优先级排队
-- [ ] 持久化后台调度 schema：run/job/attempt + input snapshot/work item，additive migration，不并行维护两套 canonical run
-- [ ] job 状态机与 CAS：queued/running/pause_requested/paused/cancel_requested/cancelled/retry_wait/budget_exhausted/completed/failed + expected_version
-- [ ] worker 运行协议：原子 claim、lease token、10 秒 heartbeat、45 秒 lease、15 秒 watchdog、启动 reconcile、失去 lease 禁止提交
+- [x] 持久化后台调度 schema：run/job/attempt + input snapshot/work item，additive migration，不并行维护两套 canonical run
+- [x] job 状态机与 CAS：queued/running/pause_requested/paused/cancel_requested/cancelled/retry_wait/budget_exhausted/completed/failed + expected_version
+- [x] worker 运行协议第一可靠薄切片：原子 claim、lease token、10 秒 heartbeat、45 秒 lease、启动 reconcile、失去 lease 禁止提交、桌面单 worker loop；15 秒独立 watchdog、显式 abandon 与 data-dir 重绑定仍属于恢复任务
 - [ ] 章节优先级与 aging：current/adjacent/normal/maintenance 持久化优先级，5 分钟 aging，持续高优先级流量下 normal 不饥饿
-- [ ] pause/cancel/resume 独立 API：幂等命令、成功提交边界生效、取消保留产物、补充总预算后 resume、非法转换稳定错误码
+- [x] pause/cancel/resume 独立 API 第一薄切片：expected-version CAS、成功提交边界生效、取消保留已成功产物、补充总预算后 resume；allowed_actions、完整幂等语义与稳定产品错误映射仍属于进度/API 收口任务
 - [ ] retry 分类与退避：schema 0/1/3 秒最多 3 次；provider transient full-jitter 最多 5 attempt；Retry-After；永久错误不重试
 - [ ] 后台任务查询与进度：PageResult 稳定分页，node/work-item 双分母，token/reservation、当前章节、allowed_actions、安全 diagnostics
 - [ ] 重启恢复与故障注入：调用前/返回后/事务中/cursor 后/完成前/真实进程强杀，证明零重复 active 产物、零丢失、cursor 单调
@@ -239,7 +239,7 @@
 - [ ] 低置信 observation 的 ReviewQueue 入队/领取/人工确认流转（M8 消费）
 - [ ] 后台中断续跑：从 input snapshot 的最后成功 work item 续跑，应用重启/lease 回收后 cursor 单调且不整章重放
 
-**当前检查点：** `ReferenceCorpusFeatureAnalysisRunner` 已用 fake analyzer 跑通 node×family 执行链：预算耗尽时停在当前 cursor，补预算后从下一项续跑；最后一项正好用完预算时正确收敛为 `completed`；写入通过 locked schema validator 的候选 observation，并同步 `reference_obs_sensory`。句级 Task A 传空 context；段落级 Task B 只读取真实 paragraph source segment，避免 `node_type='passage'` 混入 hook/beat/action_afterbeat 等派生节点，并给 analyzer 注入 parent/chapter/containing scene/前后 paragraph 的 bounded context。`ReferenceCorpusChatCompletionFeatureFamilyAnalyzer` 已接入现有 chat completion 抽象，prompt 包含 schema descriptor、node 元数据、bounded node_text 与安全压缩后的 `analysis_context`；system prompt 明确 `node_text` 是唯一 evidence 来源，context 只能辅助判断，不能用于 evidence offset。usage token 会回填 runner 预算记账。产品入口已接入 bridge/TS adapter/mock：`StartReferenceCorpusFeatureAnalysis` 读取 selected model、校验 anchor 可访问性、按 `scope=sentence|passage` 派生默认 family 并启动 runner；`GetReferenceCorpusFeatureAnalysisRun` 返回 run 元数据、tokens、cursor、observation_count 和 diagnostics，返回体不包含 `node_text/source_text/raw_text/prompt/model_output_json/embedding`。低置信度 observation 现在以 `confidence < 0.70` 初始化为 `review_state='low_confidence'`，并可在素材库“分析结果”tab 用 review_state 过滤；这只是复核路由信号，不等于完整 ReviewQueue 或人工状态机。当前入口仍是一次调用内执行的薄触发，不是后台队列；异步队列、章节优先级调度、取消能力仍未接入。
+**当前检查点：** 同步 `ReferenceCorpusFeatureAnalysisRunner` 兼容入口仍保留；新的持久后台路径已冻结 node text/context/evidence、selected model 与 token policy，构建 node×family work item，并以 canonical run/job/attempt/input snapshot/work item 为唯一持久执行协议。单 worker 桌面 loop 会启动 reconcile、claim、heartbeat、fenced commit/settlement；模型调用期间收到 pause/cancel 时先同事务提交成功产物、token 与 cursor，再收敛到 paused/cancelled；损坏或旧 frozen snapshot 在 reservation 前即可 fenced fail，不等待 lease 超时。句级与段落级 payload 均只从 frozen input 解码，段落 fixture 已证明 parent/chapter/containing scene/前后 paragraph 在 enqueue 后 live 修改时保持不变。当前仍未完成章节优先级 aging、独立 watchdog、显式 shutdown abandon、data-dir 热切换协调、完整 Retry-After/调用级审计、强杀故障矩阵和 200 万字长跑，因此 M2 仍为 `S，加深中`，不能称为生产后台完成。
 
 ### M2.3 Task C 技法标本（后端 / 关键设计）
 
@@ -293,11 +293,11 @@
 - [x] 章节蓝图接入结构化过滤薄切片：`GenerateReferenceCorpusBlueprintCandidates` 根据当前目标把“动作替代心理描写表现愤怒 + 触觉”等意图映射为候选检索 filters，后续 selected blueprint → draft 仍按选定节点取材，不二次误过滤
 - [x] 当前章节上下文排序薄切片：后端计算并缓存当前章节 embedding，同时新增 `score_components.local_context_fit`，只从插入点附近文本、previous summary、人物名/state 和 allowed knowledge 提取确定性短词；`ForbiddenKnowledge` 不进入正向检索信号
 - [x] M3 检索 golden 薄切片：`m3-retrieval-golden.json` 固化 licensed scoped search、四路召回诊断、安全排除、缓存计数和候选排序；normalized expected 只保留 `text_hash`、`text_preview_hash`、长度、score component key、route marker 与 evidence，不写入原文、embedding、prompt、`value_json` 等内部/源文字段
-- [ ] 完整融合排序：当前章节 embedding 连贯度 + 插入位置匹配 + 授权/质量/跨库来源多样性加权与权重标定（修复 #5）
-- [ ] 权重可被检查表反馈调整（M4 消费）
-- [ ] 跨语料检索（按 session 绑定的所有启用 library 展开，非单 anchor；默认不要求用户选择一本参考）
-- [ ] 跨库去重与来源覆盖：dedup_group 折叠后仍保留可解释的来源分布，低质量来源降权但不污染授权过滤
-- [ ] 全部返回 `PageResult<T>`
+- [x] 完整融合排序：当前章节 embedding 连贯度 + 插入位置匹配 + 授权/质量/跨库来源多样性加权与权重标定（修复 #5）
+- [x] 权重可被检查表反馈调整（M4 消费）
+- [x] 跨语料检索（按 session 绑定的所有启用 library 展开，非单 anchor；默认不要求用户选择一本参考）
+- [x] 跨库去重与来源覆盖：dedup_group 折叠后仍保留可解释的来源分布，低质量来源降权但不污染授权过滤
+- [x] 全部返回 `PageResult<T>`
 
 **验收：** 结构化查询（"动作替代心理描写表现愤怒"）精准命中 golden fixture 中标注样本；当前章节上下文改变时排序可见变化；技法语义相似区别于文本相似（golden 断言）；同一 QueryContext 在多库启用时召回跨 anchor 结果，禁用任一库、改变授权或 dedup_group 后候选集合/排序按 golden 预期变化；测试不得只覆盖单 anchor。
 
@@ -309,13 +309,13 @@
 
 - [ ] 完整 `ICorpusBlueprintAssembler` 多策略：情绪优先/节奏优先/技法多样性/场景模板（含情绪弧、会话状态、专家检查表闭环）
 - [x] 多候选 assembler 地基薄切片：新增 `IReferenceCorpusBlueprintCandidateAssembler` / `MultiStrategyReferenceCorpusBlueprintCandidateAssembler`，`GenerateBlueprintCandidatesAsync` 只负责检索、反馈读写和候选持久化；M4 profile/coverage/gap 组装逻辑不再散落在 `SqliteReferenceCorpusWritingService` 私有排序 helper 中
-- [ ] 覆盖率计算 + gap 识别 + 情绪弧线预估
+- [x] 覆盖率计算 + gap 识别 + 情绪弧线预估
 - [x] 蓝图表扩展薄切片：`reference_corpus_blueprints` 持久化 `assembly_strategy`/`coverage_score`/`gap_reasons_json`/`gap_positions_json`/`query_context_json`/`source_distribution_json`/`feedback_reason`
 - [x] corpus beat 父表薄切片：`reference_corpus_blueprint_beats` 持久化 `beat_index`/`role_in_beat`/`narrative_function`，不复用旧 anchored-draft `reference_chapter_blueprint_beats`
 - [x] beat→node 追溯薄切片：`GenerateBlueprintCandidatesAsync` 候选阶段即写 `reference_blueprint_beat_pieces`，正文草稿阶段继续复用同一 upsert；追溯边不放 JSON
-- [ ] `GenerateChapterBlueprintAsync` 改造：Parser + Retriever + Assembler
-- [ ] OrchestrationStages 加 goal_parsing/corpus_retrieval/blueprint_assembly
-- [ ] **legacy 兼容（护栏 G6）**：旧 run/blueprint/frontend 状态只读可恢复；新旧 stage 常量并存 + 兼容 shim；不破坏 Phase 16 reconcile/recovery；旧 blueprint 可选一次性归档脚本（不自动改写）
+- [x] `GenerateChapterBlueprintAsync` 改造：Parser + Retriever + Assembler
+- [x] OrchestrationStages 加 goal_parsing/corpus_retrieval/blueprint_assembly
+- [x] **legacy 兼容（护栏 G6）**：旧 run/blueprint/frontend 状态只读可恢复；新旧 stage 常量并存 + 兼容 shim；不破坏 Phase 16 reconcile/recovery；旧 blueprint 可选一次性归档脚本（不自动改写）
 - [x] 检查表反馈契约 + `reference_user_feedback` 持久化薄切片：二轮蓝图反馈会以 `target_type=blueprint`、被拒蓝图 id 为 `target_id` 写入 `reference_user_feedback`，保留 problem tags、rejected/avoid 计数、fallback 诊断和用户 note；同一反馈重试使用确定性 `feedback_id` 幂等写入，不重复污染偏好历史
 - [x] 检查表反馈 → 检索约束薄切片：`too_fast` 映射到 `rhythm.length_band` 中长句约束；`too_direct_emotion` 继续映射到 `action.emotion_carrier=action_over_psychology`；有命中时重新检索并改变蓝图候选，若反馈硬约束无命中则退回目标基础检索以保持循环不中断
 - [x] 同小说历史反馈软降权薄切片：无显式反馈的新一轮蓝图生成会读取 `reference_user_feedback` 中已拒绝蓝图的 `node_hash` / `library_hash` / `anchor` 信号，把相同节点集合和相关来源降到后排；空 feedback object 按无显式反馈处理，不会污染策略名或阻断历史学习
@@ -325,12 +325,12 @@
 - [x] M4 profile 选材补齐薄切片：四类 M4 profile 不再只按单一 profile 分数取前三，而是在保留策略头部素材后主动补齐缺失的 emotion/rhythm/narrative/technique 证据，并优先选择能增加 library/anchor 覆盖的候选；历史反馈 penalty 仍优先于覆盖强度
 - [x] M4 beat 级缺口返回薄切片：候选返回体新增 `gap_positions[]`，把全局缺失的 emotion/rhythm/narrative/technique 维度定位到具体 `beat_id/beat_index/node_ids`，前端候选卡可直接显示“第几拍缺节奏/叙事/技法”；若整份蓝图已覆盖完整则不误报位置缺口
 - [ ] 多蓝图迭代循环：用户拒绝/选择/勾选问题后，系统以反馈更新 QueryContext/权重/约束并重新检索、重组，直到用户接受
-- [ ] 蓝图来源分布：每份蓝图记录跨 library/anchor 的来源覆盖，避免所有策略意外塌缩到同一 anchor
-- [ ] 前端专家模式：蓝图卡列表（情绪弧折线/节奏色块/覆盖率/来源分布/gap 标红）+ 拒绝检查表
+- [x] 蓝图来源分布：每份蓝图记录跨 library/anchor 的来源覆盖，避免所有策略意外塌缩到同一 anchor
+- [x] 前端专家模式薄切片：章节写作页可切换自动/专家模式；蓝图卡展示 coverage、来源分布、beat gap、显著差异审计、iteration 状态和按 narrative function 推导的情绪弧。现有“反馈重组”继续作为拒绝/再检索入口；尚未实现逐维拒绝检查表和独立节奏色块编辑器
 
 **验收：** N 份蓝图策略对 golden fixture 产出可断言的不同分配；检查表勾选后被勾维度有可见变化（golden 前后比对）；gap 标注对"无合格语料"场景正确；至少一次“生成多蓝图 → 用户拒绝/反馈 → 再检索/重组 → 新蓝图候选”的循环有 golden 断言；多库启用时蓝图可引用多个 anchor，且不会退化为单 anchor。
 
-**当前检查点：** `GenerateBlueprintCandidatesUsesInjectedCandidateAssemblerAndPersistsResult` 证明蓝图候选生成已走可替换的 `IReferenceCorpusBlueprintCandidateAssembler`，service 只负责编排、反馈读写和 `reference_corpus_blueprints` / beat / beat→node 持久化。`GenerateBlueprintCandidatesMapsTooFastFeedbackToSlowRhythmRetrieval` 覆盖 M4 反馈薄切片：首轮可命中高相关但短促的 `node-feedback-fast-market-s1`，二轮用户勾选 `too_fast` 后，检索增加 `rhythm.length_band.value_num >= 16`，并优先生成 `rhythm_slow_m1`，第一候选同时使用 project/workspace 慢压迫节点；命中成功时不会误报 fallback。`GenerateBlueprintCandidatesProducesM4StrategyVariantsFromFeatureSignals` 证明当候选池具备 emotion/rhythm/narrative/technique 信号时，`MultiStrategyReferenceCorpusBlueprintCandidateAssembler` 能产出四类 M4 strategy variant，四份蓝图 node set 互不相同，且每份都保持跨库来源、不出现 `insufficient_beats` / `single_library_source` / `single_anchor_source`。`GenerateBlueprintCandidatesPersistsM4BlueprintMetadataAndBeatPieces` 证明候选生成阶段已落 `reference_corpus_blueprints`、`reference_corpus_blueprint_beats` 与 `reference_blueprint_beat_pieces`：assembly strategy、coverage、gap reasons、gap positions、query context、source distribution、feedback reason、beat index/role/narrative function 和 beat→node 边都可追溯，且不等待正文草稿生成。`GenerateBlueprintCandidatesScoresM4CoverageByRequiredDimensionEvidenceAndReportsGaps` 证明 coverage 已开始消费 M4 维度证据：维度完整的 M4 蓝图会高于只带 emotion/action 的普通高语义分蓝图，残缺蓝图会报告缺 rhythm/narrative/technique 覆盖，并通过 `gap_positions[]` 定位到具体 beat；完整蓝图不会误报总缺口或位置缺口。`GenerateBlueprintCandidatesBackfillsM4StrategyCandidatesWithCoverageEvidence` 证明 `emotion_priority_m4` 不会继续拿三条 emotion-only 高分句子冒充可用蓝图，而会主动补进 rhythm 和 narrative+technique 支撑节点，且补齐过程仍保持跨 library/anchor。`GenerateBlueprintCandidatesFeedbackFilterFallbackAddsDiagnosticGapReasons` 证明反馈硬约束无命中时，系统退回目标基础检索但会把 `feedback_filters_no_matches` / `fallback_to_base_filters` 写入 `feedback_summary`、候选 `feedback_reason` 和 `gap_reasons`，用户能看出反馈没有精准命中。`GenerateBlueprintCandidatesAvoidSourceFallbackAddsDiagnosticGapReasons` 证明避开来源把候选池打空时，系统会保留循环不中断，同时标注 `avoid_sources_no_alternatives` / `fallback_ignored_avoid_sources`。`GenerateBlueprintCandidatesPersistsBlueprintFeedbackForReuse` 证明二轮反馈会写入 `reference_user_feedback`，记录 rejected node、avoid library、avoid anchor 的可复用信号，并且同一反馈重试不会重复写。`GenerateBlueprintCandidatesHistoricalFeedbackDownranksRejectedNodeSet` 证明后续无显式反馈或空反馈对象的新一轮蓝图生成，会把同一组被拒素材及相关来源软降权，不再默认排第一。`GenerateBlueprintCandidatesRejectedBlueprintIdAloneDoesNotRegenerateSameNodeSet` 进一步证明仅传 `rejected_blueprint_ids`、不传 rejected nodes/avoid tags 时，系统也不会用同一组 source nodes 换一个反馈摘要后重新生成同一蓝图。`GenerateBlueprintCandidatesSourceRepetitionFeedbackPrioritizesCrossSourceBlueprint` 证明 `source_repetition` 不再只是摘要标签：当候选池存在多库/多 anchor 替代时，第一份再生成蓝图会优先使用 `source_repetition_diversity_m1`，先取每库最佳、再取每 `(library_id, anchor_id)` 最佳，避免默认第一候选继续塌到同一来源。`GenerateBlueprintCandidatesSupportsFeedbackIterationAndSelectedBlueprintDraft` 与 cross-library golden 已固化 `single_anchor_source`：反馈后候选若只能退到同一参考 anchor，必须把这个塌缩暴露给用户，而不是只报单库或 beat 不足。前端候选卡已把 fallback/gap code 与 beat 级缺口显示成中文诊断，并用 mock workflow 固化二轮反馈后的诊断可见性。尚未完成：情绪弧、真正的多轮会话状态、专家 UI，以及更深的蓝图策略模型。
+**当前检查点：** `GenerateBlueprintCandidatesUsesInjectedCandidateAssemblerAndPersistsResult` 证明蓝图候选生成已走可替换的 `IReferenceCorpusBlueprintCandidateAssembler`，service 只负责编排、反馈读写和 `reference_corpus_blueprints` / beat / beat→node 持久化。`GenerateBlueprintCandidatesMapsTooFastFeedbackToSlowRhythmRetrieval` 覆盖 M4 反馈薄切片：首轮可命中高相关但短促的 `node-feedback-fast-market-s1`，二轮用户勾选 `too_fast` 后，检索增加 `rhythm.length_band.value_num >= 16`，并优先生成 `rhythm_slow_m1`，第一候选同时使用 project/workspace 慢压迫节点；命中成功时不会误报 fallback。`GenerateBlueprintCandidatesProducesM4StrategyVariantsFromFeatureSignals` 证明当候选池具备 emotion/rhythm/narrative/technique 信号时，`MultiStrategyReferenceCorpusBlueprintCandidateAssembler` 能产出四类 M4 strategy variant，四份蓝图 node set 互不相同，且每份都保持跨库来源、不出现 `insufficient_beats` / `single_library_source` / `single_anchor_source`。`GenerateBlueprintCandidatesPersistsM4BlueprintMetadataAndBeatPieces` 证明候选生成阶段已落 `reference_corpus_blueprints`、`reference_corpus_blueprint_beats` 与 `reference_blueprint_beat_pieces`：assembly strategy、coverage、gap reasons、gap positions、query context、source distribution、feedback reason、beat index/role/narrative function 和 beat→node 边都可追溯，且不等待正文草稿生成。`GenerateBlueprintCandidatesScoresM4CoverageByRequiredDimensionEvidenceAndReportsGaps` 证明 coverage 已开始消费 M4 维度证据：维度完整的 M4 蓝图会高于只带 emotion/action 的普通高语义分蓝图，残缺蓝图会报告缺 rhythm/narrative/technique 覆盖，并通过 `gap_positions[]` 定位到具体 beat；完整蓝图不会误报总缺口或位置缺口。`GenerateBlueprintCandidatesBackfillsM4StrategyCandidatesWithCoverageEvidence` 证明 `emotion_priority_m4` 不会继续拿三条 emotion-only 高分句子冒充可用蓝图，而会主动补进 rhythm 和 narrative+technique 支撑节点，且补齐过程仍保持跨 library/anchor。`GenerateBlueprintCandidatesFeedbackFilterFallbackAddsDiagnosticGapReasons` 证明反馈硬约束无命中时，系统退回目标基础检索但会把 `feedback_filters_no_matches` / `fallback_to_base_filters` 写入 `feedback_summary`、候选 `feedback_reason` 和 `gap_reasons`，用户能看出反馈没有精准命中。`GenerateBlueprintCandidatesAvoidSourceFallbackAddsDiagnosticGapReasons` 证明避开来源把候选池打空时，系统会保留循环不中断，同时标注 `avoid_sources_no_alternatives` / `fallback_ignored_avoid_sources`。`GenerateBlueprintCandidatesPersistsBlueprintFeedbackForReuse` 证明二轮反馈会写入 `reference_user_feedback`，记录 rejected node、avoid library、avoid anchor 的可复用信号，并且同一反馈重试不会重复写。`GenerateBlueprintCandidatesHistoricalFeedbackDownranksRejectedNodeSet` 证明后续无显式反馈或空反馈对象的新一轮蓝图生成，会把同一组被拒素材及相关来源软降权，不再默认排第一。`GenerateBlueprintCandidatesRejectedBlueprintIdAloneDoesNotRegenerateSameNodeSet` 进一步证明仅传 `rejected_blueprint_ids`、不传 rejected nodes/avoid tags 时，系统也不会用同一组 source nodes 换一个反馈摘要后重新生成同一蓝图。`GenerateBlueprintCandidatesSourceRepetitionFeedbackPrioritizesCrossSourceBlueprint` 证明 `source_repetition` 不再只是摘要标签：当候选池存在多库/多 anchor 替代时，第一份再生成蓝图会优先使用 `source_repetition_diversity_m1`，先取每库最佳、再取每 `(library_id, anchor_id)` 最佳，避免默认第一候选继续塌到同一来源。`GenerateBlueprintCandidatesSupportsFeedbackIterationAndSelectedBlueprintDraft` 与 cross-library golden 已固化 `single_anchor_source`：反馈后候选若只能退到同一参考 anchor，必须把这个塌缩暴露给用户，而不是只报单库或 beat 不足。`GenerateBlueprintCandidatesProducesM4StrategyVariantsFromFeatureSignals` 还证明每份蓝图的情绪弧与 beat 一一对齐，强度归一化且证据节点不越出对应 beat；来源分布计数覆盖实际选中节点。前端候选卡已把 fallback/gap code 与 beat 级缺口显示成中文诊断，并用 mock workflow 固化二轮反馈后的诊断可见性。尚未完成：真正的多轮会话状态、逐维专家检查表闭环，以及更深的蓝图策略模型。
 
 ---
 
@@ -349,6 +349,7 @@
 - [x] slot-only 多草稿契约薄切片：`GenerateReferenceCorpusInsertionDraftCandidatesPayload.slot_value_variants` 可在同一 selected blueprint/同一 primary source nodes 上生成 `slot_variant_1..N`；候选 source node、source hash、preserved spans 源范围和 locked spans 源范围保持一致，差异只来自 slot replacements 和 assembled text。此项只证明请求侧槽位变体闭合，不等于完整多草稿；`transfer_slots` 自动派生、过渡策略变体和跨候选差异审计仍未完成
 - [x] `transfer_slots` 自动槽位候选薄切片：当请求没有显式 `slot_value_variants` 时，正文候选会读取 selected blueprint primary source nodes 的 active 且未 rejected `transfer_slots_json`；若声明 `character` 且当前章节存在多个人物快照，会生成 `auto_transfer_slot_1..N` 同源候选，只把源文开头人称代词映射到当前章节人物，保持 source node/source hash/preserved spans 一致。人工 rejected specimen 不参与自动派生。此项不凭空生成地点/道具/称谓，不理解自然语言 `constraints`，也不代表完整自动变体/差异审计完成
 - [x] 多草稿候选集差异审计薄切片：同一 source node set 的多份正文候选会在返回前执行候选级审计；候选若出现不属于该候选 `slot_values` 映射的 slot replacement，会以 `draft_candidate_set_non_slot_difference` 阻断该候选，`ready_for_insertion=false` 且章节正文回退，防止恶意/错误 assembler 把非槽位改动伪装成 slot replacement；候选若最终 `assembled_text` 与同组前序可插入候选完全重复，会以 `draft_candidate_set_duplicate_text` 阻断后续重复候选。此项先覆盖槽位候选集，不等于完整过渡策略差异审计或 UI 聚合折叠
+- [x] M5 章节专家 UI 薄切片：专家模式可编辑槽位名/多值变体，选择 `default` / `direct_join` 过渡策略并随生成请求提交；正文候选以横向并排视图显示文本、槽位差、过渡差和 locked span 数，消费 `candidate_set_audit` 摘要；可插入候选必须先锁定，再执行既有服务端 `RecordReferenceCorpusInsertionAudit` 并确认写入。此项不等于自然语言 `transfer_slots.constraints` 推理、完整过渡策略质量评测或跨候选池重组
 - [ ] 完整 `AuditDraftAgainstBlueprint` 改造：验证槽位替换正确、过渡边界合法、原句未篡改、无泄露、授权闸门与相似度闸门不可绕过
 - [ ] 正文候选派生规则：只有用户接受或继续迭代的蓝图能进入正文候选；候选尽可能复用蓝图来源语料的原句/结构，剧情微调必须落在槽位、过渡或明确允许的改写区域
 - [x] selected blueprint 节点锁定薄切片：正文候选只允许在每个 beat 自己声明的 `NodeIds` 内轮换，不得从重新检索结果、同 library/anchor 邻近句或其它 beat 拉替代 node；若任一 selected node 因 scope/library/授权检索结果变化无法读到 source piece，则返回 blocked `source_node_missing`，不得残缺生成可插入正文

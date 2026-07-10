@@ -17,8 +17,10 @@ public sealed record GenerateReferenceCorpusInsertionDraftCandidatesPayload(
     [property: JsonPropertyName("slot_values")] IReadOnlyDictionary<string, string> SlotValues,
     [property: JsonPropertyName("selected_blueprint")] ReferenceCorpusInsertionBlueprintPayload SelectedBlueprint,
     [property: JsonPropertyName("requested_count")] int RequestedCount,
-    [property: JsonPropertyName("slot_value_variants")]
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ReferenceCorpusDraftSlotValueVariantPayload>? SlotValueVariants = null);
+[property: JsonPropertyName("slot_value_variants")]
+ [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<ReferenceCorpusDraftSlotValueVariantPayload>? SlotValueVariants = null,
+ [property: JsonPropertyName("transition_strategy_variants")]
+ [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? TransitionStrategyVariants = null);
 
 public sealed record ReferenceCorpusDraftSlotValueVariantPayload(
     [property: JsonPropertyName("variant_id")] string VariantId,
@@ -67,35 +69,58 @@ public sealed record ReferenceCorpusBlueprintGapPositionPayload(
     [property: JsonPropertyName("node_ids")] IReadOnlyList<string> NodeIds,
     [property: JsonPropertyName("covered_dimensions")] IReadOnlyList<string> CoveredDimensions,
     [property: JsonPropertyName("missing_dimensions")] IReadOnlyList<string> MissingDimensions,
-    [property: JsonPropertyName("gap_reasons")] IReadOnlyList<string> GapReasons);
+[property: JsonPropertyName("gap_reasons")] IReadOnlyList<string> GapReasons);
+
+public sealed record ReferenceCorpusBlueprintEmotionArcPointPayload(
+ [property: JsonPropertyName("beat_id")] string BeatId,
+ [property: JsonPropertyName("beat_index")] int BeatIndex,
+ [property: JsonPropertyName("emotion_state")] string EmotionState,
+ [property: JsonPropertyName("intensity")] double Intensity,
+ [property: JsonPropertyName("direction")] string Direction,
+ [property: JsonPropertyName("evidence_node_ids")] IReadOnlyList<string> EvidenceNodeIds);
+
+public sealed record ReferenceCorpusBlueprintDifferenceAuditPayload(
+ [property: JsonPropertyName("passed")] bool Passed,
+ [property: JsonPropertyName("node_set_hash")] string NodeSetHash,
+ [property: JsonPropertyName("minimum_node_difference_ratio")] double MinimumNodeDifferenceRatio,
+ [property: JsonPropertyName("closest_blueprint_id")]
+ [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ClosestBlueprintId,
+ [property: JsonPropertyName("closest_node_difference_ratio")] double ClosestNodeDifferenceRatio,
+ [property: JsonPropertyName("source_distribution_differs")] bool SourceDistributionDiffers,
+ [property: JsonPropertyName("strategy_differs")] bool StrategyDiffers,
+ [property: JsonPropertyName("diagnostics")] IReadOnlyList<string> Diagnostics);
 
 public sealed record ReferenceCorpusBlueprintCandidatePayload
 {
-    public ReferenceCorpusBlueprintCandidatePayload(
+public ReferenceCorpusBlueprintCandidatePayload(
         ReferenceCorpusInsertionBlueprintPayload Blueprint,
         IReadOnlyList<ReferenceCorpusBlueprintSourcePayload> SourceDistribution,
         double CoverageScore,
         IReadOnlyList<string> GapReasons,
         string FeedbackReason)
-        : this(Blueprint, SourceDistribution, CoverageScore, GapReasons, FeedbackReason, [])
+ : this(Blueprint, SourceDistribution, CoverageScore, GapReasons, FeedbackReason, [], null, [])
     {
     }
 
     [JsonConstructor]
-    public ReferenceCorpusBlueprintCandidatePayload(
+public ReferenceCorpusBlueprintCandidatePayload(
         ReferenceCorpusInsertionBlueprintPayload Blueprint,
         IReadOnlyList<ReferenceCorpusBlueprintSourcePayload> SourceDistribution,
         double CoverageScore,
         IReadOnlyList<string> GapReasons,
         string FeedbackReason,
-        IReadOnlyList<ReferenceCorpusBlueprintGapPositionPayload>? GapPositions)
+IReadOnlyList<ReferenceCorpusBlueprintGapPositionPayload>? GapPositions,
+ ReferenceCorpusBlueprintDifferenceAuditPayload? DifferenceAudit = null,
+ IReadOnlyList<ReferenceCorpusBlueprintEmotionArcPointPayload>? EmotionArc = null)
     {
         this.Blueprint = Blueprint;
         this.SourceDistribution = SourceDistribution ?? [];
         this.CoverageScore = CoverageScore;
         this.GapReasons = GapReasons ?? [];
         this.FeedbackReason = FeedbackReason;
-        this.GapPositions = GapPositions ?? [];
+this.GapPositions = GapPositions ?? [];
+this.DifferenceAudit = DifferenceAudit;
+ this.EmotionArc = EmotionArc ?? [];
     }
 
     [JsonPropertyName("blueprint")]
@@ -114,14 +139,34 @@ public sealed record ReferenceCorpusBlueprintCandidatePayload
     public string FeedbackReason { get; init; }
 
     [JsonPropertyName("gap_positions")]
-    public IReadOnlyList<ReferenceCorpusBlueprintGapPositionPayload> GapPositions { get; init; }
+public IReadOnlyList<ReferenceCorpusBlueprintGapPositionPayload> GapPositions { get; init; }
+
+ [JsonPropertyName("difference_audit")]
+ [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+public ReferenceCorpusBlueprintDifferenceAuditPayload? DifferenceAudit { get; init; }
+
+ [JsonPropertyName("emotion_arc")]
+ public IReadOnlyList<ReferenceCorpusBlueprintEmotionArcPointPayload> EmotionArc { get; init; }
 }
+
+public sealed record ReferenceCorpusBlueprintIterationPayload(
+ [property: JsonPropertyName("iteration")] int Iteration,
+ [property: JsonPropertyName("state")] string State,
+ [property: JsonPropertyName("feedback_applied")] bool FeedbackApplied,
+ [property: JsonPropertyName("candidate_count")] int CandidateCount,
+ [property: JsonPropertyName("distinct_candidate_count")] int DistinctCandidateCount,
+ [property: JsonPropertyName("rejected_blueprint_ids")] IReadOnlyList<string> RejectedBlueprintIds,
+ [property: JsonPropertyName("can_iterate")] bool CanIterate,
+ [property: JsonPropertyName("can_select")] bool CanSelect);
 
 public sealed record ReferenceCorpusBlueprintCandidatesPayload(
     [property: JsonPropertyName("query_context")] ReferenceCorpusQueryContextPayload QueryContext,
     [property: JsonPropertyName("candidates")] IReadOnlyList<ReferenceCorpusBlueprintCandidatePayload> Candidates,
     [property: JsonPropertyName("feedback_applied")] bool FeedbackApplied,
-    [property: JsonPropertyName("feedback_summary")] string FeedbackSummary);
+ [property: JsonPropertyName("feedback_summary")] string FeedbackSummary,
+[property: JsonPropertyName("iteration")]
+ [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReferenceCorpusBlueprintIterationPayload? Iteration = null,
+ [property: JsonPropertyName("orchestration_stages")] IReadOnlyList<string>? OrchestrationStages = null);
 
 public sealed record ReferenceCorpusSlotReplacementPayload(
     [property: JsonPropertyName("slot_name")] string SlotName,
@@ -286,9 +331,30 @@ public sealed record ReferenceCorpusInsertionDraftCandidatePayload(
     [property: JsonPropertyName("explanation")] string Explanation,
     [property: JsonPropertyName("draft")] ReferenceCorpusInsertionDraftPayload Draft,
     [property: JsonPropertyName("next_action")]
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReferenceCorpusDraftCandidateNextActionPayload? NextAction = null);
+[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReferenceCorpusDraftCandidateNextActionPayload? NextAction = null);
+
+public sealed record ReferenceCorpusDraftCandidateDifferencePayload(
+ [property: JsonPropertyName("candidate_id")] string CandidateId,
+ [property: JsonPropertyName("baseline_candidate_id")] string BaselineCandidateId,
+ [property: JsonPropertyName("same_blueprint_node_set")] bool SameBlueprintNodeSet,
+ [property: JsonPropertyName("same_piece_outputs")] bool SamePieceOutputs,
+ [property: JsonPropertyName("slot_difference_count")] int SlotDifferenceCount,
+ [property: JsonPropertyName("transition_difference_count")] int TransitionDifferenceCount,
+ [property: JsonPropertyName("only_allowed_differences")] bool OnlyAllowedDifferences,
+ [property: JsonPropertyName("duplicate_text")] bool DuplicateText,
+ [property: JsonPropertyName("diagnostics")] IReadOnlyList<string> Diagnostics);
+
+public sealed record ReferenceCorpusDraftCandidateSetAuditPayload(
+ [property: JsonPropertyName("passed")] bool Passed,
+ [property: JsonPropertyName("candidate_count")] int CandidateCount,
+ [property: JsonPropertyName("ready_candidate_count")] int ReadyCandidateCount,
+ [property: JsonPropertyName("distinct_text_count")] int DistinctTextCount,
+ [property: JsonPropertyName("differences")] IReadOnlyList<ReferenceCorpusDraftCandidateDifferencePayload> Differences,
+ [property: JsonPropertyName("errors")] IReadOnlyList<string> Errors);
 
 public sealed record ReferenceCorpusInsertionDraftCandidatesPayload(
-    [property: JsonPropertyName("query_context")] ReferenceCorpusQueryContextPayload QueryContext,
-    [property: JsonPropertyName("selected_blueprint")] ReferenceCorpusInsertionBlueprintPayload SelectedBlueprint,
-    [property: JsonPropertyName("candidates")] IReadOnlyList<ReferenceCorpusInsertionDraftCandidatePayload> Candidates);
+[property: JsonPropertyName("query_context")] ReferenceCorpusQueryContextPayload QueryContext,
+[property: JsonPropertyName("selected_blueprint")] ReferenceCorpusInsertionBlueprintPayload SelectedBlueprint,
+ [property: JsonPropertyName("candidates")] IReadOnlyList<ReferenceCorpusInsertionDraftCandidatePayload> Candidates,
+ [property: JsonPropertyName("candidate_set_audit")]
+ [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReferenceCorpusDraftCandidateSetAuditPayload? CandidateSetAudit = null);

@@ -80,8 +80,12 @@ public static class ReferenceOrchestrationRunStatuses
 
 public static class ReferenceOrchestrationStages
 {
-    public const string SourceConfirmation = "source_confirmation";
-    public const string BlueprintGeneration = "blueprint_generation";
+ public const string GoalParsing = "goal_parsing";
+ public const string CorpusRetrieval = "corpus_retrieval";
+ public const string BlueprintAssembly = "blueprint_assembly";
+public const string SourceConfirmation = "source_confirmation";
+ // Legacy persisted stage. New runs enter GoalParsing after source confirmation.
+public const string BlueprintGeneration = "blueprint_generation";
     public const string BlueprintReview = "blueprint_review";
     public const string BlueprintApproval = "blueprint_approval";
     public const string MaterialBinding = "material_binding";
@@ -90,16 +94,28 @@ public static class ReferenceOrchestrationStages
     public const string FinalInsertion = "final_insertion";
 
     public static IReadOnlyList<string> All { get; } =
-    [
-        SourceConfirmation,
+[
+ GoalParsing,
+ CorpusRetrieval,
+ BlueprintAssembly,
+SourceConfirmation,
         BlueprintGeneration,
         BlueprintReview,
         BlueprintApproval,
         MaterialBinding,
         DraftGeneration,
         DraftAudit,
-        FinalInsertion
-    ];
+FinalInsertion
+];
+
+ public static string NormalizeForExecution(string stage) => stage switch
+ {
+ BlueprintGeneration => GoalParsing,
+ _ => stage
+ };
+
+ public static bool IsLegacyStage(string stage) =>
+ string.Equals(stage, BlueprintGeneration, StringComparison.Ordinal);
 }
 
 public static class ReferenceOrchestrationDecisionTypes

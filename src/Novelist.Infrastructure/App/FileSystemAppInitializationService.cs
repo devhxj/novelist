@@ -48,10 +48,10 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
         return true;
     }
 
-    public async ValueTask InitializeAsync(string dataDirectory, CancellationToken cancellationToken)
-    {
-        var hadConfig = File.Exists(ConfigPath);
-        await SaveConfigAsync(dataDirectory, cancellationToken);
+public async ValueTask InitializeAsync(string dataDirectory, CancellationToken cancellationToken)
+{
+ var previousConfig = await CaptureConfigAsync(cancellationToken);
+await SaveConfigAsync(dataDirectory, cancellationToken);
         _lastImportRecoveryResult = null;
         _referenceAnchorRecoveryCompleted = false;
         try
@@ -63,15 +63,14 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
 
             await ReconcileStartupRecoveryAsync(cancellationToken);
         }
-        catch
-        {
-            if (!hadConfig)
-            {
-                TryDeleteConfig();
-            }
-
-            throw;
-        }
+catch
+{
+ await RestoreConfigAsync(previousConfig);
+ ResetRecoveryState();
+ if (previousConfig is not null)
+ await ReconcileAfterRollbackAsync();
+throw;
+}
     }
 
     public async ValueTask<AppConfigPayload> GetAppConfigAsync(CancellationToken cancellationToken)
@@ -85,12 +84,23 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
             : new AppConfigPayload(true, config.DataDir, CreateUpdateCheckConfiguration(), importRecovery);
     }
 
-    public async ValueTask UpdateDataDirectoryAsync(string dataDirectory, CancellationToken cancellationToken)
-    {
-        await SaveConfigAsync(dataDirectory, cancellationToken);
-        _lastImportRecoveryResult = null;
-        _referenceAnchorRecoveryCompleted = false;
-        await ReconcileStartupRecoveryAsync(cancellationToken);
+public async ValueTask UpdateDataDirectoryAsync(string dataDirectory, CancellationToken cancellationToken)
+{
+ var previousConfig = await CaptureConfigAsync(cancellationToken);
+await SaveConfigAsync(dataDirectory, cancellationToken);
+ ResetRecoveryState();
+ try
+ {
+ await ReconcileStartupRecoveryAsync(cancellationToken);
+ }
+ catch
+ {
+ await RestoreConfigAsync(previousConfig);
+ ResetRecoveryState();
+ if (previousConfig is not null)
+ await ReconcileAfterRollbackAsync();
+ throw;
+ }
     }
 
     public ValueTask<PlatformPayload> GetPlatformAsync(CancellationToken cancellationToken)
@@ -134,10 +144,69 @@ public sealed class FileSystemAppInitializationService : IAppInitializationServi
         Directory.CreateDirectory(normalizedDataDirectory);
         Directory.CreateDirectory(_options.ConfigDirectory);
 
-        var config = new AppPointerConfig(normalizedDataDirectory);
-        await using var stream = File.Create(ConfigPath);
-        await JsonSerializer.SerializeAsync(stream, config, ConfigJsonOptions, cancellationToken);
-    }
+ var config = new AppPointerConfig(normalizedDataDirectory);
+ var tempPath = ConfigPath + ".tmp." + Guid.NewGuid().ToString("N");
+ try
+ {
+ await using (var stream = new FileStream(
+ tempPath,
+ FileMode.CreateNew,
+ FileAccess.Write,
+ FileShare.None,
+ 4096,
+ FileOptions.WriteThrough))
+ {
+ await JsonSerializer.SerializeAsync(stream, config, ConfigJsonOptions, cancellationToken);
+ await stream.FlushAsync(cancellationToken);
+ stream.Flush(flushToDisk: true);
+ }
+
+ File.Move(tempPath, ConfigPath, overwrite: true);
+ }
+ finally
+ {
+ if (File.Exists(tempPath)) File.Delete(tempPath);
+ }
+}
+
+ private async ValueTask<byte[]?> CaptureConfigAsync(CancellationToken cancellationToken)
+ {
+ if (!File.Exists(ConfigPath)) return null;
+ return await File.ReadAllBytesAsync(ConfigPath, cancellationToken);
+ }
+
+ private async ValueTask RestoreConfigAsync(byte[]? previousConfig)
+ {
+ if (previousConfig is null)
+ {
+ TryDeleteConfig();
+ return;
+ }
+
+ Directory.CreateDirectory(_options.ConfigDirectory);
+ var tempPath = ConfigPath + ".rollback." + Guid.NewGuid().ToString("N");
+ try
+ {
+ await File.WriteAllBytesAsync(tempPath, previousConfig, CancellationToken.None);
+ File.Move(tempPath, ConfigPath, overwrite: true);
+ }
+ finally
+ {
+ if (File.Exists(tempPath)) File.Delete(tempPath);
+ }
+ }
+
+ private void ResetRecoveryState()
+ {
+ _lastImportRecoveryResult = null;
+ _referenceAnchorRecoveryCompleted = false;
+ }
+
+ private async ValueTask ReconcileAfterRollbackAsync()
+ {
+ using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+ await ReconcileStartupRecoveryAsync(cleanup.Token);
+ }
 
     private async ValueTask<NovelImportReconciliationResultPayload> ReconcileStartupRecoveryAsync(
         CancellationToken cancellationToken)

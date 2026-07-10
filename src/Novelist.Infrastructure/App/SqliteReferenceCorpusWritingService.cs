@@ -44,7 +44,7 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
             transitionResolver ?? new HeuristicReferenceCorpusTransitionResolver());
     }
 
-    public async ValueTask<ReferenceCorpusBlueprintCandidatesPayload> GenerateBlueprintCandidatesAsync(
+public async ValueTask<ReferenceCorpusBlueprintCandidatesPayload> GenerateBlueprintCandidatesAsync(
         GenerateReferenceCorpusBlueprintCandidatesPayload input,
         CancellationToken cancellationToken)
     {
@@ -88,7 +88,7 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
         var historicalFeedback = feedback is null
             ? await ReadHistoricalFeedbackProfileAsync(input.ChapterContext.NovelId, cancellationToken)
             : ReferenceCorpusHistoricalFeedbackProfile.Empty;
-        var blueprints = await _blueprintCandidates.AssembleCandidatesAsync(
+ var assembledBlueprints = await _blueprintCandidates.AssembleCandidatesAsync(
             new ReferenceCorpusBlueprintCandidateAssemblyRequest(
                 queryContext,
                 feedbackCandidateFilter.Candidates,
@@ -97,16 +97,30 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
                 blueprintGapReasons,
                 feedback is null ? "initial_candidate" : DescribeFeedback(feedback, blueprintGapReasons),
                 historicalFeedback),
-            cancellationToken);
+cancellationToken);
+ var blueprints = ApplyBlueprintDifferenceAudit(assembledBlueprints);
         await PersistBlueprintFeedbackAsync(input, feedback, blueprintGapReasons, cancellationToken);
         await PersistBlueprintCandidatesAsync(queryContext, blueprints, cancellationToken);
 
-        return new ReferenceCorpusBlueprintCandidatesPayload(
-            queryContext,
-            blueprints,
-            feedback is not null,
-            DescribeFeedback(feedback, blueprintGapReasons));
-    }
+return new ReferenceCorpusBlueprintCandidatesPayload(
+queryContext,
+blueprints,
+feedback is not null,
+DescribeFeedback(feedback, blueprintGapReasons),
+ BuildBlueprintIteration(feedback, blueprints),
+ [ReferenceOrchestrationStages.GoalParsing, ReferenceOrchestrationStages.CorpusRetrieval, ReferenceOrchestrationStages.BlueprintAssembly]);
+}
+
+ public async ValueTask<ReferenceCorpusBlueprintCandidatePayload> GenerateChapterBlueprintAsync(
+ GenerateReferenceCorpusBlueprintCandidatesPayload input,
+ CancellationToken cancellationToken)
+ {
+ var candidates = await GenerateBlueprintCandidatesAsync(
+ input with { RequestedCount = Math.Max(1, input.RequestedCount) },
+ cancellationToken);
+ return candidates.Candidates.FirstOrDefault()
+ ?? throw new InvalidOperationException("No reference corpus blueprint could be assembled for the current goal and scope.");
+ }
 
     public async ValueTask<ReferenceCorpusInsertionDraftPayload> GenerateInsertionDraftAsync(
         GenerateReferenceCorpusInsertionDraftPayload input,
@@ -115,19 +129,38 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
         ArgumentNullException.ThrowIfNull(input);
         ValidateInput(input);
 
-        var queryContext = await ParseQueryContextAsync(
-            input.NaturalLanguageGoal,
-            input.ChapterContext,
-            input.Scope,
-            cancellationToken);
-        var candidates = await SearchCandidatesAsync(
-            queryContext,
-            input.SelectedBlueprint is null ? 20 : 80,
-            input.SelectedBlueprint is null ? BuildCandidateSearchFilters(input.NaturalLanguageGoal, feedback: null) : null,
-            cancellationToken);
-        var blueprint = input.SelectedBlueprint ?? await _blueprints.AssembleAsync(
-                new ReferenceCorpusBlueprintAssemblyRequest(queryContext, candidates.Items),
-                cancellationToken);
+ ReferenceCorpusQueryContextPayload queryContext;
+ ReferenceCorpusInsertionBlueprintPayload blueprint;
+ if (input.SelectedBlueprint is null)
+ {
+ var blueprintCandidates = await GenerateBlueprintCandidatesAsync(
+ new GenerateReferenceCorpusBlueprintCandidatesPayload(
+ input.NaturalLanguageGoal,
+ input.ChapterContext,
+ input.Scope,
+ RequestedCount: 3),
+ cancellationToken);
+ var selectedCandidate = blueprintCandidates.Candidates.FirstOrDefault(candidate =>
+ candidate.DifferenceAudit?.Passed is not false)
+ ?? throw new InvalidOperationException("No audited reference corpus blueprint could be selected for draft generation.");
+ queryContext = blueprintCandidates.QueryContext;
+ blueprint = selectedCandidate.Blueprint;
+ }
+ else
+ {
+ queryContext = await ParseQueryContextAsync(
+ input.NaturalLanguageGoal,
+ input.ChapterContext,
+ input.Scope,
+ cancellationToken);
+ blueprint = input.SelectedBlueprint;
+ }
+
+var candidates = await SearchCandidatesAsync(
+queryContext,
+ 80,
+ filters: null,
+cancellationToken);
 
         await _mutex.WaitAsync(cancellationToken);
         try
@@ -142,10 +175,11 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
                 queryContext,
                 blueprint,
                 candidates.Items,
-                input.ChapterContext,
-                input.SlotValues,
-                chapterBefore,
-                cancellationToken);
+input.ChapterContext,
+input.SlotValues,
+chapterBefore,
+ ReferenceCorpusTransitionStrategies.Default,
+cancellationToken);
         }
         finally
         {
@@ -175,13 +209,14 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
             await EnsureSchemaAsync(databasePath, cancellationToken);
             await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
             var chapterBefore = await CurrentChapterTextAsync(input.ChapterContext, cancellationToken);
-            var variants = await BuildDraftCandidateBlueprintVariantsAsync(
-                connection,
-                input.SelectedBlueprint,
-                requestedCount,
-                input.SlotValues,
-                input.SlotValueVariants,
-                candidates.Items,
+ var variants = await BuildDraftCandidateBlueprintVariantsAsync(
+connection,
+input.SelectedBlueprint,
+requestedCount,
+input.SlotValues,
+input.SlotValueVariants,
+ input.TransitionStrategyVariants,
+candidates.Items,
                 input.ChapterContext,
                 cancellationToken);
             var draftCandidates = new List<ReferenceCorpusInsertionDraftCandidatePayload>(variants.Count);
@@ -197,33 +232,12 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
                     candidates.Items,
                     input.ChapterContext,
                     variant.SlotValues,
-                    chapterBefore,
-                    cancellationToken);
+ chapterBefore,
+ variant.TransitionStrategy,
+cancellationToken);
                 var nextAction = BuildDraftCandidateNextAction(input.SelectedBlueprint, draft);
 
-                if (BuildTransitionRepairVariant(input.SelectedBlueprint, variant, draft) is { } repairVariant)
-                {
-                    var repairDraft = await BuildInsertionDraftAsync(
-                        connection,
-                        queryContext,
-                        repairVariant.Blueprint,
-                        candidates.Items,
-                        input.ChapterContext,
-                        repairVariant.SlotValues,
-                        chapterBefore,
-                        cancellationToken);
-                    if (repairDraft.ReadyForInsertion)
-                    {
-                        if (AddDraftCandidateIfNew(draftCandidates, emittedBlueprintKeys, repairVariant, repairDraft, nextAction: null))
-                        {
-                            variantsByCandidateId[repairVariant.CandidateId] = repairVariant;
-                        }
-
-                        continue;
-                    }
-                }
-
-                if (AddDraftCandidateIfNew(draftCandidates, emittedBlueprintKeys, variant, draft, nextAction))
+if (AddDraftCandidateIfNew(draftCandidates, emittedBlueprintKeys, variant, draft, nextAction))
                 {
                     variantsByCandidateId[variant.CandidateId] = variant;
                 }
@@ -240,8 +254,9 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
                         candidates.Items,
                         input.ChapterContext,
                         variant.SlotValues,
-                        chapterBefore,
-                        cancellationToken);
+ chapterBefore,
+ variant.TransitionStrategy,
+cancellationToken);
                     draftCandidates.Add(new ReferenceCorpusInsertionDraftCandidatePayload(
                         CandidateId: variant.CandidateId,
                         Strategy: variant.Strategy,
@@ -253,12 +268,17 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
                 }
             }
 
-            ApplyDraftCandidateSetAudit(draftCandidates, variantsByCandidateId, chapterBefore);
+ApplyDraftCandidateSetAudit(
+draftCandidates,
+variantsByCandidateId,
+ input.SelectedBlueprint,
+chapterBefore);
 
-            return new ReferenceCorpusInsertionDraftCandidatesPayload(
-                queryContext,
-                input.SelectedBlueprint,
-                draftCandidates);
+ return new ReferenceCorpusInsertionDraftCandidatesPayload(
+queryContext,
+input.SelectedBlueprint,
+ draftCandidates,
+ BuildDraftCandidateSetAudit(input.SelectedBlueprint, draftCandidates));
         }
         finally
         {
@@ -314,15 +334,16 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
             cancellationToken);
     }
 
-    private async ValueTask<ReferenceCorpusInsertionDraftPayload> BuildInsertionDraftAsync(
+private async ValueTask<ReferenceCorpusInsertionDraftPayload> BuildInsertionDraftAsync(
         SqliteConnection connection,
         ReferenceCorpusQueryContextPayload queryContext,
         ReferenceCorpusInsertionBlueprintPayload blueprint,
         IReadOnlyList<ReferenceCorpusCandidatePayload> candidates,
         CurrentChapterContextPayload chapterContext,
-        IReadOnlyDictionary<string, string> slotValues,
-        string chapterBefore,
-        CancellationToken cancellationToken)
+IReadOnlyDictionary<string, string> slotValues,
+string chapterBefore,
+ string transitionStrategy,
+CancellationToken cancellationToken)
     {
         if (blueprint.Beats.Count == 0)
         {
@@ -339,9 +360,10 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
         var textResult = await _textAssembler.AssembleAsync(
             new ReferenceCorpusTextAssemblyRequest(
                 blueprint,
-                sourcePieces.Select(piece => piece.ToSourcePiece()).ToArray(),
-                chapterContext,
-                slotValues),
+sourcePieces.Select(piece => piece.ToSourcePiece()).ToArray(),
+chapterContext,
+ slotValues,
+ transitionStrategy),
             cancellationToken);
         var gate = EvaluateGate(sourcePieces, textResult.Pieces);
         var audit = EvaluateDraftAudit(sourcePieces, textResult.Pieces, textResult.Transitions, textResult.AssembledText);
@@ -444,7 +466,7 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
         ReferenceCorpusInsertionDraftPayload draft,
         ReferenceCorpusDraftCandidateNextActionPayload? nextAction)
     {
-        var key = BlueprintNodeKey(variant.Blueprint) + "\u001f" + variant.SlotValueKey;
+ var key = BlueprintNodeKey(variant.Blueprint) + "\u001f" + variant.SlotValueKey + "\u001f" + variant.TransitionStrategy;
         if (!emittedBlueprintKeys.Add(key))
         {
             return false;
@@ -459,82 +481,269 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
         return true;
     }
 
-    private static void ApplyDraftCandidateSetAudit(
-        List<ReferenceCorpusInsertionDraftCandidatePayload> draftCandidates,
-        IReadOnlyDictionary<string, DraftCandidateBlueprintVariant> variantsByCandidateId,
-        string chapterBefore)
-    {
-        var groups = draftCandidates
-            .Select((candidate, index) => (Candidate: candidate, Index: index))
-            .Where(item => variantsByCandidateId.ContainsKey(item.Candidate.CandidateId))
-            .GroupBy(item => BlueprintNodeKey(item.Candidate.Draft.Blueprint), StringComparer.Ordinal);
-        foreach (var group in groups)
-        {
-            var indexes = group.Select(item => item.Index).ToArray();
-            if (indexes.Length <= 1)
-            {
-                continue;
-            }
+private static void ApplyDraftCandidateSetAudit(
+List<ReferenceCorpusInsertionDraftCandidatePayload> draftCandidates,
+IReadOnlyDictionary<string, DraftCandidateBlueprintVariant> variantsByCandidateId,
+ ReferenceCorpusInsertionBlueprintPayload selectedBlueprint,
+string chapterBefore)
+{
+ var selectedNodeSet = BuildBlueprintNodeSet(BuildPrimarySourceBlueprint(selectedBlueprint));
+ for (var index = 0; index < draftCandidates.Count; index++)
+{
+ var candidate = draftCandidates[index];
+ if (!selectedNodeSet.SetEquals(BuildDraftNodeSet(candidate.Draft)))
+{
+ draftCandidates[index] = BlockDraftCandidateForCandidateSetViolation(
+ candidate,
+ candidate.Draft.Pieces.FirstOrDefault(),
+ "draft_candidate_set_source_boundary_changed",
+ $"Draft candidate {candidate.CandidateId} changed the selected blueprint source boundary.",
+ chapterBefore);
+continue;
+}
 
-            foreach (var index in indexes)
-            {
-                var candidate = draftCandidates[index];
-                if (!candidate.Draft.Audit.Passed)
-                {
-                    continue;
-                }
+ if (!candidate.Draft.Audit.Passed ||
+ !variantsByCandidateId.TryGetValue(candidate.CandidateId, out var variant))
+{
+ continue;
+}
 
-                var variant = variantsByCandidateId[candidate.CandidateId];
-                if (FindUndeclaredCandidateSlotReplacement(candidate.Draft, variant.SlotValues) is not { } violation)
-                {
-                    continue;
-                }
+ if (FindUndeclaredCandidateSlotReplacement(candidate.Draft, variant.SlotValues) is { } violation)
+{
+draftCandidates[index] = BlockDraftCandidateForCandidateSetViolation(
+candidate,
+ violation.Piece,
+ "draft_candidate_set_non_slot_difference",
+ $"Draft candidate {candidate.CandidateId} changed source value '{violation.Replacement.SourceValue}' outside the selected slot mapping.",
+chapterBefore);
+}
+ }
 
-                draftCandidates[index] = BlockDraftCandidateForCandidateSetViolation(
-                    candidate,
-                    violation.Piece,
-                    "draft_candidate_set_non_slot_difference",
-                    $"Draft candidate {candidate.CandidateId} changed source value '{violation.Replacement.SourceValue}' outside the selected slot mapping.",
-                    chapterBefore);
-            }
+ var seenAssembledText = new Dictionary<string, string>(StringComparer.Ordinal);
+ for (var index = 0; index < draftCandidates.Count; index++)
+ {
+ var candidate = draftCandidates[index];
+ if (!candidate.Draft.Audit.Passed)
+ {
+ continue;
+ }
 
-            var seenAssembledText = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var index in indexes)
-            {
-                var candidate = draftCandidates[index];
-                if (!candidate.Draft.Audit.Passed)
-                {
-                    continue;
-                }
+ var textKey = NormalizeDraftCandidateTextKey(candidate.Draft.AssembledText);
+ if (textKey.Length == 0 || seenAssembledText.TryAdd(textKey, candidate.CandidateId))
+ {
+ continue;
+ }
 
-                var textKey = NormalizeDraftCandidateTextKey(candidate.Draft.AssembledText);
-                if (textKey.Length == 0)
-                {
-                    continue;
-                }
+ draftCandidates[index] = BlockDraftCandidateForCandidateSetViolation(
+ candidate,
+ candidate.Draft.Pieces.FirstOrDefault(),
+ "draft_candidate_set_duplicate_text",
+ $"Draft candidate {candidate.CandidateId} duplicates assembled text already emitted by candidate {seenAssembledText[textKey]}.",
+ chapterBefore);
+ }
+ }
 
-                if (seenAssembledText.TryAdd(textKey, candidate.CandidateId))
-                {
-                    continue;
-                }
+private static ReferenceCorpusDraftCandidateSetAuditPayload BuildDraftCandidateSetAudit(
+ ReferenceCorpusInsertionBlueprintPayload selectedBlueprint,
+IReadOnlyList<ReferenceCorpusInsertionDraftCandidatePayload> candidates)
+ {
+ if (candidates.Count == 0)
+ {
+ return new ReferenceCorpusDraftCandidateSetAuditPayload(
+ Passed: false,
+ CandidateCount: 0,
+ ReadyCandidateCount: 0,
+ DistinctTextCount: 0,
+ Differences: [],
+ Errors: ["draft_candidate_set_empty"]);
+ }
 
-                var piece = candidate.Draft.Pieces.FirstOrDefault();
-                if (piece is null)
-                {
-                    continue;
-                }
+ var baseline = candidates.FirstOrDefault(candidate => candidate.Draft.ReadyForInsertion) ?? candidates[0];
+ var selectedNodeSet = BuildBlueprintNodeSet(BuildPrimarySourceBlueprint(selectedBlueprint));
+var baselinePieceKeys = BuildDraftPieceKeys(baseline.Draft);
+ var baselinePieceInvariantKeys = BuildDraftPieceInvariantKeys(baseline.Draft);
+ var baselineSlotKeys = BuildDraftSlotReplacementKeys(baseline.Draft);
+ var baselineTransitionKeys = BuildDraftTransitionKeys(baseline.Draft);
+ var baselineText = NormalizeDraftCandidateTextKey(baseline.Draft.AssembledText);
+ var differences = new List<ReferenceCorpusDraftCandidateDifferencePayload>(candidates.Count);
+ var errors = new HashSet<string>(StringComparer.Ordinal);
 
-                draftCandidates[index] = BlockDraftCandidateForCandidateSetViolation(
-                    candidate,
-                    piece,
-                    "draft_candidate_set_duplicate_text",
-                    $"Draft candidate {candidate.CandidateId} duplicates assembled text already emitted by candidate {seenAssembledText[textKey]}.",
-                    chapterBefore);
-            }
-        }
-    }
+ foreach (var candidate in candidates)
+ {
+ var nodeSet = BuildDraftNodeSet(candidate.Draft);
+var pieceKeys = BuildDraftPieceKeys(candidate.Draft);
+ var pieceInvariantKeys = BuildDraftPieceInvariantKeys(candidate.Draft);
+ var slotKeys = BuildDraftSlotReplacementKeys(candidate.Draft);
+ var transitionKeys = BuildDraftTransitionKeys(candidate.Draft);
+ var sameBlueprintNodeSet = selectedNodeSet.SetEquals(nodeSet);
+var samePieceOutputs = baselinePieceKeys.SequenceEqual(pieceKeys, StringComparer.Ordinal);
+ var slotDifferenceCount = CountSymmetricDifference(baselineSlotKeys, slotKeys);
+ var transitionDifferenceCount = CountSymmetricDifference(baselineTransitionKeys, transitionKeys);
+ var duplicateText = !string.Equals(candidate.CandidateId, baseline.CandidateId, StringComparison.Ordinal) &&
+ string.Equals(baselineText, NormalizeDraftCandidateTextKey(candidate.Draft.AssembledText), StringComparison.Ordinal);
+ var pieceDifferenceExplainedBySlots = baselinePieceInvariantKeys.SequenceEqual(pieceInvariantKeys, StringComparer.Ordinal);
+ var onlyAllowedDifferences = sameBlueprintNodeSet && pieceDifferenceExplainedBySlots &&
+ candidate.Draft.Audit.Passed && !duplicateText;
+ var diagnostics = new List<string>();
 
-    private static string NormalizeDraftCandidateTextKey(string value)
+ if (!sameBlueprintNodeSet)
+ {
+ diagnostics.Add("draft_candidate_set_source_boundary_changed");
+ errors.Add("draft_candidate_set_source_boundary_changed");
+ }
+
+ if (!pieceDifferenceExplainedBySlots)
+ {
+ diagnostics.Add("draft_candidate_set_untracked_piece_difference");
+ errors.Add("draft_candidate_set_untracked_piece_difference");
+ }
+
+ if (duplicateText)
+ {
+ diagnostics.Add("draft_candidate_set_duplicate_text");
+ errors.Add("draft_candidate_set_duplicate_text");
+ }
+
+ if (!candidate.Draft.Audit.Passed)
+ {
+ diagnostics.Add("draft_candidate_audit_failed");
+ errors.Add("draft_candidate_audit_failed");
+ }
+
+ differences.Add(new ReferenceCorpusDraftCandidateDifferencePayload(
+ CandidateId: candidate.CandidateId,
+ BaselineCandidateId: baseline.CandidateId,
+ SameBlueprintNodeSet: sameBlueprintNodeSet,
+ SamePieceOutputs: samePieceOutputs,
+ SlotDifferenceCount: slotDifferenceCount,
+ TransitionDifferenceCount: transitionDifferenceCount,
+ OnlyAllowedDifferences: onlyAllowedDifferences,
+ DuplicateText: duplicateText,
+ Diagnostics: diagnostics));
+ }
+
+ var distinctTextCount = candidates
+ .Select(candidate => NormalizeDraftCandidateTextKey(candidate.Draft.AssembledText))
+ .Where(value => value.Length > 0)
+ .Distinct(StringComparer.Ordinal)
+ .Count();
+ return new ReferenceCorpusDraftCandidateSetAuditPayload(
+ Passed: errors.Count == 0 && differences.All(difference => difference.OnlyAllowedDifferences),
+ CandidateCount: candidates.Count,
+ ReadyCandidateCount: candidates.Count(candidate => candidate.Draft.ReadyForInsertion),
+ DistinctTextCount: distinctTextCount,
+ Differences: differences,
+ Errors: errors.OrderBy(value => value, StringComparer.Ordinal).ToArray());
+ }
+
+private static HashSet<string> BuildDraftNodeSet(ReferenceCorpusInsertionDraftPayload draft)
+{
+return draft.Blueprint.Beats
+.SelectMany(beat => beat.NodeIds)
+.ToHashSet(StringComparer.Ordinal);
+}
+
+ private static HashSet<string> BuildBlueprintNodeSet(ReferenceCorpusInsertionBlueprintPayload blueprint)
+ {
+ return blueprint.Beats
+ .SelectMany(beat => beat.NodeIds)
+ .ToHashSet(StringComparer.Ordinal);
+ }
+
+ private static IReadOnlyList<string> BuildDraftPieceInvariantKeys(ReferenceCorpusInsertionDraftPayload draft)
+ {
+ return draft.Pieces
+ .Select(piece => StableHash(
+ piece.PieceId,
+ piece.BeatId,
+ piece.NodeId,
+ piece.SourceTextHash,
+ BuildSlotMaskedPieceOutput(piece)))
+ .ToArray();
+ }
+
+ private static string BuildSlotMaskedPieceOutput(ReferenceCorpusInsertionPiecePayload piece)
+ {
+ var builder = new StringBuilder(piece.OutputText.Length);
+ var cursor = 0;
+ foreach (var replacement in piece.SlotReplacements
+ .OrderBy(item => item.OutputStart)
+ .ThenBy(item => item.OutputEnd))
+ {
+ if (replacement.OutputStart < cursor ||
+ replacement.OutputEnd < replacement.OutputStart ||
+ replacement.OutputEnd > piece.OutputText.Length)
+ {
+ return "invalid-slot-range";
+ }
+
+ builder.Append(piece.OutputText, cursor, replacement.OutputStart - cursor);
+ builder.Append("<slot:")
+ .Append(NormalizeTransferSlotName(replacement.SlotName) ?? string.Empty)
+ .Append(':')
+ .Append(replacement.SourceValue)
+ .Append(':')
+ .Append(replacement.SourceStart.ToString(CultureInfo.InvariantCulture))
+ .Append(':')
+ .Append(replacement.SourceEnd.ToString(CultureInfo.InvariantCulture))
+ .Append('>');
+ cursor = replacement.OutputEnd;
+ }
+
+ builder.Append(piece.OutputText, cursor, piece.OutputText.Length - cursor);
+ return builder.ToString();
+ }
+
+ private static IReadOnlyList<string> BuildDraftPieceKeys(ReferenceCorpusInsertionDraftPayload draft)
+ {
+ return draft.Pieces
+ .Select(piece => StableHash(
+ piece.PieceId,
+ piece.BeatId,
+ piece.NodeId,
+ piece.SourceTextHash,
+ piece.OutputText,
+ string.Join('|', piece.PreservedSpans.Select(span => string.Join(':', span.SpanId, span.SourceTextHash, span.OutputTextHash, span.Matches))),
+ string.Join('|', piece.LockedSpans.Select(span => string.Join(':', span.SpanId, span.SourceTextHash, span.OutputTextHash, span.Matches)))))
+ .ToArray();
+ }
+
+ private static HashSet<string> BuildDraftSlotReplacementKeys(ReferenceCorpusInsertionDraftPayload draft)
+ {
+ return draft.Pieces
+ .SelectMany(piece => piece.SlotReplacements.Select(replacement => StableHash(
+ piece.PieceId,
+ replacement.SlotName,
+ replacement.SourceValue,
+ replacement.ReplacementValue,
+ replacement.SourceStart.ToString(CultureInfo.InvariantCulture),
+ replacement.SourceEnd.ToString(CultureInfo.InvariantCulture),
+ replacement.OutputStart.ToString(CultureInfo.InvariantCulture),
+ replacement.OutputEnd.ToString(CultureInfo.InvariantCulture))))
+ .ToHashSet(StringComparer.Ordinal);
+ }
+
+ private static HashSet<string> BuildDraftTransitionKeys(ReferenceCorpusInsertionDraftPayload draft)
+ {
+ return draft.Transitions
+ .Select(transition => StableHash(
+ transition.GapId,
+ transition.AfterPieceId,
+ transition.BeforePieceId,
+ transition.Decision,
+ transition.Strategy,
+ transition.Text,
+ transition.ReplacementPieceId ?? string.Empty,
+ transition.ReplacementNodeId ?? string.Empty))
+ .ToHashSet(StringComparer.Ordinal);
+ }
+
+ private static int CountSymmetricDifference(IReadOnlySet<string> left, IReadOnlySet<string> right)
+ {
+ return left.Except(right, StringComparer.Ordinal).Count() + right.Except(left, StringComparer.Ordinal).Count();
+ }
+
+private static string NormalizeDraftCandidateTextKey(string value)
     {
         return value
             .Replace("\r\n", "\n", StringComparison.Ordinal)
@@ -614,39 +823,42 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
 
     private static ReferenceCorpusInsertionDraftCandidatePayload BlockDraftCandidateForCandidateSetViolation(
         ReferenceCorpusInsertionDraftCandidatePayload candidate,
-        ReferenceCorpusInsertionPiecePayload piece,
+ ReferenceCorpusInsertionPiecePayload? piece,
         string code,
         string message,
         string chapterBefore)
     {
-        var auditPieces = candidate.Draft.Audit.Pieces.ToList();
-        var pieceIndex = auditPieces.FindIndex(item => string.Equals(item.PieceId, piece.PieceId, StringComparison.Ordinal));
-        if (pieceIndex < 0)
-        {
-            var violations = new List<ReferenceCorpusDraftAuditViolationPayload>();
-            AddAuditViolation(violations, piece, spanId: null, code, message);
-            auditPieces.Add(new ReferenceCorpusDraftAuditPiecePayload(
-                PieceId: piece.PieceId,
-                NodeId: piece.NodeId,
-                Passed: false,
-                PreservedSpanCount: piece.PreservedSpans.Count,
-                MismatchedSpanCount: piece.PreservedSpans.Count(span => !span.Matches),
-                Violations: violations));
-        }
-        else
-        {
-            var auditPiece = auditPieces[pieceIndex];
-            var violations = auditPiece.Violations.ToList();
-            AddAuditViolation(violations, piece, spanId: null, code, message);
-            auditPieces[pieceIndex] = auditPiece with
-            {
-                Passed = false,
-                Violations = violations
-            };
-        }
+ var auditPieces = candidate.Draft.Audit.Pieces.ToList();
+ if (piece is not null)
+{
+ var pieceIndex = auditPieces.FindIndex(item => string.Equals(item.PieceId, piece.PieceId, StringComparison.Ordinal));
+ if (pieceIndex < 0)
+{
+ var violations = new List<ReferenceCorpusDraftAuditViolationPayload>();
+ AddAuditViolation(violations, piece, spanId: null, code, message);
+ auditPieces.Add(new ReferenceCorpusDraftAuditPiecePayload(
+ PieceId: piece.PieceId,
+ NodeId: piece.NodeId,
+ Passed: false,
+ PreservedSpanCount: piece.PreservedSpans.Count,
+ MismatchedSpanCount: piece.PreservedSpans.Count(span => !span.Matches),
+ Violations: violations));
+ }
+ else
+ {
+ var auditPiece = auditPieces[pieceIndex];
+ var violations = auditPiece.Violations.ToList();
+ AddAuditViolation(violations, piece, spanId: null, code, message);
+ auditPieces[pieceIndex] = auditPiece with
+ {
+ Passed = false,
+ Violations = violations
+ };
+ }
+}
 
-        var errors = candidate.Draft.Audit.Errors.ToList();
-        var error = $"{code}:{piece.NodeId}";
+var errors = candidate.Draft.Audit.Errors.ToList();
+ var error = piece is null ? code : $"{code}:{piece.NodeId}";
         if (!errors.Contains(error, StringComparer.Ordinal))
         {
             errors.Add(error);
@@ -674,18 +886,33 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
     private static async ValueTask<IReadOnlyList<DraftCandidateBlueprintVariant>> BuildDraftCandidateBlueprintVariantsAsync(
         SqliteConnection connection,
         ReferenceCorpusInsertionBlueprintPayload selectedBlueprint,
-        int requestedCount,
-        IReadOnlyDictionary<string, string> baseSlotValues,
-        IReadOnlyList<ReferenceCorpusDraftSlotValueVariantPayload>? slotValueVariants,
-        IReadOnlyList<ReferenceCorpusCandidatePayload> candidates,
+int requestedCount,
+IReadOnlyDictionary<string, string> baseSlotValues,
+IReadOnlyList<ReferenceCorpusDraftSlotValueVariantPayload>? slotValueVariants,
+ IReadOnlyList<string>? transitionStrategyVariants,
+IReadOnlyList<ReferenceCorpusCandidatePayload> candidates,
         CurrentChapterContextPayload chapterContext,
         CancellationToken cancellationToken)
     {
-        var slotVariants = BuildSlotValueDraftVariants(selectedBlueprint, requestedCount, baseSlotValues, slotValueVariants);
-        if (slotVariants.Count > 0)
-        {
-            return slotVariants;
-        }
+var slotVariants = BuildSlotValueDraftVariants(selectedBlueprint, requestedCount, baseSlotValues, slotValueVariants);
+if (slotVariants.Count > 0)
+{
+ return ExpandTransitionStrategyVariants(
+ selectedBlueprint,
+ requestedCount,
+ slotVariants,
+ transitionStrategyVariants);
+}
+
+var transitionVariants = BuildTransitionStrategyDraftVariants(
+ selectedBlueprint,
+ requestedCount,
+ baseSlotValues,
+ transitionStrategyVariants);
+ if (transitionVariants.Count > 0)
+ {
+ return transitionVariants;
+ }
 
         var primaryBlueprint = BuildPrimarySourceBlueprint(selectedBlueprint);
         var primarySourcePieces = await ReadSourcePiecesAsync(connection, primaryBlueprint, candidates, cancellationToken);
@@ -704,64 +931,47 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
             }
         }
 
-        return BuildSourceNodeDraftVariants(selectedBlueprint, requestedCount, baseSlotValues);
-    }
+ return BuildSelectedBlueprintDraftVariant(selectedBlueprint, baseSlotValues);
+}
 
-    private static IReadOnlyList<DraftCandidateBlueprintVariant> BuildSourceNodeDraftVariants(
-        ReferenceCorpusInsertionBlueprintPayload selectedBlueprint,
-        int requestedCount,
-        IReadOnlyDictionary<string, string> baseSlotValues)
-    {
-        var normalizedSlotValues = NormalizeSlotValues(baseSlotValues);
-        var slotValueKey = SlotValueKey(normalizedSlotValues);
-        var variants = new List<DraftCandidateBlueprintVariant>(requestedCount);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var nodeOptionsByBeat = selectedBlueprint.Beats
-            .Select(DraftCandidateNodeOptions)
-            .ToArray();
-        for (var index = 0; index < requestedCount; index++)
-        {
-            var beats = selectedBlueprint.Beats
-                .Select((beat, beatIndex) => BuildDraftCandidateBeatVariant(beat, nodeOptionsByBeat[beatIndex], index))
-                .ToArray();
-            var key = string.Join('|', beats.SelectMany(beat => beat.NodeIds));
-            if (key.Length == 0 || !seen.Add(key))
-            {
-                continue;
-            }
+ private static IReadOnlyList<DraftCandidateBlueprintVariant> BuildSelectedBlueprintDraftVariant(
+ReferenceCorpusInsertionBlueprintPayload selectedBlueprint,
+IReadOnlyDictionary<string, string> baseSlotValues)
+{
+var normalizedSlotValues = NormalizeSlotValues(baseSlotValues);
+var slotValueKey = SlotValueKey(normalizedSlotValues);
+ var primaryBlueprint = BuildPrimarySourceBlueprint(selectedBlueprint);
+ if (primaryBlueprint.Beats.SelectMany(beat => beat.NodeIds).Any())
+{
+ var fingerprint = StableHash(selectedBlueprint.BlueprintId, BlueprintNodeKey(primaryBlueprint), slotValueKey)[..16];
+ return
+ [
+ new DraftCandidateBlueprintVariant(
+ CandidateId: "corpus-draft-candidate-selected-" + fingerprint,
+ Strategy: "selected_blueprint_primary",
+ Explanation: "Uses the accepted selected blueprint primary source nodes; additional drafts require slot or transition variants.",
+ Blueprint: primaryBlueprint with
+ {
+ BlueprintId = $"{selectedBlueprint.BlueprintId}:selected-{fingerprint}",
+ Strategy = $"{selectedBlueprint.Strategy}:selected_blueprint_primary"
+ },
+ SlotValues: normalizedSlotValues,
+ SlotValueKey: slotValueKey)
+ ];
+}
 
-            var suffix = (index + 1).ToString(CultureInfo.InvariantCulture);
-            var fingerprint = StableHash(selectedBlueprint.BlueprintId, key, suffix)[..16];
-            var blueprint = new ReferenceCorpusInsertionBlueprintPayload(
-                BlueprintId: $"{selectedBlueprint.BlueprintId}:draft-{fingerprint}",
-                QueryContextHash: selectedBlueprint.QueryContextHash,
-                Strategy: $"{selectedBlueprint.Strategy}:source_variant_{suffix}",
-                Beats: beats);
-            variants.Add(new DraftCandidateBlueprintVariant(
-                CandidateId: "corpus-draft-candidate-" + fingerprint,
-                Strategy: "source_variant_" + suffix,
-                Explanation: index == 0
-                    ? "Uses the selected blueprint's primary source nodes with slot-only transfer."
-                    : "Rotates source nodes inside the selected blueprint beats for a comparable reuse draft.",
-                Blueprint: blueprint,
-                SlotValues: normalizedSlotValues,
-                SlotValueKey: slotValueKey));
-        }
-
-        if (variants.Count == 0)
-        {
-            var fingerprint = StableHash(selectedBlueprint.BlueprintId, "empty")[..16];
-            variants.Add(new DraftCandidateBlueprintVariant(
-                CandidateId: "corpus-draft-candidate-" + fingerprint,
-                Strategy: "selected_blueprint_empty",
-                Explanation: "The selected blueprint has no source nodes; returns a blocked draft for UI diagnostics.",
-                Blueprint: selectedBlueprint,
-                SlotValues: normalizedSlotValues,
-                SlotValueKey: slotValueKey));
-        }
-
-        return variants;
-    }
+ var emptyFingerprint = StableHash(selectedBlueprint.BlueprintId, "empty")[..16];
+ return
+ [
+ new DraftCandidateBlueprintVariant(
+ CandidateId: "corpus-draft-candidate-" + emptyFingerprint,
+Strategy: "selected_blueprint_empty",
+Explanation: "The selected blueprint has no source nodes; returns a blocked draft for UI diagnostics.",
+Blueprint: selectedBlueprint,
+SlotValues: normalizedSlotValues,
+ SlotValueKey: slotValueKey)
+ ];
+}
 
     private static IReadOnlyList<DraftCandidateBlueprintVariant> BuildAutoTransferSlotDraftVariants(
         ReferenceCorpusInsertionBlueprintPayload selectedBlueprint,
@@ -1250,10 +1460,128 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
             Feedback: feedback);
     }
 
-    private static string BlueprintNodeKey(ReferenceCorpusInsertionBlueprintPayload blueprint)
-    {
-        return string.Join('|', blueprint.Beats.SelectMany(beat => beat.NodeIds));
-    }
+private static string BlueprintNodeKey(ReferenceCorpusInsertionBlueprintPayload blueprint)
+{
+return string.Join('|', blueprint.Beats.SelectMany(beat => beat.NodeIds));
+}
+
+ private static IReadOnlyList<ReferenceCorpusBlueprintCandidatePayload> ApplyBlueprintDifferenceAudit(
+ IReadOnlyList<ReferenceCorpusBlueprintCandidatePayload> candidates)
+ {
+ const double minimumDifferenceRatio = 0.34d;
+ if (candidates.Count == 0)
+ {
+ return [];
+ }
+
+ var nodeSets = candidates
+ .Select(candidate => candidate.Blueprint.Beats
+ .SelectMany(beat => beat.NodeIds)
+ .Where(nodeId => !string.IsNullOrWhiteSpace(nodeId))
+ .ToHashSet(StringComparer.Ordinal))
+ .ToArray();
+ var sourceKeys = candidates.Select(BuildBlueprintSourceDistributionKey).ToArray();
+ var result = new ReferenceCorpusBlueprintCandidatePayload[candidates.Count];
+
+ for (var index = 0; index < candidates.Count; index++)
+ {
+ var closestIndex = -1;
+ var closestDifference = 1d;
+ for (var otherIndex = 0; otherIndex < candidates.Count; otherIndex++)
+ {
+ if (otherIndex == index)
+ {
+ continue;
+ }
+
+ var unionCount = nodeSets[index].Union(nodeSets[otherIndex], StringComparer.Ordinal).Count();
+ var intersectionCount = nodeSets[index].Intersect(nodeSets[otherIndex], StringComparer.Ordinal).Count();
+ var difference = unionCount == 0 ? 0d : 1d - ((double)intersectionCount / unionCount);
+ if (difference < closestDifference)
+ {
+ closestDifference = difference;
+ closestIndex = otherIndex;
+ }
+ }
+
+ var sourceDistributionDiffers = closestIndex < 0 ||
+ !string.Equals(sourceKeys[index], sourceKeys[closestIndex], StringComparison.Ordinal);
+ var strategyDiffers = closestIndex < 0 ||
+ !string.Equals(candidates[index].Blueprint.Strategy, candidates[closestIndex].Blueprint.Strategy, StringComparison.Ordinal);
+ var passed = closestIndex < 0 || closestDifference >= minimumDifferenceRatio ||
+ (sourceDistributionDiffers && strategyDiffers);
+ var diagnostics = new List<string>();
+ if (closestIndex >= 0 && closestDifference < minimumDifferenceRatio)
+ {
+ diagnostics.Add("blueprint_node_set_too_similar");
+ }
+
+ if (!sourceDistributionDiffers)
+ {
+ diagnostics.Add("blueprint_source_distribution_unchanged");
+ }
+
+ if (!strategyDiffers)
+ {
+ diagnostics.Add("blueprint_strategy_unchanged");
+ }
+
+ result[index] = candidates[index] with
+ {
+ DifferenceAudit = new ReferenceCorpusBlueprintDifferenceAuditPayload(
+ Passed: passed,
+ NodeSetHash: StableHash(nodeSets[index].OrderBy(value => value, StringComparer.Ordinal).ToArray()),
+ MinimumNodeDifferenceRatio: minimumDifferenceRatio,
+ ClosestBlueprintId: closestIndex < 0 ? null : candidates[closestIndex].Blueprint.BlueprintId,
+ ClosestNodeDifferenceRatio: closestIndex < 0 ? 1d : closestDifference,
+ SourceDistributionDiffers: sourceDistributionDiffers,
+ StrategyDiffers: strategyDiffers,
+ Diagnostics: diagnostics)
+ };
+ }
+
+ return result;
+ }
+
+ private static string BuildBlueprintSourceDistributionKey(ReferenceCorpusBlueprintCandidatePayload candidate)
+ {
+ return string.Join('|', candidate.SourceDistribution
+ .OrderBy(source => source.LibraryId, StringComparer.Ordinal)
+ .ThenBy(source => source.AnchorId)
+ .Select(source => string.Join(':', source.LibraryId, source.AnchorId, source.NodeCount)));
+ }
+
+ private static ReferenceCorpusBlueprintIterationPayload BuildBlueprintIteration(
+ ReferenceCorpusBlueprintFeedbackPayload? feedback,
+ IReadOnlyList<ReferenceCorpusBlueprintCandidatePayload> candidates)
+ {
+ var rejectedBlueprintIds = feedback?.RejectedBlueprintIds
+ .Where(value => !string.IsNullOrWhiteSpace(value))
+ .Select(value => value.Trim())
+ .Distinct(StringComparer.Ordinal)
+ .OrderBy(value => value, StringComparer.Ordinal)
+ .ToArray() ?? [];
+ var distinctCandidateCount = candidates
+ .Select(candidate => candidate.DifferenceAudit?.NodeSetHash ?? StableHash(
+ candidate.Blueprint.Beats
+ .SelectMany(beat => beat.NodeIds)
+ .OrderBy(value => value, StringComparer.Ordinal)
+ .ToArray()))
+ .Distinct(StringComparer.Ordinal)
+ .Count();
+
+ return new ReferenceCorpusBlueprintIterationPayload(
+ Iteration: feedback is null ? 1 : 2,
+ State: candidates.Count == 0
+ ? "blocked"
+ : feedback is null ? "awaiting_selection" : "feedback_applied",
+ FeedbackApplied: feedback is not null,
+ CandidateCount: candidates.Count,
+ DistinctCandidateCount: distinctCandidateCount,
+ RejectedBlueprintIds: rejectedBlueprintIds,
+ CanIterate: candidates.Count > 0,
+ CanSelect: candidates.Any(candidate => candidate.DifferenceAudit?.Passed != false));
+ }
 
     private static BlueprintCandidateFilterResult ApplyBlueprintFeedback(
         IReadOnlyList<ReferenceCorpusCandidatePayload> candidates,
@@ -3285,13 +3613,14 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
         IReadOnlyList<ReferenceCorpusCandidatePayload> Candidates,
         IReadOnlyList<string> GapReasons);
 
-    private sealed record DraftCandidateBlueprintVariant(
+private sealed record DraftCandidateBlueprintVariant(
         string CandidateId,
         string Strategy,
         string Explanation,
         ReferenceCorpusInsertionBlueprintPayload Blueprint,
         IReadOnlyDictionary<string, string> SlotValues,
-        string SlotValueKey);
+ string SlotValueKey,
+ string TransitionStrategy = ReferenceCorpusTransitionStrategies.Default);
 
     private sealed record LicensedSourcePiece(
         string PieceId,
@@ -3341,7 +3670,114 @@ public sealed class SqliteReferenceCorpusWritingService : IReferenceCorpusWritin
                 StringComparer.Ordinal.GetHashCode(obj.BeatId),
                 StringComparer.Ordinal.GetHashCode(obj.NodeId));
         }
-    }
+ }
+
+ private static IReadOnlyList<DraftCandidateBlueprintVariant> BuildTransitionStrategyDraftVariants(
+ ReferenceCorpusInsertionBlueprintPayload selectedBlueprint,
+ int requestedCount,
+ IReadOnlyDictionary<string, string> slotValues,
+ IReadOnlyList<string>? transitionStrategyVariants)
+ {
+ var strategies = NormalizeTransitionStrategies(transitionStrategyVariants);
+ if (strategies.Count == 0)
+ {
+ return [];
+ }
+
+ var primary = BuildPrimarySourceBlueprint(selectedBlueprint);
+ var normalizedSlots = NormalizeSlotValues(slotValues);
+ var slotKey = SlotValueKey(normalizedSlots);
+ return strategies
+ .Take(requestedCount)
+ .Select((strategy, index) => BuildTransitionStrategyVariant(
+ selectedBlueprint,
+ primary,
+ normalizedSlots,
+ slotKey,
+ strategy,
+ index + 1))
+ .ToArray();
+ }
+
+ private static IReadOnlyList<DraftCandidateBlueprintVariant> ExpandTransitionStrategyVariants(
+ ReferenceCorpusInsertionBlueprintPayload selectedBlueprint,
+ int requestedCount,
+ IReadOnlyList<DraftCandidateBlueprintVariant> slotVariants,
+ IReadOnlyList<string>? transitionStrategyVariants)
+ {
+ var strategies = NormalizeTransitionStrategies(transitionStrategyVariants);
+ if (strategies.Count == 0)
+ {
+ return slotVariants;
+ }
+
+ var result = new List<DraftCandidateBlueprintVariant>(requestedCount);
+ foreach (var slotVariant in slotVariants)
+ {
+ foreach (var strategy in strategies)
+ {
+ if (result.Count >= requestedCount)
+ {
+ return result;
+ }
+
+ result.Add(BuildTransitionStrategyVariant(
+ selectedBlueprint,
+ slotVariant.Blueprint,
+ slotVariant.SlotValues,
+ slotVariant.SlotValueKey,
+ strategy,
+ result.Count + 1));
+ }
+ }
+
+ return result;
+ }
+
+ private static DraftCandidateBlueprintVariant BuildTransitionStrategyVariant(
+ ReferenceCorpusInsertionBlueprintPayload selectedBlueprint,
+ ReferenceCorpusInsertionBlueprintPayload blueprint,
+ IReadOnlyDictionary<string, string> slotValues,
+ string slotValueKey,
+ string transitionStrategy,
+ int ordinal)
+ {
+ var suffix = ordinal.ToString(CultureInfo.InvariantCulture);
+ var fingerprint = StableHash(
+ selectedBlueprint.BlueprintId,
+ BlueprintNodeKey(blueprint),
+ slotValueKey,
+ transitionStrategy,
+ suffix)[..16];
+ var variantBlueprint = blueprint with
+ {
+ BlueprintId = selectedBlueprint.BlueprintId + ":transition-" + fingerprint,
+ Strategy = selectedBlueprint.Strategy + ":transition_variant_" + suffix
+ };
+ return new DraftCandidateBlueprintVariant(
+ CandidateId: "corpus-draft-candidate-transition-" + fingerprint,
+ Strategy: "transition_variant_" + suffix,
+ Explanation: "Uses the same selected blueprint pieces and slot mapping with transition strategy: " + transitionStrategy,
+ Blueprint: variantBlueprint,
+ SlotValues: slotValues,
+ SlotValueKey: slotValueKey,
+ TransitionStrategy: transitionStrategy);
+ }
+
+ private static IReadOnlyList<string> NormalizeTransitionStrategies(IReadOnlyList<string>? values)
+ {
+ if (values is null)
+ {
+ return [];
+ }
+
+ return values
+ .Select(value => (value ?? string.Empty).Trim().ToLowerInvariant())
+ .Where(value => value is ReferenceCorpusTransitionStrategies.Default or ReferenceCorpusTransitionStrategies.DirectJoin)
+.Distinct(StringComparer.Ordinal)
+.ToArray();
+}
+
 }
 
 internal sealed class DeterministicReferenceCorpusQueryContextParser : IReferenceCorpusQueryContextParser
@@ -3800,7 +4236,7 @@ internal sealed class HeuristicReferenceCorpusTransitionResolver : IReferenceCor
                 continue;
             }
 
-            transitions.Add(BuildDirectJoin(gap));
+ transitions.Add(CreateDirectJoin(gap));
         }
 
         return ValueTask.FromResult(new ReferenceCorpusTransitionResolutionResult(transitions));
@@ -3841,7 +4277,7 @@ internal sealed class HeuristicReferenceCorpusTransitionResolver : IReferenceCor
         return "两段情绪在这里短暂合拢。";
     }
 
-    private static ReferenceCorpusTransitionPayload BuildDirectJoin(ReferenceCorpusTransitionGapPayload gap)
+ internal static ReferenceCorpusTransitionPayload CreateDirectJoin(ReferenceCorpusTransitionGapPayload gap)
     {
         return new ReferenceCorpusTransitionPayload(
             TransitionId: ReferenceCorpusTransitionGaps.CreateDirectTransitionId(gap.GapId, gap.AfterPieceId, gap.BeforePieceId),
@@ -3966,13 +4402,20 @@ internal sealed class PreservingReferenceCorpusTextAssembler : IReferenceCorpusT
             allReplacements.AddRange(applied.Replacements);
         }
 
-        var resolvedTransitions = await _transitions.ResolveAsync(
-            new ReferenceCorpusTransitionResolutionRequest(
-                request.Blueprint,
-                pieces,
-                BuildTransitionGaps(pieces),
-                request.ChapterContext),
-            cancellationToken);
+ var gaps = BuildTransitionGaps(pieces);
+ var resolvedTransitions = string.Equals(
+ request.TransitionStrategy,
+ ReferenceCorpusTransitionStrategies.DirectJoin,
+ StringComparison.Ordinal)
+ ? new ReferenceCorpusTransitionResolutionResult(
+ gaps.Select(HeuristicReferenceCorpusTransitionResolver.CreateDirectJoin).ToArray())
+ : await _transitions.ResolveAsync(
+ new ReferenceCorpusTransitionResolutionRequest(
+ request.Blueprint,
+ pieces,
+ gaps,
+ request.ChapterContext),
+ cancellationToken);
         var composed = ComposeAssembledText(pieces, resolvedTransitions.Transitions);
 
         return new ReferenceCorpusTextAssemblyResult(

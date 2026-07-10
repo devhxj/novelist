@@ -51,8 +51,9 @@ public sealed class ReferenceCorpusTechniqueWorkItemProcessorTests
  [
  new("obs-emotion", "emotion", "emotion_mode", "text", "suppressed", null, null, null, 8, 0.88, 0, 6, "动作承载压抑情绪"),
  new("obs-rhetoric", "rhetoric", "ellipsis", "text", "silence", null, null, null, null, 0.84, 7, 12, "沉默形成留白")
- ],
- 4,
+],
+ new ReferenceCorpusFrozenModelSelection("fake", "model-a", ""),
+4,
  new ReferenceCorpusFeatureTokenEnvelope(budget, budget, 16));
 
  private static string ValidJson() =>

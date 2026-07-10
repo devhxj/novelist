@@ -19,7 +19,7 @@ public static class AppInitializationBridgeHandlers
         {
             await service.InitializeAsync(ReadStringArg(context.Payload, 0, "dataDir"), cancellationToken);
             return null;
-        });
+        }, BridgeOperationAccess.Exclusive);
 
         dispatcher.Register("GetAppConfig", async (_, cancellationToken) =>
             await service.GetAppConfigAsync(cancellationToken));
@@ -28,7 +28,7 @@ public static class AppInitializationBridgeHandlers
         {
             await service.UpdateDataDirectoryAsync(ReadStringArg(context.Payload, 0, "dataDir"), cancellationToken);
             return null;
-        });
+        }, BridgeOperationAccess.Exclusive);
 
         dispatcher.Register("GetPlatform", async (_, cancellationToken) =>
             await service.GetPlatformAsync(cancellationToken));

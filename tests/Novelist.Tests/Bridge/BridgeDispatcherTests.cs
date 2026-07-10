@@ -156,6 +156,75 @@ public sealed class BridgeDispatcherTests
     }
 
     [Fact]
+    public async Task DispatchAsyncAllowsSharedRequestsToRunConcurrently()
+    {
+        var dispatcher = new BridgeDispatcher();
+        var bothStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = 0;
+        dispatcher.Register("Read", async (_, cancellationToken) =>
+        {
+            if (Interlocked.Increment(ref started) == 2)
+            {
+                bothStarted.TrySetResult();
+            }
+
+            await release.Task.WaitAsync(cancellationToken);
+            return null;
+        });
+
+        var first = dispatcher.DispatchAsync(Request("shared-1", "Read")).AsTask();
+        var second = dispatcher.DispatchAsync(Request("shared-2", "Read")).AsTask();
+        await bothStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        release.TrySetResult();
+        await Task.WhenAll(first, second);
+    }
+
+    [Fact]
+    public async Task DispatchAsyncExclusiveRequestDrainsReadersAndBlocksNewReaders()
+    {
+        var dispatcher = new BridgeDispatcher();
+        var firstReaderStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstReader = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWriter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondReaderStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        dispatcher.Register("ReadFirst", async (_, cancellationToken) =>
+        {
+            firstReaderStarted.TrySetResult();
+            await releaseFirstReader.Task.WaitAsync(cancellationToken);
+            return null;
+        });
+        dispatcher.Register("SwitchDataDir", async (_, cancellationToken) =>
+        {
+            writerStarted.TrySetResult();
+            await releaseWriter.Task.WaitAsync(cancellationToken);
+            return null;
+        }, BridgeOperationAccess.Exclusive);
+        dispatcher.Register("ReadSecond", (_, _) =>
+        {
+            secondReaderStarted.TrySetResult();
+            return ValueTask.FromResult<object?>(null);
+        });
+
+        var firstReader = dispatcher.DispatchAsync(Request("reader-1", "ReadFirst")).AsTask();
+        await firstReaderStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var writer = dispatcher.DispatchAsync(Request("writer", "SwitchDataDir")).AsTask();
+        var secondReader = dispatcher.DispatchAsync(Request("reader-2", "ReadSecond")).AsTask();
+        await Task.Delay(50);
+        Assert.False(writerStarted.Task.IsCompleted);
+        Assert.False(secondReaderStarted.Task.IsCompleted);
+
+        releaseFirstReader.TrySetResult();
+        await writerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(secondReaderStarted.Task.IsCompleted);
+        releaseWriter.TrySetResult();
+        await secondReaderStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(firstReader, writer, secondReader);
+    }
+
+    [Fact]
     public void BridgeOutboundEventUsesStableEnvelope()
     {
         var message = BridgeOutboundEvent.Create("file:changed", new { novel_id = 42, path = "chapters/003.md" });
@@ -168,6 +237,10 @@ public sealed class BridgeDispatcherTests
         Assert.Equal(42, root.GetProperty("payload").GetProperty("novel_id").GetInt32());
         Assert.Equal("chapters/003.md", root.GetProperty("payload").GetProperty("path").GetString());
     }
+
+    private static string Request(string id, string method) => JsonSerializer.Serialize(
+   new { kind = BridgeMessageKinds.Request, id, method, payload = new { } },
+   BridgeJson.SerializerOptions);
 
     private static JsonDocument ParseOutbound(BridgeDispatchResult result)
     {

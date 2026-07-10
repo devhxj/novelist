@@ -90,8 +90,62 @@ public sealed record ReferenceCorpusQueryContextPayload(
     [property: JsonPropertyName("scope")] ReferenceCorpusScopePayload Scope);
 
 public sealed record SearchReferenceCorpusCandidatesPayload(
-    [property: JsonPropertyName("query_context")] ReferenceCorpusQueryContextPayload QueryContext,
-    [property: JsonPropertyName("page_request")] PageRequestPayload PageRequest);
+[property: JsonPropertyName("query_context")] ReferenceCorpusQueryContextPayload QueryContext,
+[property: JsonPropertyName("page_request")] PageRequestPayload PageRequest,
+[property: JsonPropertyName("retrieval_feedback")]
+[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReferenceCorpusRetrievalFeedbackPayload? RetrievalFeedback = null);
+
+public sealed record ReferenceCorpusRetrievalFeedbackPayload(
+ [property: JsonPropertyName("preferred_routes")] IReadOnlyList<string> PreferredRoutes,
+ [property: JsonPropertyName("avoided_routes")] IReadOnlyList<string> AvoidedRoutes,
+ [property: JsonPropertyName("prefer_source_diversity")] bool? PreferSourceDiversity = null,
+ [property: JsonPropertyName("weight_adjustments")]
+ [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, double>? WeightAdjustments = null);
+
+public sealed record RebuildReferenceCorpusSensoryProjectionPayload(
+ [property: JsonPropertyName("anchor_id")]
+ [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? AnchorId = null);
+
+public sealed record ReferenceCorpusProjectionRebuildPayload(
+ [property: JsonPropertyName("observation_count")] int ObservationCount,
+ [property: JsonPropertyName("projection_row_count")] int ProjectionRowCount,
+ [property: JsonPropertyName("invalid_observation_count")] int InvalidObservationCount);
+
+public sealed record GetReferenceCorpusNodeWindowPayload(
+ [property: JsonPropertyName("anchor_id")] long AnchorId,
+ [property: JsonPropertyName("node_id")] string NodeId,
+ [property: JsonPropertyName("previous_chapter_count")] int PreviousChapterCount = 1,
+ [property: JsonPropertyName("next_chapter_count")] int NextChapterCount = 1,
+ [property: JsonPropertyName("include_scene_siblings")] bool IncludeSceneSiblings = true,
+ [property: JsonPropertyName("max_nodes")] int MaxNodes = 200);
+
+public sealed record ReferenceCorpusNodeWindowItemPayload(
+ [property: JsonPropertyName("node_id")] string NodeId,
+ [property: JsonPropertyName("parent_node_id")] string? ParentNodeId,
+ [property: JsonPropertyName("node_type")] string NodeType,
+ [property: JsonPropertyName("chapter_index")] int? ChapterIndex,
+ [property: JsonPropertyName("sequence_index")] int SequenceIndex,
+ [property: JsonPropertyName("start_offset")] int StartOffset,
+ [property: JsonPropertyName("end_offset")] int EndOffset,
+ [property: JsonPropertyName("text_hash")] string TextHash,
+ [property: JsonPropertyName("text")] string Text);
+
+public sealed record ReferenceCorpusNodeWindowPayload(
+ [property: JsonPropertyName("focus_node_id")] string FocusNodeId,
+ [property: JsonPropertyName("focus_chapter_index")] int? FocusChapterIndex,
+ [property: JsonPropertyName("scene_node_id")] string? SceneNodeId,
+ [property: JsonPropertyName("chapter_nodes")] IReadOnlyList<ReferenceCorpusNodeWindowItemPayload> ChapterNodes,
+ [property: JsonPropertyName("scene_siblings")] IReadOnlyList<ReferenceCorpusNodeWindowItemPayload> SceneSiblings,
+[property: JsonPropertyName("truncated")] bool Truncated);
+
+public sealed record GetReferenceCorpusCascadeImpactPayload(
+ [property: JsonPropertyName("observation_ids")] IReadOnlyList<string> ObservationIds);
+
+public sealed record ReferenceCorpusCascadeImpactPayload(
+ [property: JsonPropertyName("observation_ids")] IReadOnlyList<string> ObservationIds,
+ [property: JsonPropertyName("specimen_ids")] IReadOnlyList<string> SpecimenIds,
+ [property: JsonPropertyName("beat_ids")] IReadOnlyList<string> BeatIds,
+ [property: JsonPropertyName("blueprint_ids")] IReadOnlyList<string> BlueprintIds);
 
 public static class ReferenceCorpusTechniqueVectorIndexBackfillStatuses
 {
@@ -127,7 +181,32 @@ public sealed record ReferenceCorpusCandidateEvidencePayload(
     [property: JsonPropertyName("observation_id")] string ObservationId,
     [property: JsonPropertyName("feature_family")] string FeatureFamily,
     [property: JsonPropertyName("feature_key")] string FeatureKey,
-    [property: JsonPropertyName("confidence")] double Confidence);
+[property: JsonPropertyName("confidence")] double Confidence);
+
+public sealed record ReferenceCorpusRetrievalDiagnosticsPayload(
+ [property: JsonPropertyName("candidate_pool_size")] int CandidatePoolSize,
+ [property: JsonPropertyName("text_semantic_hits")] int TextSemanticHits,
+ [property: JsonPropertyName("technique_semantic_hits")] int TechniqueSemanticHits,
+ [property: JsonPropertyName("structured_observation_hits")] int StructuredObservationHits,
+ [property: JsonPropertyName("chapter_context_hits")] int ChapterContextHits,
+ [property: JsonPropertyName("node_embedding_count")] int NodeEmbeddingCount,
+ [property: JsonPropertyName("technique_vector_node_count")] int TechniqueVectorNodeCount,
+ [property: JsonPropertyName("elapsed_milliseconds")] long ElapsedMilliseconds,
+ [property: JsonPropertyName("applied_weights")]
+ [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, double>? AppliedWeights = null);
+
+public sealed record ReferenceCorpusRouteProvenancePayload(
+ [property: JsonPropertyName("route")] string Route,
+ [property: JsonPropertyName("rank")] int Rank,
+ [property: JsonPropertyName("route_score")] double RouteScore);
+
+public sealed record ReferenceCorpusSourceCoveragePayload(
+ [property: JsonPropertyName("library_id")] string LibraryId,
+ [property: JsonPropertyName("anchor_id")] long AnchorId,
+ [property: JsonPropertyName("source_quality")] string SourceQuality,
+ [property: JsonPropertyName("license_state")] string LicenseState,
+ [property: JsonPropertyName("reuse_policy")] string ReusePolicy,
+ [property: JsonPropertyName("selected_representative")] bool SelectedRepresentative);
 
 public sealed record ReferenceCorpusCandidatePayload(
     [property: JsonPropertyName("candidate_id")] string CandidateId,
@@ -142,4 +221,8 @@ public sealed record ReferenceCorpusCandidatePayload(
     [property: JsonPropertyName("score")] double Score,
     [property: JsonPropertyName("score_components")] IReadOnlyDictionary<string, double> ScoreComponents,
     [property: JsonPropertyName("fit_explanation")] string FitExplanation,
-    [property: JsonPropertyName("evidence")] IReadOnlyList<ReferenceCorpusCandidateEvidencePayload> Evidence);
+[property: JsonPropertyName("evidence")] IReadOnlyList<ReferenceCorpusCandidateEvidencePayload> Evidence,
+[property: JsonPropertyName("retrieval_diagnostics")]
+ [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ReferenceCorpusRetrievalDiagnosticsPayload? RetrievalDiagnostics = null,
+ [property: JsonPropertyName("route_provenance")] IReadOnlyList<ReferenceCorpusRouteProvenancePayload>? RouteProvenance = null,
+ [property: JsonPropertyName("source_coverage")] IReadOnlyList<ReferenceCorpusSourceCoveragePayload>? SourceCoverage = null);

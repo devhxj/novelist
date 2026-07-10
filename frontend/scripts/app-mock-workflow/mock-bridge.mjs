@@ -745,8 +745,20 @@ export function installConfigurableAppMockBridge(options = {}) {
     nextReferenceBlueprintId: 701,
     referenceCorpusFeatureAnalysisRuns: [],
     nextReferenceCorpusFeatureAnalysisRunId: 1,
-    referenceCorpusTechniqueSpecimenAnalysisRuns: [],
-    nextReferenceCorpusTechniqueSpecimenAnalysisRunId: 1,
+referenceCorpusTechniqueSpecimenAnalysisRuns: [],
+nextReferenceCorpusTechniqueSpecimenAnalysisRunId: 1,
+ referenceCorpusAnalysisJobs: options.referenceCorpusAnalysisJobs ?? [{
+ job_id: 'mock-corpus-job-001', run_id: 'mock-feature:101:sentence', novel_id: 42, anchor_id: 101,
+ job_kind: 'feature_analysis', scope: 'sentence', status: 'running', version: 1,
+ priority_class: 'normal', priority_value: 10, total_nodes: 4, total_work_items: 8,
+ processed_nodes: 2, processed_work_items: 3, succeeded_work_items: 2, skipped_work_items: 1,
+ failed_work_items: 0, retrying_work_items: 0, token_budget: 1200, tokens_spent: 360,
+ tokens_reserved: 120, resume_cursor: 'sentence:3', attempt_count: 1, failure_attempt_count: 0,
+ max_attempts: 3, next_attempt_at: null, lease_heartbeat_at: now, lease_expires_at: now,
+ dependency: null, created_at: now, queued_at: now, started_at: now, updated_at: now,
+ completed_at: null, error_code: null, error_message: null, current_chapter: 1,
+ allowed_actions: ['pause', 'cancel', 'reprioritize'], safe_diagnostics: [],
+ }],
     referenceOrchestrationRuns: [],
     nextReferenceOrchestrationRunId: 1,
     contentByPath: options.contentByPath ?? defaultContentByPath,
@@ -1216,7 +1228,13 @@ export function installConfigurableAppMockBridge(options = {}) {
       case 'StartReferenceCorpusTechniqueSpecimenAnalysis': return startReferenceCorpusTechniqueSpecimenAnalysis(args[0])
       case 'GetReferenceCorpusTechniqueSpecimenAnalysisRun': return getReferenceCorpusTechniqueSpecimenAnalysisRun(args[0])
       case 'ListReferenceCorpusFeatureObservations': return listReferenceCorpusFeatureObservations(args[0])
-      case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqueSpecimens(args[0])
+case 'ListReferenceCorpusTechniqueSpecimens': return listReferenceCorpusTechniqueSpecimens(args[0])
+ case 'ListReferenceCorpusAnalysisJobs': return listReferenceCorpusAnalysisJobs(args[0])
+ case 'GetReferenceCorpusAnalysisJob': return state.referenceCorpusAnalysisJobs.find((job) => job.job_id === args[0]?.job_id) ?? null
+ case 'PauseReferenceCorpusAnalysisJob': return updateReferenceCorpusAnalysisJob(args[0], 'paused')
+ case 'ResumeReferenceCorpusAnalysisJob': return updateReferenceCorpusAnalysisJob(args[0], 'queued')
+ case 'CancelReferenceCorpusAnalysisJob': return updateReferenceCorpusAnalysisJob(args[0], 'cancelled')
+ case 'ReprioritizeReferenceCorpusAnalysisJob': return reprioritizeReferenceCorpusAnalysisJob(args[0])
       case 'GenerateReferenceCorpusBlueprintCandidates': return generateReferenceCorpusBlueprintCandidates(args[0])
       case 'GenerateReferenceCorpusInsertionDraft': return generateReferenceCorpusInsertionDraft(args[0])
       case 'GenerateReferenceCorpusInsertionDraftCandidates': return generateReferenceCorpusInsertionDraftCandidates(args[0])
@@ -5997,7 +6015,7 @@ export function installConfigurableAppMockBridge(options = {}) {
     return pageReferenceCorpusAnalysisItems(sortReferenceCorpusAnalysisItems(observations, page.sort_by, page.sort_dir), page)
   }
 
-  function listReferenceCorpusTechniqueSpecimens(input = {}) {
+function listReferenceCorpusTechniqueSpecimens(input = {}) {
     const novelId = normalizeReferenceCorpusFeatureAnalysisId(input?.novel_id ?? state.activeNovelId, 'novel_id', true)
     const anchorId = normalizeReferenceCorpusFeatureAnalysisId(input?.anchor_id ?? 101, 'anchor_id', false)
     const sourceNodeId = String(input?.source_node_id ?? 'mock-node-rain-001').trim()
@@ -6356,8 +6374,9 @@ export function installConfigurableAppMockBridge(options = {}) {
         id: `mock-corpus-blueprint-extra-${index + 1}`,
         coverage: Math.max(0.6, candidateSeeds[index % candidateSeeds.length].coverage - (index * 0.03)),
       }
-      const blueprint = makeCorpusInsertionBlueprint(seed.id, seed.strategy, seed.nodeIds)
-      return {
+const blueprint = makeCorpusInsertionBlueprint(seed.id, seed.strategy, seed.nodeIds)
+ const closest = candidateSeeds[(index + 1) % candidateSeeds.length]
+return {
         blueprint,
         source_distribution: seed.sourceDistribution ?? [{
           library_id: seed.libraryId,
@@ -6367,7 +6386,17 @@ export function installConfigurableAppMockBridge(options = {}) {
         coverage_score: seed.coverage,
         gap_reasons: seed.gapReasons,
         feedback_reason: seed.feedbackReason,
-        gap_positions: makeCorpusBlueprintGapPositions(blueprint, seed.gapPositions ?? []),
+gap_positions: makeCorpusBlueprintGapPositions(blueprint, seed.gapPositions ?? []),
+ difference_audit: {
+ passed: true,
+ node_set_hash: `mock-node-set-${index + 1}`,
+ minimum_node_difference_ratio: 0.34,
+ closest_blueprint_id: closest?.id ?? null,
+ closest_node_difference_ratio: index === 0 ? 0.67 : 0.5,
+ source_distribution_differs: true,
+ strategy_differs: true,
+ diagnostics: [],
+ },
       }
     })
 
@@ -6390,8 +6419,18 @@ export function installConfigurableAppMockBridge(options = {}) {
         },
       },
       candidates,
-      feedback_applied: feedbackApplied,
-      feedback_summary: feedbackSummary,
+feedback_applied: feedbackApplied,
+feedback_summary: feedbackSummary,
+ iteration: {
+ iteration: feedbackApplied ? 2 : 1,
+ state: feedbackApplied ? 'feedback_applied' : 'awaiting_selection',
+ feedback_applied: feedbackApplied,
+ candidate_count: candidates.length,
+ distinct_candidate_count: candidates.length,
+ rejected_blueprint_ids: feedback?.rejected_blueprint_ids ?? [],
+ can_iterate: candidates.length > 0,
+ can_select: candidates.length > 0,
+ },
     }
   }
 
@@ -6662,11 +6701,42 @@ export function installConfigurableAppMockBridge(options = {}) {
       }
     })
 
-    return {
-      query_context: drafts[0]?.draft?.query_context ?? generateReferenceCorpusInsertionDraft(input).query_context,
-      selected_blueprint: selectedBlueprint,
-      candidates: drafts,
-    }
+return {
+query_context: drafts[0]?.draft?.query_context ?? generateReferenceCorpusInsertionDraft(input).query_context,
+selected_blueprint: selectedBlueprint,
+candidates: drafts,
+ candidate_set_audit: buildMockCorpusCandidateSetAudit(drafts),
+}
+
+function listReferenceCorpusAnalysisJobs(input = {}) {
+const pageSize = Math.max(1, Number(input?.page_request?.page_size ?? 20))
+ const novelId = Number(input?.page_request?.filters?.novel_id ?? 0)
+ const matching = state.referenceCorpusAnalysisJobs.filter((job) => !novelId || job.novel_id === novelId)
+ const items = matching.slice(0, pageSize)
+ return { items, total: matching.length, page: 1, size: pageSize, total_pages: 1, next_cursor: null, has_more: false, total_estimate: matching.length }
+}
+
+ function allowedReferenceCorpusJobActions(status) {
+ if (status === 'running' || status === 'queued') return ['pause', 'cancel', 'reprioritize']
+ if (status === 'paused' || status === 'retry_wait') return ['resume', 'cancel', 'reprioritize']
+ if (status === 'budget_exhausted') return ['resume', 'cancel']
+ return []
+ }
+
+ function updateReferenceCorpusAnalysisJob(input = {}, status) {
+ const job = state.referenceCorpusAnalysisJobs.find((item) => item.job_id === input?.job_id)
+ if (!job) throw new Error('Reference corpus analysis job was not found.')
+ if (Number(input?.expected_version) !== job.version) throw new Error('Reference corpus analysis job version conflict.')
+ Object.assign(job, { status, version: job.version + 1, updated_at: now, allowed_actions: allowedReferenceCorpusJobActions(status) })
+ return { ...job }
+ }
+
+ function reprioritizeReferenceCorpusAnalysisJob(input = {}) {
+ const job = updateReferenceCorpusAnalysisJob(input, state.referenceCorpusAnalysisJobs.find((item) => item.job_id === input?.job_id)?.status)
+ Object.assign(job, { priority_class: input?.priority_class, priority_value: Number(input?.priority_value ?? 0) })
+ Object.assign(state.referenceCorpusAnalysisJobs.find((item) => item.job_id === job.job_id), job)
+ return job
+ }
   }
 
   function buildMockCorpusSlotValueDraftCandidates(input, selectedBlueprint, requestedSlotVariants) {
@@ -6711,12 +6781,35 @@ export function installConfigurableAppMockBridge(options = {}) {
       }
     })
 
-    return {
-      query_context: drafts[0]?.draft?.query_context ?? generateReferenceCorpusInsertionDraft(input).query_context,
-      selected_blueprint: selectedBlueprint,
-      candidates: drafts,
-    }
-  }
+return {
+query_context: drafts[0]?.draft?.query_context ?? generateReferenceCorpusInsertionDraft(input).query_context,
+selected_blueprint: selectedBlueprint,
+candidates: drafts,
+ candidate_set_audit: buildMockCorpusCandidateSetAudit(drafts),
+}
+}
+
+ function buildMockCorpusCandidateSetAudit(drafts) {
+ const ready = drafts.filter((candidate) => candidate.draft?.ready_for_insertion)
+ return {
+ passed: ready.length > 0,
+ candidate_count: drafts.length,
+ ready_candidate_count: ready.length,
+ distinct_text_count: new Set(drafts.map((candidate) => candidate.draft?.assembled_text ?? '')).size,
+ differences: drafts.map((candidate, index) => ({
+ candidate_id: candidate.candidate_id,
+ baseline_candidate_id: ready[0]?.candidate_id ?? drafts[0]?.candidate_id ?? '',
+ same_blueprint_node_set: true,
+ same_piece_outputs: index === 0,
+ slot_difference_count: candidate.draft?.slot_replacements?.length ?? 0,
+ transition_difference_count: candidate.draft?.transitions?.length ?? 0,
+ only_allowed_differences: candidate.draft?.audit?.passed === true,
+ duplicate_text: false,
+ diagnostics: [],
+ })),
+ errors: [],
+ }
+ }
 
   function buildMockCorpusTransferredSlotSentence(slotValues) {
     const sourceText = '她在旧市集门口没有立刻开口，只叫了一声师兄，把钥匙扣在掌心，《旧市集门口师兄钥匙案》没有改。'

@@ -38,8 +38,10 @@ public sealed class ReferenceCorpusChatCompletionTechniqueSpecimenAnalyzer : IRe
         ArgumentNullException.ThrowIfNull(input);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var selectedModel = await ResolveSelectedModelAsync(cancellationToken)
-            ?? throw new InvalidOperationException("Reference corpus technique specimen analysis requires a selected model.");
+ var selectedModel = input.ModelSelection is { } frozenModel
+ ? new SelectedModel(frozenModel.ProviderName, frozenModel.ModelId, frozenModel.ReasoningEffort)
+ : await ResolveSelectedModelAsync(cancellationToken)
+?? throw new InvalidOperationException("Reference corpus technique specimen analysis requires a selected model.");
 
         var request = new ChatCompletionRequest(
             selectedModel.ProviderName,

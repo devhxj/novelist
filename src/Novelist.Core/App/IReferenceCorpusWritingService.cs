@@ -4,6 +4,10 @@ namespace Novelist.Core.App;
 
 public interface IReferenceCorpusWritingService
 {
+ ValueTask<ReferenceCorpusBlueprintCandidatePayload> GenerateChapterBlueprintAsync(
+ GenerateReferenceCorpusBlueprintCandidatesPayload input,
+ CancellationToken cancellationToken);
+
     ValueTask<ReferenceCorpusBlueprintCandidatesPayload> GenerateBlueprintCandidatesAsync(
         GenerateReferenceCorpusBlueprintCandidatesPayload input,
         CancellationToken cancellationToken);
@@ -105,10 +109,17 @@ public sealed record ReferenceCorpusLockedSourceSpan(
     string Reason);
 
 public sealed record ReferenceCorpusTextAssemblyRequest(
-    ReferenceCorpusInsertionBlueprintPayload Blueprint,
-    IReadOnlyList<ReferenceCorpusSourcePiece> SourcePieces,
-    CurrentChapterContextPayload ChapterContext,
-    IReadOnlyDictionary<string, string> ExplicitSlotValues);
+ReferenceCorpusInsertionBlueprintPayload Blueprint,
+IReadOnlyList<ReferenceCorpusSourcePiece> SourcePieces,
+CurrentChapterContextPayload ChapterContext,
+ IReadOnlyDictionary<string, string> ExplicitSlotValues,
+ string TransitionStrategy = ReferenceCorpusTransitionStrategies.Default);
+
+public static class ReferenceCorpusTransitionStrategies
+{
+ public const string Default = "default";
+ public const string DirectJoin = "direct_join";
+}
 
 public sealed record ReferenceCorpusTextAssemblyResult(
     IReadOnlyList<ReferenceCorpusInsertionPiecePayload> Pieces,

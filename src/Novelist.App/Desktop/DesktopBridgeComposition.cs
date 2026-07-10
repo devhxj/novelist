@@ -7,11 +7,17 @@ namespace Novelist.App.Desktop;
 
 public static class DesktopBridgeComposition
 {
-    public static PhotinoWebMessageBridge CreateBridge(
+public static PhotinoWebMessageBridge CreateBridge(
         IPhotinoWindow window,
         AppInitializationOptions? appOptions = null,
         IExternalUrlOpener? externalUrlOpener = null)
-    {
+ => CreateRuntime(window, appOptions, externalUrlOpener).Bridge;
+
+ internal static DesktopBridgeRuntime CreateRuntime(
+ IPhotinoWindow window,
+ AppInitializationOptions? appOptions = null,
+ IExternalUrlOpener? externalUrlOpener = null)
+ {
         ArgumentNullException.ThrowIfNull(window);
 
         var options = appOptions ?? new AppInitializationOptions { EnableLegacyMigration = true };
@@ -111,6 +117,19 @@ var referenceCorpusAnalysisService = new SqliteReferenceCorpusAnalysisService(
 options,
 settingsService,
 chatCompletion: chatCompletionClient);
+var referenceCorpusAnalysisScheduler = new SqliteReferenceCorpusAnalysisScheduler(
+new ReferenceCorpusDatabasePathResolver(options),
+settingsService);
+var referenceCorpusAnalysisWorker = new ReferenceCorpusAnalysisWorker(
+new ReferenceCorpusDatabasePathResolver(options),
+new ReferenceCorpusChatCompletionFeatureFamilyAnalyzer(settingsService, chatCompletionClient),
+new ReferenceCorpusChatCompletionTechniqueSpecimenAnalyzer(settingsService, chatCompletionClient));
+ var initializationService = new CoordinatedAppInitializationService(
+ new FileSystemAppInitializationService(
+ options,
+ importRecovery: novelImportRecoveryService,
+ referenceAnchorRecovery: referenceAnchorService),
+ referenceCorpusAnalysisWorker);
  var referenceCorpusGovernanceService = new SqliteReferenceCorpusGovernanceService(options);
         var referenceStyleProfileService = new SqliteReferenceStyleProfileService(
             options,
@@ -162,10 +181,7 @@ chatCompletion: chatCompletionClient);
             .RegisterDefaultNovelistHandlers(new PhotinoBridgeRuntimeHost(
                 window,
                 externalUrlOpener ?? new SystemExternalUrlOpener()))
-            .RegisterAppInitializationHandlers(new FileSystemAppInitializationService(
-                options,
-                importRecovery: novelImportRecoveryService,
-                referenceAnchorRecovery: referenceAnchorService))
+ .RegisterAppInitializationHandlers(initializationService)
             .RegisterAppSettingsHandlers(settingsService)
             .RegisterNovelHandlers(novelService)
             .RegisterChapterContentHandlers(chapterContentService)
@@ -192,14 +208,32 @@ chatCompletion: chatCompletionClient);
             .RegisterReferenceAnchorHandlers(referenceAnchorService)
             .RegisterReferenceCorpusHandlers(referenceCorpusService)
 .RegisterReferenceCorpusAnalysisHandlers(referenceCorpusAnalysisService)
+.RegisterReferenceCorpusAnalysisJobHandlers(referenceCorpusAnalysisScheduler)
 .RegisterReferenceCorpusWritingHandlers(referenceCorpusWritingService)
  .RegisterReferenceCorpusGovernanceHandlers(referenceCorpusGovernanceService)
             .RegisterReferenceStyleProfileHandlers(referenceStyleProfileService)
             .RegisterReferenceAnchoredDraftHandlers(referenceAnchoredDraftService)
             .RegisterApprovalHandlers(approvalCoordinator)
             .RegisterChatSessionHandlers(chatService);
-        return new PhotinoWebMessageBridge(dispatcher, window);
-    }
+return new DesktopBridgeRuntime(
+new PhotinoWebMessageBridge(dispatcher, window),
+ referenceCorpusAnalysisWorker,
+ initializationService);
+}
+
+ internal sealed record DesktopBridgeRuntime(
+PhotinoWebMessageBridge Bridge,
+ ReferenceCorpusAnalysisWorker AnalysisWorker,
+ CoordinatedAppInitializationService InitializationService) : IAsyncDisposable
+{
+public ValueTask StartAsync(CancellationToken cancellationToken = default) =>
+ InitializationService.StartWorkerIfInitializedAsync(cancellationToken);
+
+ public async ValueTask DisposeAsync()
+ {
+ await AnalysisWorker.DisposeAsync();
+ }
+ }
 
     private sealed class DeferredRagIndexRefreshNotifier : IRagIndexRefreshNotifier
     {

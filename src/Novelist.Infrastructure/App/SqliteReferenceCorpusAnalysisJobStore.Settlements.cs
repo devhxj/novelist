@@ -21,9 +21,15 @@ internal sealed partial class SqliteReferenceCorpusAnalysisJobStore
  await ValidateWorkItemFenceAsync(connection, transaction, request.Reservation, cancellationToken);
  await ValidateAttemptFenceAsync(connection, transaction, request.Reservation, cancellationToken);
 
- var (jobStatus, workItemState, attemptOutcome) = ResolveSettlement(request.Kind);
- await SettleWorkItemRowAsync(connection, transaction, request.Reservation, workItemState, cancellationToken);
- await SettleJobRowAsync(connection, transaction, job, request, jobStatus, cancellationToken);
+ var failureAttemptCount = await ReadFailureAttemptCountAsync(
+ connection, transaction, request.Reservation.JobId, cancellationToken);
+ var settlementKind = request.Kind == ReferenceCorpusAnalysisWorkItemSettlementKind.RetryableFailure &&
+ failureAttemptCount + 1 >= job.MaxAttempts
+ ? ReferenceCorpusAnalysisWorkItemSettlementKind.PermanentFailure
+ : request.Kind;
+ var (jobStatus, workItemState, attemptOutcome) = ResolveSettlement(settlementKind);
+await SettleWorkItemRowAsync(connection, transaction, request.Reservation, workItemState, cancellationToken);
+ await SettleJobRowAsync(connection, transaction, job, request, settlementKind, jobStatus, cancellationToken);
 await SettleAttemptRowAsync(connection, transaction, request, attemptOutcome, cancellationToken);
  await SyncCanonicalRunAsync(connection, transaction, request.Reservation.JobId, cancellationToken);
 
@@ -37,8 +43,12 @@ await SettleAttemptRowAsync(connection, transaction, request, attemptOutcome, ca
  {
  if (!Enum.IsDefined(request.Kind))
  throw new ArgumentOutOfRangeException(nameof(request), request.Kind, "Unknown work-item settlement kind.");
- if (request.TokensSpent < 0 || request.TokensSpent > request.Reservation.ReservedTokens)
- throw new ArgumentOutOfRangeException(nameof(request), "Tokens spent must fit within the reservation.");
+ if (request.TokensSpent < 0)
+ throw new ArgumentOutOfRangeException(nameof(request), "Tokens spent cannot be negative.");
+ if (request.TokensSpent > request.Reservation.ReservedTokens &&
+ !string.Equals(request.ErrorCode, "token_reservation_overrun", StringComparison.Ordinal))
+ throw new ArgumentOutOfRangeException(
+ nameof(request), "Settlement tokens cannot exceed the frozen reservation.");
  if (request.ErrorCode is { Length: > MaxErrorCodeLength } || request.ErrorCode?.Any(char.IsControl) == true)
  throw new ArgumentException($"Error code must be at most {MaxErrorCodeLength} non-control characters.", nameof(request));
  if (request.ErrorMessage is { Length: > MaxErrorMessageLength } || request.ErrorMessage?.Any(char.IsControl) == true)
@@ -122,20 +132,24 @@ await SettleAttemptRowAsync(connection, transaction, request, attemptOutcome, ca
  throw new ReferenceCorpusAnalysisJobConflictException("Analysis work item changed during settlement.");
  }
 
- private static async ValueTask SettleJobRowAsync(
- SqliteConnection connection, SqliteTransaction transaction,
- ReferenceCorpusAnalysisJob job, ReferenceCorpusAnalysisWorkItemSettlementRequest request,
+private static async ValueTask SettleJobRowAsync(
+SqliteConnection connection, SqliteTransaction transaction,
+ReferenceCorpusAnalysisJob job, ReferenceCorpusAnalysisWorkItemSettlementRequest request,
+ ReferenceCorpusAnalysisWorkItemSettlementKind settlementKind,
  string jobStatus, CancellationToken cancellationToken)
- {
- var reservation = request.Reservation;
- var permanentFailure = request.Kind == ReferenceCorpusAnalysisWorkItemSettlementKind.PermanentFailure;
- var terminal = request.Kind is ReferenceCorpusAnalysisWorkItemSettlementKind.PermanentFailure
+{
+var reservation = request.Reservation;
+ var failure = settlementKind is ReferenceCorpusAnalysisWorkItemSettlementKind.RetryableFailure
+ or ReferenceCorpusAnalysisWorkItemSettlementKind.PermanentFailure;
+ var permanentFailure = settlementKind == ReferenceCorpusAnalysisWorkItemSettlementKind.PermanentFailure;
+ var terminal = settlementKind is ReferenceCorpusAnalysisWorkItemSettlementKind.PermanentFailure
  or ReferenceCorpusAnalysisWorkItemSettlementKind.CancelBoundary;
  await using var command = connection.CreateCommand();
  command.Transaction = transaction;
  command.CommandText = """
  UPDATE reference_analysis_jobs
  SET status=$status,
+ failure_attempt_count=failure_attempt_count+$failure_delta,
  processed_work_items=processed_work_items+$processed_delta,
  failed_work_items=failed_work_items+$failed_delta,
  retrying_work_items=$retrying_items,
@@ -152,14 +166,18 @@ await SettleAttemptRowAsync(connection, transaction, request, attemptOutcome, ca
  AND tokens_reserved>=$reserved_tokens
  AND processed_work_items=$processed_work_items AND failed_work_items=$failed_work_items;
  """;
- Add(command, "$status", jobStatus);
+Add(command, "$status", jobStatus);
+ Add(command, "$failure_delta", failure ? 1 : 0);
  Add(command, "$processed_delta", permanentFailure ? 1 : 0);
 Add(command, "$failed_delta", permanentFailure ? 1 : 0);
  Add(command, "$retrying_items",
- request.Kind == ReferenceCorpusAnalysisWorkItemSettlementKind.RetryableFailure ? 1 : 0);
+ settlementKind == ReferenceCorpusAnalysisWorkItemSettlementKind.RetryableFailure ? 1 : 0);
  Add(command, "$tokens_spent", request.TokensSpent);
  Add(command, "$reserved_tokens", reservation.ReservedTokens);
- Add(command, "$next_attempt_at", request.NextAttemptAt is { } retryAt ? ToDb(retryAt) : null);
+ Add(command, "$next_attempt_at",
+ settlementKind == ReferenceCorpusAnalysisWorkItemSettlementKind.RetryableFailure && request.NextAttemptAt is { } retryAt
+ ? ToDb(retryAt)
+ : null);
  Add(command, "$completed_at", terminal ? ToDb(request.SettledAt) : null);
  Add(command, "$error_code", request.ErrorCode);
  Add(command, "$error_message", request.ErrorMessage);
@@ -173,8 +191,21 @@ Add(command, "$failed_delta", permanentFailure ? 1 : 0);
  Add(command, "$attempt_no", reservation.AttemptNumber);
  Add(command, "$processed_work_items", job.ProcessedWorkItems);
  Add(command, "$failed_work_items", job.FailedWorkItems);
- if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
- throw new ReferenceCorpusAnalysisJobConflictException("Analysis job changed during work-item settlement.");
+if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+throw new ReferenceCorpusAnalysisJobConflictException("Analysis job changed during work-item settlement.");
+}
+
+ private static async ValueTask<int> ReadFailureAttemptCountAsync(
+ SqliteConnection connection,
+ SqliteTransaction transaction,
+ string jobId,
+ CancellationToken cancellationToken)
+ {
+ await using var command = connection.CreateCommand();
+ command.Transaction = transaction;
+ command.CommandText = "SELECT failure_attempt_count FROM reference_analysis_jobs WHERE job_id=$job_id;";
+ Add(command, "$job_id", jobId);
+ return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
  }
 
  private static async ValueTask SettleAttemptRowAsync(

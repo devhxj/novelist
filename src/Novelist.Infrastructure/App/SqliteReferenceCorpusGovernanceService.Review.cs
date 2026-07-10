@@ -33,10 +33,30 @@ public sealed partial class SqliteReferenceCorpusGovernanceService
  var total = await CountPendingAsync(connection, cancellationToken);
  var items = new List<ReferenceCorpusReviewQueueItemPayload>();
  await using var command = connection.CreateCommand();
- command.CommandText = "SELECT queue_id,item_type,item_id,anchor_id,node_id,reason,review_state,confidence,feature_family,created_at FROM reference_review_queue WHERE resolved_at IS NULL ORDER BY created_at,queue_id LIMIT $size OFFSET $offset;";
+ command.CommandText = """
+ SELECT queue.queue_id,queue.item_type,queue.item_id,queue.anchor_id,queue.node_id,
+ queue.reason,queue.review_state,queue.confidence,queue.feature_family,queue.created_at,
+ anchor.title,COALESCE(observation.evidence_start,0),COALESCE(observation.evidence_end,node.char_len),
+ CASE
+ WHEN observation.evidence_start IS NULL OR observation.evidence_end IS NULL THEN substr(node.text,1,160)
+ ELSE substr(node.text,MAX(1,observation.evidence_start-39),MIN(160,length(node.text)-MAX(0,observation.evidence_start-40)))
+ END
+ FROM reference_review_queue AS queue
+ LEFT JOIN reference_anchors AS anchor ON anchor.anchor_id=queue.anchor_id
+ LEFT JOIN reference_text_nodes AS node ON node.node_id=queue.node_id
+ LEFT JOIN reference_feature_observations AS observation
+ ON queue.item_type='observation' AND observation.observation_id=queue.item_id
+ WHERE queue.resolved_at IS NULL
+ ORDER BY queue.created_at,queue.queue_id LIMIT $size OFFSET $offset;
+ """;
  command.Parameters.AddWithValue("$size", size); command.Parameters.AddWithValue("$offset", (page - 1) * size);
  await using var reader = await command.ExecuteReaderAsync(cancellationToken);
- while (await reader.ReadAsync(cancellationToken)) items.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(3), reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetDouble(7), reader.IsDBNull(8) ? null : reader.GetString(8), DateTimeOffset.Parse(reader.GetString(9))));
+ while (await reader.ReadAsync(cancellationToken)) items.Add(new(
+ reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(3),
+ reader.GetString(4), reader.GetString(5), reader.GetString(6), reader.GetDouble(7),
+ reader.IsDBNull(8) ? null : reader.GetString(8), DateTimeOffset.Parse(reader.GetString(9)),
+ reader.IsDBNull(10) ? null : reader.GetString(10), reader.IsDBNull(11) ? null : reader.GetInt32(11),
+ reader.IsDBNull(12) ? null : reader.GetInt32(12), reader.IsDBNull(13) ? null : reader.GetString(13)));
  var hasMore = page * size < total;
  return new PageResultPayload<ReferenceCorpusReviewQueueItemPayload>(items, total, page, size, Math.Max(1, (int)Math.Ceiling(total / (double)size)), hasMore ? (page + 1).ToString() : null, hasMore, total);
  }, cancellationToken);

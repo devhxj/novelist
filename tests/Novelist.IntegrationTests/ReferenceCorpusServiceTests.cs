@@ -107,12 +107,12 @@ public sealed class ReferenceCorpusServiceTests : IDisposable
         {
             QueryContext = BuildFourWayRecallPayload().QueryContext with
             {
-                Scope = BuildFourWayRecallPayload().QueryContext.Scope with
-                {
-                    ExcludeAnchorIds = [203]
-                }
-            }
-        };
+Scope = BuildFourWayRecallPayload().QueryContext.Scope with
+{
+ExcludeAnchorIds = [203]
+ }
+ }
+};
 
         var result = await service.SearchCandidatesAsync(request, CancellationToken.None);
 
@@ -231,7 +231,7 @@ Assert.NotEmpty(after.Items);
  }
 
     [Fact]
-    public async Task SearchCandidatesFoldsCrossLibraryDedupGroupsBeforeScoring()
+public async Task SearchCandidatesFoldsCrossLibraryDedupGroupsBeforeScoring()
     {
         var options = CreateOptions();
         await InitializeAsync(options);
@@ -250,8 +250,81 @@ Assert.NotEmpty(after.Items);
         Assert.NotEmpty(result.Items);
         Assert.DoesNotContain(result.Items, item => item.LibraryId == "library-rain-doorway");
         Assert.Contains(result.Items, item => item.LibraryId == "library-fire-market");
-        Assert.Single(result.Items.Select(item => item.AnchorId).Distinct());
-    }
+Assert.Single(result.Items.Select(item => item.AnchorId).Distinct());
+ Assert.All(result.Items, item =>
+ {
+ Assert.Equal(2, item.SourceCoverage?.Count);
+ Assert.Equal(2, item.SourceCoverage?.Select(source => source.LibraryId).Distinct(StringComparer.Ordinal).Count());
+ Assert.Single(item.SourceCoverage!, source => source.SelectedRepresentative);
+ Assert.All(item.SourceCoverage!, source =>
+ Assert.Equal(ReferenceCorpusLicenseStates.Authorized, source.LicenseState));
+ });
+}
+
+ [Fact]
+ public async Task SearchCandidatesReturnsUnifiedRouteProvenanceForIndependentTopKUnion()
+ {
+ var options = CreateOptions();
+ await InitializeAsync(options);
+ await SeedFourWayRecallFixtureAsync(options);
+ var service = new SqliteReferenceCorpusService(
+ options,
+ new StaticEmbeddingConfigurationService(CreateEmbeddingOptions()),
+ new FourWayRecallEmbeddingClient(defaultDimensions: 4));
+
+ var result = await service.SearchCandidatesAsync(
+ BuildFourWayRecallPayload() with
+ {
+ PageRequest = BuildFourWayRecallPayload().PageRequest with { PageSize = 32 }
+ },
+ CancellationToken.None);
+
+ Assert.Contains(result.Items, item => item.RouteProvenance!.Any(route => route.Route == "text_semantic"));
+ Assert.Contains(result.Items, item => item.RouteProvenance!.Any(route => route.Route == "technique_semantic"));
+ Assert.Contains(result.Items, item => item.RouteProvenance!.Any(route => route.Route == "structured_observation"));
+ Assert.Contains(result.Items, item => item.RouteProvenance!.Any(route => route.Route == "chapter_context"));
+ Assert.All(result.Items.SelectMany(item => item.RouteProvenance ?? []), route =>
+ {
+ Assert.True(route.Rank > 0);
+ Assert.True(route.RouteScore > 0);
+ });
+ }
+
+ [Fact]
+ public async Task SearchCandidatesFeedbackAdjustsWeightsAndInvalidatesPriorCursor()
+ {
+ var options = CreateOptions();
+ await InitializeAsync(options);
+ await SeedFourWayRecallFixtureAsync(options);
+ var service = new SqliteReferenceCorpusService(
+ options,
+ new StaticEmbeddingConfigurationService(CreateEmbeddingOptions()),
+ new FourWayRecallEmbeddingClient(defaultDimensions: 4));
+ var request = BuildFourWayRecallPayload() with
+ {
+ PageRequest = BuildFourWayRecallPayload().PageRequest with { PageSize = 2 }
+ };
+
+ var baseline = await service.SearchCandidatesAsync(request, CancellationToken.None);
+ var feedbackRequest = request with
+ {
+ RetrievalFeedback = new(
+ PreferredRoutes: ["structured_observation"],
+ AvoidedRoutes: ["text_semantic"],
+ PreferSourceDiversity: true,
+ WeightAdjustments: new Dictionary<string, double> { ["observation_fit"] = 0.25 })
+ };
+ var adjusted = await service.SearchCandidatesAsync(feedbackRequest, CancellationToken.None);
+
+ Assert.True(adjusted.Items[0].RetrievalDiagnostics!.AppliedWeights!["observation_fit"] >
+ baseline.Items[0].RetrievalDiagnostics!.AppliedWeights!["observation_fit"]);
+ Assert.Contains(adjusted.Items[0].RouteProvenance!, route => route.Route == "structured_observation");
+ var exception = await Assert.ThrowsAsync<PageRequestValidationException>(async () =>
+ await service.SearchCandidatesAsync(
+ feedbackRequest with { PageRequest = feedbackRequest.PageRequest with { Cursor = baseline.NextCursor } },
+ CancellationToken.None));
+ Assert.Equal(PageRequestErrorCodes.InvalidCursor, exception.Code);
+ }
 
     [Fact]
     public async Task SearchCandidatesFiltersByStructuredObservationAndSensoryProjection()
@@ -414,7 +487,9 @@ Assert.NotEmpty(after.Items);
         Assert.Equal("node-rain-doorway-far-technique", top.NodeId);
         Assert.True(top.ScoreComponents.TryGetValue("recall_technique_semantic", out var recallRoute));
         Assert.Equal(1, recallRoute);
-        Assert.DoesNotContain(result.Items, item => item.NodeId == "node-rain-doorway-far-technique-unranked");
+ var unrankedTechnique = Assert.Single(result.Items, item => item.NodeId == "node-rain-doorway-far-technique-unranked");
+ Assert.False(unrankedTechnique.ScoreComponents.ContainsKey("recall_technique_semantic"));
+ Assert.DoesNotContain(unrankedTechnique.RouteProvenance ?? [], route => route.Route == "technique_semantic");
         Assert.Equal(2, await ReadTechniqueVectorCountAsync(options));
         Assert.Equal(2, await ReadTechniqueVectorRowCountAsync(options));
     }
@@ -873,7 +948,7 @@ Assert.NotEmpty(after.Items);
     }
 
     [Fact]
-    public async Task SearchCandidatesMergesFourRecallRoutesWithDiagnostics()
+public async Task SearchCandidatesMergesFourRecallRoutesWithDiagnostics()
     {
         var options = CreateOptions();
         await InitializeAsync(options);
@@ -2530,8 +2605,9 @@ Assert.NotEmpty(after.Items);
                 topic = Math.Min(2, dimensions - 1);
             }
 
-            vector[Math.Min(topic, dimensions - 1)] = 1f;
-            return vector;
-        }
-    }
+vector[Math.Min(topic, dimensions - 1)] = 1f;
+return vector;
+}
+}
+
 }

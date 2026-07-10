@@ -100,8 +100,13 @@ Assert.Equal(["library-project"], style.LibraryIds);
 
  Assert.True(await service.RefreshReviewQueueAsync(new(0.7), CancellationToken.None) > 0);
  var page = await service.ListReviewQueueAsync(new(new(null, 1, "created_at", "asc")), CancellationToken.None);
- var item = Assert.Single(page.Items);
- Assert.True(page.HasMore);
+var item = Assert.Single(page.Items);
+Assert.True(page.HasMore);
+ Assert.Equal("A", item.AnchorTitle);
+ Assert.Equal(0, item.EvidenceStart);
+ Assert.Equal(4, item.EvidenceEnd);
+ Assert.Equal("text", item.EvidencePreview);
+ Assert.True(item.EvidencePreview!.Length <= 240);
 
  Assert.Equal(1, await service.ReviewItemsAsync(new([item.QueueId], "confirmed"), CancellationToken.None));
  var next = await service.ListReviewQueueAsync(new(new(page.NextCursor, 10, "created_at", "asc")), CancellationToken.None);

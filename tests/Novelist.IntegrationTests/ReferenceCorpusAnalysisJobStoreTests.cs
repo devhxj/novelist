@@ -600,7 +600,7 @@ await fixture.ReadAttemptSettlementDetailsAsync($"job-{suffix}", 1));
  }
 
 [Fact]
-public async Task SettleWorkItemRejectsStaleInvocationAndTokenOverrunWithZeroWrites()
+public async Task SettleWorkItemRejectsStaleInvocationWithZeroWrites()
  {
  await using var fixture = await JobStoreFixture.CreateAsync();
  var now = DateTimeOffset.Parse("2026-07-10T01:02:03Z");
@@ -611,11 +611,6 @@ public async Task SettleWorkItemRejectsStaleInvocationAndTokenOverrunWithZeroWri
  reservation with { InvocationNumber = reservation.InvocationNumber + 1 },
  ReferenceCorpusAnalysisWorkItemSettlementKind.RetryableFailure, 275,
  "provider_timeout", "Provider timed out.", now.AddMinutes(2), now.AddSeconds(2))));
- await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
- await fixture.Store.SettleWorkItemAsync(new(
- reservation, ReferenceCorpusAnalysisWorkItemSettlementKind.PermanentFailure, 401,
- "invalid_schema", "Invalid schema.", null, now.AddSeconds(2))));
-
  var job = await fixture.Store.GetAsync("job-settle-fence");
  Assert.NotNull(job);
  Assert.Equal(ReferenceCorpusAnalysisJobStatuses.Running, job.Status);
@@ -625,6 +620,60 @@ public async Task SettleWorkItemRejectsStaleInvocationAndTokenOverrunWithZeroWri
  Assert.Equal((0, false, null, null), await fixture.ReadAttemptSettlementDetailsAsync("job-settle-fence", 1));
  }
 
+ [Fact]
+ public async Task SettleWorkItemRecordsUsageOverrunWithoutClampingActualCost()
+ {
+ await using var fixture = await JobStoreFixture.CreateAsync();
+ var now = DateTimeOffset.Parse("2026-07-10T01:02:03Z");
+ var reservation = await fixture.CreateReservationAsync("settle-overrun", now, 400);
+
+ var result = await fixture.Store.SettleWorkItemAsync(new(
+ reservation, ReferenceCorpusAnalysisWorkItemSettlementKind.PermanentFailure, 401,
+ "token_reservation_overrun", "Provider usage exceeded the frozen reservation.", null, now.AddSeconds(2)));
+
+ Assert.Equal(ReferenceCorpusAnalysisJobStatuses.Failed, result.Job.Status);
+ Assert.Equal(401, result.Job.TokensSpent);
+ Assert.Equal(0, await fixture.ReadJobReservedTokensAsync("job-settle-overrun"));
+ Assert.Equal(("failed", 0), await fixture.ReadWorkItemReservationAsync("snapshot-settle-overrun", 0));
+ Assert.Equal((401, true, "permanent_failure", "token_reservation_overrun"),
+ await fixture.ReadAttemptSettlementDetailsAsync("job-settle-overrun", 1));
+ }
+ [Theory]
+ [InlineData(false, false, ReferenceCorpusAnalysisJobStatuses.RetryWait, "pending")]
+ [InlineData(true, false, ReferenceCorpusAnalysisJobStatuses.Paused, "pending")]
+ [InlineData(false, true, ReferenceCorpusAnalysisJobStatuses.Cancelled, "pending")]
+ public async Task AbandonReservationReleasesFenceAndHonorsControlBoundary(
+ bool pause,
+ bool cancel,
+ string expectedStatus,
+ string expectedWorkState)
+ {
+ await using var fixture = await JobStoreFixture.CreateAsync();
+ var now = DateTimeOffset.Parse("2026-07-10T01:02:03Z");
+ var suffix = $"abandon-{pause}-{cancel}";
+ var reservation = await fixture.CreateReservationAsync(suffix, now, 400);
+ if (pause)
+ {
+ var running = await fixture.Store.GetAsync($"job-{suffix}");
+ await fixture.Store.RequestPauseAsync(running!.JobId, running.Version, now.AddMilliseconds(100));
+ }
+ if (cancel)
+ {
+ var running = await fixture.Store.GetAsync($"job-{suffix}");
+ await fixture.Store.RequestCancelAsync(running!.JobId, running.Version, now.AddMilliseconds(100));
+ }
+
+ var abandoned = await fixture.Store.AbandonReservationAsync(
+ reservation, 400, "worker_shutdown", "Worker stopped.",
+ now.AddSeconds(1), now.AddSeconds(2));
+
+ Assert.Equal(expectedStatus, abandoned.Status);
+ Assert.Equal(400, abandoned.TokensSpent);
+ Assert.Null(abandoned.LeaseExpiresAt);
+ Assert.Equal((expectedWorkState, 0), await fixture.ReadWorkItemReservationAsync($"snapshot-{suffix}", 0));
+ Assert.Equal((400, true, "abandoned", "worker_shutdown"),
+ await fixture.ReadAttemptSettlementDetailsAsync($"job-{suffix}", 1));
+ }
  private static ReferenceCorpusAnalysisInputSnapshot CreateSnapshot(string id, int workCount, DateTimeOffset at) =>
  new(id, 101, "stage_2", "sentence", "nodes-hash", "[\"syntax\",\"emotion\"]",
  "corpus-analysis-v2", "feature-v2", "fake", "fake-model", 2, workCount, at);

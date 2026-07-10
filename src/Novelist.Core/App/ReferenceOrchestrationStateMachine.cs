@@ -37,7 +37,7 @@ public static class ReferenceOrchestrationStateMachine
     {
         return decisionType switch
         {
-            ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts => ReferenceOrchestrationStages.BlueprintGeneration,
+ ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts => ReferenceOrchestrationStages.GoalParsing,
             ReferenceOrchestrationDecisionTypes.ApplyBlueprintRevision => ReferenceOrchestrationStages.BlueprintReview,
             ReferenceOrchestrationDecisionTypes.ApproveBlueprint => ReferenceOrchestrationStages.MaterialBinding,
             ReferenceOrchestrationDecisionTypes.ResolveHighRiskStop => currentStage,
@@ -50,7 +50,9 @@ public static class ReferenceOrchestrationStateMachine
     {
         return string.Equals(run.Status, ReferenceOrchestrationRunStatuses.Running, StringComparison.Ordinal) &&
             run.CurrentDecision is null &&
-            (string.Equals(run.Stage, ReferenceOrchestrationStages.BlueprintGeneration, StringComparison.Ordinal) ||
-                string.Equals(run.Stage, ReferenceOrchestrationStages.MaterialBinding, StringComparison.Ordinal));
+ (string.Equals(ReferenceOrchestrationStages.NormalizeForExecution(run.Stage), ReferenceOrchestrationStages.GoalParsing, StringComparison.Ordinal) ||
+ string.Equals(run.Stage, ReferenceOrchestrationStages.CorpusRetrieval, StringComparison.Ordinal) ||
+ string.Equals(run.Stage, ReferenceOrchestrationStages.BlueprintAssembly, StringComparison.Ordinal) ||
+string.Equals(run.Stage, ReferenceOrchestrationStages.MaterialBinding, StringComparison.Ordinal));
     }
 }

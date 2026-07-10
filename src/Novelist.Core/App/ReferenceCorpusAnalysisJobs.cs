@@ -40,8 +40,11 @@ public sealed record ReferenceCorpusAnalysisJob(
  DateTimeOffset? CompletedAt,
  DateTimeOffset UpdatedAt,
  string? LastErrorCode,
- string? LastErrorMessage,
- long Version);
+string? LastErrorMessage,
+long Version,
+int FailureAttemptCount = 0,
+ int TokensReserved = 0,
+ int ProcessedNodes = 0);
 
 public sealed record ReferenceCorpusAnalysisJobEnqueue(
  string JobId,
@@ -88,11 +91,13 @@ string FeatureFamily,
  string InputPayloadHash);
 
 public sealed record ReferenceCorpusAnalysisJobListRequest(
- long? NovelId,
- long? AnchorId,
- string? Status,
- int Offset,
- int Limit);
+long? NovelId,
+long? AnchorId,
+string? Status,
+int Offset,
+ int Limit,
+ DateTimeOffset? UpdatedBefore = null,
+ string? JobIdAfter = null);
 
 public sealed record ReferenceCorpusAnalysisJobClaim(
 ReferenceCorpusAnalysisJob Job,
@@ -141,9 +146,18 @@ public sealed record ReferenceCorpusAnalysisWorkItemSettlementRequest(
  DateTimeOffset SettledAt);
 
 public sealed record ReferenceCorpusAnalysisWorkItemSettlementResult(
- ReferenceCorpusAnalysisJob Job,
- string WorkItemState,
- string AttemptOutcome);
+ReferenceCorpusAnalysisJob Job,
+string WorkItemState,
+string AttemptOutcome);
+
+public enum ReferenceCorpusAnalysisCommitDisposition
+{
+ Continue,
+ Complete,
+ PauseAfterCommit,
+ CancelAfterCommit,
+ BudgetExhaustedAfterCommit
+}
 
 public sealed class ReferenceCorpusAnalysisJobConflictException : InvalidOperationException
 {

@@ -6,9 +6,25 @@ namespace Novelist.Core.Bridge;
 
 public sealed class BridgeDispatcher
 {
-    private readonly Dictionary<string, BridgeMethodHandler> _handlers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, RegisteredBridgeMethod> _handlers = new(StringComparer.Ordinal);
+    private readonly BridgeOperationGate _operationGate;
+
+    public BridgeDispatcher()
+    : this(new BridgeOperationGate())
+    {
+    }
+
+    public BridgeDispatcher(BridgeOperationGate operationGate)
+    {
+        _operationGate = operationGate ?? throw new ArgumentNullException(nameof(operationGate));
+    }
 
     public void Register(string method, BridgeMethodHandler handler)
+    {
+        Register(method, handler, BridgeOperationAccess.Shared);
+    }
+
+    public void Register(string method, BridgeMethodHandler handler, BridgeOperationAccess access)
     {
         if (string.IsNullOrWhiteSpace(method))
         {
@@ -16,7 +32,7 @@ public sealed class BridgeDispatcher
         }
 
         ArgumentNullException.ThrowIfNull(handler);
-        _handlers[method] = handler;
+        _handlers[method] = new RegisteredBridgeMethod(handler, access);
     }
 
     public async ValueTask<BridgeDispatchResult> DispatchAsync(string message, CancellationToken cancellationToken = default)
@@ -62,7 +78,7 @@ public sealed class BridgeDispatcher
             return Error(id, BridgeErrorCodes.ValidationError, "Bridge request method is required.");
         }
 
-        if (!_handlers.TryGetValue(method, out var handler))
+        if (!_handlers.TryGetValue(method, out var registered))
         {
             return Error(id, BridgeErrorCodes.MethodNotFound, $"Bridge method '{method}' is not registered.");
         }
@@ -85,7 +101,10 @@ public sealed class BridgeDispatcher
                 }
 
                 var effectiveCancellation = deadlineCancellation?.Token ?? cancellationToken;
-                var result = await handler(context, effectiveCancellation);
+                await using var operation = await _operationGate.EnterAsync(
+                registered.Access,
+                effectiveCancellation);
+                var result = await registered.Handler(context, effectiveCancellation);
                 return Serialize(BridgeResponse.Success(id, result));
             }
             finally
@@ -186,4 +205,8 @@ public sealed class BridgeDispatcher
     {
         return BridgeDispatchResult.Outbound(JsonSerializer.Serialize(response, BridgeJson.SerializerOptions));
     }
+
+    private sealed record RegisteredBridgeMethod(
+    BridgeMethodHandler Handler,
+    BridgeOperationAccess Access);
 }

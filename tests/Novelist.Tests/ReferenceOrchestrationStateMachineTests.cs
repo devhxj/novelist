@@ -6,7 +6,7 @@ namespace Novelist.Tests;
 public sealed class ReferenceOrchestrationStateMachineTests
 {
     [Theory]
-    [InlineData(ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts, ReferenceOrchestrationStages.SourceConfirmation, ReferenceOrchestrationStages.BlueprintGeneration)]
+ [InlineData(ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts, ReferenceOrchestrationStages.SourceConfirmation, ReferenceOrchestrationStages.GoalParsing)]
     [InlineData(ReferenceOrchestrationDecisionTypes.ApplyBlueprintRevision, ReferenceOrchestrationStages.BlueprintReview, ReferenceOrchestrationStages.BlueprintReview)]
     [InlineData(ReferenceOrchestrationDecisionTypes.ApproveBlueprint, ReferenceOrchestrationStages.BlueprintApproval, ReferenceOrchestrationStages.MaterialBinding)]
     public void ResumeAfterDecisionMovesApprovedHumanDecisionsIntoRunningSafeStage(
@@ -53,9 +53,12 @@ public sealed class ReferenceOrchestrationStateMachineTests
         Assert.Equal(updatedAt, resumed.UpdatedAt);
     }
 
-    [Theory]
-    [InlineData(ReferenceOrchestrationStages.BlueprintGeneration, true)]
-    [InlineData(ReferenceOrchestrationStages.MaterialBinding, true)]
+ [Theory]
+ [InlineData(ReferenceOrchestrationStages.BlueprintGeneration, true)]
+ [InlineData(ReferenceOrchestrationStages.GoalParsing, true)]
+ [InlineData(ReferenceOrchestrationStages.CorpusRetrieval, true)]
+ [InlineData(ReferenceOrchestrationStages.BlueprintAssembly, true)]
+ [InlineData(ReferenceOrchestrationStages.MaterialBinding, true)]
     [InlineData(ReferenceOrchestrationStages.BlueprintReview, false)]
     [InlineData(ReferenceOrchestrationStages.BlueprintApproval, false)]
     [InlineData(ReferenceOrchestrationStages.DraftGeneration, false)]
@@ -72,7 +75,7 @@ public sealed class ReferenceOrchestrationStateMachineTests
     }
 
     [Fact]
-    public void ShouldRunSafeStagesDoesNotRunWhenUserDecisionIsPending()
+ public void ShouldRunSafeStagesDoesNotRunWhenUserDecisionIsPending()
     {
         var run = BuildRun(
             ReferenceOrchestrationStages.BlueprintGeneration,
@@ -81,8 +84,24 @@ public sealed class ReferenceOrchestrationStateMachineTests
             Status = ReferenceOrchestrationRunStatuses.Running
         };
 
-        Assert.False(ReferenceOrchestrationStateMachine.ShouldRunSafeStages(run));
-    }
+ Assert.False(ReferenceOrchestrationStateMachine.ShouldRunSafeStages(run));
+ }
+
+ [Fact]
+ public void LegacyBlueprintGenerationStageRemainsReadableAndNormalizesOnlyForExecution()
+ {
+ var run = BuildRun(ReferenceOrchestrationStages.BlueprintGeneration, currentDecision: null) with
+ {
+ Status = ReferenceOrchestrationRunStatuses.Running
+ };
+
+ Assert.Contains(ReferenceOrchestrationStages.BlueprintGeneration, ReferenceOrchestrationStages.All);
+ Assert.Contains(ReferenceOrchestrationStages.GoalParsing, ReferenceOrchestrationStages.All);
+ Assert.True(ReferenceOrchestrationStages.IsLegacyStage(run.Stage));
+ Assert.Equal(ReferenceOrchestrationStages.GoalParsing, ReferenceOrchestrationStages.NormalizeForExecution(run.Stage));
+ Assert.Equal(ReferenceOrchestrationStages.BlueprintGeneration, run.Stage);
+ Assert.True(ReferenceOrchestrationStateMachine.ShouldRunSafeStages(run));
+ }
 
     private static ReferenceOrchestrationRunPayload BuildRun(
         string stage,

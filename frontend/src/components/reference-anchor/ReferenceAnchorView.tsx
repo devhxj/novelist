@@ -26,6 +26,7 @@ import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
 import type { diagnostics, reference } from '@/lib/novelist/types'
 import { BlueprintDetail } from './BlueprintDetail'
 import { CorpusAnalysisLibraryTab } from './CorpusAnalysisLibraryTab'
+import { CorpusAnalysisJobsPanel } from './CorpusAnalysisJobsPanel'
 import { CorpusGovernancePanel } from './CorpusGovernancePanel'
 import { OrchestrationPanel } from './OrchestrationPanel'
 import { StyleProfileLibraryPanel } from './StyleProfileLibraryPanel'
@@ -84,7 +85,17 @@ type MaterialSearchFilters = {
 type AnchorScopeFilter = 'all' | 'novel' | 'workspace_corpus'
 type MaterialPreviewSort = 'default' | 'score_desc' | 'material_id_asc'
 type MaterialArchiveFilter = 'active' | 'archived'
-type CorpusLibraryTab = 'materials' | 'analysis_results' | 'governance' | 'sources' | 'tag_review' | 'style_profiles' | 'processing_records' | 'advanced'
+type CorpusLibraryTab = 'materials' | 'analysis_results' | 'analysis_jobs' | 'governance' | 'sources' | 'tag_review' | 'style_profiles' | 'processing_records' | 'advanced'
+
+type LocatedCorpusEvidence = {
+ anchorId: number
+ nodeId: string
+ nodeType: string
+ chapterIndex?: number | null
+ startOffset: number
+ endOffset: number
+ text: string
+}
 
 type MaterialPreviewState = {
   items: reference.MaterialSummary[]
@@ -199,6 +210,7 @@ const ENABLE_REFERENCE_ACTIVITY_CHAPTER_DEBUG =
 const CORPUS_LIBRARY_TABS: Array<{ id: CorpusLibraryTab; label: string }> = [
   { id: 'materials', label: '处理后语料' },
 { id: 'analysis_results', label: '分析结果' },
+ { id: 'analysis_jobs', label: '后台任务' },
  { id: 'governance', label: '治理与复核' },
   { id: 'sources', label: '素材来源' },
   { id: 'tag_review', label: '标签校正' },
@@ -497,7 +509,11 @@ export default function ReferenceAnchorView({ novelId }: Props) {
   const [orchestrationStyleRequiredEvidenceTypes, setOrchestrationStyleRequiredEvidenceTypes] = useState(DEFAULT_ORCHESTRATION_STYLE_EVIDENCE)
   const [orchestrationStyleForbiddenRisks, setOrchestrationStyleForbiddenRisks] = useState(DEFAULT_ORCHESTRATION_STYLE_RISKS)
   const [advancedMode, setAdvancedMode] = useState(false)
-  const [activeCorpusTab, setActiveCorpusTab] = useState<CorpusLibraryTab>('sources')
+const [activeCorpusTab, setActiveCorpusTab] = useState<CorpusLibraryTab>('sources')
+const [focusedEvidenceAnchorId, setFocusedEvidenceAnchorId] = useState<number | null>(null)
+ const [locatedCorpusEvidence, setLocatedCorpusEvidence] = useState<LocatedCorpusEvidence | null>(null)
+ const [locatedCorpusEvidenceLoading, setLocatedCorpusEvidenceLoading] = useState(false)
+ const [locatedCorpusEvidenceError, setLocatedCorpusEvidenceError] = useState<string | null>(null)
   const [anchorScopeFilter, setAnchorScopeFilter] = useState<AnchorScopeFilter>('all')
   const [anchorQuery, setAnchorQuery] = useState('')
   const [anchorLicenseFilter, setAnchorLicenseFilter] = useState('all')
@@ -797,13 +813,68 @@ export default function ReferenceAnchorView({ novelId }: Props) {
     return () => { cancelled = true }
   }, [app, novelId, activeOrchestrationRun, referenceError])
 
-  useEffect(() => {
-    if (activeCorpusTab !== 'tag_review') return
+useEffect(() => {
+if (activeCorpusTab !== 'tag_review') return
     const timeoutId = window.setTimeout(() => {
       void loadMaterialTagReviewQueue(1)
     }, 0)
     return () => window.clearTimeout(timeoutId)
-  }, [activeCorpusTab, loadMaterialTagReviewQueue])
+}, [activeCorpusTab, loadMaterialTagReviewQueue])
+
+ useEffect(() => {
+ if (!locatedCorpusEvidence) return
+ const evidence = document.querySelector<HTMLElement>('[data-corpus-evidence-selection]')
+ if (!evidence) return
+ evidence.scrollIntoView({ behavior: 'smooth', block: 'center' })
+ const range = document.createRange()
+ range.selectNodeContents(evidence)
+ const selection = window.getSelection()
+ selection?.removeAllRanges()
+ selection?.addRange(range)
+ }, [locatedCorpusEvidence])
+
+ useEffect(() => {
+ const locateEvidence = async (event: Event) => {
+ const detail = (event as CustomEvent<{ anchorId?: number; nodeId?: string; evidenceStart?: number | null; evidenceEnd?: number | null }>).detail
+ if (!detail?.anchorId || !detail.nodeId) return
+const anchor = anchors.find(item => item.anchor_id === detail.anchorId)
+if (!anchor) return
+ setActiveCorpusTab('sources')
+ setAnchorScopeFilter('all')
+ setAnchorQuery('')
+ setAnchorLicenseFilter('all')
+setExpandedAnchorMaterialId(anchor.anchor_id)
+setFocusedEvidenceAnchorId(anchor.anchor_id)
+ setLocatedCorpusEvidence(null)
+ setLocatedCorpusEvidenceError(null)
+ setLocatedCorpusEvidenceLoading(true)
+ try {
+ const nodeWindow = await app.GetReferenceCorpusNodeWindow({
+ anchor_id: anchor.anchor_id, node_id: detail.nodeId,
+ previous_chapter_count: 0, next_chapter_count: 0, include_scene_siblings: false, max_nodes: 20,
+ })
+ const node = nodeWindow?.chapter_nodes.find(item => item.node_id === detail.nodeId)
+ ?? nodeWindow?.scene_siblings.find(item => item.node_id === detail.nodeId)
+ if (!node) throw new Error('未找到复核证据对应的原文节点')
+ const rawStart = detail.evidenceStart ?? 0
+ const rawEnd = detail.evidenceEnd ?? rawStart
+ const relativeStart = Math.max(0, Math.min(node.text.length, rawStart))
+ const boundedEnd = Math.max(relativeStart, Math.min(node.text.length, rawEnd))
+ const relativeEnd = boundedEnd > relativeStart ? boundedEnd : node.text.length
+ setLocatedCorpusEvidence({
+ anchorId: anchor.anchor_id, nodeId: node.node_id, nodeType: node.node_type,
+ chapterIndex: node.chapter_index, startOffset: relativeStart, endOffset: relativeEnd, text: node.text,
+ })
+ } catch (caught) {
+ setLocatedCorpusEvidenceError(caught instanceof Error ? caught.message : '复核证据原文加载失败')
+ } finally {
+ setLocatedCorpusEvidenceLoading(false)
+ }
+window.setTimeout(() => setFocusedEvidenceAnchorId(current => current === anchor.anchor_id ? null : current), 2400)
+}
+ window.addEventListener('novelist:locate-corpus-evidence', locateEvidence)
+ return () => window.removeEventListener('novelist:locate-corpus-evidence', locateEvidence)
+ }, [app, anchors])
 
   async function run<T>(
     task: () => Promise<T>,
@@ -2348,9 +2419,24 @@ export default function ReferenceAnchorView({ novelId }: Props) {
               aria-labelledby={`corpus-tab-${activeCorpusTab}`}
               className="space-y-4"
             >
-            {activeCorpusTab === 'sources' && (
-            <>
-            <div data-testid="reference-import-panel" className="rounded-lg border border-border bg-card p-4">
+{activeCorpusTab === 'sources' && (
+<>
+ {(locatedCorpusEvidenceLoading || locatedCorpusEvidenceError || locatedCorpusEvidence) && (
+ <section data-testid="located-corpus-evidence" className="rounded-lg border border-primary/40 bg-primary/5 p-4">
+ <div className="flex flex-wrap items-center justify-between gap-2">
+ <h3 className="text-xs font-semibold text-foreground">复核证据原文</h3>
+ {locatedCorpusEvidence && <span className="text-[11px] text-muted-foreground">{locatedCorpusEvidence.nodeId} · {locatedCorpusEvidence.nodeType}{locatedCorpusEvidence.chapterIndex != null ? ` · 第 ${locatedCorpusEvidence.chapterIndex} 章` : ''}</span>}
+ </div>
+ {locatedCorpusEvidenceLoading && <p className="mt-2 text-xs text-muted-foreground">正在定位原文节点...</p>}
+ {locatedCorpusEvidenceError && <p className="mt-2 text-xs text-destructive">{locatedCorpusEvidenceError}</p>}
+ {locatedCorpusEvidence && <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-foreground">
+ {locatedCorpusEvidence.text.slice(0, locatedCorpusEvidence.startOffset)}
+ <mark data-corpus-evidence-selection className="bg-amber-300 px-0.5 text-foreground">{locatedCorpusEvidence.text.slice(locatedCorpusEvidence.startOffset, locatedCorpusEvidence.endOffset) || locatedCorpusEvidence.text}</mark>
+ {locatedCorpusEvidence.text.slice(locatedCorpusEvidence.endOffset)}
+ </p>}
+ </section>
+ )}
+<div data-testid="reference-import-panel" className="rounded-lg border border-border bg-card p-4">
               <div className="flex items-center gap-2 mb-3">
                 <Plus className="h-3.5 w-3.5 text-muted-foreground" />
                 <h3 className="text-xs font-semibold text-foreground">导入语料来源</h3>
@@ -2581,7 +2667,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
               ) : (
                 <div className="space-y-2">
                   {visibleAnchors.map(anchor => (
-                    <div key={anchor.anchor_id} data-testid="reference-anchor-row" className="rounded-md border border-border bg-background px-3 py-2">
+ <div key={anchor.anchor_id} data-anchor-id={anchor.anchor_id} data-testid="reference-anchor-row" className={`rounded-md border bg-background px-3 py-2 transition-colors ${focusedEvidenceAnchorId === anchor.anchor_id ? 'border-primary bg-primary/5' : 'border-border'}`}>
                       {editingAnchorId === anchor.anchor_id && anchorEditForm ? (
                         <div className="space-y-2">
                           <Field label="标题">
@@ -2981,6 +3067,7 @@ export default function ReferenceAnchorView({ novelId }: Props) {
 {activeCorpusTab === 'analysis_results' && (
 <CorpusAnalysisLibraryTab novelId={novelId} anchors={anchors} />
 )}
+ {activeCorpusTab === 'analysis_jobs' && <CorpusAnalysisJobsPanel novelId={novelId} />}
 
  {activeCorpusTab === 'governance' && (
  <CorpusGovernancePanel novelId={novelId} />

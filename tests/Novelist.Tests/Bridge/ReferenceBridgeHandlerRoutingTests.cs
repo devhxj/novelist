@@ -1332,15 +1332,26 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 DateTimeOffset.UtcNow));
         }
 
-        public ValueTask<ReferenceAnchorBuildStatusPayload?> GetBuildStatusAsync(
+public ValueTask<ReferenceAnchorBuildStatusPayload?> GetBuildStatusAsync(
             long novelId,
             long anchorId,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add($"GetBuildStatus:{novelId}:{anchorId}");
-            return ValueTask.FromResult<ReferenceAnchorBuildStatusPayload?>(BuildStatusResult);
-        }
+return ValueTask.FromResult<ReferenceAnchorBuildStatusPayload?>(BuildStatusResult);
+}
+
+ public ValueTask<ReferenceMaterialEmbeddingBackfillPayload> BackfillMaterialEmbeddingsAsync(
+ BackfillReferenceMaterialEmbeddingsPayload input,
+ CancellationToken cancellationToken)
+ {
+ cancellationToken.ThrowIfCancellationRequested();
+ return ValueTask.FromResult(EmptyMaterialEmbeddingBackfill());
+ }
+
+ private static ReferenceMaterialEmbeddingBackfillPayload EmptyMaterialEmbeddingBackfill() =>
+ new("test", "test", 1, 0, 0, 0, 0, 0, 0, []);
 
         public ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(
             SearchReferenceMaterialsPayload input,

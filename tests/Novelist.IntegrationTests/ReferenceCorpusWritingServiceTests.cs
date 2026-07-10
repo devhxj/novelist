@@ -1961,10 +1961,23 @@ public sealed class ReferenceCorpusWritingServiceTests : IDisposable
         {
             Assert.True(candidate.CoverageScore > 0);
             Assert.DoesNotContain("insufficient_beats", candidate.GapReasons);
-            Assert.DoesNotContain("single_library_source", candidate.GapReasons);
-            Assert.DoesNotContain("single_anchor_source", candidate.GapReasons);
-            Assert.True(candidate.SourceDistribution.Select(source => source.LibraryId).Distinct(StringComparer.Ordinal).Count() >= 2);
-        });
+Assert.DoesNotContain("single_library_source", candidate.GapReasons);
+Assert.DoesNotContain("single_anchor_source", candidate.GapReasons);
+Assert.True(candidate.SourceDistribution.Select(source => source.LibraryId).Distinct(StringComparer.Ordinal).Count() >= 2);
+ Assert.Equal(
+ candidate.Blueprint.Beats.SelectMany(beat => beat.NodeIds).Distinct(StringComparer.Ordinal).Count(),
+ candidate.SourceDistribution.Sum(source => source.NodeCount));
+ Assert.Equal(candidate.Blueprint.Beats.Count, candidate.EmotionArc.Count);
+ foreach (var beat in candidate.Blueprint.Beats)
+ {
+ var point = Assert.Single(candidate.EmotionArc, item => item.BeatId == beat.BeatId);
+ Assert.Equal(beat.BeatIndex, point.BeatIndex);
+ Assert.InRange(point.Intensity, 0, 1);
+ Assert.False(string.IsNullOrWhiteSpace(point.EmotionState));
+ Assert.False(string.IsNullOrWhiteSpace(point.Direction));
+ Assert.All(point.EvidenceNodeIds, nodeId => Assert.Contains(nodeId, beat.NodeIds));
+ }
+});
     }
 
     [Fact]
@@ -2081,11 +2094,18 @@ public sealed class ReferenceCorpusWritingServiceTests : IDisposable
         Assert.Equal(2, candidateAssembler.LastRequest.Candidates.Count);
         Assert.Equal("initial_candidate", candidateAssembler.LastRequest.FeedbackReason);
         var candidate = Assert.Single(result.Candidates);
-        Assert.Equal("candidate_assembler_boundary_test", candidate.Blueprint.Strategy);
-        Assert.Equal(0.77, candidate.CoverageScore, precision: 6);
-        Assert.Equal("initial_candidate", candidate.FeedbackReason);
+Assert.Equal("candidate_assembler_boundary_test", candidate.Blueprint.Strategy);
+Assert.Equal(0.77, candidate.CoverageScore, precision: 6);
+Assert.Equal("initial_candidate", candidate.FeedbackReason);
+ Assert.Equal(
+ [ReferenceOrchestrationStages.GoalParsing, ReferenceOrchestrationStages.CorpusRetrieval, ReferenceOrchestrationStages.BlueprintAssembly],
+ result.OrchestrationStages);
 
-        var rows = await ReadCorpusBlueprintRowsAsync(options, novel.Id, chapter.ChapterNumber);
+ var chapterBlueprint = await service.GenerateChapterBlueprintAsync(request, CancellationToken.None);
+ Assert.Equal(2, candidateAssembler.Calls);
+ Assert.Equal("candidate_assembler_boundary_test", chapterBlueprint.Blueprint.Strategy);
+
+var rows = await ReadCorpusBlueprintRowsAsync(options, novel.Id, chapter.ChapterNumber);
         var row = Assert.Single(rows);
         Assert.Equal(candidate.Blueprint.BlueprintId, row.BlueprintId);
         Assert.Equal("candidate_assembler_boundary_test", row.AssemblyStrategy);
@@ -2343,7 +2363,7 @@ public sealed class ReferenceCorpusWritingServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GenerateInsertionDraftCandidatesReusesSelectedBlueprintSourceVariantsThroughGate()
+ public async Task GenerateInsertionDraftCandidatesDoesNotUseSourceRotationToFillRequestedCount()
     {
         var options = CreateOptions();
         await InitializeAsync(options);
@@ -2409,38 +2429,36 @@ public sealed class ReferenceCorpusWritingServiceTests : IDisposable
             CancellationToken.None);
 
         Assert.Equal(selectedBlueprint.BlueprintId, result.SelectedBlueprint.BlueprintId);
-        Assert.Equal(2, result.Candidates.Count);
-        Assert.Equal(result.Candidates.Count, result.Candidates.Select(candidate => candidate.CandidateId).Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(result.Candidates.Count, result.Candidates.Select(candidate => candidate.Draft.AssembledText).Distinct(StringComparer.Ordinal).Count());
-        var allowedNodeIds = selectedBlueprint.Beats
-            .SelectMany(beat => beat.NodeIds)
-            .ToHashSet(StringComparer.Ordinal);
-        foreach (var candidate in result.Candidates)
-        {
-            Assert.False(string.IsNullOrWhiteSpace(candidate.Explanation));
-            Assert.True(candidate.Draft.ReadyForInsertion);
-            Assert.True(candidate.Draft.Gate.Passed);
-            Assert.Equal(selectedBlueprint.Beats.Count, candidate.Draft.Pieces.Count);
-            Assert.StartsWith(selectedBlueprint.BlueprintId + ":draft-", candidate.Draft.Blueprint.BlueprintId, StringComparison.Ordinal);
-            Assert.All(candidate.Draft.Pieces, piece =>
-            {
-                Assert.Contains(piece.NodeId, allowedNodeIds);
-                Assert.True(piece.PreservedHashMatches);
-            });
-            AssertDraftPiecesStayWithinSelectedBeats(selectedBlueprint, candidate.Draft);
-
-            foreach (var piece in candidate.Draft.Pieces)
-            {
-                Assert.True(await BlueprintBeatPieceExistsAsync(options, piece.BeatId, piece.NodeId));
-            }
-        }
-
-        Assert.Contains(result.Candidates, candidate =>
-            candidate.Draft.Pieces.Select(piece => piece.NodeId).SequenceEqual(
-                ["node-project-doorway-s1", "node-workspace-market-s2"]));
-        Assert.Contains(result.Candidates, candidate =>
-            candidate.Draft.Pieces.Select(piece => piece.NodeId).SequenceEqual(
-                ["node-project-doorway-s2", "node-workspace-market-s1"]));
+ var candidate = Assert.Single(result.Candidates);
+var allowedNodeIds = selectedBlueprint.Beats
+.SelectMany(beat => beat.NodeIds)
+.ToHashSet(StringComparer.Ordinal);
+ Assert.False(string.IsNullOrWhiteSpace(candidate.Explanation));
+ Assert.Equal("selected_blueprint_primary", candidate.Strategy);
+ Assert.True(candidate.Draft.ReadyForInsertion);
+ Assert.True(candidate.Draft.Gate.Passed);
+ Assert.True(candidate.Draft.Audit.Passed);
+ Assert.Equal(selectedBlueprint.Beats.Count, candidate.Draft.Pieces.Count);
+ Assert.All(candidate.Draft.Pieces, piece =>
+{
+ Assert.Contains(piece.NodeId, allowedNodeIds);
+ Assert.True(piece.PreservedHashMatches);
+ });
+ Assert.Equal(
+ ["node-project-doorway-s1", "node-workspace-market-s1"],
+ candidate.Draft.Pieces.Select(piece => piece.NodeId).ToArray());
+ AssertDraftPiecesStayWithinSelectedBeats(selectedBlueprint, candidate.Draft);
+ Assert.NotNull(result.CandidateSetAudit);
+ Assert.True(result.CandidateSetAudit!.Passed);
+ Assert.All(result.CandidateSetAudit.Differences, difference =>
+ {
+ Assert.True(difference.SameBlueprintNodeSet);
+ Assert.True(difference.OnlyAllowedDifferences);
+ });
+ foreach (var piece in candidate.Draft.Pieces)
+ {
+ Assert.True(await BlueprintBeatPieceExistsAsync(options, piece.BeatId, piece.NodeId));
+ }
     }
 
     [Fact]
@@ -2577,8 +2595,97 @@ public sealed class ReferenceCorpusWritingServiceTests : IDisposable
             secondPiece.SlotReplacements.Select(replacement => replacement.ReplacementValue).ToArray());
     }
 
-    [Fact]
-    public async Task GenerateInsertionDraftCandidatesBlocksNonSlotDifferencesAcrossSlotVariants()
+[Fact]
+ public async Task GenerateInsertionDraftCandidatesCanVaryOnlyTransitionStrategyOnSelectedBlueprint()
+ {
+ var options = CreateOptions();
+ await InitializeAsync(options);
+ var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+ var chapters = new FileSystemChapterContentService(options, novels);
+ var novel = await novels.CreateNovelAsync(new CreateNovelPayload("正文过渡多草稿测试", "", ""), CancellationToken.None);
+ var chapter = await chapters.CreateChapterAsync(new CreateChapterPayload(novel.Id, "第一章"), CancellationToken.None);
+ const string currentDraft = "秦砚停在旧市集边缘。";
+ await chapters.SaveContentAsync(new SaveContentPayload(novel.Id, chapter.FilePath, currentDraft), CancellationToken.None);
+ await SeedCrossLibraryWritingFixtureAsync(options, novel.Id);
+ var corpus = new SqliteReferenceCorpusService(
+ options,
+ new StaticEmbeddingConfigurationService(CreateEmbeddingOptions()),
+ new TopicEmbeddingClient(defaultDimensions: 3));
+ var service = new SqliteReferenceCorpusWritingService(options, corpus, chapters);
+ var selectedBlueprint = new ReferenceCorpusInsertionBlueprintPayload(
+ BlueprintId: "selected-transition-strategy-blueprint",
+ QueryContextHash: "transition-strategy-query",
+ Strategy: "selected_transition_strategy_test",
+ Beats:
+ [
+ new ReferenceCorpusInsertionBlueprintBeatPayload(
+ BeatId: "selected-transition-strategy-beat-1",
+ BeatIndex: 0,
+ RoleInBeat: "opening_source_sentence",
+ NarrativeFunction: "raise_pressure",
+ NodeIds: ["node-project-doorway-s1"]),
+ new ReferenceCorpusInsertionBlueprintBeatPayload(
+ BeatId: "selected-transition-strategy-beat-2",
+ BeatIndex: 1,
+ RoleInBeat: "supporting_source_sentence",
+ NarrativeFunction: "withhold_answer",
+ NodeIds: ["node-workspace-market-s1"])
+ ]);
+
+ var result = await service.GenerateInsertionDraftCandidatesAsync(
+ new GenerateReferenceCorpusInsertionDraftCandidatesPayload(
+ NaturalLanguageGoal: "写旧市集门口对峙，秦砚压住怒意，不立刻开口。",
+ ChapterContext: new CurrentChapterContextPayload(
+ novel.Id,
+ chapter.ChapterNumber,
+ currentDraft,
+ currentDraft.Length,
+ "旧市集起火，有人在火光里靠近。",
+ [new CharacterStateSnapshotPayload("秦砚", "guarded", ["市集起火"], ["对方真实目的"])]),
+ Scope: new ReferenceCorpusScopePayload([], [ReferenceCorpusReusePolicies.VerbatimOk], [], []),
+ SlotValues: new Dictionary<string, string>
+ {
+ ["她"] = "秦砚",
+ ["他"] = "秦砚"
+ },
+ SelectedBlueprint: selectedBlueprint,
+ RequestedCount: 2,
+ TransitionStrategyVariants:
+ [
+ ReferenceCorpusTransitionStrategies.Default,
+ ReferenceCorpusTransitionStrategies.DirectJoin
+ ]),
+ CancellationToken.None);
+
+ Assert.Equal(2, result.Candidates.Count);
+ Assert.All(result.Candidates, candidate =>
+ {
+ Assert.True(candidate.Draft.ReadyForInsertion);
+ Assert.True(candidate.Draft.Gate.Passed);
+ Assert.True(candidate.Draft.Audit.Passed);
+ Assert.Equal(
+ ["node-project-doorway-s1", "node-workspace-market-s1"],
+ candidate.Draft.Pieces.Select(piece => piece.NodeId).ToArray());
+ });
+ Assert.Equal(
+ result.Candidates[0].Draft.Pieces.Select(piece => piece.SourceTextHash).ToArray(),
+ result.Candidates[1].Draft.Pieces.Select(piece => piece.SourceTextHash).ToArray());
+ Assert.NotEqual(result.Candidates[0].Draft.AssembledText, result.Candidates[1].Draft.AssembledText);
+ Assert.Contains(result.Candidates, candidate => candidate.Draft.Transitions.Any(transition =>
+ string.Equals(transition.Strategy, "heuristic_bridge_sentence", StringComparison.Ordinal)));
+ Assert.Contains(result.Candidates, candidate => candidate.Draft.Transitions.All(transition =>
+ string.Equals(transition.Strategy, ReferenceCorpusTransitionStrategies.DirectJoin, StringComparison.Ordinal)));
+ Assert.NotNull(result.CandidateSetAudit);
+ Assert.True(result.CandidateSetAudit!.Passed);
+ Assert.All(result.CandidateSetAudit.Differences, difference =>
+ {
+ Assert.True(difference.SameBlueprintNodeSet);
+ Assert.True(difference.OnlyAllowedDifferences);
+ });
+ }
+
+ [Fact]
+public async Task GenerateInsertionDraftCandidatesBlocksNonSlotDifferencesAcrossSlotVariants()
     {
         var options = CreateOptions();
         await InitializeAsync(options);
@@ -2972,7 +3079,7 @@ public sealed class ReferenceCorpusWritingServiceTests : IDisposable
             CancellationToken.None);
 
         var candidate = Assert.Single(result.Candidates);
-        Assert.Equal("source_variant_1", candidate.Strategy);
+ Assert.Equal("selected_blueprint_primary", candidate.Strategy);
         Assert.True(candidate.Draft.ReadyForInsertion);
         Assert.Equal([fixture.NodeId], candidate.Draft.Pieces.Select(piece => piece.NodeId).ToArray());
         Assert.Contains("秦砚在旧市集门口没有立刻开口", candidate.Draft.AssembledText, StringComparison.Ordinal);
@@ -3061,7 +3168,7 @@ public sealed class ReferenceCorpusWritingServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GenerateInsertionDraftCandidatesRebuildsAllowedBlueprintVariantWhenTransitionRequiresReplacement()
+ public async Task GenerateInsertionDraftCandidatesRequiresBlueprintIterationWhenTransitionRequestsSelectedAlternative()
     {
         var options = CreateOptions();
         await InitializeAsync(options);
@@ -3130,16 +3237,19 @@ public sealed class ReferenceCorpusWritingServiceTests : IDisposable
             CancellationToken.None);
 
         var candidate = Assert.Single(result.Candidates);
-        Assert.Equal("transition_repair", candidate.Strategy);
-        Assert.Contains("replacement", candidate.Explanation, StringComparison.OrdinalIgnoreCase);
-        Assert.True(candidate.Draft.ReadyForInsertion);
-        Assert.True(candidate.Draft.Audit.Passed);
-        Assert.True(candidate.Draft.Gate.Passed);
-        Assert.Equal(
-            ["node-project-doorway-s2", "node-workspace-market-s1"],
-            candidate.Draft.Pieces.Select(piece => piece.NodeId).ToArray());
-        AssertDraftPiecesStayWithinSelectedBeats(selectedBlueprint, candidate.Draft);
-        Assert.DoesNotContain("transition_piece_replacement_required", candidate.Draft.Audit.Errors, StringComparer.Ordinal);
+ Assert.Equal("selected_blueprint_primary", candidate.Strategy);
+ Assert.False(candidate.Draft.ReadyForInsertion);
+ Assert.False(candidate.Draft.Audit.Passed);
+Assert.True(candidate.Draft.Gate.Passed);
+Assert.Equal(
+ ["node-project-doorway-s1", "node-workspace-market-s1"],
+candidate.Draft.Pieces.Select(piece => piece.NodeId).ToArray());
+AssertDraftPiecesStayWithinSelectedBeats(selectedBlueprint, candidate.Draft);
+ Assert.Contains(candidate.Draft.Audit.Errors, error =>
+ error.StartsWith("transition_piece_replacement_required:", StringComparison.Ordinal));
+ Assert.NotNull(candidate.NextAction);
+ Assert.Equal(ReferenceCorpusDraftCandidateNextActions.RegenerateBlueprint, candidate.NextAction!.Action);
+ Assert.Equal("transition_repair_failed", candidate.NextAction.ReasonCode);
     }
 
     [Fact]
@@ -3214,7 +3324,7 @@ public sealed class ReferenceCorpusWritingServiceTests : IDisposable
             CancellationToken.None);
 
         var candidate = Assert.Single(result.Candidates);
-        Assert.Equal("source_variant_1", candidate.Strategy);
+ Assert.Equal("selected_blueprint_primary", candidate.Strategy);
         Assert.False(candidate.Draft.ReadyForInsertion);
         Assert.False(candidate.Draft.Audit.Passed);
         Assert.Equal(currentDraft, candidate.Draft.ChapterTextAfterInsertion);
@@ -3355,7 +3465,7 @@ public sealed class ReferenceCorpusWritingServiceTests : IDisposable
             CancellationToken.None);
 
         var candidate = Assert.Single(result.Candidates);
-        Assert.Equal("source_variant_1", candidate.Strategy);
+ Assert.Equal("selected_blueprint_primary", candidate.Strategy);
         Assert.False(candidate.Draft.ReadyForInsertion);
         Assert.False(candidate.Draft.Audit.Passed);
         Assert.Equal(currentDraft, candidate.Draft.ChapterTextAfterInsertion);

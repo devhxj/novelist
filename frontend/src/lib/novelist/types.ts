@@ -872,7 +872,7 @@ export namespace reference {
  anchor_ids: number[]
  updated_at: Timestamp
  }
- export interface CorpusReviewQueueItem {
+export interface CorpusReviewQueueItem {
  queue_id: string
  item_type: string
  item_id: string
@@ -881,8 +881,12 @@ export namespace reference {
  reason: string
  review_state: string
  confidence: number
- feature_family?: string | null
- created_at: Timestamp
+feature_family?: string | null
+created_at: Timestamp
+ anchor_title?: string | null
+ evidence_start?: number | null
+ evidence_end?: number | null
+ evidence_preview?: string | null
  }
 export interface CorpusReviewQueuePage {
 items: CorpusReviewQueueItem[]
@@ -893,6 +897,25 @@ size: number
  next_cursor?: string | null
 has_more: boolean
 }
+ export interface CorpusNodeWindowItem {
+ node_id: string
+ parent_node_id?: string | null
+ node_type: string
+ chapter_index?: number | null
+ sequence_index: number
+ start_offset: number
+ end_offset: number
+ text_hash: string
+ text: string
+ }
+ export interface CorpusNodeWindow {
+ focus_node_id: string
+ focus_chapter_index?: number | null
+ scene_node_id?: string | null
+ chapter_nodes: CorpusNodeWindowItem[]
+ scene_siblings: CorpusNodeWindowItem[]
+ truncated: boolean
+ }
   export interface Anchor {
     anchor_id: number
     novel_id: number
@@ -1080,7 +1103,7 @@ has_more: boolean
     run_id: string
   }
 
-  export interface CorpusFeatureAnalysisRun {
+export interface CorpusFeatureAnalysisRun {
     run_id: string
     novel_id: number
     anchor_id: number
@@ -1098,8 +1121,81 @@ has_more: boolean
     model_id: string
     started_at: Timestamp
     completed_at?: Timestamp | null
-    diagnostics: string[]
-  }
+diagnostics: string[]
+}
+
+ export interface EnqueueCorpusAnalysisJobInput {
+ run_id: string
+ novel_id: number
+ anchor_id: number
+ job_kind: 'feature_analysis' | 'technique_specimen' | string
+ scope: CorpusNodeType | CorpusFeatureAnalysisScope | string
+ priority_class: 'current_chapter' | 'adjacent_chapter' | 'normal' | 'maintenance' | string
+ priority_value: number
+ token_budget?: number | null
+ max_attempts?: number
+ dependency_job_id?: string | null
+ min_observation_confidence?: number
+ }
+
+ export interface CorpusAnalysisJobDependency {
+ job_id: string
+ required_status: string
+ satisfied: boolean
+ }
+
+ export interface CorpusAnalysisJob {
+ job_id: string
+ run_id: string
+ novel_id: number
+ anchor_id: number
+ job_kind: string
+ scope: string
+ status: string
+ version: number
+ priority_class: string
+ priority_value: number
+total_nodes: number
+total_work_items: number
+ processed_nodes: number
+processed_work_items: number
+ succeeded_work_items: number
+ skipped_work_items: number
+ failed_work_items: number
+ retrying_work_items: number
+ token_budget?: number | null
+ tokens_spent: number
+ resume_cursor?: string | null
+attempt_count: number
+ failure_attempt_count: number
+max_attempts: number
+ next_attempt_at?: Timestamp | null
+ lease_heartbeat_at?: Timestamp | null
+ lease_expires_at?: Timestamp | null
+ dependency?: CorpusAnalysisJobDependency | null
+ created_at: Timestamp
+ queued_at: Timestamp
+ started_at?: Timestamp | null
+ updated_at: Timestamp
+ completed_at?: Timestamp | null
+error_code?: string | null
+error_message?: string | null
+ current_chapter?: number | null
+ allowed_actions?: string[] | null
+safe_diagnostics?: string[] | null
+ tokens_reserved: number
+}
+
+ export interface CorpusAnalysisJobPage {
+ items: CorpusAnalysisJob[]
+ total: number
+ page: number
+ size: number
+ total_pages: number
+ next_cursor?: string | null
+ has_more: boolean
+ total_estimate?: number | null
+ }
 
   export type CorpusTechniqueSpecimenAnalysisScope = 'technique_specimen'
 
@@ -1277,8 +1373,9 @@ has_more: boolean
     scope: CorpusScope
     slot_values: Record<string, string>
     selected_blueprint: CorpusInsertionBlueprint
-    requested_count: number
-    slot_value_variants?: CorpusDraftSlotValueVariant[] | null
+requested_count: number
+slot_value_variants?: CorpusDraftSlotValueVariant[] | null
+ transition_strategy_variants?: string[] | null
   }
 
   export interface GenerateCorpusBlueprintCandidatesInput {
@@ -1309,9 +1406,32 @@ has_more: boolean
     source_distribution: CorpusBlueprintSourceDistributionItem[]
     coverage_score: number
     gap_reasons: string[]
-    feedback_reason: string
-    gap_positions?: CorpusBlueprintGapPosition[] | null
-  }
+feedback_reason: string
+gap_positions?: CorpusBlueprintGapPosition[] | null
+ difference_audit?: CorpusBlueprintDifferenceAudit | null
+}
+
+ export interface CorpusBlueprintDifferenceAudit {
+ passed: boolean
+ node_set_hash: string
+ minimum_node_difference_ratio: number
+ closest_blueprint_id?: string | null
+ closest_node_difference_ratio: number
+ source_distribution_differs: boolean
+ strategy_differs: boolean
+ diagnostics: string[]
+ }
+
+ export interface CorpusBlueprintIteration {
+ iteration: number
+ state: string
+ feedback_applied: boolean
+ candidate_count: number
+ distinct_candidate_count: number
+ rejected_blueprint_ids: string[]
+ can_iterate: boolean
+ can_select: boolean
+ }
 
   export interface CorpusBlueprintGapPosition {
     beat_id: string
@@ -1327,8 +1447,9 @@ has_more: boolean
   export interface CorpusBlueprintCandidates {
     query_context: CorpusQueryContext
     candidates: CorpusBlueprintCandidate[]
-    feedback_applied: boolean
-    feedback_summary: string
+feedback_applied: boolean
+feedback_summary: string
+ iteration?: CorpusBlueprintIteration | null
   }
 
   export interface CorpusInsertionBlueprint {
@@ -1498,19 +1619,41 @@ has_more: boolean
     feedback: CorpusBlueprintFeedback
   }
 
-  export interface CorpusInsertionDraftCandidate {
+export interface CorpusInsertionDraftCandidate {
     candidate_id: string
     strategy: string
     explanation: string
     draft: CorpusInsertionDraft
-    next_action?: CorpusDraftCandidateNextAction | null
-  }
+next_action?: CorpusDraftCandidateNextAction | null
+}
+
+ export interface CorpusDraftCandidateDifference {
+ candidate_id: string
+ baseline_candidate_id: string
+ same_blueprint_node_set: boolean
+ same_piece_outputs: boolean
+ slot_difference_count: number
+ transition_difference_count: number
+ only_allowed_differences: boolean
+ duplicate_text: boolean
+ diagnostics: string[]
+ }
+
+ export interface CorpusDraftCandidateSetAudit {
+ passed: boolean
+ candidate_count: number
+ ready_candidate_count: number
+ distinct_text_count: number
+ differences: CorpusDraftCandidateDifference[]
+ errors: string[]
+ }
 
   export interface CorpusInsertionDraftCandidates {
     query_context: CorpusQueryContext
-    selected_blueprint: CorpusInsertionBlueprint
-    candidates: CorpusInsertionDraftCandidate[]
-  }
+selected_blueprint: CorpusInsertionBlueprint
+candidates: CorpusInsertionDraftCandidate[]
+ candidate_set_audit?: CorpusDraftCandidateSetAudit | null
+}
 
   export interface Material {
     material_id: string

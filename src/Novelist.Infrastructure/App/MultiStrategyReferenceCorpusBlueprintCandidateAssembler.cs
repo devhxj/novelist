@@ -162,10 +162,8 @@ internal sealed class MultiStrategyReferenceCorpusBlueprintCandidateAssembler : 
 
         var strategies = new List<BlueprintCandidateStrategy>();
         var problemTags = NormalizeTextSet(feedback?.ProblemTags);
-        if (HasM4StrategySignals(candidates))
-        {
-            strategies.AddRange([
-                new BlueprintCandidateStrategy(
+ strategies.AddRange([
+new BlueprintCandidateStrategy(
                     "emotion_priority_m4",
                     BuildStrategyProfileCandidates(candidates, byScore, historicalFeedback, EmotionPriorityScore, ["rhythm", "technique", "narrative", "emotion"])),
                 new BlueprintCandidateStrategy(
@@ -174,11 +172,10 @@ internal sealed class MultiStrategyReferenceCorpusBlueprintCandidateAssembler : 
                 new BlueprintCandidateStrategy(
                     "technique_diversity_m4",
                     BuildStrategyProfileCandidates(candidates, byScore, historicalFeedback, TechniqueDiversityScore, ["emotion", "narrative", "rhythm", "technique"])),
-                new BlueprintCandidateStrategy(
-                    "scene_template_m4",
-                    BuildStrategyProfileCandidates(candidates, byScore, historicalFeedback, SceneTemplateScore, ["rhythm", "technique", "emotion", "narrative"]))
-            ]);
-        }
+new BlueprintCandidateStrategy(
+"scene_template_m4",
+BuildStrategyProfileCandidates(candidates, byScore, historicalFeedback, SceneTemplateScore, ["rhythm", "technique", "emotion", "narrative"]))
+]);
 
         if (WantsSlowerRhythm(feedback))
         {
@@ -693,17 +690,43 @@ internal sealed class MultiStrategyReferenceCorpusBlueprintCandidateAssembler : 
             .OrderBy(item => item.LibraryId, StringComparer.Ordinal)
             .ThenBy(item => item.AnchorId)
             .ToArray();
-        var coverage = BlueprintCoverageDiagnostics(selected, diagnosticGapReasons);
-        var gapPositions = BuildBlueprintGapPositions(beats, selected);
+var coverage = BlueprintCoverageDiagnostics(selected, diagnosticGapReasons);
+var gapPositions = BuildBlueprintGapPositions(beats, selected);
+ var emotionArc = BuildEmotionArc(beats, selected, queryContext);
 
         return new ReferenceCorpusBlueprintCandidatePayload(
             blueprint,
             sourceDistribution,
             CoverageScore: coverage.CoverageScore,
-            GapReasons: coverage.GapReasons,
-            FeedbackReason: feedback is null ? "initial_candidate" : feedbackReason,
-            GapPositions: gapPositions);
-    }
+GapReasons: coverage.GapReasons,
+FeedbackReason: feedback is null ? "initial_candidate" : feedbackReason,
+ GapPositions: gapPositions,
+ EmotionArc: emotionArc);
+}
+
+ private static IReadOnlyList<ReferenceCorpusBlueprintEmotionArcPointPayload> BuildEmotionArc(
+ IReadOnlyList<ReferenceCorpusInsertionBlueprintBeatPayload> beats,
+ IReadOnlyList<ReferenceCorpusCandidatePayload> selected,
+ ReferenceCorpusQueryContextPayload queryContext)
+ {
+ return beats.Select((beat, index) =>
+ {
+ var candidate = selected.ElementAtOrDefault(index);
+ var evidence = candidate?.Evidence
+ .Where(item => item.FeatureFamily is "emotion" or "action")
+ .OrderByDescending(item => item.Confidence)
+ .FirstOrDefault();
+ var intensity = evidence?.Confidence ?? Math.Clamp(0.35 + index * 0.15, 0, 1);
+ var direction = index == 0 ? "establish" : intensity >= 0.70 ? "escalate" : "sustain";
+ return new ReferenceCorpusBlueprintEmotionArcPointPayload(
+ beat.BeatId,
+ beat.BeatIndex,
+ evidence is null ? queryContext.EmotionTarget : evidence.FeatureKey,
+ Math.Round(intensity, 6),
+ direction,
+ beat.NodeIds);
+ }).ToArray();
+ }
 
     private static string BlueprintNodeSetKey(IReadOnlyList<ReferenceCorpusCandidatePayload> selected)
     {

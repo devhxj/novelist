@@ -102,9 +102,13 @@ public sealed record ReferenceCorpusReviewQueueItemPayload(
  [property: JsonPropertyName("node_id")] string NodeId,
  [property: JsonPropertyName("reason")] string Reason,
  [property: JsonPropertyName("review_state")] string ReviewState,
- [property: JsonPropertyName("confidence")] double Confidence,
- [property: JsonPropertyName("feature_family")] string? FeatureFamily,
- [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
+[property: JsonPropertyName("confidence")] double Confidence,
+[property: JsonPropertyName("feature_family")] string? FeatureFamily,
+ [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
+ [property: JsonPropertyName("anchor_title")] string? AnchorTitle = null,
+ [property: JsonPropertyName("evidence_start")] int? EvidenceStart = null,
+ [property: JsonPropertyName("evidence_end")] int? EvidenceEnd = null,
+ [property: JsonPropertyName("evidence_preview")] string? EvidencePreview = null);
 public sealed record ReconcileReferenceCorpusRunPayload(
  [property: JsonPropertyName("anchor_id")] long AnchorId,
  [property: JsonPropertyName("new_run_id")] string NewRunId);

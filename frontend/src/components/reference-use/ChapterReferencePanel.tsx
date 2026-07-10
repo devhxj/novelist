@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { AlertTriangle, Check, Copy, CornerDownLeft, FileSearch, ListEnd, Loader2, RefreshCw, Replace, Search, Wand2, X } from 'lucide-react'
+import { AlertTriangle, Check, Copy, CornerDownLeft, FileSearch, GitCompareArrows, ListEnd, Loader2, Lock, RefreshCw, Replace, Search, Wand2, X } from 'lucide-react'
 import { useApp } from '@/hooks/useApp'
 import { copyTextToClipboard } from '@/lib/clipboard'
 import { buildCopyableDiagnostic, diagnosticMessage } from '@/lib/diagnostics'
@@ -254,7 +254,11 @@ export default function ChapterReferencePanel({
   const [selectedCorpusDraftCandidateId, setSelectedCorpusDraftCandidateId] = useState('')
   const [corpusDraftLoading, setCorpusDraftLoading] = useState(false)
   const [corpusDraftError, setCorpusDraftError] = useState<ReferenceErrorState | null>(null)
-  const [corpusDraftActionMessage, setCorpusDraftActionMessage] = useState('')
+const [corpusDraftActionMessage, setCorpusDraftActionMessage] = useState('')
+ const [expertSlotName, setExpertSlotName] = useState('character')
+ const [expertSlotVariantsText, setExpertSlotVariantsText] = useState('林岚\n顾沉')
+ const [expertTransitionStrategies, setExpertTransitionStrategies] = useState<string[]>(['default', 'direct_join'])
+ const [lockedCorpusDraftCandidateId, setLockedCorpusDraftCandidateId] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
  const [writingMode, setWritingMode] = useState<'auto' | 'expert'>('auto')
 const [governance, setGovernance] = useState<reference.CorpusGovernance | null>(null)
@@ -824,12 +828,13 @@ window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, b
     }
   }, [activePath, app, buildCorpusWritingRequestContext, chapterNumber, hasValidChapter, novelId])
 
-  const selectCorpusBlueprintCandidate = useCallback((candidate: reference.CorpusBlueprintCandidate) => {
+const selectCorpusBlueprintCandidate = useCallback((candidate: reference.CorpusBlueprintCandidate) => {
     setSelectedCorpusBlueprintId(candidate.blueprint.blueprint_id)
     setCorpusBlueprintActionMessage(`已选择蓝图 ${candidate.blueprint.blueprint_id}`)
     setCorpusDraftPath(activePath)
     setCorpusDraftCandidates(null)
-    setSelectedCorpusDraftCandidateId('')
+setSelectedCorpusDraftCandidateId('')
+ setLockedCorpusDraftCandidateId('')
     setCorpusDraftError(null)
     setCorpusDraftActionMessage('')
   }, [activePath])
@@ -964,14 +969,27 @@ window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, b
     setCorpusDraftError(null)
     setCorpusDraftActionMessage('')
     try {
-      const result = await app.GenerateReferenceCorpusInsertionDraftCandidates({
+const result = await app.GenerateReferenceCorpusInsertionDraftCandidates({
         natural_language_goal: context.naturalGoal,
         chapter_context: context.chapterContext,
         scope: context.scope,
-        slot_values: {},
-        selected_blueprint: selectedCorpusBlueprintCandidate.blueprint,
-        requested_count: 3,
-      })
+ slot_values: {},
+selected_blueprint: selectedCorpusBlueprintCandidate.blueprint,
+ requested_count: writingMode === 'expert' ? 6 : 3,
+ ...(writingMode === 'expert' ? {
+ slot_value_variants: expertSlotVariantsText
+ .split(/\r?\n|，|,/)
+ .map(value => value.trim())
+ .filter(Boolean)
+ .slice(0, 4)
+ .map((value, index) => ({
+ variant_id: `expert-slot-${index + 1}`,
+ label: `${expertSlotName || 'slot'}=${value}`,
+ slot_values: { [expertSlotName.trim() || 'character']: value },
+ })),
+ transition_strategy_variants: expertTransitionStrategies,
+ } : {}),
+})
       setCorpusDraftCandidates(result)
       setSelectedCorpusDraftCandidateId(result.candidates[0]?.candidate_id ?? '')
       setCorpusDraftActionMessage(result.candidates.length > 0
@@ -1000,12 +1018,16 @@ window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, b
     } finally {
       setCorpusDraftLoading(false)
     }
-  }, [activePath, app, buildCorpusWritingRequestContext, chapterNumber, hasValidChapter, novelId, selectedCorpusBlueprintCandidate])
+ }, [activePath, app, buildCorpusWritingRequestContext, chapterNumber, expertSlotName, expertSlotVariantsText, expertTransitionStrategies, hasValidChapter, novelId, selectedCorpusBlueprintCandidate, writingMode])
 
   const applyCorpusDraft = useCallback(async () => {
  if (!visibleCorpusDraft || !selectedCorpusDraftCandidate) return
  if (!corpusDraftCanApply(visibleCorpusDraft)) {
- setCorpusDraftActionMessage('草稿审计未通过，不能应用到编辑器。')
+setCorpusDraftActionMessage('草稿审计未通过，不能应用到编辑器。')
+return
+}
+ if (writingMode === 'expert' && lockedCorpusDraftCandidateId !== selectedCorpusDraftCandidate.candidate_id) {
+ setCorpusDraftActionMessage('专家模式需要先锁定当前正文候选，再确认写入。')
  return
  }
 
@@ -1024,7 +1046,7 @@ window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, b
  } catch (caught) {
  setCorpusDraftActionMessage(`服务端审计拒绝应用：${diagnosticMessage(caught, '授权或相似度复核失败')}`)
  }
- }, [app, chapterNumber, novelId, onApplyChapterText, selectedCorpusDraftCandidate, visibleCorpusDraft])
+ }, [app, chapterNumber, lockedCorpusDraftCandidateId, novelId, onApplyChapterText, selectedCorpusDraftCandidate, visibleCorpusDraft, writingMode])
 
  const copyCorpusDraft = useCallback(async () => {
     if (!visibleCorpusDraft) return
@@ -1051,10 +1073,11 @@ window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, b
     }
   }, [activePath, chapterNumber, novelId, visibleCorpusDraft])
 
-  const selectCorpusDraftCandidate = useCallback((candidate: reference.CorpusInsertionDraftCandidate) => {
-    setSelectedCorpusDraftCandidateId(candidate.candidate_id)
-    setCorpusDraftActionMessage(`已选择正文候选 ${candidate.candidate_id}`)
-  }, [])
+const selectCorpusDraftCandidate = useCallback((candidate: reference.CorpusInsertionDraftCandidate) => {
+setSelectedCorpusDraftCandidateId(candidate.candidate_id)
+ setLockedCorpusDraftCandidateId('')
+setCorpusDraftActionMessage(`已选择正文候选 ${candidate.candidate_id}`)
+}, [])
 
   return (
     <aside
@@ -1077,7 +1100,22 @@ window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, b
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
+ <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
+ <div className="flex items-center justify-between gap-2">
+ <span className="text-[11px] font-medium text-muted-foreground">写作模式</span>
+ <div className="inline-flex rounded border border-border bg-background p-0.5" data-testid="chapter-writing-mode">
+ {(['auto', 'expert'] as const).map(mode => (
+ <button
+ key={mode}
+ type="button"
+ onClick={() => setWritingMode(mode)}
+ className={`rounded px-2 py-1 text-[11px] ${writingMode === mode ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+ >
+ {mode === 'auto' ? '自动' : '专家'}
+ </button>
+ ))}
+ </div>
+ </div>
         {writingMode === 'expert' && (
  <div data-testid="chapter-writing-expert-context" className="grid grid-cols-3 gap-2 rounded border bg-background p-2 text-[11px]">
  <div><p className="font-semibold">阶段进度</p><p>目标 {goal.trim() ? '✓' : '○'} · 蓝图 {selectedCorpusBlueprintCandidate ? '✓' : '○'} · 正文 {visibleCorpusDraft ? '✓' : '○'} · 审计 {visibleCorpusDraft?.ready_for_insertion ? '待确认' : '○'}</p></div>
@@ -1165,11 +1203,22 @@ window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, b
                 void regenerateCorpusBlueprintCandidatesFromSelection()
               }}
             />
-          ) : !corpusBlueprintLoading && !visibleCorpusBlueprintError ? (
-            <div className="rounded border border-dashed border-border bg-background px-3 py-3 text-xs leading-relaxed text-muted-foreground">
-              输入章节目标后生成多份参考剧本蓝图。这里不会处理素材库，只消费当前章节会话可访问的公共语料库。
-            </div>
-          ) : null}
+) : !corpusBlueprintLoading && !visibleCorpusBlueprintError ? (
+<div className="rounded border border-dashed border-border bg-background px-3 py-3 text-xs leading-relaxed text-muted-foreground">
+输入章节目标后生成多份参考剧本蓝图。这里不会处理素材库，只消费当前章节会话可访问的公共语料库。
+</div>
+) : null}
+
+ {writingMode === 'expert' && selectedCorpusBlueprintCandidate && (
+ <CorpusExpertDraftControls
+ slotName={expertSlotName}
+ slotVariantsText={expertSlotVariantsText}
+ transitionStrategies={expertTransitionStrategies}
+ onSlotNameChange={setExpertSlotName}
+ onSlotVariantsTextChange={setExpertSlotVariantsText}
+ onTransitionStrategiesChange={setExpertTransitionStrategies}
+ />
+ )}
 
           <button
             type="button"
@@ -1205,17 +1254,30 @@ window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, b
 
           {visibleCorpusDraftCandidates ? (
             <div className="space-y-2">
-              <CorpusInsertionDraftCandidateList
-                result={visibleCorpusDraftCandidates}
-                selectedCandidate={selectedCorpusDraftCandidate}
-                onSelect={selectCorpusDraftCandidate}
-                onNextAction={regenerateCorpusBlueprintCandidatesFromDraftAction}
-              />
-              {visibleCorpusDraft && (
+<CorpusInsertionDraftCandidateList
+result={visibleCorpusDraftCandidates}
+selectedCandidate={selectedCorpusDraftCandidate}
+onSelect={selectCorpusDraftCandidate}
+onNextAction={regenerateCorpusBlueprintCandidatesFromDraftAction}
+/>
+ {writingMode === 'expert' && (
+ <CorpusDraftComparison
+ result={visibleCorpusDraftCandidates}
+ selectedCandidateId={selectedCorpusDraftCandidate?.candidate_id ?? ''}
+ lockedCandidateId={lockedCorpusDraftCandidateId}
+ onSelect={selectCorpusDraftCandidate}
+ onLock={candidateId => {
+ setSelectedCorpusDraftCandidateId(candidateId)
+ setLockedCorpusDraftCandidateId(candidateId)
+ setCorpusDraftActionMessage(`已锁定正文候选 ${candidateId}，可确认写入。`)
+ }}
+ />
+ )}
+{visibleCorpusDraft && (
                 <>
                   <CorpusInsertionDraftPreview
                     draft={visibleCorpusDraft}
-                    insertionDisabled={insertionDisabled}
+ insertionDisabled={insertionDisabled || (writingMode === 'expert' && lockedCorpusDraftCandidateId !== selectedCorpusDraftCandidate?.candidate_id)}
                     onApply={() => { void applyCorpusDraft() }}
                     onCopy={() => {
                       void copyCorpusDraft()
@@ -1625,7 +1687,7 @@ function CorpusAnalysisPanel({
 
   return (
     <section data-testid="chapter-corpus-analysis-panel" className="rounded border border-border bg-background text-xs">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-2.5 py-2">
+<div className="flex items-center justify-between gap-2 border-b border-border px-2.5 py-2">
         <div className="min-w-0">
           <h3 className="truncate text-xs font-semibold text-foreground">节点分析 / 技法标本</h3>
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
@@ -1642,10 +1704,10 @@ function CorpusAnalysisPanel({
         >
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSearch className="h-3.5 w-3.5" />}
           刷新
-        </button>
-      </div>
+</button>
+</div>
 
-      {targets.length > 1 && (
+{targets.length > 1 && (
         <div className="flex gap-1 overflow-x-auto border-b border-border px-2.5 py-2">
           {targets.map(target => (
             <button
@@ -1799,9 +1861,15 @@ function CorpusBlueprintCandidateList({
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
           反馈重组
         </button>
-      </div>
+</div>
 
-      {candidates.length > 0 ? (
+ {result.iteration && (
+ <div data-testid="chapter-corpus-blueprint-iteration" className="border-b border-border px-2.5 py-1.5 text-[11px] text-muted-foreground">
+ 第 {result.iteration.iteration} 轮 · {result.iteration.state} · 独立候选 {result.iteration.distinct_candidate_count}/{result.iteration.candidate_count}
+ </div>
+ )}
+
+{candidates.length > 0 ? (
         <div className="divide-y divide-border">
           {candidates.map((candidate, index) => {
             const blueprint = candidate.blueprint
@@ -1859,7 +1927,7 @@ function CorpusBlueprintCandidateList({
                   </button>
                 </div>
 
-                {candidate.source_distribution.length > 0 && (
+{candidate.source_distribution.length > 0 && (
                   <div className="space-y-1">
                     <p className="text-[11px] font-medium text-foreground">来源分布</p>
                     <div className="flex flex-wrap gap-1">
@@ -1873,10 +1941,27 @@ function CorpusBlueprintCandidateList({
                       ))}
                     </div>
                   </div>
-                )}
+)}
 
-                <div className="space-y-1">
-                  <p className="text-[11px] font-medium text-foreground">节拍</p>
+ {candidate.difference_audit && (
+ <div data-testid="chapter-corpus-blueprint-difference-audit" className={`rounded border px-2 py-1.5 text-[11px] ${candidate.difference_audit.passed ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-100'}`}>
+ <div className="flex flex-wrap items-center justify-between gap-1">
+ <span className="font-medium">{candidate.difference_audit.passed ? '差异审计通过' : '差异不足'}</span>
+ <span>最近差异 {(candidate.difference_audit.closest_node_difference_ratio * 100).toFixed(0)}%</span>
+ </div>
+ <p className="mt-1 break-all opacity-80">node set {candidate.difference_audit.node_set_hash.slice(0, 12)} · 来源 {candidate.difference_audit.source_distribution_differs ? '不同' : '相同'} · 策略 {candidate.difference_audit.strategy_differs ? '不同' : '相同'}</p>
+ {candidate.difference_audit.diagnostics.length > 0 && <p className="mt-1 break-words">{candidate.difference_audit.diagnostics.join('；')}</p>}
+ </div>
+ )}
+
+<div className="space-y-1">
+<p className="text-[11px] font-medium text-foreground">节拍</p>
+ <div data-testid="chapter-corpus-blueprint-emotion-arc" className="flex min-h-8 items-end gap-1 rounded border border-border bg-card px-2 py-1">
+ {blueprint.beats.map((beat, beatIndex) => {
+ const height = corpusEmotionArcHeight(beat.narrative_function, beatIndex, blueprint.beats.length)
+ return <span key={`${beat.beat_id}:arc`} title={`${beat.beat_index + 1}. ${beat.narrative_function}`} className="min-w-3 flex-1 bg-primary/60" style={{ height: `${height}%` }} />
+ })}
+ </div>
                   {blueprint.beats.map(beat => (
                     <p key={beat.beat_id} className="break-all text-[11px] leading-relaxed text-muted-foreground">
                       {beat.beat_index + 1}. {beat.narrative_function || 'function'} · {beat.role_in_beat || 'role'} · {beat.node_ids.join(', ')}
@@ -2038,7 +2123,148 @@ function CorpusInsertionDraftCandidateList({
         </div>
       )}
     </section>
-  )
+)
+}
+
+function CorpusExpertDraftControls({
+ slotName,
+ slotVariantsText,
+ transitionStrategies,
+ onSlotNameChange,
+ onSlotVariantsTextChange,
+ onTransitionStrategiesChange,
+}: {
+ slotName: string
+ slotVariantsText: string
+ transitionStrategies: string[]
+ onSlotNameChange: (value: string) => void
+ onSlotVariantsTextChange: (value: string) => void
+ onTransitionStrategiesChange: (value: string[]) => void
+}) {
+ const slotValues = slotVariantsText
+ .split(/\r?\n|，|,/)
+ .map(value => value.trim())
+ .filter(Boolean)
+ .slice(0, 4)
+const toggleStrategy = (strategy: string) => {
+ onTransitionStrategiesChange(transitionStrategies.includes(strategy)
+ ? transitionStrategies.filter(value => value !== strategy)
+ : [...transitionStrategies, strategy])
+ }
+
+ return (
+ <section data-testid="chapter-corpus-expert-controls" className="grid gap-2 border-y border-border bg-background px-2.5 py-2 text-[11px] sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+ <label className="space-y-1 text-muted-foreground">
+ <span className="font-medium text-foreground">槽位名</span>
+ <input value={slotName} onChange={event => onSlotNameChange(event.target.value)} className="w-full rounded border border-input bg-card px-2 py-1 text-foreground outline-none focus:ring-2 focus:ring-ring" />
+ </label>
+ <label className="space-y-1 text-muted-foreground">
+ <span className="font-medium text-foreground">槽位变体</span>
+ <textarea value={slotVariantsText} onChange={event => onSlotVariantsTextChange(event.target.value)} className="min-h-14 w-full resize-y rounded border border-input bg-card px-2 py-1 text-foreground outline-none focus:ring-2 focus:ring-ring" />
+</label>
+ <div data-testid="chapter-corpus-expert-slot-table" className="sm:col-span-2 overflow-hidden rounded border border-border">
+ <div className="grid grid-cols-[minmax(90px,0.7fr)_minmax(0,1.3fr)] bg-secondary/60 px-2 py-1 font-medium text-foreground">
+ <span>槽位</span>
+ <span>变体值</span>
+ </div>
+ {slotValues.length > 0 ? slotValues.map((value, index) => (
+ <div key={`${value}-${index}`} className="grid grid-cols-[minmax(90px,0.7fr)_minmax(0,1.3fr)] border-t border-border px-2 py-1 text-muted-foreground">
+ <span className="truncate">{slotName.trim() || 'character'}</span>
+ <span className="break-words text-foreground">{value}</span>
+ </div>
+ )) : <p className="border-t border-border px-2 py-1 text-muted-foreground">暂无槽位变体</p>}
+ </div>
+<div className="space-y-1 sm:col-span-2">
+ <span className="font-medium text-foreground">过渡策略</span>
+ <div className="flex flex-wrap gap-1.5">
+ {[['default', '语义过渡'], ['direct_join', '直接拼接']].map(([value, label]) => (
+ <label key={value} className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-muted-foreground">
+ <input type="checkbox" checked={transitionStrategies.includes(value)} onChange={() => toggleStrategy(value)} />
+ {label}
+ </label>
+ ))}
+</div>
+ <div data-testid="chapter-corpus-expert-transition-list" className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
+ <span className="font-medium text-foreground">已选清单</span>
+ {transitionStrategies.length > 0 ? transitionStrategies.map(strategy => (
+ <span key={strategy} className="rounded bg-secondary px-1.5 py-0.5">{strategy === 'direct_join' ? '直接拼接' : '语义过渡'}</span>
+ )) : <span>未选择</span>}
+ </div>
+</div>
+ </section>
+ )
+}
+
+function CorpusDraftComparison({
+ result,
+ selectedCandidateId,
+ lockedCandidateId,
+ onSelect,
+ onLock,
+}: {
+ result: reference.CorpusInsertionDraftCandidates
+ selectedCandidateId: string
+ lockedCandidateId: string
+ onSelect: (candidate: reference.CorpusInsertionDraftCandidate) => void
+ onLock: (candidateId: string) => void
+}) {
+ const readyCandidates = result.candidates.filter(candidate => corpusDraftCanApply(candidate.draft))
+ const visibleCandidates = (readyCandidates.length > 0 ? readyCandidates : result.candidates).slice(0, 4)
+ const audit = result.candidate_set_audit
+
+ return (
+ <section data-testid="chapter-corpus-draft-comparison" className="space-y-2 rounded border border-border bg-background p-2">
+ <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+ <div className="flex items-center gap-1.5">
+ <GitCompareArrows className="h-3.5 w-3.5 text-muted-foreground" />
+ <span className="font-semibold text-foreground">并排差异</span>
+ </div>
+ {audit && <span className={audit.passed ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-200'}>候选集审计 {audit.passed ? '通过' : '阻断'} · 文本 {audit.distinct_text_count}</span>}
+ </div>
+ <div className="grid auto-cols-[minmax(220px,1fr)] grid-flow-col gap-2 overflow-x-auto pb-1">
+ {visibleCandidates.map(candidate => {
+ const selected = candidate.candidate_id === selectedCandidateId
+ const locked = candidate.candidate_id === lockedCandidateId
+const difference = audit?.differences.find(item => item.candidate_id === candidate.candidate_id)
+ const transitionLabels = candidate.draft.transitions.map(transition =>
+ `${transition.decision}/${transition.strategy}`)
+ return (
+ <article key={candidate.candidate_id} className={`min-w-0 space-y-2 rounded border p-2 ${selected ? 'border-primary bg-primary/5' : 'border-border bg-card'}`}>
+ <button type="button" onClick={() => onSelect(candidate)} className="w-full text-left">
+ <p className="truncate text-[11px] font-medium text-foreground">{formatCorpusDraftStrategy(candidate.strategy)}</p>
+ <p className="mt-1 line-clamp-5 whitespace-pre-wrap text-xs leading-relaxed text-foreground">{candidate.draft.assembled_text}</p>
+ </button>
+ <div className="flex flex-wrap gap-1 text-[10px] text-muted-foreground">
+ <span className="rounded bg-secondary px-1 py-0.5">槽位差 {difference?.slot_difference_count ?? candidate.draft.slot_replacements.length}</span>
+ <span className="rounded bg-secondary px-1 py-0.5">过渡差 {difference?.transition_difference_count ?? candidate.draft.transitions.length}</span>
+ <span className="rounded bg-secondary px-1 py-0.5">锁定段 {candidate.draft.pieces.reduce((sum, piece) => sum + piece.locked_spans.length, 0)}</span>
+</div>
+ <div data-testid="chapter-corpus-draft-transition-list" className="space-y-1 text-[10px] text-muted-foreground">
+ <p className="font-medium text-foreground">过渡清单</p>
+ {transitionLabels.length > 0
+ ? transitionLabels.map((label, index) => <p key={`${label}-${index}`} className="truncate">{label}</p>)
+ : <p>无相邻片段</p>}
+ </div>
+<button type="button" disabled={!corpusDraftCanApply(candidate.draft)} onClick={() => onLock(candidate.candidate_id)} className={`inline-flex w-full items-center justify-center gap-1 rounded px-2 py-1 text-[11px] ${locked ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground hover:bg-secondary/80'} disabled:opacity-50`}>
+ {locked ? <Check className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+ {locked ? '已锁定' : '锁定此稿'}
+</button>
+ {locked && <p data-testid="chapter-corpus-draft-lock-confirmation" className="text-center text-[10px] font-medium text-emerald-700 dark:text-emerald-300">已锁定，待确认写入</p>}
+</article>
+ )
+ })}
+ </div>
+ {audit && audit.errors.length > 0 && <p className="break-words text-[11px] text-amber-800 dark:text-amber-200">{audit.errors.join('；')}</p>}
+ </section>
+ )
+}
+
+function corpusEmotionArcHeight(narrativeFunction: string, index: number, count: number): number {
+ const normalized = narrativeFunction.toLowerCase()
+ if (normalized.includes('climax') || normalized.includes('reveal') || normalized.includes('pressure')) return 88
+ if (normalized.includes('withhold') || normalized.includes('suspend')) return 72
+ if (normalized.includes('release') || normalized.includes('resolve')) return 42
+ return Math.round(35 + ((index + 1) / Math.max(1, count)) * 35)
 }
 
 function corpusDraftCanApply(draft: reference.CorpusInsertionDraft): boolean {

@@ -18,7 +18,9 @@ public sealed record ReferenceCorpusFeatureFamilyAnalysisInput(
 {
     public ReferenceCorpusFeatureAnalysisContext Context { get; init; } = ReferenceCorpusFeatureAnalysisContext.Empty;
 
-    public int? MaxOutputTokens { get; init; }
+public int? MaxOutputTokens { get; init; }
+
+ public ReferenceCorpusFrozenModelSelection? ModelSelection { get; init; }
 }
 
 public sealed record ReferenceCorpusFeatureAnalysisContext(

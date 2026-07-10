@@ -24,7 +24,8 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
             DesktopLaunchLog.Write("Photino temporary files path not configured; using platform default.");
         }
         var adapter = new PhotinoWindowAdapter(window);
-        var bridge = DesktopBridgeComposition.CreateBridge(adapter, settings.AppOptions);
+ var runtime = DesktopBridgeComposition.CreateRuntime(adapter, settings.AppOptions);
+ var bridge = runtime.Bridge;
 
         var hasStoredLocation = settings.X.HasValue && settings.Y.HasValue;
         var workAreas = SafeMonitorWorkAreas(window).ToArray();
@@ -64,7 +65,8 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
         window.Load(settings.StartUrl);
         window.Maximized = false;
 
-        return adapter;
+ runtime.StartAsync().AsTask().GetAwaiter().GetResult();
+ return new RuntimeOwnedWindow(adapter, runtime);
     }
 
     private static Size ResolveLaunchSize(
@@ -154,7 +156,7 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
         return sanitized.Length == 0 ? "default" : sanitized;
     }
 
-    private sealed class PhotinoWindowAdapter : IPhotinoWindow
+private sealed class PhotinoWindowAdapter : IPhotinoWindow
     {
         private readonly PhotinoWindow _window;
 
@@ -230,9 +232,29 @@ public sealed class PhotinoWindowFactory : IPhotinoWindowFactory
                 _window.Maximized);
         }
 
-        public void Close()
-        {
-            _window.Close();
-        }
-    }
+public void Close()
+{
+_window.Close();
+ }
+ }
+
+ private sealed class RuntimeOwnedWindow(
+ IPhotinoWindow inner,
+ DesktopBridgeComposition.DesktopBridgeRuntime runtime) : IPhotinoWindow
+ {
+ public void WaitForClose()
+ {
+ try { inner.WaitForClose(); }
+ finally { runtime.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+ }
+
+ public void SendWebMessage(string message) => inner.SendWebMessage(message);
+ public ValueTask<string?> ShowSaveFileAsync(string title,string defaultPath,IReadOnlyList<NovelExportFileFilter> filters,CancellationToken cancellationToken) => inner.ShowSaveFileAsync(title,defaultPath,filters,cancellationToken);
+ public ValueTask<string?> ShowOpenFileAsync(string title,string defaultPath,IReadOnlyList<WorkspaceFileFilter> filters,CancellationToken cancellationToken) => inner.ShowOpenFileAsync(title,defaultPath,filters,cancellationToken);
+ public void Minimize() => inner.Minimize();
+ public void ToggleMaximize() => inner.ToggleMaximize();
+ public bool IsMaximized() => inner.IsMaximized();
+ public PhotinoWindowBounds GetBounds() => inner.GetBounds();
+ public void Close() => inner.Close();
+ }
 }

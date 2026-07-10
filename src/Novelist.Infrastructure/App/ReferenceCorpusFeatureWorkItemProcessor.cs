@@ -17,9 +17,10 @@ internal sealed record ReferenceCorpusFeatureWorkItemInput(
  string NodeId,
  string NodeText,
  string NodeType,
- string FeatureFamily,
- ReferenceCorpusFeatureAnalysisContext Context,
- int MaxValidationAttempts,
+string FeatureFamily,
+ReferenceCorpusFeatureAnalysisContext Context,
+ ReferenceCorpusFrozenModelSelection ModelSelection,
+int MaxValidationAttempts,
  ReferenceCorpusFeatureTokenEnvelope TokenEnvelope);
 
 internal sealed record ReferenceCorpusFeatureWorkItemResult(
@@ -74,12 +75,13 @@ internal sealed class ReferenceCorpusFeatureWorkItemProcessor
  var output = await _analyzer.AnalyzeAsync(
  new ReferenceCorpusFeatureFamilyAnalysisInput(input.RunId, input.AnchorId, input.NodeId, input.NodeType, input.NodeText, input.FeatureFamily, ReferenceCorpusFeatureFamilySchemaRegistry.Get(input.FeatureFamily))
  {
- Context = input.Context,
- MaxOutputTokens = Math.Min(remaining, input.TokenEnvelope.MaximumOutputTokens)
+Context = input.Context,
+ ModelSelection = input.ModelSelection,
+MaxOutputTokens = Math.Min(remaining, input.TokenEnvelope.MaximumOutputTokens)
  },
  cancellationToken);
 
- var chargedTokens = output.TokensSpent > 0 ? Math.Min(output.TokensSpent, remaining) : Math.Min(input.TokenEnvelope.UnknownUsageCharge, remaining);
+ var chargedTokens = output.TokensSpent > 0 ? output.TokensSpent : Math.Min(input.TokenEnvelope.UnknownUsageCharge, remaining);
  tokensSpent += chargedTokens;
  if (output.TokensSpent <= 0)
  {

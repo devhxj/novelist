@@ -18,8 +18,8 @@ internal sealed partial class SqliteReferenceCorpusAnalysisJobStore
 ValidateId(committedRunId, nameof(committedRunId));
  if (!string.Equals(committedRunId, reservation.RunId, StringComparison.Ordinal))
  throw new ArgumentException("Committed output must reference the reservation's canonical run.", nameof(committedRunId));
- if (tokensSpent < 0 || tokensSpent > reservation.ReservedTokens)
- throw new ArgumentOutOfRangeException(nameof(tokensSpent), "Tokens spent must fit within the reservation.");
+ if (tokensSpent < 0)
+ throw new ArgumentOutOfRangeException(nameof(tokensSpent));
 
  await using var connection = await OpenConnectionAsync(cancellationToken);
  await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
@@ -32,9 +32,9 @@ ValidateId(committedRunId, nameof(committedRunId));
  await persistOutputAsync(connection, transaction, cancellationToken);
  await UpdateCommittedWorkItemAsync(connection, transaction, reservation, committedRunId, now, cancellationToken);
 
- var completesJob = job.ProcessedWorkItems + 1 == job.TotalWorkItems;
- await UpdateCommittedJobAsync(connection, transaction, job, reservation, tokensSpent, completesJob, now, cancellationToken);
-await UpdateCommittedAttemptAsync(connection, transaction, reservation, tokensSpent, completesJob, now, cancellationToken);
+ var disposition = ResolveCommitDisposition(job, tokensSpent);
+ await UpdateCommittedJobAsync(connection, transaction, job, reservation, tokensSpent, disposition, now, cancellationToken);
+ await UpdateCommittedAttemptAsync(connection, transaction, reservation, tokensSpent, disposition, now, cancellationToken);
  await SyncCanonicalRunAsync(connection, transaction, reservation.JobId, cancellationToken);
 
  var committed = await ReadJobAsync(connection, transaction, reservation.JobId, cancellationToken)
@@ -52,7 +52,29 @@ await UpdateCommittedAttemptAsync(connection, transaction, reservation, tokensSp
  !string.Equals(job.InputSnapshotId, reservation.InputSnapshotId, StringComparison.Ordinal) ||
  job.AttemptCount != reservation.AttemptNumber)
  throw new ReferenceCorpusAnalysisJobConflictException("Analysis reservation no longer matches its job attempt.");
- ValidateActiveLease(job, reservation.WorkerId, reservation.LeaseToken, now);
+ if (job.Status is not (ReferenceCorpusAnalysisJobStatuses.Running
+ or ReferenceCorpusAnalysisJobStatuses.PauseRequested
+ or ReferenceCorpusAnalysisJobStatuses.CancelRequested) ||
+ !string.Equals(job.LeaseOwner, reservation.WorkerId, StringComparison.Ordinal) ||
+ !string.Equals(job.LeaseToken, reservation.LeaseToken, StringComparison.Ordinal) ||
+ job.LeaseExpiresAt is null || job.LeaseExpiresAt <= now)
+ throw new ReferenceCorpusAnalysisJobConflictException(
+ $"Lease for analysis job '{job.JobId}' is missing, expired, or owned by another worker.");
+}
+
+ private static ReferenceCorpusAnalysisCommitDisposition ResolveCommitDisposition(
+ ReferenceCorpusAnalysisJob job,
+ int tokensSpent)
+ {
+ if (job.Status == ReferenceCorpusAnalysisJobStatuses.CancelRequested)
+ return ReferenceCorpusAnalysisCommitDisposition.CancelAfterCommit;
+ if (job.Status == ReferenceCorpusAnalysisJobStatuses.PauseRequested)
+ return ReferenceCorpusAnalysisCommitDisposition.PauseAfterCommit;
+ if (job.ProcessedWorkItems + 1 == job.TotalWorkItems)
+ return ReferenceCorpusAnalysisCommitDisposition.Complete;
+ if (job.TokenBudget is { } budget && job.TokensSpent + tokensSpent >= budget)
+ return ReferenceCorpusAnalysisCommitDisposition.BudgetExhaustedAfterCommit;
+ return ReferenceCorpusAnalysisCommitDisposition.Continue;
  }
 
  private static async ValueTask ValidateWorkItemFenceAsync(
@@ -115,7 +137,8 @@ await UpdateCommittedAttemptAsync(connection, transaction, reservation, tokensSp
 
  private static async ValueTask UpdateCommittedJobAsync(
  SqliteConnection connection, SqliteTransaction transaction, ReferenceCorpusAnalysisJob job,
- ReferenceCorpusAnalysisWorkItemReservation reservation, int tokensSpent, bool completesJob,
+ReferenceCorpusAnalysisWorkItemReservation reservation, int tokensSpent,
+ ReferenceCorpusAnalysisCommitDisposition disposition,
  DateTimeOffset now, CancellationToken cancellationToken)
  {
  await using var command = connection.CreateCommand();
@@ -125,16 +148,16 @@ await UpdateCommittedAttemptAsync(connection, transaction, reservation, tokensSp
  SET processed_work_items=processed_work_items+1,succeeded_work_items=succeeded_work_items+1,
  retrying_work_items=0,
  tokens_spent=tokens_spent+$tokens_spent,tokens_reserved=tokens_reserved-$reserved_tokens,
- resume_cursor=$resume_cursor,status=CASE WHEN $completes_job=1 THEN 'completed' ELSE status END,
- completed_at=CASE WHEN $completes_job=1 THEN $now ELSE completed_at END,
- lease_owner=CASE WHEN $completes_job=1 THEN NULL ELSE lease_owner END,
- lease_token=CASE WHEN $completes_job=1 THEN NULL ELSE lease_token END,
- lease_acquired_at=CASE WHEN $completes_job=1 THEN NULL ELSE lease_acquired_at END,
- lease_expires_at=CASE WHEN $completes_job=1 THEN NULL ELSE lease_expires_at END,
- heartbeat_at=CASE WHEN $completes_job=1 THEN NULL ELSE heartbeat_at END,
+ resume_cursor=$resume_cursor,status=$target_status,
+ completed_at=CASE WHEN $terminal=1 THEN $now ELSE NULL END,
+ lease_owner=CASE WHEN $release_lease=1 THEN NULL ELSE lease_owner END,
+ lease_token=CASE WHEN $release_lease=1 THEN NULL ELSE lease_token END,
+ lease_acquired_at=CASE WHEN $release_lease=1 THEN NULL ELSE lease_acquired_at END,
+ lease_expires_at=CASE WHEN $release_lease=1 THEN NULL ELSE lease_expires_at END,
+ heartbeat_at=CASE WHEN $release_lease=1 THEN NULL ELSE heartbeat_at END,
  updated_at=$now,row_version=row_version+1
  WHERE job_id=$job_id AND run_id=$run_id AND input_snapshot_id=$snapshot_id
- AND status='running' AND lease_owner=$worker_id AND lease_token=$lease_token
+ AND status=$expected_status AND lease_owner=$worker_id AND lease_token=$lease_token
  AND lease_expires_at>$now AND attempt_count=$attempt_no
  AND tokens_reserved>=$reserved_tokens
  AND processed_work_items=$processed_work_items AND succeeded_work_items=$succeeded_work_items;
@@ -142,7 +165,18 @@ await UpdateCommittedAttemptAsync(connection, transaction, reservation, tokensSp
  Add(command, "$tokens_spent", tokensSpent);
  Add(command, "$reserved_tokens", reservation.ReservedTokens);
  Add(command, "$resume_cursor", (reservation.Ordinal + 1).ToString(System.Globalization.CultureInfo.InvariantCulture));
- Add(command, "$completes_job", completesJob ? 1 : 0);
+ var targetStatus = disposition switch
+ {
+ ReferenceCorpusAnalysisCommitDisposition.Complete => ReferenceCorpusAnalysisJobStatuses.Completed,
+ ReferenceCorpusAnalysisCommitDisposition.PauseAfterCommit => ReferenceCorpusAnalysisJobStatuses.Paused,
+ ReferenceCorpusAnalysisCommitDisposition.CancelAfterCommit => ReferenceCorpusAnalysisJobStatuses.Cancelled,
+ ReferenceCorpusAnalysisCommitDisposition.BudgetExhaustedAfterCommit => ReferenceCorpusAnalysisJobStatuses.BudgetExhausted,
+ _ => ReferenceCorpusAnalysisJobStatuses.Running
+ };
+ Add(command, "$target_status", targetStatus);
+ Add(command, "$terminal", targetStatus is ReferenceCorpusAnalysisJobStatuses.Completed or ReferenceCorpusAnalysisJobStatuses.Cancelled ? 1 : 0);
+ Add(command, "$release_lease", targetStatus == ReferenceCorpusAnalysisJobStatuses.Running ? 0 : 1);
+ Add(command, "$expected_status", job.Status);
  Add(command, "$now", ToDb(now));
  Add(command, "$job_id", reservation.JobId);
  Add(command, "$run_id", reservation.RunId);
@@ -158,7 +192,8 @@ await UpdateCommittedAttemptAsync(connection, transaction, reservation, tokensSp
 
  private static async ValueTask UpdateCommittedAttemptAsync(
  SqliteConnection connection, SqliteTransaction transaction,
- ReferenceCorpusAnalysisWorkItemReservation reservation, int tokensSpent, bool completesJob,
+ReferenceCorpusAnalysisWorkItemReservation reservation, int tokensSpent,
+ ReferenceCorpusAnalysisCommitDisposition disposition,
  DateTimeOffset now, CancellationToken cancellationToken)
  {
  await using var command = connection.CreateCommand();
@@ -166,14 +201,22 @@ await UpdateCommittedAttemptAsync(connection, transaction, reservation, tokensSp
  command.CommandText = """
  UPDATE reference_analysis_job_attempts
  SET tokens_spent=tokens_spent+$tokens_spent,
- completed_at=CASE WHEN $completes_job=1 THEN $now ELSE completed_at END,
- outcome=CASE WHEN $completes_job=1 THEN 'completed' ELSE outcome END
+ completed_at=CASE WHEN $closes_attempt=1 THEN $now ELSE completed_at END,
+ outcome=CASE WHEN $closes_attempt=1 THEN $outcome ELSE outcome END
  WHERE job_id=$job_id AND attempt_no=$attempt_no AND worker_id=$worker_id
  AND lease_token=$lease_token AND completed_at IS NULL;
  """;
  AddAttemptParameters(command, reservation);
  Add(command, "$tokens_spent", tokensSpent);
- Add(command, "$completes_job", completesJob ? 1 : 0);
+ Add(command, "$closes_attempt", disposition == ReferenceCorpusAnalysisCommitDisposition.Continue ? 0 : 1);
+ Add(command, "$outcome", disposition switch
+ {
+ ReferenceCorpusAnalysisCommitDisposition.Complete => ReferenceCorpusAnalysisJobStatuses.Completed,
+ ReferenceCorpusAnalysisCommitDisposition.PauseAfterCommit => ReferenceCorpusAnalysisJobStatuses.Paused,
+ ReferenceCorpusAnalysisCommitDisposition.CancelAfterCommit => ReferenceCorpusAnalysisJobStatuses.Cancelled,
+ ReferenceCorpusAnalysisCommitDisposition.BudgetExhaustedAfterCommit => ReferenceCorpusAnalysisJobStatuses.BudgetExhausted,
+ _ => ReferenceCorpusAnalysisJobStatuses.Running
+ });
  Add(command, "$now", ToDb(now));
  if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
  throw new ReferenceCorpusAnalysisJobConflictException("Analysis attempt changed during work-item commit.");

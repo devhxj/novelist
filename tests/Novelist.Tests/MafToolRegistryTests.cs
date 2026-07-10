@@ -1956,7 +1956,7 @@ public sealed class MafToolRegistryTests
                 DateTimeOffset.UtcNow));
         }
 
-        public ValueTask<ReferenceAnchorBuildStatusPayload?> GetBuildStatusAsync(
+public ValueTask<ReferenceAnchorBuildStatusPayload?> GetBuildStatusAsync(
             long novelId,
             long anchorId,
             CancellationToken cancellationToken)
@@ -1971,8 +1971,14 @@ public sealed class MafToolRegistryTests
                 0,
                 0,
                 string.Empty,
-                DateTimeOffset.UtcNow));
-        }
+DateTimeOffset.UtcNow));
+}
+
+ public ValueTask<ReferenceMaterialEmbeddingBackfillPayload> BackfillMaterialEmbeddingsAsync(
+ BackfillReferenceMaterialEmbeddingsPayload input,
+ CancellationToken cancellationToken) =>
+ ValueTask.FromResult(new ReferenceMaterialEmbeddingBackfillPayload(
+ "test", "test", 1, 0, 0, 0, 0, 0, 0, []));
 
         public ValueTask<PageResultPayload<ReferenceMaterialPayload>> SearchMaterialsAsync(
             SearchReferenceMaterialsPayload input,

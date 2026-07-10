@@ -289,7 +289,7 @@ public sealed class ReferenceCorpusBridgeHandlerTests
     }
 
     [Fact]
-    public async Task SearchReferenceCorpusCandidatesRejectsPageSizeAboveLimitAsValidationError()
+public async Task SearchReferenceCorpusCandidatesRejectsPageSizeAboveLimitAsValidationError()
     {
         var service = new RecordingReferenceCorpusService();
         var dispatcher = new BridgeDispatcher().RegisterReferenceCorpusHandlers(service);
@@ -307,8 +307,22 @@ public sealed class ReferenceCorpusBridgeHandlerTests
             PageRequestErrorCodes.PageSizeOutOfRange,
             error.GetProperty("details").GetProperty("page_request").GetString(),
             StringComparison.Ordinal);
-        Assert.Empty(service.Calls);
-    }
+Assert.Empty(service.Calls);
+}
+
+ [Fact]
+ public async Task SearchReferenceCorpusCandidatesMapsInvalidFeedbackToValidationError()
+ {
+ var service = new RecordingReferenceCorpusService { ThrowOnSearch = new ArgumentException("Unsupported retrieval route 'unknown'.") };
+ var dispatcher = new BridgeDispatcher().RegisterReferenceCorpusHandlers(service);
+
+ using var json = await DispatchAsync(dispatcher, "SearchReferenceCorpusCandidates", BuildSearchPayload(pageSize: 20));
+
+ Assert.False(json.RootElement.GetProperty("ok").GetBoolean());
+ Assert.Equal("VALIDATION_ERROR", json.RootElement.GetProperty("error").GetProperty("code").GetString());
+ Assert.Contains("Unsupported retrieval route",
+ json.RootElement.GetProperty("error").GetProperty("details").GetProperty("input").GetString());
+ }
 
     [Fact]
     public async Task SearchReferenceCorpusCandidatesDoesNotExposeEmbeddingOrSourceText()
@@ -628,15 +642,17 @@ public sealed class ReferenceCorpusBridgeHandlerTests
         return JsonDocument.Parse(result.OutboundJson);
     }
 
-    private sealed class RecordingReferenceCorpusService : IReferenceCorpusService
-    {
-        public List<string> Calls { get; } = [];
+private sealed class RecordingReferenceCorpusService : IReferenceCorpusService
+{
+public List<string> Calls { get; } = [];
+ public Exception? ThrowOnSearch { get; init; }
 
         public ValueTask<PageResultPayload<ReferenceCorpusCandidatePayload>> SearchCandidatesAsync(
             SearchReferenceCorpusCandidatesPayload input,
             CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
+{
+cancellationToken.ThrowIfCancellationRequested();
+ if (ThrowOnSearch is not null) throw ThrowOnSearch;
             Calls.Add(
                 $"SearchCandidates:{input.QueryContext.SceneType}:{input.QueryContext.ChapterContext.NovelId}:{input.QueryContext.ChapterContext.ChapterNumber}:{input.PageRequest.PageSize}:{input.PageRequest.SortBy}:{input.PageRequest.SortDir}");
             return ValueTask.FromResult(new PageResultPayload<ReferenceCorpusCandidatePayload>(
@@ -696,9 +712,20 @@ public sealed class ReferenceCorpusBridgeHandlerTests
 
     private sealed class RecordingReferenceCorpusWritingService : IReferenceCorpusWritingService
     {
-        public List<string> Calls { get; } = [];
+public List<string> Calls { get; } = [];
 
-        public ValueTask<ReferenceCorpusBlueprintCandidatesPayload> GenerateBlueprintCandidatesAsync(
+ public async ValueTask<ReferenceCorpusBlueprintCandidatePayload> GenerateChapterBlueprintAsync(
+ GenerateReferenceCorpusBlueprintCandidatesPayload input,
+ CancellationToken cancellationToken)
+ {
+ cancellationToken.ThrowIfCancellationRequested();
+ var result = await GenerateBlueprintCandidatesAsync(
+ input with { RequestedCount = Math.Max(1, input.RequestedCount) },
+ cancellationToken);
+ return result.Candidates[0];
+ }
+
+public ValueTask<ReferenceCorpusBlueprintCandidatesPayload> GenerateBlueprintCandidatesAsync(
             GenerateReferenceCorpusBlueprintCandidatesPayload input,
             CancellationToken cancellationToken)
         {

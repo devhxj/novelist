@@ -16,7 +16,12 @@ internal sealed partial class SqliteReferenceCorpusAnalysisJobStore
  retrying_work_items, token_budget, tokens_spent, resume_cursor, current_stage, current_chapter,
  attempt_count, max_attempts, next_attempt_at, lease_owner, lease_token, lease_acquired_at,
  lease_expires_at, heartbeat_at, pause_requested_at, cancel_requested_at, queued_at, started_at,
- completed_at, updated_at, last_error_code, last_error_message, row_version
+ completed_at, updated_at, last_error_code, last_error_message, row_version, failure_attempt_count,
+ tokens_reserved,
+ (SELECT COUNT(DISTINCT processed.node_id)
+ FROM reference_analysis_work_items AS processed
+ WHERE processed.input_snapshot_id=reference_analysis_jobs.input_snapshot_id
+ AND processed.work_state IN ('succeeded','skipped','failed')) AS processed_nodes
  """;
 
  private static void ValidateEnqueue(
@@ -200,7 +205,7 @@ if (uniqueNodes.Count != request.TotalNodes)
  GetNullableTimestamp(reader, 30), GetNullableTimestamp(reader, 31), GetNullableTimestamp(reader, 32),
  GetNullableTimestamp(reader, 33), ParseTimestamp(reader.GetString(34)), GetNullableTimestamp(reader, 35),
  GetNullableTimestamp(reader, 36), ParseTimestamp(reader.GetString(37)), GetNullableString(reader, 38),
- GetNullableString(reader, 39), reader.GetInt64(40)));
+ GetNullableString(reader, 39), reader.GetInt64(40), reader.GetInt32(41), reader.GetInt32(42), reader.GetInt32(43)));
  }
  return jobs;
  }

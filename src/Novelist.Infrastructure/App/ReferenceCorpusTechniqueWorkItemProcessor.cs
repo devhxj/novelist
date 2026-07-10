@@ -15,8 +15,9 @@ internal sealed record ReferenceCorpusTechniqueWorkItemInput(
  string NodeId,
  string NodeType,
  string NodeText,
- IReadOnlyList<ReferenceCorpusTechniqueObservationEvidence> Observations,
- int MaxValidationAttempts,
+IReadOnlyList<ReferenceCorpusTechniqueObservationEvidence> Observations,
+ ReferenceCorpusFrozenModelSelection ModelSelection,
+int MaxValidationAttempts,
  ReferenceCorpusFeatureTokenEnvelope TokenEnvelope);
 
 internal sealed record ReferenceCorpusTechniqueWorkItemResult(
@@ -67,13 +68,14 @@ internal sealed class ReferenceCorpusTechniqueWorkItemProcessor
  input.NodeType,
  input.NodeText,
  input.Observations)
- {
- MaxOutputTokens = Math.Min(remaining, input.TokenEnvelope.MaximumOutputTokens)
+{
+ ModelSelection = input.ModelSelection,
+MaxOutputTokens = Math.Min(remaining, input.TokenEnvelope.MaximumOutputTokens)
  },
  cancellationToken);
 
  var chargedTokens = output.TokensSpent > 0
- ? Math.Min(output.TokensSpent, remaining)
+ ? output.TokensSpent
  : Math.Min(input.TokenEnvelope.UnknownUsageCharge, remaining);
  tokensSpent += chargedTokens;
  if (output.TokensSpent <= 0)

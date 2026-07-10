@@ -6143,7 +6143,7 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchMaterialsFallsBackWhenEmbeddingQueryFails()
+public async Task SearchMaterialsFallsBackWhenEmbeddingQueryFails()
     {
         var options = CreateOptions();
         await InitializeAsync(options);
@@ -6201,11 +6201,155 @@ public sealed class ReferenceAnchorServiceTests : IDisposable
         var components = result.Items[0].ScoreComponents ?? throw new InvalidOperationException("Expected score components.");
         Assert.True(components["lexical"] > 0);
         Assert.DoesNotContain("embedding", components.Keys);
-        Assert.Empty(vec.SearchRequests);
-    }
+Assert.Empty(vec.SearchRequests);
+}
 
-    [Fact]
-    public async Task SearchMaterialsDoesNotRequestEmbeddingWithoutReadyVectorIndex()
+ [Fact]
+ public async Task BackfillMaterialEmbeddingsAlignsLegacyRowsAndIsIdempotent()
+ {
+ var options = CreateOptions();
+ await InitializeAsync(options);
+ var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+ var novel = await novels.CreateNovelAsync(new CreateNovelPayload("材料向量回填测试", "", ""), CancellationToken.None);
+ var sourcePath = CreateSourceFile(
+ "material-embedding-backfill.md",
+ """
+ # 第一章
+
+ 雨声压低了门口。
+
+ 他在门口停住。
+ """);
+ var embeddings = new DeterministicEmbeddingClient(dimensions: 3);
+ var vec = new RecordingSqliteVecTableProvisioner();
+ var service = new SqliteReferenceAnchorService(
+ options,
+ novels,
+ new StaticEmbeddingConfigurationService(new EmbeddingRequestOptions(
+ "custom", "https://api.example.com/v1/embeddings", "test-key", "embed-v1", 3, null)),
+ embeddings,
+ vec);
+ var anchor = await service.CreateAnchorAsync(
+ new CreateReferenceAnchorPayload(novel.Id, "材料向量参考", null, sourcePath, "markdown", "user_provided"),
+ CancellationToken.None);
+ var databasePath = Path.Combine(options.DefaultDataDirectory, "reference-anchor", "index.sqlite");
+ await using (var connection = new SqliteConnection(
+ new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString()))
+ {
+ await connection.OpenAsync();
+ await using var clear = connection.CreateCommand();
+ clear.CommandText = """
+ UPDATE reference_materials SET node_id = NULL WHERE anchor_id = $anchor_id;
+ UPDATE reference_source_segments SET node_id = NULL WHERE anchor_id = $anchor_id;
+ DELETE FROM reference_material_embeddings WHERE anchor_id = $anchor_id;
+ """;
+ clear.Parameters.AddWithValue("$anchor_id", anchor.AnchorId);
+ await clear.ExecuteNonQueryAsync();
+ }
+ embeddings.Requests.Clear();
+ vec.Provisions.Clear();
+
+ var first = await service.BackfillMaterialEmbeddingsAsync(
+ new BackfillReferenceMaterialEmbeddingsPayload(novel.Id),
+ CancellationToken.None);
+
+ Assert.True(first.MaterialCount > 0);
+ Assert.Equal(first.MaterialCount, first.BuiltCount);
+ Assert.Equal(0, first.ReusedCount);
+ Assert.True(first.AlignedSourceSegmentCount > 0);
+ Assert.True(first.AlignedMaterialCount > 0);
+ Assert.Equal(first.MaterialCount, first.ProjectionCount);
+ Assert.All(first.Items, item =>
+ {
+ Assert.Equal("custom", item.ProviderKey);
+ Assert.Equal("embed-v1", item.ModelId);
+ Assert.Equal(3, item.Dimensions);
+ Assert.False(string.IsNullOrWhiteSpace(item.MaterialHash));
+ Assert.False(string.IsNullOrWhiteSpace(item.NodeTextHash));
+ Assert.Equal(64, item.EmbeddingHash.Length);
+ Assert.Equal("built", item.Status);
+ });
+ Assert.Single(vec.Provisions);
+ Assert.Equal(first.MaterialCount, vec.Provisions[0].Vectors.Count);
+ var requestCount = embeddings.Requests.Count;
+
+ var second = await service.BackfillMaterialEmbeddingsAsync(
+ new BackfillReferenceMaterialEmbeddingsPayload(novel.Id),
+ CancellationToken.None);
+
+ Assert.Equal(0, second.BuiltCount);
+ Assert.Equal(first.MaterialCount, second.ReusedCount);
+ Assert.Equal(0, second.AlignedSourceSegmentCount);
+ Assert.Equal(0, second.AlignedMaterialCount);
+ Assert.Equal(requestCount, embeddings.Requests.Count);
+ Assert.All(second.Items, item => Assert.Equal("reused", item.Status));
+ Assert.Equal(first.Items.Select(item => item.EmbeddingHash), second.Items.Select(item => item.EmbeddingHash));
+ }
+
+ [Fact]
+ public async Task BackfillMaterialEmbeddingsRebuildsOnlyChangedRequestedAnchor()
+ {
+ var options = CreateOptions();
+ await InitializeAsync(options);
+ var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+ var novel = await novels.CreateNovelAsync(new CreateNovelPayload("材料向量增量测试", "", ""), CancellationToken.None);
+ var embeddings = new DeterministicEmbeddingClient(dimensions: 3);
+ var vec = new RecordingSqliteVecTableProvisioner();
+ var service = new SqliteReferenceAnchorService(
+ options,
+ novels,
+ new StaticEmbeddingConfigurationService(new EmbeddingRequestOptions(
+ "custom", "https://api.example.com/v1/embeddings", "test-key", "embed-v1", 3, null)),
+ embeddings,
+ vec);
+ var firstAnchor = await service.CreateAnchorAsync(
+ new CreateReferenceAnchorPayload(novel.Id, "增量参考一", null, CreateSourceFile("material-incremental-a.md", "# 第一章\n\n雨声压低门口。"), "markdown", "user_provided"),
+ CancellationToken.None);
+ var secondAnchor = await service.CreateAnchorAsync(
+ new CreateReferenceAnchorPayload(novel.Id, "增量参考二", null, CreateSourceFile("material-incremental-b.md", "# 第一章\n\n灯影停在窗边。"), "markdown", "user_provided"),
+ CancellationToken.None);
+ await service.BackfillMaterialEmbeddingsAsync(
+ new BackfillReferenceMaterialEmbeddingsPayload(novel.Id),
+ CancellationToken.None);
+ embeddings.Requests.Clear();
+ vec.Provisions.Clear();
+ var databasePath = Path.Combine(options.DefaultDataDirectory, "reference-anchor", "index.sqlite");
+ await using (var connection = new SqliteConnection(
+ new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString()))
+ {
+ await connection.OpenAsync();
+ await using var mutate = connection.CreateCommand();
+ mutate.CommandText = """
+ UPDATE reference_materials
+ SET text = text || '又近了一步。', source_hash = lower(hex(randomblob(32)))
+ WHERE material_id = (
+ SELECT material_id FROM reference_materials
+ WHERE anchor_id = $anchor_id AND archived_at IS NULL
+ ORDER BY material_id LIMIT 1
+ );
+ """;
+ mutate.Parameters.AddWithValue("$anchor_id", firstAnchor.AnchorId);
+ Assert.Equal(1, await mutate.ExecuteNonQueryAsync());
+ }
+
+ var result = await service.BackfillMaterialEmbeddingsAsync(
+ new BackfillReferenceMaterialEmbeddingsPayload(novel.Id, [firstAnchor.AnchorId]),
+ CancellationToken.None);
+
+ Assert.True(result.MaterialCount > 0);
+ Assert.Equal(1, result.BuiltCount);
+ Assert.Equal(result.MaterialCount - 1, result.ReusedCount);
+ Assert.All(result.Items, item => Assert.Equal(firstAnchor.AnchorId, item.AnchorId));
+ Assert.Contains(result.Items, item => item.Status == "built");
+ Assert.Single(vec.Provisions);
+ Assert.Contains(firstAnchor.AnchorId.ToString(), vec.Provisions[0].TableName, StringComparison.Ordinal);
+ Assert.DoesNotContain(result.Items, item => item.AnchorId == secondAnchor.AnchorId);
+ Assert.Single(embeddings.Requests);
+ Assert.Single(embeddings.Requests[0]);
+ }
+
+[Fact]
+public async Task SearchMaterialsDoesNotRequestEmbeddingWithoutReadyVectorIndex()
     {
         var options = CreateOptions();
         await InitializeAsync(options);

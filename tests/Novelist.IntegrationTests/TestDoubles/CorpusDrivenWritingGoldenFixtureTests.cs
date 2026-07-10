@@ -70,7 +70,7 @@ public sealed class CorpusDrivenWritingGoldenFixtureTests
     }
 
     [Fact]
-    public void M3RetrievalGoldenExpectedBlocksDoNotExposeRawSourceOrEmbeddings()
+public void M3RetrievalGoldenExpectedBlocksDoNotExposeRawSourceOrEmbeddings()
     {
         using var document = LoadCorpusDrivenWritingFixture("m3-retrieval-golden.json");
 
@@ -82,7 +82,28 @@ public sealed class CorpusDrivenWritingGoldenFixtureTests
         }
     }
 
-    private static void AssertExpectedBlockDoesNotExposeForbiddenProperties(JsonElement element, string path)
+ [Fact]
+ public void FullGoldenFixtureContainsFiveHundredLicensedSentencesAcrossLibraries()
+ {
+ using var document = LoadCorpusDrivenWritingFixture("m0-500-sentence-golden.json");
+ var root = document.RootElement;
+ var sentences = root.GetProperty("sentences").EnumerateArray().ToArray();
+
+ Assert.Equal("corpus-driven-writing-500-sentence-golden-v1", root.GetProperty("schema_version").GetString());
+ Assert.Equal(500, root.GetProperty("sentence_count").GetInt32());
+ Assert.Equal(500, sentences.Length);
+ Assert.Equal(2, sentences.Select(item => item.GetProperty("library_id").GetString()).Distinct().Count());
+ Assert.Equal(5, sentences.Select(item => item.GetProperty("source_id").GetString()).Distinct().Count());
+ Assert.All(sentences, sentence =>
+ {
+ Assert.Equal("authorized", sentence.GetProperty("license_state").GetString());
+ Assert.False(string.IsNullOrWhiteSpace(sentence.GetProperty("text").GetString()));
+ Assert.Equal(64, sentence.GetProperty("text_hash").GetString()?.Length);
+ Assert.True(sentence.GetProperty("expected_evidence").GetProperty("end").GetInt32() > 0);
+ });
+ }
+
+ private static void AssertExpectedBlockDoesNotExposeForbiddenProperties(JsonElement element, string path)
     {
         if (element.ValueKind == JsonValueKind.Object)
         {

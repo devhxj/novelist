@@ -11,8 +11,9 @@ public sealed record EnqueueReferenceCorpusAnalysisJobPayload(
  [property: JsonPropertyName("priority_class")] string PriorityClass,
  [property: JsonPropertyName("priority_value")] int PriorityValue,
  [property: JsonPropertyName("token_budget")] int? TokenBudget = null,
- [property: JsonPropertyName("max_attempts")] int MaxAttempts = 3,
- [property: JsonPropertyName("dependency_job_id")] string? DependencyJobId = null);
+[property: JsonPropertyName("max_attempts")] int MaxAttempts = 3,
+ [property: JsonPropertyName("dependency_job_id")] string? DependencyJobId = null,
+ [property: JsonPropertyName("min_observation_confidence")] double MinObservationConfidence = 0.70);
 
 public sealed record GetReferenceCorpusAnalysisJobPayload([property: JsonPropertyName("job_id")] string JobId);
 public sealed record ListReferenceCorpusAnalysisJobsPayload([property: JsonPropertyName("page_request")] PageRequestPayload PageRequest);
@@ -47,8 +48,9 @@ public sealed record ReferenceCorpusAnalysisJobPayload(
  [property: JsonPropertyName("token_budget")] int? TokenBudget,
  [property: JsonPropertyName("tokens_spent")] int TokensSpent,
  [property: JsonPropertyName("resume_cursor")] string? ResumeCursor,
- [property: JsonPropertyName("attempt_count")] int AttemptCount,
- [property: JsonPropertyName("max_attempts")] int MaxAttempts,
+[property: JsonPropertyName("attempt_count")] int AttemptCount,
+ [property: JsonPropertyName("failure_attempt_count")] int FailureAttemptCount,
+[property: JsonPropertyName("max_attempts")] int MaxAttempts,
  [property: JsonPropertyName("next_attempt_at")] DateTimeOffset? NextAttemptAt,
  [property: JsonPropertyName("lease_heartbeat_at")] DateTimeOffset? LeaseHeartbeatAt,
  [property: JsonPropertyName("lease_expires_at")] DateTimeOffset? LeaseExpiresAt,
@@ -57,6 +59,11 @@ public sealed record ReferenceCorpusAnalysisJobPayload(
  [property: JsonPropertyName("queued_at")] DateTimeOffset QueuedAt,
  [property: JsonPropertyName("started_at")] DateTimeOffset? StartedAt,
  [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt,
- [property: JsonPropertyName("completed_at")] DateTimeOffset? CompletedAt,
- [property: JsonPropertyName("error_code")] string? ErrorCode,
- [property: JsonPropertyName("error_message")] string? ErrorMessage);
+[property: JsonPropertyName("completed_at")] DateTimeOffset? CompletedAt,
+[property: JsonPropertyName("error_code")] string? ErrorCode,
+[property: JsonPropertyName("error_message")] string? ErrorMessage,
+[property: JsonPropertyName("current_chapter")] int? CurrentChapter = null,
+[property: JsonPropertyName("allowed_actions")] IReadOnlyList<string>? AllowedActions = null,
+[property: JsonPropertyName("safe_diagnostics")] IReadOnlyList<string>? SafeDiagnostics = null,
+ [property: JsonPropertyName("tokens_reserved")] int TokensReserved = 0,
+ [property: JsonPropertyName("processed_nodes")] int ProcessedNodes = 0);

@@ -499,7 +499,7 @@ CREATE TABLE reference_analysis_attempts (
 - diagnostics 只返回稳定错误码和有限长度摘要，禁止源文、prompt、模型原始输出、embedding、内部 JSON 和密钥。
 - 稳定错误语义至少包括 `analysis_job_not_found`、`analysis_job_version_conflict`、`analysis_job_invalid_transition`、`analysis_job_idempotency_conflict`、`analysis_snapshot_stale`、`analysis_cursor_stale`、`analysis_budget_not_increased`、`analysis_dependency_not_ready`、`analysis_license_revoked`；bridge 不透传 provider 原始错误。
 
-**实施边界（2026-07-10）**：持久化 store 薄切片已实现 canonical run/input snapshot/work item/job/attempt、CAS pause/resume/cancel/reprioritize、priority、claim/lease/heartbeat、过期 reclaim、retry requeue、token reservation，以及产物/work item/job/attempt/run 的 fenced 同事务 commit/settlement。该进展只证明执行协议地基，不代表生产后台完成。仍未完成 scheduler 的完整冻结 snapshot builder、真实 worker 循环、startup reconcile、任务 bridge/UI、桌面 runtime 生命周期和数据目录重绑定。后台路径不得调用会重读 live node/context/evidence 的全量 runner，也不能把同步入口包装成内存线程后宣称完成。
+**实施边界（2026-07-10）**：持久化后台第一可靠薄切片已实现 canonical run/input snapshot/work item/job/attempt、完整冻结 snapshot builder、CAS pause/resume/cancel/reprioritize、priority、claim/lease/heartbeat、启动 reconcile、过期 reclaim、retry requeue、token reservation、单 worker 桌面 loop，以及产物/work item/job/attempt/run 的 fenced 同事务 commit/settlement。模型调用期间的 pause/cancel 不再丢弃成功产物；冻结 token policy 驱动 reservation/validation/output/unknown-usage 计费；损坏或 legacy snapshot 可在 reservation 前 fenced fail。Bridge 已接入 enqueue/get/list/control，worker 由 Photino window runtime 持有并随窗口关闭释放。该进展仍只达到 `S`：章节优先级 aging、15 秒独立 watchdog、显式 shutdown abandon、SQLite commit uncertainty reconcile、Retry-After/调用级 attempt 审计、data-dir 重绑定协调、allowed_actions/UI 进度闭环、强杀故障矩阵和 200 万字规模验收尚未完成。后台路径不得回退到重读 live node/context/evidence 的 runner，也不得据此宣称生产后台完成。
 
 **分析查阅入口（M2.4 薄入口）**：`ListReferenceCorpusFeatureObservations` / `ListReferenceCorpusTechniqueSpecimens` 接收 `novel_id + anchor_id + node_id/source_node_id + PageRequest`。后端默认只读 `validity_state='active'`，filter/sort 白名单在 bridge 和 service 双层校验，pageSize/cursor/filter 错误统一返回 validation error。Observation payload 只返回展示安全字段（`value_preview/value_text/value_num/value_bool/text_hash/evidence_preview`），不暴露 `value_json` 或 node 全文；`confidence < 0.70` 的 observation 初始化为 `review_state='low_confidence'`，可通过同一列表过滤，作为 M8 ReviewQueue 的输入信号而不是完整人工状态机。TechniqueSpecimen payload 将 slots、条件、failure/anti-pattern、why_it_works 解析为 typed shape，并通过 `reference_specimen_evidence` junction 回填 evidence trace。章节侧只读嵌入基于当前插入草稿 pieces 的 `anchor_id/node_id`；素材库处理侧提供独立“分析结果”tab，用于按 anchor/node/filter 查阅 observation/specimen，不混入章节蓝图、候选生成或插入动作。
 
@@ -776,3 +776,15 @@ QueryContext 确认、来源选择、gap 处理、槽位表、过渡清单、锁
 - 新写作会话用新 stage 状态机，旧 run 不混入
 - Phase 16 的 reconcile/recovery 逻辑对旧 run 继续生效；新会话走新 reconcile 路径
 - 迁移（可选）：提供一次性脚本把旧 blueprint 转 read-only 归档，不自动改写
+
+---
+
+## 十二、功能封板流 C 产品化增强（2026-07-10）
+
+M6-M9 的任务清单保持已完成状态，本轮不调整里程碑勾选，只补齐实际使用中的产品闭环：
+
+- **后台任务面板整合**：语料工作区增加独立“后台任务”页签，稳定分页展示服务端 10 态 job、node/work-item 双进度、token 已用/预留/预算、当前章节、attempt、重试倒计时与安全诊断。操作按钮完全由后端 `allowed_actions` 驱动，并携带 `expected_version` 执行暂停、继续、取消和提权；冲突后刷新，不在前端复制状态机。
+- **复核证据与原文跳转**：ReviewQueue DTO/SQL 补齐锚点标题、证据起止 offset 和有界 preview。专家复核项直接展示证据摘要及字符范围，“定位原文”切回素材来源、展开对应锚点预览并滚动聚焦来源行，避免人工复核脱离上下文。
+- **专家治理 UI**：治理页保留会话库 binding，专家模式增加成员禁用原因、明确的授权确认与禁止使用动作；聚合知识支持按类型筛选，`stale` 聚合以独立视觉状态和数量指标突出，重建仍按当前会话生效库执行。
+- **契约与安全边界**：job diagnostics 只返回错误码和依赖 job id；ReviewQueue 只返回受限 preview，不返回完整节点正文。任务控制和 evidence 数据均由后端契约提供，前端只负责展示与命令分发。
+- **验证补强**：调度器覆盖 `allowed_actions`；治理集成测试覆盖复核项标题、offset 与 bounded preview；前端 mock bridge 提供带版本检查的任务控制状态，供后台任务页签 workflow 验证。
