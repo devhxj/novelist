@@ -144,11 +144,12 @@ internal sealed partial class SqliteReferenceCorpusAnalysisJobStore
  configureUpdate(current, command);
  Add(command, "$job_id", jobId);
  Add(command, "$expected_version", expectedVersion);
- if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
- {
- throw VersionConflict(jobId, expectedVersion, actualVersion: null);
- }
- var updated = await ReadJobAsync(connection, transaction, jobId, cancellationToken)
+if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+{
+throw VersionConflict(jobId, expectedVersion, actualVersion: null);
+}
+ await SyncCanonicalRunAsync(connection, transaction, jobId, cancellationToken);
+var updated = await ReadJobAsync(connection, transaction, jobId, cancellationToken)
  ?? throw new InvalidOperationException($"Analysis job '{jobId}' disappeared during mutation.");
  await transaction.CommitAsync(cancellationToken);
  return updated;

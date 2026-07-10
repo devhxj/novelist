@@ -40,12 +40,33 @@ public sealed class ReferenceCorpusAnalysisJobStateMachineTests
  }
 
  [Fact]
- public void TerminalJobsCannotBeResumed()
+public void TerminalJobsCannotBeResumed()
  {
  Assert.Throws<InvalidOperationException>(() =>
  ReferenceCorpusAnalysisJobStateMachine.Resume(
  ReferenceCorpusAnalysisJobStatuses.Cancelled,
  tokenBudget: null,
  tokensSpent: 0));
+}
+
+ [Theory]
+ [InlineData(ReferenceCorpusAnalysisJobStatuses.Running, ReferenceCorpusAnalysisRunStatuses.Completed, ReferenceCorpusAnalysisJobStatuses.Completed)]
+ [InlineData(ReferenceCorpusAnalysisJobStatuses.Running, ReferenceCorpusAnalysisRunStatuses.BudgetExhausted, ReferenceCorpusAnalysisJobStatuses.BudgetExhausted)]
+ [InlineData(ReferenceCorpusAnalysisJobStatuses.PauseRequested, ReferenceCorpusAnalysisRunStatuses.Paused, ReferenceCorpusAnalysisJobStatuses.Paused)]
+ [InlineData(ReferenceCorpusAnalysisJobStatuses.CancelRequested, ReferenceCorpusAnalysisRunStatuses.PartialCompleted, ReferenceCorpusAnalysisJobStatuses.Cancelled)]
+ [InlineData(ReferenceCorpusAnalysisJobStatuses.Running, ReferenceCorpusAnalysisRunStatuses.Failed, ReferenceCorpusAnalysisJobStatuses.Failed)]
+ public void RunnerOutcomeMapsToCompatibleJobState(string jobStatus, string runStatus, string expected)
+ {
+ Assert.Equal(expected, ReferenceCorpusAnalysisJobStateMachine.ApplyRunOutcome(jobStatus, runStatus));
+ }
+
+ [Theory]
+ [InlineData(ReferenceCorpusAnalysisJobStatuses.Running, ReferenceCorpusAnalysisRunStatuses.Paused)]
+ [InlineData(ReferenceCorpusAnalysisJobStatuses.Running, ReferenceCorpusAnalysisRunStatuses.PartialCompleted)]
+ [InlineData(ReferenceCorpusAnalysisJobStatuses.CancelRequested, ReferenceCorpusAnalysisRunStatuses.Completed)]
+ public void RunnerOutcomeRejectsContradictoryJobState(string jobStatus, string runStatus)
+ {
+ Assert.Throws<InvalidOperationException>(() =>
+ ReferenceCorpusAnalysisJobStateMachine.ApplyRunOutcome(jobStatus, runStatus));
  }
 }

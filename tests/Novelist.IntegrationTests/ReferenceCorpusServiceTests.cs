@@ -181,7 +181,7 @@ public sealed class ReferenceCorpusServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchCandidatesHonorsDisabledSessionLibraries()
+public async Task SearchCandidatesHonorsDisabledSessionLibraries()
     {
         var options = CreateOptions();
         await InitializeAsync(options);
@@ -200,8 +200,35 @@ public sealed class ReferenceCorpusServiceTests : IDisposable
 
         Assert.DoesNotContain(after.Items, item => item.LibraryId == "library-fire-market");
         Assert.All(after.Items, item => Assert.Equal("library-rain-doorway", item.LibraryId));
-        Assert.NotEmpty(after.Items);
-    }
+Assert.NotEmpty(after.Items);
+}
+
+ [Fact]
+ public async Task SearchCandidatesDoesNotRestoreLibrariesAfterExplicitSessionUnbind()
+ {
+ var options = CreateOptions();
+ await InitializeAsync(options);
+ await SeedCrossLibrarySessionFixtureAsync(options);
+ await using (var connection = await OpenReferenceConnectionAsync(options))
+ await using (var command = connection.CreateCommand())
+ {
+ command.CommandText = """
+ DELETE FROM reference_session_library_binding WHERE session_id='session-cross-corpus';
+ INSERT INTO reference_session_library_scope_state(session_id,is_explicit,updated_at)
+ VALUES('session-cross-corpus',1,'2026-07-10T00:00:00Z');
+ """;
+ await command.ExecuteNonQueryAsync();
+ }
+ var service = new SqliteReferenceCorpusService(
+ options,
+ new StaticEmbeddingConfigurationService(CreateEmbeddingOptions()),
+ new TopicEmbeddingClient(defaultDimensions: 3));
+
+ var result = await service.SearchCandidatesAsync(BuildCrossLibrarySearchPayload(), CancellationToken.None);
+
+ Assert.Empty(result.Items);
+ Assert.Equal(0, result.Total);
+ }
 
     [Fact]
     public async Task SearchCandidatesFoldsCrossLibraryDedupGroupsBeforeScoring()

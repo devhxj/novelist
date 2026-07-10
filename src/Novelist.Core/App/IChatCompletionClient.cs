@@ -18,7 +18,8 @@ public sealed record ChatCompletionRequest(
     string ModelId,
     string ReasoningEffort,
     IReadOnlyList<ChatCompletionMessage> Messages,
-    IReadOnlyList<ChatToolDefinition>? Tools = null);
+    IReadOnlyList<ChatToolDefinition>? Tools = null,
+    int? MaxOutputTokens = null);
 
 public sealed record ChatCompletionMessage(
     string Role,

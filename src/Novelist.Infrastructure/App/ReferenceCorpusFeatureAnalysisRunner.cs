@@ -131,7 +131,7 @@ var workItem = workItems[index];
                     request,
                     state,
                     await CountObservationsAsync(connection, request.RunId, cancellationToken),
-                    completedAt: request.StartedAt,
+ completedAt: DateTimeOffset.UtcNow,
                     cancellationToken);
                 return BuildResult(request.RunId, state, await CountObservationsAsync(connection, request.RunId, cancellationToken), processed, diagnostics);
             }
@@ -184,7 +184,7 @@ var workItem = workItems[index];
             request,
             state,
             await CountObservationsAsync(connection, request.RunId, cancellationToken),
-            completedAt: request.StartedAt,
+ completedAt: DateTimeOffset.UtcNow,
             cancellationToken);
         return BuildResult(request.RunId, state, await CountObservationsAsync(connection, request.RunId, cancellationToken), processed, diagnostics);
     }

@@ -17,6 +17,8 @@ public sealed record ReferenceCorpusFeatureFamilyAnalysisInput(
     ReferenceCorpusFeatureFamilySchema Schema)
 {
     public ReferenceCorpusFeatureAnalysisContext Context { get; init; } = ReferenceCorpusFeatureAnalysisContext.Empty;
+
+    public int? MaxOutputTokens { get; init; }
 }
 
 public sealed record ReferenceCorpusFeatureAnalysisContext(
@@ -62,11 +64,11 @@ public sealed record ReferenceCorpusFeatureAnalysisRunRequest(
     string ModelProvider,
     string ModelId,
     int? TokenBudget,
-bool Resume,
-DateTimeOffset StartedAt,
+ bool Resume,
+ DateTimeOffset StartedAt,
  int MaxValidationAttempts = 2)
 {
- public IReferenceCorpusAnalysisExecutionControl ExecutionControl { get; init; } =
+    public IReferenceCorpusAnalysisExecutionControl ExecutionControl { get; init; } =
  ContinueReferenceCorpusAnalysisExecutionControl.Instance;
 }
 

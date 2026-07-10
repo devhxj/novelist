@@ -112,12 +112,18 @@ internal static class ReferenceCorpusSchemaProvisioner
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
             );
 
-            CREATE TABLE IF NOT EXISTS reference_session_library_binding (
+CREATE TABLE IF NOT EXISTS reference_session_library_binding (
               session_id TEXT NOT NULL,
               library_id TEXT NOT NULL,
               PRIMARY KEY(session_id, library_id),
               FOREIGN KEY(library_id) REFERENCES reference_corpus_libraries(library_id) ON DELETE CASCADE
-            );
+);
+
+ CREATE TABLE IF NOT EXISTS reference_session_library_scope_state (
+ session_id TEXT PRIMARY KEY,
+ is_explicit INTEGER NOT NULL DEFAULT 1,
+ updated_at TEXT NOT NULL
+ );
 
             CREATE TABLE IF NOT EXISTS reference_source_license (
               anchor_id INTEGER PRIMARY KEY,
@@ -183,7 +189,7 @@ internal static class ReferenceCorpusSchemaProvisioner
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
             );
 
-            CREATE TABLE IF NOT EXISTS reference_technique_specimens (
+CREATE TABLE IF NOT EXISTS reference_technique_specimens (
               specimen_id TEXT PRIMARY KEY,
               source_node_id TEXT NOT NULL,
               source_anchor_id INTEGER NOT NULL,
@@ -208,7 +214,10 @@ internal static class ReferenceCorpusSchemaProvisioner
               FOREIGN KEY(source_node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE,
               FOREIGN KEY(source_anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
               FOREIGN KEY(analysis_run_id) REFERENCES reference_analysis_runs(run_id) ON DELETE CASCADE
-            );
+);
+
+ CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_technique_specimens_generation
+ ON reference_technique_specimens(analysis_run_id, source_node_id, technique_family);
 
             CREATE TABLE IF NOT EXISTS reference_technique_vectors (
               vector_id TEXT PRIMARY KEY,
@@ -452,7 +461,14 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  chapter_node_id TEXT,
  feature_family TEXT NOT NULL,
  node_text_hash TEXT NOT NULL,
+ input_payload_json TEXT NOT NULL,
+ input_payload_hash TEXT NOT NULL,
  work_state TEXT NOT NULL DEFAULT 'pending',
+ execution_worker_id TEXT,
+ execution_lease_token TEXT,
+ execution_attempt_no INTEGER,
+ invocation_no INTEGER NOT NULL DEFAULT 0,
+ reserved_tokens INTEGER NOT NULL DEFAULT 0 CHECK(reserved_tokens >= 0),
  committed_run_id TEXT,
  committed_at TEXT,
  PRIMARY KEY(input_snapshot_id, ordinal),
@@ -484,6 +500,7 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  retrying_work_items INTEGER NOT NULL DEFAULT 0,
  token_budget INTEGER CHECK(token_budget IS NULL OR token_budget >= 0),
  tokens_spent INTEGER NOT NULL DEFAULT 0,
+ tokens_reserved INTEGER NOT NULL DEFAULT 0 CHECK(tokens_reserved >= 0),
  resume_cursor TEXT,
  current_stage TEXT NOT NULL,
  current_chapter INTEGER,
@@ -505,6 +522,7 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  last_error_message TEXT,
  row_version INTEGER NOT NULL DEFAULT 0 CHECK(row_version >= 0),
  FOREIGN KEY(input_snapshot_id) REFERENCES reference_analysis_input_snapshots(input_snapshot_id) ON DELETE RESTRICT,
+ FOREIGN KEY(run_id) REFERENCES reference_analysis_runs(run_id) ON DELETE RESTRICT,
  FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
  FOREIGN KEY(dependency_job_id) REFERENCES reference_analysis_jobs(job_id) ON DELETE RESTRICT
  );
@@ -540,5 +558,33 @@ await command.ExecuteNonQueryAsync(cancellationToken);
  ON reference_analysis_work_items(input_snapshot_id, work_state, ordinal);
  """;
  await command.ExecuteNonQueryAsync(cancellationToken);
+ await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "execution_worker_id", "TEXT", cancellationToken);
+ await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "execution_lease_token", "TEXT", cancellationToken);
+ await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "execution_attempt_no", "INTEGER", cancellationToken);
+ await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "invocation_no", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+ await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "reserved_tokens", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+ await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "input_payload_json", "TEXT", cancellationToken);
+ await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_work_items", "input_payload_hash", "TEXT", cancellationToken);
+ await EnsureAnalysisJobColumnAsync(connection, "reference_analysis_jobs", "tokens_reserved", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+ }
+
+ private static async ValueTask EnsureAnalysisJobColumnAsync(
+ SqliteConnection connection,
+ string tableName,
+ string columnName,
+ string definition,
+ CancellationToken cancellationToken)
+ {
+ await using var inspect = connection.CreateCommand();
+ inspect.CommandText = $"PRAGMA table_info({tableName});";
+ await using var reader = await inspect.ExecuteReaderAsync(cancellationToken);
+ while (await reader.ReadAsync(cancellationToken))
+ {
+ if (string.Equals(reader.GetString(1), columnName, StringComparison.Ordinal)) return;
+ }
+ await reader.DisposeAsync();
+ await using var alter = connection.CreateCommand();
+ alter.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {columnName} {definition};";
+ await alter.ExecuteNonQueryAsync(cancellationToken);
  }
 }

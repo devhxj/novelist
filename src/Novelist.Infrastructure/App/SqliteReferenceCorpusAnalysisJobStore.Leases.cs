@@ -137,29 +137,61 @@ internal sealed partial class SqliteReferenceCorpusAnalysisJobStore
  {
  await using var connection = await OpenConnectionAsync(cancellationToken);
  await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
- var expired = new List<(string JobId, int AttemptCount, int MaxAttempts)>();
+ var expired = new List<(string JobId, string InputSnapshotId, string Status, int AttemptCount, int MaxAttempts, int ReservedTokens, int InProgressItems)>();
  await using (var select = connection.CreateCommand())
  {
  select.Transaction = transaction;
  select.CommandText = """
- SELECT job_id, attempt_count, max_attempts
- FROM reference_analysis_jobs
+ SELECT job.job_id,job.input_snapshot_id,job.status,job.attempt_count,job.max_attempts,
+ COALESCE(SUM(work.reserved_tokens),0),COUNT(work.ordinal)
+ FROM reference_analysis_jobs AS job
+ LEFT JOIN reference_analysis_work_items AS work
+ ON work.input_snapshot_id=job.input_snapshot_id AND work.work_state='in_progress'
  WHERE status IN ('running', 'pause_requested', 'cancel_requested')
  AND lease_expires_at IS NOT NULL
  AND lease_expires_at <= $now
- ORDER BY job_id;
+ GROUP BY job.job_id,job.input_snapshot_id,job.status,job.attempt_count,job.max_attempts
+ ORDER BY job.job_id;
  """;
  Add(select, "$now", ToDb(now));
  await using var reader = await select.ExecuteReaderAsync(cancellationToken);
  while (await reader.ReadAsync(cancellationToken))
  {
- expired.Add((reader.GetString(0), reader.GetInt32(1), reader.GetInt32(2)));
+ expired.Add((reader.GetString(0),reader.GetString(1),reader.GetString(2),reader.GetInt32(3),
+ reader.GetInt32(4),reader.GetInt32(5),reader.GetInt32(6)));
  }
  }
 
  foreach (var item in expired)
  {
  var terminal = item.AttemptCount >= item.MaxAttempts;
+ var nextStatus = item.Status switch
+ {
+ ReferenceCorpusAnalysisJobStatuses.PauseRequested => ReferenceCorpusAnalysisJobStatuses.Paused,
+ ReferenceCorpusAnalysisJobStatuses.CancelRequested => ReferenceCorpusAnalysisJobStatuses.Cancelled,
+ _ when terminal => ReferenceCorpusAnalysisJobStatuses.Failed,
+ _ => ReferenceCorpusAnalysisJobStatuses.RetryWait
+ };
+var retryable = nextStatus == ReferenceCorpusAnalysisJobStatuses.RetryWait;
+var completed = nextStatus is ReferenceCorpusAnalysisJobStatuses.Cancelled or ReferenceCorpusAnalysisJobStatuses.Failed;
+ var failedItems = nextStatus == ReferenceCorpusAnalysisJobStatuses.Failed ? item.InProgressItems : 0;
+ await using (var releaseWork = connection.CreateCommand())
+ {
+ releaseWork.Transaction = transaction;
+ releaseWork.CommandText = """
+ UPDATE reference_analysis_work_items
+ SET work_state=$work_state,execution_worker_id=NULL,execution_lease_token=NULL,
+ execution_attempt_no=NULL,reserved_tokens=0,
+ committed_run_id=CASE WHEN $work_state='failed' THEN committed_run_id ELSE NULL END,
+ committed_at=CASE WHEN $work_state='failed' THEN committed_at ELSE NULL END
+ WHERE input_snapshot_id=$snapshot_id AND work_state='in_progress';
+ """;
+ Add(releaseWork, "$work_state", failedItems > 0 ? "failed" : "pending");
+ Add(releaseWork, "$snapshot_id", item.InputSnapshotId);
+ if (await releaseWork.ExecuteNonQueryAsync(cancellationToken) != item.InProgressItems)
+ throw new ReferenceCorpusAnalysisJobConflictException(
+ $"Analysis work items for expired job '{item.JobId}' changed during lease recovery.");
+ }
  await using var update = connection.CreateCommand();
  update.Transaction = transaction;
  update.CommandText = """
@@ -167,6 +199,11 @@ internal sealed partial class SqliteReferenceCorpusAnalysisJobStore
  SET status = $status,
  next_attempt_at = $next_attempt_at,
  completed_at = $completed_at,
+ tokens_spent = tokens_spent + $reserved_tokens,
+ tokens_reserved = tokens_reserved - $reserved_tokens,
+ processed_work_items = processed_work_items + $failed_items,
+ failed_work_items = failed_work_items + $failed_items,
+ retrying_work_items = $retrying_items,
  lease_owner = NULL,
  lease_token = NULL,
  lease_acquired_at = NULL,
@@ -178,14 +215,20 @@ internal sealed partial class SqliteReferenceCorpusAnalysisJobStore
  row_version = row_version + 1
  WHERE job_id = $job_id
  AND lease_expires_at IS NOT NULL
- AND lease_expires_at <= $now;
+ AND lease_expires_at <= $now
+ AND tokens_reserved >= $reserved_tokens;
  """;
- Add(update, "$status", terminal ? ReferenceCorpusAnalysisJobStatuses.Failed : ReferenceCorpusAnalysisJobStatuses.RetryWait);
- Add(update, "$next_attempt_at", terminal ? null : ToDb(retryAt));
- Add(update, "$completed_at", terminal ? ToDb(now) : null);
+ Add(update, "$status", nextStatus);
+ Add(update, "$next_attempt_at", retryable ? ToDb(retryAt) : null);
+Add(update, "$completed_at", completed ? ToDb(now) : null);
+ Add(update, "$reserved_tokens", item.ReservedTokens);
+ Add(update, "$failed_items", failedItems);
+ Add(update, "$retrying_items", retryable ? item.InProgressItems : 0);
  Add(update, "$now", ToDb(now));
  Add(update, "$job_id", item.JobId);
- await update.ExecuteNonQueryAsync(cancellationToken);
+ if (await update.ExecuteNonQueryAsync(cancellationToken) != 1)
+ throw new ReferenceCorpusAnalysisJobConflictException(
+ $"Analysis job '{item.JobId}' changed during expired lease recovery.");
 
  await using var attempt = connection.CreateCommand();
  attempt.Transaction = transaction;
@@ -194,14 +237,19 @@ internal sealed partial class SqliteReferenceCorpusAnalysisJobStore
  SET completed_at = $now,
  outcome = 'abandoned',
  error_code = 'lease_expired',
- error_message = 'Worker lease expired before the attempt completed.'
+ error_message = 'Worker lease expired before the attempt completed.',
+ tokens_spent = tokens_spent + $reserved_tokens
  WHERE job_id = $job_id AND attempt_no = $attempt_no AND completed_at IS NULL;
  """;
  Add(attempt, "$now", ToDb(now));
  Add(attempt, "$job_id", item.JobId);
- Add(attempt, "$attempt_no", item.AttemptCount);
- await attempt.ExecuteNonQueryAsync(cancellationToken);
- }
+Add(attempt, "$attempt_no", item.AttemptCount);
+ Add(attempt, "$reserved_tokens", item.ReservedTokens);
+if (await attempt.ExecuteNonQueryAsync(cancellationToken) != 1)
+throw new ReferenceCorpusAnalysisJobConflictException(
+$"Analysis attempt for expired job '{item.JobId}' changed during lease recovery.");
+ await SyncCanonicalRunAsync(connection, transaction, item.JobId, cancellationToken);
+}
 
  await transaction.CommitAsync(cancellationToken);
  return expired.Count;

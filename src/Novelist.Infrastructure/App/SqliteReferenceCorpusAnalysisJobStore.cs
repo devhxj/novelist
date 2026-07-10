@@ -33,9 +33,10 @@ internal sealed partial class SqliteReferenceCorpusAnalysisJobStore
  ValidateEnqueue(snapshot, workItems, request);
  await using var connection = await OpenConnectionAsync(cancellationToken);
  await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
- try
- {
- await InsertSnapshotAsync(connection, transaction, snapshot, cancellationToken);
+try
+{
+ await EnsureCanonicalRunAsync(connection, transaction, snapshot, request, cancellationToken);
+await InsertSnapshotAsync(connection, transaction, snapshot, cancellationToken);
  await InsertWorkItemsAsync(connection, transaction, snapshot.InputSnapshotId, workItems, cancellationToken);
  await InsertJobAsync(connection, transaction, request, cancellationToken);
  await transaction.CommitAsync(cancellationToken);

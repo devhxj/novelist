@@ -45,7 +45,8 @@ public sealed class ReferenceCorpusChatCompletionFeatureFamilyAnalyzer : IRefere
             [
                 new ChatCompletionMessage("system", BuildSystemPrompt()),
                 new ChatCompletionMessage("user", BuildUserPrompt(input))
-            ]);
+ ],
+ MaxOutputTokens: input.MaxOutputTokens);
 
         var builder = new StringBuilder();
         var tokensSpent = 0;

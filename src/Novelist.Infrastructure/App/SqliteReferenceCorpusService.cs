@@ -1465,9 +1465,10 @@ public sealed class SqliteReferenceCorpusService : IReferenceCorpusService
             return explicitLibraryIds;
         }
 
-        var sessionId = NormalizeSessionId(scope.SessionId, novelId);
-        var bound = await ReadSessionLibraryIdsAsync(connection, sessionId, novelId, cancellationToken);
-        if (IsDefaultProjectSession(sessionId, novelId))
+var sessionId = NormalizeSessionId(scope.SessionId, novelId);
+var bound = await ReadSessionLibraryIdsAsync(connection, sessionId, novelId, cancellationToken);
+ var explicitScope = await HasExplicitSessionLibraryScopeAsync(connection, sessionId, cancellationToken);
+ if (!explicitScope && IsDefaultProjectSession(sessionId, novelId))
         {
             foreach (var libraryId in await ReadGlobalWorkspaceLibraryIdsAsync(connection, cancellationToken))
             {
@@ -1475,7 +1476,7 @@ public sealed class SqliteReferenceCorpusService : IReferenceCorpusService
             }
         }
 
-        if (bound.Count > 0)
+ if (bound.Count > 0 || explicitScope)
         {
             return bound;
         }
@@ -1483,7 +1484,7 @@ public sealed class SqliteReferenceCorpusService : IReferenceCorpusService
         return await ReadConventionalDefaultLibraryIdsAsync(connection, novelId, cancellationToken);
     }
 
-    private static async ValueTask<HashSet<string>> ReadSessionLibraryIdsAsync(
+private static async ValueTask<HashSet<string>> ReadSessionLibraryIdsAsync(
         SqliteConnection connection,
         string sessionId,
         long novelId,
@@ -1500,8 +1501,20 @@ public sealed class SqliteReferenceCorpusService : IReferenceCorpusService
             """;
         command.Parameters.AddWithValue("$session_id", sessionId);
         command.Parameters.AddWithValue("$novel_id", novelId);
-        return await ReadLibraryIdSetAsync(command, cancellationToken);
-    }
+return await ReadLibraryIdSetAsync(command, cancellationToken);
+}
+
+ private static async ValueTask<bool> HasExplicitSessionLibraryScopeAsync(
+ SqliteConnection connection,
+ string sessionId,
+ CancellationToken cancellationToken)
+ {
+ await using var command = connection.CreateCommand();
+ command.CommandText = "SELECT is_explicit FROM reference_session_library_scope_state WHERE session_id=$session_id;";
+ command.Parameters.AddWithValue("$session_id", sessionId);
+ var value = await command.ExecuteScalarAsync(cancellationToken);
+ return value is not null && value is not DBNull && Convert.ToInt32(value) == 1;
+ }
 
     private static async ValueTask<HashSet<string>> ReadGlobalWorkspaceLibraryIdsAsync(
         SqliteConnection connection,

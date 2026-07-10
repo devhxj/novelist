@@ -34,10 +34,26 @@ public static class ReferenceCorpusAnalysisJobStateMachine
  _ => throw Invalid("resume", status)
  };
 
- public static bool IsTerminal(string status) => status is
- ReferenceCorpusAnalysisJobStatuses.Cancelled or
- ReferenceCorpusAnalysisJobStatuses.Completed or
- ReferenceCorpusAnalysisJobStatuses.Failed;
+public static bool IsTerminal(string status) => status is
+ReferenceCorpusAnalysisJobStatuses.Cancelled or
+ReferenceCorpusAnalysisJobStatuses.Completed or
+ReferenceCorpusAnalysisJobStatuses.Failed;
+
+ public static string ApplyRunOutcome(string jobStatus, string runStatus) => (jobStatus, runStatus) switch
+ {
+ (ReferenceCorpusAnalysisJobStatuses.Running, ReferenceCorpusAnalysisRunStatuses.Completed) =>
+ ReferenceCorpusAnalysisJobStatuses.Completed,
+ (ReferenceCorpusAnalysisJobStatuses.Running, ReferenceCorpusAnalysisRunStatuses.BudgetExhausted) =>
+ ReferenceCorpusAnalysisJobStatuses.BudgetExhausted,
+ (ReferenceCorpusAnalysisJobStatuses.Running, ReferenceCorpusAnalysisRunStatuses.Failed) =>
+ ReferenceCorpusAnalysisJobStatuses.Failed,
+ (ReferenceCorpusAnalysisJobStatuses.PauseRequested, ReferenceCorpusAnalysisRunStatuses.Paused) =>
+ ReferenceCorpusAnalysisJobStatuses.Paused,
+ (ReferenceCorpusAnalysisJobStatuses.CancelRequested, ReferenceCorpusAnalysisRunStatuses.PartialCompleted) =>
+ ReferenceCorpusAnalysisJobStatuses.Cancelled,
+ _ => throw new InvalidOperationException(
+ $"Run status '{runStatus}' is incompatible with analysis job status '{jobStatus}'.")
+ };
 
  private static InvalidOperationException Invalid(string action, string status) =>
  new($"Cannot {action} reference corpus analysis job from status '{status}'.");

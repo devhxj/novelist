@@ -36,7 +36,10 @@ public sealed class ReferenceCorpusChatCompletionFeatureFamilyAnalyzerTests
                 NodeType: ReferenceCorpusNodeTypes.Sentence,
                 NodeText: "雨声贴着门缝往里挤。",
                 Family: ReferenceCorpusFeatureFamilies.Syntax,
-                Schema: ReferenceCorpusFeatureFamilySchemaRegistry.Get(ReferenceCorpusFeatureFamilies.Syntax)),
+                Schema: ReferenceCorpusFeatureFamilySchemaRegistry.Get(ReferenceCorpusFeatureFamilies.Syntax))
+            {
+                MaxOutputTokens = 777
+            },
             CancellationToken.None);
 
         Assert.Equal("""{"schema_version":"reference-corpus-feature-family-v1","family":"syntax","node_type":"sentence","observations":[]}""", output.ModelOutputJson);
@@ -46,6 +49,7 @@ public sealed class ReferenceCorpusChatCompletionFeatureFamilyAnalyzerTests
         Assert.Equal("qwen-plus", chat.LastRequest.ModelId);
         Assert.Equal("high", chat.LastRequest.ReasoningEffort);
         Assert.Null(chat.LastRequest.Tools);
+        Assert.Equal(777, chat.LastRequest.MaxOutputTokens);
         Assert.Collection(
             chat.LastRequest.Messages,
             system =>

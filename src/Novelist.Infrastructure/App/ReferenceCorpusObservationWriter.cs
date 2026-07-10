@@ -54,11 +54,9 @@ internal static class ReferenceCorpusObservationWriter
               value_json = excluded.value_json,
               intensity = excluded.intensity,
               confidence = excluded.confidence,
-              explanation = excluded.explanation,
-              review_state = excluded.review_state,
-              validity_state = excluded.validity_state,
+ explanation = excluded.explanation, validity_state = excluded.validity_state,
               superseded_by_run_id = excluded.superseded_by_run_id;
-            """;
+""";
         command.Parameters.AddWithValue("$observation_id", identity.ObservationId);
         command.Parameters.AddWithValue("$node_id", observation.NodeId);
         command.Parameters.AddWithValue("$node_type", observation.NodeType);

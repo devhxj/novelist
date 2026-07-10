@@ -22,9 +22,12 @@ public sealed partial class SqliteReferenceCorpusGovernanceService : IReferenceC
  ArgumentNullException.ThrowIfNull(input);
  var sessionId = Required(input.SessionId, nameof(input.SessionId));
  var libraryId = Required(input.LibraryId, nameof(input.LibraryId));
- return await LockedAsync(async connection =>
- {
- await ExecuteAsync(connection, input.Enabled
+return await LockedAsync(async connection =>
+{
+ await ExecuteAsync(connection,
+ "INSERT INTO reference_session_library_scope_state(session_id,is_explicit,updated_at) VALUES($session,1,$time) ON CONFLICT(session_id) DO UPDATE SET is_explicit=1,updated_at=excluded.updated_at;",
+ cancellationToken, ("$session", sessionId), ("$time", DateTimeOffset.UtcNow.ToString("O")));
+await ExecuteAsync(connection, input.Enabled
  ? "INSERT INTO reference_session_library_binding(session_id, library_id) VALUES ($session, $library) ON CONFLICT(session_id, library_id) DO NOTHING;"
  : "DELETE FROM reference_session_library_binding WHERE session_id = $session AND library_id = $library;",
  cancellationToken, ("$session", sessionId), ("$library", libraryId));

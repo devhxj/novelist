@@ -17,7 +17,10 @@ public sealed record ReferenceCorpusTechniqueSpecimenAnalysisInput(
     string NodeId,
     string NodeType,
     string NodeText,
-    IReadOnlyList<ReferenceCorpusTechniqueObservationEvidence> Observations);
+ IReadOnlyList<ReferenceCorpusTechniqueObservationEvidence> Observations)
+{
+    public int? MaxOutputTokens { get; init; }
+}
 
 public sealed record ReferenceCorpusTechniqueObservationEvidence(
     string ObservationId,
@@ -46,11 +49,11 @@ public sealed record ReferenceCorpusTechniqueSpecimenRunRequest(
     string ModelProvider,
     string ModelId,
     double MinObservationConfidence,
-int? TokenBudget,
-bool Resume,
+ int? TokenBudget,
+ bool Resume,
  DateTimeOffset StartedAt)
 {
- public IReferenceCorpusAnalysisExecutionControl ExecutionControl { get; init; } =
+    public IReferenceCorpusAnalysisExecutionControl ExecutionControl { get; init; } =
  ContinueReferenceCorpusAnalysisExecutionControl.Instance;
 }
 

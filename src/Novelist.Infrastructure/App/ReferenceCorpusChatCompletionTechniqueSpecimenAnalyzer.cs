@@ -48,7 +48,8 @@ public sealed class ReferenceCorpusChatCompletionTechniqueSpecimenAnalyzer : IRe
             [
                 new ChatCompletionMessage("system", BuildSystemPrompt()),
                 new ChatCompletionMessage("user", BuildUserPrompt(input))
-            ]);
+ ],
+ MaxOutputTokens: input.MaxOutputTokens);
 
         var builder = new StringBuilder();
         var tokensSpent = 0;

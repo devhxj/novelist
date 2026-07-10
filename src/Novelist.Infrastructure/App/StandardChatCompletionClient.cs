@@ -31,6 +31,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         ChatCompletionRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        ValidateMaxOutputTokens(request);
         var provider = await ResolveProviderAsync(request, cancellationToken);
         var payload = BuildPayload(provider, request, stream: true, titleGeneration: false);
         using var httpRequest = CreateHttpRequest(provider, payload);
@@ -104,6 +105,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         ChatCompletionRequest request,
         CancellationToken cancellationToken)
     {
+        ValidateMaxOutputTokens(request);
         var provider = await ResolveProviderAsync(request, cancellationToken);
         var payload = BuildPayload(provider, request, stream: false, titleGeneration: true);
         using var httpRequest = CreateHttpRequest(provider, payload);
@@ -214,6 +216,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
             return item;
         }).ToArray();
 
+        var maxOutputTokens = ResolveMaxOutputTokens(provider, request, titleGeneration);
         var payload = new Dictionary<string, object?>
         {
             ["model"] = provider.Model.Id,
@@ -221,10 +224,8 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
             ["stream"] = stream,
             ["temperature"] = provider.Temperature,
             ["max_tokens"] = titleGeneration
-                ? 64
-                : provider.Model.MaxOutputTokens > 0
-                    ? provider.Model.MaxOutputTokens
-                    : 4096
+ ? maxOutputTokens
+ : maxOutputTokens
         };
 
         if (stream)
@@ -262,6 +263,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         bool stream,
         bool titleGeneration)
     {
+        var maxOutputTokens = ResolveMaxOutputTokens(provider, request, titleGeneration);
         var payload = new Dictionary<string, object?>
         {
             ["model"] = provider.Model.Id,
@@ -269,10 +271,8 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
             ["stream"] = stream,
             ["temperature"] = provider.Temperature,
             ["max_output_tokens"] = titleGeneration
-                ? 64
-                : provider.Model.MaxOutputTokens > 0
-                    ? provider.Model.MaxOutputTokens
-                    : 4096
+ ? maxOutputTokens
+ : maxOutputTokens
         };
 
         if (request.Tools is { Count: > 0 })
@@ -299,7 +299,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
     }
 
     private static IReadOnlyList<Dictionary<string, object?>> ToResponsesInput(
-        IReadOnlyList<ChatCompletionMessage> messages)
+ IReadOnlyList<ChatCompletionMessage> messages)
     {
         var input = new List<Dictionary<string, object?>>();
         foreach (var message in messages)
@@ -904,12 +904,42 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
     }
 
     private sealed record ResolvedProvider(
-        string Key,
-        string EndpointType,
-        Uri EndpointUrl,
-        string ApiKey,
-        double Temperature,
-        ModelInfoPayload Model);
+ string Key,
+ string EndpointType,
+ Uri EndpointUrl,
+ string ApiKey,
+ double Temperature,
+ ModelInfoPayload Model);
+
+    private static int ResolveMaxOutputTokens(
+ ResolvedProvider provider,
+ ChatCompletionRequest request,
+ bool titleGeneration)
+    {
+        ValidateMaxOutputTokens(request);
+
+        var modelLimit = provider.Model.MaxOutputTokens > 0
+            ? provider.Model.MaxOutputTokens
+            : 4096;
+        if (request.MaxOutputTokens is { } requestLimit)
+        {
+            return Math.Min(requestLimit, modelLimit);
+        }
+
+        return titleGeneration ? 64 : modelLimit;
+    }
+
+    private static void ValidateMaxOutputTokens(ChatCompletionRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.MaxOutputTokens is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request.MaxOutputTokens),
+                request.MaxOutputTokens,
+                message: null);
+        }
+    }
 
     private sealed class StreamingToolCall
     {

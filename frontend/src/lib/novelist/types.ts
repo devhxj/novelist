@@ -884,13 +884,15 @@ export namespace reference {
  feature_family?: string | null
  created_at: Timestamp
  }
- export interface CorpusReviewQueuePage {
- items: CorpusReviewQueueItem[]
- total: number
- page: number
- size: number
- has_more: boolean
- }
+export interface CorpusReviewQueuePage {
+items: CorpusReviewQueueItem[]
+total: number
+page: number
+size: number
+ total_pages: number
+ next_cursor?: string | null
+has_more: boolean
+}
   export interface Anchor {
     anchor_id: number
     novel_id: number

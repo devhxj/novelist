@@ -79,11 +79,13 @@ public sealed record ReferenceCorpusAnalysisInputSnapshot(
  DateTimeOffset CreatedAt);
 
 public sealed record ReferenceCorpusAnalysisWorkItemSnapshot(
- int Ordinal,
- string NodeId,
- string? ChapterNodeId,
- string FeatureFamily,
- string NodeTextHash);
+int Ordinal,
+string NodeId,
+string? ChapterNodeId,
+string FeatureFamily,
+ string NodeTextHash,
+ string InputPayloadJson,
+ string InputPayloadHash);
 
 public sealed record ReferenceCorpusAnalysisJobListRequest(
  long? NovelId,
@@ -97,11 +99,51 @@ ReferenceCorpusAnalysisJob Job,
 string LeaseToken);
 
 public sealed record ReferenceCorpusAnalysisJobLease(
+string JobId,
+string WorkerId,
+string LeaseToken,
+int AttemptNumber,
+DateTimeOffset LeaseExpiresAt);
+
+public sealed record ReferenceCorpusAnalysisWorkItemReservation(
  string JobId,
- string WorkerId,
- string LeaseToken,
- int AttemptNumber,
- DateTimeOffset LeaseExpiresAt);
+ string RunId,
+ string InputSnapshotId,
+ int Ordinal,
+ string NodeId,
+ string? ChapterNodeId,
+string FeatureFamily,
+string NodeTextHash,
+string InputPayloadJson,
+ string InputPayloadHash,
+int AttemptNumber,
+ int InvocationNumber,
+ int ReservedTokens,
+string WorkerId,
+string LeaseToken);
+
+public enum ReferenceCorpusAnalysisWorkItemSettlementKind
+{
+ RetryableFailure,
+ PermanentFailure,
+ BudgetExhausted,
+ PauseBoundary,
+ CancelBoundary
+}
+
+public sealed record ReferenceCorpusAnalysisWorkItemSettlementRequest(
+ ReferenceCorpusAnalysisWorkItemReservation Reservation,
+ ReferenceCorpusAnalysisWorkItemSettlementKind Kind,
+ int TokensSpent,
+ string? ErrorCode,
+ string? ErrorMessage,
+ DateTimeOffset? NextAttemptAt,
+ DateTimeOffset SettledAt);
+
+public sealed record ReferenceCorpusAnalysisWorkItemSettlementResult(
+ ReferenceCorpusAnalysisJob Job,
+ string WorkItemState,
+ string AttemptOutcome);
 
 public sealed class ReferenceCorpusAnalysisJobConflictException : InvalidOperationException
 {

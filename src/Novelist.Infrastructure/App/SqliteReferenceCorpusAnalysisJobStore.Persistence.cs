@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Novelist.Core.App;
@@ -92,17 +94,75 @@ internal sealed partial class SqliteReferenceCorpusAnalysisJobStore
  {
  ValidateId(chapterNodeId, nameof(workItems));
  }
- ValidateText(item.FeatureFamily, nameof(workItems), 128);
- ValidateText(item.NodeTextHash, nameof(workItems), 256);
+ValidateText(item.FeatureFamily, nameof(workItems), 128);
+ValidateText(item.NodeTextHash, nameof(workItems), 256);
+ ValidateJson(item.InputPayloadJson, nameof(workItems));
+ ValidateText(item.InputPayloadHash, nameof(workItems), 64);
+ var canonicalPayloadHash = ComputeInputPayloadHash(item.InputPayloadJson);
+ if (!string.Equals(item.InputPayloadHash, canonicalPayloadHash, StringComparison.Ordinal))
+ {
+ throw new ArgumentException(
+ "Work-item input payload hash must be the lowercase SHA-256 of canonical JSON.", nameof(workItems));
+ }
  if (!uniqueWorkItems.Add((item.NodeId, item.FeatureFamily)))
  {
  throw new ArgumentException("Frozen work items cannot repeat a node and feature family.", nameof(workItems));
  }
  uniqueNodes.Add(item.NodeId);
  }
- if (uniqueNodes.Count != request.TotalNodes)
- {
+if (uniqueNodes.Count != request.TotalNodes)
+{
  throw new ArgumentException("Frozen node count does not match the job total.", nameof(workItems));
+}
+}
+
+ internal static string ComputeInputPayloadHash(string inputPayloadJson)
+ {
+ ArgumentException.ThrowIfNullOrWhiteSpace(inputPayloadJson);
+ using var document = JsonDocument.Parse(inputPayloadJson);
+ using var stream = new MemoryStream();
+ using (var writer = new Utf8JsonWriter(stream))
+ {
+ WriteCanonicalJson(writer, document.RootElement);
+ }
+ return Convert.ToHexString(SHA256.HashData(stream.ToArray())).ToLowerInvariant();
+ }
+
+ private static void WriteCanonicalJson(Utf8JsonWriter writer, JsonElement element)
+ {
+ switch (element.ValueKind)
+ {
+ case JsonValueKind.Object:
+ writer.WriteStartObject();
+ foreach (var property in element.EnumerateObject().OrderBy(static item => item.Name, StringComparer.Ordinal))
+ {
+ writer.WritePropertyName(property.Name);
+ WriteCanonicalJson(writer, property.Value);
+ }
+ writer.WriteEndObject();
+ break;
+ case JsonValueKind.Array:
+ writer.WriteStartArray();
+ foreach (var item in element.EnumerateArray()) WriteCanonicalJson(writer, item);
+ writer.WriteEndArray();
+ break;
+ case JsonValueKind.String:
+ writer.WriteStringValue(element.GetString());
+ break;
+ case JsonValueKind.Number:
+ writer.WriteRawValue(element.GetRawText(), skipInputValidation: true);
+ break;
+ case JsonValueKind.True:
+ writer.WriteBooleanValue(true);
+ break;
+ case JsonValueKind.False:
+ writer.WriteBooleanValue(false);
+ break;
+ case JsonValueKind.Null:
+ writer.WriteNullValue();
+ break;
+ default:
+ throw new JsonException($"Unsupported JSON value kind '{element.ValueKind}'.");
  }
  }
 
@@ -222,16 +282,20 @@ internal sealed partial class SqliteReferenceCorpusAnalysisJobStore
  command.Transaction = transaction;
  command.CommandText = """
  INSERT INTO reference_analysis_work_items
- (input_snapshot_id, ordinal, node_id, chapter_node_id, feature_family, node_text_hash)
+ (input_snapshot_id, ordinal, node_id, chapter_node_id, feature_family, node_text_hash,
+ input_payload_json, input_payload_hash)
  VALUES
- ($snapshot_id, $ordinal, $node_id, $chapter_node_id, $family, $text_hash);
+ ($snapshot_id, $ordinal, $node_id, $chapter_node_id, $family, $text_hash,
+ $input_payload_json, $input_payload_hash);
  """;
  Add(command, "$snapshot_id", snapshotId);
  Add(command, "$ordinal", item.Ordinal);
  Add(command, "$node_id", item.NodeId);
  Add(command, "$chapter_node_id", item.ChapterNodeId);
- Add(command, "$family", item.FeatureFamily);
- Add(command, "$text_hash", item.NodeTextHash);
+Add(command, "$family", item.FeatureFamily);
+Add(command, "$text_hash", item.NodeTextHash);
+ Add(command, "$input_payload_json", item.InputPayloadJson);
+ Add(command, "$input_payload_hash", item.InputPayloadHash);
  await command.ExecuteNonQueryAsync(cancellationToken);
  }
  }

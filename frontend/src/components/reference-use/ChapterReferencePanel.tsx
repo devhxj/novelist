@@ -257,16 +257,17 @@ export default function ChapterReferencePanel({
   const [corpusDraftActionMessage, setCorpusDraftActionMessage] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
  const [writingMode, setWritingMode] = useState<'auto' | 'expert'>('auto')
- const [governance, setGovernance] = useState<reference.CorpusGovernance | null>(null)
+const [governance, setGovernance] = useState<reference.CorpusGovernance | null>(null)
+ const [hydratedRecoveryKey, setHydratedRecoveryKey] = useState('')
 
   const recoveryKey = `novelist:corpus-writing:${novelId}:${chapterNumber}:${activePath}`
 
- useEffect(() => {
- if (!hasValidChapter) return
+useEffect(() => {
  queueMicrotask(() => {
+ if (!hasValidChapter) { setHydratedRecoveryKey(''); return }
  try {
- const saved = window.sessionStorage.getItem(recoveryKey)
- if (!saved) return
+const saved = window.sessionStorage.getItem(recoveryKey)
+ if (saved) {
  const state = JSON.parse(saved) as { goal?: string; writingMode?: 'auto' | 'expert'; blueprint?: reference.CorpusBlueprintCandidates; selectedBlueprintId?: string; drafts?: reference.CorpusInsertionDraftCandidates; selectedDraftId?: string }
  setGoal(state.goal ?? '')
  setWritingMode(state.writingMode ?? 'auto')
@@ -274,14 +275,16 @@ export default function ChapterReferencePanel({
  setSelectedCorpusBlueprintId(state.selectedBlueprintId ?? '')
  if (state.drafts) { setCorpusDraftPath(activePath); setCorpusDraftCandidates(state.drafts) }
  setSelectedCorpusDraftCandidateId(state.selectedDraftId ?? '')
+ }
  } catch { window.sessionStorage.removeItem(recoveryKey) }
+ finally { setHydratedRecoveryKey(recoveryKey) }
  })
- }, [activePath, hasValidChapter, recoveryKey])
+}, [activePath, hasValidChapter, recoveryKey])
 
  useEffect(() => {
- if (!hasValidChapter) return
- window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, blueprint: corpusBlueprintPath === activePath ? corpusBlueprintCandidates : null, selectedBlueprintId: selectedCorpusBlueprintId, drafts: corpusDraftPath === activePath ? corpusDraftCandidates : null, selectedDraftId: selectedCorpusDraftCandidateId }))
- }, [activePath, corpusBlueprintCandidates, corpusBlueprintPath, corpusDraftCandidates, corpusDraftPath, goal, hasValidChapter, recoveryKey, selectedCorpusBlueprintId, selectedCorpusDraftCandidateId, writingMode])
+ if (!hasValidChapter || hydratedRecoveryKey !== recoveryKey) return
+window.sessionStorage.setItem(recoveryKey, JSON.stringify({ goal, writingMode, blueprint: corpusBlueprintPath === activePath ? corpusBlueprintCandidates : null, selectedBlueprintId: selectedCorpusBlueprintId, drafts: corpusDraftPath === activePath ? corpusDraftCandidates : null, selectedDraftId: selectedCorpusDraftCandidateId }))
+ }, [activePath, corpusBlueprintCandidates, corpusBlueprintPath, corpusDraftCandidates, corpusDraftPath, goal, hasValidChapter, hydratedRecoveryKey, recoveryKey, selectedCorpusBlueprintId, selectedCorpusDraftCandidateId, writingMode])
 
  useEffect(() => {
  if (writingMode !== 'expert' || !hasValidChapter) return

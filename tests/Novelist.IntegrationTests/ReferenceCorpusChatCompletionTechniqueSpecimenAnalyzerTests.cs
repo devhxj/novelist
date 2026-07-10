@@ -51,7 +51,10 @@ public sealed class ReferenceCorpusChatCompletionTechniqueSpecimenAnalyzerTests
                         EvidenceStart: 0,
                         EvidenceEnd: 13,
                         Explanation: "动作和沉默共同显示压抑情绪。")
-                ]),
+                ])
+            {
+                MaxOutputTokens = 888
+            },
             CancellationToken.None);
 
         Assert.StartsWith("{\"schema_version\":\"reference-corpus-technique-specimen-v1\"", output.ModelOutputJson, StringComparison.Ordinal);
@@ -61,6 +64,7 @@ public sealed class ReferenceCorpusChatCompletionTechniqueSpecimenAnalyzerTests
         Assert.Equal("qwen-plus", chat.LastRequest.ModelId);
         Assert.Equal("high", chat.LastRequest.ReasoningEffort);
         Assert.Null(chat.LastRequest.Tools);
+        Assert.Equal(888, chat.LastRequest.MaxOutputTokens);
         Assert.Collection(
             chat.LastRequest.Messages,
             system =>
