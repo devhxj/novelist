@@ -4,7 +4,7 @@ This implementation plan has been split into focused companion documents so each
 
 ## Status
 
-Phases 0-16 have implementation and regression evidence at their recorded thin-slice boundaries. The Phase 16 corpus/chapter surface split, persistent blueprint-session default path, restart recovery, and automated long-task UX are now implemented; the remaining M9 evidence is a real-user walk-through, not more parallel controls. Active status and experience closure are governed by `docs/corpus-driven-writing/development-plan.md` and `tasks.md`; this document remains the historical reference-anchor design and implementation index.
+Phases 0-16 have implementation and regression evidence at their recorded thin-slice boundaries. The Phase 16 corpus/chapter surface split, persistent blueprint-session default path, restart recovery, and automated long-task UX are now implemented. The new Corpus Library reference-book management and local blueprint-preview workspace is implemented but still needs its focused browser regression; real-user walk-through evidence also remains open. Active status and experience closure are governed by `docs/corpus-driven-writing/development-plan.md` and `tasks.md`; this document remains the historical reference-anchor design and implementation index.
 
 ## Date
 

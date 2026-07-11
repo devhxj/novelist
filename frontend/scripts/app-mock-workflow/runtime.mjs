@@ -144,7 +144,7 @@ export function parseRunConfig(args) {
     throw new Error(`Unsupported app mock target: ${config.target}`)
   }
   config.grep = normalizeGrepTag(config.grep)
-  if (config.grep && !['@startup', '@diagnostics', '@surface', '@phase15-surface', '@phase15-stress', '@phase15-compact', '@writing', '@reference-anchor', '@corpus-library', '@chapter-reference', '@pattern', '@git', '@update', '@time', '@layout', '@error'].includes(config.grep)) {
+  if (config.grep && !['@startup', '@diagnostics', '@surface', '@phase15-surface', '@phase15-stress', '@phase15-compact', '@writing', '@reference-anchor', '@reference-workspace', '@corpus-library', '@chapter-reference', '@pattern', '@git', '@update', '@time', '@layout', '@error'].includes(config.grep)) {
     throw new Error(`Unsupported app mock grep: ${config.grep}`)
   }
   if (!/^phase\d+$/i.test(config.phase)) {

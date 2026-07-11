@@ -8387,6 +8387,194 @@ public async Task SearchMaterialsDoesNotRequestEmbeddingWithoutReadyVectorIndex(
     }
 
     [Fact]
+    public async Task GetMaterialCoverageReportsAccessibleDimensionCountsAndSeparatesArchivedMaterials()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var ownerNovel = await novels.CreateNovelAsync(new CreateNovelPayload("维度覆盖来源", "", ""), CancellationToken.None);
+        var consumingNovel = await novels.CreateNovelAsync(new CreateNovelPayload("维度覆盖使用方", "", ""), CancellationToken.None);
+        var otherNovel = await novels.CreateNovelAsync(new CreateNovelPayload("不应泄露的私有来源", "", ""), CancellationToken.None);
+        var workspaceSourcePath = CreateSourceFile(
+            "material-coverage-workspace.md",
+            """
+            雨声压住门外的街，林岚握住钥匙，没有立刻说话。
+
+            “你还是来了。”她把杯子推远半寸。
+            """);
+        var privateSourcePath = CreateSourceFile("material-coverage-private.md", "另一部小说的私有材料不应计入当前覆盖。\n");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var workspaceAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(
+                ownerNovel.Id,
+                "共享维度来源",
+                null,
+                workspaceSourcePath,
+                "markdown",
+                "user_provided",
+                ReferenceCorpusVisibilities.Workspace),
+            CancellationToken.None);
+        await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(otherNovel.Id, "私有维度来源", null, privateSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        var activeCoverage = await service.GetMaterialCoverageAsync(
+            new GetReferenceMaterialCoveragePayload(consumingNovel.Id),
+            CancellationToken.None);
+
+        Assert.True(activeCoverage.MaterialCount > 1);
+        Assert.Equal(1, activeCoverage.SourceCount);
+        Assert.Contains(activeCoverage.Facets, facet => facet.Key == "material_type" && facet.DistinctValueCount > 0);
+        Assert.Contains(activeCoverage.Facets, facet => facet.Key == "function_tag" && facet.Values.Count > 0);
+        Assert.Contains(activeCoverage.Facets, facet => facet.Key == "scene_tag" && facet.Values.Count > 0);
+        Assert.Contains(activeCoverage.Facets, facet => facet.Key == "technique_tag" && facet.Values.Count > 0);
+
+        var searchableMaterials = (await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                consumingNovel.Id,
+                [workspaceAnchor.AnchorId],
+                "",
+                [ReferenceMaterialTypes.Sentence],
+                [],
+                [],
+                [],
+                [],
+                1,
+                10),
+            CancellationToken.None)).Items;
+        Assert.NotEmpty(searchableMaterials);
+        var materialToArchive = searchableMaterials[0];
+        await service.DeleteMaterialsAsync(
+            new DeleteReferenceMaterialsPayload(consumingNovel.Id, [materialToArchive.MaterialId]),
+            CancellationToken.None);
+
+        var activeAfterArchive = await service.GetMaterialCoverageAsync(
+            new GetReferenceMaterialCoveragePayload(consumingNovel.Id, ReferenceMaterialArchiveFilters.Active),
+            CancellationToken.None);
+        var archivedCoverage = await service.GetMaterialCoverageAsync(
+            new GetReferenceMaterialCoveragePayload(consumingNovel.Id, ReferenceMaterialArchiveFilters.Archived),
+            CancellationToken.None);
+
+        Assert.Equal(activeCoverage.MaterialCount - 1, activeAfterArchive.MaterialCount);
+        Assert.Equal(1, archivedCoverage.MaterialCount);
+        Assert.Equal(1, archivedCoverage.SourceCount);
+    }
+
+    [Fact]
+    public async Task SearchMaterialsFiltersBySceneTag()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("场景筛选", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "scene-filter.md",
+            "雨声压在门廊上。林岚握住钥匙，没有立刻回头。门外传来第二次敲门声。");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "场景筛选参考", null, sourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+
+        var allMaterials = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "",
+                [],
+                [],
+                [],
+                [],
+                [],
+                1,
+                100),
+            CancellationToken.None);
+        Assert.NotEmpty(allMaterials.Items);
+        var taggedMaterial = allMaterials.Items[0];
+        await service.UpdateMaterialTagsAsync(
+            new UpdateReferenceMaterialTagsPayload(
+                novel.Id,
+                taggedMaterial.MaterialId,
+                FunctionTag: null,
+                EmotionTag: null,
+                SceneTag: "doorway",
+                PovTag: null,
+                TechniqueTag: null,
+                Origin: "test",
+                Note: "scene facet filter"),
+            CancellationToken.None);
+
+        var result = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [anchor.AnchorId],
+                "",
+                [],
+                [],
+                [],
+                [],
+                [],
+                1,
+                100,
+                SceneTags: ["doorway"]),
+            CancellationToken.None);
+
+        var material = Assert.Single(result.Items);
+        Assert.Equal(taggedMaterial.MaterialId, material.MaterialId);
+        Assert.Equal("doorway", material.SceneTag);
+    }
+
+    [Fact]
+    public async Task ReadyOnlyMaterialSearchAndCoverageExcludeFailedSources()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("可用语料范围", "", ""), CancellationToken.None);
+        var readySourcePath = CreateSourceFile("ready-source.md", "雨声压住了窗沿。林岚把钥匙收进掌心。\n");
+        var failedSourcePath = CreateSourceFile("failed-source.md", "门外传来第三次敲门。她没有回头。\n");
+        var service = new SqliteReferenceAnchorService(options, novels);
+        var readyAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "可用来源", null, readySourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        var failedAnchor = await service.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "失败来源", null, failedSourcePath, "markdown", "user_provided"),
+            CancellationToken.None);
+        await UpdateAnchorBuildStatusAsync(
+            options,
+            failedAnchor.AnchorId,
+            ReferenceAnchorBuildStates.FailedEmbedding,
+            ReferenceAnchorBuildStates.FailedEmbedding);
+
+        var defaultSearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(novel.Id, [], "", [], [], [], [], [], 1, 100),
+            CancellationToken.None);
+        Assert.Contains(defaultSearch.Items, material => material.AnchorId == failedAnchor.AnchorId);
+
+        var readyOnlySearch = await service.SearchMaterialsAsync(
+            new SearchReferenceMaterialsPayload(
+                novel.Id,
+                [],
+                "",
+                [],
+                [],
+                [],
+                [],
+                [],
+                1,
+                100,
+                ReadyOnly: true),
+            CancellationToken.None);
+        Assert.Contains(readyOnlySearch.Items, material => material.AnchorId == readyAnchor.AnchorId);
+        Assert.DoesNotContain(readyOnlySearch.Items, material => material.AnchorId == failedAnchor.AnchorId);
+
+        var coverage = await service.GetMaterialCoverageAsync(
+            new GetReferenceMaterialCoveragePayload(novel.Id),
+            CancellationToken.None);
+        Assert.Equal(1, coverage.SourceCount);
+        Assert.Equal(readyOnlySearch.Total, coverage.MaterialCount);
+    }
+
+    [Fact]
     public async Task DeleteMaterialsRollsBackWhenAnyMaterialIsNotAccessible()
     {
         var options = CreateOptions();

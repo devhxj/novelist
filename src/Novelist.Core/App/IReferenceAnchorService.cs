@@ -38,6 +38,10 @@ CancellationToken cancellationToken);
         SearchReferenceMaterialsPayload input,
         CancellationToken cancellationToken);
 
+    ValueTask<ReferenceMaterialCoveragePayload> GetMaterialCoverageAsync(
+        GetReferenceMaterialCoveragePayload input,
+        CancellationToken cancellationToken);
+
     ValueTask<PageResultPayload<ReferenceMaterialTagReviewItemPayload>> GetMaterialTagReviewQueueAsync(
         GetReferenceMaterialTagReviewQueuePayload input,
         CancellationToken cancellationToken);

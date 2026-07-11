@@ -114,7 +114,7 @@ export async function verifyWritingBridgeCalls(page) {
 export async function verifyReferenceBridgeCalls(page) {
   const calls = await page.evaluate(() => window.__appMockState.calls)
   const methods = calls.map((call) => call.method)
-  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetReferenceAnchors', 'SearchReferenceMaterials', 'GetReferenceMaterialDetail']
+  const requiredMethods = ['IsInitialized', 'GetSettings', 'GetNovels', 'GetChapters', 'GetReferenceAnchors', 'GetReferenceMaterialCoverage', 'SearchReferenceMaterials']
 
   for (const method of requiredMethods) {
     assert(methods.includes(method), `Expected reference bridge method ${method} to be called.`)
@@ -122,6 +122,32 @@ export async function verifyReferenceBridgeCalls(page) {
 
   assert(!methods.includes('SaveContent'), 'reference entry workflow must not save chapter content implicitly')
   assert(!methods.includes('runtime.shell.openExternal'), 'reference entry workflow must not open external URLs')
+}
+
+export async function verifyReferenceWorkspaceBridgeCalls(page) {
+  const calls = await page.evaluate(() => window.__appMockState.calls)
+  const methods = calls.map((call) => call.method)
+  const requiredMethods = [
+    'IsInitialized',
+    'GetSettings',
+    'GetNovels',
+    'GetReferenceAnchors',
+    'GetReferenceMaterialCoverage',
+    'SearchReferenceMaterials',
+    'CreateReferenceAnchor',
+    'DeleteReferenceAnchor',
+    'GenerateReferenceCorpusBlueprintCandidates',
+  ]
+
+  for (const method of requiredMethods) {
+    assert(methods.includes(method), `Expected reference workspace bridge method ${method} to be called.`)
+  }
+
+  const previewRequest = calls.filter((call) => call.method === 'GenerateReferenceCorpusBlueprintCandidates').at(-1)?.args?.[0]
+  assert.deepEqual(previewRequest?.scope?.include_anchor_ids, [101], 'blueprint preview must use the selected reference book only')
+  assert.equal(previewRequest?.chapter_context?.novel_id, 42, 'blueprint preview must preserve the active novel')
+  assert(!methods.includes('SaveContent'), 'blueprint preview must not write chapter content')
+  assert(!methods.includes('runtime.shell.openExternal'), 'reference workspace must not open external URLs')
 }
 
 export async function verifyCorpusLibraryBridgeCalls(page) {

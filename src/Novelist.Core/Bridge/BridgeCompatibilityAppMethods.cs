@@ -104,6 +104,7 @@ public static class BridgeCompatibilityAppMethods
         "GetReferenceChapterBlueprints",
         "GetReferenceDraftCandidates",
         "GetReferenceMaterialDetail",
+        "GetReferenceMaterialCoverage",
         "GetReferenceMaterialTagReviewQueue",
         "GetReferenceSourceSegmentDetail",
         "GetReferenceSourceProcessingDetail",

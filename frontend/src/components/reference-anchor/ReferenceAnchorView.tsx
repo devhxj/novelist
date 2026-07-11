@@ -45,6 +45,7 @@ import { inputClass, statusTone } from './referenceAnchorStyles'
 
 interface Props {
   novelId: number
+  refreshKey?: number
 }
 
 type AnchorForm = {
@@ -452,7 +453,7 @@ function MaterialListPreview({ text, truncated }: { text: string; truncated: boo
   )
 }
 
-export default function ReferenceAnchorView({ novelId }: Props) {
+export default function ReferenceAnchorView({ novelId, refreshKey = 0 }: Props) {
   const app = useApp()
 
   const [anchors, setAnchors] = useState<reference.Anchor[]>([])
@@ -791,7 +792,7 @@ const [focusedEvidenceAnchorId, setFocusedEvidenceAnchorId] = useState<number | 
       }
     })()
     return () => { cancelled = true }
-  }, [loadAnchors, loadStyleProfiles, referenceError])
+  }, [loadAnchors, loadStyleProfiles, referenceError, refreshKey])
 
   useEffect(() => {
     let cancelled = false

@@ -112,6 +112,12 @@ public static class ReferenceAnchorBridgeHandlers
                     ReadObjectArg<SearchReferenceMaterialsPayload>(context.Payload, 0, "input"),
                     cancellationToken)));
 
+        dispatcher.Register("GetReferenceMaterialCoverage", async (context, cancellationToken) =>
+            SanitizeMaterialCoverage(
+                await service.GetMaterialCoverageAsync(
+                    ReadObjectArg<GetReferenceMaterialCoveragePayload>(context.Payload, 0, "input"),
+                    cancellationToken)));
+
         dispatcher.Register("GetReferenceMaterialTagReviewQueue", async (context, cancellationToken) =>
             SanitizeMaterialTagReviewQueueResults(
                 await service.GetMaterialTagReviewQueueAsync(
@@ -195,6 +201,26 @@ public static class ReferenceAnchorBridgeHandlers
             result.Page,
             result.Size,
             result.TotalPages);
+    }
+
+    private static ReferenceMaterialCoveragePayload SanitizeMaterialCoverage(
+        ReferenceMaterialCoveragePayload coverage)
+    {
+        return coverage with
+        {
+            Facets = (coverage.Facets ?? Array.Empty<ReferenceMaterialFacetPayload>())
+                .Select(facet => facet with
+                {
+                    Key = ReferencePayloadSanitizer.RedactAndBoundText(facet.Key, 128),
+                    Values = (facet.Values ?? Array.Empty<ReferenceMaterialFacetValuePayload>())
+                        .Select(value => value with
+                        {
+                            Value = ReferencePayloadSanitizer.RedactAndBoundText(value.Value, 128)
+                        })
+                        .ToArray()
+                })
+                .ToArray()
+        };
     }
 
     private static PageResultPayload<ReferenceMaterialTagReviewItemPayload> SanitizeMaterialTagReviewQueueResults(

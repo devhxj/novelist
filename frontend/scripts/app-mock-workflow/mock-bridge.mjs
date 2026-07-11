@@ -1219,8 +1219,12 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'CreateReferenceAnchor': return createReferenceAnchor(args[0])
       case 'CreateReferenceAnchors': return createReferenceAnchors(args[0])
       case 'CreateReferenceAnchorsWithResult': return createReferenceAnchorsWithResult(args[0])
+      case 'DeleteReferenceAnchor':
+        deleteReferenceAnchor(args[0], args[1])
+        return null
       case 'RebuildReferenceAnchor': return rebuildReferenceAnchor(args[1])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
+      case 'GetReferenceMaterialCoverage': return getReferenceMaterialCoverage(args[0])
       case 'GetReferenceMaterialTagReviewQueue': return getReferenceMaterialTagReviewQueue(args[0])
       case 'GetReferenceMaterialDetail': return getReferenceMaterialDetail(args[0])
       case 'GetReferenceSourceSegmentDetail': return getReferenceSourceSegmentDetail(args[0])
@@ -3561,7 +3565,9 @@ function referenceAnchors() {
     return [
       ...state.referenceAnchors,
       ...state.createdReferenceAnchors,
-    ].map(sanitizeReferenceAnchor)
+    ]
+      .filter((anchor) => anchor.owner_scope !== 'workspace_corpus' || anchor.visibility === 'workspace')
+      .map(sanitizeReferenceAnchor)
   }
 
   function sanitizeReferenceAnchor(anchor) {
@@ -3596,6 +3602,27 @@ function referenceAnchors() {
     }
     state.createdReferenceAnchors.push(anchor)
     return sanitizeReferenceAnchor(anchor)
+  }
+
+  function deleteReferenceAnchor(novelId, anchorId) {
+    const id = Number(anchorId)
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new Error('Reference anchor id must be a positive integer.')
+    }
+
+    const workspaceAnchor = [...state.referenceAnchors, ...state.createdReferenceAnchors]
+      .find((anchor) => anchor.anchor_id === id && anchor.owner_scope === 'workspace_corpus')
+    if (workspaceAnchor) {
+      const archive = (anchor) => anchor.anchor_id === id
+        ? { ...anchor, visibility: 'restricted', updated_at: now }
+        : anchor
+      state.referenceAnchors = state.referenceAnchors.map(archive)
+      state.createdReferenceAnchors = state.createdReferenceAnchors.map(archive)
+      return
+    }
+
+    state.referenceAnchors = state.referenceAnchors.filter((anchor) => anchor.anchor_id !== id)
+    state.createdReferenceAnchors = state.createdReferenceAnchors.filter((anchor) => anchor.anchor_id !== id)
   }
 
   function findExistingReferenceAnchorForInput(input) {
@@ -4144,9 +4171,24 @@ function referenceAnchors() {
       .toLowerCase()
       .split(/\s+/)
       .filter((term) => term && !/^第\d+章$/.test(term))
+    const archiveFilter = String(input.archive_filter ?? 'active')
+    const readyAnchorIds = input.ready_only === true
+      ? new Set(referenceAnchors()
+        .filter((anchor) => anchor.status === 'ready' || anchor.status === 'completed')
+        .map((anchor) => Number(anchor.anchor_id)))
+      : null
     const source = Array.isArray(state.referenceMaterials) ? state.referenceMaterials : []
     const filtered = source.filter((material) => {
       if (anchorIds.length > 0 && !anchorIds.includes(Number(material.anchor_id))) return false
+      if (readyAnchorIds && !readyAnchorIds.has(Number(material.anchor_id))) return false
+      if (archiveFilter === 'active' && material.archived_at) return false
+      if (archiveFilter === 'archived' && !material.archived_at) return false
+      if (!matchesReferenceFacetFilter(material.material_type, input.material_types)) return false
+      if (!matchesReferenceFacetFilter(material.function_tag, input.function_tags)) return false
+      if (!matchesReferenceFacetFilter(material.emotion_tag, input.emotion_tags)) return false
+      if (!matchesReferenceFacetFilter(material.scene_tag, input.scene_tags)) return false
+      if (!matchesReferenceFacetFilter(material.pov_tag, input.pov_tags)) return false
+      if (!matchesReferenceFacetFilter(material.technique_tag, input.technique_tags)) return false
       if (queryTerms.length === 0) return true
       const searchable = [
         material.text,
@@ -4166,6 +4208,56 @@ function referenceAnchors() {
       size,
       filtered.length,
     )
+  }
+
+  function matchesReferenceFacetFilter(value, filters) {
+    const normalizedFilters = Array.isArray(filters)
+      ? filters.map((item) => String(item ?? '').trim().toLowerCase()).filter(Boolean)
+      : []
+    return normalizedFilters.length === 0 || normalizedFilters.includes(String(value ?? '').trim().toLowerCase())
+  }
+
+  function getReferenceMaterialCoverage(input = {}) {
+    const archiveFilter = String(input.archive_filter ?? 'active')
+    const visibleAnchorIds = new Set(referenceAnchors()
+      .filter((anchor) => anchor.status === 'ready' || anchor.status === 'completed')
+      .map((anchor) => Number(anchor.anchor_id)))
+    const materials = (Array.isArray(state.referenceMaterials) ? state.referenceMaterials : []).filter((material) => {
+      if (!visibleAnchorIds.has(Number(material.anchor_id))) return false
+      if (archiveFilter === 'active' && material.archived_at) return false
+      if (archiveFilter === 'archived' && !material.archived_at) return false
+      return true
+    })
+    const facetColumns = [
+      ['material_type', 'material_type'],
+      ['function_tag', 'function_tag'],
+      ['emotion_tag', 'emotion_tag'],
+      ['scene_tag', 'scene_tag'],
+      ['pov_tag', 'pov_tag'],
+      ['technique_tag', 'technique_tag'],
+    ]
+    const facets = facetColumns.map(([key, column]) => {
+      const counts = new Map()
+      for (const material of materials) {
+        const value = String(material[column] ?? '').trim()
+        if (!value) continue
+        counts.set(value, (counts.get(value) ?? 0) + 1)
+      }
+      return {
+        key,
+        distinct_value_count: counts.size,
+        values: [...counts.entries()]
+          .sort(([leftValue, leftCount], [rightValue, rightCount]) => rightCount - leftCount || leftValue.localeCompare(rightValue))
+          .slice(0, 16)
+          .map(([value, materialCount]) => ({ value, material_count: materialCount })),
+      }
+    })
+
+    return {
+      material_count: materials.length,
+      source_count: new Set(materials.map((material) => Number(material.anchor_id))).size,
+      facets,
+    }
   }
 
   function toReferenceMaterialSummary(material) {

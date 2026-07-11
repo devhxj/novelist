@@ -145,6 +145,8 @@ author confirms source policy, chapter target, known facts, and forbidden facts
 
 The default chapter UI now uses the persistent blueprint session. Server state restores the target, iterations, and selected blueprint after refresh or restart, and browser automation covers the single automatic path plus long-task and error recovery. Unmoderated target-user walks and writing-effect evaluation remain open, so the current slice is not presented as product completion.
 
+The corpus library is a separate working surface: a left-side reference-book manager supports filtering, file selection, add, delete, and ready-book selection; the center shows six-facet material coverage and on-demand search for ready sources; a right-side temporary blueprint preview compares candidates for those selected books. This preview neither creates a chapter session nor writes prose or editor content; chapter writing remains in the chapter reference panel.
+
 The workflow stops for author confirmation when:
 
 - source, license, known-fact, or forbidden-fact boundaries are unclear;
@@ -217,7 +219,7 @@ Adjust narrative pacing according to the current chapter target.
     </tr>
     <tr>
       <td><strong>Corpus-driven writing</strong></td>
-      <td>The M1 product thin slice is established; the M2 50K full-pipeline standard gate has passed; M3-M5 await real-effect evidence; M6-M8 are frozen; M9 automated experience closure is complete, with target-user task validation still open. The system remains at S maturity, not production P or scale L.</td>
+      <td>The M1 product thin slice is established; the M2 50K full-pipeline standard gate has passed; M3-M5 await real-effect evidence; M6-M8 are frozen; M9 chapter-default automation is closed, while the Corpus Library workspace still needs focused browser acceptance and target-user task validation. The system remains at S maturity, not production P or scale L.</td>
     </tr>
     <tr>
       <td><strong>Phase 15</strong></td>
@@ -241,6 +243,7 @@ Adjust narrative pacing according to the current chapter target.
 - The chapter-level `Reference Materials` automatic path now stays focused on “goal → choose a writing blueprint → prose candidate → explicit insert”, with source details and manual controls available as progressive expert detail.
 - The selected writing blueprint is restored from the server-owned chapter session after reopening, so authors can continue without recreating the same step.
 - `Corpus Library` analysis runs as a persistent background task: authors can return to its progress and receive one clear recovery action for paused, failed, exhausted, or blocked work.
+- `Corpus Library` now places reference-book management on the left, six-facet corpus search in the center, and an AI blueprint preview on the right. The preview stays local to the workspace and never writes chapter prose.
 
 See [Release Notes](docs/releases/release-notes.md) for the full change history.
 
@@ -357,20 +360,16 @@ Starting only Vite leaves desktop bridge APIs unavailable. To use the bridge aga
       <td>Run frontend ESLint.</td>
     </tr>
     <tr>
-      <td><code>npm&nbsp;--prefix&nbsp;frontend&nbsp;run&nbsp;test:reference-style</code></td>
-      <td>Run the reference-style browser workflow and generate the usability report.</td>
-    </tr>
-    <tr>
-      <td><code>npm&nbsp;--prefix&nbsp;frontend&nbsp;run&nbsp;test:reference-style:stress</code></td>
-      <td>Run the 10 MB reference-style browser stress workflow.</td>
-    </tr>
-    <tr>
       <td><code>npm&nbsp;--prefix&nbsp;frontend&nbsp;run&nbsp;verify</code></td>
       <td>Run frontend build, lint, corpus/chapter/reference workflows, and the baseline app-wide smoke test.</td>
     </tr>
     <tr>
       <td><code>npm&nbsp;--prefix&nbsp;frontend&nbsp;run&nbsp;test:phase16</code></td>
       <td>Run the corpus-library and chapter-reference browser workflows.</td>
+    </tr>
+    <tr>
+      <td><code>npm&nbsp;--prefix&nbsp;frontend&nbsp;run&nbsp;test:reference-workspace</code></td>
+      <td>Run the focused reference-book management and temporary blueprint-preview browser workflow.</td>
     </tr>
     <tr>
       <td><code>dotnet&nbsp;test&nbsp;Novelist.slnx&nbsp;--no-restore&nbsp;-v&nbsp;minimal</code></td>

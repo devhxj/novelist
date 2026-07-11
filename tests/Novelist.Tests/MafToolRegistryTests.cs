@@ -2022,6 +2022,14 @@ DateTimeOffset.UtcNow));
                 TotalPages: 1));
         }
 
+        public ValueTask<ReferenceMaterialCoveragePayload> GetMaterialCoverageAsync(
+            GetReferenceMaterialCoveragePayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(new ReferenceMaterialCoveragePayload(0, 0, []));
+        }
+
         public ValueTask<PageResultPayload<ReferenceMaterialTagReviewItemPayload>> GetMaterialTagReviewQueueAsync(
             GetReferenceMaterialTagReviewQueuePayload input,
             CancellationToken cancellationToken)

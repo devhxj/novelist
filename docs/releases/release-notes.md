@@ -6,6 +6,7 @@
 - Chapter-level `参考素材` now keeps the default writing path focused on “goal → choose a writing blueprint → review prose → explicitly insert”. Source details, identifiers, and manual controls remain available as progressive expert detail instead of competing entry points.
 - A chosen corpus-writing blueprint is now restored from the server-owned chapter session after the panel or app is reopened, so authors can continue from the selected plan without rebuilding the same step.
 - `素材库` can start analysis as a persistent background task, let authors leave the page, and return to the same task with its progress and a clear recovery action for paused, failed, exhausted, or blocked work.
+- `素材库`现在以左侧参考书籍管理、中间六维语料覆盖与按需检索、右侧 AI 蓝图预演组成单一工作台；预演仅比较候选方案，不创建写作会话，也不会写入章节正文。
 - Candidate use remains explicit and auditable: the chapter panel only updates the editor buffer after source, license, similarity, and draft checks pass; it does not silently save or insert chapter prose.
 
 ### 2026-07-09

@@ -6,7 +6,7 @@ This file is the stable overview entry point. The detailed content is split into
 
 ## Status
 
-Phases 0-16 have implementation evidence at their recorded thin-slice boundaries. [Phase 16](tasks-phase-16.md) established the corpus/chapter surface split; M9 has since closed automated default-path convergence, persistent blueprint-session use, restart recovery, and long-task/accessibility checks. Real-user usability evidence remains open.
+Phases 0-16 have implementation evidence at their recorded thin-slice boundaries. [Phase 16](tasks-phase-16.md) established the corpus/chapter surface split; M9 has automated evidence for the chapter default path, persistent blueprint-session use, restart recovery, and long-task/accessibility checks. The corpus workspace now has dedicated reference-book and transient blueprint-preview surfaces, pending focused browser acceptance; real-user usability evidence also remains open.
 
 This plan remains the source of truth for reference-anchor design history and guardrails. Use the corpus-driven writing [development plan](../corpus-driven-writing/development-plan.md) and [tasks](../corpus-driven-writing/tasks.md) for current milestone status and M9 experience closure.
 

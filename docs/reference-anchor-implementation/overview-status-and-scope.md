@@ -4,7 +4,7 @@
 
 ## Status
 
-Phases 0-16 have implementation evidence at their recorded thin-slice boundaries. Phase 16 established the reference-corpus/chapter surface split; M9 has since added persistent default-session use, restart recovery, and a single primary chapter path with automated browser evidence. Real-user usability evidence remains open.
+Phases 0-16 have implementation evidence at their recorded thin-slice boundaries. Phase 16 established the reference-corpus/chapter surface split; M9 has persistent default-session use, restart recovery, and a single primary chapter path with automated browser evidence. The corpus workspace correction still needs its focused browser workflow, and real-user usability evidence remains open.
 
 This plan is the source of truth for reference-anchor design constraints. Current status and M9 experience closure live in `docs/corpus-driven-writing/development-plan.md` and `tasks.md`.
 

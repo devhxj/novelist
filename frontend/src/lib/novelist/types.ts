@@ -1996,6 +1996,30 @@ candidates: CorpusInsertionDraftCandidate[]
     style_profile_ids?: number[] | null
     style_dimensions?: string[] | null
     imitation_intensity?: 'diagnostic_only' | 'loose' | 'moderate' | 'strong' | null
+    scene_tags?: string[] | null
+    ready_only?: boolean | null
+  }
+
+  export interface GetMaterialCoverageInput {
+    novel_id: number
+    archive_filter?: 'active' | 'archived' | 'all' | null
+  }
+
+  export interface MaterialFacetValue {
+    value: string
+    material_count: number
+  }
+
+  export interface MaterialFacet {
+    key: string
+    distinct_value_count: number
+    values: MaterialFacetValue[]
+  }
+
+  export interface MaterialCoverage {
+    material_count: number
+    source_count: number
+    facets: MaterialFacet[]
   }
 
   export interface SlotValue {

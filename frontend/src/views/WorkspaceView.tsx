@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { flushSync } from 'react-dom'
 import { useApp } from '@/hooks/useApp'
 import type { novel, chapter, search } from '@/hooks/useApp'
-import type { novelImport, update } from '@/lib/novelist/types'
+import type { novelImport, reference, update } from '@/lib/novelist/types'
 import { useNovelImport } from '@/hooks/useNovelImport'
 import ActivityBar from '@/components/shell/ActivityBar'
 import StatusBar from '@/components/shell/StatusBar'
@@ -14,7 +14,8 @@ import ArcListView from '@/components/storyarc/ArcListView'
 import TimelineView from '@/components/timeline/TimelineView'
 import ReaderView from '@/components/reader/ReaderView'
 import PreferenceView from '@/components/preference/PreferenceView'
-import ReferenceAnchorView from '@/components/reference-anchor/ReferenceAnchorView'
+import ReferenceCorpusWorkspace from '@/components/reference-anchor/ReferenceCorpusWorkspace'
+import BlueprintPreviewPanel from '@/components/reference-anchor/BlueprintPreviewPanel'
 import StyleSampleLibraryView from '@/components/style/StyleSampleLibraryView'
 import NarrativePatternView from '@/components/pattern/NarrativePatternView'
 import GitHistoryView from '@/components/git/GitHistoryView'
@@ -74,6 +75,9 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
   const [platformOS, setPlatformOS] = useState('')
   const [updateResult, setUpdateResult] = useState<update.UpdateCheckResult | null>(null)
   const [showUpdateDialog, setShowUpdateDialog] = useState(false)
+  const [referenceAnchors, setReferenceAnchors] = useState<reference.Anchor[]>([])
+  const [selectedReferenceAnchorIds, setSelectedReferenceAnchorIds] = useState<number[]>([])
+  const [referenceRefreshKey, setReferenceRefreshKey] = useState(0)
   const loadedRef = useRef(false)
   const autoUpdateCheckedRef = useRef(false)
   const { theme, toggle: toggleTheme } = useTheme()
@@ -194,6 +198,8 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
       if (!exists && novels.length > 0) {
         const first = novels[0]
         setActiveNovelId(first.id)
+        setReferenceAnchors([])
+        setSelectedReferenceAnchorIds([])
         setActivePanel('chapters')
         void app.SetActiveNovel({ novel_id: first.id })
       } else if (novels.length === 0) {
@@ -242,6 +248,8 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
 
   async function handleSelectNovel(n: novel.Novel) {
     setActiveNovelId(n.id)
+    setReferenceAnchors([])
+    setSelectedReferenceAnchorIds([])
     setActivePanel('chapters')
     contentRef.current?.closeAllTabs()
     setTabTarget(null)
@@ -258,6 +266,8 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
       setShowCreate(false)
       await loadNovels()
       setActiveNovelId(n.id)
+      setReferenceAnchors([])
+      setSelectedReferenceAnchorIds([])
       setActivePanel('chapters')
       await app.SetActiveNovel({ novel_id: n.id })
     }
@@ -269,6 +279,8 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
       setShowCreateDialog(false)
       await loadNovels()
       setActiveNovelId(n.id)
+      setReferenceAnchors([])
+      setSelectedReferenceAnchorIds([])
       setActivePanel('chapters')
       await app.SetActiveNovel({ novel_id: n.id })
     }
@@ -318,6 +330,8 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
 
     const importedNovelId = run.created_novel_id
     setActiveNovelId(importedNovelId)
+    setReferenceAnchors([])
+    setSelectedReferenceAnchorIds([])
     setActivePanel('chapters')
     setTabTarget(null)
     setActiveContent('')
@@ -338,6 +352,16 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
   }
 
   const activeNovel = novels.find(n => n.id === activeNovelId)
+
+  const handleReferenceAnchorsChange = useCallback((anchors: reference.Anchor[]) => {
+    const validIds = new Set(anchors.map((anchor) => anchor.anchor_id))
+    setReferenceAnchors(anchors)
+    setSelectedReferenceAnchorIds((current) => current.filter((id) => validIds.has(id)))
+  }, [])
+
+  const handleReferenceMutation = useCallback(() => {
+    setReferenceRefreshKey((current) => current + 1)
+  }, [])
 
   // ── 窗口按钮样式 ────────────────────────────────────────
 
@@ -454,6 +478,11 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
             searchQuery={searchQuery}
             searchResults={searchResults}
             onSearchChange={(q, r) => { setSearchQuery(q); setSearchResults(r) }}
+            selectedReferenceAnchorIds={selectedReferenceAnchorIds}
+            referenceRefreshKey={referenceRefreshKey}
+            onReferenceSelectionChange={setSelectedReferenceAnchorIds}
+            onReferenceAnchorsChange={handleReferenceAnchorsChange}
+            onReferenceMutation={handleReferenceMutation}
           />
         )}
 
@@ -496,7 +525,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
         ) : activePanel === 'preferences' ? (
           <PreferenceView novelId={activeNovelId} focusId={preferenceFocusId} />
         ) : activePanel === 'reference' ? (
-          <ReferenceAnchorView novelId={activeNovelId} />
+          <ReferenceCorpusWorkspace key={activeNovelId} novelId={activeNovelId} refreshKey={referenceRefreshKey} />
         ) : activePanel === 'style-samples' ? (
           <StyleSampleLibraryView novelId={activeNovelId} />
         ) : activePanel === 'patterns' ? (
@@ -507,7 +536,16 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
           <ProfileView />
         ) : null}
 
-        {activePanel !== 'profile' && (
+        {activePanel === 'reference' ? (
+          <BlueprintPreviewPanel
+            width={layout.chat_panel_width}
+            onWidthChange={setChatPanelWidth}
+            onWidthCommit={(width) => { void commitLayout({ chat_panel_width: width }) }}
+            novelId={activeNovelId}
+            anchors={referenceAnchors}
+            selectedAnchorIds={selectedReferenceAnchorIds}
+          />
+        ) : activePanel !== 'profile' && (
           <ChatPanel
             width={layout.chat_panel_width}
             onWidthChange={setChatPanelWidth}

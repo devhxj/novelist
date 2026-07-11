@@ -1038,7 +1038,9 @@ public sealed class ReferenceAnchorContractTests
             ArchiveFilter: ReferenceMaterialArchiveFilters.Archived,
             StyleProfileIds: [99],
             StyleDimensions: ["dialogue_ratio"],
-            ImitationIntensity: ReferenceStyleImitationIntensities.Strong);
+            ImitationIntensity: ReferenceStyleImitationIntensities.Strong,
+            SceneTags: ["threshold"],
+            ReadyOnly: true);
 
         using var json = JsonDocument.Parse(JsonSerializer.Serialize(payload, BridgeJson.SerializerOptions));
         var root = json.RootElement;
@@ -1050,6 +1052,8 @@ public sealed class ReferenceAnchorContractTests
         Assert.Equal(99, root.GetProperty("style_profile_ids")[0].GetInt64());
         Assert.Equal("dialogue_ratio", root.GetProperty("style_dimensions")[0].GetString());
         Assert.Equal("strong", root.GetProperty("imitation_intensity").GetString());
+        Assert.Equal("threshold", root.GetProperty("scene_tags")[0].GetString());
+        Assert.True(root.GetProperty("ready_only").GetBoolean());
         Assert.False(root.TryGetProperty("NarrativeDuties", out _));
         Assert.False(root.TryGetProperty("EmotionTransitions", out _));
         Assert.False(root.TryGetProperty("ProseDuties", out _));
@@ -1057,6 +1061,41 @@ public sealed class ReferenceAnchorContractTests
         Assert.False(root.TryGetProperty("StyleProfileIds", out _));
         Assert.False(root.TryGetProperty("StyleDimensions", out _));
         Assert.False(root.TryGetProperty("ImitationIntensity", out _));
+        Assert.False(root.TryGetProperty("SceneTags", out _));
+        Assert.False(root.TryGetProperty("ReadyOnly", out _));
+    }
+
+    [Fact]
+    public void MaterialCoveragePayloadUsesBoundedFacetCountsWithoutSourceText()
+    {
+        var input = new GetReferenceMaterialCoveragePayload(
+            NovelId: 42,
+            ArchiveFilter: ReferenceMaterialArchiveFilters.Active);
+        var result = new ReferenceMaterialCoveragePayload(
+            MaterialCount: 128,
+            SourceCount: 2,
+            Facets:
+            [
+                new ReferenceMaterialFacetPayload(
+                    Key: "technique_tag",
+                    DistinctValueCount: 2,
+                    Values:
+                    [
+                        new ReferenceMaterialFacetValuePayload("interiority", 96),
+                        new ReferenceMaterialFacetValuePayload("afterbeat", 32)
+                    ])
+            ]);
+
+        using var inputJson = JsonDocument.Parse(JsonSerializer.Serialize(input, BridgeJson.SerializerOptions));
+        using var resultJson = JsonDocument.Parse(JsonSerializer.Serialize(result, BridgeJson.SerializerOptions));
+
+        Assert.Equal(42, inputJson.RootElement.GetProperty("novel_id").GetInt64());
+        Assert.Equal("active", inputJson.RootElement.GetProperty("archive_filter").GetString());
+        Assert.Equal(128, resultJson.RootElement.GetProperty("material_count").GetInt64());
+        Assert.Equal("technique_tag", resultJson.RootElement.GetProperty("facets")[0].GetProperty("key").GetString());
+        Assert.Equal("interiority", resultJson.RootElement.GetProperty("facets")[0].GetProperty("values")[0].GetProperty("value").GetString());
+        Assert.False(resultJson.RootElement.GetRawText().Contains("text", StringComparison.OrdinalIgnoreCase));
+        Assert.False(resultJson.RootElement.GetRawText().Contains("source_path", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

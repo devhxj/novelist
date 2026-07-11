@@ -4,7 +4,7 @@
 
 > **Status boundary (2026-07-10):** This file preserves Phase 16 implementation checkpoints. The corpus-driven-writing M9 work has since closed the automated single default chapter path, persistent blueprint-session recovery, background-task recovery, and accessibility/viewport evidence. These checkpoints still do not prove real-user task success; the remaining acceptance work is authoritative in `docs/corpus-driven-writing/development-plan.md` and M9 in `tasks.md`.
 >
-> **Historical task-ledger note (2026-07-11):** Unchecked Phase 16 boxes below preserve the original planning checkpoint and are not a second current completion count. The authoritative current ledger is `docs/corpus-driven-writing/tasks.md`: its only open atomic task is the five-person, unprompted M9 usability study. Keep the historical boxes for traceability; do not use them to claim a separate open default-UI implementation backlog.
+> **Historical task-ledger note (2026-07-11):** Unchecked Phase 16 boxes below preserve the original planning checkpoint and are not a second current completion count. The authoritative current ledger is `docs/corpus-driven-writing/tasks.md`: M9 still requires the focused corpus-workspace browser acceptance and the five-person, unprompted usability study. Keep the historical boxes for traceability; do not use them to claim a separate open default-UI implementation backlog.
 
 ## Phase 16: Corpus Library and Chapter Reference-Use Separation
 

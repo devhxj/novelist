@@ -15,6 +15,7 @@ Novelist is a .NET 10 + Photino.NET desktop app with a React/Vite frontend. The 
 - `cd frontend && npm ci && npm run build`: install frontend dependencies, then run TypeScript and Vite build.
 - `cd frontend && npm run lint`: run ESLint for TypeScript/React files.
 - `npm --prefix frontend run verify`: run frontend build, lint, corpus/chapter/reference workflows, and the app smoke suite.
+- `npm --prefix frontend run test:reference-workspace`: run the focused reference-book management and transient blueprint-preview browser workflow.
 
 ## Coding Style & Naming Conventions
 
@@ -26,7 +27,7 @@ Do not revive retired legacy implementations: do not add new code under legacy `
 
 Prefer focused unit tests in `tests/Novelist.Tests` for pure bridge/tool behavior and integration tests in `tests/Novelist.IntegrationTests` for filesystem, SQLite, Git, migration, and app-host behavior. Add tests for storage, path safety, migrations, version history, bridge contracts, and user-facing workflow changes. UI changes require build, lint, the focused browser workflow, and screenshots for changed states; verify keyboard/focus, narrow desktop layouts, long-task recovery, and error recovery when relevant.
 
-For corpus-driven writing, follow `docs/corpus-driven-writing/development-plan.md`: keep the 1,000-item job-store micro-benchmark, use 50K as the required full scheduler/builder/worker/fake-analyzer gate, and reserve 2M for explicit non-blocking long runs. The formal 50K gate has passed; future changes must preserve it. M9 automated default-path, accessibility, and recovery evidence is complete, while real-user validation remains open; do not expand the expert control surface.
+For corpus-driven writing, follow `docs/corpus-driven-writing/development-plan.md`: keep the 1,000-item job-store micro-benchmark, use 50K as the required full scheduler/builder/worker/fake-analyzer gate, and reserve 2M for explicit non-blocking long runs. The formal 50K gate has passed; future changes must preserve it. M9 chapter-default, accessibility, and recovery evidence is complete; the Corpus Library reference-book and blueprint-preview workflow still needs focused browser acceptance, and real-user validation remains open. Do not expand the expert control surface.
 
 ## Commit & Pull Request Guidelines
 

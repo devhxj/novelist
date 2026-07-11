@@ -27,6 +27,7 @@ public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorServi
     private const int MaterialDetailMaxSegments = 3;
     private const int MaterialDetailMaxSlots = 20;
     private const int MaterialListPreviewMaxChars = 160;
+    private const int MaterialCoverageFacetValueLimit = 16;
     private const double MaterialReviewConfidenceThreshold = 0.75;
     private const int MaxExplicitAnchorFilterIds = 256;
     private const int AdvancedSceneMaxParagraphs = 8;
@@ -94,6 +95,15 @@ public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorServi
     private static readonly HashSet<string> AllowedFeedbackTargetTypes = new(ReferenceFeedbackTargetTypes.All, StringComparer.Ordinal);
     private static readonly HashSet<string> AllowedMaterialArchiveFilters = new(ReferenceMaterialArchiveFilters.Allowed, StringComparer.Ordinal);
     private static readonly HashSet<string> AllowedStyleImitationIntensities = new(ReferenceStyleImitationIntensities.All, StringComparer.Ordinal);
+    private static readonly (string Key, string Column)[] MaterialCoverageFacetColumns =
+    [
+        ("material_type", "material_type"),
+        ("function_tag", "function_tag"),
+        ("emotion_tag", "emotion_tag"),
+        ("scene_tag", "scene_tag"),
+        ("pov_tag", "pov_tag"),
+        ("technique_tag", "technique_tag")
+    ];
 
     private readonly AppInitializationOptions _options;
     private readonly INovelService _novels;
@@ -1411,6 +1421,11 @@ public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorServi
                 anchorIds = await GetAnchorIdsAsync(connection, input.NovelId, cancellationToken);
             }
 
+            if (input.ReadyOnly == true)
+            {
+                anchorIds = await FilterReadyAnchorIdsAsync(connection, anchorIds, cancellationToken);
+            }
+
             if (anchorIds.Length == 0)
             {
                 return new PageResultPayload<ReferenceMaterialPayload>([], 0, page, size, 0);
@@ -1464,6 +1479,42 @@ public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorServi
                 })
                 .ToArray();
             return new PageResultPayload<ReferenceMaterialPayload>(items, total, page, size, totalPages);
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<ReferenceMaterialCoveragePayload> GetMaterialCoverageAsync(
+        GetReferenceMaterialCoveragePayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        var archiveFilter = string.IsNullOrWhiteSpace(input.ArchiveFilter)
+            ? ReferenceMaterialArchiveFilters.Active
+            : ValidateAllowedText(input.ArchiveFilter, nameof(input.ArchiveFilter), AllowedMaterialArchiveFilters);
+
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            var databasePath = await DatabasePathAsync(cancellationToken);
+            await EnsureSchemaAsync(databasePath, cancellationToken);
+            await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+            var anchorIds = await GetAnchorIdsAsync(connection, input.NovelId, cancellationToken);
+            anchorIds = await FilterReadyAnchorIdsAsync(connection, anchorIds, cancellationToken);
+            if (anchorIds.Length == 0)
+            {
+                return new ReferenceMaterialCoveragePayload(0, 0, []);
+            }
+
+            return await ReadMaterialCoverageAsync(
+                connection,
+                input.NovelId,
+                anchorIds,
+                archiveFilter,
+                cancellationToken);
         }
         finally
         {
@@ -3875,6 +3926,36 @@ CancellationToken cancellationToken)
         return anchorIds.ToArray();
     }
 
+    private static async ValueTask<long[]> FilterReadyAnchorIdsAsync(
+        SqliteConnection connection,
+        IReadOnlyList<long> anchorIds,
+        CancellationToken cancellationToken)
+    {
+        if (anchorIds.Count == 0)
+        {
+            return [];
+        }
+
+        await using var command = connection.CreateCommand();
+        var parameterNames = AddLongParameters(command, "$ready_anchor_id_", anchorIds);
+        command.CommandText = $"""
+            SELECT anchor_id
+            FROM reference_anchors
+            WHERE status = $ready_status
+              AND anchor_id IN ({string.Join(", ", parameterNames)})
+            ORDER BY anchor_id ASC;
+            """;
+        command.Parameters.AddWithValue("$ready_status", ReferenceAnchorBuildStates.Ready);
+        var readyAnchorIds = new List<long>(anchorIds.Count);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            readyAnchorIds.Add(reader.GetInt64(0));
+        }
+
+        return readyAnchorIds.ToArray();
+    }
+
     private static async ValueTask<IReadOnlyList<ReferenceSourceSegment>> ReadSourceSegmentsAsync(
         SqliteConnection connection,
         long anchorId,
@@ -3967,6 +4048,112 @@ CancellationToken cancellationToken)
         }
 
         return materials;
+    }
+
+    private static async ValueTask<ReferenceMaterialCoveragePayload> ReadMaterialCoverageAsync(
+        SqliteConnection connection,
+        long novelId,
+        IReadOnlyList<long> anchorIds,
+        string archiveFilter,
+        CancellationToken cancellationToken)
+    {
+        if (anchorIds.Count == 0)
+        {
+            return new ReferenceMaterialCoveragePayload(0, 0, []);
+        }
+
+        await using var command = connection.CreateCommand();
+        var anchorParameters = AddLongParameters(command, "$coverage_anchor_id_", anchorIds);
+        command.CommandText = $$"""
+            WITH filtered AS MATERIALIZED (
+                SELECT m.anchor_id, m.material_type, m.function_tag, m.emotion_tag,
+                       m.scene_tag, m.pov_tag, m.technique_tag
+                {{BuildMaterialCoverageWhere(anchorParameters)}}
+            ),
+            facet_values AS (
+                SELECT 'material_type' AS facet_key, material_type AS value, COUNT(*) AS material_count
+                FROM filtered GROUP BY material_type
+                UNION ALL
+                SELECT 'function_tag', function_tag, COUNT(*) FROM filtered GROUP BY function_tag
+                UNION ALL
+                SELECT 'emotion_tag', emotion_tag, COUNT(*) FROM filtered GROUP BY emotion_tag
+                UNION ALL
+                SELECT 'scene_tag', scene_tag, COUNT(*) FROM filtered GROUP BY scene_tag
+                UNION ALL
+                SELECT 'pov_tag', pov_tag, COUNT(*) FROM filtered GROUP BY pov_tag
+                UNION ALL
+                SELECT 'technique_tag', technique_tag, COUNT(*) FROM filtered GROUP BY technique_tag
+            )
+            SELECT '__summary__' AS facet_key, '' AS value,
+                   COUNT(*) AS material_count, COUNT(DISTINCT anchor_id) AS source_count
+            FROM filtered
+            UNION ALL
+            SELECT facet_key, value, material_count, 0 AS source_count
+            FROM facet_values;
+            """;
+        AddMaterialTagReviewQueueParameters(command, novelId, archiveFilter);
+
+        long materialCount = 0;
+        var sourceCount = 0;
+        var valuesByFacet = new Dictionary<string, List<ReferenceMaterialFacetValuePayload>>(StringComparer.Ordinal);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var key = reader.GetString(0);
+            if (string.Equals(key, "__summary__", StringComparison.Ordinal))
+            {
+                materialCount = reader.GetInt64(2);
+                sourceCount = checked((int)reader.GetInt64(3));
+                continue;
+            }
+
+            if (!valuesByFacet.TryGetValue(key, out var values))
+            {
+                values = [];
+                valuesByFacet[key] = values;
+            }
+
+            values.Add(new ReferenceMaterialFacetValuePayload(
+                reader.GetString(1),
+                reader.GetInt64(2)));
+        }
+
+        if (materialCount == 0)
+        {
+            return new ReferenceMaterialCoveragePayload(0, 0, []);
+        }
+
+        var facets = MaterialCoverageFacetColumns
+            .Select(facet =>
+            {
+                var values = valuesByFacet.TryGetValue(facet.Key, out var current) ? current : [];
+                return new ReferenceMaterialFacetPayload(
+                    facet.Key,
+                    values.Count,
+                    values
+                        .OrderByDescending(value => value.MaterialCount)
+                        .ThenBy(value => value.Value, StringComparer.Ordinal)
+                        .Take(MaterialCoverageFacetValueLimit)
+                        .ToArray());
+            })
+            .ToArray();
+
+        return new ReferenceMaterialCoveragePayload(materialCount, sourceCount, facets);
+    }
+
+    private static string BuildMaterialCoverageWhere(IReadOnlyList<string> anchorParameterNames)
+    {
+        return $$"""
+            FROM reference_materials m
+            INNER JOIN reference_anchors a ON a.anchor_id = m.anchor_id
+            WHERE {{AnchorAliasNovelOrVisibleWorkspaceCorpusPredicate}}
+              AND (
+                $archive_filter = $archive_filter_all OR
+                ($archive_filter = $archive_filter_active AND m.archived_at IS NULL) OR
+                ($archive_filter = $archive_filter_archived AND m.archived_at IS NOT NULL)
+              )
+              AND m.anchor_id IN ({{string.Join(", ", anchorParameterNames)}})
+            """;
     }
 
     private static async ValueTask<PageResultPayload<ReferenceMaterialTagReviewItemPayload>> ReadMaterialTagReviewQueueItemsAsync(
@@ -7251,6 +7438,7 @@ EndOffset = baseOffset + sentence.EndOffset
         return MatchesAnyFilter(material.MaterialType, input.MaterialTypes) &&
             MatchesAnyFilter(material.EmotionTag, input.EmotionTags) &&
             MatchesAnyFilter(material.FunctionTag, input.FunctionTags) &&
+            MatchesAnyFilter(material.SceneTag, input.SceneTags) &&
             MatchesAnyFilter(material.PovTag, input.PovTags) &&
             MatchesAnyFilter(material.TechniqueTag, input.TechniqueTags) &&
             MatchesNarrativeDutyFilters(material, input.NarrativeDuties) &&
@@ -7632,6 +7820,7 @@ EndOffset = baseOffset + sentence.EndOffset
         score += MatchesNonEmptyFilter(material.MaterialType, input.MaterialTypes) ? 1.0 : 0;
         score += MatchesNonEmptyFilter(material.EmotionTag, input.EmotionTags) ? 1.0 : 0;
         score += MatchesNonEmptyFilter(material.FunctionTag, input.FunctionTags) ? 1.0 : 0;
+        score += MatchesNonEmptyFilter(material.SceneTag, input.SceneTags) ? 1.0 : 0;
         score += MatchesNonEmptyFilter(material.PovTag, input.PovTags) ? 1.0 : 0;
         score += MatchesNonEmptyFilter(material.TechniqueTag, input.TechniqueTags) ? 1.0 : 0;
         return score;

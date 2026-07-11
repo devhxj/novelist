@@ -81,7 +81,12 @@ public sealed class ReferenceBridgeHandlerRoutingTests
             2,
             10,
             ProseDuties: ["source_backed_detail"],
-            ArchiveFilter: ReferenceMaterialArchiveFilters.Archived));
+            ArchiveFilter: ReferenceMaterialArchiveFilters.Archived,
+            SceneTags: ["threshold"],
+            ReadyOnly: true));
+        await AssertOkAsync(dispatcher, "GetReferenceMaterialCoverage", new GetReferenceMaterialCoveragePayload(
+            42,
+            ReferenceMaterialArchiveFilters.Active));
         await AssertOkAsync(dispatcher, "GetReferenceMaterialTagReviewQueue", new GetReferenceMaterialTagReviewQueuePayload(
             42,
             [99],
@@ -164,7 +169,8 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 "UpdateAnchorMetadata:42:99:Updated Anchor:Updated Author:licensed:workspace:user_verified:curated,rain",
                 "RebuildAnchor:42:99",
                 "GetBuildStatus:42:99",
-                "SearchMaterials:42:99:fog:passage:unease:interiority:close:afterbeat:2:10:source_backed_detail:archived",
+                "SearchMaterials:42:99:fog:passage:unease:interiority:threshold:close:afterbeat:2:10:source_backed_detail:archived:ready",
+                "GetMaterialCoverage:42:active",
                 "GetMaterialTagReviewQueue:42:99:3:25:active",
                 "GetMaterialDetail:42:material-1",
                 "GetSourceSegmentDetail:42:99:segment-1",
@@ -1359,13 +1365,25 @@ return ValueTask.FromResult<ReferenceAnchorBuildStatusPayload?>(BuildStatusResul
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add(
-                $"SearchMaterials:{input.NovelId}:{string.Join(',', input.AnchorIds)}:{input.Query}:{string.Join(',', input.MaterialTypes)}:{string.Join(',', input.EmotionTags)}:{string.Join(',', input.FunctionTags)}:{string.Join(',', input.PovTags)}:{string.Join(',', input.TechniqueTags)}:{input.Page}:{input.Size}:{string.Join(',', input.ProseDuties ?? [])}:{input.ArchiveFilter}");
+                $"SearchMaterials:{input.NovelId}:{string.Join(',', input.AnchorIds)}:{input.Query}:{string.Join(',', input.MaterialTypes)}:{string.Join(',', input.EmotionTags)}:{string.Join(',', input.FunctionTags)}:{string.Join(',', input.SceneTags ?? [])}:{string.Join(',', input.PovTags)}:{string.Join(',', input.TechniqueTags)}:{input.Page}:{input.Size}:{string.Join(',', input.ProseDuties ?? [])}:{input.ArchiveFilter}:{(input.ReadyOnly == true ? "ready" : "all")}");
             return ValueTask.FromResult(new PageResultPayload<ReferenceMaterialPayload>(
                 [CreateMaterialPayload("material-1")],
                 1,
                 input.Page,
                 input.Size,
                 1));
+        }
+
+        public ValueTask<ReferenceMaterialCoveragePayload> GetMaterialCoverageAsync(
+            GetReferenceMaterialCoveragePayload input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add($"GetMaterialCoverage:{input.NovelId}:{input.ArchiveFilter}");
+            return ValueTask.FromResult(new ReferenceMaterialCoveragePayload(
+                1,
+                1,
+                [new ReferenceMaterialFacetPayload("material_type", 1, [new ReferenceMaterialFacetValuePayload("sentence", 1)])]));
         }
 
         public ValueTask<PageResultPayload<ReferenceMaterialTagReviewItemPayload>> GetMaterialTagReviewQueueAsync(

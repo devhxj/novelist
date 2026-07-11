@@ -607,7 +607,33 @@ public sealed record SearchReferenceMaterialsPayload(
     IReadOnlyList<string>? StyleDimensions = null,
     [property: JsonPropertyName("imitation_intensity")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    string? ImitationIntensity = null);
+    string? ImitationIntensity = null,
+    [property: JsonPropertyName("scene_tags")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? SceneTags = null,
+    [property: JsonPropertyName("ready_only")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? ReadyOnly = null);
+
+public sealed record GetReferenceMaterialCoveragePayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("archive_filter")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ArchiveFilter = null);
+
+public sealed record ReferenceMaterialFacetValuePayload(
+    [property: JsonPropertyName("value")] string Value,
+    [property: JsonPropertyName("material_count")] long MaterialCount);
+
+public sealed record ReferenceMaterialFacetPayload(
+    [property: JsonPropertyName("key")] string Key,
+    [property: JsonPropertyName("distinct_value_count")] int DistinctValueCount,
+    [property: JsonPropertyName("values")] IReadOnlyList<ReferenceMaterialFacetValuePayload> Values);
+
+public sealed record ReferenceMaterialCoveragePayload(
+    [property: JsonPropertyName("material_count")] long MaterialCount,
+    [property: JsonPropertyName("source_count")] int SourceCount,
+    [property: JsonPropertyName("facets")] IReadOnlyList<ReferenceMaterialFacetPayload> Facets);
 
 public sealed record ReferenceSlotValuePayload(
     [property: JsonPropertyName("slot_name")] string SlotName,

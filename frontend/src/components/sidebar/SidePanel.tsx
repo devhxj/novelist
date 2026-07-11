@@ -11,7 +11,9 @@ import TimelineList from '@/components/timeline/TimelineList'
 import ArcList from '@/components/storyarc/ArcList'
 import ReaderList from '@/components/reader/ReaderList'
 import PreferenceList from '@/components/preference/PreferenceList'
+import ReferenceBookSidebar from '@/components/reference-anchor/ReferenceBookSidebar'
 import type { SearchResult } from '@/components/search/SearchPanel'
+import type { reference } from '@/lib/novelist/types'
 import { LAYOUT_LIMITS, clampPanelWidth } from '@/lib/layout'
 
 interface Props {
@@ -42,6 +44,11 @@ interface Props {
   searchQuery: string
   searchResults: SearchResult[]
   onSearchChange: (query: string, results: SearchResult[]) => void
+  selectedReferenceAnchorIds: number[]
+  referenceRefreshKey: number
+  onReferenceSelectionChange: (anchorIds: number[]) => void
+  onReferenceAnchorsChange: (anchors: reference.Anchor[]) => void
+  onReferenceMutation: () => void
 }
 
 export default function SidePanel({
@@ -56,6 +63,8 @@ export default function SidePanel({
   activeSkillName, onSelectSkill, onEditSkill, onNewSkill,
   onSearchNavigateEntity, onSearchNavigateChapter,
   searchQuery, searchResults, onSearchChange,
+  selectedReferenceAnchorIds, referenceRefreshKey,
+  onReferenceSelectionChange, onReferenceAnchorsChange, onReferenceMutation,
 }: Props) {
   const [isDragging, setIsDragging] = useState(false)
   const startXRef = useRef(0)
@@ -196,6 +205,15 @@ export default function SidePanel({
         <ReaderList novelId={novelId} />
       ) : activePanel === 'preferences' ? (
         <PreferenceList novelId={novelId} />
+      ) : activePanel === 'reference' ? (
+        <ReferenceBookSidebar
+          novelId={novelId}
+          selectedAnchorIds={selectedReferenceAnchorIds}
+          refreshKey={referenceRefreshKey}
+          onSelectionChange={onReferenceSelectionChange}
+          onAnchorsChange={onReferenceAnchorsChange}
+          onReferenceMutation={onReferenceMutation}
+        />
       ) : (
         <div className="flex-1 flex items-center justify-center">
           <p className="text-xs text-muted-foreground">即将推出</p>

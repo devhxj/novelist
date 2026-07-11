@@ -12,6 +12,7 @@ import {
   verifyPhase15SurfaceBridgeCalls,
   verifyPatternBridgeCalls,
   verifyReferenceBridgeCalls,
+  verifyReferenceWorkspaceBridgeCalls,
   verifyRelativeTimeBridgeCalls,
   verifySmokeBridgeCalls,
   verifyStartupBridgeCalls,
@@ -82,6 +83,7 @@ import {
   verifyImportExportFilePickerWorkflow,
   verifyNovelChapterWorkflow,
   verifyReferenceSmoke,
+  verifyReferenceWorkspaceWorkflow,
   verifySearchWorkflow,
   verifyShellNavigation,
 } from './surface-workflows.mjs'
@@ -2162,6 +2164,12 @@ export async function runFullSuite(browser, url) {
     await page.screenshot({ path: path.join(outputDir, 'app-07-reference.png'), fullPage: true })
   }
 
+  if (runConfig.grep === '@reference-workspace') {
+    logStep('checking reference books and blueprint preview workspace')
+    await verifyReferenceWorkspaceWorkflow(page)
+    await page.screenshot({ path: path.join(outputDir, 'app-reference-workspace.png'), fullPage: true })
+  }
+
   if (runConfig.grep === '@reference-anchor') {
     logStep('checking reference error feedback')
     await verifyReferenceErrorFeedbackWorkflow(errorFeedbackWorkflowContext(page, browser, url, consoleErrors, pageErrors))
@@ -2221,6 +2229,8 @@ export async function runFullSuite(browser, url) {
     await verifyWritingBridgeCalls(page)
   } else if (runConfig.grep === '@reference-anchor') {
     await verifyReferenceBridgeCalls(page)
+  } else if (runConfig.grep === '@reference-workspace') {
+    await verifyReferenceWorkspaceBridgeCalls(page)
   } else if (runConfig.grep === '@corpus-library') {
     await verifyCorpusLibraryBridgeCalls(page)
   } else if (runConfig.grep === '@chapter-reference') {

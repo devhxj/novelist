@@ -196,6 +196,7 @@ export interface NovelistAppApi {
   GetReferenceChapterBlueprints: AppMethod<[number, number | null], reference.ChapterBlueprintSummary[]>
   GetReferenceDraftCandidates: AppMethod<[reference.GetDraftCandidatesInput], reference.DraftParagraphCandidate[]>
   GetReferenceMaterialDetail: AppMethod<[reference.GetMaterialDetailInput], reference.MaterialDetail | null>
+  GetReferenceMaterialCoverage: AppMethod<[reference.GetMaterialCoverageInput], reference.MaterialCoverage>
   GetReferenceMaterialTagReviewQueue: AppMethod<[reference.GetMaterialTagReviewQueueInput], storage.PageResult_reference_MaterialTagReviewItem_>
   GetReferenceSourceSegmentDetail: AppMethod<[reference.GetSourceSegmentDetailInput], reference.SourceSegmentDetail | null>
   GetReferenceOrchestrationRun: AppMethod<[number, string], reference.OrchestrationRun | null>
@@ -426,6 +427,7 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   GetReferenceChapterBlueprints: appMethod<NovelistAppApi['GetReferenceChapterBlueprints']>('GetReferenceChapterBlueprints'),
   GetReferenceDraftCandidates: appMethod<NovelistAppApi['GetReferenceDraftCandidates']>('GetReferenceDraftCandidates'),
   GetReferenceMaterialDetail: appMethod<NovelistAppApi['GetReferenceMaterialDetail']>('GetReferenceMaterialDetail'),
+  GetReferenceMaterialCoverage: appMethod<NovelistAppApi['GetReferenceMaterialCoverage']>('GetReferenceMaterialCoverage'),
   GetReferenceMaterialTagReviewQueue: appMethod<NovelistAppApi['GetReferenceMaterialTagReviewQueue']>('GetReferenceMaterialTagReviewQueue'),
   GetReferenceSourceSegmentDetail: appMethod<NovelistAppApi['GetReferenceSourceSegmentDetail']>('GetReferenceSourceSegmentDetail'),
   GetReferenceOrchestrationRun: appMethod<NovelistAppApi['GetReferenceOrchestrationRun']>('GetReferenceOrchestrationRun'),
