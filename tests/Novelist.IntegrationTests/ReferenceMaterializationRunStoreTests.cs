@@ -217,6 +217,59 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         Assert.Equal(ReferenceMaterializationErrorCodes.EmbeddingInvalid, exception.ErrorCode);
     }
 
+    [Fact]
+    public async Task GenerationVectorIndexCompletesOnlyWhenTheWholeCurrentBatchHasCompleteVectors()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options, chapterCount: 2);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var embedder = new ReferenceMaterializationEmbeddingProcessor(
+            new FixedEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "embedding-provider", "https://example.invalid", "key", "embedding-model", 8, null)),
+            new FixedEmbeddingClient(dimensions: 8));
+
+        foreach (var chapterIndex in new[] { 1, 2 })
+        {
+            await store.BuildCandidatesForChapterAsync(run.RunId, chapterIndex, CancellationToken.None);
+            var qualification = await store.ReadQualificationWorkItemAsync(run.RunId, chapterIndex, CancellationToken.None);
+            await store.PersistQualificationAsync(
+                run.RunId,
+                chapterIndex,
+                new ReferenceMaterializationQualificationResult(
+                    qualification.Request.Candidates.Select(candidate => AcceptedDecision(candidate)).ToArray()),
+                CancellationToken.None);
+            var embedding = await store.ReadEmbeddingWorkItemAsync(run.RunId, chapterIndex, CancellationToken.None);
+            await store.PersistEmbeddingsAsync(
+                run.RunId,
+                chapterIndex,
+                await embedder.EmbedAsync(embedding.Request, CancellationToken.None),
+                CancellationToken.None);
+        }
+
+        var vec = new RecordingVecProvisioner();
+        var indexer = new ReferenceMaterializationVectorIndexer(resolver, vec);
+        var indexed = await indexer.IndexCurrentBatchAsync(run.RunId, CancellationToken.None);
+        var progress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
+        var status = await store.GetAsync(run.RunId, CancellationToken.None);
+
+        Assert.Equal(0, indexed.BatchIndex);
+        Assert.True(indexed.VectorCount > 0);
+        Assert.Equal(indexed.VectorCount, vec.LastRequest?.Vectors.Count);
+        Assert.Contains("vec_reference_materialization_", vec.LastRequest?.TableName, StringComparison.Ordinal);
+        Assert.All(progress.Items, item => Assert.Equal(ReferenceMaterializationChapterStates.Completed, item.Status));
+        Assert.Equal(2, status?.ProcessedChapters);
+        Assert.Equal(1, status?.CompletedChapterBatches);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -392,6 +445,21 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
                 index,
                 Enumerable.Range(0, dimensions).Select(value => (float)(index + value + 1)).ToArray())).ToArray();
             return ValueTask.FromResult(new EmbeddingBatchResult(options.ModelId, dimensions, items, new EmbeddingUsage(0, 0)));
+        }
+    }
+
+    private sealed class RecordingVecProvisioner : ISqliteVecTableProvisioner
+    {
+        public SqliteVecProvisionRequest? LastRequest { get; private set; }
+
+        public ValueTask ProvisionAsync(
+            string databasePath,
+            SqliteVecProvisionRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            LastRequest = request;
+            return ValueTask.CompletedTask;
         }
     }
 }

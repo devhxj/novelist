@@ -224,6 +224,23 @@ internal static class ReferenceCorpusSchemaProvisioner
             CREATE INDEX IF NOT EXISTS idx_reference_materialization_candidate_embeddings_generation
               ON reference_materialization_candidate_embeddings(generation_id, candidate_id);
 
+            CREATE TABLE IF NOT EXISTS reference_materialization_vector_indexes (
+              generation_id TEXT PRIMARY KEY,
+              run_id TEXT NOT NULL,
+              table_name TEXT NOT NULL,
+              provider TEXT NOT NULL,
+              model_id TEXT NOT NULL,
+              dimensions INTEGER NOT NULL CHECK(dimensions > 0),
+              vector_count INTEGER NOT NULL CHECK(vector_count >= 0),
+              status TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              FOREIGN KEY(run_id) REFERENCES reference_materialization_runs(run_id) ON DELETE CASCADE
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_materialization_vector_indexes_run
+              ON reference_materialization_vector_indexes(run_id);
+
  CREATE TABLE IF NOT EXISTS reference_analysis_runs (
               run_id TEXT PRIMARY KEY,
               anchor_id INTEGER NOT NULL,
