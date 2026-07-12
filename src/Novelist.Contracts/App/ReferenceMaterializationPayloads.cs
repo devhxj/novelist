@@ -82,6 +82,7 @@ public static class ReferenceMaterializationErrorCodes
     public const string VectorIndexFailed = "materialization_vector_index_failed";
     public const string GenerationIncomplete = "materialization_generation_incomplete";
     public const string ChapterSplitProfileStale = "materialization_chapter_split_profile_stale";
+    public const string RetryRequiresNewRun = "materialization_retry_requires_new_run";
 }
 
 public static class ReferenceMaterializationCandidateTypes
@@ -139,6 +140,11 @@ public sealed record EnqueueReferenceMaterializationPayload(
     [property: JsonPropertyName("chapter_batch_size")] int ChapterBatchSize = ReferenceMaterializationBatchSizes.Default);
 
 public sealed record GetReferenceMaterializationStatusPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("run_id")] string RunId);
+
+public sealed record RetryReferenceMaterializationPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_id")] long AnchorId,
     [property: JsonPropertyName("run_id")] string RunId);

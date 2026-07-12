@@ -133,9 +133,12 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
             return await store.PromoteIfReadyAsync(runId, cancellationToken);
         }
 
+        using var leaseLost = new CancellationTokenSource();
+        using var heartbeatStop = new CancellationTokenSource();
+        var heartbeat = MaintainLeaseAsync(store, claim, leaseLost, heartbeatStop.Token);
         try
         {
-            using var batchCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            using var batchCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, leaseLost.Token);
             var builtCandidates = new List<ReferenceCandidateBuildResult>(claim.ChapterIndexes.Count);
             Task[] tasks = [];
             try
@@ -174,13 +177,19 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                 throw;
             }
 
-            var indexed = await _indexer.IndexCurrentBatchAsync(claim.RunId, cancellationToken);
+            ThrowIfLeaseLost(leaseLost);
+            var indexed = await _indexer.IndexCurrentBatchAsync(claim.RunId, batchCancellation.Token);
+            ThrowIfLeaseLost(leaseLost);
             await store.ReleaseBatchLeaseAsync(claim, cancellationToken);
             if (indexed.NextBatchIndex is null)
             {
                 await store.PromoteIfReadyAsync(claim.RunId, cancellationToken);
             }
             return true;
+        }
+        catch (OperationCanceledException) when (leaseLost.IsCancellationRequested)
+        {
+            return false;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -189,17 +198,36 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         }
         catch (ReferenceMaterializationException exception)
         {
+            if (leaseLost.IsCancellationRequested)
+            {
+                return false;
+            }
             await store.FailCurrentBatchAsync(claim, exception.ErrorCode, Sanitize(exception.Message), CancellationToken.None);
             return true;
         }
         catch (Exception exception)
         {
+            if (leaseLost.IsCancellationRequested)
+            {
+                return false;
+            }
             await store.FailCurrentBatchAsync(
                 claim,
                 ReferenceMaterializationErrorCodes.LlmRequestFailed,
                 Sanitize(exception.Message),
                 CancellationToken.None);
             return true;
+        }
+        finally
+        {
+            heartbeatStop.Cancel();
+            try
+            {
+                await heartbeat;
+            }
+            catch (OperationCanceledException) when (heartbeatStop.IsCancellationRequested)
+            {
+            }
         }
     }
 
@@ -280,6 +308,49 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         var embeddingWork = await store.ReadEmbeddingWorkItemAsync(runId, chapterIndex, cancellationToken);
         var embeddings = await _embedder.EmbedAsync(embeddingWork.Request, cancellationToken);
         await store.PersistEmbeddingsAsync(runId, chapterIndex, embeddings, cancellationToken);
+    }
+
+    private async Task MaintainLeaseAsync(
+        SqliteReferenceMaterializationRunStore store,
+        ReferenceMaterializationBatchClaim claim,
+        CancellationTokenSource leaseLost,
+        CancellationToken stoppingToken)
+    {
+        try
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                await Task.Delay(LeaseHeartbeatInterval(), stoppingToken);
+                if (!await store.RenewBatchLeaseAsync(claim, _leaseDuration, stoppingToken))
+                {
+                    leaseLost.Cancel();
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            leaseLost.Cancel();
+        }
+    }
+
+    private TimeSpan LeaseHeartbeatInterval()
+    {
+        var interval = TimeSpan.FromTicks(_leaseDuration.Ticks / 3);
+        return interval < TimeSpan.FromMilliseconds(100)
+            ? TimeSpan.FromMilliseconds(100)
+            : interval;
+    }
+
+    private static void ThrowIfLeaseLost(CancellationTokenSource leaseLost)
+    {
+        if (leaseLost.IsCancellationRequested)
+        {
+            throw new OperationCanceledException("Materialization worker lost the current batch lease.");
+        }
     }
 
     private static string Sanitize(string value)

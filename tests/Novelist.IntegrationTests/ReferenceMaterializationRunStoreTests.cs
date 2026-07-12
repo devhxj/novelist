@@ -431,6 +431,130 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task ClaimReclaimsAnExpiredLeaseAndResetsOnlyTheCurrentIncompleteBatch()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options, chapterCount: 6);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var firstClaim = await store.ClaimCurrentBatchAsync(
+            run.RunId,
+            "expired-owner",
+            TimeSpan.FromMinutes(1),
+            CancellationToken.None);
+        Assert.NotNull(firstClaim);
+        await store.BuildCandidatesForChapterAsync(run.RunId, firstClaim!.ChapterIndexes[0], CancellationToken.None);
+        await MarkLeaseExpiredAsync(options, run.RunId);
+
+        var reclaimed = await store.ClaimCurrentBatchAsync(
+            run.RunId,
+            "recovery-owner",
+            TimeSpan.FromMinutes(1),
+            CancellationToken.None);
+        var progress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
+
+        Assert.NotNull(reclaimed);
+        Assert.Equal([1, 2, 3, 4, 5], reclaimed!.ChapterIndexes);
+        Assert.All(progress.Items.Where(item => item.BatchIndex == 0), item =>
+        {
+            Assert.Equal(ReferenceMaterializationChapterStates.Pending, item.Status);
+            Assert.Equal(0, item.CandidateCount);
+            Assert.Equal(0, item.DecidedCount);
+            Assert.Equal(0, item.VectorCount);
+        });
+        var later = Assert.Single(progress.Items, item => item.BatchIndex == 1);
+        Assert.Equal(ReferenceMaterializationChapterStates.Pending, later.Status);
+        await store.ReleaseBatchLeaseAsync(reclaimed, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task WorkerHeartbeatKeepsALongRunningBatchLeaseOwnedUntilTheBatchCompletes()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options, chapterCount: 2);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var qualifier = new BlockingQualifier();
+        await using var worker = new ReferenceMaterializationWorker(
+            resolver,
+            qualifier,
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
+            workerId: "heartbeat-owner",
+            leaseDuration: TimeSpan.FromMilliseconds(600));
+
+        var processing = worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None).AsTask();
+        await qualifier.Started.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(TimeSpan.FromMilliseconds(900));
+        var contender = await store.ClaimCurrentBatchAsync(
+            run.RunId,
+            "contending-owner",
+            TimeSpan.FromSeconds(1),
+            CancellationToken.None);
+
+        Assert.Null(contender);
+        qualifier.Release();
+        Assert.True(await processing);
+    }
+
+    [Fact]
+    public async Task ExplicitRetryResetsOnlyTheFailedCurrentBatchAndKeepsTheFrozenGeneration()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options, chapterCount: 6);
+        var preflight = new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
+            new ReferenceMaterializationModelIdentityPayload("provider", "model"),
+            new ReferenceMaterializationModelIdentityPayload("embedding-provider", "embedding-model", 8)));
+        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer(), modelPreflight: preflight);
+        var profile = await service.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await service.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var claim = await store.ClaimCurrentBatchAsync(run.RunId, "failing-owner", TimeSpan.FromMinutes(1), CancellationToken.None);
+        Assert.NotNull(claim);
+        await store.BuildCandidatesForChapterAsync(run.RunId, claim!.ChapterIndexes[0], CancellationToken.None);
+        await store.FailCurrentBatchAsync(
+            claim,
+            ReferenceMaterializationErrorCodes.LlmRequestFailed,
+            "Provider timed out.",
+            CancellationToken.None);
+
+        var retried = await service.RetryMaterializationAsync(
+            new RetryReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, run.RunId),
+            CancellationToken.None);
+        var progress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
+
+        Assert.Equal(1, preflight.CallCount);
+        Assert.Equal(ReferenceMaterializationRunStates.Running, retried.Status);
+        Assert.Equal(run.GenerationId, retried.GenerationId);
+        Assert.All(progress.Items.Where(item => item.BatchIndex == 0), item =>
+            Assert.Equal(ReferenceMaterializationChapterStates.Pending, item.Status));
+        var later = Assert.Single(progress.Items, item => item.BatchIndex == 1);
+        Assert.Equal(ReferenceMaterializationChapterStates.Pending, later.Status);
+        Assert.Equal(0, later.CandidateCount);
+    }
+
+    [Fact]
     public async Task WorkerSplitsLargeChapterQualificationIntoBoundedModelBatches()
     {
         var options = CreateOptions();
@@ -645,6 +769,20 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         return (string?)await command.ExecuteScalarAsync(CancellationToken.None);
     }
 
+    private static async ValueTask MarkLeaseExpiredAsync(AppInitializationOptions options, string runId)
+    {
+        await using var connection = await OpenConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_materialization_run_leases
+            SET lease_expires_at = $lease_expires_at
+            WHERE run_id = $run_id;
+            """;
+        command.Parameters.AddWithValue("$lease_expires_at", DateTimeOffset.UtcNow.AddMinutes(-1).ToString("O"));
+        command.Parameters.AddWithValue("$run_id", runId);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync(CancellationToken.None));
+    }
+
     private static async ValueTask<SqliteConnection> OpenConnectionAsync(AppInitializationOptions options)
     {
         var path = Path.Combine(options.DefaultDataDirectory, "reference-anchor", "index.sqlite");
@@ -746,6 +884,38 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
                 .Select((vector, index) => new SqliteVecSearchRecord(vector.RowId, 0.1 + index * 0.1))
                 .ToArray();
             return ValueTask.FromResult<IReadOnlyList<SqliteVecSearchRecord>>(records);
+        }
+    }
+
+    private sealed class RecordingPreflight(ReferenceMaterializationModelPreflightResult result) : IReferenceMaterializationModelPreflight
+    {
+        public int CallCount { get; private set; }
+
+        public ValueTask<ReferenceMaterializationModelPreflightResult> VerifyAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class BlockingQualifier : IReferenceMaterializationQualifier
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
+        public void Release() => _release.TrySetResult();
+
+        public async ValueTask<ReferenceMaterializationQualificationResult> QualifyAsync(
+            ReferenceMaterializationQualificationRequest input,
+            CancellationToken cancellationToken)
+        {
+            _started.TrySetResult();
+            await _release.Task.WaitAsync(cancellationToken);
+            return new ReferenceMaterializationQualificationResult(
+                input.Candidates.Select(candidate => AcceptedDecision(candidate)).ToArray());
         }
     }
 

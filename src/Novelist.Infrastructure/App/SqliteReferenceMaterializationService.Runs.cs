@@ -49,6 +49,37 @@ public sealed partial class SqliteReferenceMaterializationService
         return status is null || status.AnchorId != input.AnchorId ? null : status;
     }
 
+    public async ValueTask<ReferenceMaterializationStatusPayload> RetryMaterializationAsync(
+        RetryReferenceMaterializationPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateReferenceInput(input.NovelId, input.AnchorId);
+        var current = await GetMaterializationStatusAsync(
+            new GetReferenceMaterializationStatusPayload(input.NovelId, input.AnchorId, input.RunId),
+            cancellationToken)
+            ?? throw new ArgumentException("Materialization run does not exist.", nameof(input));
+        if (current.Status is not (ReferenceMaterializationRunStates.Failed or ReferenceMaterializationRunStates.Cancelled))
+        {
+            throw new InvalidOperationException("Only failed or cancelled materialization runs can be retried.");
+        }
+
+        await EnsureConfirmedProfileMatchesCurrentSourceAsync(
+            input.NovelId,
+            input.AnchorId,
+            current.SplitProfileId,
+            cancellationToken);
+        var models = await _modelPreflight.VerifyAsync(cancellationToken);
+        if (!SameModel(current.Llm, models.Llm) || !SameModel(current.Embedding, models.Embedding))
+        {
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.RetryRequiresNewRun,
+                "The configured models changed after this materialization run started. Create a new run instead of retrying this generation.");
+        }
+
+        return await _runStore.RetryCurrentBatchAsync(current.RunId, cancellationToken);
+    }
+
     public async ValueTask<PageResultPayload<ReferenceMaterializationChapterProgressPayload>> ListMaterializationChapterProgressAsync(
         ListReferenceMaterializationChapterProgressPayload input,
         CancellationToken cancellationToken)
@@ -167,4 +198,11 @@ public sealed partial class SqliteReferenceMaterializationService
         command.Parameters.AddWithValue("$workspace_visibility", WorkspaceCorpusVisibility);
         return (string?)await command.ExecuteScalarAsync(cancellationToken);
     }
+
+    private static bool SameModel(
+        ReferenceMaterializationModelIdentityPayload left,
+        ReferenceMaterializationModelIdentityPayload right) =>
+        string.Equals(left.Provider, right.Provider, StringComparison.Ordinal) &&
+        string.Equals(left.ModelId, right.ModelId, StringComparison.Ordinal) &&
+        left.Dimensions == right.Dimensions;
 }

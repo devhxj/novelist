@@ -1008,6 +1008,8 @@ has_more: boolean
     run_id: string
   }
 
+  export type RetryMaterializationInput = GetMaterializationStatusInput
+
   export interface ListMaterializationChapterProgressInput extends GetMaterializationStatusInput {
     page: number
     size: number

@@ -19,6 +19,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
         await AssertOkAsync(dispatcher, "ConfirmReferenceChapterSplit", new ConfirmReferenceChapterSplitPayload(42, 99, "profile-1"));
         await AssertOkAsync(dispatcher, "EnqueueReferenceMaterialization", new EnqueueReferenceMaterializationPayload(42, 99, "profile-1", 10));
         await AssertOkAsync(dispatcher, "GetReferenceMaterializationStatus", new GetReferenceMaterializationStatusPayload(42, 99, "run-1"));
+        await AssertOkAsync(dispatcher, "RetryReferenceMaterialization", new RetryReferenceMaterializationPayload(42, 99, "run-1"));
         await AssertOkAsync(dispatcher, "ListReferenceMaterializationChapterProgress", new ListReferenceMaterializationChapterProgressPayload(42, 99, "run-1", 1, 20));
         await AssertOkAsync(dispatcher, "ListActiveReferenceMaterializationMaterials", new ListActiveReferenceMaterializationMaterialsPayload(42, 99, 1, 20, "真相"));
         await AssertOkAsync(dispatcher, "SearchActiveReferenceMaterializationMaterials", new SearchActiveReferenceMaterializationMaterialsPayload(42, 99, "谜底", 10));
@@ -30,6 +31,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                 "confirm:42:99:profile-1",
                 "enqueue:42:99:profile-1:10",
                 "status:42:99:run-1",
+                "retry:42:99:run-1",
                 "progress:42:99:run-1:1:20",
                 "materials:42:99:1:20:真相",
                 "semantic-materials:42:99:谜底:10"
@@ -160,6 +162,17 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
         {
             Calls.Add($"status:{input.NovelId}:{input.AnchorId}:{input.RunId}");
             return ValueTask.FromResult<ReferenceMaterializationStatusPayload?>(CreateStatus(input.AnchorId));
+        }
+
+        public ValueTask<ReferenceMaterializationStatusPayload> RetryMaterializationAsync(
+            RetryReferenceMaterializationPayload input,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add($"retry:{input.NovelId}:{input.AnchorId}:{input.RunId}");
+            return ValueTask.FromResult(CreateStatus(input.AnchorId) with
+            {
+                Status = ReferenceMaterializationRunStates.Running
+            });
         }
 
         public ValueTask<PageResultPayload<ReferenceMaterializationChapterProgressPayload>> ListMaterializationChapterProgressAsync(

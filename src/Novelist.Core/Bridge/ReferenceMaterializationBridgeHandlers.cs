@@ -39,6 +39,11 @@ public static class ReferenceMaterializationBridgeHandlers
                 ReadObjectArg<GetReferenceMaterializationStatusPayload>(context.Payload, 0, "input"),
                 cancellationToken)));
 
+        dispatcher.Register("RetryReferenceMaterialization", async (context, cancellationToken) =>
+            await ExecuteStatusAsync(() => service.RetryMaterializationAsync(
+                ReadObjectArg<RetryReferenceMaterializationPayload>(context.Payload, 0, "input"),
+                cancellationToken)));
+
         dispatcher.Register("ListReferenceMaterializationChapterProgress", async (context, cancellationToken) =>
             await ExecuteProgressAsync(() => service.ListMaterializationChapterProgressAsync(
                 ReadObjectArg<ListReferenceMaterializationChapterProgressPayload>(context.Payload, 0, "input"),

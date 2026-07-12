@@ -156,6 +156,7 @@ export interface NovelistAppApi {
  GetReferenceCorpusFeatureAnalysisRun: AppMethod<[reference.GetCorpusFeatureAnalysisRunInput], reference.CorpusFeatureAnalysisRun | null>
  EnqueueReferenceCorpusAnalysisJob: AppMethod<[reference.EnqueueCorpusAnalysisJobInput], reference.CorpusAnalysisJob>
  EnqueueReferenceMaterialization: AppMethod<[reference.EnqueueMaterializationInput], reference.MaterializationStatus>
+ RetryReferenceMaterialization: AppMethod<[reference.RetryMaterializationInput], reference.MaterializationStatus>
  GetReferenceCorpusAnalysisJob: AppMethod<[{ job_id: string }], reference.CorpusAnalysisJob | null>
  ListReferenceCorpusAnalysisJobs: AppMethod<[{ page_request: storage.PageRequest }], reference.CorpusAnalysisJobPage>
  ListReferenceMaterializationChapterProgress: AppMethod<[reference.ListMaterializationChapterProgressInput], storage.PageResult_reference_MaterializationChapterProgress_>
@@ -395,6 +396,7 @@ RebuildReferenceCorpusDedupGroups: appMethod<NovelistAppApi['RebuildReferenceCor
 GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorpusFeatureAnalysisRun']>('GetReferenceCorpusFeatureAnalysisRun'),
  EnqueueReferenceCorpusAnalysisJob: appMethod<NovelistAppApi['EnqueueReferenceCorpusAnalysisJob']>('EnqueueReferenceCorpusAnalysisJob'),
  EnqueueReferenceMaterialization: appMethod<NovelistAppApi['EnqueueReferenceMaterialization']>('EnqueueReferenceMaterialization'),
+ RetryReferenceMaterialization: appMethod<NovelistAppApi['RetryReferenceMaterialization']>('RetryReferenceMaterialization'),
  GetReferenceCorpusAnalysisJob: appMethod<NovelistAppApi['GetReferenceCorpusAnalysisJob']>('GetReferenceCorpusAnalysisJob'),
  ListReferenceCorpusAnalysisJobs: appMethod<NovelistAppApi['ListReferenceCorpusAnalysisJobs']>('ListReferenceCorpusAnalysisJobs'),
  ListReferenceMaterializationChapterProgress: appMethod<NovelistAppApi['ListReferenceMaterializationChapterProgress']>('ListReferenceMaterializationChapterProgress'),

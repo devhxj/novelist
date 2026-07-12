@@ -54,10 +54,16 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
 
         var now = DateTimeOffset.UtcNow;
         var token = Guid.NewGuid().ToString("N");
-        if (!await TryAcquireLeaseAsync(connection, transaction, normalizedRunId, workerId, token, now, leaseDuration, cancellationToken))
+        var lease = await TryAcquireLeaseAsync(connection, transaction, normalizedRunId, workerId, token, now, leaseDuration, cancellationToken);
+        if (!lease.Acquired)
         {
             await transaction.RollbackAsync(cancellationToken);
             return null;
+        }
+
+        if (lease.ReclaimedExpiredLease)
+        {
+            await ResetCurrentBatchAsync(connection, transaction, normalizedRunId, run.CurrentBatchIndex.Value, cancellationToken);
         }
 
         if (run.Status == ReferenceMaterializationRunStates.Queued)
@@ -96,6 +102,37 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await transaction.CommitAsync(cancellationToken);
     }
 
+    public async ValueTask<bool> RenewBatchLeaseAsync(
+        ReferenceMaterializationBatchClaim claim,
+        TimeSpan leaseDuration,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(claim);
+        if (leaseDuration <= TimeSpan.Zero || leaseDuration > TimeSpan.FromMinutes(30))
+        {
+            throw new ArgumentOutOfRangeException(nameof(leaseDuration), "Lease duration must be between zero and thirty minutes.");
+        }
+
+        var databasePath = await EnsureSchemaAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_materialization_run_leases
+            SET lease_expires_at = $lease_expires_at,
+                updated_at = $updated_at
+            WHERE run_id = $run_id
+              AND lease_token = $lease_token
+              AND lease_expires_at > $now;
+            """;
+        command.Parameters.AddWithValue("$lease_expires_at", FormatTimestamp(now.Add(leaseDuration)));
+        command.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
+        command.Parameters.AddWithValue("$run_id", NormalizeRunId(claim.RunId));
+        command.Parameters.AddWithValue("$lease_token", claim.LeaseToken);
+        command.Parameters.AddWithValue("$now", FormatTimestamp(now));
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+    }
+
     public async ValueTask FailCurrentBatchAsync(
         ReferenceMaterializationBatchClaim claim,
         string errorCode,
@@ -115,6 +152,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         var run = await ReadBatchRunAsync(connection, transaction, normalizedRunId, cancellationToken)
             ?? throw new ArgumentException("Materialization run does not exist.", nameof(claim));
+        if (!await IsClaimLeaseOwnedAsync(connection, transaction, claim, cancellationToken))
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return;
+        }
         if (run.Status == ReferenceMaterializationRunStates.Running)
         {
             ReferenceMaterializationRunStateMachine.EnsureCanTransition(
@@ -262,7 +304,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             : null;
     }
 
-    private static async ValueTask<bool> TryAcquireLeaseAsync(
+    private static async ValueTask<LeaseAcquisitionResult> TryAcquireLeaseAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         string runId,
@@ -272,6 +314,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         TimeSpan leaseDuration,
         CancellationToken cancellationToken)
     {
+        var reclaimedExpiredLease = false;
         await using (var existing = connection.CreateCommand())
         {
             existing.Transaction = transaction;
@@ -284,9 +327,35 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             var expiresAt = (string?)await existing.ExecuteScalarAsync(cancellationToken);
             if (expiresAt is not null && DateTimeOffset.Parse(expiresAt) > now)
             {
-                return false;
+                return LeaseAcquisitionResult.Busy;
             }
+
+            reclaimedExpiredLease = expiresAt is not null;
         }
+
+        return await ReplaceLeaseAsync(
+            connection,
+            transaction,
+            runId,
+            workerId,
+            leaseToken,
+            now,
+            leaseDuration,
+            reclaimedExpiredLease,
+            cancellationToken);
+    }
+
+    private static async ValueTask<LeaseAcquisitionResult> ReplaceLeaseAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string runId,
+        string workerId,
+        string leaseToken,
+        DateTimeOffset now,
+        TimeSpan leaseDuration,
+        bool reclaimedExpiredLease,
+        CancellationToken cancellationToken)
+    {
 
         await using (var delete = connection.CreateCommand())
         {
@@ -308,7 +377,131 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         insert.Parameters.AddWithValue("$lease_token", leaseToken);
         insert.Parameters.AddWithValue("$lease_expires_at", FormatTimestamp(now.Add(leaseDuration)));
         insert.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
-        return await insert.ExecuteNonQueryAsync(cancellationToken) == 1;
+        return new LeaseAcquisitionResult(
+            await insert.ExecuteNonQueryAsync(cancellationToken) == 1,
+            reclaimedExpiredLease);
+    }
+
+    private static async ValueTask ResetCurrentBatchAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string runId,
+        int batchIndex,
+        CancellationToken cancellationToken)
+    {
+        await using (var embeddings = connection.CreateCommand())
+        {
+            embeddings.Transaction = transaction;
+            embeddings.CommandText = $"""
+                DELETE FROM reference_materialization_candidate_embeddings
+                WHERE run_id = $run_id
+                  AND candidate_id IN ({CurrentBatchCandidateIdsSql});
+                """;
+            embeddings.Parameters.AddWithValue("$run_id", runId);
+            embeddings.Parameters.AddWithValue("$batch_index", batchIndex);
+            await embeddings.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var candidates = connection.CreateCommand())
+        {
+            candidates.Transaction = transaction;
+            candidates.CommandText = """
+                UPDATE reference_material_candidates
+                SET decision = $pending,
+                    decision_origin = 'candidate_window_builder',
+                    quality_score = NULL,
+                    confidence = NULL,
+                    scores_json = '{}',
+                    tags_json = '[]',
+                    reason_codes_json = '[]',
+                    reviewed_at = NULL,
+                    row_version = row_version + 1
+                WHERE run_id = $run_id
+                  AND candidate_id IN (
+                """ + CurrentBatchCandidateIdsSql + ");";
+            candidates.Parameters.AddWithValue("$pending", ReferenceMaterializationCandidateDecisions.Pending);
+            candidates.Parameters.AddWithValue("$run_id", runId);
+            candidates.Parameters.AddWithValue("$batch_index", batchIndex);
+            await candidates.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var chapters = connection.CreateCommand())
+        {
+            chapters.Transaction = transaction;
+            chapters.CommandText = """
+                UPDATE reference_materialization_chapter_progress
+                SET status = $pending,
+                    current_stage = $pending,
+                    candidate_count = 0,
+                    decided_count = 0,
+                    accepted_count = 0,
+                    rejected_count = 0,
+                    review_count = 0,
+                    vector_count = 0,
+                    started_at = NULL,
+                    completed_at = NULL,
+                    last_error_code = NULL,
+                    last_error_message = NULL,
+                    row_version = row_version + 1
+                WHERE run_id = $run_id
+                  AND batch_index = $batch_index
+                  AND status <> $completed;
+                """;
+            chapters.Parameters.AddWithValue("$pending", ReferenceMaterializationChapterStates.Pending);
+            chapters.Parameters.AddWithValue("$run_id", runId);
+            chapters.Parameters.AddWithValue("$batch_index", batchIndex);
+            chapters.Parameters.AddWithValue("$completed", ReferenceMaterializationChapterStates.Completed);
+            await chapters.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await RefreshRunCountsAsync(connection, transaction, runId, cancellationToken);
+        await using var index = connection.CreateCommand();
+        index.Transaction = transaction;
+        index.CommandText = """
+            UPDATE reference_materialization_vector_indexes
+            SET status = 'building',
+                updated_at = $updated_at
+            WHERE run_id = $run_id;
+            """;
+        index.Parameters.AddWithValue("$updated_at", FormatTimestamp(DateTimeOffset.UtcNow));
+        index.Parameters.AddWithValue("$run_id", runId);
+        await index.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async ValueTask RefreshRunCountsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string runId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE reference_materialization_runs
+            SET candidate_count = (
+                    SELECT COALESCE(SUM(candidate_count), 0)
+                    FROM reference_materialization_chapter_progress
+                    WHERE run_id = $run_id),
+                accepted_count = (
+                    SELECT COALESCE(SUM(accepted_count), 0)
+                    FROM reference_materialization_chapter_progress
+                    WHERE run_id = $run_id),
+                rejected_count = (
+                    SELECT COALESCE(SUM(rejected_count), 0)
+                    FROM reference_materialization_chapter_progress
+                    WHERE run_id = $run_id),
+                review_count = (
+                    SELECT COALESCE(SUM(review_count), 0)
+                    FROM reference_materialization_chapter_progress
+                    WHERE run_id = $run_id),
+                vector_count = (
+                    SELECT COALESCE(SUM(vector_count), 0)
+                    FROM reference_materialization_chapter_progress
+                    WHERE run_id = $run_id)
+            WHERE run_id = $run_id;
+            """;
+        command.Parameters.AddWithValue("$run_id", runId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async ValueTask StartRunAsync(
@@ -383,7 +576,51 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static async ValueTask<bool> IsClaimLeaseOwnedAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        ReferenceMaterializationBatchClaim claim,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT 1
+            FROM reference_materialization_run_leases
+            WHERE run_id = $run_id
+              AND lease_token = $lease_token
+              AND lease_expires_at > $now;
+            """;
+        command.Parameters.AddWithValue("$run_id", NormalizeRunId(claim.RunId));
+        command.Parameters.AddWithValue("$lease_token", claim.LeaseToken);
+        command.Parameters.AddWithValue("$now", FormatTimestamp(DateTimeOffset.UtcNow));
+        return await command.ExecuteScalarAsync(cancellationToken) is not null;
+    }
+
+    private const string CurrentBatchCandidateIdsSql = """
+        SELECT DISTINCT candidate.candidate_id
+        FROM reference_material_candidates candidate
+        JOIN reference_material_candidate_nodes candidate_node ON candidate_node.candidate_id = candidate.candidate_id
+        JOIN reference_text_nodes node ON node.node_id = candidate_node.node_id
+        JOIN reference_materialization_runs run ON run.run_id = candidate.run_id
+        JOIN reference_materialization_chapter_progress progress
+          ON progress.run_id = run.run_id
+         AND progress.batch_index = $batch_index
+        JOIN reference_chapter_split_boundaries boundary
+          ON boundary.split_profile_id = run.split_profile_id
+         AND boundary.chapter_index = progress.chapter_index
+        WHERE candidate.run_id = $run_id
+          AND node.anchor_id = run.anchor_id
+          AND node.start_offset >= boundary.content_start
+          AND node.end_offset <= boundary.content_end
+        """;
+
     private sealed record BatchRun(string RunId, string Status, int? CurrentBatchIndex);
+
+    private sealed record LeaseAcquisitionResult(bool Acquired, bool ReclaimedExpiredLease)
+    {
+        public static LeaseAcquisitionResult Busy { get; } = new(false, false);
+    }
 }
 
 internal sealed record ReferenceMaterializationBatchClaim(
