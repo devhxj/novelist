@@ -412,14 +412,16 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                     quality_score = NULL,
                     confidence = NULL,
                     scores_json = '{}',
-                    tags_json = '[]',
+                    tags_json = '{}',
                     reason_codes_json = '[]',
                     reviewed_at = NULL,
                     row_version = row_version + 1
                 WHERE run_id = $run_id
+                  AND decision_origin <> $deterministic_triage
                   AND candidate_id IN (
                 """ + CurrentBatchCandidateIdsSql + ");";
             candidates.Parameters.AddWithValue("$pending", ReferenceMaterializationCandidateDecisions.Pending);
+            candidates.Parameters.AddWithValue("$deterministic_triage", "deterministic_triage");
             candidates.Parameters.AddWithValue("$run_id", runId);
             candidates.Parameters.AddWithValue("$batch_index", batchIndex);
             await candidates.ExecuteNonQueryAsync(cancellationToken);

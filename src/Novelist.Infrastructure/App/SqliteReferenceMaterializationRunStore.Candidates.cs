@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
 using Novelist.Core.App;
@@ -27,8 +28,14 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         if (chapter.Status == ReferenceMaterializationChapterStates.LlmQualifying)
         {
             var existingCount = await CountChapterCandidatesAsync(connection, transaction, normalizedRunId, chapterIndex, cancellationToken);
+            var existingDecisions = await ReadChapterDecisionCountsAsync(connection, transaction, normalizedRunId, chapterIndex, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            return new ReferenceCandidateBuildResult(chapterIndex, existingCount, WasAlreadyBuilt: true);
+            return new ReferenceCandidateBuildResult(
+                chapterIndex,
+                existingCount,
+                existingDecisions.PendingCount,
+                existingDecisions.AcceptedCount,
+                WasAlreadyBuilt: true);
         }
 
         ReferenceMaterializationChapterStateMachine.EnsureCanTransition(
@@ -46,10 +53,30 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             ReferenceMaterializationChapterStates.BuildingCandidates,
             ReferenceMaterializationChapterStates.LlmQualifying);
         var candidateCount = await CountChapterCandidatesAsync(connection, transaction, normalizedRunId, chapterIndex, cancellationToken);
-        await UpdateChapterCandidateProgressAsync(connection, transaction, normalizedRunId, chapterIndex, candidateCount, cancellationToken);
-        await UpdateRunCandidateCountAsync(connection, transaction, normalizedRunId, cancellationToken);
+        var decisionCounts = await ReadChapterDecisionCountsAsync(connection, transaction, normalizedRunId, chapterIndex, cancellationToken);
+        if (decisionCounts.PendingCount == 0)
+        {
+            ReferenceMaterializationChapterStateMachine.EnsureCanTransition(
+                ReferenceMaterializationChapterStates.LlmQualifying,
+                ReferenceMaterializationChapterStates.Embedding);
+        }
+
+        await UpdateChapterCandidateProgressAsync(
+            connection,
+            transaction,
+            normalizedRunId,
+            chapterIndex,
+            candidateCount,
+            decisionCounts,
+            cancellationToken);
+        await RefreshRunCountsAsync(connection, transaction, normalizedRunId, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return new ReferenceCandidateBuildResult(chapterIndex, candidateCount, WasAlreadyBuilt: false);
+        return new ReferenceCandidateBuildResult(
+            chapterIndex,
+            candidateCount,
+            decisionCounts.PendingCount,
+            decisionCounts.AcceptedCount,
+            WasAlreadyBuilt: false);
     }
 
     private static async ValueTask<CandidateBuildChapter?> ReadCandidateBuildChapterAsync(
@@ -143,7 +170,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                       decision, decision_origin, scores_json, tags_json, reason_codes_json, created_at)
                     VALUES (
                       $candidate_id, $candidate_key, $run_id, $anchor_id, $candidate_type, $text_hash,
-                      'pending', 'candidate_window_builder', '{}', '[]', '[]', $created_at);
+                      $decision, $decision_origin, '{}', '{}', $reason_codes_json, $created_at);
                     """;
                 insertCandidate.Parameters.AddWithValue("$candidate_id", candidateId);
                 insertCandidate.Parameters.AddWithValue("$candidate_key", window.CandidateKey);
@@ -151,6 +178,9 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 insertCandidate.Parameters.AddWithValue("$anchor_id", anchorId);
                 insertCandidate.Parameters.AddWithValue("$candidate_type", window.CandidateType);
                 insertCandidate.Parameters.AddWithValue("$text_hash", window.TextHash);
+                insertCandidate.Parameters.AddWithValue("$decision", window.InitialDecision);
+                insertCandidate.Parameters.AddWithValue("$decision_origin", window.DecisionOrigin);
+                insertCandidate.Parameters.AddWithValue("$reason_codes_json", JsonSerializer.Serialize(window.ReasonCodes));
                 insertCandidate.Parameters.AddWithValue("$created_at", now);
                 await insertCandidate.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -202,12 +232,62 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
     }
 
+    private static async ValueTask<CandidateDecisionCounts> ReadChapterDecisionCountsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string runId,
+        int chapterIndex,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT
+              COALESCE(SUM(CASE WHEN candidate.decision = $pending THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN candidate.decision = $accepted THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN candidate.decision = $rejected THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN candidate.decision = $review THEN 1 ELSE 0 END), 0)
+            FROM (
+              SELECT candidate.candidate_id, candidate.decision
+              FROM reference_material_candidates candidate
+              JOIN reference_material_candidate_nodes candidate_node ON candidate_node.candidate_id = candidate.candidate_id
+              JOIN reference_text_nodes node ON node.node_id = candidate_node.node_id
+              JOIN reference_materialization_runs run ON run.run_id = candidate.run_id
+              JOIN reference_chapter_split_boundaries boundary ON boundary.split_profile_id = run.split_profile_id
+              WHERE candidate.run_id = $run_id
+                AND boundary.chapter_index = $chapter_index
+                AND node.anchor_id = run.anchor_id
+                AND node.start_offset >= boundary.content_start
+                AND node.end_offset <= boundary.content_end
+              GROUP BY candidate.candidate_id, candidate.decision
+            ) candidate;
+            """;
+        command.Parameters.AddWithValue("$pending", ReferenceMaterializationCandidateDecisions.Pending);
+        command.Parameters.AddWithValue("$accepted", ReferenceMaterializationCandidateDecisions.Accepted);
+        command.Parameters.AddWithValue("$rejected", ReferenceMaterializationCandidateDecisions.Rejected);
+        command.Parameters.AddWithValue("$review", ReferenceMaterializationCandidateDecisions.ReviewRequired);
+        command.Parameters.AddWithValue("$run_id", runId);
+        command.Parameters.AddWithValue("$chapter_index", chapterIndex);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            throw new InvalidOperationException("Materialization candidate counts are unavailable.");
+        }
+
+        return new CandidateDecisionCounts(
+            reader.GetInt32(0),
+            reader.GetInt32(1),
+            reader.GetInt32(2),
+            reader.GetInt32(3));
+    }
+
     private static async ValueTask UpdateChapterCandidateProgressAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         string runId,
         int chapterIndex,
         int candidateCount,
+        CandidateDecisionCounts decisionCounts,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
@@ -217,38 +297,28 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             SET status = $status,
                 current_stage = $current_stage,
                 candidate_count = $candidate_count,
+                decided_count = $decided_count,
+                accepted_count = $accepted_count,
+                rejected_count = $rejected_count,
+                review_count = $review_count,
                 row_version = row_version + 1,
                 started_at = COALESCE(started_at, $started_at)
             WHERE run_id = $run_id
               AND chapter_index = $chapter_index;
             """;
-        command.Parameters.AddWithValue("$status", ReferenceMaterializationChapterStates.LlmQualifying);
-        command.Parameters.AddWithValue("$current_stage", ReferenceMaterializationChapterStates.LlmQualifying);
+        var nextStage = decisionCounts.PendingCount == 0
+            ? ReferenceMaterializationChapterStates.Embedding
+            : ReferenceMaterializationChapterStates.LlmQualifying;
+        command.Parameters.AddWithValue("$status", nextStage);
+        command.Parameters.AddWithValue("$current_stage", nextStage);
         command.Parameters.AddWithValue("$candidate_count", candidateCount);
+        command.Parameters.AddWithValue("$decided_count", candidateCount - decisionCounts.PendingCount);
+        command.Parameters.AddWithValue("$accepted_count", decisionCounts.AcceptedCount);
+        command.Parameters.AddWithValue("$rejected_count", decisionCounts.RejectedCount);
+        command.Parameters.AddWithValue("$review_count", decisionCounts.ReviewCount);
         command.Parameters.AddWithValue("$started_at", FormatTimestamp(DateTimeOffset.UtcNow));
         command.Parameters.AddWithValue("$run_id", runId);
         command.Parameters.AddWithValue("$chapter_index", chapterIndex);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
-    private static async ValueTask UpdateRunCandidateCountAsync(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        string runId,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            UPDATE reference_materialization_runs
-            SET candidate_count = (
-              SELECT COALESCE(SUM(candidate_count), 0)
-              FROM reference_materialization_chapter_progress
-              WHERE run_id = $run_id
-            )
-            WHERE run_id = $run_id;
-            """;
-        command.Parameters.AddWithValue("$run_id", runId);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -261,9 +331,17 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         int ContentStart,
         int ContentEnd,
         string Status);
+
+    private sealed record CandidateDecisionCounts(
+        int PendingCount,
+        int AcceptedCount,
+        int RejectedCount,
+        int ReviewCount);
 }
 
 internal sealed record ReferenceCandidateBuildResult(
     int ChapterIndex,
     int CandidateCount,
+    int PendingCandidateCount,
+    int AcceptedCandidateCount,
     bool WasAlreadyBuilt);

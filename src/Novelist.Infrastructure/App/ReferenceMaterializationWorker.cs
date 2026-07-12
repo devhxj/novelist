@@ -158,7 +158,8 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                         store,
                         claim.RunId,
                         candidateBuild.ChapterIndex,
-                        candidateBuild.CandidateCount,
+                        candidateBuild.PendingCandidateCount,
+                        candidateBuild.AcceptedCandidateCount,
                         batchCancellation.Token))
                     .ToArray();
                 await Task.WhenAll(tasks);
@@ -281,13 +282,21 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         SqliteReferenceMaterializationRunStore store,
         string runId,
         int chapterIndex,
-        int candidateCount,
+        int pendingCandidateCount,
+        int acceptedCandidateCount,
         CancellationToken cancellationToken)
     {
-        if (candidateCount == 0)
+        if (pendingCandidateCount == 0)
         {
-            await store.CompleteEmptyQualificationAsync(runId, chapterIndex, cancellationToken);
-            await store.CompleteEmptyEmbeddingAsync(runId, chapterIndex, cancellationToken);
+            if (acceptedCandidateCount == 0)
+            {
+                await store.CompleteEmptyEmbeddingAsync(runId, chapterIndex, cancellationToken);
+                return;
+            }
+
+            var prequalifiedEmbeddingWork = await store.ReadEmbeddingWorkItemAsync(runId, chapterIndex, cancellationToken);
+            var prequalifiedEmbeddings = await _embedder.EmbedAsync(prequalifiedEmbeddingWork.Request, cancellationToken);
+            await store.PersistEmbeddingsAsync(runId, chapterIndex, prequalifiedEmbeddings, cancellationToken);
             return;
         }
 

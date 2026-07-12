@@ -100,6 +100,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         {
             using var document = JsonDocument.Parse(value);
             var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return new ReferenceMaterializationMaterialTagsPayload([], [], [], []);
+            }
+
             return new ReferenceMaterializationMaterialTagsPayload(
                 ReadArray(root, "narrative_functions"),
                 ReadArray(root, "emotion_mechanics"),

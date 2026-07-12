@@ -330,6 +330,60 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task WorkerCompletesRuleRejectedOnlyChaptersWithoutCallingModels()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(
+            options,
+            chapterCount: 2,
+            sourceOverride: "# 第一章\n\n嗯。\n\n# 第二章\n\n他点头。\n");
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var worker = new ReferenceMaterializationWorker(
+            resolver,
+            new FailingQualifier(),
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
+            workerId: "rule-rejection-worker");
+
+        Assert.True(await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None));
+        var status = await store.GetAsync(run.RunId, CancellationToken.None);
+        var progress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
+        var rejectedCandidates = await splitService.ListMaterializationCandidatesAsync(
+            new ListReferenceMaterializationCandidatesPayload(
+                anchor.NovelId,
+                anchor.AnchorId,
+                run.RunId,
+                ReferenceMaterializationCandidateDecisions.Rejected),
+            CancellationToken.None);
+
+        Assert.NotNull(status);
+        Assert.Equal(ReferenceMaterializationRunStates.Completed, status.Status);
+        Assert.Equal(0, status.AcceptedCount);
+        Assert.Equal(0, status.VectorCount);
+        Assert.Equal(2, status.RejectedCount);
+        Assert.Equal(2, rejectedCandidates.Items.Count);
+        Assert.All(rejectedCandidates.Items, candidate => Assert.Equal("deterministic_triage", candidate.DecisionOrigin));
+        Assert.Contains(rejectedCandidates.Items, candidate => candidate.ReasonCodes.SequenceEqual(["fragment"]));
+        Assert.Contains(rejectedCandidates.Items, candidate => candidate.ReasonCodes.SequenceEqual(["generic_action"]));
+        Assert.All(progress.Items, item =>
+        {
+            Assert.Equal(ReferenceMaterializationChapterStates.Completed, item.Status);
+            Assert.Equal(1, item.RejectedCount);
+            Assert.Equal(0, item.AcceptedCount);
+            Assert.Equal(0, item.VectorCount);
+        });
+    }
+
+    [Fact]
     public async Task ConfirmedReviewCandidateRequalifiesAndReindexesOnlyItsCompletedChapter()
     {
         var options = CreateOptions();
@@ -637,9 +691,22 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             TimeSpan.FromMinutes(1),
             CancellationToken.None);
         var progress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
+        var pendingCandidates = await splitService.ListMaterializationCandidatesAsync(
+            new ListReferenceMaterializationCandidatesPayload(
+                anchor.NovelId,
+                anchor.AnchorId,
+                run.RunId,
+                ReferenceMaterializationCandidateDecisions.Pending),
+            CancellationToken.None);
 
         Assert.NotNull(reclaimed);
         Assert.Equal([1, 2, 3, 4, 5], reclaimed!.ChapterIndexes);
+        Assert.NotEmpty(pendingCandidates.Items);
+        Assert.All(pendingCandidates.Items, item =>
+        {
+            Assert.Empty(item.Tags.NarrativeFunctions);
+            Assert.Empty(item.Tags.Techniques);
+        });
         Assert.All(progress.Items.Where(item => item.BatchIndex == 0), item =>
         {
             Assert.Equal(ReferenceMaterializationChapterStates.Pending, item.Status);

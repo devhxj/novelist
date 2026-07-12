@@ -29,7 +29,7 @@ public sealed partial class SqliteReferenceMaterializationService
                 splitProfileId,
                 Guid.NewGuid().ToString("N"),
                 "materialization-policy-v1",
-                "candidate-window-v1",
+                ReferenceCandidateWindowBuilder.Version,
                 ReferenceMaterializationChatCompletionQualifier.SchemaVersion,
                 models.Llm,
                 models.Embedding,

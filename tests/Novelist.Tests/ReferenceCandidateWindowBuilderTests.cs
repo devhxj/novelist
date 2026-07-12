@@ -131,6 +131,25 @@ public sealed class ReferenceCandidateWindowBuilderTests
     }
 
     [Fact]
+    public void BuildRecordsAnIsolatedAcknowledgementAsADeterministicRejection()
+    {
+        var builder = new ReferenceCandidateWindowBuilder();
+        var chapter = new ReferenceCandidateChapterInput(
+            AnchorId: 99,
+            ChapterIndex: 1,
+            ContentStart: 0,
+            ContentEnd: 8,
+            Nodes:
+            [new ReferenceCandidateSourceNode("p-ack", "paragraph", 0, 2, "嗯。", "p-ack-hash")]);
+
+        var candidate = Assert.Single(builder.Build(chapter));
+
+        Assert.Equal(ReferenceMaterializationCandidateDecisions.Rejected, candidate.InitialDecision);
+        Assert.Equal("deterministic_triage", candidate.DecisionOrigin);
+        Assert.Equal(["fragment"], candidate.ReasonCodes);
+    }
+
+    [Fact]
     public void BuildRetainsAStandaloneHighValueShortSentence()
     {
         var builder = new ReferenceCandidateWindowBuilder();

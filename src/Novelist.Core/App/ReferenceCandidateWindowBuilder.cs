@@ -6,6 +6,8 @@ namespace Novelist.Core.App;
 
 public sealed class ReferenceCandidateWindowBuilder
 {
+    public const string Version = "candidate-window-v2";
+
     private static readonly string[] DialogueMarkers = ["“", "”", "「", "」", "『", "』", "\""];
     private static readonly string[] EmotionMarkers = ["沉默", "没有回答", "攥", "发紧", "发凉", "发涩", "发颤", "避开", "咽下", "欲言又止"];
     private static readonly string[] HookMarkers = ["忽然", "突然", "敲门", "第三次", "威胁", "？", "?"];
@@ -41,7 +43,14 @@ public sealed class ReferenceCandidateWindowBuilder
                 }
 
                 var nodes = paragraphs[range.Start..(range.End + 1)];
-                AddCandidate(candidates, input, SelectCandidateType(nodes), nodes);
+                AddCandidate(
+                    candidates,
+                    input,
+                    range.RuleRejectionCode is null ? SelectCandidateType(nodes) : ReferenceMaterializationCandidateTypes.QualifiedSentence,
+                    nodes,
+                    range.RuleRejectionCode is null ? ReferenceMaterializationCandidateDecisions.Pending : ReferenceMaterializationCandidateDecisions.Rejected,
+                    range.RuleRejectionCode is null ? "candidate_window_builder" : "deterministic_triage",
+                    range.RuleRejectionCode is null ? [] : [range.RuleRejectionCode]);
             }
 
             for (var index = 0; index < paragraphs.Length; index++)
@@ -92,7 +101,10 @@ public sealed class ReferenceCandidateWindowBuilder
             }
             else
             {
-                ranges.Add(range);
+                ranges.Add(range with
+                {
+                    RuleRejectionCode = range.Start == range.End ? RuleRejectionCode(kind) : null
+                });
             }
         }
 
@@ -144,7 +156,10 @@ public sealed class ReferenceCandidateWindowBuilder
         List<ReferenceMaterialCandidateWindow> candidates,
         ReferenceCandidateChapterInput chapter,
         string candidateType,
-        IReadOnlyList<ReferenceCandidateSourceNode> nodes)
+        IReadOnlyList<ReferenceCandidateSourceNode> nodes,
+        string initialDecision = ReferenceMaterializationCandidateDecisions.Pending,
+        string decisionOrigin = "candidate_window_builder",
+        IReadOnlyList<string>? reasonCodes = null)
     {
         var candidateKey = BuildCandidateKey(chapter.AnchorId, chapter.ChapterIndex, candidateType, nodes);
         if (candidates.Any(candidate => string.Equals(candidate.CandidateKey, candidateKey, StringComparison.Ordinal)))
@@ -157,7 +172,10 @@ public sealed class ReferenceCandidateWindowBuilder
             chapter.ChapterIndex,
             candidateType,
             HashText(string.Join("\n", nodes.Select(node => node.Text))),
-            nodes));
+            nodes,
+            initialDecision,
+            decisionOrigin,
+            reasonCodes ?? []));
     }
 
     private static string BuildCandidateKey(
@@ -240,6 +258,14 @@ public sealed class ReferenceCandidateWindowBuilder
         (NormalizedCharacterCount(value) >= 8 &&
          (ContainsAny(value, HookMarkers) || ContainsAny(value, PayoffMarkers) || ContainsAny(value, EmotionMarkers)));
 
+    private static string RuleRejectionCode(ContextDependencyKind kind) => kind switch
+    {
+        ContextDependencyKind.Acknowledgement => "fragment",
+        ContextDependencyKind.GenericAction => "generic_action",
+        ContextDependencyKind.Transition => "noise",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind))
+    };
+
     private static int NormalizedCharacterCount(string value) =>
         value.Count(character => !char.IsWhiteSpace(character) && !char.IsPunctuation(character));
 
@@ -254,7 +280,7 @@ public sealed class ReferenceCandidateWindowBuilder
         Transition
     }
 
-    private readonly record struct ParagraphRange(int Start, int End);
+    private readonly record struct ParagraphRange(int Start, int End, string? RuleRejectionCode = null);
 }
 
 public sealed record ReferenceCandidateChapterInput(
@@ -277,4 +303,7 @@ public sealed record ReferenceMaterialCandidateWindow(
     int ChapterIndex,
     string CandidateType,
     string TextHash,
-    IReadOnlyList<ReferenceCandidateSourceNode> SourceNodes);
+    IReadOnlyList<ReferenceCandidateSourceNode> SourceNodes,
+    string InitialDecision,
+    string DecisionOrigin,
+    IReadOnlyList<string> ReasonCodes);
