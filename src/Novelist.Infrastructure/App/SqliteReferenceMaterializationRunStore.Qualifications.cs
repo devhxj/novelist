@@ -59,7 +59,12 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         var snapshot = await ReadQualificationSnapshotAsync(connection, transaction, normalizedRunId, chapterIndex, cancellationToken)
             ?? throw new ArgumentException("Materialization chapter progress does not exist.", nameof(chapterIndex));
         EnsureQualificationStage(snapshot);
-        var candidates = await ReadQualificationCandidatesAsync(connection, transaction, snapshot, maxCount: null, cancellationToken);
+        var candidates = await ReadQualificationCandidatesAsync(
+            connection,
+            transaction,
+            snapshot,
+            ReferenceMaterializationChatCompletionQualifier.MaxCandidatesPerRequest,
+            cancellationToken);
         var decidedCandidates = ValidateQualificationResult(result, candidates);
 
         var decisions = result.Decisions.ToDictionary(decision => decision.CandidateId, StringComparer.Ordinal);
@@ -139,7 +144,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         SqliteConnection connection,
         SqliteTransaction? transaction,
         QualificationSnapshot snapshot,
-        int? maxCount,
+        int maxCount,
         CancellationToken cancellationToken)
     {
         var candidates = new List<CandidateSummary>();
@@ -157,13 +162,15 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                   AND node.start_offset >= $content_start
                   AND node.end_offset <= $content_end
                 GROUP BY candidate.candidate_id, candidate.candidate_type
-                ORDER BY MIN(node.start_offset), MIN(node.end_offset), candidate.candidate_id;
+                ORDER BY MIN(node.start_offset), MIN(node.end_offset), candidate.candidate_id
+                LIMIT $max_count;
                 """;
             command.Parameters.AddWithValue("$run_id", snapshot.RunId);
             command.Parameters.AddWithValue("$decision", ReferenceMaterializationCandidateDecisions.Pending);
             command.Parameters.AddWithValue("$anchor_id", snapshot.AnchorId);
             command.Parameters.AddWithValue("$content_start", snapshot.ContentStart);
             command.Parameters.AddWithValue("$content_end", snapshot.ContentEnd);
+            command.Parameters.AddWithValue("$max_count", maxCount);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -187,7 +194,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 nodes));
         }
 
-        return maxCount is null ? qualified : qualified.Take(maxCount.Value).ToArray();
+        return qualified;
     }
 
     private static async ValueTask<IReadOnlyList<ReferenceMaterializationQualificationSourceNode>> ReadQualificationCandidateNodesAsync(

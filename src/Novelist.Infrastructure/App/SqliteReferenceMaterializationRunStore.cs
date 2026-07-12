@@ -9,6 +9,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
 {
     private readonly IReferenceCorpusDatabasePathResolver _databasePathResolver;
     private readonly ReferenceCandidateWindowBuilder _candidateWindowBuilder;
+    private readonly object _schemaInitializationGate = new();
+    private Task<string>? _schemaInitialization;
 
     public SqliteReferenceMaterializationRunStore(
         IReferenceCorpusDatabasePathResolver databasePathResolver,
@@ -140,10 +142,36 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
 
     private async ValueTask<string> EnsureSchemaAsync(CancellationToken cancellationToken)
     {
-        var databasePath = await _databasePathResolver.ResolveAsync(cancellationToken);
+        Task<string> initialization;
+        lock (_schemaInitializationGate)
+        {
+            initialization = _schemaInitialization ??= EnsureSchemaCoreAsync();
+        }
+
+        try
+        {
+            return await initialization.WaitAsync(cancellationToken);
+        }
+        catch when (initialization.IsFaulted)
+        {
+            lock (_schemaInitializationGate)
+            {
+                if (ReferenceEquals(_schemaInitialization, initialization))
+                {
+                    _schemaInitialization = null;
+                }
+            }
+
+            throw;
+        }
+    }
+
+    private async Task<string> EnsureSchemaCoreAsync()
+    {
+        var databasePath = await _databasePathResolver.ResolveAsync(CancellationToken.None);
         Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
-        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
-        await ReferenceCorpusSchemaProvisioner.EnsureCoreTablesAsync(connection, cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, CancellationToken.None);
+        await ReferenceCorpusSchemaProvisioner.EnsureCoreTablesAsync(connection, CancellationToken.None);
         return databasePath;
     }
 

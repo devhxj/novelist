@@ -59,6 +59,31 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateRunCanRetryWhenItsFirstSchemaInitializationFails()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options, chapterCount: 2);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var store = new SqliteReferenceMaterializationRunStore(
+            new FailFirstCorpusDatabasePathResolver(new ReferenceCorpusDatabasePathResolver(options)));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None));
+
+        var created = await store.CreateAsync(
+            CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceMaterializationRunStates.Queued, created.Status);
+    }
+
+    [Fact]
     public async Task BuildCandidatesPersistsOnlyChapterLocalNodeEvidenceAndIsIdempotent()
     {
         var options = CreateOptions();
@@ -836,6 +861,67 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         Assert.All(progress.Items, item => Assert.Equal(ReferenceMaterializationChapterStates.Completed, item.Status));
     }
 
+    [Fact]
+    public async Task QualificationWorkItemDoesNotReadCandidatesOutsideTheFrozenModelBatch()
+    {
+        var options = CreateOptions();
+        var repeated = string.Join(
+            "\n\n",
+            Enumerable.Range(1, 12).Select(index => $"第{index}段的冲突在门外持续升级，她把钥匙攥进掌心，没有立刻回答。"));
+        var anchor = await CreateAnchorAsync(
+            options,
+            chapterCount: 2,
+            sourceOverride: $"# 第一章\n\n{repeated}\n\n# 第二章\n\n她终于说出了真相。\n");
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        await store.BuildCandidatesForChapterAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
+        await CorruptSixthPendingCandidateEvidenceAsync(options, run.RunId, chapterIndex: 1);
+
+        var work = await store.ReadQualificationWorkItemAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
+
+        Assert.Equal(ReferenceMaterializationChatCompletionQualifier.MaxCandidatesPerRequest, work.Request.Candidates.Count);
+    }
+
+    [Fact]
+    public async Task QualificationPersistenceDoesNotReadCandidatesOutsideTheFrozenModelBatch()
+    {
+        var options = CreateOptions();
+        var repeated = string.Join(
+            "\n\n",
+            Enumerable.Range(1, 12).Select(index => $"第{index}段的冲突在门外持续升级，她把钥匙攥进掌心，没有立刻回答。"));
+        var anchor = await CreateAnchorAsync(
+            options,
+            chapterCount: 2,
+            sourceOverride: $"# 第一章\n\n{repeated}\n\n# 第二章\n\n她终于说出了真相。\n");
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        await store.BuildCandidatesForChapterAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
+        var work = await store.ReadQualificationWorkItemAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
+        await CorruptSixthPendingCandidateEvidenceAsync(options, run.RunId, chapterIndex: 1);
+
+        var persisted = await store.PersistQualificationAsync(
+            run.RunId,
+            chapterIndex: 1,
+            new ReferenceMaterializationQualificationResult(work.Request.Candidates.Select(AcceptedDecision).ToArray()),
+            CancellationToken.None);
+
+        Assert.Equal(work.Request.Candidates.Count, persisted.DecidedCount);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -983,6 +1069,44 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         return Convert.ToInt32(await command.ExecuteScalarAsync(CancellationToken.None));
     }
 
+    private static async ValueTask CorruptSixthPendingCandidateEvidenceAsync(
+        AppInitializationOptions options,
+        string runId,
+        int chapterIndex)
+    {
+        await using var connection = await OpenConnectionAsync(options);
+        string? candidateId;
+        await using (var select = connection.CreateCommand())
+        {
+            select.CommandText = """
+                SELECT candidate.candidate_id
+                FROM reference_material_candidates candidate
+                JOIN reference_material_candidate_nodes candidate_node ON candidate_node.candidate_id = candidate.candidate_id
+                JOIN reference_text_nodes node ON node.node_id = candidate_node.node_id
+                WHERE candidate.run_id = $run_id
+                  AND candidate.decision = $decision
+                  AND node.chapter_index = $chapter_index
+                GROUP BY candidate.candidate_id
+                ORDER BY MIN(node.start_offset), MIN(node.end_offset), candidate.candidate_id
+                LIMIT 1 OFFSET 5;
+                """;
+            select.Parameters.AddWithValue("$run_id", runId);
+            select.Parameters.AddWithValue("$decision", ReferenceMaterializationCandidateDecisions.Pending);
+            select.Parameters.AddWithValue("$chapter_index", chapterIndex);
+            candidateId = (string?)await select.ExecuteScalarAsync(CancellationToken.None);
+        }
+
+        Assert.False(string.IsNullOrWhiteSpace(candidateId));
+        await using var update = connection.CreateCommand();
+        update.CommandText = """
+            UPDATE reference_material_candidate_nodes
+            SET evidence_end = 2147483647
+            WHERE candidate_id = $candidate_id;
+            """;
+        update.Parameters.AddWithValue("$candidate_id", candidateId);
+        Assert.True(await update.ExecuteNonQueryAsync(CancellationToken.None) > 0);
+    }
+
     private static ReferenceMaterializationCandidateQualification AcceptedDecision(
         ReferenceMaterializationQualificationCandidate candidate)
     {
@@ -1092,6 +1216,17 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         {
             return ValueTask.FromResult(Novelist.Core.App.ReferenceChapterSplitModelResult.Empty);
         }
+    }
+
+    private sealed class FailFirstCorpusDatabasePathResolver(IReferenceCorpusDatabasePathResolver inner)
+        : IReferenceCorpusDatabasePathResolver
+    {
+        private int _remainingFailures = 1;
+
+        public ValueTask<string> ResolveAsync(CancellationToken cancellationToken) =>
+            Interlocked.Exchange(ref _remainingFailures, 0) == 1
+                ? ValueTask.FromException<string>(new InvalidOperationException("Transient database-path resolution failure."))
+                : inner.ResolveAsync(cancellationToken);
     }
 
     private sealed class FixedEmbeddingConfigurationService(EmbeddingRequestOptions options) : IEmbeddingConfigurationService
