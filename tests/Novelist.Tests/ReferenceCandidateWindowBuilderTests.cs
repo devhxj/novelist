@@ -153,6 +153,53 @@ public sealed class ReferenceCandidateWindowBuilderTests
     }
 
     [Fact]
+    public void BuildSplitsAnOverlongParagraphIntoContiguousSentenceWindows()
+    {
+        var sentenceTexts = Enumerable.Range(1, 4)
+            .Select(index => $"第{index}段" + new string('叙', 440) + "。")
+            .ToArray();
+        var offset = 0;
+        var sentences = sentenceTexts
+            .Select((text, index) =>
+            {
+                var node = new ReferenceCandidateSourceNode(
+                    $"s-{index + 1}",
+                    "sentence",
+                    offset,
+                    offset + text.Length,
+                    text,
+                    $"s-{index + 1}-hash");
+                offset += text.Length;
+                return node;
+            })
+            .ToArray();
+        var paragraph = new ReferenceCandidateSourceNode(
+            "p-long",
+            "paragraph",
+            0,
+            offset,
+            string.Concat(sentenceTexts),
+            "p-long-hash");
+        var builder = new ReferenceCandidateWindowBuilder();
+        var chapter = new ReferenceCandidateChapterInput(
+            AnchorId: 99,
+            ChapterIndex: 1,
+            ContentStart: 0,
+            ContentEnd: offset,
+            Nodes: [paragraph, .. sentences]);
+
+        var candidates = builder.Build(chapter);
+
+        Assert.Equal(2, candidates.Count);
+        Assert.Collection(
+            candidates,
+            first => Assert.Equal(["s-1", "s-2"], first.SourceNodes.Select(node => node.NodeId).ToArray()),
+            second => Assert.Equal(["s-3", "s-4"], second.SourceNodes.Select(node => node.NodeId).ToArray()));
+        Assert.All(candidates, candidate =>
+            Assert.True(string.Join("\n", candidate.SourceNodes.Select(node => node.Text)).Length <= 1_200));
+    }
+
+    [Fact]
     public void BuildRecordsAnIsolatedAcknowledgementAsADeterministicRejection()
     {
         var builder = new ReferenceCandidateWindowBuilder();

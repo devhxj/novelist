@@ -17,6 +17,7 @@ public sealed class ReferenceCandidateWindowBuilder
     private static readonly string[] HighValueShortMarkers = ["别开", "不能", "真相", "原来", "死了", "活着", "回来", "钥匙"];
     private const int GenericActionMaximumCharacters = 8;
     private const int ContextDependentShortMaximumCharacters = 8;
+    private const int CandidateHardMaximumCharacters = 1_200;
 
     public IReadOnlyList<ReferenceMaterialCandidateWindow> Build(ReferenceCandidateChapterInput input)
     {
@@ -31,6 +32,9 @@ public sealed class ReferenceCandidateWindowBuilder
         var candidates = new List<ReferenceMaterialCandidateWindow>();
         var paragraphs = boundedNodes
             .Where(node => string.Equals(node.NodeType, "paragraph", StringComparison.Ordinal))
+            .ToArray();
+        var sentences = boundedNodes
+            .Where(node => string.Equals(node.NodeType, "sentence", StringComparison.Ordinal))
             .ToArray();
         if (paragraphs.Length > 0)
         {
@@ -58,7 +62,7 @@ public sealed class ReferenceCandidateWindowBuilder
             {
                 if (!coveredParagraphs[index])
                 {
-                    AddCandidate(candidates, input, SelectCandidateType([paragraphs[index]]), [paragraphs[index]]);
+                    AddParagraphCandidates(candidates, input, paragraphs[index], sentences);
                 }
             }
         }
@@ -183,6 +187,71 @@ public sealed class ReferenceCandidateWindowBuilder
             decisionOrigin,
             reasonCodes ?? []));
     }
+
+    private static void AddParagraphCandidates(
+        List<ReferenceMaterialCandidateWindow> candidates,
+        ReferenceCandidateChapterInput chapter,
+        ReferenceCandidateSourceNode paragraph,
+        IReadOnlyList<ReferenceCandidateSourceNode> sentences)
+    {
+        foreach (var sourceNodes in SplitOverlongParagraph(paragraph, sentences))
+        {
+            AddCandidate(candidates, chapter, SelectCandidateType(sourceNodes), sourceNodes);
+        }
+    }
+
+    private static IReadOnlyList<IReadOnlyList<ReferenceCandidateSourceNode>> SplitOverlongParagraph(
+        ReferenceCandidateSourceNode paragraph,
+        IReadOnlyList<ReferenceCandidateSourceNode> sentences)
+    {
+        if (paragraph.Text.Length <= CandidateHardMaximumCharacters)
+        {
+            return [[paragraph]];
+        }
+
+        var contained = sentences
+            .Where(sentence => sentence.StartOffset >= paragraph.StartOffset && sentence.EndOffset <= paragraph.EndOffset)
+            .OrderBy(sentence => sentence.StartOffset)
+            .ThenBy(sentence => sentence.EndOffset)
+            .ThenBy(sentence => sentence.NodeId, StringComparer.Ordinal)
+            .ToArray();
+        if (!CoversParagraphContinuously(paragraph, contained) || contained.Any(sentence => sentence.Text.Length > CandidateHardMaximumCharacters))
+        {
+            return [[paragraph]];
+        }
+
+        var windows = new List<IReadOnlyList<ReferenceCandidateSourceNode>>();
+        var current = new List<ReferenceCandidateSourceNode>();
+        var currentLength = 0;
+        foreach (var sentence in contained)
+        {
+            var delimiterLength = current.Count == 0 ? 0 : 1;
+            if (current.Count > 0 && currentLength + delimiterLength + sentence.Text.Length > CandidateHardMaximumCharacters)
+            {
+                windows.Add(current.ToArray());
+                current.Clear();
+                currentLength = 0;
+            }
+
+            currentLength += (current.Count == 0 ? 0 : 1) + sentence.Text.Length;
+            current.Add(sentence);
+        }
+
+        if (current.Count > 0)
+        {
+            windows.Add(current.ToArray());
+        }
+
+        return windows;
+    }
+
+    private static bool CoversParagraphContinuously(
+        ReferenceCandidateSourceNode paragraph,
+        IReadOnlyList<ReferenceCandidateSourceNode> sentences) =>
+        sentences.Count > 1 &&
+        sentences[0].StartOffset == paragraph.StartOffset &&
+        sentences[^1].EndOffset == paragraph.EndOffset &&
+        sentences.Zip(sentences.Skip(1), (current, next) => current.EndOffset == next.StartOffset).All(static continuous => continuous);
 
     private static string BuildCandidateKey(
         long anchorId,
