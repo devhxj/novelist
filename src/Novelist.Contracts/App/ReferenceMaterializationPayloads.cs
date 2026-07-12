@@ -108,6 +108,16 @@ public static class ReferenceMaterializationCandidateTypes
     ];
 }
 
+public static class ReferenceMaterializationCandidateDecisions
+{
+    public const string Pending = "pending";
+    public const string Accepted = "accepted";
+    public const string Rejected = "rejected";
+    public const string ReviewRequired = "review_required";
+
+    public static IReadOnlyList<string> All { get; } = [Pending, Accepted, Rejected, ReviewRequired];
+}
+
 public sealed record AnalyzeReferenceChapterSplitPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_id")] long AnchorId);
