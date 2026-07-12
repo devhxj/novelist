@@ -113,6 +113,32 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
     }
 
     [Fact]
+    public async Task PreviewManualSplitSupportsLiteralDelimiters()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("Literal chapter split", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "literal-split.txt",
+            "--- CHAPTER ---\n\nA door opens.\n\n--- CHAPTER ---\n\nThe rain returns.\n");
+        var anchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await anchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "Literal split source", null, sourcePath, "text", "user_provided"),
+            CancellationToken.None);
+        var service = new SqliteReferenceMaterializationService(options, new RecordingChapterSplitAnalyzer(ReferenceChapterSplitModelResult.Empty));
+
+        var result = await service.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(novel.Id, anchor.AnchorId, "literal:--- CHAPTER ---"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceChapterSplitProfileStates.Validated, result.Status);
+        Assert.Equal(2, result.ChapterCount);
+        Assert.Equal(["第1章", "第2章"], result.Boundaries.Select(boundary => boundary.Title).ToArray());
+        Assert.All(result.Boundaries, boundary => Assert.True(boundary.ContentEnd > boundary.ContentStart));
+    }
+
+    [Fact]
     public async Task PreviewManualSplitRejectsTemplatesWithNoValidFullSourceBoundaries()
     {
         var options = CreateOptions();
