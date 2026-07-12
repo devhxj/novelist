@@ -354,6 +354,61 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SemanticSearchFusesIndependentLexicalStructuredTechniqueAndVectorRoutes()
+    {
+        var options = CreateOptions();
+        var (anchor, status, vec) = await CreateCompletedGenerationAsync(
+            options,
+            "# 第一章\n\nlexicaltoken sets the scene.\n\n# 第二章\n\nlexicaltoken turns the pressure.");
+        var search = new SqliteReferenceMaterializationSemanticSearch(
+            options,
+            new ReferenceCorpusDatabasePathResolver(options),
+            new FixedEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "embedding-provider", "https://example.invalid", "key", "embedding-model", 8, null)),
+            new FixedEmbeddingClient(dimensions: 8),
+            vec);
+
+        var results = await search.SearchAsync(anchor.AnchorId, "lexicaltoken reveal subtext", maxResults: 10, CancellationToken.None);
+
+        Assert.NotEmpty(results);
+        Assert.All(results, result =>
+        {
+            Assert.Equal(status.GenerationId, result.Material.GenerationId);
+            Assert.NotNull(result.ScoreComponents);
+            Assert.True(result.ScoreComponents!.ContainsKey("semantic"));
+            Assert.True(result.ScoreComponents.ContainsKey("lexical"));
+            Assert.True(result.ScoreComponents.ContainsKey("structured"));
+            Assert.True(result.ScoreComponents.ContainsKey("technique"));
+            Assert.True(result.ScoreComponents.ContainsKey("quality"));
+            Assert.True(result.ScoreComponents.ContainsKey("fused"));
+        });
+        Assert.Contains(results, result => result.ScoreComponents!["lexical"] > 0);
+        Assert.Contains(results, result => result.ScoreComponents!["structured"] > 0);
+        Assert.Contains(results, result => result.ScoreComponents!["technique"] > 0);
+    }
+
+    [Fact]
+    public async Task SemanticSearchUsesTheLexicalRouteForShortChineseTerms()
+    {
+        var options = CreateOptions();
+        var (anchor, _, vec) = await CreateCompletedGenerationAsync(
+            options,
+            "# 第一章\n\n雨声压住窗沿，门外响起第三次敲门。\n\n# 第二章\n\n雨声停下后，屋里更安静了。");
+        var search = new SqliteReferenceMaterializationSemanticSearch(
+            options,
+            new ReferenceCorpusDatabasePathResolver(options),
+            new FixedEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "embedding-provider", "https://example.invalid", "key", "embedding-model", 8, null)),
+            new FixedEmbeddingClient(dimensions: 8),
+            vec);
+
+        var results = await search.SearchAsync(anchor.AnchorId, "雨声", maxResults: 10, CancellationToken.None);
+
+        Assert.NotEmpty(results);
+        Assert.Contains(results, result => result.ScoreComponents!["lexical"] > 0);
+    }
+
+    [Fact]
     public async Task SemanticSearchRejectsAnActiveEmbeddingConfigurationThatDriftedFromTheGeneration()
     {
         var options = CreateOptions();
@@ -621,9 +676,10 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     }
 
     private async ValueTask<(ReferenceAnchorPayload Anchor, ReferenceMaterializationStatusPayload Status, SearchableVecProvisioner Vec)> CreateCompletedGenerationAsync(
-        AppInitializationOptions options)
+        AppInitializationOptions options,
+        string? sourceOverride = null)
     {
-        var anchor = await CreateAnchorAsync(options, chapterCount: 2);
+        var anchor = await CreateAnchorAsync(options, chapterCount: 2, sourceOverride);
         var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
         var profile = await splitService.PreviewChapterSplitAsync(
             new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),

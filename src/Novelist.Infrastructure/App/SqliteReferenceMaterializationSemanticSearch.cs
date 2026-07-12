@@ -5,7 +5,7 @@ using Novelist.Core.App;
 
 namespace Novelist.Infrastructure.App;
 
-public sealed class SqliteReferenceMaterializationSemanticSearch : IReferenceMaterializationSemanticSearch
+public sealed partial class SqliteReferenceMaterializationSemanticSearch : IReferenceMaterializationSemanticSearch
 {
     private const int MaxQueryCharacters = 256;
     private const int MaxResults = 100;
@@ -63,17 +63,20 @@ public sealed class SqliteReferenceMaterializationSemanticSearch : IReferenceMat
         var snapshot = await ReadActiveGenerationSnapshotAsync(connection, anchorId, cancellationToken);
         if (snapshot is null)
         {
-            return [];
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.GenerationIncomplete,
+                "Active-generation material search requires a material-ready generation.");
         }
 
         ValidateFrozenEmbedding(snapshot, embeddingOptions);
         var queryVector = await EmbedQueryAsync(normalizedQuery, embeddingOptions, snapshot, cancellationToken);
+        var routeLimit = Math.Min(MaxResults, checked(maxResults * 2));
         IReadOnlyList<SqliteVecSearchRecord> vectorResults;
         try
         {
             vectorResults = await _vecQuery.SearchAsync(
                 databasePath,
-                new SqliteVecSearchRequest(snapshot.TableName, snapshot.Dimensions, queryVector, maxResults),
+                new SqliteVecSearchRequest(snapshot.TableName, snapshot.Dimensions, queryVector, routeLimit),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -87,32 +90,45 @@ public sealed class SqliteReferenceMaterializationSemanticSearch : IReferenceMat
                 "Active-generation material vector search failed.");
         }
 
-        ValidateVectorResults(vectorResults, maxResults);
-        if (vectorResults.Count == 0)
-        {
-            return [];
-        }
-
-        var materialsByEmbeddingRowId = await ReadActiveMaterialsByEmbeddingRowIdAsync(
+        ValidateVectorResults(vectorResults, routeLimit);
+        var semanticRoute = await ReadSemanticRouteAsync(
             connection,
             anchorId,
             snapshot,
-            vectorResults.Select(result => result.RowId).ToArray(),
+            vectorResults,
             cancellationToken);
-        if (materialsByEmbeddingRowId.Count != vectorResults.Count)
+        var lexicalRoute = await SearchLexicalRouteAsync(
+            connection,
+            anchorId,
+            snapshot,
+            normalizedQuery,
+            routeLimit,
+            cancellationToken);
+        var tagRoutes = await SearchTagRoutesAsync(
+            connection,
+            anchorId,
+            snapshot,
+            normalizedQuery,
+            routeLimit,
+            cancellationToken);
+        var currentSnapshot = await ReadActiveGenerationSnapshotAsync(connection, anchorId, cancellationToken);
+        if (currentSnapshot is null ||
+            !string.Equals(currentSnapshot.GenerationId, snapshot.GenerationId, StringComparison.Ordinal))
         {
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.GenerationIncomplete,
-                "Active-generation vector rows no longer match the promoted materials.");
+                "The active materialization generation changed while retrieving materials.");
         }
 
-        return vectorResults
-            .OrderBy(result => result.Distance)
-            .ThenBy(result => result.RowId)
-            .Select(result => new ReferenceMaterializationSemanticSearchHitPayload(
-                materialsByEmbeddingRowId[result.RowId],
-                Math.Round(Math.Clamp(1.0 - result.Distance, 0, 1), 6)))
-            .ToArray();
+        return await FuseRoutesAsync(
+            connection,
+            snapshot,
+            semanticRoute,
+            lexicalRoute,
+            tagRoutes.Structured,
+            tagRoutes.Technique,
+            maxResults,
+            cancellationToken);
     }
 
     private static async ValueTask<ActiveGenerationSnapshot?> ReadActiveGenerationSnapshotAsync(

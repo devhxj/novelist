@@ -1106,6 +1106,7 @@ has_more: boolean
   export interface MaterializationSemanticSearchHit {
     material: MaterializationMaterial
     vector_score: number
+    score_components?: Record<string, number> | null
   }
 
   export interface GenerateMaterializationBlueprintPreviewInput {
