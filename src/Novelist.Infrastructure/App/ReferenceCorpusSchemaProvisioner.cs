@@ -81,6 +81,127 @@ internal static class ReferenceCorpusSchemaProvisioner
             CREATE INDEX IF NOT EXISTS idx_reference_chapter_split_profiles_anchor
               ON reference_chapter_split_profiles(anchor_id, status, created_at DESC);
 
+            CREATE TABLE IF NOT EXISTS reference_materialization_runs (
+              run_id TEXT PRIMARY KEY,
+              anchor_id INTEGER NOT NULL,
+              split_profile_id TEXT NOT NULL,
+              generation_id TEXT NOT NULL,
+              policy_version TEXT NOT NULL,
+              candidate_version TEXT NOT NULL,
+              qualifier_version TEXT NOT NULL,
+              model_provider TEXT NOT NULL,
+              model_id TEXT NOT NULL,
+              embedding_provider TEXT NOT NULL,
+              embedding_model_id TEXT NOT NULL,
+              embedding_dimensions INTEGER NOT NULL CHECK(embedding_dimensions > 0),
+              status TEXT NOT NULL,
+              chapter_batch_size INTEGER NOT NULL CHECK(chapter_batch_size IN (5, 10)),
+              total_chapters INTEGER NOT NULL DEFAULT 0 CHECK(total_chapters >= 0),
+              processed_chapters INTEGER NOT NULL DEFAULT 0 CHECK(processed_chapters >= 0),
+              total_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(total_chapter_batches >= 0),
+              completed_chapter_batches INTEGER NOT NULL DEFAULT 0 CHECK(completed_chapter_batches >= 0),
+              current_batch_index INTEGER,
+              current_batch_start_chapter INTEGER,
+              current_batch_end_chapter INTEGER,
+              candidate_count INTEGER NOT NULL DEFAULT 0 CHECK(candidate_count >= 0),
+              accepted_count INTEGER NOT NULL DEFAULT 0 CHECK(accepted_count >= 0),
+              rejected_count INTEGER NOT NULL DEFAULT 0 CHECK(rejected_count >= 0),
+              review_count INTEGER NOT NULL DEFAULT 0 CHECK(review_count >= 0),
+              vector_count INTEGER NOT NULL DEFAULT 0 CHECK(vector_count >= 0),
+              tokens_spent INTEGER NOT NULL DEFAULT 0 CHECK(tokens_spent >= 0),
+              last_error_code TEXT,
+              last_error_message TEXT,
+              started_at TEXT NOT NULL,
+              completed_at TEXT,
+              activated_at TEXT,
+              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE,
+              FOREIGN KEY(split_profile_id) REFERENCES reference_chapter_split_profiles(split_profile_id) ON DELETE RESTRICT
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_materialization_runs_generation
+              ON reference_materialization_runs(generation_id);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_materialization_runs_anchor_status
+              ON reference_materialization_runs(anchor_id, status, started_at DESC);
+
+            CREATE TABLE IF NOT EXISTS reference_anchor_materialization_state (
+              anchor_id INTEGER PRIMARY KEY,
+              active_generation_id TEXT,
+              previous_generation_id TEXT,
+              row_version INTEGER NOT NULL DEFAULT 0 CHECK(row_version >= 0),
+              updated_at TEXT NOT NULL,
+              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS reference_materialization_chapter_progress (
+              run_id TEXT NOT NULL,
+              chapter_node_id TEXT NOT NULL,
+              chapter_index INTEGER NOT NULL CHECK(chapter_index > 0),
+              batch_index INTEGER NOT NULL CHECK(batch_index >= 0),
+              status TEXT NOT NULL,
+              current_stage TEXT NOT NULL,
+              candidate_count INTEGER NOT NULL DEFAULT 0 CHECK(candidate_count >= 0),
+              decided_count INTEGER NOT NULL DEFAULT 0 CHECK(decided_count >= 0),
+              accepted_count INTEGER NOT NULL DEFAULT 0 CHECK(accepted_count >= 0),
+              rejected_count INTEGER NOT NULL DEFAULT 0 CHECK(rejected_count >= 0),
+              review_count INTEGER NOT NULL DEFAULT 0 CHECK(review_count >= 0),
+              vector_count INTEGER NOT NULL DEFAULT 0 CHECK(vector_count >= 0),
+              model_call_count INTEGER NOT NULL DEFAULT 0 CHECK(model_call_count >= 0),
+              started_at TEXT,
+              completed_at TEXT,
+              last_error_code TEXT,
+              last_error_message TEXT,
+              row_version INTEGER NOT NULL DEFAULT 0 CHECK(row_version >= 0),
+              PRIMARY KEY(run_id, chapter_node_id),
+              UNIQUE(run_id, chapter_index),
+              FOREIGN KEY(run_id) REFERENCES reference_materialization_runs(run_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_reference_materialization_chapter_progress_run_batch
+              ON reference_materialization_chapter_progress(run_id, batch_index, chapter_index);
+
+            CREATE TABLE IF NOT EXISTS reference_material_candidates (
+              candidate_id TEXT PRIMARY KEY,
+              candidate_key TEXT NOT NULL,
+              run_id TEXT NOT NULL,
+              anchor_id INTEGER NOT NULL,
+              candidate_type TEXT NOT NULL,
+              text_hash TEXT NOT NULL,
+              decision TEXT NOT NULL,
+              decision_origin TEXT NOT NULL,
+              quality_score REAL,
+              confidence REAL,
+              scores_json TEXT NOT NULL,
+              tags_json TEXT NOT NULL,
+              reason_codes_json TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              reviewed_at TEXT,
+              row_version INTEGER NOT NULL DEFAULT 0 CHECK(row_version >= 0),
+              FOREIGN KEY(run_id) REFERENCES reference_materialization_runs(run_id) ON DELETE CASCADE,
+              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_material_candidates_run_key
+              ON reference_material_candidates(run_id, candidate_key);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_material_candidates_run_decision
+              ON reference_material_candidates(run_id, decision, candidate_id);
+
+            CREATE TABLE IF NOT EXISTS reference_material_candidate_nodes (
+              candidate_id TEXT NOT NULL,
+              node_id TEXT NOT NULL,
+              ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+              evidence_start INTEGER NOT NULL CHECK(evidence_start >= 0),
+              evidence_end INTEGER NOT NULL CHECK(evidence_end > evidence_start),
+              text_hash TEXT NOT NULL,
+              PRIMARY KEY(candidate_id, ordinal),
+              FOREIGN KEY(candidate_id) REFERENCES reference_material_candidates(candidate_id) ON DELETE CASCADE,
+              FOREIGN KEY(node_id) REFERENCES reference_text_nodes(node_id) ON DELETE RESTRICT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_reference_material_candidate_nodes_node
+              ON reference_material_candidate_nodes(node_id, candidate_id);
+
  CREATE TABLE IF NOT EXISTS reference_analysis_runs (
               run_id TEXT PRIMARY KEY,
               anchor_id INTEGER NOT NULL,
