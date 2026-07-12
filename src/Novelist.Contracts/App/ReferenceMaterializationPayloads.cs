@@ -84,6 +84,30 @@ public static class ReferenceMaterializationErrorCodes
     public const string ChapterSplitProfileStale = "materialization_chapter_split_profile_stale";
 }
 
+public static class ReferenceMaterializationCandidateTypes
+{
+    public const string Passage = "passage";
+    public const string DialogueExchange = "dialogue_exchange";
+    public const string ActionReaction = "action_reaction";
+    public const string Emotion = "emotion";
+    public const string Hook = "hook";
+    public const string Payoff = "payoff";
+    public const string Transition = "transition";
+    public const string QualifiedSentence = "qualified_sentence";
+
+    public static IReadOnlyList<string> All { get; } =
+    [
+        Passage,
+        DialogueExchange,
+        ActionReaction,
+        Emotion,
+        Hook,
+        Payoff,
+        Transition,
+        QualifiedSentence
+    ];
+}
+
 public sealed record AnalyzeReferenceChapterSplitPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
     [property: JsonPropertyName("anchor_id")] long AnchorId);
