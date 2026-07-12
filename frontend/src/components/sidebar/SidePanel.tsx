@@ -138,7 +138,7 @@ export default function SidePanel({
 
   return (
     <aside
-      className="relative border-r bg-sidebar flex flex-col shrink-0 select-none cursor-default overflow-hidden"
+      className={`relative border-r bg-sidebar flex flex-col shrink-0 select-none cursor-default overflow-hidden${activePanel === 'reference' ? ' reference-side-panel' : ''}`}
       style={{ width }}
     >
       <div

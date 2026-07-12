@@ -139,6 +139,16 @@
   --sidebar-ring: oklch(0.7 0.12 185);
 }
 
+@media (max-width: 1100px) {
+  .reference-side-panel {
+    width: 210px !important;
+  }
+
+  .reference-blueprint-panel {
+    width: min(32vw, 320px) !important;
+  }
+}
+
 /* ── 深色主题 ────────────────────────────────────────────── */
 
 [data-theme="dark"] {

@@ -172,7 +172,7 @@ export default function BlueprintPreviewPanel({
   const canGenerate = Boolean(novelId && goal.trim() && readyAnchors.length > 0 && !isCheckingSources && !isGenerating)
 
   return (
-    <aside data-testid="blueprint-preview-panel" className="reference-materialization-surface relative flex shrink-0 flex-col overflow-hidden border-l bg-sidebar" style={{ width }} aria-busy={isCheckingSources || isGenerating}>
+    <aside data-testid="blueprint-preview-panel" className="reference-blueprint-panel reference-materialization-surface relative flex shrink-0 flex-col overflow-hidden border-l bg-sidebar" style={{ width }} aria-busy={isCheckingSources || isGenerating}>
       <div
         role="separator"
         aria-label="调整蓝图预演面板宽度"
