@@ -103,6 +103,9 @@ public static PhotinoWebMessageBridge CreateBridge(
             embeddingService,
             embeddingClient,
             sqliteVecProvider);
+        var referenceMaterializationService = new SqliteReferenceMaterializationService(
+            options,
+            new ReferenceChapterSplitChatCompletionAnalyzer(settingsService, chatCompletionClient));
         var referenceCorpusService = new SqliteReferenceCorpusService(
             options,
             embeddingService,
@@ -212,6 +215,7 @@ referenceCorpusService);
             .RegisterNarrativePatternHandlers(narrativePatternService)
             .RegisterGitHistoryHandlers(versionControl)
             .RegisterReferenceAnchorHandlers(referenceAnchorService)
+            .RegisterReferenceMaterializationHandlers(referenceMaterializationService)
             .RegisterReferenceCorpusHandlers(referenceCorpusService)
 .RegisterReferenceCorpusAnalysisHandlers(referenceCorpusAnalysisService)
 .RegisterReferenceCorpusAnalysisJobHandlers(referenceCorpusAnalysisScheduler)

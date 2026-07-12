@@ -46,6 +46,41 @@ internal static class ReferenceCorpusSchemaProvisioner
               FOREIGN KEY(parent_node_id) REFERENCES reference_text_nodes(node_id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS reference_chapter_split_profiles (
+              split_profile_id TEXT PRIMARY KEY,
+              anchor_id INTEGER NOT NULL,
+              source_hash TEXT NOT NULL,
+              split_mode TEXT NOT NULL,
+              sample_char_count INTEGER NOT NULL,
+              sample_hash TEXT NOT NULL,
+              pattern_kind TEXT NOT NULL,
+              delimiter_template TEXT NOT NULL,
+              pattern_json TEXT NOT NULL,
+              model_provider TEXT,
+              model_id TEXT,
+              confidence REAL,
+              status TEXT NOT NULL,
+              chapter_count INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL,
+              confirmed_at TEXT,
+              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS reference_chapter_split_boundaries (
+              split_profile_id TEXT NOT NULL,
+              chapter_index INTEGER NOT NULL,
+              title TEXT NOT NULL,
+              heading_start INTEGER NOT NULL,
+              content_start INTEGER NOT NULL,
+              content_end INTEGER NOT NULL,
+              text_hash TEXT NOT NULL,
+              PRIMARY KEY(split_profile_id, chapter_index),
+              FOREIGN KEY(split_profile_id) REFERENCES reference_chapter_split_profiles(split_profile_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_reference_chapter_split_profiles_anchor
+              ON reference_chapter_split_profiles(anchor_id, status, created_at DESC);
+
  CREATE TABLE IF NOT EXISTS reference_analysis_runs (
               run_id TEXT PRIMARY KEY,
               anchor_id INTEGER NOT NULL,

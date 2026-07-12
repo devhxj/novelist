@@ -78,9 +78,10 @@ export interface SearchStoryMemoryResult {
 }
 
 export interface NovelistAppApi {
- AdvanceReferenceCorpusBlueprintSession: AppMethod<[reference.AdvanceCorpusBlueprintSessionInput], reference.CorpusBlueprintSession>
+  AdvanceReferenceCorpusBlueprintSession: AppMethod<[reference.AdvanceCorpusBlueprintSessionInput], reference.CorpusBlueprintSession>
   ApproveTool: AppMethod<[string, boolean, string], void>
   AdaptReferenceMaterial: AppMethod<[reference.AdaptMaterialInput], reference.AdaptMaterialResult>
+  AnalyzeReferenceChapterSplit: AppMethod<[reference.AnalyzeChapterSplitInput], reference.ChapterSplitProfile>
   ApproveReferenceChapterBlueprint: AppMethod<[reference.ApproveChapterBlueprintInput], reference.ChapterBlueprint>
   ArchiveReferenceStyleProfile: AppMethod<[reference.ArchiveStyleProfileInput], reference.StyleProfile>
   AuditReferenceAnchoredDraft: AppMethod<[reference.AuditAnchoredDraftInput], reference.AnchoredDraftAudit>
@@ -97,6 +98,7 @@ export interface NovelistAppApi {
   CancelStyleSkillExtraction: AppMethod<[styleSample.CancelStyleSkillExtractionInput], styleSample.StyleSkillExtractionRun>
   Chat: AppMethod<[app.ChatInput], app.ChatResult>
   CheckForUpdates: AppMethod<[update.CheckForUpdatesInput], update.UpdateCheckResult>
+  ConfirmReferenceChapterSplit: AppMethod<[reference.ConfirmChapterSplitInput], reference.ChapterSplitProfile>
   CompareReferenceStyleProfiles: AppMethod<[reference.CompareStyleProfilesInput], reference.StyleProfileComparison>
   CompressContext: AppMethod<[app.CompressInput], app.CompressResult>
   CreateArcNode: AppMethod<[number, app.CreateArcNodeInput], storyarc.ArcNode>
@@ -227,6 +229,7 @@ export interface NovelistAppApi {
   ListSlashCommands: AppMethod<[app.ListSlashCommandsInput], app.SlashCommand[]>
   PickNovelImportFile: AppMethod<[], string | null>
   PickReferenceSourceFile: AppMethod<[], string | null>
+  PreviewReferenceChapterSplit: AppMethod<[reference.PreviewChapterSplitInput], reference.ChapterSplitProfile>
   PromoteReferenceAnchorsToWorkspaceCorpus: AppMethod<[reference.PromoteAnchorsToWorkspaceCorpusInput], reference.Anchor[]>
   PromoteReferenceAnchorToWorkspaceCorpus: AppMethod<[reference.PromoteAnchorToWorkspaceCorpusInput], reference.Anchor>
   RebuildReferenceAnchor: AppMethod<[number, number], reference.BuildStatus>
@@ -309,9 +312,10 @@ export function toArgsPayload(args: AppMethodArgs): unknown {
 }
 
 export const appApi: NovelistAppApi = {
- AdvanceReferenceCorpusBlueprintSession: appMethod<NovelistAppApi['AdvanceReferenceCorpusBlueprintSession']>('AdvanceReferenceCorpusBlueprintSession'),
+  AdvanceReferenceCorpusBlueprintSession: appMethod<NovelistAppApi['AdvanceReferenceCorpusBlueprintSession']>('AdvanceReferenceCorpusBlueprintSession'),
   ApproveTool: appMethod<NovelistAppApi['ApproveTool']>('ApproveTool'),
   AdaptReferenceMaterial: appMethod<NovelistAppApi['AdaptReferenceMaterial']>('AdaptReferenceMaterial'),
+  AnalyzeReferenceChapterSplit: appMethod<NovelistAppApi['AnalyzeReferenceChapterSplit']>('AnalyzeReferenceChapterSplit'),
   ApproveReferenceChapterBlueprint: appMethod<NovelistAppApi['ApproveReferenceChapterBlueprint']>('ApproveReferenceChapterBlueprint'),
   ArchiveReferenceStyleProfile: appMethod<NovelistAppApi['ArchiveReferenceStyleProfile']>('ArchiveReferenceStyleProfile'),
   AuditReferenceAnchoredDraft: appMethod<NovelistAppApi['AuditReferenceAnchoredDraft']>('AuditReferenceAnchoredDraft'),
@@ -328,6 +332,7 @@ CancelReferenceOrchestrationRun: appMethod<NovelistAppApi['CancelReferenceOrches
   CancelStyleSkillExtraction: appMethod<NovelistAppApi['CancelStyleSkillExtraction']>('CancelStyleSkillExtraction'),
   Chat: ((...args) => invokeAppArgs('Chat', args, { timeoutMs: null })) as NovelistAppApi['Chat'],
   CheckForUpdates: appMethod<NovelistAppApi['CheckForUpdates']>('CheckForUpdates'),
+  ConfirmReferenceChapterSplit: appMethod<NovelistAppApi['ConfirmReferenceChapterSplit']>('ConfirmReferenceChapterSplit'),
   CompareReferenceStyleProfiles: appMethod<NovelistAppApi['CompareReferenceStyleProfiles']>('CompareReferenceStyleProfiles'),
   CompressContext: appMethod<NovelistAppApi['CompressContext']>('CompressContext'),
   CreateArcNode: appMethod<NovelistAppApi['CreateArcNode']>('CreateArcNode'),
@@ -458,6 +463,7 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   ListSlashCommands: appMethod<NovelistAppApi['ListSlashCommands']>('ListSlashCommands'),
   PickNovelImportFile: appMethod<NovelistAppApi['PickNovelImportFile']>('PickNovelImportFile'),
   PickReferenceSourceFile: appMethod<NovelistAppApi['PickReferenceSourceFile']>('PickReferenceSourceFile'),
+  PreviewReferenceChapterSplit: appMethod<NovelistAppApi['PreviewReferenceChapterSplit']>('PreviewReferenceChapterSplit'),
   PromoteReferenceAnchorsToWorkspaceCorpus: appMethod<NovelistAppApi['PromoteReferenceAnchorsToWorkspaceCorpus']>('PromoteReferenceAnchorsToWorkspaceCorpus'),
   PromoteReferenceAnchorToWorkspaceCorpus: appMethod<NovelistAppApi['PromoteReferenceAnchorToWorkspaceCorpus']>('PromoteReferenceAnchorToWorkspaceCorpus'),
   RebuildReferenceAnchor: appMethod<NovelistAppApi['RebuildReferenceAnchor']>('RebuildReferenceAnchor'),

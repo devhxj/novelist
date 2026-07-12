@@ -953,6 +953,48 @@ has_more: boolean
     anchors: CreateAnchorInput[]
   }
 
+  export interface AnalyzeChapterSplitInput {
+    novel_id: number
+    anchor_id: number
+  }
+
+  export interface PreviewChapterSplitInput {
+    novel_id: number
+    anchor_id: number
+    delimiter_template: string
+  }
+
+  export interface ConfirmChapterSplitInput {
+    novel_id: number
+    anchor_id: number
+    split_profile_id: string
+  }
+
+  export interface ChapterSplitBoundary {
+    chapter_index: number
+    title: string
+    heading_start: number
+    content_start: number
+    content_end: number
+    text_hash: string
+  }
+
+  export interface ChapterSplitProfile {
+    split_profile_id: string
+    anchor_id: number
+    source_hash: string
+    split_mode: 'auto' | 'manual'
+    pattern_kind: string
+    delimiter_template: string
+    sample_char_count: number
+    status: 'draft' | 'validated' | 'confirmed' | 'stale'
+    chapter_count: number
+    boundaries: ChapterSplitBoundary[]
+    model_provider?: string | null
+    model_id?: string | null
+    confidence?: number | null
+  }
+
   export interface CreateAnchorFailure {
     index: number
     title: string
