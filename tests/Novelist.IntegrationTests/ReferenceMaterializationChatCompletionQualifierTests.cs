@@ -15,7 +15,7 @@ public sealed class ReferenceMaterializationChatCompletionQualifierTests
             new ChatCompletionStreamEvent(
                 ChatCompletionStreamEventKind.Content,
                 """
-                {"schema_version":"reference-materialization-qualifier-v1","decisions":[{"candidate_id":"candidate-a","decision":"accept","source_spans":[{"node_id":"node-a","start":0,"end":7}],"scores":{"semantic_completeness":0.91,"information_density":0.72,"narrative_value":0.83,"transferability":0.61,"context_independence":0.75,"technique_distinctiveness":0.69},"tags":{"narrative_functions":["reveal"],"emotion_mechanics":["escalation"],"pov":["close_third"],"techniques":["subtext"]},"confidence":0.84,"reason_codes":["complete_exchange"]},{"candidate_id":"candidate-b","decision":"reject","source_spans":[{"node_id":"node-b","start":0,"end":5}],"scores":{"semantic_completeness":0.15,"information_density":0.12,"narrative_value":0.09,"transferability":0.03,"context_independence":0.18,"technique_distinctiveness":0.04},"tags":{"narrative_functions":[],"emotion_mechanics":[],"pov":[],"techniques":[]},"confidence":0.93,"reason_codes":["context_dependent"]}]}
+                {"schema_version":"reference-materialization-qualifier-v2","decisions":[{"candidate_id":"candidate-a","decision":"accept","source_spans":[{"node_id":"node-a","start":0,"end":7}],"scores":{"semantic_completeness":0.91,"information_density":0.72,"narrative_value":0.83,"transferability":0.61,"context_independence":0.75,"technique_distinctiveness":0.69},"tags":{"narrative_functions":["reveal"],"emotion_mechanics":["escalation"],"pov":["close_third"],"techniques":["subtext"],"scene_beat_roles":["turn_beat"],"character_relations":["mistrust"],"causal_information_roles":["reveal"]},"confidence":0.84,"reason_codes":["complete_exchange"]},{"candidate_id":"candidate-b","decision":"reject","source_spans":[{"node_id":"node-b","start":0,"end":5}],"scores":{"semantic_completeness":0.15,"information_density":0.12,"narrative_value":0.09,"transferability":0.03,"context_independence":0.18,"technique_distinctiveness":0.04},"tags":{"narrative_functions":[],"emotion_mechanics":[],"pov":[],"techniques":[],"scene_beat_roles":[],"character_relations":[],"causal_information_roles":[]},"confidence":0.93,"reason_codes":["context_dependent"]}]}
                 """)
         ]);
         var qualifier = new ReferenceMaterializationChatCompletionQualifier(chat);
@@ -32,6 +32,9 @@ public sealed class ReferenceMaterializationChatCompletionQualifierTests
         Assert.Equal(2, result.Decisions.Count);
         Assert.Equal(ReferenceMaterializationCandidateDecisions.Accepted, result.Decisions[0].Decision);
         Assert.Equal("node-a", Assert.Single(result.Decisions[0].SourceSpans).NodeId);
+        Assert.Equal(["turn_beat"], result.Decisions[0].Tags.SceneBeatRoles);
+        Assert.Equal(["mistrust"], result.Decisions[0].Tags.CharacterRelations);
+        Assert.Equal(["reveal"], result.Decisions[0].Tags.CausalInformationRoles);
         Assert.Equal(ReferenceMaterializationCandidateDecisions.Rejected, result.Decisions[1].Decision);
         Assert.Equal("qwen", chat.LastRequest?.ProviderName);
         Assert.Equal("qwen-plus", chat.LastRequest?.ModelId);
@@ -74,6 +77,25 @@ public sealed class ReferenceMaterializationChatCompletionQualifierTests
                 new ReferenceMaterializationQualificationRequest(
                     new ReferenceMaterializationLlmSelection("qwen", "qwen-plus", "high"),
                     [Candidate("candidate-a", "node-a", "他说出了真相。"), Candidate("candidate-b", "node-b", "他点了头。")]),
+                CancellationToken.None));
+
+        Assert.Equal(ReferenceMaterializationErrorCodes.LlmOutputInvalid, exception.ErrorCode);
+    }
+
+    [Fact]
+    public async Task QualifyAsyncRejectsUnknownExtendedTagValues()
+    {
+        const string response = """
+            {"schema_version":"reference-materialization-qualifier-v2","decisions":[{"candidate_id":"candidate-a","decision":"accept","source_spans":[{"node_id":"node-a","start":0,"end":7}],"scores":{"semantic_completeness":0.5,"information_density":0.5,"narrative_value":0.5,"transferability":0.5,"context_independence":0.5,"technique_distinctiveness":0.5},"tags":{"narrative_functions":[],"emotion_mechanics":[],"pov":[],"techniques":[],"scene_beat_roles":["invented_beat"],"character_relations":[],"causal_information_roles":[]},"confidence":0.5,"reason_codes":["complete_exchange"]}]}
+            """;
+        var qualifier = new ReferenceMaterializationChatCompletionQualifier(
+            new RecordingChatCompletionClient([new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, response)]));
+
+        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
+            await qualifier.QualifyAsync(
+                new ReferenceMaterializationQualificationRequest(
+                    new ReferenceMaterializationLlmSelection("qwen", "qwen-plus", "high"),
+                    [Candidate("candidate-a", "node-a", "他说出了真相。")]),
                 CancellationToken.None));
 
         Assert.Equal(ReferenceMaterializationErrorCodes.LlmOutputInvalid, exception.ErrorCode);

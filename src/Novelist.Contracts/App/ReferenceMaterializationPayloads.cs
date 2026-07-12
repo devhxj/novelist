@@ -279,7 +279,17 @@ public sealed record ReferenceMaterializationMaterialTagsPayload(
     [property: JsonPropertyName("narrative_functions")] IReadOnlyList<string> NarrativeFunctions,
     [property: JsonPropertyName("emotion_mechanics")] IReadOnlyList<string> EmotionMechanics,
     [property: JsonPropertyName("pov")] IReadOnlyList<string> Pov,
-    [property: JsonPropertyName("techniques")] IReadOnlyList<string> Techniques);
+    [property: JsonPropertyName("techniques")] IReadOnlyList<string> Techniques)
+{
+    [JsonPropertyName("scene_beat_roles")]
+    public IReadOnlyList<string> SceneBeatRoles { get; init; } = [];
+
+    [JsonPropertyName("character_relations")]
+    public IReadOnlyList<string> CharacterRelations { get; init; } = [];
+
+    [JsonPropertyName("causal_information_roles")]
+    public IReadOnlyList<string> CausalInformationRoles { get; init; } = [];
+}
 
 public sealed record ReferenceMaterializationMaterialPayload(
     [property: JsonPropertyName("material_id")] string MaterialId,

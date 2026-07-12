@@ -172,6 +172,23 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             : null;
     }
 
+    public async ValueTask<string?> GetQualifierVersionAsync(
+        string runId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedRunId = NormalizeRunId(runId);
+        var databasePath = await EnsureSchemaAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT qualifier_version
+            FROM reference_materialization_runs
+            WHERE run_id = $run_id;
+            """;
+        command.Parameters.AddWithValue("$run_id", normalizedRunId);
+        return (string?)await command.ExecuteScalarAsync(cancellationToken);
+    }
+
     private static async ValueTask<IReadOnlyList<ChapterBoundary>> ReadBoundariesAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,

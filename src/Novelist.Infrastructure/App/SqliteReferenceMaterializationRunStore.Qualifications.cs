@@ -506,7 +506,10 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             narrative_functions = tags.NarrativeFunctions,
             emotion_mechanics = tags.EmotionMechanics,
             pov = tags.Pov,
-            techniques = tags.Techniques
+            techniques = tags.Techniques,
+            scene_beat_roles = tags.SceneBeatRoles,
+            character_relations = tags.CharacterRelations,
+            causal_information_roles = tags.CausalInformationRoles
         });
 
     private sealed record QualificationSnapshot(

@@ -30,7 +30,7 @@ public sealed partial class SqliteReferenceMaterializationService
                 Guid.NewGuid().ToString("N"),
                 "materialization-policy-v1",
                 "candidate-window-v1",
-                "material-qualifier-v1",
+                ReferenceMaterializationChatCompletionQualifier.SchemaVersion,
                 models.Llm,
                 models.Embedding,
                 input.ChapterBatchSize,
@@ -75,6 +75,14 @@ public sealed partial class SqliteReferenceMaterializationService
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.RetryRequiresNewRun,
                 "The configured models changed after this materialization run started. Create a new run instead of retrying this generation.");
+        }
+
+        var qualifierVersion = await _runStore.GetQualifierVersionAsync(current.RunId, cancellationToken);
+        if (!string.Equals(qualifierVersion, ReferenceMaterializationChatCompletionQualifier.SchemaVersion, StringComparison.Ordinal))
+        {
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.RetryRequiresNewRun,
+                "The material qualification schema changed after this run started. Create a new run instead of retrying this generation.");
         }
 
         return await _runStore.RetryCurrentBatchAsync(current.RunId, cancellationToken);

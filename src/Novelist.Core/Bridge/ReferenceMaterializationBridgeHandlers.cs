@@ -235,7 +235,12 @@ public static class ReferenceMaterializationBridgeHandlers
                 SanitizeTags(material.Tags.NarrativeFunctions),
                 SanitizeTags(material.Tags.EmotionMechanics),
                 SanitizeTags(material.Tags.Pov),
-                SanitizeTags(material.Tags.Techniques)),
+                SanitizeTags(material.Tags.Techniques))
+            {
+                SceneBeatRoles = SanitizeTags(material.Tags.SceneBeatRoles),
+                CharacterRelations = SanitizeTags(material.Tags.CharacterRelations),
+                CausalInformationRoles = SanitizeTags(material.Tags.CausalInformationRoles)
+            },
             ReasonCodes = SanitizeTags(material.ReasonCodes)
         };
     }

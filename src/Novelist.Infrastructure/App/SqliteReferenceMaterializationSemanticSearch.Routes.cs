@@ -162,7 +162,10 @@ public sealed partial class SqliteReferenceMaterializationSemanticSearch
                 queryTerms,
                 material.Tags.NarrativeFunctions
                     .Concat(material.Tags.EmotionMechanics)
-                    .Concat(material.Tags.Pov));
+                    .Concat(material.Tags.Pov)
+                    .Concat(material.Tags.SceneBeatRoles)
+                    .Concat(material.Tags.CharacterRelations)
+                    .Concat(material.Tags.CausalInformationRoles));
             var techniqueScore = TagScore(queryTerms, material.Tags.Techniques);
             if (structuredScore > 0)
             {

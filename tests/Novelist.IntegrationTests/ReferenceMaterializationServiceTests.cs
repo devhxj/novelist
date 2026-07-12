@@ -146,6 +146,52 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
         Assert.Equal(ReferenceMaterializationRunStates.Failed, failed?.Status);
     }
 
+    [Fact]
+    public async Task RetryRejectsAQualifierSchemaThatDoesNotMatchTheCurrentMaterializationSchema()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options);
+        var service = new SqliteReferenceMaterializationService(
+            options,
+            new EmptyChapterSplitAnalyzer(),
+            modelPreflight: new RecordingPreflight(new ReferenceMaterializationModelPreflightResult(
+                new ReferenceMaterializationModelIdentityPayload("llm", "model"),
+                new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8))));
+        var profile = await service.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await service.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
+        var run = await store.CreateAsync(new ReferenceMaterializationRunSeed(
+            Guid.NewGuid().ToString("N"),
+            anchor.AnchorId,
+            profile.SplitProfileId,
+            Guid.NewGuid().ToString("N"),
+            "policy-v1",
+            "candidate-v1",
+            "material-qualifier-v1",
+            new ReferenceMaterializationModelIdentityPayload("llm", "model"),
+            new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8),
+            5,
+            DateTimeOffset.UtcNow), CancellationToken.None);
+        var claim = await store.ClaimCurrentBatchAsync(run.RunId, "failing-owner", TimeSpan.FromMinutes(1), CancellationToken.None);
+        Assert.NotNull(claim);
+        await store.FailCurrentBatchAsync(
+            claim!,
+            ReferenceMaterializationErrorCodes.LlmOutputInvalid,
+            "Schema did not validate.",
+            CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
+            await service.RetryMaterializationAsync(
+                new RetryReferenceMaterializationPayload(anchor.NovelId, anchor.AnchorId, run.RunId),
+                CancellationToken.None));
+
+        Assert.Equal(ReferenceMaterializationErrorCodes.RetryRequiresNewRun, exception.ErrorCode);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))

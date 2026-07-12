@@ -160,8 +160,11 @@ public sealed partial class SqliteReferenceMaterializationSemanticSearch : IRefe
                    COUNT(material.material_id) AS material_count,
                    COUNT(embedding.candidate_id) AS embedding_count,
                    COUNT(DISTINCT material.run_id) AS material_run_count,
-                   MAX(material.run_id) AS material_run_id
+                   MAX(material.run_id) AS material_run_id,
+                   run.qualifier_version
             FROM reference_materialization_vector_indexes index_metadata
+            JOIN reference_materialization_runs run
+              ON run.run_id = index_metadata.run_id
             LEFT JOIN reference_materialization_materials material
               ON material.anchor_id = $anchor_id
              AND material.generation_id = index_metadata.generation_id
@@ -175,7 +178,8 @@ public sealed partial class SqliteReferenceMaterializationSemanticSearch : IRefe
             WHERE index_metadata.generation_id = $generation_id
               AND index_metadata.status = 'ready'
             GROUP BY index_metadata.run_id, index_metadata.table_name, index_metadata.provider,
-                     index_metadata.model_id, index_metadata.dimensions, index_metadata.vector_count;
+                     index_metadata.model_id, index_metadata.dimensions, index_metadata.vector_count,
+                     run.qualifier_version;
             """;
         command.Parameters.AddWithValue("$anchor_id", anchorId);
         command.Parameters.AddWithValue("$generation_id", generationId);
@@ -198,13 +202,18 @@ public sealed partial class SqliteReferenceMaterializationSemanticSearch : IRefe
             reader.GetInt32(6),
             reader.GetInt32(7),
             reader.GetInt32(8),
-            reader.IsDBNull(9) ? null : reader.GetString(9));
+            reader.IsDBNull(9) ? null : reader.GetString(9),
+            reader.GetString(10));
         if (snapshot.Dimensions <= 0 ||
             snapshot.VectorCount != snapshot.MaterialCount ||
             snapshot.EmbeddingCount != snapshot.MaterialCount ||
             (snapshot.MaterialCount > 0 &&
              (snapshot.MaterialRunCount != 1 ||
               !string.Equals(snapshot.RunId, snapshot.MaterialRunId, StringComparison.Ordinal))) ||
+            !string.Equals(
+                snapshot.QualifierVersion,
+                ReferenceMaterializationChatCompletionQualifier.SchemaVersion,
+                StringComparison.Ordinal) ||
             !string.Equals(
                 snapshot.TableName,
                 SqliteVecTableProvisioner.BuildReferenceMaterializationVectorTableName(snapshot.GenerationId, snapshot.Dimensions),
@@ -391,7 +400,12 @@ public sealed partial class SqliteReferenceMaterializationSemanticSearch : IRefe
                 ReadArray(root, "narrative_functions"),
                 ReadArray(root, "emotion_mechanics"),
                 ReadArray(root, "pov"),
-                ReadArray(root, "techniques"));
+                ReadArray(root, "techniques"))
+            {
+                SceneBeatRoles = ReadArray(root, "scene_beat_roles"),
+                CharacterRelations = ReadArray(root, "character_relations"),
+                CausalInformationRoles = ReadArray(root, "causal_information_roles")
+            };
         }
         catch (JsonException)
         {
@@ -440,5 +454,6 @@ public sealed partial class SqliteReferenceMaterializationSemanticSearch : IRefe
         int MaterialCount,
         int EmbeddingCount,
         int MaterialRunCount,
-        string? MaterialRunId);
+        string? MaterialRunId,
+        string QualifierVersion);
 }

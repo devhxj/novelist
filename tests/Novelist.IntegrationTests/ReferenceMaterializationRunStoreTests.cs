@@ -321,6 +321,12 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken.None);
         Assert.Equal(status!.AcceptedCount, checked((int)listed.Total));
         Assert.All(listed.Items, item => Assert.Equal(status.GenerationId, item.GenerationId));
+        Assert.All(listed.Items, item =>
+        {
+            Assert.Equal(["turn_beat"], item.Tags.SceneBeatRoles);
+            Assert.Equal(["mistrust"], item.Tags.CharacterRelations);
+            Assert.Equal(["reveal"], item.Tags.CausalInformationRoles);
+        });
     }
 
     [Fact]
@@ -447,6 +453,32 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
 
         Assert.Equal(ReferenceMaterializationErrorCodes.VectorIndexFailed, exception.ErrorCode);
         Assert.NotNull(vec.LastSearchRequest);
+    }
+
+    [Fact]
+    public async Task ActiveMaterialQueriesRejectAGenerationFromThePreviousQualifierSchema()
+    {
+        var options = CreateOptions();
+        var (anchor, status, vec) = await CreateCompletedGenerationAsync(options);
+        await SetQualifierVersionAsync(options, status.RunId, "material-qualifier-v1");
+        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var search = new SqliteReferenceMaterializationSemanticSearch(
+            options,
+            new ReferenceCorpusDatabasePathResolver(options),
+            new FixedEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "embedding-provider", "https://example.invalid", "key", "embedding-model", 8, null)),
+            new FixedEmbeddingClient(dimensions: 8),
+            vec);
+
+        var listed = await service.ListActiveMaterialsAsync(
+            new ListActiveReferenceMaterializationMaterialsPayload(anchor.NovelId, anchor.AnchorId, 1, 20),
+            CancellationToken.None);
+        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
+            await search.SearchAsync(anchor.AnchorId, "检索意图", maxResults: 10, CancellationToken.None));
+
+        Assert.Empty(listed.Items);
+        Assert.Equal(0, listed.Total);
+        Assert.Equal(ReferenceMaterializationErrorCodes.GenerationIncomplete, exception.ErrorCode);
     }
 
     [Fact]
@@ -716,7 +748,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             GenerationId: Guid.NewGuid().ToString("N"),
             PolicyVersion: "policy-v1",
             CandidateVersion: "candidate-v1",
-            QualifierVersion: "qualifier-v1",
+            QualifierVersion: ReferenceMaterializationChatCompletionQualifier.SchemaVersion,
             Llm: new ReferenceMaterializationModelIdentityPayload("provider", "model"),
             Embedding: new ReferenceMaterializationModelIdentityPayload("embedding-provider", "embedding-model", 8),
             ChapterBatchSize: chapterBatchSize,
@@ -738,6 +770,23 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         command.Parameters.AddWithValue("$run_id", runId);
         command.Parameters.AddWithValue("$chapter_index", chapterIndex);
         return Convert.ToInt32(await command.ExecuteScalarAsync(CancellationToken.None));
+    }
+
+    private static async ValueTask SetQualifierVersionAsync(
+        AppInitializationOptions options,
+        string runId,
+        string qualifierVersion)
+    {
+        await using var connection = await OpenConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE reference_materialization_runs
+            SET qualifier_version = $qualifier_version
+            WHERE run_id = $run_id;
+            """;
+        command.Parameters.AddWithValue("$qualifier_version", qualifierVersion);
+        command.Parameters.AddWithValue("$run_id", runId);
+        Assert.Equal(1, await command.ExecuteNonQueryAsync(CancellationToken.None));
     }
 
     private static async ValueTask<int> CountCandidateLinksOutsideChapterAsync(AppInitializationOptions options, string runId, int chapterIndex)
@@ -784,7 +833,12 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             ReferenceMaterializationCandidateDecisions.Accepted,
             candidate.SourceNodes.Select(node => new ReferenceMaterializationQualificationSpan(node.NodeId, 0, node.Text.Length)).ToArray(),
             new ReferenceMaterializationQualityScores(0.9, 0.8, 0.7, 0.6, 0.5, 0.4),
-            new ReferenceMaterializationQualificationTags(["reveal"], [], ["close_third"], ["subtext"]),
+            new ReferenceMaterializationQualificationTags(["reveal"], [], ["close_third"], ["subtext"])
+            {
+                SceneBeatRoles = ["turn_beat"],
+                CharacterRelations = ["mistrust"],
+                CausalInformationRoles = ["reveal"]
+            },
             0.85,
             ["complete_exchange"]);
     }

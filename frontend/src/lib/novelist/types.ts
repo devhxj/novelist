@@ -1089,6 +1089,9 @@ has_more: boolean
     emotion_mechanics: string[]
     pov: string[]
     techniques: string[]
+    scene_beat_roles: string[]
+    character_relations: string[]
+    causal_information_roles: string[]
   }
 
   export interface MaterializationMaterial {

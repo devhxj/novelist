@@ -36,12 +36,16 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             JOIN reference_anchor_materialization_state state
               ON state.anchor_id = material.anchor_id
              AND state.active_generation_id = material.generation_id
+            JOIN reference_materialization_runs run
+              ON run.run_id = material.run_id
             WHERE material.anchor_id = $anchor_id
+              AND run.qualifier_version = $qualifier_version
               AND ($query = '' OR instr(material.text, $query) > 0)
             ORDER BY material.quality_score DESC, material.confidence DESC, material.material_id
             LIMIT $limit OFFSET $offset;
             """;
         command.Parameters.AddWithValue("$anchor_id", anchorId);
+        command.Parameters.AddWithValue("$qualifier_version", ReferenceMaterializationChatCompletionQualifier.SchemaVersion);
         command.Parameters.AddWithValue("$query", normalizedQuery);
         command.Parameters.AddWithValue("$limit", size);
         command.Parameters.AddWithValue("$offset", offset);
@@ -78,10 +82,14 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             JOIN reference_anchor_materialization_state state
               ON state.anchor_id = material.anchor_id
              AND state.active_generation_id = material.generation_id
+            JOIN reference_materialization_runs run
+              ON run.run_id = material.run_id
             WHERE material.anchor_id = $anchor_id
+              AND run.qualifier_version = $qualifier_version
               AND ($query = '' OR instr(material.text, $query) > 0);
             """;
         command.Parameters.AddWithValue("$anchor_id", anchorId);
+        command.Parameters.AddWithValue("$qualifier_version", ReferenceMaterializationChatCompletionQualifier.SchemaVersion);
         command.Parameters.AddWithValue("$query", query);
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
     }
@@ -96,7 +104,12 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 ReadArray(root, "narrative_functions"),
                 ReadArray(root, "emotion_mechanics"),
                 ReadArray(root, "pov"),
-                ReadArray(root, "techniques"));
+                ReadArray(root, "techniques"))
+            {
+                SceneBeatRoles = ReadArray(root, "scene_beat_roles"),
+                CharacterRelations = ReadArray(root, "character_relations"),
+                CausalInformationRoles = ReadArray(root, "causal_information_roles")
+            };
         }
         catch (JsonException)
         {

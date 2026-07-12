@@ -147,7 +147,7 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             Guid.NewGuid().ToString("N"),
             "materialization-policy-v1",
             "candidate-window-v1",
-            "material-qualifier-v1",
+            ReferenceMaterializationChatCompletionQualifier.SchemaVersion,
             new ReferenceMaterializationModelIdentityPayload("scale-llm", "scale-llm-model"),
             new ReferenceMaterializationModelIdentityPayload("scale-embedding", "scale-embedding-model", 8),
             batchSize,

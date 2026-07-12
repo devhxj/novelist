@@ -55,4 +55,11 @@ public sealed record ReferenceMaterializationQualificationTags(
     IReadOnlyList<string> NarrativeFunctions,
     IReadOnlyList<string> EmotionMechanics,
     IReadOnlyList<string> Pov,
-    IReadOnlyList<string> Techniques);
+    IReadOnlyList<string> Techniques)
+{
+    public IReadOnlyList<string> SceneBeatRoles { get; init; } = [];
+
+    public IReadOnlyList<string> CharacterRelations { get; init; } = [];
+
+    public IReadOnlyList<string> CausalInformationRoles { get; init; } = [];
+}
