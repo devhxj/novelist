@@ -29,6 +29,21 @@ public static class ReferenceMaterializationBridgeHandlers
                 ReadObjectArg<ConfirmReferenceChapterSplitPayload>(context.Payload, 0, "input"),
                 cancellationToken)));
 
+        dispatcher.Register("EnqueueReferenceMaterialization", async (context, cancellationToken) =>
+            await ExecuteStatusAsync(() => service.EnqueueMaterializationAsync(
+                ReadObjectArg<EnqueueReferenceMaterializationPayload>(context.Payload, 0, "input"),
+                cancellationToken)));
+
+        dispatcher.Register("GetReferenceMaterializationStatus", async (context, cancellationToken) =>
+            await ExecuteOptionalStatusAsync(() => service.GetMaterializationStatusAsync(
+                ReadObjectArg<GetReferenceMaterializationStatusPayload>(context.Payload, 0, "input"),
+                cancellationToken)));
+
+        dispatcher.Register("ListReferenceMaterializationChapterProgress", async (context, cancellationToken) =>
+            await ExecuteProgressAsync(() => service.ListMaterializationChapterProgressAsync(
+                ReadObjectArg<ListReferenceMaterializationChapterProgressPayload>(context.Payload, 0, "input"),
+                cancellationToken)));
+
         return dispatcher;
     }
 
@@ -51,6 +66,102 @@ public static class ReferenceMaterializationBridgeHandlers
                     TextHash = ReferencePayloadSanitizer.RedactAndBoundText(boundary.TextHash, 128)
                 })
                 .ToArray()
+        };
+    }
+
+    private static async ValueTask<ReferenceMaterializationStatusPayload> ExecuteStatusAsync(
+        Func<ValueTask<ReferenceMaterializationStatusPayload>> operation)
+    {
+        try
+        {
+            return SanitizeStatus(await operation());
+        }
+        catch (ReferenceMaterializationException exception)
+        {
+            throw new BridgeRequestException(
+                exception.ErrorCode,
+                exception.Message,
+                new { error_code = exception.ErrorCode },
+                retryable: true);
+        }
+    }
+
+    private static async ValueTask<ReferenceMaterializationStatusPayload?> ExecuteOptionalStatusAsync(
+        Func<ValueTask<ReferenceMaterializationStatusPayload?>> operation)
+    {
+        try
+        {
+            var result = await operation();
+            return result is null ? null : SanitizeStatus(result);
+        }
+        catch (ReferenceMaterializationException exception)
+        {
+            throw new BridgeRequestException(
+                exception.ErrorCode,
+                exception.Message,
+                new { error_code = exception.ErrorCode },
+                retryable: true);
+        }
+    }
+
+    private static async ValueTask<PageResultPayload<ReferenceMaterializationChapterProgressPayload>> ExecuteProgressAsync(
+        Func<ValueTask<PageResultPayload<ReferenceMaterializationChapterProgressPayload>>> operation)
+    {
+        try
+        {
+            var result = await operation();
+            return new PageResultPayload<ReferenceMaterializationChapterProgressPayload>(
+                result.Items.Select(SanitizeProgress).ToArray(),
+                result.Total,
+                result.Page,
+                result.Size,
+                result.TotalPages);
+        }
+        catch (ReferenceMaterializationException exception)
+        {
+            throw new BridgeRequestException(
+                exception.ErrorCode,
+                exception.Message,
+                new { error_code = exception.ErrorCode },
+                retryable: true);
+        }
+    }
+
+    private static ReferenceMaterializationStatusPayload SanitizeStatus(ReferenceMaterializationStatusPayload status)
+    {
+        return status with
+        {
+            RunId = ReferencePayloadSanitizer.RedactAndBoundText(status.RunId, 128),
+            SplitProfileId = ReferencePayloadSanitizer.RedactAndBoundText(status.SplitProfileId, 128),
+            GenerationId = ReferencePayloadSanitizer.RedactAndBoundText(status.GenerationId, 128),
+            Status = ReferencePayloadSanitizer.RedactAndBoundText(status.Status, 32),
+            Llm = SanitizeModel(status.Llm),
+            Embedding = SanitizeModel(status.Embedding),
+            LastErrorCode = status.LastErrorCode is null ? null : ReferencePayloadSanitizer.RedactAndBoundText(status.LastErrorCode, 128),
+            LastErrorMessage = status.LastErrorMessage is null ? null : ReferencePayloadSanitizer.RedactAndBoundText(status.LastErrorMessage, 512),
+            NextAction = ReferencePayloadSanitizer.RedactAndBoundText(status.NextAction, 64)
+        };
+    }
+
+    private static ReferenceMaterializationChapterProgressPayload SanitizeProgress(
+        ReferenceMaterializationChapterProgressPayload progress)
+    {
+        return progress with
+        {
+            Status = ReferencePayloadSanitizer.RedactAndBoundText(progress.Status, 32),
+            CurrentStage = ReferencePayloadSanitizer.RedactAndBoundText(progress.CurrentStage, 64),
+            LastErrorCode = progress.LastErrorCode is null ? null : ReferencePayloadSanitizer.RedactAndBoundText(progress.LastErrorCode, 128),
+            LastErrorMessage = progress.LastErrorMessage is null ? null : ReferencePayloadSanitizer.RedactAndBoundText(progress.LastErrorMessage, 512)
+        };
+    }
+
+    private static ReferenceMaterializationModelIdentityPayload SanitizeModel(
+        ReferenceMaterializationModelIdentityPayload model)
+    {
+        return model with
+        {
+            Provider = ReferencePayloadSanitizer.RedactAndBoundText(model.Provider, 128),
+            ModelId = ReferencePayloadSanitizer.RedactAndBoundText(model.ModelId, 256)
         };
     }
 

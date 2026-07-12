@@ -995,6 +995,78 @@ has_more: boolean
     confidence?: number | null
   }
 
+  export interface EnqueueMaterializationInput {
+    novel_id: number
+    anchor_id: number
+    split_profile_id: string
+    chapter_batch_size?: 5 | 10
+  }
+
+  export interface GetMaterializationStatusInput {
+    novel_id: number
+    anchor_id: number
+    run_id: string
+  }
+
+  export interface ListMaterializationChapterProgressInput extends GetMaterializationStatusInput {
+    page: number
+    size: number
+  }
+
+  export interface MaterializationModelIdentity {
+    provider: string
+    model_id: string
+    dimensions?: number | null
+  }
+
+  export interface MaterializationChapterProgress {
+    chapter_index: number
+    batch_index: number
+    status: string
+    current_stage: string
+    candidate_count: number
+    decided_count: number
+    accepted_count: number
+    rejected_count: number
+    review_count: number
+    vector_count: number
+    model_call_count: number
+    started_at?: Timestamp | null
+    completed_at?: Timestamp | null
+    last_error_code?: string | null
+    last_error_message?: string | null
+    row_version: number
+  }
+
+  export interface MaterializationStatus {
+    run_id: string
+    anchor_id: number
+    split_profile_id: string
+    generation_id: string
+    status: string
+    chapter_batch_size: 5 | 10
+    total_chapters: number
+    processed_chapters: number
+    total_chapter_batches: number
+    completed_chapter_batches: number
+    current_batch_index?: number | null
+    current_batch_start_chapter?: number | null
+    current_batch_end_chapter?: number | null
+    candidate_count: number
+    accepted_count: number
+    rejected_count: number
+    review_count: number
+    vector_count: number
+    llm: MaterializationModelIdentity
+    embedding: MaterializationModelIdentity
+    last_error_code?: string | null
+    last_error_message?: string | null
+    started_at: Timestamp
+    completed_at?: Timestamp | null
+    vector_index_healthy: boolean
+    next_action: string
+  }
+
   export interface CreateAnchorFailure {
     index: number
     title: string
@@ -2834,6 +2906,14 @@ export namespace storage {
     sort_by: string
     sort_dir: 'asc' | 'desc' | string
     filters?: Record<string, string> | null
+  }
+
+  export interface PageResult_reference_MaterializationChapterProgress_ {
+    items: reference.MaterializationChapterProgress[]
+    total: number
+    page: number
+    size: number
+    total_pages: number
   }
 
   export interface PageResult_git_GitCommitSummary_ {

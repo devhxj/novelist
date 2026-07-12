@@ -17,12 +17,18 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
         await AssertOkAsync(dispatcher, "AnalyzeReferenceChapterSplit", new AnalyzeReferenceChapterSplitPayload(42, 99));
         await AssertOkAsync(dispatcher, "PreviewReferenceChapterSplit", new PreviewReferenceChapterSplitPayload(42, 99, "第{number}章 {title}"));
         await AssertOkAsync(dispatcher, "ConfirmReferenceChapterSplit", new ConfirmReferenceChapterSplitPayload(42, 99, "profile-1"));
+        await AssertOkAsync(dispatcher, "EnqueueReferenceMaterialization", new EnqueueReferenceMaterializationPayload(42, 99, "profile-1", 10));
+        await AssertOkAsync(dispatcher, "GetReferenceMaterializationStatus", new GetReferenceMaterializationStatusPayload(42, 99, "run-1"));
+        await AssertOkAsync(dispatcher, "ListReferenceMaterializationChapterProgress", new ListReferenceMaterializationChapterProgressPayload(42, 99, "run-1", 1, 20));
 
         Assert.Equal(
             [
                 "analyze:42:99",
                 "preview:42:99:第{number}章 {title}",
-                "confirm:42:99:profile-1"
+                "confirm:42:99:profile-1",
+                "enqueue:42:99:profile-1:10",
+                "status:42:99:run-1",
+                "progress:42:99:run-1:1:20"
             ],
             service.Calls);
     }
@@ -36,6 +42,27 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
 
         Assert.False(json.RootElement.GetProperty("ok").GetBoolean());
         Assert.Equal(BridgeErrorCodes.ValidationError, json.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task EnqueueReturnsTheStableMaterializationErrorCodeFromModelPreflight()
+    {
+        var service = new RecordingMaterializationService
+        {
+            EnqueueException = new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.EmbeddingHealthCheckFailed,
+                "Embedding health check failed.")
+        };
+        var dispatcher = new BridgeDispatcher().RegisterReferenceMaterializationHandlers(service);
+        var result = await dispatcher.DispatchAsync(Request(
+            "EnqueueReferenceMaterialization",
+            new EnqueueReferenceMaterializationPayload(42, 99, "profile-1")));
+        using var json = JsonDocument.Parse(result.OutboundJson ?? throw new InvalidOperationException("Bridge returned no response."));
+
+        Assert.False(json.RootElement.GetProperty("ok").GetBoolean());
+        var error = json.RootElement.GetProperty("error");
+        Assert.Equal(ReferenceMaterializationErrorCodes.EmbeddingHealthCheckFailed, error.GetProperty("code").GetString());
+        Assert.True(error.GetProperty("retryable").GetBoolean());
     }
 
     private static async Task AssertOkAsync(BridgeDispatcher dispatcher, string method, params object?[] args)
@@ -59,6 +86,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
     private sealed class RecordingMaterializationService : IReferenceMaterializationService
     {
         public List<string> Calls { get; } = [];
+        public Exception? EnqueueException { get; init; }
 
         public ValueTask<ReferenceChapterSplitProfilePayload> AnalyzeChapterSplitAsync(
             AnalyzeReferenceChapterSplitPayload input,
@@ -87,6 +115,39 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
             });
         }
 
+        public ValueTask<ReferenceMaterializationStatusPayload> EnqueueMaterializationAsync(
+            EnqueueReferenceMaterializationPayload input,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add($"enqueue:{input.NovelId}:{input.AnchorId}:{input.SplitProfileId}:{input.ChapterBatchSize}");
+            if (EnqueueException is not null)
+            {
+                throw EnqueueException;
+            }
+            return ValueTask.FromResult(CreateStatus(input.AnchorId));
+        }
+
+        public ValueTask<ReferenceMaterializationStatusPayload?> GetMaterializationStatusAsync(
+            GetReferenceMaterializationStatusPayload input,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add($"status:{input.NovelId}:{input.AnchorId}:{input.RunId}");
+            return ValueTask.FromResult<ReferenceMaterializationStatusPayload?>(CreateStatus(input.AnchorId));
+        }
+
+        public ValueTask<PageResultPayload<ReferenceMaterializationChapterProgressPayload>> ListMaterializationChapterProgressAsync(
+            ListReferenceMaterializationChapterProgressPayload input,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add($"progress:{input.NovelId}:{input.AnchorId}:{input.RunId}:{input.Page}:{input.Size}");
+            return ValueTask.FromResult(new PageResultPayload<ReferenceMaterializationChapterProgressPayload>(
+                [new ReferenceMaterializationChapterProgressPayload(1, 0, "pending", "pending", 0, 0, 0, 0, 0, 0, 0, null, null, null, null, 0)],
+                1,
+                input.Page,
+                input.Size,
+                1));
+        }
+
         private static ReferenceChapterSplitProfilePayload CreateProfile(long anchorId)
         {
             return new ReferenceChapterSplitProfilePayload(
@@ -103,6 +164,37 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                 "provider",
                 "model",
                 0.9);
+        }
+
+        private static ReferenceMaterializationStatusPayload CreateStatus(long anchorId)
+        {
+            return new ReferenceMaterializationStatusPayload(
+                "run-1",
+                anchorId,
+                "profile-1",
+                "generation-1",
+                ReferenceMaterializationRunStates.Queued,
+                5,
+                2,
+                0,
+                1,
+                0,
+                0,
+                1,
+                2,
+                0,
+                0,
+                0,
+                0,
+                0,
+                new ReferenceMaterializationModelIdentityPayload("provider", "model"),
+                new ReferenceMaterializationModelIdentityPayload("embedding", "embedding-model", 3),
+                null,
+                null,
+                DateTimeOffset.UtcNow,
+                null,
+                false,
+                "start_processing");
         }
     }
 }

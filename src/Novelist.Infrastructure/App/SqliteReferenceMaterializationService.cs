@@ -8,7 +8,7 @@ using Novelist.Core.App;
 
 namespace Novelist.Infrastructure.App;
 
-public sealed class SqliteReferenceMaterializationService : IReferenceMaterializationService
+public sealed partial class SqliteReferenceMaterializationService : IReferenceMaterializationService
 {
     private const int ChapterSplitSampleMaxChars = 50_000;
     private const int ChapterSplitPreviewLimit = 20;
@@ -21,18 +21,27 @@ public sealed class SqliteReferenceMaterializationService : IReferenceMaterializ
     private readonly AppInitializationOptions _options;
     private readonly IReferenceChapterSplitAnalyzer _analyzer;
     private readonly IReferenceCorpusDatabasePathResolver _databasePathResolver;
+    private readonly IReferenceMaterializationModelPreflight _modelPreflight;
+    private readonly SqliteReferenceMaterializationRunStore _runStore;
     private readonly SemaphoreSlim _mutex = new(1, 1);
 
     public SqliteReferenceMaterializationService(
         AppInitializationOptions? options = null,
         IReferenceChapterSplitAnalyzer? analyzer = null,
-        IReferenceCorpusDatabasePathResolver? databasePathResolver = null)
+        IReferenceCorpusDatabasePathResolver? databasePathResolver = null,
+        IReferenceMaterializationModelPreflight? modelPreflight = null)
     {
         _options = options ?? new AppInitializationOptions();
         _analyzer = analyzer ?? new ReferenceChapterSplitChatCompletionAnalyzer(
             new FileSystemAppSettingsService(_options),
             new StandardChatCompletionClient(new FileSystemLlmConfigurationService(_options)));
         _databasePathResolver = databasePathResolver ?? new ReferenceCorpusDatabasePathResolver(_options);
+        _modelPreflight = modelPreflight ?? new ReferenceMaterializationModelPreflight(
+            new FileSystemAppSettingsService(_options),
+            new StandardChatCompletionClient(new FileSystemLlmConfigurationService(_options)),
+            new FileSystemEmbeddingSettingsService(_options),
+            new HybridEmbeddingClient());
+        _runStore = new SqliteReferenceMaterializationRunStore(_databasePathResolver);
     }
 
     public async ValueTask<ReferenceChapterSplitProfilePayload> AnalyzeChapterSplitAsync(

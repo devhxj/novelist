@@ -15,4 +15,16 @@ public interface IReferenceMaterializationService
     ValueTask<ReferenceChapterSplitProfilePayload> ConfirmChapterSplitAsync(
         ConfirmReferenceChapterSplitPayload input,
         CancellationToken cancellationToken);
+
+    ValueTask<ReferenceMaterializationStatusPayload> EnqueueMaterializationAsync(
+        EnqueueReferenceMaterializationPayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<ReferenceMaterializationStatusPayload?> GetMaterializationStatusAsync(
+        GetReferenceMaterializationStatusPayload input,
+        CancellationToken cancellationToken);
+
+    ValueTask<PageResultPayload<ReferenceMaterializationChapterProgressPayload>> ListMaterializationChapterProgressAsync(
+        ListReferenceMaterializationChapterProgressPayload input,
+        CancellationToken cancellationToken);
 }
