@@ -551,6 +551,146 @@ public sealed partial class SqliteReferenceAnchorService : IReferenceAnchorServi
         }
     }
 
+    public async ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceAsync(
+        CreateReferenceAnchorPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateNovelId(input.NovelId);
+        await EnsureNovelExistsAsync(input.NovelId, cancellationToken);
+
+        var title = NormalizeRequiredText(input.Title, nameof(input.Title), maxLength: 200);
+        var author = NormalizeOptionalText(input.Author, nameof(input.Author), maxLength: 200);
+        var sourcePath = ValidateSourcePath(input.SourcePath);
+        var sourceKind = ValidateAllowedText(input.SourceKind, nameof(input.SourceKind), AllowedSourceKinds);
+        var licenseStatus = ValidateAllowedText(input.LicenseStatus, nameof(input.LicenseStatus), AllowedLicenseStatuses);
+        var visibility = string.IsNullOrWhiteSpace(input.Visibility)
+            ? ReferenceCorpusVisibilities.Private
+            : ValidateAllowedText(input.Visibility, nameof(input.Visibility), AllowedCorpusVisibilities);
+        var storedNovelId = visibility == ReferenceCorpusVisibilities.Workspace
+            ? (long?)null
+            : input.NovelId;
+        var sourceTrust = string.IsNullOrWhiteSpace(input.SourceTrust)
+            ? ReferenceSourceTrustLevels.UserVerified
+            : ValidateAllowedText(input.SourceTrust, nameof(input.SourceTrust), AllowedSourceTrustLevels);
+        var userTags = NormalizeUserTags(input.UserTags);
+        var source = await ReadSourceFileAsync(sourcePath, cancellationToken);
+        var databasePath = await DatabasePathAsync(cancellationToken);
+        var importLockKey = BuildImportIdentityLockKey(
+            databasePath,
+            storedNovelId,
+            visibility,
+            sourcePath,
+            sourceKind,
+            "materialization-source");
+        var importLock = ImportIdentityLocks.GetOrAdd(importLockKey, _ => new SemaphoreSlim(1, 1));
+
+        await importLock.WaitAsync(cancellationToken);
+        try
+        {
+            await _mutex.WaitAsync(cancellationToken);
+            try
+            {
+                await EnsureSchemaAsync(databasePath, cancellationToken);
+                await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+                await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                var existing = await FindExistingAnchorForImportAsync(
+                    connection,
+                    transaction,
+                    storedNovelId,
+                    visibility,
+                    sourcePath,
+                    sourceKind,
+                    source.Hash,
+                    cancellationToken);
+                if (existing is not null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                    return existing;
+                }
+
+                var now = DateTimeOffset.UtcNow;
+                ReferenceAnchorPayload anchor;
+                try
+                {
+                    anchor = await InsertAnchorAsync(
+                        connection,
+                        transaction,
+                        storedNovelId,
+                        title,
+                        author,
+                        sourcePath,
+                        sourceKind,
+                        licenseStatus,
+                        visibility,
+                        sourceTrust,
+                        userTags,
+                        source.Hash,
+                        now,
+                        cancellationToken);
+                    await UpsertDefaultCorpusMembershipAsync(
+                        connection,
+                        transaction,
+                        anchor.AnchorId,
+                        storedNovelId,
+                        visibility,
+                        licenseStatus,
+                        sourceTrust,
+                        now,
+                        cancellationToken);
+                }
+                catch (SqliteException exception) when (IsSqliteConstraintViolation(exception))
+                {
+                    var conflicting = await FindExistingAnchorForImportAsync(
+                        connection,
+                        transaction,
+                        storedNovelId,
+                        visibility,
+                        sourcePath,
+                        sourceKind,
+                        source.Hash,
+                        cancellationToken);
+                    if (conflicting is null)
+                    {
+                        throw;
+                    }
+
+                    await transaction.CommitAsync(cancellationToken);
+                    return conflicting;
+                }
+
+                var readyAnchor = anchor with
+                {
+                    Status = ReferenceAnchorBuildStates.Ready,
+                    UpdatedAt = now
+                };
+                await UpdateAnchorBuildResultAsync(
+                    connection,
+                    transaction,
+                    readyAnchor,
+                    ReferenceAnchorBuildStates.Ready,
+                    "ready",
+                    sourceSegmentCount: 0,
+                    materialCount: 0,
+                    slotCount: 0,
+                    lastError: string.Empty,
+                    now,
+                    cancellationToken,
+                    vectorCount: 0);
+                await transaction.CommitAsync(cancellationToken);
+                return readyAnchor;
+            }
+            finally
+            {
+                _mutex.Release();
+            }
+        }
+        finally
+        {
+            importLock.Release();
+        }
+    }
+
     public async ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync(
         CreateReferenceAnchorsPayload input,
         CancellationToken cancellationToken)

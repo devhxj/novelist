@@ -12,6 +12,7 @@
     "test:reference-style": "npm run test:reference-workspace",
     "test:reference-style:stress": "npm run test:reference-workspace",
     "test:chapter-range": "node tests/chapter-range.test.mjs",
+    "test:reference-materialization-api": "node --test tests/reference-materialization-api.test.mjs",
     "test:time": "node tests/time.test.mjs",
     "test:layout": "node tests/layout.test.mjs",
     "test:diagnostics": "node tests/diagnostics.test.mjs",

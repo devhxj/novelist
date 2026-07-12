@@ -177,7 +177,7 @@ export default function ReferenceBookSidebar({
     setActiveAction('create')
     setError(null)
     try {
-      const created = await app.CreateReferenceAnchor({
+      const created = await app.RegisterReferenceMaterializationSource({
         novel_id: novelId,
         title,
         author: form.author.trim() || undefined,

@@ -36,6 +36,7 @@ public static class BridgeCompatibilityAppMethods
         "CreatePreference",
         "CreateReaderPerspective",
         "CreateReferenceAnchor",
+        "RegisterReferenceMaterializationSource",
         "CreateReferenceAnchors",
         "CreateReferenceAnchorsWithResult",
         "CreateStyleSample",

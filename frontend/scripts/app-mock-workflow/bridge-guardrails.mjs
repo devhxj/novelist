@@ -139,7 +139,7 @@ export async function verifyReferenceWorkspaceBridgeCalls(page) {
     'ListReferenceMaterializationChapterProgress',
     'ListReferenceMaterializationCandidates',
     'ListActiveReferenceMaterializationMaterials',
-    'CreateReferenceAnchor',
+    'RegisterReferenceMaterializationSource',
     'DeleteReferenceAnchor',
     'GenerateReferenceMaterializationBlueprintPreview',
   ]

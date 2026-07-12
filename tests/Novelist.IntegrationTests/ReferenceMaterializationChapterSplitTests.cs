@@ -12,6 +12,36 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "novelist-tests", Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public async Task RegisterMaterializationSourceSkipsLegacyExtractionAndIsReadyForChapterSplit()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("材料化来源登记", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "materialization-source.txt",
+            "第1章 开端\n" + new string('甲', 25_000) + "\n第2章 转折\n" + new string('乙', 25_000));
+        var anchors = new SqliteReferenceAnchorService(options, novels);
+
+        var anchor = await anchors.RegisterMaterializationSourceAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "材料化来源", null, sourcePath, "text", "user_provided"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceAnchorBuildStates.Ready, anchor.Status);
+        Assert.Equal(0, await CountAnchorRowsAsync(options, "reference_source_segments", anchor.AnchorId));
+        Assert.Equal(0, await CountAnchorRowsAsync(options, "reference_materials", anchor.AnchorId));
+
+        var materialization = new SqliteReferenceMaterializationService(
+            options,
+            new RecordingChapterSplitAnalyzer(ReferenceChapterSplitModelResult.Empty));
+        var preview = await materialization.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(novel.Id, anchor.AnchorId, "第{number}章 {title}"),
+            CancellationToken.None);
+
+        Assert.Equal(2, preview.ChapterCount);
+    }
+
+    [Fact]
     public async Task AnalyzeAutoSplitSendsOnlyTheFirstFiftyThousandNormalizedCharactersToTheModel()
     {
         var options = CreateOptions();
@@ -293,6 +323,15 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
         command.Parameters.AddWithValue("$split_profile_id", splitProfileId);
         return (string)(await command.ExecuteScalarAsync(CancellationToken.None)
             ?? throw new InvalidOperationException("Split profile was not persisted."));
+    }
+
+    private static async ValueTask<int> CountAnchorRowsAsync(AppInitializationOptions options, string tableName, long anchorId)
+    {
+        await using var connection = await OpenConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM {tableName} WHERE anchor_id = $anchor_id;";
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(CancellationToken.None));
     }
 
     private static async ValueTask<SqliteConnection> OpenConnectionAsync(AppInitializationOptions options)

@@ -1800,6 +1800,10 @@ public sealed class MafToolRegistryTests
                 DateTimeOffset.UtcNow));
         }
 
+        public ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceAsync(
+            CreateReferenceAnchorPayload input,
+            CancellationToken cancellationToken) => CreateAnchorAsync(input, cancellationToken);
+
         public async ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync(
             CreateReferenceAnchorsPayload input,
             CancellationToken cancellationToken)

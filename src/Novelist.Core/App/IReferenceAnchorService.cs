@@ -8,6 +8,10 @@ public interface IReferenceAnchorService
         CreateReferenceAnchorPayload input,
         CancellationToken cancellationToken);
 
+    ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceAsync(
+        CreateReferenceAnchorPayload input,
+        CancellationToken cancellationToken);
+
     ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync(
         CreateReferenceAnchorsPayload input,
         CancellationToken cancellationToken);

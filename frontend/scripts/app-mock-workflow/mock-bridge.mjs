@@ -1219,6 +1219,7 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'GetReferenceAnchorBuildStatus': return referenceBuildStatus(args[1])
       case 'PickReferenceSourceFile': return options.pickedReferenceSourceFile ?? null
       case 'CreateReferenceAnchor': return createReferenceAnchor(args[0])
+      case 'RegisterReferenceMaterializationSource': return createReferenceAnchor(args[0])
       case 'CreateReferenceAnchors': return createReferenceAnchors(args[0])
       case 'CreateReferenceAnchorsWithResult': return createReferenceAnchorsWithResult(args[0])
       case 'DeleteReferenceAnchor':

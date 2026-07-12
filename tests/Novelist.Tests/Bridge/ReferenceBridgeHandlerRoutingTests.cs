@@ -1142,6 +1142,10 @@ public sealed class ReferenceBridgeHandlerRoutingTests
                 userTags: input.UserTags ?? []));
         }
 
+        public ValueTask<ReferenceAnchorPayload> RegisterMaterializationSourceAsync(
+            CreateReferenceAnchorPayload input,
+            CancellationToken cancellationToken) => CreateAnchorAsync(input, cancellationToken);
+
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> CreateAnchorsAsync(
             CreateReferenceAnchorsPayload input,
             CancellationToken cancellationToken)

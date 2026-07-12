@@ -812,9 +812,9 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await referenceBooks.getByRole('button', { name: '添加参考书籍' }).click()
   await referenceBooks.getByLabel('参考书标题').fill('蓝图预演测试书')
   await referenceBooks.getByLabel('参考书文件路径').fill('D:\\books\\blueprint-preview.md')
-  const createCallCount = await bridgeCallCount(page, 'CreateReferenceAnchor')
+  const createCallCount = await bridgeCallCount(page, 'RegisterReferenceMaterializationSource')
   await referenceBooks.getByRole('button', { name: /^添加参考书$/ }).click()
-  await waitForBridgeCallCountAfter(page, 'CreateReferenceAnchor', createCallCount)
+  await waitForBridgeCallCountAfter(page, 'RegisterReferenceMaterializationSource', createCallCount)
   await expectVisible(referenceBooks.getByText('蓝图预演测试书'), 'created reference book')
 
   await referenceBooks.getByRole('button', { name: '删除《蓝图预演测试书》' }).click()

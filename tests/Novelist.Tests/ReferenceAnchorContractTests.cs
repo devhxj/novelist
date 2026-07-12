@@ -2016,6 +2016,7 @@ public sealed class ReferenceAnchorContractTests
         string[] expected =
         [
             "CreateReferenceAnchor",
+            "RegisterReferenceMaterializationSource",
             "CreateReferenceAnchors",
             "CreateReferenceAnchorsWithResult",
             "GetReferenceAnchors",
