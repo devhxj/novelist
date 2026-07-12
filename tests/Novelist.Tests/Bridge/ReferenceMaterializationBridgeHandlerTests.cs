@@ -20,6 +20,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
         await AssertOkAsync(dispatcher, "EnqueueReferenceMaterialization", new EnqueueReferenceMaterializationPayload(42, 99, "profile-1", 10));
         await AssertOkAsync(dispatcher, "GetReferenceMaterializationStatus", new GetReferenceMaterializationStatusPayload(42, 99, "run-1"));
         await AssertOkAsync(dispatcher, "ListReferenceMaterializationChapterProgress", new ListReferenceMaterializationChapterProgressPayload(42, 99, "run-1", 1, 20));
+        await AssertOkAsync(dispatcher, "ListActiveReferenceMaterializationMaterials", new ListActiveReferenceMaterializationMaterialsPayload(42, 99, 1, 20, "真相"));
 
         Assert.Equal(
             [
@@ -28,7 +29,8 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                 "confirm:42:99:profile-1",
                 "enqueue:42:99:profile-1:10",
                 "status:42:99:run-1",
-                "progress:42:99:run-1:1:20"
+                "progress:42:99:run-1:1:20",
+                "materials:42:99:1:20:真相"
             ],
             service.Calls);
     }
@@ -142,6 +144,28 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
             Calls.Add($"progress:{input.NovelId}:{input.AnchorId}:{input.RunId}:{input.Page}:{input.Size}");
             return ValueTask.FromResult(new PageResultPayload<ReferenceMaterializationChapterProgressPayload>(
                 [new ReferenceMaterializationChapterProgressPayload(1, 0, "pending", "pending", 0, 0, 0, 0, 0, 0, 0, null, null, null, null, 0)],
+                1,
+                input.Page,
+                input.Size,
+                1));
+        }
+
+        public ValueTask<PageResultPayload<ReferenceMaterializationMaterialPayload>> ListActiveMaterialsAsync(
+            ListActiveReferenceMaterializationMaterialsPayload input,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add($"materials:{input.NovelId}:{input.AnchorId}:{input.Page}:{input.Size}:{input.Query}");
+            return ValueTask.FromResult(new PageResultPayload<ReferenceMaterializationMaterialPayload>(
+                [new ReferenceMaterializationMaterialPayload(
+                    "material-1",
+                    input.AnchorId,
+                    "generation-1",
+                    "passage",
+                    "她说出了真相。",
+                    0.9,
+                    0.8,
+                    new ReferenceMaterializationMaterialTagsPayload(["reveal"], [], ["close_third"], ["subtext"]),
+                    ["complete_exchange"])],
                 1,
                 input.Page,
                 input.Size,

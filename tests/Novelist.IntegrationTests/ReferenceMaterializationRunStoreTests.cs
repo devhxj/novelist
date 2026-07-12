@@ -315,6 +315,12 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         Assert.True(status?.VectorIndexHealthy);
         Assert.Equal(status?.AcceptedCount, await CountPromotedMaterialsAsync(options, run.RunId));
         Assert.Equal(status?.GenerationId, await ReadActiveGenerationAsync(options, anchor.AnchorId));
+        var materializationService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var listed = await materializationService.ListActiveMaterialsAsync(
+            new ListActiveReferenceMaterializationMaterialsPayload(anchor.NovelId, anchor.AnchorId, 1, 20),
+            CancellationToken.None);
+        Assert.Equal(status!.AcceptedCount, checked((int)listed.Total));
+        Assert.All(listed.Items, item => Assert.Equal(status.GenerationId, item.GenerationId));
     }
 
     [Fact]

@@ -65,6 +65,21 @@ public sealed partial class SqliteReferenceMaterializationService
         return await _runStore.ListChapterProgressAsync(input.RunId, input.Page, input.Size, cancellationToken);
     }
 
+    public async ValueTask<PageResultPayload<ReferenceMaterializationMaterialPayload>> ListActiveMaterialsAsync(
+        ListActiveReferenceMaterializationMaterialsPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateReferenceInput(input.NovelId, input.AnchorId);
+        await EnsureAnchorAccessibleAsync(input.NovelId, input.AnchorId, cancellationToken);
+        return await _runStore.ListActiveMaterialsAsync(
+            input.AnchorId,
+            input.Page,
+            input.Size,
+            input.Query,
+            cancellationToken);
+    }
+
     private async ValueTask EnsureConfirmedProfileMatchesCurrentSourceAsync(
         long novelId,
         long anchorId,

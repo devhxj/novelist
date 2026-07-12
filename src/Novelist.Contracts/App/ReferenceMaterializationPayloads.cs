@@ -150,6 +150,14 @@ public sealed record ListReferenceMaterializationChapterProgressPayload(
     [property: JsonPropertyName("page")] int Page,
     [property: JsonPropertyName("size")] int Size);
 
+public sealed record ListActiveReferenceMaterializationMaterialsPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("page")] int Page,
+    [property: JsonPropertyName("size")] int Size,
+    [property: JsonPropertyName("query")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Query = null);
+
 public sealed record ReferenceChapterSplitBoundaryPayload(
     [property: JsonPropertyName("chapter_index")] int ChapterIndex,
     [property: JsonPropertyName("title")] string Title,
@@ -251,3 +259,20 @@ public sealed record ReferenceMaterializationStatusPayload(
     DateTimeOffset? CompletedAt,
     [property: JsonPropertyName("vector_index_healthy")] bool VectorIndexHealthy,
     [property: JsonPropertyName("next_action")] string NextAction);
+
+public sealed record ReferenceMaterializationMaterialTagsPayload(
+    [property: JsonPropertyName("narrative_functions")] IReadOnlyList<string> NarrativeFunctions,
+    [property: JsonPropertyName("emotion_mechanics")] IReadOnlyList<string> EmotionMechanics,
+    [property: JsonPropertyName("pov")] IReadOnlyList<string> Pov,
+    [property: JsonPropertyName("techniques")] IReadOnlyList<string> Techniques);
+
+public sealed record ReferenceMaterializationMaterialPayload(
+    [property: JsonPropertyName("material_id")] string MaterialId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("generation_id")] string GenerationId,
+    [property: JsonPropertyName("material_type")] string MaterialType,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("quality_score")] double QualityScore,
+    [property: JsonPropertyName("confidence")] double Confidence,
+    [property: JsonPropertyName("tags")] ReferenceMaterializationMaterialTagsPayload Tags,
+    [property: JsonPropertyName("reason_codes")] IReadOnlyList<string> ReasonCodes);

@@ -140,6 +140,7 @@ public static class BridgeCompatibilityAppMethods
 "ListReferenceCorpusTechniqueSpecimens",
  "ListReferenceCorpusAnalysisJobs",
  "ListReferenceMaterializationChapterProgress",
+ "ListActiveReferenceMaterializationMaterials",
  "ListReferenceCorpusAggregates",
  "ListReferenceCorpusReviewQueue",
         "ListSlashCommands",

@@ -27,4 +27,8 @@ public interface IReferenceMaterializationService
     ValueTask<PageResultPayload<ReferenceMaterializationChapterProgressPayload>> ListMaterializationChapterProgressAsync(
         ListReferenceMaterializationChapterProgressPayload input,
         CancellationToken cancellationToken);
+
+    ValueTask<PageResultPayload<ReferenceMaterializationMaterialPayload>> ListActiveMaterialsAsync(
+        ListActiveReferenceMaterializationMaterialsPayload input,
+        CancellationToken cancellationToken);
 }

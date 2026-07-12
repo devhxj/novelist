@@ -44,6 +44,11 @@ public static class ReferenceMaterializationBridgeHandlers
                 ReadObjectArg<ListReferenceMaterializationChapterProgressPayload>(context.Payload, 0, "input"),
                 cancellationToken)));
 
+        dispatcher.Register("ListActiveReferenceMaterializationMaterials", async (context, cancellationToken) =>
+            await ExecuteMaterialsAsync(() => service.ListActiveMaterialsAsync(
+                ReadObjectArg<ListActiveReferenceMaterializationMaterialsPayload>(context.Payload, 0, "input"),
+                cancellationToken)));
+
         return dispatcher;
     }
 
@@ -127,6 +132,29 @@ public static class ReferenceMaterializationBridgeHandlers
         }
     }
 
+    private static async ValueTask<PageResultPayload<ReferenceMaterializationMaterialPayload>> ExecuteMaterialsAsync(
+        Func<ValueTask<PageResultPayload<ReferenceMaterializationMaterialPayload>>> operation)
+    {
+        try
+        {
+            var result = await operation();
+            return new PageResultPayload<ReferenceMaterializationMaterialPayload>(
+                result.Items.Select(SanitizeMaterial).ToArray(),
+                result.Total,
+                result.Page,
+                result.Size,
+                result.TotalPages);
+        }
+        catch (ReferenceMaterializationException exception)
+        {
+            throw new BridgeRequestException(
+                exception.ErrorCode,
+                exception.Message,
+                new { error_code = exception.ErrorCode },
+                retryable: true);
+        }
+    }
+
     private static ReferenceMaterializationStatusPayload SanitizeStatus(ReferenceMaterializationStatusPayload status)
     {
         return status with
@@ -163,6 +191,32 @@ public static class ReferenceMaterializationBridgeHandlers
             Provider = ReferencePayloadSanitizer.RedactAndBoundText(model.Provider, 128),
             ModelId = ReferencePayloadSanitizer.RedactAndBoundText(model.ModelId, 256)
         };
+    }
+
+    private static ReferenceMaterializationMaterialPayload SanitizeMaterial(
+        ReferenceMaterializationMaterialPayload material)
+    {
+        return material with
+        {
+            MaterialId = ReferencePayloadSanitizer.RedactAndBoundText(material.MaterialId, 128),
+            GenerationId = ReferencePayloadSanitizer.RedactAndBoundText(material.GenerationId, 128),
+            MaterialType = ReferencePayloadSanitizer.RedactAndBoundText(material.MaterialType, 64),
+            Text = ReferencePayloadSanitizer.RedactAndBoundText(material.Text, 1_400),
+            Tags = new ReferenceMaterializationMaterialTagsPayload(
+                SanitizeTags(material.Tags.NarrativeFunctions),
+                SanitizeTags(material.Tags.EmotionMechanics),
+                SanitizeTags(material.Tags.Pov),
+                SanitizeTags(material.Tags.Techniques)),
+            ReasonCodes = SanitizeTags(material.ReasonCodes)
+        };
+    }
+
+    private static IReadOnlyList<string> SanitizeTags(IReadOnlyList<string>? values)
+    {
+        return (values ?? Array.Empty<string>())
+            .Take(12)
+            .Select(value => ReferencePayloadSanitizer.RedactAndBoundText(value, 96))
+            .ToArray();
     }
 
     private static T ReadObjectArg<T>(JsonElement? payload, int index, string argumentName)
