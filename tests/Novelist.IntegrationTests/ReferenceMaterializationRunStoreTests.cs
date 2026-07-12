@@ -309,6 +309,12 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         Assert.Equal(2, status?.ProcessedChapters);
         Assert.Equal(1, status?.CompletedChapterBatches);
         Assert.Null(status?.CurrentBatchIndex);
+        Assert.True(
+            status?.Status == ReferenceMaterializationRunStates.Completed,
+            $"{status?.LastErrorCode}: {status?.LastErrorMessage}");
+        Assert.True(status?.VectorIndexHealthy);
+        Assert.Equal(status?.AcceptedCount, await CountPromotedMaterialsAsync(options, run.RunId));
+        Assert.Equal(status?.GenerationId, await ReadActiveGenerationAsync(options, anchor.AnchorId));
     }
 
     [Fact]
@@ -511,6 +517,24 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         command.Parameters.AddWithValue("$run_id", runId);
         command.Parameters.AddWithValue("$chapter_index", chapterIndex);
         return Convert.ToInt32(await command.ExecuteScalarAsync(CancellationToken.None));
+    }
+
+    private static async ValueTask<int> CountPromotedMaterialsAsync(AppInitializationOptions options, string runId)
+    {
+        await using var connection = await OpenConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM reference_materialization_materials WHERE run_id = $run_id;";
+        command.Parameters.AddWithValue("$run_id", runId);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(CancellationToken.None));
+    }
+
+    private static async ValueTask<string?> ReadActiveGenerationAsync(AppInitializationOptions options, long anchorId)
+    {
+        await using var connection = await OpenConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT active_generation_id FROM reference_anchor_materialization_state WHERE anchor_id = $anchor_id;";
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        return (string?)await command.ExecuteScalarAsync(CancellationToken.None);
     }
 
     private static async ValueTask<SqliteConnection> OpenConnectionAsync(AppInitializationOptions options)

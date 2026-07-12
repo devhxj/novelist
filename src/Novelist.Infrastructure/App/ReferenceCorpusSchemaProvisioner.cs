@@ -250,6 +250,44 @@ internal static class ReferenceCorpusSchemaProvisioner
             CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_materialization_vector_indexes_run
               ON reference_materialization_vector_indexes(run_id);
 
+            CREATE TABLE IF NOT EXISTS reference_materialization_materials (
+              material_id TEXT PRIMARY KEY,
+              generation_id TEXT NOT NULL,
+              run_id TEXT NOT NULL,
+              candidate_id TEXT NOT NULL,
+              anchor_id INTEGER NOT NULL,
+              material_type TEXT NOT NULL,
+              text TEXT NOT NULL,
+              text_hash TEXT NOT NULL,
+              quality_score REAL NOT NULL,
+              confidence REAL NOT NULL,
+              scores_json TEXT NOT NULL,
+              tags_json TEXT NOT NULL,
+              reason_codes_json TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(run_id) REFERENCES reference_materialization_runs(run_id) ON DELETE CASCADE,
+              FOREIGN KEY(candidate_id) REFERENCES reference_material_candidates(candidate_id) ON DELETE RESTRICT,
+              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_materialization_materials_generation_candidate
+              ON reference_materialization_materials(generation_id, candidate_id);
+
+            CREATE INDEX IF NOT EXISTS idx_reference_materialization_materials_active_lookup
+              ON reference_materialization_materials(anchor_id, generation_id, material_type, material_id);
+
+            CREATE TABLE IF NOT EXISTS reference_materialization_material_nodes (
+              material_id TEXT NOT NULL,
+              node_id TEXT NOT NULL,
+              ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+              evidence_start INTEGER NOT NULL CHECK(evidence_start >= 0),
+              evidence_end INTEGER NOT NULL CHECK(evidence_end > evidence_start),
+              text_hash TEXT NOT NULL,
+              PRIMARY KEY(material_id, ordinal),
+              FOREIGN KEY(material_id) REFERENCES reference_materialization_materials(material_id) ON DELETE CASCADE,
+              FOREIGN KEY(node_id) REFERENCES reference_text_nodes(node_id) ON DELETE RESTRICT
+            );
+
  CREATE TABLE IF NOT EXISTS reference_analysis_runs (
               run_id TEXT PRIMARY KEY,
               anchor_id INTEGER NOT NULL,

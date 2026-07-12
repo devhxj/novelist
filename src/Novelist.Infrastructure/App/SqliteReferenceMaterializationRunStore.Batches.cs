@@ -14,8 +14,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.CommandText = """
             SELECT run_id
             FROM reference_materialization_runs
-            WHERE status IN ($queued, $running)
-              AND current_batch_index IS NOT NULL
+            WHERE (status = $queued AND current_batch_index IS NOT NULL)
+               OR (status = $running AND (current_batch_index IS NOT NULL OR processed_chapters = total_chapters))
             ORDER BY started_at, run_id
             LIMIT 1;
             """;
@@ -272,25 +272,43 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         TimeSpan leaseDuration,
         CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
+        await using (var existing = connection.CreateCommand())
+        {
+            existing.Transaction = transaction;
+            existing.CommandText = """
+                SELECT lease_expires_at
+                FROM reference_materialization_run_leases
+                WHERE run_id = $run_id;
+                """;
+            existing.Parameters.AddWithValue("$run_id", runId);
+            var expiresAt = (string?)await existing.ExecuteScalarAsync(cancellationToken);
+            if (expiresAt is not null && DateTimeOffset.Parse(expiresAt) > now)
+            {
+                return false;
+            }
+        }
+
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM reference_materialization_run_leases WHERE run_id = $run_id;";
+            delete.Parameters.AddWithValue("$run_id", runId);
+            await delete.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = """
             INSERT INTO reference_materialization_run_leases (
               run_id, worker_id, lease_token, lease_expires_at, updated_at)
-            VALUES ($run_id, $worker_id, $lease_token, $lease_expires_at, $updated_at)
-            ON CONFLICT(run_id) DO UPDATE SET
-              worker_id = excluded.worker_id,
-              lease_token = excluded.lease_token,
-              lease_expires_at = excluded.lease_expires_at,
-              updated_at = excluded.updated_at
-            WHERE reference_materialization_run_leases.lease_expires_at <= $updated_at;
+            VALUES ($run_id, $worker_id, $lease_token, $lease_expires_at, $updated_at);
             """;
-        command.Parameters.AddWithValue("$run_id", runId);
-        command.Parameters.AddWithValue("$worker_id", workerId);
-        command.Parameters.AddWithValue("$lease_token", leaseToken);
-        command.Parameters.AddWithValue("$lease_expires_at", FormatTimestamp(now.Add(leaseDuration)));
-        command.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
-        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+        insert.Parameters.AddWithValue("$run_id", runId);
+        insert.Parameters.AddWithValue("$worker_id", workerId);
+        insert.Parameters.AddWithValue("$lease_token", leaseToken);
+        insert.Parameters.AddWithValue("$lease_expires_at", FormatTimestamp(now.Add(leaseDuration)));
+        insert.Parameters.AddWithValue("$updated_at", FormatTimestamp(now));
+        return await insert.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
     private static async ValueTask StartRunAsync(

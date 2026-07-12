@@ -130,17 +130,34 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         var claim = await store.ClaimCurrentBatchAsync(runId, _workerId, _leaseDuration, cancellationToken);
         if (claim is null)
         {
-            return false;
+            return await store.PromoteIfReadyAsync(runId, cancellationToken);
         }
 
         try
         {
             using var batchCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var tasks = claim.ChapterIndexes
-                .Select(chapterIndex => ProcessChapterAsync(store, claim.RunId, chapterIndex, batchCancellation.Token))
-                .ToArray();
+            var builtCandidates = new List<ReferenceCandidateBuildResult>(claim.ChapterIndexes.Count);
+            Task[] tasks = [];
             try
             {
+                // SQLite writes are short but serialized; stage them before the model calls so every chapter
+                // in the frozen batch can qualify concurrently without holding an open database transaction.
+                foreach (var chapterIndex in claim.ChapterIndexes)
+                {
+                    builtCandidates.Add(await store.BuildCandidatesForChapterAsync(
+                        claim.RunId,
+                        chapterIndex,
+                        batchCancellation.Token));
+                }
+
+                tasks = builtCandidates
+                    .Select(candidateBuild => ProcessPreparedChapterAsync(
+                        store,
+                        claim.RunId,
+                        candidateBuild.ChapterIndex,
+                        candidateBuild.CandidateCount,
+                        batchCancellation.Token))
+                    .ToArray();
                 await Task.WhenAll(tasks);
             }
             catch
@@ -157,8 +174,12 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
                 throw;
             }
 
-            await _indexer.IndexCurrentBatchAsync(claim.RunId, cancellationToken);
+            var indexed = await _indexer.IndexCurrentBatchAsync(claim.RunId, cancellationToken);
             await store.ReleaseBatchLeaseAsync(claim, cancellationToken);
+            if (indexed.NextBatchIndex is null)
+            {
+                await store.PromoteIfReadyAsync(claim.RunId, cancellationToken);
+            }
             return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -228,14 +249,14 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
         }
     }
 
-    private async Task ProcessChapterAsync(
+    private async Task ProcessPreparedChapterAsync(
         SqliteReferenceMaterializationRunStore store,
         string runId,
         int chapterIndex,
+        int candidateCount,
         CancellationToken cancellationToken)
     {
-        var candidates = await store.BuildCandidatesForChapterAsync(runId, chapterIndex, cancellationToken);
-        if (candidates.CandidateCount == 0)
+        if (candidateCount == 0)
         {
             await store.CompleteEmptyQualificationAsync(runId, chapterIndex, cancellationToken);
             await store.CompleteEmptyEmbeddingAsync(runId, chapterIndex, cancellationToken);

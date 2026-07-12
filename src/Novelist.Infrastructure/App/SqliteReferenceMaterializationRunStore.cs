@@ -61,7 +61,14 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                    current_batch_index, current_batch_start_chapter, current_batch_end_chapter,
                    candidate_count, accepted_count, rejected_count, review_count, vector_count,
                    model_provider, model_id, embedding_provider, embedding_model_id, embedding_dimensions,
-                   last_error_code, last_error_message, started_at, completed_at
+                   last_error_code, last_error_message, started_at, completed_at,
+                   EXISTS(
+                     SELECT 1
+                     FROM reference_materialization_vector_indexes vector_index
+                     WHERE vector_index.run_id = reference_materialization_runs.run_id
+                       AND vector_index.status = 'ready'
+                       AND vector_index.vector_count = reference_materialization_runs.vector_count
+                   ) AS vector_index_healthy
             FROM reference_materialization_runs
             WHERE run_id = $run_id;
             """;
@@ -375,7 +382,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             reader.IsDBNull(24) ? null : reader.GetString(24),
             ParseTimestamp(reader.GetString(25)),
             reader.IsDBNull(26) ? null : ParseTimestamp(reader.GetString(26)),
-            false,
+            reader.GetInt64(27) != 0,
             NextActionFor(status));
     }
 
