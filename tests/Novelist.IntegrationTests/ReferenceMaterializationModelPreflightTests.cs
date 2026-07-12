@@ -64,6 +64,22 @@ public sealed class ReferenceMaterializationModelPreflightTests
         Assert.Equal(1, embeddings.CallCount);
     }
 
+    [Fact]
+    public async Task VerifyAsyncReservesOutputCapacityForThinkingModelHealthChecks()
+    {
+        var chat = new MinimumOutputChatCompletionClient(minimumOutputTokens: 256);
+        var preflight = new ReferenceMaterializationModelPreflight(
+            new FixedSettingsService("deepseek/deepseek-v4-pro"),
+            chat,
+            new FixedEmbeddingConfiguration(new EmbeddingRequestOptions("embedding", "https://example.test", "key", "embed", 3, null)),
+            new RecordingEmbeddingClient());
+
+        await preflight.VerifyAsync(CancellationToken.None);
+
+        Assert.NotNull(chat.Request);
+        Assert.Equal(256, chat.Request.MaxOutputTokens);
+    }
+
     private sealed class FixedSettingsService(string selectedModelKey) : IAppSettingsService
     {
         public ValueTask<AppSettingsPayload> GetSettingsAsync(CancellationToken cancellationToken) =>
@@ -116,6 +132,25 @@ public sealed class ReferenceMaterializationModelPreflightTests
                 3,
                 [new EmbeddingItemResult(0, [1f, 2f, 3f])],
                 new EmbeddingUsage(1, 1)));
+        }
+    }
+
+    private sealed class MinimumOutputChatCompletionClient(int minimumOutputTokens) : IChatCompletionClient
+    {
+        public ChatCompletionRequest? Request { get; private set; }
+
+        public ValueTask<string> GenerateTextAsync(ChatCompletionRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ChatCompletionStreamEvent> StreamChatAsync(
+            ChatCompletionRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            Request = request;
+            await Task.CompletedTask;
+            if (request.MaxOutputTokens >= minimumOutputTokens)
+            {
+                yield return new ChatCompletionStreamEvent(ChatCompletionStreamEventKind.Content, "{\"ok\":true}");
+            }
         }
     }
 }

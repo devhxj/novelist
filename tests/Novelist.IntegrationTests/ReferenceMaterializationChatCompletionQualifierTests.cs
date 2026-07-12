@@ -13,10 +13,13 @@ public sealed class ReferenceMaterializationChatCompletionQualifierTests
         var chat = new RecordingChatCompletionClient(
         [
             new ChatCompletionStreamEvent(
-                ChatCompletionStreamEventKind.Content,
-                """
-                {"schema_version":"reference-materialization-qualifier-v2","decisions":[{"candidate_id":"candidate-a","decision":"accept","source_spans":[{"node_id":"node-a","start":0,"end":7}],"scores":{"semantic_completeness":0.91,"information_density":0.72,"narrative_value":0.83,"transferability":0.61,"context_independence":0.75,"technique_distinctiveness":0.69},"tags":{"narrative_functions":["reveal"],"emotion_mechanics":["escalation"],"pov":["close_third"],"techniques":["subtext"],"scene_beat_roles":["turn_beat"],"character_relations":["mistrust"],"causal_information_roles":["reveal"]},"confidence":0.84,"reason_codes":["complete_exchange"]},{"candidate_id":"candidate-b","decision":"reject","source_spans":[{"node_id":"node-b","start":0,"end":5}],"scores":{"semantic_completeness":0.15,"information_density":0.12,"narrative_value":0.09,"transferability":0.03,"context_independence":0.18,"technique_distinctiveness":0.04},"tags":{"narrative_functions":[],"emotion_mechanics":[],"pov":[],"techniques":[],"scene_beat_roles":[],"character_relations":[],"causal_information_roles":[]},"confidence":0.93,"reason_codes":["context_dependent"]}]}
-                """)
+                ChatCompletionStreamEventKind.ToolCall,
+                ToolCall: new ChatToolCall(
+                    "call-qualification",
+                    "submit_materialization_qualification",
+                    """
+                {"decisions":[{"candidate_id":"candidate-a","decision":"accept","source_spans":[{"node_id":"node-a","start":0,"end":7}],"scores":{"semantic_completeness":0.91,"information_density":0.72,"narrative_value":0.83,"transferability":0.61,"context_independence":0.75,"technique_distinctiveness":0.69},"tags":{"narrative_functions":["reveal"],"emotion_mechanics":["escalation"],"pov":["close_third"],"techniques":["subtext"],"scene_beat_roles":["turn_beat"],"character_relations":["mistrust"],"causal_information_roles":["reveal"]},"confidence":0.84,"reason_codes":["complete_exchange"]},{"candidate_id":"candidate-b","decision":"reject","source_spans":[{"node_id":"node-b","start":0,"end":5}],"scores":{"semantic_completeness":0.15,"information_density":0.12,"narrative_value":0.09,"transferability":0.03,"context_independence":0.18,"technique_distinctiveness":0.04},"tags":{"narrative_functions":[],"emotion_mechanics":[],"pov":[],"techniques":[],"scene_beat_roles":[],"character_relations":[],"causal_information_roles":[]},"confidence":0.93,"reason_codes":["context_dependent"]}]}
+                """))
         ]);
         var qualifier = new ReferenceMaterializationChatCompletionQualifier(chat);
 
@@ -39,7 +42,11 @@ public sealed class ReferenceMaterializationChatCompletionQualifierTests
         Assert.Equal("qwen", chat.LastRequest?.ProviderName);
         Assert.Equal("qwen-plus", chat.LastRequest?.ModelId);
         Assert.Equal("high", chat.LastRequest?.ReasoningEffort);
-        Assert.Contains("Return strict JSON only", chat.LastRequest?.Messages[0].Content, StringComparison.Ordinal);
+        Assert.Equal(0, chat.LastRequest?.TemperatureOverride);
+        var tool = Assert.Single(chat.LastRequest!.Tools!);
+        Assert.Equal("submit_materialization_qualification", tool.Name);
+        Assert.True(tool.Strict);
+        Assert.Contains("Call submit_materialization_qualification exactly once", chat.LastRequest?.Messages[0].Content, StringComparison.Ordinal);
         Assert.Contains("candidate-a", chat.LastRequest?.Messages[1].Content, StringComparison.Ordinal);
     }
 
@@ -99,6 +106,23 @@ public sealed class ReferenceMaterializationChatCompletionQualifierTests
                 CancellationToken.None));
 
         Assert.Equal(ReferenceMaterializationErrorCodes.LlmOutputInvalid, exception.ErrorCode);
+    }
+
+    [Fact]
+    public async Task QualifyAsyncRejectsRequestsThatExceedTheFiveCandidateModelBatch()
+    {
+        var qualifier = new ReferenceMaterializationChatCompletionQualifier(
+            new RecordingChatCompletionClient([]));
+        var candidates = Enumerable.Range(1, 6)
+            .Select(index => Candidate($"candidate-{index}", $"node-{index}", "他说出了真相。"))
+            .ToArray();
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await qualifier.QualifyAsync(
+                new ReferenceMaterializationQualificationRequest(
+                    new ReferenceMaterializationLlmSelection("deepseek", "deepseek-v4-pro", "high"),
+                    candidates),
+                CancellationToken.None));
     }
 
     private static ReferenceMaterializationQualificationCandidate Candidate(string candidateId, string nodeId, string text)

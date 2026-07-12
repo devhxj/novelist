@@ -5,6 +5,8 @@ namespace Novelist.Infrastructure.App;
 
 internal sealed class ReferenceMaterializationModelPreflight : IReferenceMaterializationModelPreflight
 {
+    private const int LlmHealthCheckMaxOutputTokens = 256;
+
     private readonly IAppSettingsService _settings;
     private readonly IChatCompletionClient _completion;
     private readonly IEmbeddingConfigurationService _embeddingConfiguration;
@@ -52,7 +54,7 @@ internal sealed class ReferenceMaterializationModelPreflight : IReferenceMateria
                         new ChatCompletionMessage("system", "Return exactly {\"ok\":true}."),
                         new ChatCompletionMessage("user", "materialization health check")
                     ],
-                    MaxOutputTokens: 16),
+                    MaxOutputTokens: LlmHealthCheckMaxOutputTokens),
                 cancellationToken))
             {
                 if (item.Kind == ChatCompletionStreamEventKind.Content && !string.IsNullOrWhiteSpace(item.Data))

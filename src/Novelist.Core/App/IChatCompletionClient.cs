@@ -19,7 +19,8 @@ public sealed record ChatCompletionRequest(
     string ReasoningEffort,
     IReadOnlyList<ChatCompletionMessage> Messages,
     IReadOnlyList<ChatToolDefinition>? Tools = null,
-    int? MaxOutputTokens = null);
+    int? MaxOutputTokens = null,
+    double? TemperatureOverride = null);
 
 public sealed record ChatCompletionMessage(
     string Role,
@@ -32,7 +33,8 @@ public sealed record ChatCompletionMessage(
 public sealed record ChatToolDefinition(
     string Name,
     string Description,
-    JsonElement ParametersSchema);
+    JsonElement ParametersSchema,
+    bool Strict = false);
 
 public sealed record ChatToolCall(
     string Id,

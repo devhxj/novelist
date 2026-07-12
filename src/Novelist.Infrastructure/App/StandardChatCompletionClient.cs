@@ -222,7 +222,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
             ["model"] = provider.Model.Id,
             ["messages"] = messages,
             ["stream"] = stream,
-            ["temperature"] = provider.Temperature,
+            ["temperature"] = ResolveTemperature(provider, request),
             ["max_tokens"] = titleGeneration
  ? maxOutputTokens
  : maxOutputTokens
@@ -269,7 +269,7 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
             ["model"] = provider.Model.Id,
             ["input"] = ToResponsesInput(request.Messages),
             ["stream"] = stream,
-            ["temperature"] = provider.Temperature,
+            ["temperature"] = ResolveTemperature(provider, request),
             ["max_output_tokens"] = titleGeneration
  ? maxOutputTokens
  : maxOutputTokens
@@ -524,23 +524,29 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
 
     private static Dictionary<string, object?> ToOpenAiToolDefinition(ChatToolDefinition tool)
     {
+        var function = new Dictionary<string, object?>
+        {
+            ["name"] = NormalizeRequiredText(tool.Name, nameof(tool.Name), 128),
+            ["description"] = NormalizeOptionalText(tool.Description, nameof(tool.Description), 4096),
+            ["parameters"] = tool.ParametersSchema.ValueKind == JsonValueKind.Undefined
+                ? JsonSerializer.SerializeToElement(new { type = "object", properties = new { } }, JsonOptions)
+                : tool.ParametersSchema
+        };
+        if (tool.Strict)
+        {
+            function["strict"] = true;
+        }
+
         return new Dictionary<string, object?>
         {
             ["type"] = "function",
-            ["function"] = new Dictionary<string, object?>
-            {
-                ["name"] = NormalizeRequiredText(tool.Name, nameof(tool.Name), 128),
-                ["description"] = NormalizeOptionalText(tool.Description, nameof(tool.Description), 4096),
-                ["parameters"] = tool.ParametersSchema.ValueKind == JsonValueKind.Undefined
-                    ? JsonSerializer.SerializeToElement(new { type = "object", properties = new { } }, JsonOptions)
-                    : tool.ParametersSchema
-            }
+            ["function"] = function
         };
     }
 
     private static Dictionary<string, object?> ToResponsesToolDefinition(ChatToolDefinition tool)
     {
-        return new Dictionary<string, object?>
+        var definition = new Dictionary<string, object?>
         {
             ["type"] = "function",
             ["name"] = NormalizeRequiredText(tool.Name, nameof(tool.Name), 128),
@@ -549,6 +555,12 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
                 ? JsonSerializer.SerializeToElement(new { type = "object", properties = new { } }, JsonOptions)
                 : tool.ParametersSchema
         };
+        if (tool.Strict)
+        {
+            definition["strict"] = true;
+        }
+
+        return definition;
     }
 
     private static Dictionary<string, object?> ToOpenAiToolCall(ChatToolCall call)
@@ -927,6 +939,20 @@ public sealed class StandardChatCompletionClient : IChatCompletionClient
         }
 
         return titleGeneration ? 64 : modelLimit;
+    }
+
+    private static double ResolveTemperature(ResolvedProvider provider, ChatCompletionRequest request)
+    {
+        var temperature = request.TemperatureOverride ?? provider.Temperature;
+        if (double.IsNaN(temperature) || double.IsInfinity(temperature) || temperature < 0 || temperature > 2)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request.TemperatureOverride),
+                temperature,
+                "Temperature must be between 0 and 2.");
+        }
+
+        return temperature;
     }
 
     private static void ValidateMaxOutputTokens(ChatCompletionRequest request)

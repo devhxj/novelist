@@ -51,6 +51,43 @@ public sealed class StandardChatCompletionClientTokenLimitTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StreamChatAsyncUsesExplicitTemperatureOverrideForEachEndpoint(bool responsesEndpoint)
+    {
+        var handler = new RecordingHandler();
+        var client = CreateClient(responsesEndpoint, 2048, handler);
+
+        await DrainAsync(client.StreamChatAsync(CreateRequest(640, temperatureOverride: 0), CancellationToken.None));
+
+        using var payload = JsonDocument.Parse(Assert.Single(handler.Bodies));
+        Assert.Equal(0, payload.RootElement.GetProperty("temperature").GetDouble());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StreamChatAsyncCarriesStrictToolDefinitionsForEachEndpoint(bool responsesEndpoint)
+    {
+        var handler = new RecordingHandler();
+        var client = CreateClient(responsesEndpoint, 2048, handler);
+        using var schema = JsonDocument.Parse("""{"type":"object","properties":{}}""");
+        var request = CreateRequest(640) with
+        {
+            Tools = [new ChatToolDefinition("submit_result", "Submit a result.", schema.RootElement.Clone(), Strict: true)]
+        };
+
+        await DrainAsync(client.StreamChatAsync(request, CancellationToken.None));
+
+        using var payload = JsonDocument.Parse(Assert.Single(handler.Bodies));
+        var tool = payload.RootElement.GetProperty("tools")[0];
+        var strict = responsesEndpoint
+            ? tool.GetProperty("strict").GetBoolean()
+            : tool.GetProperty("function").GetProperty("strict").GetBoolean();
+        Assert.True(strict);
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(-1)]
     public async Task StreamChatAsyncRejectsNonPositiveRequestLimitWithoutSending(int limit)
@@ -95,12 +132,13 @@ public sealed class StandardChatCompletionClientTokenLimitTests
  new HttpClient(handler));
     }
 
-    private static ChatCompletionRequest CreateRequest(int? maxOutputTokens) => new(
+    private static ChatCompletionRequest CreateRequest(int? maxOutputTokens, double? temperatureOverride = null) => new(
  nameof(Names.provider_a),
  nameof(Names.model_a),
  string.Empty,
  [new ChatCompletionMessage(nameof(Names.user), nameof(Names.content))],
- MaxOutputTokens: maxOutputTokens);
+ MaxOutputTokens: maxOutputTokens,
+ TemperatureOverride: temperatureOverride);
 
     private static string PropertyName(bool responsesEndpoint) =>
     responsesEndpoint ? nameof(Names.max_output_tokens) : nameof(Names.max_tokens);
