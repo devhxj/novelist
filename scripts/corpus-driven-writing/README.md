@@ -81,6 +81,14 @@ The normal `dotnet test` suite discovers this test but skips it unless the scrip
 ./scripts/corpus-driven-writing/run-materialization-scale-gate.ps1 -Configuration Release -ScaleCharacters 2000000
 ```
 
+## Materialization quality fixture contract
+
+`run-materialization-quality-fixture-contract.ps1` validates the v2 calibration and holdout annotations independently of throughput. It checks decision/type/reason-code enums, source hashes, exact evidence spans, duplicate identifiers, and the physical calibration/holdout split.
+
+```powershell
+./scripts/corpus-driven-writing/run-materialization-quality-fixture-contract.ps1 -Configuration Release
+```
+
 ## Writing-effect evaluation
 
 `run-writing-evaluation.ps1` evaluates a redacted dataset containing only IDs, hashes, numeric results, and human labels. It writes aggregate retrieval, blueprint, and prose metrics beneath `build/tmp/corpus-driven-writing/`; it never writes source or candidate prose to the report.
