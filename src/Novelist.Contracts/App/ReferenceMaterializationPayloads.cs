@@ -81,6 +81,8 @@ public static class ReferenceMaterializationErrorCodes
     public const string EmbeddingInvalid = "materialization_embedding_invalid";
     public const string VectorIndexFailed = "materialization_vector_index_failed";
     public const string GenerationIncomplete = "materialization_generation_incomplete";
+    public const string BlueprintMaterialNotReady = "materialization_blueprint_material_not_ready";
+    public const string BlueprintNoRelevantMaterial = "materialization_blueprint_no_relevant_material";
     public const string ChapterSplitProfileStale = "materialization_chapter_split_profile_stale";
     public const string RetryRequiresNewRun = "materialization_retry_requires_new_run";
 }

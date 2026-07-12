@@ -288,6 +288,71 @@ internal static class ReferenceCorpusSchemaProvisioner
               FOREIGN KEY(node_id) REFERENCES reference_text_nodes(node_id) ON DELETE RESTRICT
             );
 
+            CREATE TABLE IF NOT EXISTS reference_materialization_blueprint_preview_sessions (
+              session_id TEXT PRIMARY KEY,
+              novel_id INTEGER NOT NULL,
+              goal TEXT NOT NULL,
+              status TEXT NOT NULL CHECK(status IN ('active', 'stale')),
+              next_action TEXT NOT NULL CHECK(next_action IN ('none', 'rebuild')),
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS reference_materialization_blueprint_preview_sources (
+              session_id TEXT NOT NULL,
+              anchor_id INTEGER NOT NULL,
+              generation_id TEXT NOT NULL,
+              material_count INTEGER NOT NULL CHECK(material_count > 0),
+              PRIMARY KEY(session_id, anchor_id),
+              FOREIGN KEY(session_id) REFERENCES reference_materialization_blueprint_preview_sessions(session_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS reference_materialization_blueprint_preview_candidates (
+              session_id TEXT NOT NULL,
+              blueprint_id TEXT NOT NULL,
+              candidate_index INTEGER NOT NULL CHECK(candidate_index >= 0),
+              strategy TEXT NOT NULL,
+              PRIMARY KEY(session_id, blueprint_id),
+              UNIQUE(session_id, candidate_index),
+              FOREIGN KEY(session_id) REFERENCES reference_materialization_blueprint_preview_sessions(session_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS reference_materialization_blueprint_preview_beats (
+              session_id TEXT NOT NULL,
+              blueprint_id TEXT NOT NULL,
+              beat_id TEXT NOT NULL,
+              beat_index INTEGER NOT NULL CHECK(beat_index >= 0),
+              intent TEXT NOT NULL,
+              narrative_function TEXT NOT NULL,
+              PRIMARY KEY(session_id, blueprint_id, beat_id),
+              UNIQUE(session_id, blueprint_id, beat_index),
+              FOREIGN KEY(session_id, blueprint_id)
+                REFERENCES reference_materialization_blueprint_preview_candidates(session_id, blueprint_id)
+                ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS reference_materialization_blueprint_preview_material_links (
+              session_id TEXT NOT NULL,
+              blueprint_id TEXT NOT NULL,
+              beat_id TEXT NOT NULL,
+              material_id TEXT NOT NULL,
+              anchor_id INTEGER NOT NULL,
+              generation_id TEXT NOT NULL,
+              material_type TEXT NOT NULL,
+              text_preview TEXT NOT NULL,
+              quality_score REAL NOT NULL,
+              vector_score REAL NOT NULL,
+              fit_explanation TEXT NOT NULL,
+              material_rank INTEGER NOT NULL CHECK(material_rank >= 0),
+              PRIMARY KEY(session_id, blueprint_id, beat_id, material_id),
+              FOREIGN KEY(session_id, blueprint_id, beat_id)
+                REFERENCES reference_materialization_blueprint_preview_beats(session_id, blueprint_id, beat_id)
+                ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_reference_materialization_blueprint_preview_sources_generation
+              ON reference_materialization_blueprint_preview_sources(anchor_id, generation_id);
+
  CREATE TABLE IF NOT EXISTS reference_analysis_runs (
               run_id TEXT PRIMARY KEY,
               anchor_id INTEGER NOT NULL,

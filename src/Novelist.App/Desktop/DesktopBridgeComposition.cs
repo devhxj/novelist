@@ -115,6 +115,10 @@ public static PhotinoWebMessageBridge CreateBridge(
             new ReferenceChapterSplitChatCompletionAnalyzer(settingsService, chatCompletionClient),
             materializationDatabasePathResolver,
             semanticSearch: referenceMaterializationSemanticSearch);
+        var referenceMaterializationBlueprintPreviewService = new SqliteReferenceMaterializationBlueprintPreviewService(
+            options,
+            referenceMaterializationService,
+            materializationDatabasePathResolver);
         var referenceMaterializationWorker = new ReferenceMaterializationWorker(
             materializationDatabasePathResolver,
             new ReferenceMaterializationChatCompletionQualifier(chatCompletionClient),
@@ -231,6 +235,7 @@ referenceCorpusService);
             .RegisterGitHistoryHandlers(versionControl)
             .RegisterReferenceAnchorHandlers(referenceAnchorService)
             .RegisterReferenceMaterializationHandlers(referenceMaterializationService)
+            .RegisterReferenceMaterializationBlueprintPreviewHandlers(referenceMaterializationBlueprintPreviewService)
             .RegisterReferenceCorpusHandlers(referenceCorpusService)
 .RegisterReferenceCorpusAnalysisHandlers(referenceCorpusAnalysisService)
 .RegisterReferenceCorpusAnalysisJobHandlers(referenceCorpusAnalysisScheduler)

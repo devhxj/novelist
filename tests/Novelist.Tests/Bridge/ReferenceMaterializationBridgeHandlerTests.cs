@@ -92,6 +92,48 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
         Assert.True(error.GetProperty("retryable").GetBoolean());
     }
 
+    [Fact]
+    public async Task BlueprintPreviewHandlersRouteGenerationAndLookupToTheV2PreviewService()
+    {
+        var service = new RecordingBlueprintPreviewService();
+        var dispatcher = new BridgeDispatcher().RegisterReferenceMaterializationBlueprintPreviewHandlers(service);
+
+        await AssertOkAsync(
+            dispatcher,
+            "GenerateReferenceMaterializationBlueprintPreview",
+            new GenerateReferenceMaterializationBlueprintPreviewPayload(42, [99, 101], "安排冲突升级", 2));
+        await AssertOkAsync(
+            dispatcher,
+            "GetReferenceMaterializationBlueprintPreview",
+            new GetReferenceMaterializationBlueprintPreviewPayload(42, "session-1"));
+
+        Assert.Equal(
+            ["generate:42:99,101:安排冲突升级:2", "get:42:session-1"],
+            service.Calls);
+    }
+
+    [Fact]
+    public async Task BlueprintPreviewHandlersReturnTheStableMaterialReadyErrorCode()
+    {
+        var service = new RecordingBlueprintPreviewService
+        {
+            GenerateException = new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.BlueprintMaterialNotReady,
+                "Reference source has no active material-ready generation.")
+        };
+        var dispatcher = new BridgeDispatcher().RegisterReferenceMaterializationBlueprintPreviewHandlers(service);
+
+        var result = await dispatcher.DispatchAsync(Request(
+            "GenerateReferenceMaterializationBlueprintPreview",
+            new GenerateReferenceMaterializationBlueprintPreviewPayload(42, [99], "安排冲突升级")));
+        using var json = JsonDocument.Parse(result.OutboundJson ?? throw new InvalidOperationException("Bridge returned no response."));
+
+        Assert.False(json.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal(
+            ReferenceMaterializationErrorCodes.BlueprintMaterialNotReady,
+            json.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
     private static async Task AssertOkAsync(BridgeDispatcher dispatcher, string method, params object?[] args)
     {
         var result = await dispatcher.DispatchAsync(Request(method, args));
@@ -282,5 +324,60 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                 false,
                 "start_processing");
         }
+    }
+
+    private sealed class RecordingBlueprintPreviewService : IReferenceMaterializationBlueprintPreviewService
+    {
+        public List<string> Calls { get; } = [];
+
+        public Exception? GenerateException { get; init; }
+
+        public ValueTask<ReferenceMaterializationBlueprintPreviewPayload> GenerateAsync(
+            GenerateReferenceMaterializationBlueprintPreviewPayload input,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add($"generate:{input.NovelId}:{string.Join(',', input.AnchorIds)}:{input.Goal}:{input.RequestedCount}");
+            if (GenerateException is not null)
+            {
+                throw GenerateException;
+            }
+
+            return ValueTask.FromResult(CreatePreview());
+        }
+
+        public ValueTask<ReferenceMaterializationBlueprintPreviewPayload?> GetAsync(
+            GetReferenceMaterializationBlueprintPreviewPayload input,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add($"get:{input.NovelId}:{input.SessionId}");
+            return ValueTask.FromResult<ReferenceMaterializationBlueprintPreviewPayload?>(CreatePreview());
+        }
+
+        private static ReferenceMaterializationBlueprintPreviewPayload CreatePreview() => new(
+            "session-1",
+            ReferenceMaterializationBlueprintPreviewStatuses.Active,
+            ReferenceMaterializationBlueprintPreviewNextActions.None,
+            "安排冲突升级",
+            [new ReferenceMaterializationBlueprintPreviewSourcePayload(99, "generation-1", 2)],
+            [new ReferenceMaterializationBlueprintPreviewCandidatePayload(
+                "blueprint-1",
+                "pressure_chain",
+                [new ReferenceMaterializationBlueprintPreviewBeatPayload(
+                    "beat-1",
+                    0,
+                    "Establish pressure.",
+                    "conflict",
+                    [new ReferenceMaterializationBlueprintPreviewMaterialLinkPayload(
+                        "material-1",
+                        99,
+                        "generation-1",
+                        "passage",
+                        "A pressure point.",
+                        0.9,
+                        0.8,
+                        "Semantic match.")])])],
+            [],
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow);
     }
 }
