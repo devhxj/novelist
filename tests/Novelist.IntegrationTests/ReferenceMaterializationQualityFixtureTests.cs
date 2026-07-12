@@ -2,7 +2,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
+using Novelist.Infrastructure.App;
 
 namespace Novelist.IntegrationTests;
 
@@ -62,6 +64,59 @@ public sealed class ReferenceMaterializationQualityFixtureTests
             "calibration"));
     }
 
+    [Fact]
+    public async Task LegacyMaterializationProjectsEverySeedSourceNodeIncludingNoise()
+    {
+        using var calibration = LoadFixture("materialization-quality-calibration-v1.json");
+        using var holdout = LoadFixture("materialization-quality-holdout-v1.json");
+        var labeledNodes = ReadLabeledNodes(calibration.RootElement)
+            .Concat(ReadLabeledNodes(holdout.RootElement))
+            .ToArray();
+        var root = Path.Combine(Path.GetTempPath(), "novelist-materialization-v1-baseline", Guid.NewGuid().ToString("N"));
+        var options = new AppInitializationOptions
+        {
+            ConfigDirectory = Path.Combine(root, "config"),
+            DefaultDataDirectory = Path.Combine(root, "data"),
+            EnableLegacyMigration = false
+        };
+
+        try
+        {
+            await new FileSystemAppInitializationService(options).InitializeAsync(options.DefaultDataDirectory, CancellationToken.None);
+            var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+            var novel = await novels.CreateNovelAsync(new CreateNovelPayload("V1 基线", "", ""), CancellationToken.None);
+            var sourceDirectory = Path.Combine(root, "sources");
+            Directory.CreateDirectory(sourceDirectory);
+            var sourcePath = Path.Combine(sourceDirectory, "quality-baseline.md");
+            await File.WriteAllTextAsync(sourcePath, "# 质量基线\n\n" + string.Join("\n\n", labeledNodes.Select(node => node.Text)));
+            var anchors = new SqliteReferenceAnchorService(options, novels);
+            var anchor = await anchors.CreateAnchorAsync(
+                new CreateReferenceAnchorPayload(novel.Id, "质量基线来源", null, sourcePath, "markdown", "user_provided"),
+                CancellationToken.None);
+
+            await using var connection = await OpenCorpusConnectionAsync(options);
+            var rawNodeCount = await CountAsync(connection, "SELECT COUNT(*) FROM reference_text_nodes WHERE anchor_id = $anchor_id;", anchor.AnchorId);
+            var materialCount = await CountAsync(connection, "SELECT COUNT(*) FROM reference_materials WHERE anchor_id = $anchor_id AND archived_at IS NULL;", anchor.AnchorId);
+            Assert.True(rawNodeCount >= labeledNodes.Length);
+            Assert.True(materialCount >= labeledNodes.Length, $"raw_nodes={rawNodeCount}; materials={materialCount}");
+            foreach (var node in labeledNodes.Where(node => node.Category is "short_noise" or "transition_noise"))
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT COUNT(*) FROM reference_materials WHERE anchor_id = $anchor_id AND text = $text AND archived_at IS NULL;";
+                command.Parameters.AddWithValue("$anchor_id", anchor.AnchorId);
+                command.Parameters.AddWithValue("$text", node.Text);
+                Assert.True(Convert.ToInt32(await command.ExecuteScalarAsync()) > 0, node.CaseId);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     private static JsonDocument LoadFixture(string fileName)
     {
         return JsonDocument.Parse(File.ReadAllText(FixturePath(fileName)));
@@ -72,6 +127,43 @@ public sealed class ReferenceMaterializationQualityFixtureTests
         "Fixtures",
         "corpus-driven-writing",
         fileName);
+
+    private static IReadOnlyList<LabeledNode> ReadLabeledNodes(JsonElement root)
+    {
+        var nodes = new List<LabeledNode>();
+        foreach (var item in root.GetProperty("cases").EnumerateArray())
+        {
+            var caseId = item.GetProperty("case_id").GetString() ?? throw new InvalidOperationException();
+            var category = item.GetProperty("category").GetString() ?? throw new InvalidOperationException();
+            foreach (var node in item.GetProperty("source_nodes").EnumerateArray())
+            {
+                nodes.Add(new LabeledNode(caseId, category, node.GetProperty("text").GetString() ?? throw new InvalidOperationException()));
+            }
+        }
+
+        return nodes;
+    }
+
+    private static async ValueTask<SqliteConnection> OpenCorpusConnectionAsync(AppInitializationOptions options)
+    {
+        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = Path.Combine(options.DefaultDataDirectory, "reference-anchor", "index.sqlite"),
+            Pooling = false
+        }.ToString());
+        await connection.OpenAsync();
+        return connection;
+    }
+
+    private static async ValueTask<int> CountAsync(SqliteConnection connection, string sql, long anchorId)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
+
+    private sealed record LabeledNode(string CaseId, string Category, string Text);
 }
 
 internal static class MaterializationQualityFixtureContract

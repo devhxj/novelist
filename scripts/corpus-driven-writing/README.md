@@ -89,6 +89,16 @@ The normal `dotnet test` suite discovers this test but skips it unless the scrip
 ./scripts/corpus-driven-writing/run-materialization-quality-fixture-contract.ps1 -Configuration Release
 ```
 
+## Legacy materialization baseline
+
+`run-materialization-v1-baseline.ps1` runs the existing `BuildMaterials` projection against the same calibration and holdout fixture. It writes a deterministic, redacted JSON report with raw node, material, unique source-span, overlap, short-noise, short-valuable, and active-search fields. The report never includes source prose or local paths.
+
+```powershell
+./scripts/corpus-driven-writing/run-materialization-v1-baseline.ps1 -Configuration Release
+```
+
+The checked-in seed fixture establishes the measurement path and exposes v1's mechanical projection behavior; it is not the approximately 500-sentence human holdout required to pass the v2 materialization quality gate. Do not treat a successful baseline command as a v2 quality result.
+
 ## Writing-effect evaluation
 
 `run-writing-evaluation.ps1` evaluates a redacted dataset containing only IDs, hashes, numeric results, and human labels. It writes aggregate retrieval, blueprint, and prose metrics beneath `build/tmp/corpus-driven-writing/`; it never writes source or candidate prose to the report.
