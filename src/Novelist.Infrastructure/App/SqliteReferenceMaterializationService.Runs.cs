@@ -125,6 +125,38 @@ public sealed partial class SqliteReferenceMaterializationService
             cancellationToken);
     }
 
+    public async ValueTask<ReferenceMaterializationCandidateReviewResultPayload> ReviewMaterializationCandidateAsync(
+        ReviewReferenceMaterializationCandidatePayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateReferenceInput(input.NovelId, input.AnchorId);
+        await EnsureAnchorAccessibleAsync(input.NovelId, input.AnchorId, cancellationToken);
+        var status = await _runStore.GetAsync(input.RunId, cancellationToken);
+        if (status is null || status.AnchorId != input.AnchorId)
+        {
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.CandidateReviewInvalid,
+                "Materialization run does not exist.");
+        }
+
+        var mutation = await _runStore.ReviewCandidateAsync(
+            input.RunId,
+            input.CandidateId,
+            input.Action,
+            input.ExpectedVersion,
+            input.SourceSpans,
+            cancellationToken);
+        var updatedStatus = await _runStore.GetAsync(input.RunId, cancellationToken)
+            ?? throw new InvalidOperationException("Materialization run disappeared after candidate review.");
+        return new ReferenceMaterializationCandidateReviewResultPayload(
+            mutation.CandidateId,
+            mutation.Decision,
+            mutation.RowVersion,
+            mutation.RequalificationQueued,
+            updatedStatus);
+    }
+
     public async ValueTask<PageResultPayload<ReferenceMaterializationMaterialPayload>> ListActiveMaterialsAsync(
         ListActiveReferenceMaterializationMaterialsPayload input,
         CancellationToken cancellationToken)

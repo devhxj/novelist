@@ -541,12 +541,13 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             FROM reference_materialization_chapter_progress
             WHERE run_id = $run_id
               AND batch_index = $batch_index
-              AND status = $pending
+              AND status IN ($pending, $qualifying)
             ORDER BY chapter_index;
             """;
         command.Parameters.AddWithValue("$run_id", runId);
         command.Parameters.AddWithValue("$batch_index", batchIndex);
         command.Parameters.AddWithValue("$pending", ReferenceMaterializationChapterStates.Pending);
+        command.Parameters.AddWithValue("$qualifying", ReferenceMaterializationChapterStates.LlmQualifying);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var chapters = new List<int>();
         while (await reader.ReadAsync(cancellationToken))

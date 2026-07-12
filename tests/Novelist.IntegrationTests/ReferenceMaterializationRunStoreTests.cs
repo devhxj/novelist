@@ -330,6 +330,97 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task ConfirmedReviewCandidateRequalifiesAndReindexesOnlyItsCompletedChapter()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(options, chapterCount: 2);
+        var materialization = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await materialization.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await materialization.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var provisioner = new RecordingVecProvisioner();
+        var initialWorker = new ReferenceMaterializationWorker(
+            resolver,
+            new SingleReviewQualifier(),
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(resolver, provisioner),
+            workerId: "test-review-initial-worker");
+
+        Assert.True(await initialWorker.ProcessRunOnceAsync(run.RunId, CancellationToken.None));
+        var initial = await store.GetAsync(run.RunId, CancellationToken.None);
+        Assert.Equal(ReferenceMaterializationRunStates.Completed, initial?.Status);
+        Assert.Equal(1, initial?.ReviewCount);
+        var reviewCandidate = Assert.Single((await materialization.ListMaterializationCandidatesAsync(
+            new ListReferenceMaterializationCandidatesPayload(
+                anchor.NovelId,
+                anchor.AnchorId,
+                run.RunId,
+                ReferenceMaterializationCandidateDecisions.ReviewRequired),
+            CancellationToken.None)).Items);
+        Assert.NotEmpty(reviewCandidate.SourceSpans);
+
+        var reviewed = await materialization.ReviewMaterializationCandidateAsync(
+            new ReviewReferenceMaterializationCandidatePayload(
+                anchor.NovelId,
+                anchor.AnchorId,
+                run.RunId,
+                reviewCandidate.CandidateId,
+                ReferenceMaterializationCandidateReviewActions.Confirm,
+                reviewCandidate.RowVersion),
+            CancellationToken.None);
+
+        Assert.True(reviewed.RequalificationQueued);
+        Assert.Equal(ReferenceMaterializationCandidateDecisions.Pending, reviewed.Decision);
+        Assert.Equal(ReferenceMaterializationRunStates.Running, reviewed.Status.Status);
+        Assert.Equal(0, reviewed.Status.CompletedChapterBatches);
+        var conflict = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
+            await materialization.ReviewMaterializationCandidateAsync(
+                new ReviewReferenceMaterializationCandidatePayload(
+                    anchor.NovelId,
+                    anchor.AnchorId,
+                    run.RunId,
+                    reviewCandidate.CandidateId,
+                    ReferenceMaterializationCandidateReviewActions.Confirm,
+                    reviewCandidate.RowVersion),
+                CancellationToken.None));
+        Assert.Equal(ReferenceMaterializationErrorCodes.CandidateReviewConflict, conflict.ErrorCode);
+        var reopened = await store.ListChapterProgressAsync(run.RunId, 1, 10, CancellationToken.None);
+        Assert.Equal(ReferenceMaterializationChapterStates.LlmQualifying, Assert.Single(reopened.Items, item => item.ChapterIndex == reviewCandidate.ChapterIndex).Status);
+        Assert.All(
+            reopened.Items.Where(item => item.ChapterIndex != reviewCandidate.ChapterIndex),
+            item => Assert.Equal(ReferenceMaterializationChapterStates.Completed, item.Status));
+
+        var resumedWorker = new ReferenceMaterializationWorker(
+            resolver,
+            new ConcurrentAcceptingQualifier(),
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(resolver, provisioner),
+            workerId: "test-review-resumed-worker");
+        Assert.True(await resumedWorker.ProcessRunOnceAsync(run.RunId, CancellationToken.None));
+        var completed = await store.GetAsync(run.RunId, CancellationToken.None);
+        Assert.NotNull(completed);
+        Assert.Equal(ReferenceMaterializationRunStates.Completed, completed.Status);
+        Assert.Equal(initial!.GenerationId, completed.GenerationId);
+        Assert.Equal(completed.AcceptedCount, completed.VectorCount);
+        Assert.Equal(0, completed.ReviewCount);
+        Assert.Equal(completed.GenerationId, await ReadActiveGenerationAsync(options, anchor.AnchorId));
+        var acceptedCandidates = await materialization.ListMaterializationCandidatesAsync(
+            new ListReferenceMaterializationCandidatesPayload(
+                anchor.NovelId,
+                anchor.AnchorId,
+                run.RunId,
+                ReferenceMaterializationCandidateDecisions.Accepted),
+            CancellationToken.None);
+        Assert.Contains(acceptedCandidates.Items, candidate => candidate.CandidateId == reviewCandidate.CandidateId);
+    }
+
+    [Fact]
     public async Task SemanticSearchUsesOnlyTheActiveGenerationVectorIndexWithoutLexicalPrefilter()
     {
         var options = CreateOptions();
@@ -843,6 +934,21 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             ["complete_exchange"]);
     }
 
+    private static ReferenceMaterializationCandidateQualification ReviewRequiredDecision(
+        ReferenceMaterializationQualificationCandidate candidate) => new(
+        candidate.CandidateId,
+        ReferenceMaterializationCandidateDecisions.ReviewRequired,
+        candidate.SourceNodes.Select(node => new ReferenceMaterializationQualificationSpan(node.NodeId, 0, node.Text.Length)).ToArray(),
+        new ReferenceMaterializationQualityScores(0.6, 0.6, 0.6, 0.6, 0.6, 0.6),
+        new ReferenceMaterializationQualificationTags(["reveal"], [], ["close_third"], ["subtext"])
+        {
+            SceneBeatRoles = ["turn_beat"],
+            CharacterRelations = ["mistrust"],
+            CausalInformationRoles = ["reveal"]
+        },
+        0.5,
+        ["requires_review"]);
+
     private static async ValueTask<int> CountEmbeddingsForChapterAsync(AppInitializationOptions options, string runId, int chapterIndex)
     {
         await using var connection = await OpenConnectionAsync(options);
@@ -1071,6 +1177,22 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
                     return;
                 }
             }
+        }
+    }
+
+    private sealed class SingleReviewQualifier : IReferenceMaterializationQualifier
+    {
+        private int _reviewed;
+
+        public ValueTask<ReferenceMaterializationQualificationResult> QualifyAsync(
+            ReferenceMaterializationQualificationRequest input,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(new ReferenceMaterializationQualificationResult(
+                input.Candidates.Select(candidate => Interlocked.CompareExchange(ref _reviewed, 1, 0) == 0
+                    ? ReviewRequiredDecision(candidate)
+                    : AcceptedDecision(candidate)).ToArray()));
         }
     }
 

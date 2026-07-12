@@ -18,6 +18,8 @@ public static class ReferenceMaterializationRunStateMachine
                 ReferenceMaterializationRunStates.Cancelled,
             ReferenceMaterializationRunStates.Failed or ReferenceMaterializationRunStates.Cancelled =>
                 next == ReferenceMaterializationRunStates.Running,
+            ReferenceMaterializationRunStates.Completed =>
+                next == ReferenceMaterializationRunStates.Running,
             _ => false
         };
     }
@@ -59,6 +61,8 @@ public static class ReferenceMaterializationChapterStateMachine
                 ReferenceMaterializationChapterStates.Cancelled,
             ReferenceMaterializationChapterStates.Failed or ReferenceMaterializationChapterStates.Cancelled =>
                 next == ReferenceMaterializationChapterStates.BuildingCandidates,
+            ReferenceMaterializationChapterStates.Completed =>
+                next == ReferenceMaterializationChapterStates.LlmQualifying,
             _ => false
         };
     }

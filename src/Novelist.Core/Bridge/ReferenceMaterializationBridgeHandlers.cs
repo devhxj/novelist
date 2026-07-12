@@ -54,6 +54,11 @@ public static class ReferenceMaterializationBridgeHandlers
                 ReadObjectArg<ListReferenceMaterializationCandidatesPayload>(context.Payload, 0, "input"),
                 cancellationToken)));
 
+        dispatcher.Register("ReviewReferenceMaterializationCandidate", async (context, cancellationToken) =>
+            await ExecuteCandidateReviewAsync(() => service.ReviewMaterializationCandidateAsync(
+                ReadObjectArg<ReviewReferenceMaterializationCandidatePayload>(context.Payload, 0, "input"),
+                cancellationToken)));
+
         dispatcher.Register("ListActiveReferenceMaterializationMaterials", async (context, cancellationToken) =>
             await ExecuteMaterialsAsync(() => service.ListActiveMaterialsAsync(
                 ReadObjectArg<ListActiveReferenceMaterializationMaterialsPayload>(context.Payload, 0, "input"),
@@ -193,6 +198,29 @@ public static class ReferenceMaterializationBridgeHandlers
         }
     }
 
+    private static async ValueTask<ReferenceMaterializationCandidateReviewResultPayload> ExecuteCandidateReviewAsync(
+        Func<ValueTask<ReferenceMaterializationCandidateReviewResultPayload>> operation)
+    {
+        try
+        {
+            var result = await operation();
+            return result with
+            {
+                CandidateId = ReferencePayloadSanitizer.RedactAndBoundText(result.CandidateId, 128),
+                Decision = ReferencePayloadSanitizer.RedactAndBoundText(result.Decision, 32),
+                Status = SanitizeStatus(result.Status)
+            };
+        }
+        catch (ReferenceMaterializationException exception)
+        {
+            throw new BridgeRequestException(
+                exception.ErrorCode,
+                exception.Message,
+                new { error_code = exception.ErrorCode },
+                retryable: true);
+        }
+    }
+
     private static async ValueTask<IReadOnlyList<ReferenceMaterializationSemanticSearchHitPayload>> ExecuteSemanticMaterialsAsync(
         Func<ValueTask<IReadOnlyList<ReferenceMaterializationSemanticSearchHitPayload>>> operation)
     {
@@ -284,6 +312,13 @@ public static class ReferenceMaterializationBridgeHandlers
             Decision = ReferencePayloadSanitizer.RedactAndBoundText(candidate.Decision, 32),
             DecisionOrigin = ReferencePayloadSanitizer.RedactAndBoundText(candidate.DecisionOrigin, 64),
             TextPreview = ReferencePayloadSanitizer.RedactAndBoundText(candidate.TextPreview, 512),
+            SourceSpans = (candidate.SourceSpans ?? Array.Empty<ReferenceMaterializationCandidateSourceSpanPayload>())
+                .Take(12)
+                .Select(span => new ReferenceMaterializationCandidateSourceSpanPayload(
+                    ReferencePayloadSanitizer.RedactAndBoundText(span.NodeId, 128),
+                    Math.Max(0, span.Start),
+                    Math.Max(0, span.End)))
+                .ToArray(),
             Tags = new ReferenceMaterializationMaterialTagsPayload(
                 SanitizeTags(candidate.Tags.NarrativeFunctions),
                 SanitizeTags(candidate.Tags.EmotionMechanics),

@@ -65,9 +65,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         var completedChapters = await CompleteBatchChaptersAsync(connection, transaction, run, now, cancellationToken);
         var completedBatchCount = await CountCompletedBatchesAsync(connection, transaction, run.RunId, cancellationToken);
         var processedChapterCount = await CountCompletedChaptersAsync(connection, transaction, run.RunId, cancellationToken);
-        var nextBatchIndex = currentBatchIndex + 1 < run.TotalChapterBatches
-            ? currentBatchIndex + 1
-            : (int?)null;
+        var nextBatchIndex = await FindFirstIncompleteBatchIndexAsync(
+            connection,
+            transaction,
+            run.RunId,
+            cancellationToken);
         await AdvanceRunBatchAsync(
             connection,
             transaction,
@@ -129,13 +131,15 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.Transaction = transaction;
         command.CommandText = """
             SELECT COUNT(*),
-                   COALESCE(SUM(CASE WHEN status = $indexing AND current_stage = $indexing
-                                      AND vector_count = accepted_count THEN 1 ELSE 0 END), 0)
+                   COALESCE(SUM(CASE WHEN (status = $completed AND vector_count = accepted_count)
+                                      OR (status = $indexing AND current_stage = $indexing
+                                          AND vector_count = accepted_count) THEN 1 ELSE 0 END), 0)
             FROM reference_materialization_chapter_progress
             WHERE run_id = $run_id
               AND batch_index = $batch_index;
             """;
         command.Parameters.AddWithValue("$indexing", ReferenceMaterializationChapterStates.Indexing);
+        command.Parameters.AddWithValue("$completed", ReferenceMaterializationChapterStates.Completed);
         command.Parameters.AddWithValue("$run_id", run.RunId);
         command.Parameters.AddWithValue("$batch_index", run.CurrentBatchIndex.Value);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -322,6 +326,30 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.Parameters.AddWithValue("$run_id", runId);
         command.Parameters.AddWithValue("$completed", ReferenceMaterializationChapterStates.Completed);
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken));
+    }
+
+    private static async ValueTask<int?> FindFirstIncompleteBatchIndexAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string runId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT MIN(batch_index)
+            FROM (
+              SELECT batch_index
+              FROM reference_materialization_chapter_progress
+              WHERE run_id = $run_id
+              GROUP BY batch_index
+              HAVING SUM(CASE WHEN status = $completed THEN 0 ELSE 1 END) > 0
+            );
+            """;
+        command.Parameters.AddWithValue("$run_id", runId);
+        command.Parameters.AddWithValue("$completed", ReferenceMaterializationChapterStates.Completed);
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is null || value is DBNull ? null : Convert.ToInt32(value);
     }
 
     private static async ValueTask AdvanceRunBatchAsync(

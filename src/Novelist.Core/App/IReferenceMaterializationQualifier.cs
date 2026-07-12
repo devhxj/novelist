@@ -24,7 +24,8 @@ public sealed record ReferenceMaterializationQualificationCandidate(
 
 public sealed record ReferenceMaterializationQualificationSourceNode(
     string NodeId,
-    string Text);
+    string Text,
+    int SourceStart = 0);
 
 public sealed record ReferenceMaterializationQualificationResult(
     IReadOnlyList<ReferenceMaterializationCandidateQualification> Decisions);

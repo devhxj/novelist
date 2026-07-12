@@ -36,6 +36,10 @@ public interface IReferenceMaterializationService
         ListReferenceMaterializationCandidatesPayload input,
         CancellationToken cancellationToken);
 
+    ValueTask<ReferenceMaterializationCandidateReviewResultPayload> ReviewMaterializationCandidateAsync(
+        ReviewReferenceMaterializationCandidatePayload input,
+        CancellationToken cancellationToken);
+
     ValueTask<PageResultPayload<ReferenceMaterializationMaterialPayload>> ListActiveMaterialsAsync(
         ListActiveReferenceMaterializationMaterialsPayload input,
         CancellationToken cancellationToken);

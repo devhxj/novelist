@@ -199,7 +199,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT candidate_node.node_id, node.text
+            SELECT candidate_node.node_id, node.text,
+                   candidate_node.evidence_start, candidate_node.evidence_end
             FROM reference_material_candidate_nodes candidate_node
             JOIN reference_text_nodes node ON node.node_id = candidate_node.node_id
             WHERE candidate_node.candidate_id = $candidate_id
@@ -210,7 +211,18 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         var nodes = new List<ReferenceMaterializationQualificationSourceNode>();
         while (await reader.ReadAsync(cancellationToken))
         {
-            nodes.Add(new ReferenceMaterializationQualificationSourceNode(reader.GetString(0), reader.GetString(1)));
+            var text = reader.GetString(1);
+            var start = reader.GetInt32(2);
+            var end = reader.GetInt32(3);
+            if (start < 0 || end <= start || end > text.Length)
+            {
+                throw new InvalidOperationException("Materialization candidate evidence offsets are invalid.");
+            }
+
+            nodes.Add(new ReferenceMaterializationQualificationSourceNode(
+                reader.GetString(0),
+                text[start..end],
+                start));
         }
 
         return nodes;
@@ -370,8 +382,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 WHERE candidate_id = $candidate_id
                   AND node_id = $node_id;
                 """;
-            command.Parameters.AddWithValue("$evidence_start", span.Start);
-            command.Parameters.AddWithValue("$evidence_end", span.End);
+            command.Parameters.AddWithValue("$evidence_start", span.Start + node.SourceStart);
+            command.Parameters.AddWithValue("$evidence_end", span.End + node.SourceStart);
             command.Parameters.AddWithValue("$candidate_id", candidate.CandidateId);
             command.Parameters.AddWithValue("$node_id", node.NodeId);
             if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)

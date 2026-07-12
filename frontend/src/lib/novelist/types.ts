@@ -1021,6 +1021,19 @@ has_more: boolean
     size?: number
   }
 
+  export interface MaterializationCandidateSourceSpan {
+    node_id: string
+    start: number
+    end: number
+  }
+
+  export interface ReviewMaterializationCandidateInput extends GetMaterializationStatusInput {
+    candidate_id: string
+    action: 'confirm' | 'reject' | 'adjust_boundary'
+    expected_version: number
+    source_spans?: MaterializationCandidateSourceSpan[] | null
+  }
+
   export interface ListActiveMaterializationMaterialsInput {
     novel_id: number
     anchor_id: number
@@ -1116,6 +1129,7 @@ has_more: boolean
     candidate_id: string
     run_id: string
     anchor_id: number
+    chapter_index: number
     candidate_type: string
     decision: 'pending' | 'accepted' | 'rejected' | 'review_required'
     decision_origin: string
@@ -1124,8 +1138,17 @@ has_more: boolean
     tags: MaterializationMaterialTags
     reason_codes: string[]
     text_preview: string
+    source_spans: MaterializationCandidateSourceSpan[]
     source_node_count: number
     row_version: number
+  }
+
+  export interface MaterializationCandidateReviewResult {
+    candidate_id: string
+    decision: 'pending' | 'accepted' | 'rejected' | 'review_required'
+    row_version: number
+    requalification_queued: boolean
+    status: MaterializationStatus
   }
 
   export interface MaterializationSemanticSearchHit {

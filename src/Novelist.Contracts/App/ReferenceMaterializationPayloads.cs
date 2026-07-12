@@ -86,6 +86,8 @@ public static class ReferenceMaterializationErrorCodes
     public const string BlueprintNoRelevantMaterial = "materialization_blueprint_no_relevant_material";
     public const string ChapterSplitProfileStale = "materialization_chapter_split_profile_stale";
     public const string RetryRequiresNewRun = "materialization_retry_requires_new_run";
+    public const string CandidateReviewConflict = "materialization_candidate_review_conflict";
+    public const string CandidateReviewInvalid = "materialization_candidate_review_invalid";
 }
 
 public static class ReferenceMaterializationCandidateTypes
@@ -120,6 +122,15 @@ public static class ReferenceMaterializationCandidateDecisions
     public const string ReviewRequired = "review_required";
 
     public static IReadOnlyList<string> All { get; } = [Pending, Accepted, Rejected, ReviewRequired];
+}
+
+public static class ReferenceMaterializationCandidateReviewActions
+{
+    public const string Confirm = "confirm";
+    public const string Reject = "reject";
+    public const string AdjustBoundary = "adjust_boundary";
+
+    public static IReadOnlyList<string> All { get; } = [Confirm, Reject, AdjustBoundary];
 }
 
 public sealed record AnalyzeReferenceChapterSplitPayload(
@@ -166,6 +177,20 @@ public sealed record ListReferenceMaterializationCandidatesPayload(
     [property: JsonPropertyName("decision")] string Decision = ReferenceMaterializationCandidateDecisions.ReviewRequired,
     [property: JsonPropertyName("page")] int Page = 1,
     [property: JsonPropertyName("size")] int Size = 20);
+
+public sealed record ReferenceMaterializationCandidateSourceSpanPayload(
+    [property: JsonPropertyName("node_id")] string NodeId,
+    [property: JsonPropertyName("start")] int Start,
+    [property: JsonPropertyName("end")] int End);
+
+public sealed record ReviewReferenceMaterializationCandidatePayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("run_id")] string RunId,
+    [property: JsonPropertyName("candidate_id")] string CandidateId,
+    [property: JsonPropertyName("action")] string Action,
+    [property: JsonPropertyName("expected_version")] long ExpectedVersion,
+    [property: JsonPropertyName("source_spans")] IReadOnlyList<ReferenceMaterializationCandidateSourceSpanPayload>? SourceSpans = null);
 
 public sealed record ListActiveReferenceMaterializationMaterialsPayload(
     [property: JsonPropertyName("novel_id")] long NovelId,
@@ -303,6 +328,7 @@ public sealed record ReferenceMaterializationCandidatePayload(
     [property: JsonPropertyName("candidate_id")] string CandidateId,
     [property: JsonPropertyName("run_id")] string RunId,
     [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("chapter_index")] int ChapterIndex,
     [property: JsonPropertyName("candidate_type")] string CandidateType,
     [property: JsonPropertyName("decision")] string Decision,
     [property: JsonPropertyName("decision_origin")] string DecisionOrigin,
@@ -313,8 +339,16 @@ public sealed record ReferenceMaterializationCandidatePayload(
     [property: JsonPropertyName("tags")] ReferenceMaterializationMaterialTagsPayload Tags,
     [property: JsonPropertyName("reason_codes")] IReadOnlyList<string> ReasonCodes,
     [property: JsonPropertyName("text_preview")] string TextPreview,
+    [property: JsonPropertyName("source_spans")] IReadOnlyList<ReferenceMaterializationCandidateSourceSpanPayload> SourceSpans,
     [property: JsonPropertyName("source_node_count")] int SourceNodeCount,
     [property: JsonPropertyName("row_version")] long RowVersion);
+
+public sealed record ReferenceMaterializationCandidateReviewResultPayload(
+    [property: JsonPropertyName("candidate_id")] string CandidateId,
+    [property: JsonPropertyName("decision")] string Decision,
+    [property: JsonPropertyName("row_version")] long RowVersion,
+    [property: JsonPropertyName("requalification_queued")] bool RequalificationQueued,
+    [property: JsonPropertyName("status")] ReferenceMaterializationStatusPayload Status);
 
 public sealed record ReferenceMaterializationMaterialPayload(
     [property: JsonPropertyName("material_id")] string MaterialId,

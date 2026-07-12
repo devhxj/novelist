@@ -30,6 +30,16 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
             page = 1,
             size = 20
         });
+        await AssertOkAsync(dispatcher, "ReviewReferenceMaterializationCandidate", new
+        {
+            novel_id = 42L,
+            anchor_id = 99L,
+            run_id = "run-1",
+            candidate_id = "candidate-1",
+            action = "confirm",
+            expected_version = 3L,
+            source_spans = Array.Empty<object>()
+        });
         await AssertOkAsync(dispatcher, "ListActiveReferenceMaterializationMaterials", new ListActiveReferenceMaterializationMaterialsPayload(42, 99, 1, 20, "真相"));
         await AssertOkAsync(dispatcher, "SearchActiveReferenceMaterializationMaterials", new SearchActiveReferenceMaterializationMaterialsPayload(42, 99, "谜底", 10));
 
@@ -43,6 +53,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                 "retry:42:99:run-1",
                 "progress:42:99:run-1:1:20",
                 "candidates:42:99:run-1:review_required:1:20",
+                "review-candidate:42:99:run-1:candidate-1:confirm:3:0",
                 "materials:42:99:1:20:真相",
                 "semantic-materials:42:99:谜底:10"
             ],
@@ -272,6 +283,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                     "candidate-1",
                     input.RunId,
                     input.AnchorId,
+                    1,
                     "dialogue_exchange",
                     input.Decision,
                     "llm_qualifier",
@@ -280,12 +292,26 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                     new ReferenceMaterializationMaterialTagsPayload(["reveal"], [], ["close_third"], ["subtext"]),
                     ["context_missing"],
                     "她没有立刻回答。",
+                    [new ReferenceMaterializationCandidateSourceSpanPayload("node-1", 0, 8)],
                     1,
                     3)],
                 1,
                 input.Page,
                 input.Size,
                 1));
+        }
+
+        public ValueTask<ReferenceMaterializationCandidateReviewResultPayload> ReviewMaterializationCandidateAsync(
+            ReviewReferenceMaterializationCandidatePayload input,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add($"review-candidate:{input.NovelId}:{input.AnchorId}:{input.RunId}:{input.CandidateId}:{input.Action}:{input.ExpectedVersion}:{input.SourceSpans?.Count ?? 0}");
+            return ValueTask.FromResult(new ReferenceMaterializationCandidateReviewResultPayload(
+                input.CandidateId,
+                ReferenceMaterializationCandidateDecisions.Pending,
+                input.ExpectedVersion + 1,
+                true,
+                CreateStatus(input.AnchorId) with { Status = ReferenceMaterializationRunStates.Running }));
         }
 
         public ValueTask<IReadOnlyList<ReferenceMaterializationSemanticSearchHitPayload>> SearchActiveMaterialsAsync(

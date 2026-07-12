@@ -300,7 +300,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                   anchor_id, active_generation_id, previous_generation_id, row_version, updated_at)
                 VALUES ($anchor_id, $generation_id, NULL, 0, $updated_at)
                 ON CONFLICT(anchor_id) DO UPDATE SET
-                  previous_generation_id = reference_anchor_materialization_state.active_generation_id,
+                  previous_generation_id = CASE
+                    WHEN reference_anchor_materialization_state.active_generation_id = excluded.active_generation_id
+                    THEN reference_anchor_materialization_state.previous_generation_id
+                    ELSE reference_anchor_materialization_state.active_generation_id
+                  END,
                   active_generation_id = excluded.active_generation_id,
                   row_version = reference_anchor_materialization_state.row_version + 1,
                   updated_at = excluded.updated_at;
