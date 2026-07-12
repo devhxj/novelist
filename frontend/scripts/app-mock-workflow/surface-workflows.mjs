@@ -72,8 +72,8 @@ export async function verifyShellNavigation(page) {
   await expectVisible(page.getByText('输入关键词搜索'), 'search prompt from shell navigation')
 
   await clickActivity(page, '素材库')
-  await expectVisible(page.getByRole('heading', { name: '参考语料工作台' }), 'reference corpus workspace from shell navigation')
-  await expectVisible(page.getByTestId('reference-material-coverage'), 'reference corpus coverage from shell navigation')
+  await expectVisible(page.getByRole('heading', { name: '选择一个参考来源' }), 'reference materialization workspace from shell navigation')
+  await expectVisible(page.getByTestId('reference-book-sidebar'), 'reference source sidebar from shell navigation')
 
   await clickActivity(page, '风格素材')
   await expectVisible(page.getByRole('heading', { name: /风格素材/ }), 'style sample panel from shell navigation')
@@ -760,9 +760,9 @@ export async function verifyChatWorkflow(page) {
 
 export async function verifyReferenceSmoke(page) {
   await page.getByTitle('素材库').click()
-  await expectVisible(page.getByRole('heading', { name: '参考语料工作台' }), 'reference corpus workspace heading')
+  await expectVisible(page.getByRole('heading', { name: '选择一个参考来源' }), 'reference materialization workspace heading')
   await expectVisible(page.getByText('全局雨夜参考').first(), 'reference anchor fixture')
-  await expectVisible(page.getByTestId('reference-material-coverage'), 'reference material coverage')
+  await expectVisible(page.getByTestId('blueprint-preview-panel'), 'materialization blueprint preview')
 }
 
 export async function verifyReferenceWorkspaceWorkflow(page) {
@@ -774,35 +774,33 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await expectVisible(referenceBooks.getByRole('heading', { name: '参考书籍' }), 'reference books sidebar heading')
   await expectVisible(referenceBooks.getByText('全局雨夜参考'), 'reference books sidebar fixture')
   await expectVisible(blueprintPreview.getByRole('heading', { name: 'AI 蓝图预演' }), 'blueprint preview heading')
-  await expectVisible(corpusWorkspace.getByRole('heading', { name: '参考语料工作台' }), 'reference corpus workspace heading')
-  await expectVisible(corpusWorkspace.getByTestId('reference-material-coverage'), 'reference corpus coverage panel')
-  for (const facet of ['material_type', 'function_tag', 'emotion_tag', 'scene_tag', 'pov_tag', 'technique_tag']) {
-    await expectVisible(corpusWorkspace.getByTestId(`reference-material-facet-${facet}`), `reference coverage ${facet} facet`)
-  }
+  await expectVisible(corpusWorkspace.getByRole('heading', { name: '选择一个参考来源' }), 'empty materialization workspace')
   await expectHidden(page.getByText('AI 对话', { exact: true }), 'generic chat is hidden for the corpus workspace')
-  assert.equal(await corpusWorkspace.getByRole('button', { name: '检索' }).isDisabled(), true, 'empty material search must stay disabled until the user narrows the scope')
-
-  const sceneFacet = corpusWorkspace.getByTestId('reference-material-facet-scene_tag')
-  const sceneTag = sceneFacet.getByRole('button').first()
-  const sceneSearchCount = await bridgeCallCount(page, 'SearchReferenceMaterials')
-  assert.equal(sceneSearchCount, 0, 'opening the corpus workspace must not scan every material before the user narrows the scope')
-  await sceneTag.click()
-  await waitForBridgeCallCountAfter(page, 'SearchReferenceMaterials', sceneSearchCount)
-  const sceneSearchInput = await page.evaluate(() => window.__appMockState.calls
-    .filter((call) => call.method === 'SearchReferenceMaterials')
-    .at(-1)?.args?.[0])
-  assert(Array.isArray(sceneSearchInput?.scene_tags) && sceneSearchInput.scene_tags.length === 1, 'scene facet must drive scene_tags material search input')
 
   await referenceBooks.getByRole('button', { name: '选择《全局雨夜参考》' }).click()
-  await expectVisible(blueprintPreview.getByText('已选 1 本参考书'), 'selected reference book count')
+  await expectVisible(corpusWorkspace.getByRole('heading', { name: '全局雨夜参考' }), 'selected materialization source')
+
+  const analyzeCount = await bridgeCallCount(page, 'AnalyzeReferenceChapterSplit')
+  await corpusWorkspace.getByRole('button', { name: '自动分析前 50K' }).click()
+  await waitForBridgeCallCountAfter(page, 'AnalyzeReferenceChapterSplit', analyzeCount)
+  await expectVisible(corpusWorkspace.getByRole('button', { name: '确认章节边界' }), 'chapter split confirmation')
+
+  const confirmCount = await bridgeCallCount(page, 'ConfirmReferenceChapterSplit')
+  await corpusWorkspace.getByRole('button', { name: '确认章节边界' }).click()
+  await waitForBridgeCallCountAfter(page, 'ConfirmReferenceChapterSplit', confirmCount)
+  await corpusWorkspace.getByRole('button', { name: '10' }).click()
+  const enqueueCount = await bridgeCallCount(page, 'EnqueueReferenceMaterialization')
+  await corpusWorkspace.getByRole('button', { name: '启动材料化' }).click()
+  await waitForBridgeCallCountAfter(page, 'EnqueueReferenceMaterialization', enqueueCount)
+  await expectVisible(corpusWorkspace.getByText('向量索引完整'), 'completed materialization index state')
 
   await blueprintPreview.getByLabel('预演目标').fill('让林岚确认门口线索，并在结尾留下新的悬念。')
-  const previewCallCount = await bridgeCallCount(page, 'GenerateReferenceCorpusBlueprintCandidates')
+  await expectVisible(blueprintPreview.getByText('可预演 1 本'), 'active material source count')
+  const previewCallCount = await bridgeCallCount(page, 'GenerateReferenceMaterializationBlueprintPreview')
   await blueprintPreview.getByRole('button', { name: '生成预演' }).click()
-  await waitForBridgeCallCountAfter(page, 'GenerateReferenceCorpusBlueprintCandidates', previewCallCount)
+  await waitForBridgeCallCountAfter(page, 'GenerateReferenceMaterializationBlueprintPreview', previewCallCount)
   await expectVisible(blueprintPreview.getByTestId('blueprint-preview-candidate').first(), 'generated blueprint candidate')
-  await blueprintPreview.getByTestId('blueprint-preview-candidate').first().click()
-  await expectVisible(blueprintPreview.getByTestId('blueprint-preview-selected'), 'selected local preview candidate')
+  await page.screenshot({ path: path.join(outputDir, 'materialized-reference-workspace.png'), fullPage: true })
 
   await referenceBooks.getByRole('button', { name: '归档《全局雨夜参考》为受限语料' }).click()
   await expectVisible(referenceBooks.getByText('确认将工作区语料归档为受限？'), 'workspace corpus archive confirmation')
@@ -845,8 +843,8 @@ export async function verifyCompactViewportSmoke(browser, url, consoleErrors, pa
   await expectVisible(page.getByRole('heading', { name: /角色/ }), 'compact character surface')
 
   await clickActivity(page, '素材库')
-  await expectVisible(page.getByRole('heading', { name: '参考语料工作台' }), 'compact reference corpus workspace')
-  await expectVisible(page.getByTestId('reference-material-coverage'), 'compact reference material coverage')
+  await expectVisible(page.getByRole('heading', { name: '选择一个参考来源' }), 'compact reference materialization workspace')
+  await expectVisible(page.getByTestId('reference-book-sidebar'), 'compact reference source sidebar')
 
   await clickActivity(page, '风格素材')
   await expectVisible(page.getByRole('heading', { name: /风格素材/ }), 'compact style sample surface')

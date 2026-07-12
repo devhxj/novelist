@@ -525,7 +525,14 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
         ) : activePanel === 'preferences' ? (
           <PreferenceView novelId={activeNovelId} focusId={preferenceFocusId} />
         ) : activePanel === 'reference' ? (
-          <ReferenceCorpusWorkspace key={activeNovelId} novelId={activeNovelId} refreshKey={referenceRefreshKey} />
+          <ReferenceCorpusWorkspace
+            key={activeNovelId}
+            novelId={activeNovelId}
+            refreshKey={referenceRefreshKey}
+            anchors={referenceAnchors}
+            selectedAnchorIds={selectedReferenceAnchorIds}
+            onMaterializationChange={handleReferenceMutation}
+          />
         ) : activePanel === 'style-samples' ? (
           <StyleSampleLibraryView novelId={activeNovelId} />
         ) : activePanel === 'patterns' ? (
@@ -544,6 +551,7 @@ export default function WorkspaceView({ initialNovelId, initialShowHelp, startup
             novelId={activeNovelId}
             anchors={referenceAnchors}
             selectedAnchorIds={selectedReferenceAnchorIds}
+            refreshKey={referenceRefreshKey}
           />
         ) : activePanel !== 'profile' && (
           <ChatPanel

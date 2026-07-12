@@ -737,6 +737,8 @@ export function installConfigurableAppMockBridge(options = {}) {
     createdReferenceAnchors: [],
     referenceAnchors: options.referenceAnchors ?? defaultReferenceAnchors,
     referenceMaterials: options.referenceMaterials ?? defaultReferenceMaterials,
+    materializationProfiles: {},
+    materializationRuns: [],
     referenceBuildStatuses: options.referenceBuildStatuses ?? {},
     referenceStyleProfiles: options.referenceStyleProfiles ?? [],
     referenceStyleProfileBuildStatuses: options.referenceStyleProfileBuildStatuses ?? {},
@@ -1223,6 +1225,17 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
         deleteReferenceAnchor(args[0], args[1])
         return null
       case 'RebuildReferenceAnchor': return rebuildReferenceAnchor(args[1])
+      case 'AnalyzeReferenceChapterSplit': return analyzeReferenceChapterSplit(args[0])
+      case 'PreviewReferenceChapterSplit': return previewReferenceChapterSplit(args[0])
+      case 'ConfirmReferenceChapterSplit': return confirmReferenceChapterSplit(args[0])
+      case 'EnqueueReferenceMaterialization': return enqueueReferenceMaterialization(args[0])
+      case 'GetReferenceMaterializationStatus': return getReferenceMaterializationStatus(args[0])
+      case 'RetryReferenceMaterialization': return retryReferenceMaterialization(args[0])
+      case 'ListReferenceMaterializationChapterProgress': return listReferenceMaterializationChapterProgress(args[0])
+      case 'ListReferenceMaterializationCandidates': return listReferenceMaterializationCandidates(args[0])
+      case 'ReviewReferenceMaterializationCandidate': return reviewReferenceMaterializationCandidate(args[0])
+      case 'ListActiveReferenceMaterializationMaterials': return listActiveReferenceMaterializationMaterials(args[0])
+      case 'GenerateReferenceMaterializationBlueprintPreview': return generateReferenceMaterializationBlueprintPreview(args[0])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
       case 'GetReferenceMaterialCoverage': return getReferenceMaterialCoverage(args[0])
       case 'GetReferenceMaterialTagReviewQueue': return getReferenceMaterialTagReviewQueue(args[0])
@@ -3623,6 +3636,174 @@ function referenceAnchors() {
 
     state.referenceAnchors = state.referenceAnchors.filter((anchor) => anchor.anchor_id !== id)
     state.createdReferenceAnchors = state.createdReferenceAnchors.filter((anchor) => anchor.anchor_id !== id)
+  }
+
+  function createChapterSplitProfile(input = {}, mode = 'auto') {
+    const anchorId = Number(input?.anchor_id ?? 0)
+    const profile = {
+      split_profile_id: `mock-split-${anchorId}-${mode}`,
+      anchor_id: anchorId,
+      source_hash: `mock-source-${anchorId}`,
+      split_mode: mode,
+      pattern_kind: 'chapter_template',
+      delimiter_template: mode === 'manual' ? String(input?.delimiter_template ?? '') : '第{number}章 {title}',
+      sample_char_count: mode === 'auto' ? 50000 : 0,
+      status: 'validated',
+      chapter_count: 3,
+      boundaries: [
+        { chapter_index: 1, title: '雨夜来信', heading_start: 0, content_start: 8, content_end: 960, text_hash: `mock-${anchorId}-1` },
+        { chapter_index: 2, title: '钟楼回声', heading_start: 961, content_start: 970, content_end: 1930, text_hash: `mock-${anchorId}-2` },
+        { chapter_index: 3, title: '未读的名字', heading_start: 1931, content_start: 1940, content_end: 2880, text_hash: `mock-${anchorId}-3` },
+      ],
+      model_provider: mode === 'auto' ? 'deepseek' : null,
+      model_id: mode === 'auto' ? 'deepseek-v4-pro' : null,
+      confidence: mode === 'auto' ? 0.96 : null,
+    }
+    state.materializationProfiles[String(anchorId)] = profile
+    return profile
+  }
+
+  function analyzeReferenceChapterSplit(input) {
+    return createChapterSplitProfile(input, 'auto')
+  }
+
+  function previewReferenceChapterSplit(input) {
+    if (!String(input?.delimiter_template ?? '').trim()) throw new Error('A chapter delimiter template is required.')
+    return createChapterSplitProfile(input, 'manual')
+  }
+
+  function confirmReferenceChapterSplit(input) {
+    const profile = state.materializationProfiles[String(input?.anchor_id ?? '')]
+    if (!profile || profile.split_profile_id !== input?.split_profile_id) throw new Error('Chapter split profile was not found.')
+    profile.status = 'confirmed'
+    return { ...profile }
+  }
+
+  function materializationStatus(anchorId, profile, batchSize = 5) {
+    return {
+      run_id: `mock-materialization-${anchorId}`,
+      anchor_id: anchorId,
+      split_profile_id: profile.split_profile_id,
+      generation_id: `mock-generation-${anchorId}`,
+      status: 'completed',
+      chapter_batch_size: batchSize,
+      total_chapters: profile.chapter_count,
+      processed_chapters: profile.chapter_count,
+      total_chapter_batches: Math.ceil(profile.chapter_count / batchSize),
+      completed_chapter_batches: Math.ceil(profile.chapter_count / batchSize),
+      current_batch_index: null,
+      current_batch_start_chapter: null,
+      current_batch_end_chapter: null,
+      candidate_count: 18,
+      accepted_count: 12,
+      rejected_count: 6,
+      review_count: 0,
+      vector_count: 12,
+      llm: { provider: 'deepseek', model_id: 'deepseek-v4-pro', dimensions: null },
+      embedding: { provider: 'onnx', model_id: 'bge-m3', dimensions: 1024 },
+      last_error_code: null,
+      last_error_message: null,
+      started_at: now,
+      completed_at: now,
+      vector_index_healthy: true,
+      next_action: 'none',
+    }
+  }
+
+  function enqueueReferenceMaterialization(input) {
+    const anchorId = Number(input?.anchor_id ?? 0)
+    const profile = state.materializationProfiles[String(anchorId)]
+    if (!profile || profile.status !== 'confirmed' || profile.split_profile_id !== input?.split_profile_id) {
+      throw new Error('A confirmed chapter split profile is required.')
+    }
+    const batchSize = Number(input?.chapter_batch_size ?? 5)
+    if (batchSize !== 5 && batchSize !== 10) throw new Error('Chapter batch size must be 5 or 10.')
+    const run = materializationStatus(anchorId, profile, batchSize)
+    state.materializationRuns = state.materializationRuns.filter((item) => item.anchor_id !== anchorId)
+    state.materializationRuns.push(run)
+    return { ...run }
+  }
+
+  function getReferenceMaterializationStatus(input = {}) {
+    const anchorId = Number(input?.anchor_id ?? 0)
+    const requestedRunId = String(input?.run_id ?? '')
+    const matches = state.materializationRuns.filter((run) => run.anchor_id === anchorId)
+    const run = requestedRunId ? matches.find((item) => item.run_id === requestedRunId) : matches.at(-1)
+    return run ? { ...run } : null
+  }
+
+  function retryReferenceMaterialization(input = {}) {
+    const run = getReferenceMaterializationStatus(input)
+    if (!run) throw new Error('Materialization run was not found.')
+    return run
+  }
+
+  function listReferenceMaterializationChapterProgress(input = {}) {
+    const run = getReferenceMaterializationStatus(input)
+    if (!run) return { items: [], total: 0, page: 1, size: Number(input?.size ?? 20), total_pages: 1, next_cursor: null, has_more: false, total_estimate: 0 }
+    const items = Array.from({ length: run.total_chapters }, (_, index) => ({
+      chapter_index: index + 1,
+      batch_index: Math.floor(index / run.chapter_batch_size),
+      status: 'completed',
+      current_stage: 'completed',
+      candidate_count: 6,
+      decided_count: 6,
+      accepted_count: 4,
+      rejected_count: 2,
+      review_count: 0,
+      vector_count: 4,
+      model_call_count: 1,
+      started_at: now,
+      completed_at: now,
+      last_error_code: null,
+      last_error_message: null,
+      row_version: 1,
+    }))
+    return { items, total: items.length, page: 1, size: Number(input?.size ?? 20), total_pages: 1, next_cursor: null, has_more: false, total_estimate: items.length }
+  }
+
+  function listReferenceMaterializationCandidates(input = {}) {
+    return { items: [], total: 0, page: 1, size: Number(input?.size ?? 20), total_pages: 1, next_cursor: null, has_more: false, total_estimate: 0 }
+  }
+
+  function reviewReferenceMaterializationCandidate(input = {}) {
+    const status = getReferenceMaterializationStatus(input)
+    if (!status) throw new Error('Materialization run was not found.')
+    return { candidate_id: String(input?.candidate_id ?? ''), decision: input?.action === 'reject' ? 'rejected' : 'accepted', row_version: Number(input?.expected_version ?? 0) + 1, requalification_queued: true, status }
+  }
+
+  function listActiveReferenceMaterializationMaterials(input = {}) {
+    const run = getReferenceMaterializationStatus({ anchor_id: input?.anchor_id })
+    const items = run?.status === 'completed' && run.vector_index_healthy ? [{
+      material_id: `mock-active-material-${run.anchor_id}`,
+      anchor_id: run.anchor_id,
+      generation_id: run.generation_id,
+      material_type: 'action_reaction',
+      text: '她把杯底半圈水痕压进记忆里，没有急着回头。',
+      quality_score: 0.91,
+      confidence: 0.88,
+      tags: { narrative_functions: ['reveal'], emotion_mechanics: ['restraint'], pov: ['close_third'], techniques: ['delayed_reaction'], scene_beat_roles: ['turn'], character_relations: [], causal_information_roles: ['clue'] },
+      reason_codes: ['complete_exchange'],
+    }] : []
+    return { items, total: items.length, page: 1, size: Number(input?.size ?? 20), total_pages: 1, next_cursor: null, has_more: false, total_estimate: items.length }
+  }
+
+  function generateReferenceMaterializationBlueprintPreview(input = {}) {
+    const anchorIds = Array.isArray(input?.anchor_ids) ? input.anchor_ids.map(Number).filter(Number.isInteger) : []
+    if (anchorIds.length === 0) throw new Error('Active materials are required.')
+    const anchorId = anchorIds[0]
+    const run = getReferenceMaterializationStatus({ anchor_id: anchorId })
+    if (!run?.vector_index_healthy) throw new Error('Active vector index is required.')
+    const count = Math.max(1, Math.min(3, Number(input?.requested_count ?? 1)))
+    const candidates = Array.from({ length: count }, (_, index) => ({
+      blueprint_id: `mock-materialization-blueprint-${index + 1}`,
+      strategy: index === 0 ? '先确认水痕线索，再延迟揭示人物的真实动机。' : '将线索压力前置，用反应差异制造下一章冲突。',
+      beats: [
+        { beat_id: `mock-beat-${index}-1`, beat_index: 1, intent: '让主角发现线索与旧案的关联。', narrative_function: 'information_reveal', materials: [{ material_id: `mock-active-material-${anchorId}`, anchor_id: anchorId, generation_id: run.generation_id, material_type: 'action_reaction', text_preview: '她把杯底半圈水痕压进记忆里。', quality_score: 0.91, vector_score: 0.88, fit_explanation: '用克制反应保留判断空间。' }] },
+        { beat_id: `mock-beat-${index}-2`, beat_index: 2, intent: '在结尾抛出新的不确定性。', narrative_function: 'hook', materials: [{ material_id: `mock-active-material-${anchorId}`, anchor_id: anchorId, generation_id: run.generation_id, material_type: 'action_reaction', text_preview: '她没有急着回头。', quality_score: 0.86, vector_score: 0.83, fit_explanation: '以延迟动作建立未解压力。' }] },
+      ],
+    }))
+    return { session_id: `mock-materialization-preview-${anchorId}`, status: 'active', next_action: 'none', goal: String(input?.goal ?? ''), sources: anchorIds.map((id) => ({ anchor_id: id, generation_id: `mock-generation-${id}`, material_count: 12 })), candidates, stale_anchor_ids: [], created_at: now, updated_at: now }
   }
 
   function findExistingReferenceAnchorForInput(input) {

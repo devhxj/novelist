@@ -49,7 +49,7 @@ function titleFromPath(path: string): string {
 
 function anchorState(anchor: reference.Anchor): { label: string; className: string; usable: boolean } {
   if (anchor.status === 'ready' || anchor.status === 'completed') {
-    return { label: '可用', className: 'text-emerald-700 dark:text-emerald-400', usable: true }
+    return { label: '已导入', className: 'text-emerald-700 dark:text-emerald-400', usable: true }
   }
   if (anchor.status.startsWith('failed_') || anchor.status === 'cancelled') {
     return { label: '处理失败', className: 'text-destructive', usable: false }
@@ -223,7 +223,7 @@ export default function ReferenceBookSidebar({
   }
 
   return (
-    <section data-testid="reference-book-sidebar" className="flex min-h-0 flex-1 flex-col" aria-busy={isLoading}>
+    <section data-testid="reference-book-sidebar" className="reference-materialization-sidebar flex min-h-0 flex-1 flex-col bg-sidebar" aria-busy={isLoading}>
       <header className="flex items-center gap-2 border-b px-4 py-3">
         <BookMarked className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
         <div className="min-w-0 flex-1">
