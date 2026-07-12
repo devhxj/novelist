@@ -31,4 +31,8 @@ public interface IReferenceMaterializationService
     ValueTask<PageResultPayload<ReferenceMaterializationMaterialPayload>> ListActiveMaterialsAsync(
         ListActiveReferenceMaterializationMaterialsPayload input,
         CancellationToken cancellationToken);
+
+    ValueTask<IReadOnlyList<ReferenceMaterializationSemanticSearchHitPayload>> SearchActiveMaterialsAsync(
+        SearchActiveReferenceMaterializationMaterialsPayload input,
+        CancellationToken cancellationToken);
 }

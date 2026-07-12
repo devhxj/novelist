@@ -80,6 +80,20 @@ public sealed partial class SqliteReferenceMaterializationService
             cancellationToken);
     }
 
+    public async ValueTask<IReadOnlyList<ReferenceMaterializationSemanticSearchHitPayload>> SearchActiveMaterialsAsync(
+        SearchActiveReferenceMaterializationMaterialsPayload input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateReferenceInput(input.NovelId, input.AnchorId);
+        await EnsureAnchorAccessibleAsync(input.NovelId, input.AnchorId, cancellationToken);
+        return await _semanticSearch.SearchAsync(
+            input.AnchorId,
+            input.Query,
+            input.MaxResults,
+            cancellationToken);
+    }
+
     private async ValueTask EnsureConfirmedProfileMatchesCurrentSourceAsync(
         long novelId,
         long anchorId,

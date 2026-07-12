@@ -49,6 +49,11 @@ public static class ReferenceMaterializationBridgeHandlers
                 ReadObjectArg<ListActiveReferenceMaterializationMaterialsPayload>(context.Payload, 0, "input"),
                 cancellationToken)));
 
+        dispatcher.Register("SearchActiveReferenceMaterializationMaterials", async (context, cancellationToken) =>
+            await ExecuteSemanticMaterialsAsync(() => service.SearchActiveMaterialsAsync(
+                ReadObjectArg<SearchActiveReferenceMaterializationMaterialsPayload>(context.Payload, 0, "input"),
+                cancellationToken)));
+
         return dispatcher;
     }
 
@@ -144,6 +149,25 @@ public static class ReferenceMaterializationBridgeHandlers
                 result.Page,
                 result.Size,
                 result.TotalPages);
+        }
+        catch (ReferenceMaterializationException exception)
+        {
+            throw new BridgeRequestException(
+                exception.ErrorCode,
+                exception.Message,
+                new { error_code = exception.ErrorCode },
+                retryable: true);
+        }
+    }
+
+    private static async ValueTask<IReadOnlyList<ReferenceMaterializationSemanticSearchHitPayload>> ExecuteSemanticMaterialsAsync(
+        Func<ValueTask<IReadOnlyList<ReferenceMaterializationSemanticSearchHitPayload>>> operation)
+    {
+        try
+        {
+            return (await operation())
+                .Select(hit => hit with { Material = SanitizeMaterial(hit.Material) })
+                .ToArray();
         }
         catch (ReferenceMaterializationException exception)
         {

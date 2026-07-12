@@ -324,6 +324,77 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task SemanticSearchUsesOnlyTheActiveGenerationVectorIndexWithoutLexicalPrefilter()
+    {
+        var options = CreateOptions();
+        var (anchor, status, vec) = await CreateCompletedGenerationAsync(options);
+        var query = "绝不重复的检索意图";
+        var search = new SqliteReferenceMaterializationSemanticSearch(
+            options,
+            new ReferenceCorpusDatabasePathResolver(options),
+            new FixedEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "embedding-provider", "https://example.invalid", "key", "embedding-model", 8, null)),
+            new FixedEmbeddingClient(dimensions: 8),
+            vec);
+
+        var results = await search.SearchAsync(anchor.AnchorId, query, maxResults: 10, CancellationToken.None);
+
+        Assert.NotEmpty(results);
+        Assert.All(results, result =>
+        {
+            Assert.Equal(status.GenerationId, result.Material.GenerationId);
+            Assert.DoesNotContain(query, result.Material.Text, StringComparison.Ordinal);
+            Assert.InRange(result.VectorScore, 0, 1);
+        });
+        Assert.NotNull(vec.LastSearchRequest);
+        Assert.Equal(
+            SqliteVecTableProvisioner.BuildReferenceMaterializationVectorTableName(status.GenerationId, 8),
+            vec.LastSearchRequest!.TableName);
+        Assert.Equal(8, vec.LastSearchRequest.Dimensions);
+    }
+
+    [Fact]
+    public async Task SemanticSearchRejectsAnActiveEmbeddingConfigurationThatDriftedFromTheGeneration()
+    {
+        var options = CreateOptions();
+        var (anchor, _, vec) = await CreateCompletedGenerationAsync(options);
+        var search = new SqliteReferenceMaterializationSemanticSearch(
+            options,
+            new ReferenceCorpusDatabasePathResolver(options),
+            new FixedEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "different-provider", "https://example.invalid", "key", "different-model", 8, null)),
+            new FixedEmbeddingClient(dimensions: 8),
+            vec);
+
+        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
+            await search.SearchAsync(anchor.AnchorId, "检索意图", maxResults: 10, CancellationToken.None));
+
+        Assert.Equal(ReferenceMaterializationErrorCodes.EmbeddingHealthCheckFailed, exception.ErrorCode);
+        Assert.Null(vec.LastSearchRequest);
+    }
+
+    [Fact]
+    public async Task SemanticSearchReportsVectorIndexFailuresInsteadOfReturningFallbackResults()
+    {
+        var options = CreateOptions();
+        var (anchor, _, vec) = await CreateCompletedGenerationAsync(options);
+        vec.SearchException = new InvalidOperationException("sqlite-vec is unavailable");
+        var search = new SqliteReferenceMaterializationSemanticSearch(
+            options,
+            new ReferenceCorpusDatabasePathResolver(options),
+            new FixedEmbeddingConfigurationService(new EmbeddingRequestOptions(
+                "embedding-provider", "https://example.invalid", "key", "embedding-model", 8, null)),
+            new FixedEmbeddingClient(dimensions: 8),
+            vec);
+
+        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
+            await search.SearchAsync(anchor.AnchorId, "检索意图", maxResults: 10, CancellationToken.None));
+
+        Assert.Equal(ReferenceMaterializationErrorCodes.VectorIndexFailed, exception.ErrorCode);
+        Assert.NotNull(vec.LastSearchRequest);
+    }
+
+    [Fact]
     public async Task WorkerFailsTheCurrentBatchAndLeavesLaterBatchesUnclaimedWhenOneChapterFails()
     {
         var options = CreateOptions();
@@ -423,6 +494,37 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         return await anchors.CreateAnchorAsync(
             new CreateReferenceAnchorPayload(novel.Id, "运行仓库来源", null, sourcePath, "markdown", "user_provided"),
             CancellationToken.None);
+    }
+
+    private async ValueTask<(ReferenceAnchorPayload Anchor, ReferenceMaterializationStatusPayload Status, SearchableVecProvisioner Vec)> CreateCompletedGenerationAsync(
+        AppInitializationOptions options)
+    {
+        var anchor = await CreateAnchorAsync(options, chapterCount: 2);
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var vec = new SearchableVecProvisioner();
+        var worker = new ReferenceMaterializationWorker(
+            resolver,
+            new ConcurrentAcceptingQualifier(),
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(resolver, vec),
+            workerId: "test-materialization-semantic-search-worker");
+
+        Assert.True(await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None));
+        var status = await store.GetAsync(run.RunId, CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal(ReferenceMaterializationRunStates.Completed, status.Status);
+        Assert.Equal(status.AcceptedCount, vec.LastProvisionRequest?.Vectors.Count);
+        return (anchor, status, vec);
     }
 
     private static ReferenceMaterializationRunSeed CreateSeed(long anchorId, string profileId, int chapterBatchSize)
@@ -607,6 +709,43 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             LastRequest = request;
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class SearchableVecProvisioner : ISqliteVecTableProvisioner, ISqliteVecQueryProvider
+    {
+        public SqliteVecProvisionRequest? LastProvisionRequest { get; private set; }
+
+        public SqliteVecSearchRequest? LastSearchRequest { get; private set; }
+
+        public Exception? SearchException { get; set; }
+
+        public ValueTask ProvisionAsync(
+            string databasePath,
+            SqliteVecProvisionRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            LastProvisionRequest = request;
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<IReadOnlyList<SqliteVecSearchRecord>> SearchAsync(
+            string databasePath,
+            SqliteVecSearchRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            LastSearchRequest = request;
+            if (SearchException is not null)
+            {
+                throw SearchException;
+            }
+            var records = (LastProvisionRequest?.Vectors ?? [])
+                .Take(request.TopK)
+                .Select((vector, index) => new SqliteVecSearchRecord(vector.RowId, 0.1 + index * 0.1))
+                .ToArray();
+            return ValueTask.FromResult<IReadOnlyList<SqliteVecSearchRecord>>(records);
         }
     }
 

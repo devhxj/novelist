@@ -158,6 +158,12 @@ public sealed record ListActiveReferenceMaterializationMaterialsPayload(
     [property: JsonPropertyName("query")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Query = null);
 
+public sealed record SearchActiveReferenceMaterializationMaterialsPayload(
+    [property: JsonPropertyName("novel_id")] long NovelId,
+    [property: JsonPropertyName("anchor_id")] long AnchorId,
+    [property: JsonPropertyName("query")] string Query,
+    [property: JsonPropertyName("max_results")] int MaxResults);
+
 public sealed record ReferenceChapterSplitBoundaryPayload(
     [property: JsonPropertyName("chapter_index")] int ChapterIndex,
     [property: JsonPropertyName("title")] string Title,
@@ -276,3 +282,7 @@ public sealed record ReferenceMaterializationMaterialPayload(
     [property: JsonPropertyName("confidence")] double Confidence,
     [property: JsonPropertyName("tags")] ReferenceMaterializationMaterialTagsPayload Tags,
     [property: JsonPropertyName("reason_codes")] IReadOnlyList<string> ReasonCodes);
+
+public sealed record ReferenceMaterializationSemanticSearchHitPayload(
+    [property: JsonPropertyName("material")] ReferenceMaterializationMaterialPayload Material,
+    [property: JsonPropertyName("vector_score")] double VectorScore);

@@ -1021,6 +1021,13 @@ has_more: boolean
     query?: string | null
   }
 
+  export interface SearchActiveMaterializationMaterialsInput {
+    novel_id: number
+    anchor_id: number
+    query: string
+    max_results: number
+  }
+
   export interface MaterializationModelIdentity {
     provider: string
     model_id: string
@@ -1092,6 +1099,11 @@ has_more: boolean
     confidence: number
     tags: MaterializationMaterialTags
     reason_codes: string[]
+  }
+
+  export interface MaterializationSemanticSearchHit {
+    material: MaterializationMaterial
+    vector_score: number
   }
 
   export interface CreateAnchorFailure {

@@ -21,6 +21,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
         await AssertOkAsync(dispatcher, "GetReferenceMaterializationStatus", new GetReferenceMaterializationStatusPayload(42, 99, "run-1"));
         await AssertOkAsync(dispatcher, "ListReferenceMaterializationChapterProgress", new ListReferenceMaterializationChapterProgressPayload(42, 99, "run-1", 1, 20));
         await AssertOkAsync(dispatcher, "ListActiveReferenceMaterializationMaterials", new ListActiveReferenceMaterializationMaterialsPayload(42, 99, 1, 20, "真相"));
+        await AssertOkAsync(dispatcher, "SearchActiveReferenceMaterializationMaterials", new SearchActiveReferenceMaterializationMaterialsPayload(42, 99, "谜底", 10));
 
         Assert.Equal(
             [
@@ -30,7 +31,8 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                 "enqueue:42:99:profile-1:10",
                 "status:42:99:run-1",
                 "progress:42:99:run-1:1:20",
-                "materials:42:99:1:20:真相"
+                "materials:42:99:1:20:真相",
+                "semantic-materials:42:99:谜底:10"
             ],
             service.Calls);
     }
@@ -67,6 +69,27 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
         Assert.True(error.GetProperty("retryable").GetBoolean());
     }
 
+    [Fact]
+    public async Task SemanticSearchReturnsTheStableMaterializationErrorCodeFromTheVectorRoute()
+    {
+        var service = new RecordingMaterializationService
+        {
+            SemanticSearchException = new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.VectorIndexFailed,
+                "Active-generation material vector search failed.")
+        };
+        var dispatcher = new BridgeDispatcher().RegisterReferenceMaterializationHandlers(service);
+        var result = await dispatcher.DispatchAsync(Request(
+            "SearchActiveReferenceMaterializationMaterials",
+            new SearchActiveReferenceMaterializationMaterialsPayload(42, 99, "检索意图", 10)));
+        using var json = JsonDocument.Parse(result.OutboundJson ?? throw new InvalidOperationException("Bridge returned no response."));
+
+        Assert.False(json.RootElement.GetProperty("ok").GetBoolean());
+        var error = json.RootElement.GetProperty("error");
+        Assert.Equal(ReferenceMaterializationErrorCodes.VectorIndexFailed, error.GetProperty("code").GetString());
+        Assert.True(error.GetProperty("retryable").GetBoolean());
+    }
+
     private static async Task AssertOkAsync(BridgeDispatcher dispatcher, string method, params object?[] args)
     {
         var result = await dispatcher.DispatchAsync(Request(method, args));
@@ -89,6 +112,8 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
     {
         public List<string> Calls { get; } = [];
         public Exception? EnqueueException { get; init; }
+
+        public Exception? SemanticSearchException { get; init; }
 
         public ValueTask<ReferenceChapterSplitProfilePayload> AnalyzeChapterSplitAsync(
             AnalyzeReferenceChapterSplitPayload input,
@@ -170,6 +195,30 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                 input.Page,
                 input.Size,
                 1));
+        }
+
+        public ValueTask<IReadOnlyList<ReferenceMaterializationSemanticSearchHitPayload>> SearchActiveMaterialsAsync(
+            SearchActiveReferenceMaterializationMaterialsPayload input,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add($"semantic-materials:{input.NovelId}:{input.AnchorId}:{input.Query}:{input.MaxResults}");
+            if (SemanticSearchException is not null)
+            {
+                throw SemanticSearchException;
+            }
+            return ValueTask.FromResult<IReadOnlyList<ReferenceMaterializationSemanticSearchHitPayload>>(
+            [new ReferenceMaterializationSemanticSearchHitPayload(
+                new ReferenceMaterializationMaterialPayload(
+                    "material-1",
+                    input.AnchorId,
+                    "generation-1",
+                    "passage",
+                    "她说出了真相。",
+                    0.9,
+                    0.8,
+                    new ReferenceMaterializationMaterialTagsPayload(["reveal"], [], ["close_third"], ["subtext"]),
+                    ["complete_exchange"]),
+                0.8)]);
         }
 
         private static ReferenceChapterSplitProfilePayload CreateProfile(long anchorId)
