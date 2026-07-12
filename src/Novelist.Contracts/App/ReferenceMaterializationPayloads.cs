@@ -85,6 +85,7 @@ public static class ReferenceMaterializationErrorCodes
     public const string BlueprintMaterialNotReady = "materialization_blueprint_material_not_ready";
     public const string BlueprintNoRelevantMaterial = "materialization_blueprint_no_relevant_material";
     public const string ChapterSplitProfileStale = "materialization_chapter_split_profile_stale";
+    public const string CandidateWindowInvalid = "materialization_candidate_window_invalid";
     public const string RetryRequiresNewRun = "materialization_retry_requires_new_run";
     public const string CandidateReviewConflict = "materialization_candidate_review_conflict";
     public const string CandidateReviewInvalid = "materialization_candidate_review_invalid";

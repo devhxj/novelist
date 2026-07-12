@@ -200,6 +200,46 @@ public sealed class ReferenceCandidateWindowBuilderTests
     }
 
     [Fact]
+    public void BuildRejectsAnOverlongParagraphWithoutCompleteSentenceCoverage()
+    {
+        var builder = new ReferenceCandidateWindowBuilder();
+        var text = new string('叙', 1_201);
+        var chapter = new ReferenceCandidateChapterInput(
+            AnchorId: 99,
+            ChapterIndex: 1,
+            ContentStart: 0,
+            ContentEnd: text.Length,
+            Nodes:
+            [new ReferenceCandidateSourceNode("p-long", "paragraph", 0, text.Length, text, "p-long-hash")]);
+
+        var exception = Assert.Throws<ReferenceMaterializationException>(() => builder.Build(chapter));
+
+        Assert.Equal(ReferenceMaterializationErrorCodes.CandidateWindowInvalid, exception.ErrorCode);
+    }
+
+    [Fact]
+    public void BuildRejectsAContextWindowThatExceedsTheHardMaximum()
+    {
+        var leadingText = new string('叙', 1_196);
+        var chapter = new ReferenceCandidateChapterInput(
+            AnchorId: 99,
+            ChapterIndex: 1,
+            ContentStart: 0,
+            ContentEnd: 1_206,
+            Nodes:
+            [
+                new ReferenceCandidateSourceNode("p-leading", "paragraph", 0, leadingText.Length, leadingText, "p-leading-hash"),
+                new ReferenceCandidateSourceNode("p-event", "paragraph", leadingText.Length, leadingText.Length + 5, "门开了。", "p-event-hash"),
+                new ReferenceCandidateSourceNode("p-reaction", "paragraph", leadingText.Length + 5, 1_206, "她停住。", "p-reaction-hash")
+            ]);
+        var builder = new ReferenceCandidateWindowBuilder();
+
+        var exception = Assert.Throws<ReferenceMaterializationException>(() => builder.Build(chapter));
+
+        Assert.Equal(ReferenceMaterializationErrorCodes.CandidateWindowInvalid, exception.ErrorCode);
+    }
+
+    [Fact]
     public void BuildRecordsAnIsolatedAcknowledgementAsADeterministicRejection()
     {
         var builder = new ReferenceCandidateWindowBuilder();

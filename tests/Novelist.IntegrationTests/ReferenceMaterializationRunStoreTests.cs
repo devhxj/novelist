@@ -688,6 +688,38 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task WorkerFailsTheRunWhenAnOverlongParagraphCannotBeSplitSafely()
+    {
+        var options = CreateOptions();
+        var anchor = await CreateAnchorAsync(
+            options,
+            chapterCount: 2,
+            sourceOverride: "# 第一章\n\n" + new string('叙', 1_201) + "\n\n# 第二章\n\n正常正文。\n");
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var worker = new ReferenceMaterializationWorker(
+            resolver,
+            new ConcurrentAcceptingQualifier(),
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
+            workerId: "test-materialization-overlong-candidate-worker");
+
+        Assert.True(await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None));
+
+        var status = await store.GetAsync(run.RunId, CancellationToken.None);
+        Assert.Equal(ReferenceMaterializationRunStates.Failed, status?.Status);
+        Assert.Equal(ReferenceMaterializationErrorCodes.CandidateWindowInvalid, status?.LastErrorCode);
+    }
+
+    [Fact]
     public async Task ClaimReclaimsAnExpiredLeaseAndResetsOnlyTheCurrentIncompleteBatch()
     {
         var options = CreateOptions();

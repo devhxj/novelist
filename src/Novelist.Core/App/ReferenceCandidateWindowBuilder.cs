@@ -171,6 +171,14 @@ public sealed class ReferenceCandidateWindowBuilder
         string decisionOrigin = "candidate_window_builder",
         IReadOnlyList<string>? reasonCodes = null)
     {
+        var candidateText = string.Join("\n", nodes.Select(node => node.Text));
+        if (candidateText.Length > CandidateHardMaximumCharacters)
+        {
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.CandidateWindowInvalid,
+                "A materialization candidate exceeds the source-window length limit.");
+        }
+
         var candidateKey = BuildCandidateKey(chapter.AnchorId, chapter.ChapterIndex, candidateType, nodes);
         if (candidates.Any(candidate => string.Equals(candidate.CandidateKey, candidateKey, StringComparison.Ordinal)))
         {
@@ -181,7 +189,7 @@ public sealed class ReferenceCandidateWindowBuilder
             candidateKey,
             chapter.ChapterIndex,
             candidateType,
-            HashText(string.Join("\n", nodes.Select(node => node.Text))),
+            HashText(candidateText),
             nodes,
             initialDecision,
             decisionOrigin,
@@ -217,7 +225,9 @@ public sealed class ReferenceCandidateWindowBuilder
             .ToArray();
         if (!CoversParagraphContinuously(paragraph, contained) || contained.Any(sentence => sentence.Text.Length > CandidateHardMaximumCharacters))
         {
-            return [[paragraph]];
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.CandidateWindowInvalid,
+                "An oversized materialization paragraph cannot be split along complete source sentence boundaries.");
         }
 
         var windows = new List<IReadOnlyList<ReferenceCandidateSourceNode>>();
