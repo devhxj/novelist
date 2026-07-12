@@ -11,7 +11,7 @@ public sealed class ReferenceMaterializationChatCompletionQualifier : IReference
 {
     public const string SchemaVersion = "reference-materialization-qualifier-v1";
 
-    private const int MaxCandidatesPerRequest = 20;
+    public const int MaxCandidatesPerRequest = 20;
     private const int MaxOutputChars = 128 * 1024;
     private const int MaxOutputTokens = 8_192;
     private const int MaxCandidateTextChars = 1_200;

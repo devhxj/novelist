@@ -106,6 +106,12 @@ public static PhotinoWebMessageBridge CreateBridge(
         var referenceMaterializationService = new SqliteReferenceMaterializationService(
             options,
             new ReferenceChapterSplitChatCompletionAnalyzer(settingsService, chatCompletionClient));
+        var materializationDatabasePathResolver = new ReferenceCorpusDatabasePathResolver(options);
+        var referenceMaterializationWorker = new ReferenceMaterializationWorker(
+            materializationDatabasePathResolver,
+            new ReferenceMaterializationChatCompletionQualifier(chatCompletionClient),
+            new ReferenceMaterializationEmbeddingProcessor(embeddingService, embeddingClient),
+            new ReferenceMaterializationVectorIndexer(materializationDatabasePathResolver, sqliteVecProvider));
         var referenceCorpusService = new SqliteReferenceCorpusService(
             options,
             embeddingService,
@@ -138,7 +144,8 @@ referenceCorpusService);
  importRecovery: novelImportRecoveryService,
  referenceAnchorRecovery: referenceAnchorService),
  referenceCorpusAnalysisWorker,
- referenceCorpusTechniqueVectorMaintenanceLoop);
+ referenceCorpusTechniqueVectorMaintenanceLoop,
+ referenceMaterializationWorker);
  var referenceCorpusGovernanceService = new SqliteReferenceCorpusGovernanceService(options);
         var referenceStyleProfileService = new SqliteReferenceStyleProfileService(
             options,
@@ -229,6 +236,7 @@ return new DesktopBridgeRuntime(
 new PhotinoWebMessageBridge(dispatcher, window),
  referenceCorpusAnalysisWorker,
  referenceCorpusTechniqueVectorMaintenanceLoop,
+ referenceMaterializationWorker,
  initializationService);
 }
 
@@ -236,6 +244,7 @@ new PhotinoWebMessageBridge(dispatcher, window),
 PhotinoWebMessageBridge Bridge,
  ReferenceCorpusAnalysisWorker AnalysisWorker,
  ReferenceCorpusTechniqueVectorMaintenanceLoop TechniqueVectorMaintenanceLoop,
+ ReferenceMaterializationWorker MaterializationWorker,
  CoordinatedAppInitializationService InitializationService) : IAsyncDisposable
 {
 public ValueTask StartAsync(CancellationToken cancellationToken = default) =>
@@ -249,7 +258,14 @@ public ValueTask StartAsync(CancellationToken cancellationToken = default) =>
  }
  finally
  {
+ try
+ {
+ await MaterializationWorker.DisposeAsync();
+ }
+ finally
+ {
  await AnalysisWorker.DisposeAsync();
+ }
  }
  }
  }

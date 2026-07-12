@@ -6,6 +6,24 @@ namespace Novelist.Infrastructure.App;
 
 internal sealed partial class SqliteReferenceMaterializationRunStore
 {
+    public async ValueTask<string?> ReadNextRunnableRunIdAsync(CancellationToken cancellationToken)
+    {
+        var databasePath = await EnsureSchemaAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT run_id
+            FROM reference_materialization_runs
+            WHERE status IN ($queued, $running)
+              AND current_batch_index IS NOT NULL
+            ORDER BY started_at, run_id
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$queued", ReferenceMaterializationRunStates.Queued);
+        command.Parameters.AddWithValue("$running", ReferenceMaterializationRunStates.Running);
+        return (string?)await command.ExecuteScalarAsync(cancellationToken);
+    }
+
     public async ValueTask<ReferenceMaterializationBatchClaim?> ClaimCurrentBatchAsync(
         string runId,
         string workerId,

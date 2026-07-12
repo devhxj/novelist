@@ -3,15 +3,22 @@ using Novelist.Core.App;
 
 namespace Novelist.Infrastructure.App;
 
-public sealed class ReferenceMaterializationWorker
+public sealed class ReferenceMaterializationWorker : IAsyncDisposable
 {
     private static readonly TimeSpan DefaultLeaseDuration = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan DefaultIdleDelay = TimeSpan.FromSeconds(1);
     private readonly IReferenceCorpusDatabasePathResolver _databasePathResolver;
     private readonly IReferenceMaterializationQualifier _qualifier;
     private readonly IReferenceMaterializationEmbedder _embedder;
     private readonly ReferenceMaterializationVectorIndexer _indexer;
     private readonly string _workerId;
     private readonly TimeSpan _leaseDuration;
+    private readonly TimeSpan _idleDelay;
+    private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
+    private readonly SemaphoreSlim _pumpGate = new(1, 1);
+    private CancellationTokenSource? _loopCancellation;
+    private Task? _loopTask;
+    private bool _disposed;
 
     public ReferenceMaterializationWorker(
         IReferenceCorpusDatabasePathResolver databasePathResolver,
@@ -19,7 +26,8 @@ public sealed class ReferenceMaterializationWorker
         IReferenceMaterializationEmbedder embedder,
         ReferenceMaterializationVectorIndexer indexer,
         string? workerId = null,
-        TimeSpan? leaseDuration = null)
+        TimeSpan? leaseDuration = null,
+        TimeSpan? idleDelay = null)
     {
         _databasePathResolver = databasePathResolver ?? throw new ArgumentNullException(nameof(databasePathResolver));
         _qualifier = qualifier ?? throw new ArgumentNullException(nameof(qualifier));
@@ -32,6 +40,87 @@ public sealed class ReferenceMaterializationWorker
         if (_leaseDuration <= TimeSpan.Zero || _leaseDuration > TimeSpan.FromMinutes(30))
         {
             throw new ArgumentOutOfRangeException(nameof(leaseDuration));
+        }
+
+        _idleDelay = idleDelay ?? DefaultIdleDelay;
+        if (_idleDelay <= TimeSpan.Zero || _idleDelay > TimeSpan.FromMinutes(10))
+        {
+            throw new ArgumentOutOfRangeException(nameof(idleDelay));
+        }
+    }
+
+    public bool IsRunning => _loopTask is { IsCompleted: false };
+
+    public async ValueTask StartAsync(CancellationToken cancellationToken = default)
+    {
+        await _lifecycleGate.WaitAsync(cancellationToken);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_loopTask is { IsCompleted: false })
+            {
+                return;
+            }
+
+            _loopCancellation?.Dispose();
+            _loopCancellation = new CancellationTokenSource();
+            _loopTask = RunLoopAsync(_loopCancellation.Token);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    public async ValueTask StopAsync(CancellationToken cancellationToken = default)
+    {
+        Task? loop;
+        await _lifecycleGate.WaitAsync(cancellationToken);
+        try
+        {
+            loop = _loopTask;
+            if (loop is null)
+            {
+                return;
+            }
+
+            _loopCancellation!.Cancel();
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+
+        await loop.WaitAsync(cancellationToken);
+        await _lifecycleGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (ReferenceEquals(loop, _loopTask))
+            {
+                _loopTask = null;
+                _loopCancellation?.Dispose();
+                _loopCancellation = null;
+            }
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    public async ValueTask<bool> PumpOnceAsync(CancellationToken cancellationToken)
+    {
+        await _pumpGate.WaitAsync(cancellationToken);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var store = new SqliteReferenceMaterializationRunStore(_databasePathResolver);
+            var runId = await store.ReadNextRunnableRunIdAsync(cancellationToken);
+            return runId is not null && await ProcessRunOnceAsync(runId, cancellationToken);
+        }
+        finally
+        {
+            _pumpGate.Release();
         }
     }
 
@@ -93,6 +182,52 @@ public sealed class ReferenceMaterializationWorker
         }
     }
 
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync();
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            _disposed = true;
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+
+        await _pumpGate.WaitAsync();
+        _pumpGate.Release();
+    }
+
+    private async Task RunLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (!await PumpOnceAsync(cancellationToken))
+                {
+                    await Task.Delay(_idleDelay, cancellationToken);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch
+            {
+                try
+                {
+                    await Task.Delay(_idleDelay, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
     private async Task ProcessChapterAsync(
         SqliteReferenceMaterializationRunStore store,
         string runId,
@@ -107,9 +242,14 @@ public sealed class ReferenceMaterializationWorker
             return;
         }
 
-        var qualificationWork = await store.ReadQualificationWorkItemAsync(runId, chapterIndex, cancellationToken);
-        var qualification = await _qualifier.QualifyAsync(qualificationWork.Request, cancellationToken);
-        var persistedQualification = await store.PersistQualificationAsync(runId, chapterIndex, qualification, cancellationToken);
+        ReferenceMaterializationQualificationPersistenceResult persistedQualification;
+        do
+        {
+            var qualificationWork = await store.ReadQualificationWorkItemAsync(runId, chapterIndex, cancellationToken);
+            var qualification = await _qualifier.QualifyAsync(qualificationWork.Request, cancellationToken);
+            persistedQualification = await store.PersistQualificationAsync(runId, chapterIndex, qualification, cancellationToken);
+        }
+        while (!persistedQualification.IsComplete);
         if (persistedQualification.AcceptedCount == 0)
         {
             await store.CompleteEmptyEmbeddingAsync(runId, chapterIndex, cancellationToken);

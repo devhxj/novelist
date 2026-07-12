@@ -23,7 +23,12 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         var snapshot = await ReadQualificationSnapshotAsync(connection, transaction: null, normalizedRunId, chapterIndex, cancellationToken)
             ?? throw new ArgumentException("Materialization chapter progress does not exist.", nameof(chapterIndex));
         EnsureQualificationStage(snapshot);
-        var candidates = await ReadQualificationCandidatesAsync(connection, transaction: null, snapshot, cancellationToken);
+        var candidates = await ReadQualificationCandidatesAsync(
+            connection,
+            transaction: null,
+            snapshot,
+            ReferenceMaterializationChatCompletionQualifier.MaxCandidatesPerRequest,
+            cancellationToken);
         if (candidates.Count == 0)
         {
             throw new InvalidOperationException("Materialization chapter has no candidates to qualify.");
@@ -54,11 +59,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         var snapshot = await ReadQualificationSnapshotAsync(connection, transaction, normalizedRunId, chapterIndex, cancellationToken)
             ?? throw new ArgumentException("Materialization chapter progress does not exist.", nameof(chapterIndex));
         EnsureQualificationStage(snapshot);
-        var candidates = await ReadQualificationCandidatesAsync(connection, transaction, snapshot, cancellationToken);
-        ValidateQualificationResult(result, candidates);
+        var candidates = await ReadQualificationCandidatesAsync(connection, transaction, snapshot, maxCount: null, cancellationToken);
+        var decidedCandidates = ValidateQualificationResult(result, candidates);
 
         var decisions = result.Decisions.ToDictionary(decision => decision.CandidateId, StringComparer.Ordinal);
-        foreach (var candidate in candidates)
+        foreach (var candidate in decidedCandidates)
         {
             await PersistCandidateDecisionAsync(
                 connection,
@@ -68,27 +73,28 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 cancellationToken);
         }
 
-        var acceptedCount = result.Decisions.Count(decision => decision.Decision == ReferenceMaterializationCandidateDecisions.Accepted);
-        var rejectedCount = result.Decisions.Count(decision => decision.Decision == ReferenceMaterializationCandidateDecisions.Rejected);
-        var reviewCount = result.Decisions.Count(decision => decision.Decision == ReferenceMaterializationCandidateDecisions.ReviewRequired);
+        var counts = await ReadQualificationDecisionCountsAsync(connection, transaction, snapshot, cancellationToken);
+        var isComplete = counts.PendingCount == 0;
         await UpdateQualificationProgressAsync(
             connection,
             transaction,
             normalizedRunId,
             chapterIndex,
-            result.Decisions.Count,
-            acceptedCount,
-            rejectedCount,
-            reviewCount,
+            counts.DecidedCount,
+            counts.AcceptedCount,
+            counts.RejectedCount,
+            counts.ReviewCount,
+            isComplete,
             cancellationToken);
         await UpdateRunQualificationCountsAsync(connection, transaction, normalizedRunId, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new ReferenceMaterializationQualificationPersistenceResult(
             chapterIndex,
-            result.Decisions.Count,
-            acceptedCount,
-            rejectedCount,
-            reviewCount);
+            counts.DecidedCount,
+            counts.AcceptedCount,
+            counts.RejectedCount,
+            counts.ReviewCount,
+            isComplete);
     }
 
     private static async ValueTask<QualificationSnapshot?> ReadQualificationSnapshotAsync(
@@ -133,6 +139,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         SqliteConnection connection,
         SqliteTransaction? transaction,
         QualificationSnapshot snapshot,
+        int? maxCount,
         CancellationToken cancellationToken)
     {
         var candidates = new List<CandidateSummary>();
@@ -180,7 +187,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 nodes));
         }
 
-        return qualified;
+        return maxCount is null ? qualified : qualified.Take(maxCount.Value).ToArray();
     }
 
     private static async ValueTask<IReadOnlyList<ReferenceMaterializationQualificationSourceNode>> ReadQualificationCandidateNodesAsync(
@@ -209,16 +216,17 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         return nodes;
     }
 
-    private static void ValidateQualificationResult(
+    private static IReadOnlyList<ReferenceMaterializationQualificationCandidate> ValidateQualificationResult(
         ReferenceMaterializationQualificationResult result,
         IReadOnlyList<ReferenceMaterializationQualificationCandidate> candidates)
     {
-        if (result.Decisions is null || result.Decisions.Count != candidates.Count)
+        if (result.Decisions is null || result.Decisions.Count is 0 or > ReferenceMaterializationChatCompletionQualifier.MaxCandidatesPerRequest)
         {
-            throw new InvalidOperationException("Material qualification result must decide every candidate exactly once.");
+            throw new InvalidOperationException("Material qualification result must contain a bounded non-empty decision set.");
         }
 
         var candidateLookup = candidates.ToDictionary(candidate => candidate.CandidateId, StringComparer.Ordinal);
+        var decidedCandidates = new List<ReferenceMaterializationQualificationCandidate>(result.Decisions.Count);
         var decisionIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var decision in result.Decisions)
         {
@@ -237,6 +245,8 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 throw new InvalidOperationException("Material qualification result is invalid.");
             }
 
+            decidedCandidates.Add(candidate);
+
             var sourceNodes = candidate.SourceNodes.ToDictionary(node => node.NodeId, StringComparer.Ordinal);
             var spanNodeIds = new HashSet<string>(StringComparer.Ordinal);
             foreach (var span in decision.SourceSpans)
@@ -251,10 +261,61 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             }
         }
 
-        if (decisionIds.Count != candidateLookup.Count)
+        if (decisionIds.Count != result.Decisions.Count)
         {
             throw new InvalidOperationException("Material qualification result must decide every candidate exactly once.");
         }
+
+        return decidedCandidates;
+    }
+
+    private static async ValueTask<QualificationDecisionCounts> ReadQualificationDecisionCountsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        QualificationSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT
+              COALESCE(SUM(CASE WHEN candidate.decision <> $pending THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN candidate.decision = $accepted THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN candidate.decision = $rejected THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN candidate.decision = $review THEN 1 ELSE 0 END), 0),
+              COALESCE(SUM(CASE WHEN candidate.decision = $pending THEN 1 ELSE 0 END), 0)
+            FROM (
+              SELECT candidate.candidate_id, candidate.decision
+              FROM reference_material_candidates candidate
+              JOIN reference_material_candidate_nodes candidate_node ON candidate_node.candidate_id = candidate.candidate_id
+              JOIN reference_text_nodes node ON node.node_id = candidate_node.node_id
+              WHERE candidate.run_id = $run_id
+                AND node.anchor_id = $anchor_id
+                AND node.start_offset >= $content_start
+                AND node.end_offset <= $content_end
+              GROUP BY candidate.candidate_id, candidate.decision
+            ) candidate;
+            """;
+        command.Parameters.AddWithValue("$pending", ReferenceMaterializationCandidateDecisions.Pending);
+        command.Parameters.AddWithValue("$accepted", ReferenceMaterializationCandidateDecisions.Accepted);
+        command.Parameters.AddWithValue("$rejected", ReferenceMaterializationCandidateDecisions.Rejected);
+        command.Parameters.AddWithValue("$review", ReferenceMaterializationCandidateDecisions.ReviewRequired);
+        command.Parameters.AddWithValue("$run_id", snapshot.RunId);
+        command.Parameters.AddWithValue("$anchor_id", snapshot.AnchorId);
+        command.Parameters.AddWithValue("$content_start", snapshot.ContentStart);
+        command.Parameters.AddWithValue("$content_end", snapshot.ContentEnd);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            throw new InvalidOperationException("Materialization qualification counts are unavailable.");
+        }
+
+        return new QualificationDecisionCounts(
+            reader.GetInt32(0),
+            reader.GetInt32(1),
+            reader.GetInt32(2),
+            reader.GetInt32(3),
+            reader.GetInt32(4));
     }
 
     private static async ValueTask PersistCandidateDecisionAsync(
@@ -329,11 +390,15 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         int acceptedCount,
         int rejectedCount,
         int reviewCount,
+        bool isComplete,
         CancellationToken cancellationToken)
     {
-        ReferenceMaterializationChapterStateMachine.EnsureCanTransition(
-            ReferenceMaterializationChapterStates.LlmQualifying,
-            ReferenceMaterializationChapterStates.Embedding);
+        if (isComplete)
+        {
+            ReferenceMaterializationChapterStateMachine.EnsureCanTransition(
+                ReferenceMaterializationChapterStates.LlmQualifying,
+                ReferenceMaterializationChapterStates.Embedding);
+        }
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
@@ -350,8 +415,12 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
               AND chapter_index = $chapter_index
               AND status = $expected_status;
             """;
-        command.Parameters.AddWithValue("$status", ReferenceMaterializationChapterStates.Embedding);
-        command.Parameters.AddWithValue("$current_stage", ReferenceMaterializationChapterStates.Embedding);
+        command.Parameters.AddWithValue("$status", isComplete
+            ? ReferenceMaterializationChapterStates.Embedding
+            : ReferenceMaterializationChapterStates.LlmQualifying);
+        command.Parameters.AddWithValue("$current_stage", isComplete
+            ? ReferenceMaterializationChapterStates.Embedding
+            : ReferenceMaterializationChapterStates.LlmQualifying);
         command.Parameters.AddWithValue("$decided_count", decidedCount);
         command.Parameters.AddWithValue("$accepted_count", acceptedCount);
         command.Parameters.AddWithValue("$rejected_count", rejectedCount);
@@ -452,6 +521,12 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         string CurrentStage);
 
     private sealed record CandidateSummary(string CandidateId, string CandidateType);
+    private sealed record QualificationDecisionCounts(
+        int DecidedCount,
+        int AcceptedCount,
+        int RejectedCount,
+        int ReviewCount,
+        int PendingCount);
 }
 
 internal sealed record ReferenceMaterializationQualificationWorkItem(
@@ -463,4 +538,5 @@ internal sealed record ReferenceMaterializationQualificationPersistenceResult(
     int DecidedCount,
     int AcceptedCount,
     int RejectedCount,
-    int ReviewCount);
+    int ReviewCount,
+    bool IsComplete);

@@ -347,6 +347,43 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         Assert.Equal(0, later.CandidateCount);
     }
 
+    [Fact]
+    public async Task WorkerSplitsLargeChapterQualificationIntoBoundedModelBatches()
+    {
+        var options = CreateOptions();
+        var repeated = string.Join(
+            "\n\n",
+            Enumerable.Range(1, 11).Select(index => $"“第{index}次别开门。”她把钥匙攥进掌心，门外响起第三次敲门，她仍没有回答。"));
+        var anchor = await CreateAnchorAsync(
+            options,
+            chapterCount: 2,
+            sourceOverride: $"# 第一章\n\n{repeated}\n\n# 第二章\n\n她终于说出了真相。\n");
+        var splitService = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var profile = await splitService.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
+            CancellationToken.None);
+        await splitService.ConfirmChapterSplitAsync(
+            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
+            CancellationToken.None);
+        var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var store = new SqliteReferenceMaterializationRunStore(resolver);
+        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId, chapterBatchSize: 5), CancellationToken.None);
+        var qualifier = new ConcurrentAcceptingQualifier();
+        var worker = new ReferenceMaterializationWorker(
+            resolver,
+            qualifier,
+            new AcceptingEmbedder(),
+            new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
+            workerId: "test-materialization-batch-worker");
+
+        Assert.True(await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None));
+        var progress = await store.ListChapterProgressAsync(run.RunId, page: 1, size: 10, CancellationToken.None);
+
+        Assert.True(qualifier.InvocationCount >= 3);
+        Assert.InRange(qualifier.MaximumCandidateBatchSize, 1, ReferenceMaterializationChatCompletionQualifier.MaxCandidatesPerRequest);
+        Assert.All(progress.Items, item => Assert.Equal(ReferenceMaterializationChapterStates.Completed, item.Status));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -355,7 +392,10 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         }
     }
 
-    private async ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(AppInitializationOptions options, int chapterCount)
+    private async ValueTask<ReferenceAnchorPayload> CreateAnchorAsync(
+        AppInitializationOptions options,
+        int chapterCount,
+        string? sourceOverride = null)
     {
         await new FileSystemAppInitializationService(options).InitializeAsync(options.DefaultDataDirectory, CancellationToken.None);
         var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
@@ -363,7 +403,7 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
         var sourceDirectory = Path.Combine(_root, "sources");
         Directory.CreateDirectory(sourceDirectory);
         var sourcePath = Path.Combine(sourceDirectory, "run-store.md");
-        var source = string.Join(
+        var source = sourceOverride ?? string.Join(
             "\n\n",
             Enumerable.Range(1, chapterCount).Select(index => $"# 第{index}章\n\n第 {index} 章正文。"));
         await File.WriteAllTextAsync(sourcePath, source);
@@ -544,9 +584,11 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
     {
         private int _active;
         private int _maximumConcurrency;
+        private int _maximumCandidateBatchSize;
         private int _invocationCount;
 
         public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
+        public int MaximumCandidateBatchSize => Volatile.Read(ref _maximumCandidateBatchSize);
         public int InvocationCount => Volatile.Read(ref _invocationCount);
 
         public async ValueTask<ReferenceMaterializationQualificationResult> QualifyAsync(
@@ -554,15 +596,9 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref _invocationCount);
+            UpdateMaximum(ref _maximumCandidateBatchSize, input.Candidates.Count);
             var active = Interlocked.Increment(ref _active);
-            while (true)
-            {
-                var observed = Volatile.Read(ref _maximumConcurrency);
-                if (observed >= active || Interlocked.CompareExchange(ref _maximumConcurrency, active, observed) == observed)
-                {
-                    break;
-                }
-            }
+            UpdateMaximum(ref _maximumConcurrency, active);
 
             try
             {
@@ -573,6 +609,18 @@ public sealed class ReferenceMaterializationRunStoreTests : IDisposable
             finally
             {
                 Interlocked.Decrement(ref _active);
+            }
+        }
+
+        private static void UpdateMaximum(ref int destination, int value)
+        {
+            while (true)
+            {
+                var observed = Volatile.Read(ref destination);
+                if (observed >= value || Interlocked.CompareExchange(ref destination, value, observed) == observed)
+                {
+                    return;
+                }
             }
         }
     }
