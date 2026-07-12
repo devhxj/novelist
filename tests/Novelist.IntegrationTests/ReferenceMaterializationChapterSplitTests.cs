@@ -206,12 +206,12 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
                 0.9,
                 [1])));
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
             await service.AnalyzeChapterSplitAsync(
                 new AnalyzeReferenceChapterSplitPayload(novel.Id, anchor.AnchorId),
                 CancellationToken.None));
 
-        Assert.Contains("evidence", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(ReferenceMaterializationErrorCodes.ChapterSplitOutputInvalid, exception.ErrorCode);
     }
 
     [Fact]

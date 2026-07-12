@@ -678,7 +678,9 @@ public sealed partial class SqliteReferenceMaterializationService : IReferenceMa
             result.EvidenceOffsets.Count == 0 ||
             result.EvidenceOffsets.Any(offset => offset < 0 || offset >= sampleLength))
         {
-            throw new InvalidOperationException("Chapter split analysis returned invalid structured output.");
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.ChapterSplitOutputInvalid,
+                "Chapter split analysis returned invalid structured output.");
         }
     }
 
@@ -689,7 +691,9 @@ public sealed partial class SqliteReferenceMaterializationService : IReferenceMa
             .ToHashSet();
         if (headingOffsets.Count == 0 || result.EvidenceOffsets.Any(offset => !headingOffsets.Contains(offset)))
         {
-            throw new InvalidOperationException("Chapter split analysis returned evidence that does not match the source sample.");
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.ChapterSplitOutputInvalid,
+                "Chapter split analysis returned evidence that does not match the source sample.");
         }
     }
 

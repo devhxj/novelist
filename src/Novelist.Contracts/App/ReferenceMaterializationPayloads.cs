@@ -71,6 +71,7 @@ public static class ReferenceMaterializationChapterStates
 
 public static class ReferenceMaterializationErrorCodes
 {
+    public const string ChapterSplitOutputInvalid = "materialization_chapter_split_output_invalid";
     public const string LlmNotConfigured = "materialization_llm_not_configured";
     public const string LlmHealthCheckFailed = "materialization_llm_health_check_failed";
     public const string LlmRequestFailed = "materialization_llm_request_failed";
