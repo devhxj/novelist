@@ -87,6 +87,32 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
     }
 
     [Fact]
+    public async Task PreviewManualSplitSupportsEnglishChapterTemplates()
+    {
+        var options = CreateOptions();
+        await InitializeAsync(options);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(new CreateNovelPayload("English chapter split", "", ""), CancellationToken.None);
+        var sourcePath = CreateSourceFile(
+            "english-split.txt",
+            "Chapter 1: First Contact\n\nThe door opened.\n\nChapter 2: Return\n\nThe rain stopped.\n");
+        var anchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await anchors.CreateAnchorAsync(
+            new CreateReferenceAnchorPayload(novel.Id, "English split source", null, sourcePath, "text", "user_provided"),
+            CancellationToken.None);
+        var service = new SqliteReferenceMaterializationService(options, new RecordingChapterSplitAnalyzer(ReferenceChapterSplitModelResult.Empty));
+
+        var result = await service.PreviewChapterSplitAsync(
+            new PreviewReferenceChapterSplitPayload(novel.Id, anchor.AnchorId, "Chapter {number}: {title}"),
+            CancellationToken.None);
+
+        Assert.Equal(ReferenceChapterSplitProfileStates.Validated, result.Status);
+        Assert.Equal(2, result.ChapterCount);
+        Assert.Equal(["First Contact", "Return"], result.Boundaries.Select(boundary => boundary.Title).ToArray());
+        Assert.All(result.Boundaries, boundary => Assert.True(boundary.ContentEnd > boundary.ContentStart));
+    }
+
+    [Fact]
     public async Task PreviewManualSplitRejectsTemplatesWithNoValidFullSourceBoundaries()
     {
         var options = CreateOptions();
