@@ -98,6 +98,23 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
             completed.Status == ReferenceMaterializationRunStates.Completed,
             $"{completed.LastErrorCode}: {completed.LastErrorMessage}");
         Assert.True(completed.VectorIndexHealthy);
+        Assert.Equal(2, completed.MaterialCount);
+        Assert.Equal(2, completed.VectorCount);
+        Assert.Equal(2, completed.ModelCallCount);
+        var chapterProgress = await service.ListMaterializationChapterProgressAsync(
+            new ListReferenceMaterializationChapterProgressPayload(
+                novel.Id,
+                anchor.AnchorId,
+                run.RunId,
+                1,
+                20),
+            CancellationToken.None);
+        Assert.All(chapterProgress.Items, chapter =>
+        {
+            Assert.Equal(1, chapter.MaterialCount);
+            Assert.Equal(1, chapter.VectorCount);
+            Assert.Equal(1, chapter.ModelCallCount);
+        });
         Assert.Collection(
             extractor.Requests.OrderBy(request => request.ChapterIndex),
             first =>
@@ -595,8 +612,8 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(new ReferenceMaterializationEmbeddingResult(
-                input.Items.Select((item, index) => new ReferenceMaterializationCandidateEmbedding(
-                    item.CandidateId,
+                input.Items.Select((item, index) => new ReferenceMaterializationMaterialEmbedding(
+                    item.MaterialId,
                     [1f, index + 2f, index + 3f])).ToArray()));
         }
     }
@@ -609,8 +626,8 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(new ReferenceMaterializationEmbeddingResult(
-                input.Items.Select(item => new ReferenceMaterializationCandidateEmbedding(
-                    item.CandidateId,
+                input.Items.Select(item => new ReferenceMaterializationMaterialEmbedding(
+                    item.MaterialId,
                     [1f, 2f])).ToArray()));
         }
     }

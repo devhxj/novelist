@@ -30,7 +30,6 @@ public sealed partial class SqliteReferenceMaterializationService
                 Guid.NewGuid().ToString("N"),
                 "materialization-policy-v1",
                 ReferenceChapterMaterialChatCompletionExtractor.SchemaVersion,
-                ReferenceChapterMaterialChatCompletionExtractor.SchemaVersion,
                 models.Llm,
                 models.Embedding,
                 input.ChapterBatchSize,
@@ -61,9 +60,9 @@ public sealed partial class SqliteReferenceMaterializationService
             new GetReferenceMaterializationStatusPayload(input.NovelId, input.AnchorId, input.RunId),
             cancellationToken)
             ?? throw new ArgumentException("Materialization run does not exist.", nameof(input));
-        if (current.Status is not (ReferenceMaterializationRunStates.Failed or ReferenceMaterializationRunStates.Cancelled))
+        if (current.Status != ReferenceMaterializationRunStates.Failed)
         {
-            throw new InvalidOperationException("Only failed or cancelled materialization runs can be retried.");
+            throw new InvalidOperationException("Only failed materialization runs can be retried.");
         }
 
         await EnsureConfirmedProfileMatchesCurrentSourceAsync(
@@ -79,8 +78,8 @@ public sealed partial class SqliteReferenceMaterializationService
                 "The configured models changed after this materialization run started. Create a new run instead of retrying this generation.");
         }
 
-        var qualifierVersion = await _runStore.GetQualifierVersionAsync(current.RunId, cancellationToken);
-        if (!string.Equals(qualifierVersion, ReferenceChapterMaterialChatCompletionExtractor.SchemaVersion, StringComparison.Ordinal))
+        var extractorSchemaVersion = await _runStore.GetExtractorSchemaVersionAsync(current.RunId, cancellationToken);
+        if (!string.Equals(extractorSchemaVersion, ReferenceChapterMaterialChatCompletionExtractor.SchemaVersion, StringComparison.Ordinal))
         {
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.RetryRequiresNewRun,

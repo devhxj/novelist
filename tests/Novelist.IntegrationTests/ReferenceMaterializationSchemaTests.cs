@@ -28,6 +28,10 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
         var runIndexes = await ReadIndexesAsync(options, "reference_materialization_runs");
         Assert.Contains("ux_reference_materialization_runs_generation", runIndexes);
         Assert.Contains("idx_reference_materialization_runs_anchor_status", runIndexes);
+        var runColumns = await ReadColumnsAsync(options, "reference_materialization_runs");
+        Assert.Contains("extractor_schema_version", runColumns);
+        Assert.DoesNotContain("candidate_version", runColumns);
+        Assert.DoesNotContain("qualifier_version", runColumns);
         var candidateIndexes = await ReadIndexesAsync(options, "reference_material_candidates");
         Assert.Contains("ux_reference_material_candidates_run_key", candidateIndexes);
     }
@@ -87,11 +91,11 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO reference_materialization_runs (
-              run_id, anchor_id, split_profile_id, generation_id, policy_version, candidate_version, qualifier_version,
+              run_id, anchor_id, split_profile_id, generation_id, policy_version, extractor_schema_version,
               model_provider, model_id, embedding_provider, embedding_model_id, embedding_dimensions,
               status, chapter_batch_size, total_chapters, total_chapter_batches, started_at)
             VALUES (
-              $run_id, $anchor_id, $split_profile_id, $generation_id, 'policy-v1', 'candidate-v1', 'qualifier-v1',
+              $run_id, $anchor_id, $split_profile_id, $generation_id, 'policy-v1', 'extractor-v1',
               'provider', 'model', 'embedding-provider', 'embedding-model', 8,
               'queued', $chapter_batch_size, 2, 1, '2026-07-12T00:00:00.0000000Z');
             """;
@@ -124,6 +128,21 @@ public sealed class ReferenceMaterializationSchemaTests : IDisposable
         await using var connection = await OpenConnectionAsync(options);
         await using var command = connection.CreateCommand();
         command.CommandText = $"PRAGMA index_list({tableName});";
+        await using var reader = await command.ExecuteReaderAsync(CancellationToken.None);
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        while (await reader.ReadAsync(CancellationToken.None))
+        {
+            names.Add(reader.GetString(1));
+        }
+
+        return names;
+    }
+
+    private static async ValueTask<IReadOnlySet<string>> ReadColumnsAsync(AppInitializationOptions options, string tableName)
+    {
+        await using var connection = await OpenConnectionAsync(options);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({tableName});";
         await using var reader = await command.ExecuteReaderAsync(CancellationToken.None);
         var names = new HashSet<string>(StringComparer.Ordinal);
         while (await reader.ReadAsync(CancellationToken.None))

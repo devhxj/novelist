@@ -16,28 +16,28 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         var run = await ReadBatchRunAsync(connection, transaction, normalizedRunId, cancellationToken)
             ?? throw new ArgumentException("Materialization run does not exist.", nameof(runId));
-        if (run.Status is not (ReferenceMaterializationRunStates.Failed or ReferenceMaterializationRunStates.Cancelled) ||
+        if (run.Status != ReferenceMaterializationRunStates.Failed ||
             run.CurrentBatchIndex is null)
         {
-            throw new InvalidOperationException("Only a failed or cancelled materialization batch can be retried.");
+            throw new InvalidOperationException("Only a failed materialization batch can be retried.");
         }
 
         await DeleteExpiredLeaseOrRejectActiveLeaseAsync(connection, transaction, normalizedRunId, cancellationToken);
-        ReferenceMaterializationRunStateMachine.EnsureCanTransition(run.Status, ReferenceMaterializationRunStates.Running);
+        ReferenceMaterializationRunStateMachine.EnsureCanTransition(run.Status, ReferenceMaterializationRunStates.Extracting);
         await ResetCurrentBatchAsync(connection, transaction, normalizedRunId, run.CurrentBatchIndex.Value, cancellationToken);
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
             command.CommandText = """
                 UPDATE reference_materialization_runs
-                SET status = $running,
+                SET status = $extracting,
                     last_error_code = NULL,
                     last_error_message = NULL,
                     completed_at = NULL
                 WHERE run_id = $run_id
                   AND status = $expected_status;
                 """;
-            command.Parameters.AddWithValue("$running", ReferenceMaterializationRunStates.Running);
+            command.Parameters.AddWithValue("$extracting", ReferenceMaterializationRunStates.Extracting);
             command.Parameters.AddWithValue("$run_id", normalizedRunId);
             command.Parameters.AddWithValue("$expected_status", run.Status);
             if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)

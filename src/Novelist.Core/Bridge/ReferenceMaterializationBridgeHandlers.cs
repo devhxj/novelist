@@ -154,7 +154,6 @@ public static class ReferenceMaterializationBridgeHandlers
         return progress with
         {
             Status = ReferencePayloadSanitizer.RedactAndBoundText(progress.Status, 32),
-            CurrentStage = ReferencePayloadSanitizer.RedactAndBoundText(progress.CurrentStage, 64),
             LastErrorCode = progress.LastErrorCode is null ? null : ReferencePayloadSanitizer.RedactAndBoundText(progress.LastErrorCode, 128),
             LastErrorMessage = progress.LastErrorMessage is null ? null : ReferencePayloadSanitizer.RedactAndBoundText(progress.LastErrorMessage, 512)
         };

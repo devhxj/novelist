@@ -327,13 +327,13 @@ public sealed class ReferenceWritingServiceTests : IDisposable
 
             INSERT INTO reference_materialization_runs (
               run_id, anchor_id, split_profile_id, generation_id,
-              policy_version, candidate_version, qualifier_version,
+              policy_version, extractor_schema_version,
               model_provider, model_id, embedding_provider, embedding_model_id,
               embedding_dimensions, status, chapter_batch_size, total_chapters,
               processed_chapters, material_count, vector_count, started_at, completed_at, activated_at)
             VALUES (
               $run_id, $anchor_id, $profile_id, $generation_id,
-              'test', 'test', 'test', 'test', 'test', 'test', 'test',
+              'test', 'test', 'test', 'test', 'test', 'test',
               3, 'completed', 5, 1, 1, 1, 1, $now, $now, $now);
 
             INSERT INTO reference_anchor_materialization_state (

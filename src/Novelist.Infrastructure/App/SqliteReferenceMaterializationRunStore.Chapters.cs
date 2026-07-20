@@ -32,7 +32,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             chapterIndex,
             cancellationToken)
             ?? throw new ArgumentException("Materialization chapter does not exist.", nameof(chapterIndex));
-        if (snapshot.RunStatus != ReferenceMaterializationRunStates.Running ||
+        if (snapshot.RunStatus != ReferenceMaterializationRunStates.Extracting ||
             snapshot.ChapterStatus != ReferenceMaterializationChapterStates.Pending)
         {
             throw new InvalidOperationException("Materialization chapter is not pending extraction.");
@@ -144,7 +144,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             workItem.ChapterIndex,
             cancellationToken)
             ?? throw new InvalidOperationException("Materialization chapter disappeared before persistence.");
-        if (current.RunStatus != ReferenceMaterializationRunStates.Running ||
+        if (current.RunStatus != ReferenceMaterializationRunStates.Extracting ||
             current.ChapterStatus != ReferenceMaterializationChapterStates.Embedding ||
             !string.Equals(current.GenerationId, workItem.GenerationId, StringComparison.Ordinal))
         {
@@ -178,11 +178,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 UPDATE reference_materialization_chapter_progress
                 SET status = $completed,
                     current_stage = $completed,
-                    candidate_count = $material_count,
-                    decided_count = $material_count,
-                    accepted_count = $material_count,
-                    rejected_count = 0,
-                    review_count = 0,
                     material_count = $material_count,
                     vector_count = $vector_count,
                     completed_at = $completed_at,
@@ -392,7 +387,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         }
     }
 
-    private static IReadOnlyDictionary<string, ReferenceMaterializationCandidateEmbedding> ValidateEmbeddings(
+    private static IReadOnlyDictionary<string, ReferenceMaterializationMaterialEmbedding> ValidateEmbeddings(
         ReferenceChapterMaterializationWorkItem workItem,
         IReadOnlyList<PreparedReferenceMaterial> materials,
         ReferenceMaterializationEmbeddingResult result)
@@ -403,12 +398,12 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         }
 
         var expected = materials.Select(material => material.MaterialId).ToHashSet(StringComparer.Ordinal);
-        var actual = new Dictionary<string, ReferenceMaterializationCandidateEmbedding>(StringComparer.Ordinal);
+        var actual = new Dictionary<string, ReferenceMaterializationMaterialEmbedding>(StringComparer.Ordinal);
         foreach (var embedding in result.Embeddings)
         {
             if (embedding is null ||
-                !expected.Contains(embedding.CandidateId) ||
-                !actual.TryAdd(embedding.CandidateId, embedding) ||
+                !expected.Contains(embedding.MaterialId) ||
+                !actual.TryAdd(embedding.MaterialId, embedding) ||
                 embedding.Vector is null ||
                 embedding.Vector.Count != workItem.EmbeddingModel.Dimensions ||
                 embedding.Vector.Any(value => float.IsNaN(value) || float.IsInfinity(value)))
@@ -487,7 +482,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         SqliteTransaction transaction,
         ReferenceChapterMaterializationWorkItem workItem,
         PreparedReferenceMaterial material,
-        ReferenceMaterializationCandidateEmbedding embedding,
+        ReferenceMaterializationMaterialEmbedding embedding,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {

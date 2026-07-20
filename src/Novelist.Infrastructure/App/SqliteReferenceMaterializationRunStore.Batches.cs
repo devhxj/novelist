@@ -15,12 +15,15 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             SELECT run_id
             FROM reference_materialization_runs
             WHERE (status = $queued AND current_batch_index IS NOT NULL)
-               OR (status = $running AND (current_batch_index IS NOT NULL OR processed_chapters = total_chapters))
+               OR (status IN ($extracting, $embedding, $indexing)
+                   AND (current_batch_index IS NOT NULL OR processed_chapters = total_chapters))
             ORDER BY started_at, run_id
             LIMIT 1;
             """;
         command.Parameters.AddWithValue("$queued", ReferenceMaterializationRunStates.Queued);
-        command.Parameters.AddWithValue("$running", ReferenceMaterializationRunStates.Running);
+        command.Parameters.AddWithValue("$extracting", ReferenceMaterializationRunStates.Extracting);
+        command.Parameters.AddWithValue("$embedding", ReferenceMaterializationRunStates.Embedding);
+        command.Parameters.AddWithValue("$indexing", ReferenceMaterializationRunStates.Indexing);
         return (string?)await command.ExecuteScalarAsync(cancellationToken);
     }
 
@@ -46,7 +49,10 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         var run = await ReadBatchRunAsync(connection, transaction, normalizedRunId, cancellationToken);
         if (run is null || run.CurrentBatchIndex is null ||
-            run.Status is not (ReferenceMaterializationRunStates.Queued or ReferenceMaterializationRunStates.Running))
+            run.Status is not (ReferenceMaterializationRunStates.Queued or
+                ReferenceMaterializationRunStates.Extracting or
+                ReferenceMaterializationRunStates.Embedding or
+                ReferenceMaterializationRunStates.Indexing))
         {
             await transaction.RollbackAsync(cancellationToken);
             return null;
@@ -70,7 +76,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         {
             ReferenceMaterializationRunStateMachine.EnsureCanTransition(
                 ReferenceMaterializationRunStates.Queued,
-                ReferenceMaterializationRunStates.Running);
+                ReferenceMaterializationRunStates.Extracting);
             await StartRunAsync(connection, transaction, normalizedRunId, cancellationToken);
         }
 
@@ -139,6 +145,51 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
+    public async ValueTask MarkCurrentBatchEmbeddingAsync(
+        ReferenceMaterializationBatchClaim claim,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(claim);
+        var databasePath = await EnsureSchemaAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        var run = await ReadBatchRunAsync(connection, transaction, NormalizeRunId(claim.RunId), cancellationToken)
+            ?? throw new ArgumentException("Materialization run does not exist.", nameof(claim));
+        if (!await IsClaimLeaseOwnedAsync(connection, transaction, claim, cancellationToken))
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw new InvalidOperationException("Materialization worker lost the current batch lease.");
+        }
+
+        if (run.Status == ReferenceMaterializationRunStates.Extracting)
+        {
+            ReferenceMaterializationRunStateMachine.EnsureCanTransition(
+                ReferenceMaterializationRunStates.Extracting,
+                ReferenceMaterializationRunStates.Embedding);
+            await using var update = connection.CreateCommand();
+            update.Transaction = transaction;
+            update.CommandText = """
+                UPDATE reference_materialization_runs
+                SET status = $embedding
+                WHERE run_id = $run_id
+                  AND status = $extracting;
+                """;
+            update.Parameters.AddWithValue("$embedding", ReferenceMaterializationRunStates.Embedding);
+            update.Parameters.AddWithValue("$run_id", run.RunId);
+            update.Parameters.AddWithValue("$extracting", ReferenceMaterializationRunStates.Extracting);
+            if (await update.ExecuteNonQueryAsync(cancellationToken) != 1)
+            {
+                throw new InvalidOperationException("Materialization run changed before vector indexing.");
+            }
+        }
+        else if (run.Status is not (ReferenceMaterializationRunStates.Embedding or ReferenceMaterializationRunStates.Indexing))
+        {
+            throw new InvalidOperationException("Materialization run is not ready for vector indexing.");
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async ValueTask FailCurrentBatchAsync(
         ReferenceMaterializationBatchClaim claim,
         string errorCode,
@@ -163,10 +214,13 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             await transaction.RollbackAsync(cancellationToken);
             return;
         }
-        if (run.Status == ReferenceMaterializationRunStates.Running)
+        if (run.Status is ReferenceMaterializationRunStates.Queued or
+            ReferenceMaterializationRunStates.Extracting or
+            ReferenceMaterializationRunStates.Embedding or
+            ReferenceMaterializationRunStates.Indexing)
         {
             ReferenceMaterializationRunStateMachine.EnsureCanTransition(
-                ReferenceMaterializationRunStates.Running,
+                run.Status,
                 ReferenceMaterializationRunStates.Failed);
         }
 
@@ -203,7 +257,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                     last_error_message = $error_message,
                     completed_at = $completed_at
                 WHERE run_id = $run_id
-                  AND status IN ($queued, $running);
+                  AND status IN ($queued, $extracting, $embedding, $indexing);
                 """;
             command.Parameters.AddWithValue("$failed", ReferenceMaterializationRunStates.Failed);
             command.Parameters.AddWithValue("$error_code", errorCode);
@@ -211,7 +265,9 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             command.Parameters.AddWithValue("$completed_at", FormatTimestamp(DateTimeOffset.UtcNow));
             command.Parameters.AddWithValue("$run_id", normalizedRunId);
             command.Parameters.AddWithValue("$queued", ReferenceMaterializationRunStates.Queued);
-            command.Parameters.AddWithValue("$running", ReferenceMaterializationRunStates.Running);
+            command.Parameters.AddWithValue("$extracting", ReferenceMaterializationRunStates.Extracting);
+            command.Parameters.AddWithValue("$embedding", ReferenceMaterializationRunStates.Embedding);
+            command.Parameters.AddWithValue("$indexing", ReferenceMaterializationRunStates.Indexing);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -371,11 +427,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 UPDATE reference_materialization_chapter_progress
                 SET status = $pending,
                     current_stage = $pending,
-                    candidate_count = 0,
-                    decided_count = 0,
-                    accepted_count = 0,
-                    rejected_count = 0,
-                    review_count = 0,
                     material_count = 0,
                     vector_count = 0,
                     started_at = NULL,
@@ -418,23 +469,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.Transaction = transaction;
         command.CommandText = """
             UPDATE reference_materialization_runs
-            SET candidate_count = (
-                    SELECT COALESCE(SUM(candidate_count), 0)
-                    FROM reference_materialization_chapter_progress
-                    WHERE run_id = $run_id),
-                accepted_count = (
-                    SELECT COALESCE(SUM(accepted_count), 0)
-                    FROM reference_materialization_chapter_progress
-                    WHERE run_id = $run_id),
-                rejected_count = (
-                    SELECT COALESCE(SUM(rejected_count), 0)
-                    FROM reference_materialization_chapter_progress
-                    WHERE run_id = $run_id),
-                review_count = (
-                    SELECT COALESCE(SUM(review_count), 0)
-                    FROM reference_materialization_chapter_progress
-                    WHERE run_id = $run_id),
-                material_count = (
+            SET material_count = (
                     SELECT COALESCE(SUM(material_count), 0)
                     FROM reference_materialization_chapter_progress
                     WHERE run_id = $run_id),
@@ -458,11 +493,11 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.Transaction = transaction;
         command.CommandText = """
             UPDATE reference_materialization_runs
-            SET status = $running
+            SET status = $extracting
             WHERE run_id = $run_id
               AND status = $queued;
             """;
-        command.Parameters.AddWithValue("$running", ReferenceMaterializationRunStates.Running);
+        command.Parameters.AddWithValue("$extracting", ReferenceMaterializationRunStates.Extracting);
         command.Parameters.AddWithValue("$run_id", runId);
         command.Parameters.AddWithValue("$queued", ReferenceMaterializationRunStates.Queued);
         if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)

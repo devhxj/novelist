@@ -17,12 +17,12 @@ public sealed record ReferenceMaterializationEmbeddingRequest(
     IReadOnlyList<ReferenceMaterializationEmbeddingItem> Items);
 
 public sealed record ReferenceMaterializationEmbeddingItem(
-    string CandidateId,
+    string MaterialId,
     string Text);
 
 public sealed record ReferenceMaterializationEmbeddingResult(
-    IReadOnlyList<ReferenceMaterializationCandidateEmbedding> Embeddings);
+    IReadOnlyList<ReferenceMaterializationMaterialEmbedding> Embeddings);
 
-public sealed record ReferenceMaterializationCandidateEmbedding(
-    string CandidateId,
+public sealed record ReferenceMaterializationMaterialEmbedding(
+    string MaterialId,
     IReadOnlyList<float> Vector);

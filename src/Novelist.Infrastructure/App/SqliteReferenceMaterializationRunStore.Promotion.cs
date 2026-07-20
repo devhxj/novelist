@@ -20,7 +20,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             return false;
         }
 
-        if (run.Status != ReferenceMaterializationRunStates.Running ||
+        if (run.Status != ReferenceMaterializationRunStates.Indexing ||
             run.CurrentBatchIndex is not null ||
             !await IsGenerationReadyForPromotionAsync(connection, transaction, run, cancellationToken))
         {
@@ -190,7 +190,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         }
 
         ReferenceMaterializationRunStateMachine.EnsureCanTransition(
-            ReferenceMaterializationRunStates.Running,
+            ReferenceMaterializationRunStates.Indexing,
             ReferenceMaterializationRunStates.Completed);
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -200,13 +200,13 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                 completed_at = $completed_at,
                 activated_at = $activated_at
             WHERE run_id = $run_id
-              AND status = $running;
+              AND status = $indexing;
             """;
         command.Parameters.AddWithValue("$completed", ReferenceMaterializationRunStates.Completed);
         command.Parameters.AddWithValue("$completed_at", FormatTimestamp(now));
         command.Parameters.AddWithValue("$activated_at", FormatTimestamp(now));
         command.Parameters.AddWithValue("$run_id", run.RunId);
-        command.Parameters.AddWithValue("$running", ReferenceMaterializationRunStates.Running);
+        command.Parameters.AddWithValue("$indexing", ReferenceMaterializationRunStates.Indexing);
         if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
         {
             throw new InvalidOperationException("Materialization run changed while activating its generation.");

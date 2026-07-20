@@ -36,6 +36,26 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
     }
 
     [Fact]
+    public async Task MaterializationProgressExposesOnlyCanonicalCounts()
+    {
+        var dispatcher = new BridgeDispatcher().RegisterReferenceMaterializationHandlers(
+            new RecordingMaterializationService());
+        var result = await dispatcher.DispatchAsync(Request(
+            "ListReferenceMaterializationChapterProgress",
+            new ListReferenceMaterializationChapterProgressPayload(42, 99, "run-1", 1, 20)));
+        using var json = JsonDocument.Parse(result.OutboundJson ?? throw new InvalidOperationException("Bridge returned no response."));
+        var progress = json.RootElement.GetProperty("result").GetProperty("items")[0];
+
+        Assert.True(progress.TryGetProperty("material_count", out _));
+        Assert.True(progress.TryGetProperty("vector_count", out _));
+        Assert.True(progress.TryGetProperty("model_call_count", out _));
+        Assert.False(progress.TryGetProperty("candidate_count", out _));
+        Assert.False(progress.TryGetProperty("accepted_count", out _));
+        Assert.False(progress.TryGetProperty("review_count", out _));
+        Assert.False(progress.TryGetProperty("current_stage", out _));
+    }
+
+    [Fact]
     public async Task ChapterSplitHandlersRejectMissingObjectArguments()
     {
         var dispatcher = new BridgeDispatcher().RegisterReferenceMaterializationHandlers(new RecordingMaterializationService());
@@ -202,7 +222,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
             Calls.Add($"retry:{input.NovelId}:{input.AnchorId}:{input.RunId}");
             return ValueTask.FromResult(CreateStatus(input.AnchorId) with
             {
-                Status = ReferenceMaterializationRunStates.Running
+                Status = ReferenceMaterializationRunStates.Extracting
             });
         }
 
@@ -212,7 +232,18 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
         {
             Calls.Add($"progress:{input.NovelId}:{input.AnchorId}:{input.RunId}:{input.Page}:{input.Size}");
             return ValueTask.FromResult(new PageResultPayload<ReferenceMaterializationChapterProgressPayload>(
-                [new ReferenceMaterializationChapterProgressPayload(1, 0, "pending", "pending", 0, 0, 0, 0, 0, 0, 0, null, null, null, null, 0)],
+                [new ReferenceMaterializationChapterProgressPayload(
+                    1,
+                    0,
+                    ReferenceMaterializationChapterStates.Pending,
+                    0,
+                    0,
+                    0,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0)],
                 1,
                 input.Page,
                 input.Size,
@@ -253,8 +284,6 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                 0,
                 1,
                 2,
-                0,
-                0,
                 0,
                 0,
                 0,

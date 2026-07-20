@@ -969,12 +969,7 @@ export namespace reference {
     chapter_index: number
     batch_index: number
     status: string
-    current_stage: string
-    candidate_count: number
-    decided_count: number
-    accepted_count: number
-    rejected_count: number
-    review_count: number
+    material_count: number
     vector_count: number
     model_call_count: number
     started_at?: Timestamp | null
@@ -998,11 +993,9 @@ export namespace reference {
     current_batch_index?: number | null
     current_batch_start_chapter?: number | null
     current_batch_end_chapter?: number | null
-    candidate_count: number
-    accepted_count: number
-    rejected_count: number
-    review_count: number
+    material_count: number
     vector_count: number
+    model_call_count: number
     llm: MaterializationModelIdentity
     embedding: MaterializationModelIdentity
     last_error_code?: string | null

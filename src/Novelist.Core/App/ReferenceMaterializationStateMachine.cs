@@ -9,17 +9,20 @@ public static class ReferenceMaterializationRunStateMachine
         return current switch
         {
             ReferenceMaterializationRunStates.Queued =>
-                next is ReferenceMaterializationRunStates.Running or
-                ReferenceMaterializationRunStates.Failed or
-                ReferenceMaterializationRunStates.Cancelled,
-            ReferenceMaterializationRunStates.Running =>
-                next is ReferenceMaterializationRunStates.Failed or
+                next is ReferenceMaterializationRunStates.Extracting or
+                ReferenceMaterializationRunStates.Failed,
+            ReferenceMaterializationRunStates.Extracting =>
+                next is ReferenceMaterializationRunStates.Embedding or
+                ReferenceMaterializationRunStates.Failed,
+            ReferenceMaterializationRunStates.Embedding =>
+                next is ReferenceMaterializationRunStates.Indexing or
+                ReferenceMaterializationRunStates.Failed,
+            ReferenceMaterializationRunStates.Indexing =>
+                next is ReferenceMaterializationRunStates.Extracting or
                 ReferenceMaterializationRunStates.Completed or
-                ReferenceMaterializationRunStates.Cancelled,
-            ReferenceMaterializationRunStates.Failed or ReferenceMaterializationRunStates.Cancelled =>
-                next == ReferenceMaterializationRunStates.Running,
-            ReferenceMaterializationRunStates.Completed =>
-                next == ReferenceMaterializationRunStates.Running,
+                ReferenceMaterializationRunStates.Failed,
+            ReferenceMaterializationRunStates.Failed =>
+                next == ReferenceMaterializationRunStates.Extracting,
             _ => false
         };
     }
@@ -40,29 +43,16 @@ public static class ReferenceMaterializationChapterStateMachine
         return current switch
         {
             ReferenceMaterializationChapterStates.Pending =>
-                next is ReferenceMaterializationChapterStates.BuildingCandidates or
-                ReferenceMaterializationChapterStates.Failed or
-                ReferenceMaterializationChapterStates.Cancelled,
-            ReferenceMaterializationChapterStates.BuildingCandidates =>
-                next is ReferenceMaterializationChapterStates.LlmQualifying or
-                ReferenceMaterializationChapterStates.Failed or
-                ReferenceMaterializationChapterStates.Cancelled,
-            ReferenceMaterializationChapterStates.LlmQualifying =>
+                next is ReferenceMaterializationChapterStates.Extracting or
+                ReferenceMaterializationChapterStates.Failed,
+            ReferenceMaterializationChapterStates.Extracting =>
                 next is ReferenceMaterializationChapterStates.Embedding or
-                ReferenceMaterializationChapterStates.Failed or
-                ReferenceMaterializationChapterStates.Cancelled,
+                ReferenceMaterializationChapterStates.Failed,
             ReferenceMaterializationChapterStates.Embedding =>
-                next is ReferenceMaterializationChapterStates.Indexing or
-                ReferenceMaterializationChapterStates.Failed or
-                ReferenceMaterializationChapterStates.Cancelled,
-            ReferenceMaterializationChapterStates.Indexing =>
                 next is ReferenceMaterializationChapterStates.Completed or
-                ReferenceMaterializationChapterStates.Failed or
-                ReferenceMaterializationChapterStates.Cancelled,
-            ReferenceMaterializationChapterStates.Failed or ReferenceMaterializationChapterStates.Cancelled =>
-                next == ReferenceMaterializationChapterStates.BuildingCandidates,
-            ReferenceMaterializationChapterStates.Completed =>
-                next == ReferenceMaterializationChapterStates.LlmQualifying,
+                ReferenceMaterializationChapterStates.Failed,
+            ReferenceMaterializationChapterStates.Failed =>
+                next == ReferenceMaterializationChapterStates.Pending,
             _ => false
         };
     }

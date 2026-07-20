@@ -67,13 +67,13 @@ public sealed class ReferenceMaterializationEmbeddingProcessor : IReferenceMater
             throw new ArgumentException("Materialization embedding request is invalid.", nameof(input));
         }
 
-        var candidateIds = new HashSet<string>(StringComparer.Ordinal);
+        var materialIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var item in input.Items)
         {
             if (item is null ||
-                string.IsNullOrWhiteSpace(item.CandidateId) ||
-                item.CandidateId.Length > 256 ||
-                !candidateIds.Add(item.CandidateId) ||
+                string.IsNullOrWhiteSpace(item.MaterialId) ||
+                item.MaterialId.Length > 256 ||
+                !materialIds.Add(item.MaterialId) ||
                 string.IsNullOrWhiteSpace(item.Text) || item.Text.Length > MaxTextCharsPerItem ||
                 item.Text.Contains('\0'))
             {
@@ -125,8 +125,8 @@ public sealed class ReferenceMaterializationEmbeddingProcessor : IReferenceMater
         }
 
         return new ReferenceMaterializationEmbeddingResult(
-            input.Items.Select((item, index) => new ReferenceMaterializationCandidateEmbedding(
-                item.CandidateId,
+            input.Items.Select((item, index) => new ReferenceMaterializationMaterialEmbedding(
+                item.MaterialId,
                 byIndex[index].Vector.ToArray())).ToArray());
     }
 

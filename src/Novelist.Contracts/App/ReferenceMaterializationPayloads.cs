@@ -37,37 +37,30 @@ public static class ReferenceMaterializationBatchSizes
 public static class ReferenceMaterializationRunStates
 {
     public const string Queued = "queued";
-    public const string Running = "running";
+    public const string Extracting = "extracting";
+    public const string Embedding = "embedding";
+    public const string Indexing = "indexing";
     public const string Failed = "failed";
     public const string Completed = "completed";
-    public const string Cancelled = "cancelled";
 
-    public static IReadOnlyList<string> All { get; } = [Queued, Running, Failed, Completed, Cancelled];
+    public static IReadOnlyList<string> All { get; } = [Queued, Extracting, Embedding, Indexing, Failed, Completed];
 }
 
 public static class ReferenceMaterializationChapterStates
 {
     public const string Pending = "pending";
     public const string Extracting = "extracting";
-    public const string BuildingCandidates = "building_candidates";
-    public const string LlmQualifying = "llm_qualifying";
     public const string Embedding = "embedding";
-    public const string Indexing = "indexing";
     public const string Completed = "completed";
     public const string Failed = "failed";
-    public const string Cancelled = "cancelled";
 
     public static IReadOnlyList<string> All { get; } =
     [
         Pending,
         Extracting,
-        BuildingCandidates,
-        LlmQualifying,
         Embedding,
-        Indexing,
         Completed,
-        Failed,
-        Cancelled
+        Failed
     ];
 }
 
@@ -170,12 +163,7 @@ public sealed record ReferenceMaterializationChapterProgressPayload(
     [property: JsonPropertyName("chapter_index")] int ChapterIndex,
     [property: JsonPropertyName("batch_index")] int BatchIndex,
     [property: JsonPropertyName("status")] string Status,
-    [property: JsonPropertyName("current_stage")] string CurrentStage,
-    [property: JsonPropertyName("candidate_count")] int CandidateCount,
-    [property: JsonPropertyName("decided_count")] int DecidedCount,
-    [property: JsonPropertyName("accepted_count")] int AcceptedCount,
-    [property: JsonPropertyName("rejected_count")] int RejectedCount,
-    [property: JsonPropertyName("review_count")] int ReviewCount,
+    [property: JsonPropertyName("material_count")] int MaterialCount,
     [property: JsonPropertyName("vector_count")] int VectorCount,
     [property: JsonPropertyName("model_call_count")] int ModelCallCount,
     [property: JsonPropertyName("started_at")]
@@ -212,11 +200,9 @@ public sealed record ReferenceMaterializationStatusPayload(
     [property: JsonPropertyName("current_batch_end_chapter")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     int? CurrentBatchEndChapter,
-    [property: JsonPropertyName("candidate_count")] int CandidateCount,
-    [property: JsonPropertyName("accepted_count")] int AcceptedCount,
-    [property: JsonPropertyName("rejected_count")] int RejectedCount,
-    [property: JsonPropertyName("review_count")] int ReviewCount,
+    [property: JsonPropertyName("material_count")] int MaterialCount,
     [property: JsonPropertyName("vector_count")] int VectorCount,
+    [property: JsonPropertyName("model_call_count")] int ModelCallCount,
     [property: JsonPropertyName("llm")] ReferenceMaterializationModelIdentityPayload Llm,
     [property: JsonPropertyName("embedding")] ReferenceMaterializationModelIdentityPayload Embedding,
     [property: JsonPropertyName("last_error_code")]

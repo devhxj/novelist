@@ -6,20 +6,26 @@ namespace Novelist.Tests;
 public sealed class ReferenceMaterializationStateMachineTests
 {
     [Fact]
-    public void RunStateMachineAllowsOnlyOrderedTerminalTransitions()
+    public void RunStateMachineUsesOnlyWholeChapterPipelineStages()
     {
         Assert.True(ReferenceMaterializationRunStateMachine.CanTransition(
             ReferenceMaterializationRunStates.Queued,
-            ReferenceMaterializationRunStates.Running));
+            ReferenceMaterializationRunStates.Extracting));
         Assert.True(ReferenceMaterializationRunStateMachine.CanTransition(
-            ReferenceMaterializationRunStates.Running,
-            ReferenceMaterializationRunStates.Failed));
+            ReferenceMaterializationRunStates.Extracting,
+            ReferenceMaterializationRunStates.Embedding));
         Assert.True(ReferenceMaterializationRunStateMachine.CanTransition(
-            ReferenceMaterializationRunStates.Running,
-            ReferenceMaterializationRunStates.Cancelled));
+            ReferenceMaterializationRunStates.Embedding,
+            ReferenceMaterializationRunStates.Indexing));
         Assert.True(ReferenceMaterializationRunStateMachine.CanTransition(
-            ReferenceMaterializationRunStates.Running,
+            ReferenceMaterializationRunStates.Indexing,
             ReferenceMaterializationRunStates.Completed));
+        Assert.True(ReferenceMaterializationRunStateMachine.CanTransition(
+            ReferenceMaterializationRunStates.Indexing,
+            ReferenceMaterializationRunStates.Extracting));
+        Assert.True(ReferenceMaterializationRunStateMachine.CanTransition(
+            ReferenceMaterializationRunStates.Embedding,
+            ReferenceMaterializationRunStates.Failed));
         Assert.False(ReferenceMaterializationRunStateMachine.CanTransition(
             ReferenceMaterializationRunStates.Queued,
             ReferenceMaterializationRunStates.Completed));
@@ -29,25 +35,19 @@ public sealed class ReferenceMaterializationStateMachineTests
     }
 
     [Fact]
-    public void ChapterStateMachineRequiresQualificationAndVectorStagesBeforeCompletion()
+    public void ChapterStateMachineUsesOnlyExtractionAndEmbeddingStages()
     {
         Assert.True(ReferenceMaterializationChapterStateMachine.CanTransition(
             ReferenceMaterializationChapterStates.Pending,
-            ReferenceMaterializationChapterStates.BuildingCandidates));
+            ReferenceMaterializationChapterStates.Extracting));
         Assert.True(ReferenceMaterializationChapterStateMachine.CanTransition(
-            ReferenceMaterializationChapterStates.BuildingCandidates,
-            ReferenceMaterializationChapterStates.LlmQualifying));
-        Assert.True(ReferenceMaterializationChapterStateMachine.CanTransition(
-            ReferenceMaterializationChapterStates.LlmQualifying,
+            ReferenceMaterializationChapterStates.Extracting,
             ReferenceMaterializationChapterStates.Embedding));
         Assert.True(ReferenceMaterializationChapterStateMachine.CanTransition(
             ReferenceMaterializationChapterStates.Embedding,
-            ReferenceMaterializationChapterStates.Indexing));
-        Assert.True(ReferenceMaterializationChapterStateMachine.CanTransition(
-            ReferenceMaterializationChapterStates.Indexing,
             ReferenceMaterializationChapterStates.Completed));
         Assert.True(ReferenceMaterializationChapterStateMachine.CanTransition(
-            ReferenceMaterializationChapterStates.LlmQualifying,
+            ReferenceMaterializationChapterStates.Extracting,
             ReferenceMaterializationChapterStates.Failed));
         Assert.False(ReferenceMaterializationChapterStateMachine.CanTransition(
             ReferenceMaterializationChapterStates.Pending,

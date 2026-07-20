@@ -166,6 +166,8 @@ public sealed class ReferenceMaterializationWorker : IAsyncDisposable
             }
 
             ThrowIfLeaseLost(leaseLost);
+            await store.MarkCurrentBatchEmbeddingAsync(claim, batchCancellation.Token);
+            ThrowIfLeaseLost(leaseLost);
             var indexed = await _indexer.IndexCurrentBatchAsync(claim.RunId, batchCancellation.Token);
             ThrowIfLeaseLost(leaseLost);
             if (indexed.NextBatchIndex is null)

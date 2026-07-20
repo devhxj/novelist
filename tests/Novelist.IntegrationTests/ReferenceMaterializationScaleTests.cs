@@ -57,7 +57,7 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
         }
 
         stopwatch.Stop();
-        var processedMaterials = runs.Sum(run => run.CandidateCount);
+        var processedMaterials = runs.Sum(run => run.MaterialCount);
         var throughput = processedMaterials / Math.Max(stopwatch.Elapsed.TotalSeconds, 0.001);
         Assert.Equal(4, runs.Count);
         Assert.Equal(3, runs.Count(run => run.ChapterBatchSize == 5));
@@ -65,7 +65,7 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
         Assert.All(runs, run =>
         {
             Assert.Equal(ReferenceMaterializationRunStates.Completed, run.Status);
-            Assert.Equal(run.AcceptedCount, run.VectorCount);
+            Assert.Equal(run.MaterialCount, run.VectorCount);
             Assert.True(run.VectorIndexHealthy);
             Assert.Equal(run.TotalChapters, run.ProcessedChapters);
         });
@@ -165,7 +165,6 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             profileId,
             Guid.NewGuid().ToString("N"),
             "materialization-policy-v1",
-            ReferenceChapterMaterialChatCompletionExtractor.SchemaVersion,
             ReferenceChapterMaterialChatCompletionExtractor.SchemaVersion,
             new ReferenceMaterializationModelIdentityPayload("scale-llm", "scale-llm-model"),
             new ReferenceMaterializationModelIdentityPayload("scale-embedding", "scale-embedding-model", 8),
@@ -296,8 +295,8 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             return ValueTask.FromResult(new ReferenceMaterializationEmbeddingResult(
-                input.Items.Select((item, index) => new ReferenceMaterializationCandidateEmbedding(
-                    item.CandidateId,
+                input.Items.Select((item, index) => new ReferenceMaterializationMaterialEmbedding(
+                    item.MaterialId,
                     Enumerable.Range(1, input.Model.Dimensions).Select(value => (float)(value + index)).ToArray())).ToArray()));
         }
     }

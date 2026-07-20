@@ -35,8 +35,8 @@ function formatCount(value: number): string {
 
 function runTone(status: string): string {
   if (status === 'completed') return 'text-emerald-700 dark:text-emerald-300'
-  if (status === 'failed' || status === 'cancelled') return 'text-destructive'
-  if (status === 'running' || status === 'queued') return 'text-sky-700 dark:text-sky-300'
+  if (status === 'failed') return 'text-destructive'
+  if (['queued', 'extracting', 'embedding', 'indexing'].includes(status)) return 'text-sky-700 dark:text-sky-300'
   return 'text-muted-foreground'
 }
 
@@ -54,7 +54,6 @@ function stageLabel(stage: string): string {
     indexing: '建立索引',
     completed: '完成',
     failed: '失败',
-    cancelled: '已取消',
   }
   return labels[stage] ?? stage.replaceAll('_', ' ')
 }
@@ -172,7 +171,7 @@ export default function ReferenceCorpusWorkspace({
   }, [loadRunDetail, materialPage, run])
 
   useEffect(() => {
-    if (!run || run.status !== 'queued' && run.status !== 'running') return
+    if (!run || !['queued', 'extracting', 'embedding', 'indexing'].includes(run.status)) return
     const timer = window.setInterval(() => {
       void loadRun(selectedAnchor)
     }, 3_000)
@@ -428,7 +427,7 @@ export default function ReferenceCorpusWorkspace({
                 <h2 id="run-heading" className="text-sm font-semibold text-foreground">2. 材料化进度</h2>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   {run
-                    ? `状态：${run.status.replaceAll('_', ' ')} · ${formatCount(run.processed_chapters)} / ${formatCount(run.total_chapters)} 章节`
+                    ? `状态：${stageLabel(run.status)} · ${formatCount(run.processed_chapters)} / ${formatCount(run.total_chapters)} 章节`
                     : '确认章节边界后，按固定批次依次处理；批内可以并行，批次之间保持顺序。'}
                 </p>
               </div>
@@ -468,7 +467,7 @@ export default function ReferenceCorpusWorkspace({
             <>
               <dl className="mt-3 grid grid-cols-2 divide-x divide-y divide-border border border-border sm:grid-cols-4" aria-label="材料化漏斗">
                 {[
-                  ['材料', run.accepted_count],
+                  ['材料', run.material_count],
                   ['向量', run.vector_count],
                   ['已处理章节', run.processed_chapters],
                   ['总章节', run.total_chapters],
@@ -507,8 +506,8 @@ export default function ReferenceCorpusWorkspace({
                   <li key={item.chapter_index} className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 px-2 py-2 text-xs sm:px-3">
                     <span className="text-muted-foreground">{item.chapter_index}</span>
                     <span className="min-w-0">
-                      <span className="block truncate text-foreground">{stageLabel(item.current_stage)}</span>
-                      <span className="mt-0.5 block text-[11px] text-muted-foreground">材料 {formatCount(item.accepted_count)} · 向量 {formatCount(item.vector_count)}</span>
+                      <span className="block truncate text-foreground">{stageLabel(item.status)}</span>
+                      <span className="mt-0.5 block text-[11px] text-muted-foreground">材料 {formatCount(item.material_count)} · 向量 {formatCount(item.vector_count)}</span>
                     </span>
                     <span className={runTone(item.status)}>{item.status}</span>
                   </li>
