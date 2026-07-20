@@ -834,25 +834,6 @@ export namespace reader {
 }
 
 export namespace reference {
- export interface CorpusNodeWindowItem {
- node_id: string
- parent_node_id?: string | null
- node_type: string
- chapter_index?: number | null
- sequence_index: number
- start_offset: number
- end_offset: number
- text_hash: string
- text: string
- }
- export interface CorpusNodeWindow {
- focus_node_id: string
- focus_chapter_index?: number | null
- scene_node_id?: string | null
- chapter_nodes: CorpusNodeWindowItem[]
- scene_siblings: CorpusNodeWindowItem[]
- truncated: boolean
- }
   export interface Anchor {
     anchor_id: number
     novel_id: number
@@ -1213,85 +1194,6 @@ export namespace reference {
     last_error: string
     updated_at: Timestamp
   }
-
-  export type CorpusNodeType = 'chapter' | 'scene' | 'passage' | 'sentence' | 'clause'
-  export type CorpusLicenseState = 'unknown' | 'public_domain' | 'cc' | 'authorized' | 'restricted' | 'forbidden'
-  export type CorpusReusePolicy = 'verbatim_ok' | 'adapted_only' | 'reference_only' | 'forbidden'
-
-  export interface CharacterStateSnapshot {
-    character: string
-    state: string
-    allowed_knowledge: string[]
-    forbidden_knowledge: string[]
-  }
-
-  export interface CurrentChapterContext {
-    novel_id: number
-    chapter_number: number
-    current_draft_text?: string | null
-    insertion_offset: number
-    previous_chapter_summary?: string | null
-    character_snapshots: CharacterStateSnapshot[]
-  }
-
-  export interface CorpusScope {
-    library_ids: string[]
-    reuse_policies: CorpusReusePolicy[]
-    include_anchor_ids: number[]
-    exclude_anchor_ids: number[]
-    session_id?: string | null
-  }
-
-  export interface CorpusQueryContext {
-    scene_type: string
-    emotion_target: string
-    pacing_target: string
-    narrative_position: string
-    commercial_mechanic: string
-    character_states: string[]
-    required_narrative_functions: string[]
-    chapter_context: CurrentChapterContext
-    scope: CorpusScope
-  }
-
-  export interface SearchCorpusCandidatesInput {
-    query_context: CorpusQueryContext
-    page_request: storage.PageRequest
-  }
-
-  export interface CorpusCandidateEvidence {
-    observation_id: string
-    feature_family: string
-    feature_key: string
-    confidence: number
-  }
-
-  export interface CorpusCandidate {
-    candidate_id: string
-    node_id: string
-    anchor_id: number
-    library_id: string
-    node_type: CorpusNodeType
-    text_preview: string
-    text_hash: string
-    license_state: CorpusLicenseState
-    reuse_policy: CorpusReusePolicy
-    score: number
-    score_components: Record<string, number>
-    fit_explanation: string
-    evidence: CorpusCandidateEvidence[]
-  }
-
- export interface GetCorpusCascadeImpactInput {
- observation_ids: string[]
- }
-
- export interface CorpusCascadeImpact {
- observation_ids: string[]
- specimen_ids: string[]
- beat_ids: string[]
- blueprint_ids: string[]
- }
 
   export interface Material {
     material_id: string
@@ -2424,17 +2326,6 @@ export namespace storage {
 
   export interface PageResult_reference_MaterialSummary_ {
     items: reference.MaterialSummary[]
-    total: number
-    page: number
-    size: number
-    total_pages: number
-    next_cursor?: string | null
-    has_more?: boolean
-    total_estimate?: number | null
-  }
-
-  export interface PageResult_reference_CorpusCandidate_ {
-    items: reference.CorpusCandidate[]
     total: number
     page: number
     size: number

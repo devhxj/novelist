@@ -71,6 +71,7 @@ public static class ReferenceMaterialTypes
     public const string Hook = "hook";
     public const string Payoff = "payoff";
     public const string Transition = "transition";
+    public const string Clause = "clause";
 
     public static IReadOnlyList<string> All { get; } =
     [
@@ -85,7 +86,8 @@ public static class ReferenceMaterialTypes
         ImageMotif,
         Hook,
         Payoff,
-        Transition
+        Transition,
+        Clause
     ];
 }
 

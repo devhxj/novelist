@@ -1228,18 +1228,6 @@ export function installConfigurableAppMockBridge(options = {}) {
       case 'GetReferenceMaterialDetail': return getReferenceMaterialDetail(args[0])
       case 'GetReferenceSourceSegmentDetail': return getReferenceSourceSegmentDetail(args[0])
 case 'GetReferenceSourceProcessingDetail': return getReferenceSourceProcessingDetail(args[0])
- case 'GetReferenceCorpusNodeWindow': {
- const nodeId = String(args[0]?.node_id ?? 'mock-node-rain-001')
- const text = '把杯底半圈水痕压进记忆里，没有急着回头。'
- return {
- focus_node_id: nodeId,
- focus_chapter_index: 1,
- scene_node_id: null,
- chapter_nodes: [{ node_id: nodeId, parent_node_id: null, node_type: 'sentence', chapter_index: 1, sequence_index: 1, start_offset: 0, end_offset: text.length, text_hash: `hash-${nodeId}`, text }],
- scene_siblings: [],
- truncated: false,
- }
- }
       case 'UpdateReferenceMaterialTags': return updateReferenceMaterialTags(args[0])
       case 'UpdateReferenceMaterialsTags': return updateReferenceMaterialsTags(args[0])
       case 'AdaptReferenceMaterial': return adaptReferenceMaterial(args[0])

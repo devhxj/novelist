@@ -3757,7 +3757,7 @@ CancellationToken cancellationToken)
                 transaction,
                 new ReferenceCorpusFeatureObservation(
                     NodeId: nodeId,
-                    NodeType: ReferenceCorpusNodeTypes.Sentence,
+                    NodeType: ReferenceMaterialTypes.Sentence,
                     RunId: runId,
                     AnchorId: anchorId,
                     FeatureFamily: "rhythm",
@@ -3795,7 +3795,7 @@ CancellationToken cancellationToken)
                     transaction,
                     new ReferenceCorpusFeatureObservation(
                         NodeId: nodeId,
-                        NodeType: ReferenceCorpusNodeTypes.Sentence,
+                        NodeType: ReferenceMaterialTypes.Sentence,
                         RunId: runId,
                         AnchorId: anchorId,
                         FeatureFamily: "sensory",
@@ -3837,7 +3837,7 @@ CancellationToken cancellationToken)
                     transaction,
                     new ReferenceCorpusFeatureObservation(
                         NodeId: nodeId,
-                        NodeType: ReferenceCorpusNodeTypes.Sentence,
+                        NodeType: ReferenceMaterialTypes.Sentence,
                         RunId: runId,
                         AnchorId: anchorId,
                         FeatureFamily: "emotion",
@@ -8718,19 +8718,19 @@ return value is '。' or '！' or '？' or '!' or '?' or '.';
     {
         return segmentType switch
         {
-            "chapter" => ReferenceCorpusNodeTypes.Chapter,
-"scene" => ReferenceCorpusNodeTypes.Scene,
-"sentence" => ReferenceCorpusNodeTypes.Sentence,
- "clause" => ReferenceCorpusNodeTypes.Clause,
-"paragraph" => ReferenceCorpusNodeTypes.Passage,
-            "beat" => ReferenceCorpusNodeTypes.Passage,
-            "dialogue_exchange" => ReferenceCorpusNodeTypes.Passage,
-            "action_afterbeat" => ReferenceCorpusNodeTypes.Passage,
-            "image_motif" => ReferenceCorpusNodeTypes.Passage,
-            "hook" => ReferenceCorpusNodeTypes.Passage,
-            "payoff" => ReferenceCorpusNodeTypes.Passage,
-            "transition" => ReferenceCorpusNodeTypes.Passage,
-            _ => ReferenceCorpusNodeTypes.Passage
+            "chapter" => ReferenceMaterialTypes.Chapter,
+"scene" => ReferenceMaterialTypes.Scene,
+"sentence" => ReferenceMaterialTypes.Sentence,
+"clause" => ReferenceMaterialTypes.Clause,
+"paragraph" => ReferenceMaterialTypes.Passage,
+            "beat" => ReferenceMaterialTypes.Passage,
+            "dialogue_exchange" => ReferenceMaterialTypes.Passage,
+            "action_afterbeat" => ReferenceMaterialTypes.Passage,
+            "image_motif" => ReferenceMaterialTypes.Passage,
+            "hook" => ReferenceMaterialTypes.Passage,
+            "payoff" => ReferenceMaterialTypes.Passage,
+            "transition" => ReferenceMaterialTypes.Passage,
+            _ => ReferenceMaterialTypes.Passage
         };
     }
 
