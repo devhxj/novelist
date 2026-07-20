@@ -237,7 +237,7 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
         var sourcePath = Path.Combine(sourceDirectory, "service.md");
         await File.WriteAllTextAsync(sourcePath, "# 第一章\n\n雨声压住窗沿。\n\n# 第二章\n\n门外响起第三次敲门。\n");
         var anchors = new SqliteReferenceAnchorService(options, novels);
-        return await anchors.CreateAnchorAsync(
+        return await anchors.RegisterMaterializationSourceAsync(
             new CreateReferenceAnchorPayload(novel.Id, "服务入口来源", null, sourcePath, "markdown", "user_provided"),
             CancellationToken.None);
     }

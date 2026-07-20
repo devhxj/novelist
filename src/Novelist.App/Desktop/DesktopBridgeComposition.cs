@@ -99,10 +99,7 @@ public static PhotinoWebMessageBridge CreateBridge(
             ragIndexService);
         var referenceAnchorService = new SqliteReferenceAnchorService(
             options,
-            novelService,
-            embeddingService,
-            embeddingClient,
-            sqliteVecProvider);
+            novelService);
         var materializationDatabasePathResolver = new ReferenceCorpusDatabasePathResolver(options);
         var referenceMaterializationService = new SqliteReferenceMaterializationService(
             options,
@@ -128,19 +125,8 @@ public static PhotinoWebMessageBridge CreateBridge(
  var initializationService = new CoordinatedAppInitializationService(
  new FileSystemAppInitializationService(
  options,
- importRecovery: novelImportRecoveryService,
- referenceAnchorRecovery: referenceAnchorService),
+ importRecovery: novelImportRecoveryService),
  referenceMaterializationWorker);
-        var referenceStyleProfileService = new SqliteReferenceStyleProfileService(
-            options,
-            novelService,
-            new ReferenceStyleChatCompletionLlmAnalyzer(settingsService, chatCompletionClient));
-        var referenceAnchoredDraftService = new SqliteReferenceAnchoredDraftService(
-            options,
-            novelService,
-            planningService,
-            referenceAnchorService,
-            new AiReferenceBlueprintRevisionProposalProvider(settingsService, chatCompletionClient));
         var webFetchService = new HttpWebFetchService();
         var webSearchService = new DeepSeekWebSearchService(llmService);
         var subagentRunner = new DeferredSubagentRunner();
@@ -156,8 +142,7 @@ public static PhotinoWebMessageBridge CreateBridge(
             webFetchService,
             webSearchService,
             referenceAnchorService,
-            referenceAnchoredDraftService,
-            referenceStyleProfiles: referenceStyleProfileService));
+            referenceMaterials: referenceMaterialSearch));
         var chatService = new FileSystemChatSessionService(
             options,
             novelService,
@@ -210,8 +195,6 @@ public static PhotinoWebMessageBridge CreateBridge(
             .RegisterReferenceMaterialSearchHandlers(referenceMaterialSearch)
             .RegisterReferenceMaterializationBlueprintPreviewHandlers(referenceMaterializationBlueprintPreviewService)
             .RegisterReferenceWritingHandlers(referenceWritingService)
-            .RegisterReferenceStyleProfileHandlers(referenceStyleProfileService)
-            .RegisterReferenceAnchoredDraftHandlers(referenceAnchoredDraftService)
             .RegisterApprovalHandlers(approvalCoordinator)
             .RegisterChatSessionHandlers(chatService);
 return new DesktopBridgeRuntime(

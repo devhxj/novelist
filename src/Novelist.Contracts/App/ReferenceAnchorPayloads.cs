@@ -15,6 +15,8 @@ public static class ReferenceRewriteLevels
 
 public static class ReferenceAnchorBuildStates
 {
+    public const string PendingSplit = "pending_split";
+    public const string PendingMaterialization = "pending_materialization";
     public const string Created = "created";
     public const string Importing = "importing";
     public const string SourceImported = "source_imported";

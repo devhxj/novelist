@@ -141,6 +141,41 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
     }
 
     [Fact]
+    public async Task RegisterMaterializationSourceOnlyRegistersSourceAndLeavesMaterializationPending()
+    {
+        var options = CreateOptions();
+        await new FileSystemAppInitializationService(options).InitializeAsync(
+            options.DefaultDataDirectory,
+            CancellationToken.None);
+        var novels = new FileSystemNovelService(options, new FileSystemAppSettingsService(options));
+        var novel = await novels.CreateNovelAsync(
+            new CreateNovelPayload("登记来源", "", ""),
+            CancellationToken.None);
+        var sourceDirectory = Path.Combine(_root, "sources");
+        Directory.CreateDirectory(sourceDirectory);
+        var sourcePath = Path.Combine(sourceDirectory, "pending.txt");
+        await File.WriteAllTextAsync(sourcePath, "Chapter 1: Pending\n\nSource text.");
+
+        var anchors = new SqliteReferenceAnchorService(options, novels);
+        var anchor = await anchors.RegisterMaterializationSourceAsync(
+            new CreateReferenceAnchorPayload(
+                novel.Id,
+                "待处理来源",
+                null,
+                sourcePath,
+                "text",
+                "user_provided"),
+            CancellationToken.None);
+
+        Assert.Equal("pending_split", anchor.Status);
+        await using var connection = await OpenConnectionAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM reference_materialization_materials WHERE anchor_id = $anchor_id;";
+        command.Parameters.AddWithValue("$anchor_id", anchor.AnchorId);
+        Assert.Equal(0L, (long)(await command.ExecuteScalarAsync(CancellationToken.None))!);
+    }
+
+    [Fact]
     public async Task EmptyExtractionFailsWithoutPersistingOrActivatingMaterials()
     {
         var scenario = await CreateQueuedScenarioAsync(new EmptyExtractor(), new FixedEmbedder());

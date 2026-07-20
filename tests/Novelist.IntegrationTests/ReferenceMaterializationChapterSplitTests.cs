@@ -28,9 +28,8 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
             new CreateReferenceAnchorPayload(novel.Id, "材料化来源", null, sourcePath, "text", "user_provided"),
             CancellationToken.None);
 
-        Assert.Equal(ReferenceAnchorBuildStates.Ready, anchor.Status);
-        Assert.Equal(0, await CountAnchorRowsAsync(options, "reference_source_segments", anchor.AnchorId));
-        Assert.Equal(0, await CountAnchorRowsAsync(options, "reference_materials", anchor.AnchorId));
+        Assert.Equal(ReferenceAnchorBuildStates.PendingSplit, anchor.Status);
+        Assert.Equal(0, await CountMaterialsAsync(options, anchor.AnchorId));
 
         var materialization = new SqliteReferenceMaterializationService(
             options,
@@ -52,7 +51,7 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
         var prefix = "# 第一章\r\n" + new string('甲', 49_990);
         var sourcePath = CreateSourceFile("auto-split.md", prefix + "\r\n# 第二章\r\n" + new string('乙', 300));
         var anchors = new SqliteReferenceAnchorService(options, novels);
-        var anchor = await anchors.CreateAnchorAsync(
+        var anchor = await anchors.RegisterMaterializationSourceAsync(
             new CreateReferenceAnchorPayload(novel.Id, "自动切分来源", null, sourcePath, "markdown", "user_provided"),
             CancellationToken.None);
         var analyzer = new RecordingChapterSplitAnalyzer(
@@ -86,7 +85,7 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
             "manual-split.txt",
             "第1章 开端\n\n雨声压住窗沿。\n\n第2章 转折\n\n门外响起第三次敲门。\n");
         var anchors = new SqliteReferenceAnchorService(options, novels);
-        var anchor = await anchors.CreateAnchorAsync(
+        var anchor = await anchors.RegisterMaterializationSourceAsync(
             new CreateReferenceAnchorPayload(novel.Id, "手动切分来源", null, sourcePath, "text", "user_provided"),
             CancellationToken.None);
         var analyzer = new RecordingChapterSplitAnalyzer(ReferenceChapterSplitModelResult.Empty);
@@ -128,7 +127,7 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
             "english-split.txt",
             "Chapter 1: First Contact\n\nThe door opened.\n\nChapter 2: Return\n\nThe rain stopped.\n");
         var anchors = new SqliteReferenceAnchorService(options, novels);
-        var anchor = await anchors.CreateAnchorAsync(
+        var anchor = await anchors.RegisterMaterializationSourceAsync(
             new CreateReferenceAnchorPayload(novel.Id, "English split source", null, sourcePath, "text", "user_provided"),
             CancellationToken.None);
         var service = new SqliteReferenceMaterializationService(options, new RecordingChapterSplitAnalyzer(ReferenceChapterSplitModelResult.Empty));
@@ -154,7 +153,7 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
             "toc-split.txt",
             "目录\n第一辑 开端(text00002.html)\n第二辑 回声(text00003.html)\n\n版权信息\n\n第一辑 开端\n\n雨声压住窗沿。\n\n第二辑 回声\n\n门外响起第三次敲门。\n");
         var anchors = new SqliteReferenceAnchorService(options, novels);
-        var anchor = await anchors.CreateAnchorAsync(
+        var anchor = await anchors.RegisterMaterializationSourceAsync(
             new CreateReferenceAnchorPayload(novel.Id, "目录来源", null, sourcePath, "text", "user_provided"),
             CancellationToken.None);
         var service = new SqliteReferenceMaterializationService(options, new RecordingChapterSplitAnalyzer(ReferenceChapterSplitModelResult.Empty));
@@ -193,7 +192,7 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
             """;
         var sourcePath = CreateSourceFileWithBom("full-width-heading-space.txt", source);
         var anchors = new SqliteReferenceAnchorService(options, novels);
-        var anchor = await anchors.CreateAnchorAsync(
+        var anchor = await anchors.RegisterMaterializationSourceAsync(
             new CreateReferenceAnchorPayload(novel.Id, "全角空格来源", null, sourcePath, "text", "user_provided"),
             CancellationToken.None);
         var firstHeadingOffset = source.IndexOf("第一辑", StringComparison.Ordinal);
@@ -224,7 +223,7 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
             "literal-split.txt",
             "--- CHAPTER ---\n\nA door opens.\n\n--- CHAPTER ---\n\nThe rain returns.\n");
         var anchors = new SqliteReferenceAnchorService(options, novels);
-        var anchor = await anchors.CreateAnchorAsync(
+        var anchor = await anchors.RegisterMaterializationSourceAsync(
             new CreateReferenceAnchorPayload(novel.Id, "Literal split source", null, sourcePath, "text", "user_provided"),
             CancellationToken.None);
         var service = new SqliteReferenceMaterializationService(options, new RecordingChapterSplitAnalyzer(ReferenceChapterSplitModelResult.Empty));
@@ -248,7 +247,7 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
         var novel = await novels.CreateNovelAsync(new CreateNovelPayload("无章节边界", "", ""), CancellationToken.None);
         var sourcePath = CreateSourceFile("no-boundaries.txt", "没有标题的正文。\n\n仍然没有章节。\n");
         var anchors = new SqliteReferenceAnchorService(options, novels);
-        var anchor = await anchors.CreateAnchorAsync(
+        var anchor = await anchors.RegisterMaterializationSourceAsync(
             new CreateReferenceAnchorPayload(novel.Id, "无边界来源", null, sourcePath, "text", "user_provided"),
             CancellationToken.None);
         var service = new SqliteReferenceMaterializationService(options, new RecordingChapterSplitAnalyzer(ReferenceChapterSplitModelResult.Empty));
@@ -270,7 +269,7 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
         var novel = await novels.CreateNovelAsync(new CreateNovelPayload("切分证据校验", "", ""), CancellationToken.None);
         var sourcePath = CreateSourceFile("invalid-evidence.md", "# 第一章\n\n雨声压住窗沿。\n\n# 第二章\n\n门外响起第三次敲门。\n");
         var anchors = new SqliteReferenceAnchorService(options, novels);
-        var anchor = await anchors.CreateAnchorAsync(
+        var anchor = await anchors.RegisterMaterializationSourceAsync(
             new CreateReferenceAnchorPayload(novel.Id, "证据无效来源", null, sourcePath, "markdown", "user_provided"),
             CancellationToken.None);
         var service = new SqliteReferenceMaterializationService(
@@ -301,7 +300,7 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
             "stale-split.txt",
             "第1章 开端\n\n雨声压住窗沿。\n\n第2章 转折\n\n门外响起第三次敲门。\n");
         var anchors = new SqliteReferenceAnchorService(options, novels);
-        var anchor = await anchors.CreateAnchorAsync(
+        var anchor = await anchors.RegisterMaterializationSourceAsync(
             new CreateReferenceAnchorPayload(novel.Id, "失效切分来源", null, sourcePath, "text", "user_provided"),
             CancellationToken.None);
         var service = new SqliteReferenceMaterializationService(options, new RecordingChapterSplitAnalyzer(ReferenceChapterSplitModelResult.Empty));
@@ -396,11 +395,11 @@ public sealed class ReferenceMaterializationChapterSplitTests : IDisposable
             .ToArray();
     }
 
-    private static async ValueTask<int> CountAnchorRowsAsync(AppInitializationOptions options, string tableName, long anchorId)
+    private static async ValueTask<int> CountMaterialsAsync(AppInitializationOptions options, long anchorId)
     {
         await using var connection = await OpenConnectionAsync(options);
         await using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT COUNT(*) FROM {tableName} WHERE anchor_id = $anchor_id;";
+        command.CommandText = "SELECT COUNT(*) FROM reference_materialization_materials WHERE anchor_id = $anchor_id;";
         command.Parameters.AddWithValue("$anchor_id", anchorId);
         return Convert.ToInt32(await command.ExecuteScalarAsync(CancellationToken.None));
     }

@@ -187,55 +187,6 @@ public sealed class WorkspaceUtilityServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchAllLeavesReferenceMaterialsInDedicatedSearch()
-    {
-        var options = CreateOptions();
-        await InitializeAsync(options);
-        var settings = new FileSystemAppSettingsService(options);
-        var novelService = new FileSystemNovelService(options, settings);
-        var novel = await novelService.CreateNovelAsync(new CreateNovelPayload("长夜档案", "", ""), CancellationToken.None);
-        var chapterService = new FileSystemChapterContentService(options, novelService);
-        var world = new FileSystemWorldEntityService(options, novelService);
-        var planning = new FileSystemPlanningService(options, novelService);
-        var referenceSourcePath = CreateSourceFile(
-            "reference.md",
-            """
-            # 雨夜参考
-
-            雨声压低了整条街的呼吸。
-            """);
-        var referenceAnchors = new SqliteReferenceAnchorService(options, novelService);
-        var anchor = await referenceAnchors.CreateAnchorAsync(
-            new CreateReferenceAnchorPayload(
-                novel.Id,
-                "雨夜参考",
-                null,
-                referenceSourcePath,
-                "markdown",
-                "user_provided"),
-            CancellationToken.None);
-        var dedicatedResults = await referenceAnchors.SearchMaterialsAsync(
-            new SearchReferenceMaterialsPayload(
-                novel.Id,
-                [anchor.AnchorId],
-                "雨声",
-                [],
-                [],
-                [],
-                [],
-                [],
-                1,
-                10),
-            CancellationToken.None);
-        Assert.NotEmpty(dedicatedResults.Items);
-
-        var search = new FileSystemWorkspaceSearchService(options, novelService, chapterService, world, planning);
-        var results = await search.SearchAllAsync(novel.Id, "雨声", CancellationToken.None);
-
-        Assert.Empty(results);
-    }
-
-    [Fact]
     public async Task SearchAllKeepsExactResultsWhenSemanticSearchFails()
     {
         var options = CreateOptions();

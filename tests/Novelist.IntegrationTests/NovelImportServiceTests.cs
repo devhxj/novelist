@@ -234,10 +234,6 @@ public sealed class NovelImportServiceTests : IDisposable
         var referenceAnchors = new SqliteReferenceAnchorService(options, novelService);
         Assert.Empty(await referenceAnchors.GetAnchorsAsync(novel.Id, CancellationToken.None));
 
-        var styleProfiles = new SqliteReferenceStyleProfileService(options, novelService);
-        Assert.Empty(await styleProfiles.GetStyleProfilesAsync(
-            new GetReferenceStyleProfilesPayload(novel.Id, IncludeArchived: true),
-            CancellationToken.None));
     }
 
     [Fact]

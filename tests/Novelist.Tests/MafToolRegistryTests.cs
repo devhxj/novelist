@@ -151,92 +151,12 @@ public sealed class MafToolRegistryTests
     }
 
     [Fact]
-    public void CreateToolsIncludesReferenceToolsOnlyWhenServicesAreConfigured()
+    public void CreateToolsIncludesOnlyActiveReferenceToolsWhenServicesAreConfigured()
     {
         var withoutReferenceServices = new NovelistMafToolRegistry(new RecordingStoryMemorySearchService());
         Assert.DoesNotContain(
             withoutReferenceServices.CreateTools(new NovelistMafToolContext(17)),
-            tool => tool.Name.StartsWith("search_reference", StringComparison.Ordinal) ||
-                tool.Name.StartsWith("get_reference_style", StringComparison.Ordinal) ||
-                tool.Name.StartsWith("generate_reference", StringComparison.Ordinal));
-
-        var withOnlyReferenceAnchors = new NovelistMafToolRegistry(
-            new RecordingStoryMemorySearchService(),
-            chapterContent: null,
-            approvals: null,
-            events: null,
-            subagents: null,
-            preferences: null,
-            world: null,
-            planning: null,
-            webFetch: null,
-            webSearch: null,
-            referenceAnchors: new RecordingReferenceAnchorService());
-        var materialToolNames = withOnlyReferenceAnchors.CreateTools(new NovelistMafToolContext(17))
-            .Select(tool => tool.Name)
-            .ToArray();
-        Assert.Contains("get_reference_anchors", materialToolNames);
-        Assert.Contains("search_reference_materials", materialToolNames);
-        Assert.Contains("get_reference_material_detail", materialToolNames);
-        Assert.Contains("get_reference_source_segment_detail", materialToolNames);
-        Assert.Contains("get_reference_source_processing_detail", materialToolNames);
-        Assert.Contains("adapt_reference_material", materialToolNames);
-        Assert.Contains("audit_reference_reuse", materialToolNames);
-        Assert.DoesNotContain("get_reference_style_profiles", materialToolNames);
-        Assert.DoesNotContain("get_reference_style_profile", materialToolNames);
-        Assert.DoesNotContain("generate_reference_chapter_blueprint", materialToolNames);
-        Assert.DoesNotContain("generate_reference_anchored_draft", materialToolNames);
-
-        var withOnlyReferenceDrafts = new NovelistMafToolRegistry(
-            new RecordingStoryMemorySearchService(),
-            chapterContent: null,
-            approvals: null,
-            events: null,
-            subagents: null,
-            preferences: null,
-            world: null,
-            planning: null,
-            webFetch: null,
-            webSearch: null,
-            referenceDrafts: new RecordingReferenceAnchoredDraftService());
-        var draftToolNames = withOnlyReferenceDrafts.CreateTools(new NovelistMafToolContext(17))
-            .Select(tool => tool.Name)
-            .ToArray();
-        Assert.DoesNotContain("get_reference_anchors", draftToolNames);
-        Assert.DoesNotContain("search_reference_materials", draftToolNames);
-        Assert.DoesNotContain("get_reference_style_profiles", draftToolNames);
-        Assert.DoesNotContain("get_reference_style_profile", draftToolNames);
-        Assert.Contains("generate_reference_chapter_blueprint", draftToolNames);
-        Assert.Contains("generate_reference_anchored_draft", draftToolNames);
-        Assert.Contains("get_reference_draft_audits", draftToolNames);
-        Assert.Contains("get_reference_style_audit_findings", draftToolNames);
-        Assert.DoesNotContain("get_reference_draft_candidates", draftToolNames);
-
-        var withOnlyStyleProfiles = new NovelistMafToolRegistry(
-            new RecordingStoryMemorySearchService(),
-            chapterContent: null,
-            approvals: null,
-            events: null,
-            subagents: null,
-            preferences: null,
-            world: null,
-            planning: null,
-            webFetch: null,
-            webSearch: null,
-            referenceAnchors: null,
-            referenceDrafts: null,
-            referenceStyleProfiles: new RecordingReferenceStyleProfileService());
-        var styleProfileToolNames = withOnlyStyleProfiles.CreateTools(new NovelistMafToolContext(17))
-            .Select(tool => tool.Name)
-            .ToArray();
-        Assert.Contains("get_reference_style_profiles", styleProfileToolNames);
-        Assert.Contains("get_reference_style_profile", styleProfileToolNames);
-        Assert.DoesNotContain("build_reference_style_profile", styleProfileToolNames);
-        Assert.DoesNotContain("import_reference_style_profile", styleProfileToolNames);
-        Assert.DoesNotContain("approve_reference_style_contract", styleProfileToolNames);
-        Assert.DoesNotContain("insert_style_imitation_candidate", styleProfileToolNames);
-        Assert.DoesNotContain("search_reference_materials", styleProfileToolNames);
-        Assert.DoesNotContain("generate_reference_anchored_draft", styleProfileToolNames);
+            tool => tool.Name.Contains("reference", StringComparison.Ordinal));
 
         var registry = new NovelistMafToolRegistry(
             new RecordingStoryMemorySearchService(),
@@ -250,277 +170,23 @@ public sealed class MafToolRegistryTests
             webFetch: null,
             webSearch: null,
             referenceAnchors: new RecordingReferenceAnchorService(),
-            referenceDrafts: new RecordingReferenceAnchoredDraftService(),
-            referenceStyleProfiles: new RecordingReferenceStyleProfileService());
-
-        var tools = registry.CreateTools(new NovelistMafToolContext(17));
-        var names = tools.Select(tool => tool.Name).ToArray();
-
-        Assert.Contains("get_reference_anchors", names);
-        Assert.Contains("search_reference_materials", names);
-        Assert.Contains("get_reference_material_detail", names);
-        Assert.Contains("get_reference_source_segment_detail", names);
-        Assert.Contains("get_reference_source_processing_detail", names);
-        Assert.Contains("adapt_reference_material", names);
-        Assert.Contains("audit_reference_reuse", names);
-        Assert.Contains("generate_reference_chapter_blueprint", names);
-        Assert.Contains("review_reference_chapter_blueprint", names);
-        Assert.Contains("revise_reference_chapter_blueprint", names);
-        Assert.Contains("approve_reference_chapter_blueprint", names);
-        Assert.Contains("bind_reference_blueprint_materials", names);
-        Assert.Contains("generate_reference_anchored_draft", names);
-        Assert.Contains("audit_reference_anchored_draft", names);
-        Assert.Contains("get_reference_draft_audits", names);
-        Assert.Contains("get_reference_style_audit_findings", names);
-        Assert.Contains("start_reference_orchestration_run", names);
-        Assert.Contains("get_reference_orchestration_runs", names);
-        Assert.Contains("get_reference_orchestration_run", names);
-        Assert.Contains("get_reference_orchestration_run_events", names);
-        Assert.Contains("cancel_reference_orchestration_run", names);
-        Assert.Contains("get_reference_style_profiles", names);
-        Assert.Contains("get_reference_style_profile", names);
-        Assert.DoesNotContain("resume_reference_orchestration_run", names);
-        Assert.DoesNotContain("get_reference_draft_candidates", names);
-        Assert.DoesNotContain("approve_reference_orchestration_decision", names);
-        Assert.DoesNotContain("apply_reference_blueprint_revision", names);
-        Assert.DoesNotContain("insert_reference_anchored_draft", names);
-        Assert.DoesNotContain("build_reference_style_profile", names);
-        Assert.DoesNotContain("approve_reference_style_contract", names);
-        Assert.DoesNotContain("import_reference_style_profile", names);
-        Assert.DoesNotContain("insert_style_imitation_candidate", names);
-
-        foreach (var tool in tools.Where(tool => tool.Name.Contains("reference", StringComparison.Ordinal)))
-        {
-            Assert.True(tool.JsonSchema.TryGetProperty("properties", out var properties), tool.Name);
-            Assert.False(properties.TryGetProperty("novel_id", out _), tool.Name);
-            Assert.False(properties.TryGetProperty("session_id", out _), tool.Name);
-            Assert.False(properties.TryGetProperty("turn_id", out _), tool.Name);
-            Assert.False(properties.TryGetProperty("tool_id", out _), tool.Name);
-        }
-
-        var generateDraft = tools.Single(tool => tool.Name == "generate_reference_anchored_draft");
-        Assert.Contains("approved", generateDraft.Description, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("SaveContent", generateDraft.Description, StringComparison.Ordinal);
-        Assert.True(generateDraft.JsonSchema.TryGetProperty("properties", out var generateDraftProperties));
-        Assert.True(generateDraftProperties.TryGetProperty("blueprint_id", out _));
-        Assert.True(generateDraftProperties.TryGetProperty("beat_ids", out _));
-        Assert.True(generateDraftProperties.TryGetProperty("style_intensities", out _));
-        Assert.True(generateDraftProperties.TryGetProperty("candidates_per_beat", out _));
-        Assert.False(generateDraftProperties.TryGetProperty("content", out _));
-        Assert.False(generateDraftProperties.TryGetProperty("text", out _));
-        Assert.False(generateDraftProperties.TryGetProperty("path", out _));
-        Assert.False(generateDraftProperties.TryGetProperty("chapter_path", out _));
-        Assert.DoesNotContain("SaveContent", generateDraftProperties.EnumerateObject().Select(property => property.Name), StringComparer.Ordinal);
-
-        var bindMaterials = tools.Single(tool => tool.Name == "bind_reference_blueprint_materials");
-        Assert.Contains("select_top_candidate", bindMaterials.Description, StringComparison.Ordinal);
-        Assert.True(bindMaterials.JsonSchema.TryGetProperty("properties", out var bindMaterialsProperties));
-        Assert.True(bindMaterialsProperties.TryGetProperty("blueprint_id", out _));
-        Assert.True(bindMaterialsProperties.TryGetProperty("max_results_per_beat", out _));
-        Assert.True(bindMaterialsProperties.TryGetProperty("select_top_candidate", out _));
-
-        var getDraftAudits = tools.Single(tool => tool.Name == "get_reference_draft_audits");
-        AssertToolDescriptionContains(getDraftAudits, "只读", "不返回候选正文", "不返回源文本", "不能批准", "不能写章节");
-        Assert.True(getDraftAudits.JsonSchema.TryGetProperty("properties", out var getDraftAuditsProperties));
-        Assert.True(getDraftAuditsProperties.TryGetProperty("blueprint_id", out _));
-        Assert.True(getDraftAuditsProperties.TryGetProperty("candidate_ids", out _));
-        Assert.True(getDraftAuditsProperties.TryGetProperty("limit", out _));
-        Assert.False(getDraftAuditsProperties.TryGetProperty("novel_id", out _));
-        Assert.False(getDraftAuditsProperties.TryGetProperty("content", out _));
-        Assert.False(getDraftAuditsProperties.TryGetProperty("text", out _));
-        Assert.False(getDraftAuditsProperties.TryGetProperty("candidate_text", out _));
-        Assert.False(getDraftAuditsProperties.TryGetProperty("source_text", out _));
-        Assert.False(getDraftAuditsProperties.TryGetProperty("prompt", out _));
-        Assert.False(getDraftAuditsProperties.TryGetProperty("path", out _));
-
-        var getStyleAuditFindings = tools.Single(tool => tool.Name == "get_reference_style_audit_findings");
-        AssertToolDescriptionContains(getStyleAuditFindings, "只读", "style/source-leak", "不返回候选正文", "不返回源文本", "不能批准", "不能写章节");
-        Assert.True(getStyleAuditFindings.JsonSchema.TryGetProperty("properties", out var getStyleAuditProperties));
-        Assert.True(getStyleAuditProperties.TryGetProperty("blueprint_id", out _));
-        Assert.True(getStyleAuditProperties.TryGetProperty("candidate_ids", out _));
-        Assert.True(getStyleAuditProperties.TryGetProperty("risk_types", out _));
-        Assert.True(getStyleAuditProperties.TryGetProperty("limit", out _));
-        Assert.False(getStyleAuditProperties.TryGetProperty("novel_id", out _));
-        Assert.False(getStyleAuditProperties.TryGetProperty("content", out _));
-        Assert.False(getStyleAuditProperties.TryGetProperty("text", out _));
-        Assert.False(getStyleAuditProperties.TryGetProperty("candidate_text", out _));
-        Assert.False(getStyleAuditProperties.TryGetProperty("source_text", out _));
-        Assert.False(getStyleAuditProperties.TryGetProperty("prompt", out _));
-        Assert.False(getStyleAuditProperties.TryGetProperty("path", out _));
-
-        var searchMaterials = tools.Single(tool => tool.Name == "search_reference_materials");
-        AssertToolDescriptionContains(searchMaterials, "story context", "license", "score_components", "不直接写章节");
-        Assert.True(searchMaterials.JsonSchema.TryGetProperty("properties", out var searchMaterialsProperties));
-        Assert.True(searchMaterialsProperties.TryGetProperty("narrative_duties", out _));
-        Assert.True(searchMaterialsProperties.TryGetProperty("emotion_transitions", out _));
-        Assert.True(searchMaterialsProperties.TryGetProperty("prose_duties", out _));
-        Assert.True(searchMaterialsProperties.TryGetProperty("style_profile_ids", out _));
-        Assert.True(searchMaterialsProperties.TryGetProperty("style_dimensions", out _));
-        Assert.True(searchMaterialsProperties.TryGetProperty("imitation_intensity", out _));
-
-        var getMaterialDetail = tools.Single(tool => tool.Name == "get_reference_material_detail");
-        AssertToolDescriptionContains(getMaterialDetail, "只读", "bounded previews", "不返回 source_path", "不返回 source_text", "不能写章节");
-        Assert.True(getMaterialDetail.JsonSchema.TryGetProperty("properties", out var getMaterialDetailProperties));
-        Assert.True(getMaterialDetailProperties.TryGetProperty("material_id", out _));
-        Assert.False(getMaterialDetailProperties.TryGetProperty("novel_id", out _));
-        Assert.False(getMaterialDetailProperties.TryGetProperty("source_path", out _));
-        Assert.False(getMaterialDetailProperties.TryGetProperty("source_text", out _));
-        Assert.False(getMaterialDetailProperties.TryGetProperty("candidate_text", out _));
-        Assert.False(getMaterialDetailProperties.TryGetProperty("prompt", out _));
-        Assert.False(getMaterialDetailProperties.TryGetProperty("path", out _));
-
-        var getSourceSegmentDetail = tools.Single(tool => tool.Name == "get_reference_source_segment_detail");
-        AssertToolDescriptionContains(getSourceSegmentDetail, "只读", "bounded text_preview", "不返回 source_path", "不返回 source_text", "不能写章节");
-        Assert.True(getSourceSegmentDetail.JsonSchema.TryGetProperty("properties", out var getSourceSegmentDetailProperties));
-        Assert.True(getSourceSegmentDetailProperties.TryGetProperty("anchor_id", out _));
-        Assert.True(getSourceSegmentDetailProperties.TryGetProperty("segment_id", out _));
-        Assert.False(getSourceSegmentDetailProperties.TryGetProperty("novel_id", out _));
-        Assert.False(getSourceSegmentDetailProperties.TryGetProperty("source_path", out _));
-        Assert.False(getSourceSegmentDetailProperties.TryGetProperty("source_text", out _));
-        Assert.False(getSourceSegmentDetailProperties.TryGetProperty("candidate_text", out _));
-        Assert.False(getSourceSegmentDetailProperties.TryGetProperty("prompt", out _));
-        Assert.False(getSourceSegmentDetailProperties.TryGetProperty("path", out _));
-
-        var getSourceProcessingDetail = tools.Single(tool => tool.Name == "get_reference_source_processing_detail");
-        AssertToolDescriptionContains(getSourceProcessingDetail, "只读", "已脱敏 diagnostics", "不返回 source_path", "不返回 source_text", "不能写章节");
-        Assert.True(getSourceProcessingDetail.JsonSchema.TryGetProperty("properties", out var getSourceProcessingDetailProperties));
-        Assert.True(getSourceProcessingDetailProperties.TryGetProperty("anchor_id", out _));
-        Assert.False(getSourceProcessingDetailProperties.TryGetProperty("novel_id", out _));
-        Assert.False(getSourceProcessingDetailProperties.TryGetProperty("source_path", out _));
-        Assert.False(getSourceProcessingDetailProperties.TryGetProperty("source_text", out _));
-        Assert.False(getSourceProcessingDetailProperties.TryGetProperty("candidate_text", out _));
-        Assert.False(getSourceProcessingDetailProperties.TryGetProperty("prompt", out _));
-        Assert.False(getSourceProcessingDetailProperties.TryGetProperty("path", out _));
-
-        var adaptMaterial = tools.Single(tool => tool.Name == "adapt_reference_material");
-        AssertToolDescriptionContains(adaptMaterial, "bounded text preview", "不返回完整材料文本", "不返回 source_path", "不直接写章节");
-
-        var listStyleProfiles = tools.Single(tool => tool.Name == "get_reference_style_profiles");
-        AssertToolDescriptionContains(listStyleProfiles, "只读", "不能构建", "不能导入", "不能审批", "不能写章节");
-        Assert.True(listStyleProfiles.JsonSchema.TryGetProperty("properties", out var listStyleProfileProperties));
-        Assert.True(listStyleProfileProperties.TryGetProperty("include_archived", out _));
-        Assert.False(listStyleProfileProperties.TryGetProperty("anchor_ids", out _));
-        Assert.False(listStyleProfileProperties.TryGetProperty("source_path", out _));
-
-        var getStyleProfile = tools.Single(tool => tool.Name == "get_reference_style_profile");
-        AssertToolDescriptionContains(getStyleProfile, "evidence", "不返回源文本", "只读", "不能审批");
-        Assert.True(getStyleProfile.JsonSchema.TryGetProperty("properties", out var getStyleProfileProperties));
-        Assert.True(getStyleProfileProperties.TryGetProperty("profile_id", out _));
-        Assert.False(getStyleProfileProperties.TryGetProperty("source_text", out _));
-        Assert.False(getStyleProfileProperties.TryGetProperty("content", out _));
-
-        var approveBlueprint = tools.Single(tool => tool.Name == "approve_reference_chapter_blueprint");
-        AssertToolDescriptionContains(approveBlueprint, "style_contract", "用户显式审批", "agent 不能批准 style contract");
-
-        var startOrchestration = tools.Single(tool => tool.Name == "start_reference_orchestration_run");
-        AssertToolDescriptionContains(
-            startOrchestration,
-            "source/fact",
-            "blueprint revision",
-            "final insertion",
-            "作者");
-        Assert.True(startOrchestration.JsonSchema.TryGetProperty("properties", out var startOrchestrationProperties));
-        Assert.True(startOrchestrationProperties.TryGetProperty("chapter_number", out _));
-        Assert.True(startOrchestrationProperties.TryGetProperty("chapter_goal", out _));
-        Assert.True(startOrchestrationProperties.TryGetProperty("known_facts", out _));
-        Assert.True(startOrchestrationProperties.TryGetProperty("forbidden_facts", out _));
-        Assert.True(startOrchestrationProperties.TryGetProperty("include_anchor_ids", out _));
-        Assert.True(startOrchestrationProperties.TryGetProperty("exclude_anchor_ids", out _));
-        Assert.True(startOrchestrationProperties.TryGetProperty("license_statuses", out _));
-        Assert.False(startOrchestrationProperties.TryGetProperty("anchor_ids", out _));
-        Assert.False(startOrchestrationProperties.TryGetProperty("source_confirmed", out _));
-        Assert.False(startOrchestrationProperties.TryGetProperty("decision_type", out _));
-        Assert.False(startOrchestrationProperties.TryGetProperty("decision_payload", out _));
-        Assert.False(startOrchestrationProperties.TryGetProperty("content", out _));
-        Assert.False(startOrchestrationProperties.TryGetProperty("text", out _));
-
-        var getRuns = tools.Single(tool => tool.Name == "get_reference_orchestration_runs");
-        Assert.True(getRuns.JsonSchema.GetProperty("properties").TryGetProperty("chapter_number", out _));
-
-        var getRun = tools.Single(tool => tool.Name == "get_reference_orchestration_run");
-        Assert.True(getRun.JsonSchema.GetProperty("properties").TryGetProperty("run_id", out _));
-
-        var getEvents = tools.Single(tool => tool.Name == "get_reference_orchestration_run_events");
-        AssertToolDescriptionContains(getEvents, "只读", "不批准", "不恢复", "不写章节");
-        Assert.True(getEvents.JsonSchema.GetProperty("properties").TryGetProperty("run_id", out _));
-        Assert.False(getEvents.JsonSchema.GetProperty("properties").TryGetProperty("decision_type", out _));
-        Assert.False(getEvents.JsonSchema.GetProperty("properties").TryGetProperty("decision_payload", out _));
-
-        var cancelRun = tools.Single(tool => tool.Name == "cancel_reference_orchestration_run");
-        Assert.True(cancelRun.JsonSchema.GetProperty("properties").TryGetProperty("run_id", out _));
-        Assert.True(cancelRun.JsonSchema.GetProperty("properties").TryGetProperty("reason", out _));
-    }
-
-    [Fact]
-    public void ReferenceAgentToolsCannotImportCorpusSourcesOrReadArbitraryFiles()
-    {
-        var registry = new NovelistMafToolRegistry(
-            new RecordingStoryMemorySearchService(),
-            chapterContent: null,
-            approvals: null,
-            events: null,
-            subagents: null,
-            preferences: null,
-            world: null,
-            planning: null,
-            webFetch: null,
-            webSearch: null,
-            referenceAnchors: new RecordingReferenceAnchorService(),
-            referenceDrafts: new RecordingReferenceAnchoredDraftService(),
-            referenceStyleProfiles: new RecordingReferenceStyleProfileService());
+            referenceMaterials: new RecordingReferenceMaterialSearch());
 
         var referenceTools = registry.CreateTools(new NovelistMafToolContext(17))
             .Where(tool => tool.Name.Contains("reference", StringComparison.Ordinal))
+            .OrderBy(tool => tool.Name, StringComparer.Ordinal)
             .ToArray();
-        var names = referenceTools.Select(tool => tool.Name).ToArray();
 
-        Assert.DoesNotContain("create_reference_anchor", names);
-        Assert.DoesNotContain("import_reference_source", names);
-        Assert.DoesNotContain("pick_reference_source_file", names);
-        Assert.DoesNotContain("promote_reference_anchor_to_workspace_corpus", names);
-        Assert.DoesNotContain("update_reference_anchor_metadata", names);
-        Assert.DoesNotContain("delete_reference_anchor", names);
-        Assert.DoesNotContain("build_reference_style_profile", names);
-        Assert.DoesNotContain("archive_reference_style_profile", names);
-        Assert.DoesNotContain("update_reference_style_profile", names);
-
+        Assert.Equal(
+            ["get_reference_anchors", "search_reference_materials"],
+            referenceTools.Select(tool => tool.Name));
         foreach (var tool in referenceTools)
         {
             Assert.True(tool.JsonSchema.TryGetProperty("properties", out var properties), tool.Name);
+            Assert.False(properties.TryGetProperty("novel_id", out _), tool.Name);
             Assert.False(properties.TryGetProperty("source_path", out _), tool.Name);
-            Assert.False(properties.TryGetProperty("file_path", out _), tool.Name);
-            Assert.False(properties.TryGetProperty("absolute_path", out _), tool.Name);
             Assert.False(properties.TryGetProperty("path", out _), tool.Name);
-            Assert.False(properties.TryGetProperty("source_file", out _), tool.Name);
-            Assert.False(properties.TryGetProperty("source_uri", out _), tool.Name);
-            Assert.False(properties.TryGetProperty("source_url", out _), tool.Name);
-            Assert.False(properties.TryGetProperty("import_path", out _), tool.Name);
         }
-
-        AssertToolDescriptionContains(
-            referenceTools.Single(tool => tool.Name == "get_reference_anchors"),
-            "已导入",
-            "不返回 source_path",
-            "不能导入",
-            "不能读取任意文件");
-        AssertToolDescriptionContains(
-            referenceTools.Single(tool => tool.Name == "search_reference_materials"),
-            "已导入",
-            "license/visibility",
-            "不能导入",
-            "不能读取任意文件");
-        AssertToolDescriptionContains(
-            referenceTools.Single(tool => tool.Name == "start_reference_orchestration_run"),
-            "已导入",
-            "license/visibility",
-            "不能导入",
-            "不能读取任意文件");
-        AssertToolDescriptionContains(
-            referenceTools.Single(tool => tool.Name == "get_reference_style_profiles"),
-            "已存在",
-            "只读",
-            "不能构建",
-            "不能导入");
     }
 
     [Fact]
@@ -539,8 +205,7 @@ public sealed class MafToolRegistryTests
             webFetch: new RecordingWebFetchService(),
             webSearch: new RecordingWebSearchService(),
             referenceAnchors: new RecordingReferenceAnchorService(),
-            referenceDrafts: new RecordingReferenceAnchoredDraftService(),
-            referenceStyleProfiles: new RecordingReferenceStyleProfileService());
+            referenceMaterials: new RecordingReferenceMaterialSearch());
 
         var tools = registry.CreateTools(new NovelistMafToolContext(17));
         var names = tools.Select(tool => tool.Name).ToArray();
@@ -571,155 +236,10 @@ public sealed class MafToolRegistryTests
     }
 
     [Fact]
-    public void ReferenceStyleAgentToolAuthorityMatrixAllowsOnlySearchInspectAndCandidatePreparation()
-    {
-        var registry = new NovelistMafToolRegistry(
-            new RecordingStoryMemorySearchService(),
-            chapterContent: null,
-            approvals: null,
-            events: null,
-            subagents: null,
-            preferences: null,
-            world: null,
-            planning: null,
-            webFetch: null,
-            webSearch: null,
-            referenceAnchors: new RecordingReferenceAnchorService(),
-            referenceDrafts: new RecordingReferenceAnchoredDraftService(),
-            referenceStyleProfiles: new RecordingReferenceStyleProfileService());
-
-        var referenceTools = registry.CreateTools(new NovelistMafToolContext(17))
-            .Where(tool => tool.Name.Contains("reference", StringComparison.Ordinal))
-            .ToDictionary(tool => tool.Name);
-        var names = referenceTools.Keys.ToArray();
-
-        string[] allowedStyleSurface =
-        [
-            "generate_reference_chapter_blueprint",
-            "search_reference_materials",
-            "get_reference_style_profiles",
-            "get_reference_style_profile",
-            "revise_reference_chapter_blueprint",
-            "review_reference_chapter_blueprint",
-            "approve_reference_chapter_blueprint",
-            "bind_reference_blueprint_materials",
-            "generate_reference_anchored_draft",
-            "audit_reference_anchored_draft",
-            "get_reference_draft_audits",
-            "get_reference_style_audit_findings"
-        ];
-
-        foreach (var allowed in allowedStyleSurface)
-        {
-            Assert.Contains(allowed, names);
-        }
-
-        string[] forbiddenStyleSurface =
-        [
-            "build_reference_style_profile",
-            "import_reference_style_profile",
-            "archive_reference_style_profile",
-            "restore_reference_style_profile",
-            "update_reference_style_profile",
-            "delete_reference_style_profile",
-            "approve_reference_style_contract",
-            "approve_reference_orchestration_decision",
-            "resume_reference_orchestration_run",
-            "apply_reference_blueprint_revision",
-            "insert_reference_anchored_draft",
-            "insert_style_imitation_candidate",
-            "save_reference_anchored_draft",
-            "save_style_candidate",
-            "save_content",
-            "SaveContent"
-        ];
-
-        foreach (var forbidden in forbiddenStyleSurface)
-        {
-            Assert.DoesNotContain(forbidden, names);
-        }
-
-        foreach (var toolName in allowedStyleSurface)
-        {
-            var tool = referenceTools[toolName];
-            Assert.True(tool.JsonSchema.TryGetProperty("properties", out var properties), tool.Name);
-            foreach (var forbiddenProperty in ForbiddenReferenceStyleToolProperties)
-            {
-                Assert.False(properties.TryGetProperty(forbiddenProperty, out _), $"{tool.Name} exposes {forbiddenProperty}");
-            }
-        }
-
-        AssertToolDescriptionContains(
-            referenceTools["approve_reference_chapter_blueprint"],
-            "style_contract",
-            "用户显式审批",
-            "agent 不能批准 style contract");
-        AssertToolDescriptionContains(
-            referenceTools["get_reference_style_audit_findings"],
-            "只读",
-            "style/source-leak",
-            "不能批准",
-            "不能写章节");
-    }
-
-    [Fact]
-    public void ReferenceDraftToolDescriptionsEnforceBlueprintWorkflowOrder()
-    {
-        var registry = new NovelistMafToolRegistry(
-            new RecordingStoryMemorySearchService(),
-            chapterContent: null,
-            approvals: null,
-            events: null,
-            subagents: null,
-            preferences: null,
-            world: null,
-            planning: null,
-            webFetch: null,
-            webSearch: null,
-            referenceAnchors: new RecordingReferenceAnchorService(),
-            referenceDrafts: new RecordingReferenceAnchoredDraftService());
-
-        var tools = registry.CreateTools(new NovelistMafToolContext(17))
-            .Where(tool => tool.Name.Contains("reference", StringComparison.Ordinal))
-            .ToDictionary(tool => tool.Name);
-
-        AssertToolDescriptionContains(
-            tools["generate_reference_chapter_blueprint"],
-            "review_reference_chapter_blueprint",
-            "不生成正文");
-        AssertToolDescriptionContains(
-            tools["review_reference_chapter_blueprint"],
-            "generate_reference_chapter_blueprint",
-            "revise_reference_chapter_blueprint",
-            "approve_reference_chapter_blueprint");
-        AssertToolDescriptionContains(
-            tools["approve_reference_chapter_blueprint"],
-            "review_reference_chapter_blueprint",
-            "bind_reference_blueprint_materials");
-        AssertToolDescriptionContains(
-            tools["bind_reference_blueprint_materials"],
-            "approve_reference_chapter_blueprint",
-            "select_top_candidate=true",
-            "generate_reference_anchored_draft");
-        AssertToolDescriptionContains(
-            tools["generate_reference_anchored_draft"],
-            "generate_reference_chapter_blueprint",
-            "review_reference_chapter_blueprint",
-            "approve_reference_chapter_blueprint",
-            "bind_reference_blueprint_materials",
-            "select_top_candidate=true",
-            "audit_reference_anchored_draft",
-            "SaveContent");
-        AssertToolDescriptionContains(
-            tools["audit_reference_anchored_draft"],
-            "generate_reference_anchored_draft",
-            "纯检查");
-    }
-
-    [Fact]
-    public async Task ReferenceMaterialToolInjectsNovelContext()
+    public async Task ReferenceMaterialToolsInjectNovelContext()
     {
         var anchors = new RecordingReferenceAnchorService();
+        var materials = new RecordingReferenceMaterialSearch();
         var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
             new RecordingStoryMemorySearchService(),
             chapterContent: null,
@@ -731,509 +251,31 @@ public sealed class MafToolRegistryTests
             planning: null,
             webFetch: null,
             webSearch: null,
-            referenceAnchors: anchors));
+            referenceAnchors: anchors,
+            referenceMaterials: materials));
 
         var anchorsResult = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 0),
-            new ChatToolCall(
-                "call_reference_anchors",
-                "get_reference_anchors",
-                "{}"),
+            new ChatToolExecutionContext(23, "sess_reference", 1),
+            new ChatToolCall("call_reference_anchors", "get_reference_anchors", "{}"),
             CancellationToken.None);
-
-        Assert.True(anchorsResult.Success, anchorsResult.Error);
-        var anchorSummary = Assert.Single(anchorsResult.Data!.Value.EnumerateArray());
-        Assert.Equal(7, anchorSummary.GetProperty("anchor_id").GetInt64());
-        Assert.Equal(23, anchorSummary.GetProperty("novel_id").GetInt64());
-        Assert.Equal("参考书", anchorSummary.GetProperty("title").GetString());
-        Assert.True(anchorSummary.TryGetProperty("source_file_hash", out _));
-        Assert.False(anchorSummary.TryGetProperty("source_path", out _));
-        Assert.DoesNotContain("source_path", anchorSummary.GetRawText(), StringComparison.OrdinalIgnoreCase);
-
-        var result = await executor.ExecuteAsync(
+        var searchResult = await executor.ExecuteAsync(
             new ChatToolExecutionContext(23, "sess_reference", 1),
             new ChatToolCall(
                 "call_reference_search",
                 "search_reference_materials",
-                """{"query":"雨夜压迫感","anchor_ids":[7],"material_types":["sentence"],"narrative_duties":["external_evidence"],"emotion_transitions":["neutral->pressure"],"prose_duties":["source_backed_detail"],"style_profile_ids":[99],"style_dimensions":["dialogue_ratio"],"imitation_intensity":"strong","page":1,"size":5}"""),
-            CancellationToken.None);
-
-        Assert.True(result.Success, result.Error);
-        Assert.NotNull(anchors.LastSearch);
-        Assert.Equal(23, anchors.LastSearch.NovelId);
-        Assert.Equal("雨夜压迫感", anchors.LastSearch.Query);
-        Assert.Equal([7], anchors.LastSearch.AnchorIds);
-        Assert.Equal(["sentence"], anchors.LastSearch.MaterialTypes);
-        Assert.Equal(["external_evidence"], anchors.LastSearch.NarrativeDuties);
-        Assert.Equal(["neutral->pressure"], anchors.LastSearch.EmotionTransitions);
-        Assert.Equal(["source_backed_detail"], anchors.LastSearch.ProseDuties);
-        Assert.Equal([99], anchors.LastSearch.StyleProfileIds);
-        Assert.Equal(["dialogue_ratio"], anchors.LastSearch.StyleDimensions);
-        Assert.Equal(ReferenceStyleImitationIntensities.Strong, anchors.LastSearch.ImitationIntensity);
-        var material = result.Data!.Value.GetProperty("items")[0];
-        Assert.Equal("mat-1", material.GetProperty("material_id").GetString());
-        Assert.False(material.TryGetProperty("text", out _));
-        Assert.True(material.GetProperty("text_truncated").GetBoolean());
-        Assert.Contains("雨声压低了整条街的呼吸", material.GetProperty("text_preview").GetString());
-        Assert.DoesNotContain(FullReferenceMaterialLeakSentinel, material.GetRawText(), StringComparison.Ordinal);
-        var components = material.GetProperty("score_components");
-        Assert.Equal(2.5, components.GetProperty("story_context").GetDouble());
-        Assert.Equal(1.25, components.GetProperty("prose_duty").GetDouble());
-
-        var materialDetailResult = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 2),
-            new ChatToolCall(
-                "call_reference_material_detail",
-                "get_reference_material_detail",
-                """{"material_id":"mat-1"}"""),
-            CancellationToken.None);
-
-        Assert.True(materialDetailResult.Success, materialDetailResult.Error);
-        Assert.NotNull(anchors.LastMaterialDetail);
-        Assert.Equal(23, anchors.LastMaterialDetail.NovelId);
-        Assert.Equal("mat-1", anchors.LastMaterialDetail.MaterialId);
-        var materialDetail = materialDetailResult.Data!.Value;
-        Assert.Equal("mat-1", materialDetail.GetProperty("material").GetProperty("material_id").GetString());
-        Assert.True(materialDetail.TryGetProperty("processing_notes", out _));
-        Assert.False(materialDetail.TryGetProperty("source_path", out _));
-        Assert.DoesNotContain("source_path", materialDetail.GetRawText(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("source_text", materialDetail.GetRawText(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("candidate_text", materialDetail.GetRawText(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("prompt", materialDetail.GetRawText(), StringComparison.OrdinalIgnoreCase);
-
-        var sourceSegmentResult = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 3),
-            new ChatToolCall(
-                "call_reference_source_segment",
-                "get_reference_source_segment_detail",
-                """{"anchor_id":7,"segment_id":"seg-1"}"""),
-            CancellationToken.None);
-
-        Assert.True(sourceSegmentResult.Success, sourceSegmentResult.Error);
-        Assert.NotNull(anchors.LastSourceSegmentDetail);
-        Assert.Equal(23, anchors.LastSourceSegmentDetail.NovelId);
-        Assert.Equal(7, anchors.LastSourceSegmentDetail.AnchorId);
-        Assert.Equal("seg-1", anchors.LastSourceSegmentDetail.SegmentId);
-        var sourceSegment = sourceSegmentResult.Data!.Value;
-        Assert.Equal("seg-1", sourceSegment.GetProperty("segment").GetProperty("segment_id").GetString());
-        Assert.False(sourceSegment.GetProperty("segment").TryGetProperty("text", out _));
-        Assert.DoesNotContain("source_path", sourceSegment.GetRawText(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("source_text", sourceSegment.GetRawText(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("candidate_text", sourceSegment.GetRawText(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("prompt", sourceSegment.GetRawText(), StringComparison.OrdinalIgnoreCase);
-
-        var sourceProcessingResult = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 4),
-            new ChatToolCall(
-                "call_reference_source_processing",
-                "get_reference_source_processing_detail",
-                """{"anchor_id":7}"""),
-            CancellationToken.None);
-
-        Assert.True(sourceProcessingResult.Success, sourceProcessingResult.Error);
-        Assert.NotNull(anchors.LastSourceProcessingDetail);
-        Assert.Equal(23, anchors.LastSourceProcessingDetail.NovelId);
-        Assert.Equal(7, anchors.LastSourceProcessingDetail.AnchorId);
-        var sourceProcessing = sourceProcessingResult.Data!.Value;
-        Assert.Equal(7, sourceProcessing.GetProperty("source").GetProperty("anchor_id").GetInt64());
-        Assert.True(sourceProcessing.TryGetProperty("events", out _));
-        Assert.False(sourceProcessing.TryGetProperty("source_path", out _));
-        Assert.DoesNotContain("source_path", sourceProcessing.GetRawText(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("source_text", sourceProcessing.GetRawText(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("candidate_text", sourceProcessing.GetRawText(), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("prompt", sourceProcessing.GetRawText(), StringComparison.OrdinalIgnoreCase);
-
-        var adaptResult = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 5),
-            new ChatToolCall(
-                "call_reference_adapt",
-                "adapt_reference_material",
-                """{"material_id":"mat-1","slot_values":[{"slot_name":"object","value":"门"}],"max_rewrite_level":"L1","scene_facts":["door exists"]}"""),
-            CancellationToken.None);
-
-        Assert.True(adaptResult.Success, adaptResult.Error);
-        Assert.NotNull(anchors.LastAdapt);
-        Assert.Equal(23, anchors.LastAdapt.NovelId);
-        Assert.Equal("mat-1", anchors.LastAdapt.MaterialId);
-        Assert.Equal("门", anchors.LastAdapt.SlotValues[0].Value);
-        Assert.False(adaptResult.Data!.Value.GetRawText().Contains(FullReferenceMaterialLeakSentinel, StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task ReferenceDetailToolsRedactDirtyServiceDiagnostics()
-    {
-        var anchors = new RecordingReferenceAnchorService
-        {
-            UseUnsafeReferenceDetails = true
-        };
-        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
-            new RecordingStoryMemorySearchService(),
-            chapterContent: null,
-            approvals: null,
-            events: null,
-            subagents: null,
-            preferences: null,
-            world: null,
-            planning: null,
-            webFetch: null,
-            webSearch: null,
-            referenceAnchors: anchors));
-
-        var anchorsResult = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 0),
-            new ChatToolCall(
-                "call_reference_anchors",
-                "get_reference_anchors",
-                "{}"),
+                """{"query":"雨夜对峙","max_results":4}"""),
             CancellationToken.None);
 
         Assert.True(anchorsResult.Success, anchorsResult.Error);
-        AssertReferenceToolResultDoesNotExposeSensitiveText(anchorsResult.Data!.Value);
-        Assert.Contains("safe-tag", anchorsResult.Data.Value.GetRawText(), StringComparison.Ordinal);
-
-        var materialDetailResult = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 1),
-            new ChatToolCall(
-                "call_reference_material_detail",
-                "get_reference_material_detail",
-                """{"material_id":"mat-unsafe"}"""),
-            CancellationToken.None);
-
-        Assert.True(materialDetailResult.Success, materialDetailResult.Error);
-        AssertReferenceToolResultDoesNotExposeSensitiveText(materialDetailResult.Data!.Value);
-        Assert.Equal("第一章", materialDetailResult.Data.Value.GetProperty("segments")[0].GetProperty("chapter_title").GetString());
-
-        var sourceSegmentResult = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 2),
-            new ChatToolCall(
-                "call_reference_source_segment",
-                "get_reference_source_segment_detail",
-                """{"anchor_id":7,"segment_id":"seg-unsafe"}"""),
-            CancellationToken.None);
-
-        Assert.True(sourceSegmentResult.Success, sourceSegmentResult.Error);
-        AssertReferenceToolResultDoesNotExposeSensitiveText(sourceSegmentResult.Data!.Value);
-        Assert.Equal("seg-unsafe", sourceSegmentResult.Data.Value.GetProperty("segment").GetProperty("segment_id").GetString());
-        Assert.False(sourceSegmentResult.Data.Value.GetProperty("segment").TryGetProperty("text", out _));
-
-        var sourceProcessingResult = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 3),
-            new ChatToolCall(
-                "call_reference_source_processing",
-                "get_reference_source_processing_detail",
-                """{"anchor_id":7}"""),
-            CancellationToken.None);
-
-        Assert.True(sourceProcessingResult.Success, sourceProcessingResult.Error);
-        AssertReferenceToolResultDoesNotExposeSensitiveText(sourceProcessingResult.Data!.Value);
-        Assert.Equal(1, sourceProcessingResult.Data.Value.GetProperty("current_status").GetProperty("source_segment_count").GetInt32());
-
-        var adaptResult = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 4),
-            new ChatToolCall(
-                "call_reference_adapt",
-                "adapt_reference_material",
-                """{"material_id":"mat-unsafe","slot_values":[],"max_rewrite_level":"L1","scene_facts":[]}"""),
-            CancellationToken.None);
-
-        Assert.True(adaptResult.Success, adaptResult.Error);
-        AssertReferenceToolResultDoesNotExposeSensitiveText(adaptResult.Data!.Value);
-        var adaptedText = adaptResult.Data.Value.GetProperty("text").GetString() ?? string.Empty;
-        Assert.True(adaptedText.Length <= 803, "MAF adapt tool must return a bounded text preview.");
-        Assert.DoesNotContain("tail-that-proves-unbounded-text", adaptResult.Data.Value.GetRawText(), StringComparison.Ordinal);
-
-        var auditResult = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 5),
-            new ChatToolCall(
-                "call_reference_audit",
-                "audit_reference_reuse",
-                """{"material_id":"mat-unsafe","candidate_text":"candidate","max_rewrite_level":"L1","scene_facts":[]}"""),
-            CancellationToken.None);
-
-        Assert.True(auditResult.Success, auditResult.Error);
-        AssertReferenceToolResultDoesNotExposeSensitiveText(auditResult.Data!.Value);
-        Assert.Equal("audit-unsafe", auditResult.Data.Value.GetProperty("audit_id").GetString());
-        Assert.DoesNotContain("tail-that-proves-unbounded-text", auditResult.Data.Value.GetRawText(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task ReferenceStyleProfileToolsInjectNovelContext()
-    {
-        var styleProfiles = new RecordingReferenceStyleProfileService();
-        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
-            new RecordingStoryMemorySearchService(),
-            chapterContent: null,
-            approvals: null,
-            events: null,
-            subagents: null,
-            preferences: null,
-            world: null,
-            planning: null,
-            webFetch: null,
-            webSearch: null,
-            referenceAnchors: null,
-            referenceDrafts: null,
-            referenceStyleProfiles: styleProfiles));
-
-        var listResult = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 1),
-            new ChatToolCall(
-                "call_reference_style_profiles",
-                "get_reference_style_profiles",
-                """{"include_archived":true}"""),
-            CancellationToken.None);
-
-        Assert.True(listResult.Success, listResult.Error);
-        Assert.NotNull(styleProfiles.LastList);
-        Assert.Equal(23, styleProfiles.LastList.NovelId);
-        Assert.True(styleProfiles.LastList.IncludeArchived);
-        var summary = listResult.Data!.Value[0];
-        Assert.Equal(99, summary.GetProperty("profile_id").GetInt64());
-        Assert.Equal(23, summary.GetProperty("novel_id").GetInt64());
-
-        var detailResult = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 2),
-            new ChatToolCall(
-                "call_reference_style_profile",
-                "get_reference_style_profile",
-                """{"profile_id":99}"""),
-            CancellationToken.None);
-
-        Assert.True(detailResult.Success, detailResult.Error);
-        Assert.Equal(23, styleProfiles.LastGetNovelId);
-        Assert.Equal(99, styleProfiles.LastGetProfileId);
-        var profile = detailResult.Data!.Value;
-        Assert.Equal(99, profile.GetProperty("profile_id").GetInt64());
-        Assert.True(profile.TryGetProperty("features", out var features));
-        Assert.Equal("dialogue_ratio", features.GetProperty("numeric_features")[0].GetProperty("feature_key").GetString());
-        Assert.True(profile.TryGetProperty("evidence_spans", out var evidenceSpans));
-        Assert.Equal("ev-1", evidenceSpans[0].GetProperty("evidence_id").GetString());
-        Assert.False(profile.TryGetProperty("source_text", out _));
-        Assert.False(profile.TryGetProperty("content", out _));
-    }
-
-    [Fact]
-    public async Task ReferenceDraftBindToolInjectsSelectionIntent()
-    {
-        var drafts = new RecordingReferenceAnchoredDraftService();
-        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
-            new RecordingStoryMemorySearchService(),
-            chapterContent: null,
-            approvals: null,
-            events: null,
-            subagents: null,
-            preferences: null,
-            world: null,
-            planning: null,
-            webFetch: null,
-            webSearch: null,
-            referenceAnchors: null,
-            referenceDrafts: drafts));
-
-        var result = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 1),
-            new ChatToolCall(
-                "call_reference_bind",
-                "bind_reference_blueprint_materials",
-                """{"blueprint_id":501,"max_results_per_beat":4,"select_top_candidate":true}"""),
-            CancellationToken.None);
-
-        Assert.True(result.Success, result.Error);
-        Assert.NotNull(drafts.LastBind);
-        Assert.Equal(23, drafts.LastBind.NovelId);
-        Assert.Equal(501, drafts.LastBind.BlueprintId);
-        Assert.Equal(4, drafts.LastBind.MaxResultsPerBeat);
-        Assert.True(drafts.LastBind.SelectTopCandidate);
-    }
-
-    [Fact]
-    public async Task ReferenceDraftAuditInspectionToolInjectsNovelContextAndReturnsOnlyReports()
-    {
-        var drafts = new RecordingReferenceAnchoredDraftService();
-        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
-            new RecordingStoryMemorySearchService(),
-            chapterContent: null,
-            approvals: null,
-            events: null,
-            subagents: null,
-            preferences: null,
-            world: null,
-            planning: null,
-            webFetch: null,
-            webSearch: null,
-            referenceAnchors: null,
-            referenceDrafts: drafts));
-
-        var result = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 1),
-            new ChatToolCall(
-                "call_reference_get_draft_audits",
-                "get_reference_draft_audits",
-                """{"blueprint_id":501,"candidate_ids":["candidate-1"],"limit":2}"""),
-            CancellationToken.None);
-
-        Assert.True(result.Success, result.Error);
-        Assert.NotNull(drafts.LastGetAudits);
-        Assert.Equal(23, drafts.LastGetAudits.NovelId);
-        Assert.Equal(501, drafts.LastGetAudits.BlueprintId);
-        Assert.Equal(["candidate-1"], drafts.LastGetAudits.CandidateIds);
-        Assert.Equal(2, drafts.LastGetAudits.Limit);
-
-        var audits = result.Data!.Value.EnumerateArray().ToArray();
-        var audit = Assert.Single(audits);
-        Assert.Equal("draft-audit-1", audit.GetProperty("audit_id").GetString());
-        Assert.Equal("candidate-1", audit.GetProperty("candidate_ids")[0].GetString());
-        Assert.Equal("Persisted draft audit failed for 1 candidate.", audit.GetProperty("readable_report").GetProperty("summary").GetString());
-        Assert.False(audit.TryGetProperty("candidate_text", out _));
-        Assert.False(audit.TryGetProperty("source_text", out _));
-        Assert.False(audit.TryGetProperty("prompt", out _));
-        Assert.False(audit.TryGetProperty("content", out _));
-        Assert.False(audit.TryGetProperty("path", out _));
-    }
-
-    [Fact]
-    public async Task ReferenceStyleAuditInspectionToolInjectsNovelContextAndReturnsOnlyStyleFindings()
-    {
-        var drafts = new RecordingReferenceAnchoredDraftService();
-        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
-            new RecordingStoryMemorySearchService(),
-            chapterContent: null,
-            approvals: null,
-            events: null,
-            subagents: null,
-            preferences: null,
-            world: null,
-            planning: null,
-            webFetch: null,
-            webSearch: null,
-            referenceAnchors: null,
-            referenceDrafts: drafts));
-
-        var result = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 1),
-            new ChatToolCall(
-                "call_reference_get_style_audit_findings",
-                "get_reference_style_audit_findings",
-                """{"blueprint_id":501,"candidate_ids":["candidate-1"],"risk_types":["source_leak"],"limit":2}"""),
-            CancellationToken.None);
-
-        Assert.True(result.Success, result.Error);
-        Assert.NotNull(drafts.LastGetStyleAuditFindings);
-        Assert.Equal(23, drafts.LastGetStyleAuditFindings.NovelId);
-        Assert.Equal(501, drafts.LastGetStyleAuditFindings.BlueprintId);
-        Assert.Equal(["candidate-1"], drafts.LastGetStyleAuditFindings.CandidateIds);
-        Assert.Equal(["source_leak"], drafts.LastGetStyleAuditFindings.RiskTypes);
-        Assert.Equal(2, drafts.LastGetStyleAuditFindings.Limit);
-
-        var findings = result.Data!.Value.EnumerateArray().ToArray();
-        var finding = Assert.Single(findings);
-        Assert.Equal("draft-audit-1", finding.GetProperty("audit_id").GetString());
-        Assert.Equal("source_leak", finding.GetProperty("risk_type").GetString());
-        Assert.Equal("candidate-1", finding.GetProperty("candidate_ids")[0].GetString());
-        Assert.Contains("Source-leak risk", finding.GetProperty("message").GetString(), StringComparison.OrdinalIgnoreCase);
-        Assert.False(finding.TryGetProperty("candidate_text", out _));
-        Assert.False(finding.TryGetProperty("source_text", out _));
-        Assert.False(finding.TryGetProperty("prompt", out _));
-        Assert.False(finding.TryGetProperty("content", out _));
-        Assert.False(finding.TryGetProperty("path", out _));
-    }
-
-    [Fact]
-    public async Task ReferenceOrchestrationAgentToolStartsRunWithoutApprovingHumanDecisions()
-    {
-        var drafts = new RecordingReferenceAnchoredDraftService();
-        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
-            new RecordingStoryMemorySearchService(),
-            chapterContent: null,
-            approvals: null,
-            events: null,
-            subagents: null,
-            preferences: null,
-            world: null,
-            planning: null,
-            webFetch: null,
-            webSearch: null,
-            referenceAnchors: null,
-            referenceDrafts: drafts));
-
-        var result = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 1),
-            new ChatToolCall(
-                "call_reference_orchestration_start",
-                "start_reference_orchestration_run",
-                """
-                {
-                  "chapter_number": 8,
-                  "chapter_goal": "雨夜逼问后让主角确认盟友隐瞒了港口线索",
-                  "known_facts": ["主角已经知道港口暗号"],
-                  "forbidden_facts": ["不能揭露内鬼身份"],
-                  "include_anchor_ids": [7],
-                  "exclude_anchor_ids": [9],
-                  "license_statuses": ["user_provided"],
-                  "max_results_per_beat": 4
-                }
-                """),
-            CancellationToken.None);
-
-        Assert.True(result.Success, result.Error);
-        Assert.NotNull(drafts.LastStart);
-        Assert.Equal(23, drafts.LastStart.NovelId);
-        Assert.Equal(8, drafts.LastStart.ChapterNumber);
-        Assert.Equal("雨夜逼问后让主角确认盟友隐瞒了港口线索", drafts.LastStart.ChapterGoal);
-        Assert.Equal(["主角已经知道港口暗号"], drafts.LastStart.KnownFacts);
-        Assert.Equal(["不能揭露内鬼身份"], drafts.LastStart.ForbiddenFacts);
-        Assert.Null(drafts.LastStart.AnchorIds);
-        Assert.False(drafts.LastStart.SourceConfirmed);
-        Assert.Equal("story_context", drafts.LastStart.CorpusSearchPolicy.Mode);
-        Assert.Equal(4, drafts.LastStart.CorpusSearchPolicy.MaxResultsPerBeat);
-        Assert.Equal(["user_provided"], drafts.LastStart.CorpusSearchPolicy.LicenseStatuses);
-        Assert.Equal([7], drafts.LastStart.CorpusSearchPolicy.IncludeAnchorIds);
-        Assert.Equal([9], drafts.LastStart.CorpusSearchPolicy.ExcludeAnchorIds);
-        Assert.Null(drafts.LastStart.StylePolicy);
-
-        var data = result.Data!.Value;
-        Assert.Equal(ReferenceOrchestrationRunStatuses.WaitingForUser, data.GetProperty("status").GetString());
-        Assert.Equal(ReferenceOrchestrationStages.SourceConfirmation, data.GetProperty("stage").GetString());
+        Assert.True(searchResult.Success, searchResult.Error);
+        Assert.Equal(23, anchors.LastNovelId);
+        Assert.NotNull(materials.LastSearch);
+        Assert.Equal(23, materials.LastSearch.NovelId);
+        Assert.Equal("雨夜对峙", materials.LastSearch.Query);
+        Assert.Equal(4, materials.LastSearch.MaxResults);
         Assert.Equal(
-            ReferenceOrchestrationDecisionTypes.ConfirmSourceAndFacts,
-            data.GetProperty("current_decision").GetProperty("decision_type").GetString());
-    }
-
-    [Fact]
-    public async Task ReferenceOrchestrationAgentToolReadsRunEventsWithoutApprovingHumanDecisions()
-    {
-        var drafts = new RecordingReferenceAnchoredDraftService();
-        var executor = new NovelistMafChatToolExecutor(new NovelistMafToolRegistry(
-            new RecordingStoryMemorySearchService(),
-            chapterContent: null,
-            approvals: null,
-            events: null,
-            subagents: null,
-            preferences: null,
-            world: null,
-            planning: null,
-            webFetch: null,
-            webSearch: null,
-            referenceAnchors: null,
-            referenceDrafts: drafts));
-
-        var result = await executor.ExecuteAsync(
-            new ChatToolExecutionContext(23, "sess_reference", 1),
-            new ChatToolCall(
-                "call_reference_orchestration_events",
-                "get_reference_orchestration_run_events",
-                """{"run_id":"run-7"}"""),
-            CancellationToken.None);
-
-        Assert.True(result.Success, result.Error);
-        Assert.Equal(23, drafts.LastGetEventsNovelId);
-        Assert.Equal("run-7", drafts.LastGetEventsRunId);
-
-        var events = result.Data!.Value.EnumerateArray().ToArray();
-        var item = Assert.Single(events);
-        Assert.Equal("run-7", item.GetProperty("run_id").GetString());
-        Assert.Equal("required_decision", item.GetProperty("event_type").GetString());
-        Assert.Equal(ReferenceOrchestrationDecisionTypes.ApproveBlueprint, item.GetProperty("decision_type").GetString());
+            "material-1",
+            searchResult.Data!.Value[0].GetProperty("materialId").GetString());
     }
 
     [Fact]
@@ -1771,8 +813,43 @@ public sealed class MafToolRegistryTests
         }
     }
 
+    private sealed class RecordingReferenceMaterialSearch : IReferenceMaterialSearch
+    {
+        public ReferenceMaterialSearchRequest? LastSearch { get; private set; }
+
+        public ValueTask<ReferenceMaterialListPage> ListAsync(
+            ReferenceMaterialListRequest input,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public ValueTask<IReadOnlyList<ReferenceMaterialSearchHit>> SearchAsync(
+            ReferenceMaterialSearchRequest input,
+            CancellationToken cancellationToken)
+        {
+            LastSearch = input;
+            IReadOnlyList<ReferenceMaterialSearchHit> hits =
+            [
+                new ReferenceMaterialSearchHit(
+                    "material-1",
+                    "generation-1",
+                    7,
+                    1,
+                    0,
+                    "dialogue_exchange",
+                    "她没有回答。",
+                    "用于承接对峙。",
+                    ["dialogue"],
+                    "text-hash",
+                    0.12)
+            ];
+            return ValueTask.FromResult(hits);
+        }
+    }
+
     private sealed class RecordingReferenceAnchorService : IReferenceAnchorService
     {
+        public long LastNovelId { get; private set; }
+
         public SearchReferenceMaterialsPayload? LastSearch { get; private set; }
         public GetReferenceMaterialDetailPayload? LastMaterialDetail { get; private set; }
         public GetReferenceSourceSegmentDetailPayload? LastSourceSegmentDetail { get; private set; }
@@ -1832,6 +909,7 @@ public sealed class MafToolRegistryTests
 
         public ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetAnchorsAsync(long novelId, CancellationToken cancellationToken)
         {
+            LastNovelId = novelId;
             if (UseUnsafeReferenceDetails)
             {
                 return ValueTask.FromResult<IReadOnlyList<ReferenceAnchorPayload>>(
