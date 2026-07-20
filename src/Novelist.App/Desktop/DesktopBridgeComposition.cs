@@ -123,6 +123,10 @@ public static PhotinoWebMessageBridge CreateBridge(
             sqliteVecProvider);
         var referenceMaterializationBlueprintPreviewService = new ReferenceMaterializationBlueprintPreviewService(
             referenceMaterialSearch);
+        var referenceWritingService = new SqliteReferenceWritingService(
+            options,
+            referenceMaterialSearch,
+            materializationDatabasePathResolver);
         var referenceMaterializationWorker = new ReferenceMaterializationWorker(
             materializationDatabasePathResolver,
             new ReferenceChapterMaterialChatCompletionExtractor(chatCompletionClient),
@@ -240,6 +244,7 @@ referenceCorpusService);
             .RegisterReferenceAnchorHandlers(referenceAnchorService)
             .RegisterReferenceMaterializationHandlers(referenceMaterializationService)
             .RegisterReferenceMaterializationBlueprintPreviewHandlers(referenceMaterializationBlueprintPreviewService)
+            .RegisterReferenceWritingHandlers(referenceWritingService)
             .RegisterReferenceCorpusHandlers(referenceCorpusService)
 .RegisterReferenceCorpusAnalysisHandlers(referenceCorpusAnalysisService)
 .RegisterReferenceCorpusAnalysisJobHandlers(referenceCorpusAnalysisScheduler)
