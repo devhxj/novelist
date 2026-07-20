@@ -134,11 +134,14 @@ export interface NovelistAppApi {
   ExtractStyleSkillFromSamples: AppMethod<[styleSample.StartStyleSkillExtractionInput], styleSample.StyleSkillExtractionRun>
   ExtractStyle: AppMethod<[app.ExtractStyleInput], app.ExtractStyleResult>
   GenerateReferenceAnchoredDraft: AppMethod<[reference.GenerateAnchoredDraftInput], reference.AnchoredDraft>
+  GenerateReferenceBlueprints: AppMethod<[reference.GenerateWritingBlueprintsInput], reference.WritingSession>
   GenerateReferenceChapterBlueprint: AppMethod<[reference.GenerateChapterBlueprintInput], reference.ChapterBlueprint>
   GenerateReferenceCorpusBlueprintCandidates: AppMethod<[reference.GenerateCorpusBlueprintCandidatesInput], reference.CorpusBlueprintCandidates>
   GenerateReferenceCorpusInsertionDraft: AppMethod<[reference.GenerateCorpusInsertionDraftInput], reference.CorpusInsertionDraft>
  GenerateReferenceCorpusInsertionDraftCandidates: AppMethod<[reference.GenerateCorpusInsertionDraftCandidatesInput], reference.CorpusInsertionDraftCandidates>
+  GenerateReferenceDraftCandidates: AppMethod<[reference.GenerateWritingDraftCandidatesInput], reference.WritingDraftCandidates>
  GetReferenceCorpusBlueprintSession: AppMethod<[reference.GetCorpusBlueprintSessionInput], reference.CorpusBlueprintSession | null>
+  GetReferenceWritingSession: AppMethod<[reference.GetWritingSessionInput], reference.WritingSession | null>
  GetReferenceCorpusCascadeImpact: AppMethod<[reference.GetCorpusCascadeImpactInput], reference.CorpusCascadeImpact>
  GetReferenceCorpusGovernance: AppMethod<[{ session_id?: string | null }], reference.CorpusGovernance>
  GetReferenceCorpusNodeWindow: AppMethod<[{ anchor_id: number; node_id: string; previous_chapter_count?: number; next_chapter_count?: number; include_scene_siblings?: boolean; max_nodes?: number }], reference.CorpusNodeWindow | null>
@@ -266,6 +269,7 @@ export interface NovelistAppApi {
   SearchAll: AppMethod<[number, string], search.Result[]>
   SearchReferenceCorpusCandidates: AppMethod<[reference.SearchCorpusCandidatesInput], storage.PageResult_reference_CorpusCandidate_>
   SearchReferenceMaterials: AppMethod<[reference.SearchMaterialsInput], storage.PageResult_reference_MaterialSummary_>
+  SelectReferenceBlueprint: AppMethod<[reference.SelectWritingBlueprintInput], reference.WritingSession>
   SearchStyleSamples: AppMethod<[styleSample.SearchStyleSamplesInput], storage.PageResult_styleSample_StyleSample_>
   SearchStoryMemory: AppMethod<[SearchStoryMemoryInput], SearchStoryMemoryResult>
   SetActiveNovel: AppMethod<[app.SetActiveNovelInput], void>
@@ -379,11 +383,14 @@ CancelReferenceOrchestrationRun: appMethod<NovelistAppApi['CancelReferenceOrches
   ExtractStyleSkillFromSamples: ((...args) => invokeAppArgs('ExtractStyleSkillFromSamples', args, { timeoutMs: null })) as NovelistAppApi['ExtractStyleSkillFromSamples'],
   ExtractStyle: appMethod<NovelistAppApi['ExtractStyle']>('ExtractStyle'),
   GenerateReferenceAnchoredDraft: appMethod<NovelistAppApi['GenerateReferenceAnchoredDraft']>('GenerateReferenceAnchoredDraft'),
+  GenerateReferenceBlueprints: ((...args) => invokeAppArgs('GenerateReferenceBlueprints', args, { timeoutMs: null })) as NovelistAppApi['GenerateReferenceBlueprints'],
   GenerateReferenceChapterBlueprint: appMethod<NovelistAppApi['GenerateReferenceChapterBlueprint']>('GenerateReferenceChapterBlueprint'),
   GenerateReferenceCorpusBlueprintCandidates: appMethod<NovelistAppApi['GenerateReferenceCorpusBlueprintCandidates']>('GenerateReferenceCorpusBlueprintCandidates'),
   GenerateReferenceCorpusInsertionDraft: appMethod<NovelistAppApi['GenerateReferenceCorpusInsertionDraft']>('GenerateReferenceCorpusInsertionDraft'),
 GenerateReferenceCorpusInsertionDraftCandidates: appMethod<NovelistAppApi['GenerateReferenceCorpusInsertionDraftCandidates']>('GenerateReferenceCorpusInsertionDraftCandidates'),
+  GenerateReferenceDraftCandidates: ((...args) => invokeAppArgs('GenerateReferenceDraftCandidates', args, { timeoutMs: null })) as NovelistAppApi['GenerateReferenceDraftCandidates'],
  GetReferenceCorpusBlueprintSession: appMethod<NovelistAppApi['GetReferenceCorpusBlueprintSession']>('GetReferenceCorpusBlueprintSession'),
+  GetReferenceWritingSession: appMethod<NovelistAppApi['GetReferenceWritingSession']>('GetReferenceWritingSession'),
  GetReferenceCorpusCascadeImpact: appMethod<NovelistAppApi['GetReferenceCorpusCascadeImpact']>('GetReferenceCorpusCascadeImpact'),
  GetReferenceCorpusGovernance: appMethod<NovelistAppApi['GetReferenceCorpusGovernance']>('GetReferenceCorpusGovernance'),
  GetReferenceCorpusNodeWindow: appMethod<NovelistAppApi['GetReferenceCorpusNodeWindow']>('GetReferenceCorpusNodeWindow'),
@@ -511,6 +518,7 @@ GetReferenceCorpusFeatureAnalysisRun: appMethod<NovelistAppApi['GetReferenceCorp
   SearchAll: appMethod<NovelistAppApi['SearchAll']>('SearchAll'),
   SearchReferenceCorpusCandidates: appMethod<NovelistAppApi['SearchReferenceCorpusCandidates']>('SearchReferenceCorpusCandidates'),
   SearchReferenceMaterials: appMethod<NovelistAppApi['SearchReferenceMaterials']>('SearchReferenceMaterials'),
+  SelectReferenceBlueprint: appMethod<NovelistAppApi['SelectReferenceBlueprint']>('SelectReferenceBlueprint'),
   SearchStyleSamples: appMethod<NovelistAppApi['SearchStyleSamples']>('SearchStyleSamples'),
   SearchStoryMemory: appMethod<NovelistAppApi['SearchStoryMemory']>('SearchStoryMemory'),
   SetActiveNovel: appMethod<NovelistAppApi['SetActiveNovel']>('SetActiveNovel'),

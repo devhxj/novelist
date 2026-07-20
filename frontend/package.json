@@ -13,6 +13,7 @@
     "test:reference-style:stress": "npm run test:reference-workspace",
     "test:chapter-range": "node tests/chapter-range.test.mjs",
     "test:reference-materialization-api": "node --test tests/reference-materialization-api.test.mjs",
+    "test:reference-writing-api": "node --test tests/reference-writing-api.test.mjs",
     "test:time": "node tests/time.test.mjs",
     "test:layout": "node tests/layout.test.mjs",
     "test:diagnostics": "node tests/diagnostics.test.mjs",
@@ -32,7 +33,7 @@
     "test:app:stress": "node scripts/app-mock-workflow.mjs --suite=stress --target=vite",
     "test:app:usability": "node scripts/app-mock-workflow.mjs --suite=usability --target=vite",
     "test:app:dist": "node scripts/app-mock-workflow.mjs --suite=smoke --target=dist",
-    "verify": "npm run build && npm run lint && npm run test:phase16 && npm run test:app"
+    "verify": "npm run build && npm run lint && npm run test:reference-writing-api && npm run test:phase16 && npm run test:app"
   },
   "dependencies": {
     "@antv/g6": "^5.1.1",

@@ -1212,6 +1212,91 @@ has_more: boolean
     updated_at: Timestamp
   }
 
+  export interface GenerateWritingBlueprintsInput {
+    novel_id: number
+    chapter_number: number
+    session_id: string
+    goal: string
+    requested_count?: number
+  }
+
+  export interface GetWritingSessionInput {
+    novel_id: number
+    chapter_number: number
+    session_id: string
+  }
+
+  export interface SelectWritingBlueprintInput extends GetWritingSessionInput {
+    blueprint_id: string
+  }
+
+  export interface GenerateWritingDraftCandidatesInput extends SelectWritingBlueprintInput {
+    current_draft_text: string
+    insertion_offset: number
+    slot_values: Record<string, string>
+    requested_count?: number
+  }
+
+  export interface WritingMaterialIdentity {
+    material_id: string
+    generation_id: string
+  }
+
+  export interface WritingBlueprintBeat {
+    beat_id: string
+    beat_index: number
+    intent: string
+    narrative_function: string
+    materials: WritingMaterialIdentity[]
+  }
+
+  export interface WritingBlueprint {
+    blueprint_id: string
+    strategy: string
+    beats: WritingBlueprintBeat[]
+  }
+
+  export interface WritingSession {
+    session_id: string
+    novel_id: number
+    chapter_number: number
+    goal: string
+    blueprints: WritingBlueprint[]
+    selected_blueprint_id: string
+    updated_at: Timestamp
+  }
+
+  export interface WritingDraftSource {
+    beat_id: string
+    material_id: string
+    generation_id: string
+    anchor_id: number
+    chapter_index: number
+    text_hash: string
+    license_state: string
+    reuse_policy: string
+  }
+
+  export interface WritingDraftAudit {
+    passed: boolean
+    errors: string[]
+  }
+
+  export interface WritingDraftCandidate {
+    candidate_id: string
+    blueprint_id: string
+    text: string
+    chapter_text_after_insertion: string
+    sources: WritingDraftSource[]
+    audit: WritingDraftAudit
+  }
+
+  export interface WritingDraftCandidates {
+    session_id: string
+    blueprint_id: string
+    candidates: WritingDraftCandidate[]
+  }
+
   export interface CreateAnchorFailure {
     index: number
     title: string
