@@ -138,13 +138,6 @@ public static PhotinoWebMessageBridge CreateBridge(
             embeddingClient,
             sqliteVecProvider,
             sqliteVecProvider);
-var referenceCorpusWritingService = new SqliteReferenceCorpusWritingService(
-            options,
-            referenceCorpusService,
-chapterContentService);
- var referenceCorpusBlueprintIterationCoordinator = new SqliteReferenceCorpusBlueprintIterationCoordinator(
- referenceCorpusWritingService,
- options);
 var referenceCorpusAnalysisService = new SqliteReferenceCorpusAnalysisService(
 options,
 settingsService,
@@ -166,7 +159,6 @@ referenceCorpusService);
  referenceCorpusAnalysisWorker,
  referenceCorpusTechniqueVectorMaintenanceLoop,
  referenceMaterializationWorker);
- var referenceCorpusGovernanceService = new SqliteReferenceCorpusGovernanceService(options);
         var referenceStyleProfileService = new SqliteReferenceStyleProfileService(
             options,
             novelService,
@@ -248,8 +240,6 @@ referenceCorpusService);
             .RegisterReferenceCorpusHandlers(referenceCorpusService)
 .RegisterReferenceCorpusAnalysisHandlers(referenceCorpusAnalysisService)
 .RegisterReferenceCorpusAnalysisJobHandlers(referenceCorpusAnalysisScheduler)
-.RegisterReferenceCorpusWritingHandlers(referenceCorpusWritingService, referenceCorpusBlueprintIterationCoordinator)
- .RegisterReferenceCorpusGovernanceHandlers(referenceCorpusGovernanceService)
             .RegisterReferenceStyleProfileHandlers(referenceStyleProfileService)
             .RegisterReferenceAnchoredDraftHandlers(referenceAnchoredDraftService)
             .RegisterApprovalHandlers(approvalCoordinator)

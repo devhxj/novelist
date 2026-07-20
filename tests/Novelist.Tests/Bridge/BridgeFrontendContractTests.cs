@@ -35,10 +35,12 @@ public sealed class BridgeFrontendContractTests
         Assert.Contains("GetAppConfig: AppMethod<[], config.AppConfig>", apiSource, StringComparison.Ordinal);
         Assert.Contains("update_check", typeSource, StringComparison.Ordinal);
 Assert.Contains("import_recovery?: novelImport.ImportReconciliationResult | null", typeSource, StringComparison.Ordinal);
- Assert.Contains("AdvanceReferenceCorpusBlueprintSession: AppMethod<[reference.AdvanceCorpusBlueprintSessionInput], reference.CorpusBlueprintSession>", apiSource, StringComparison.Ordinal);
- Assert.Contains("GetReferenceCorpusBlueprintSession: AppMethod<[reference.GetCorpusBlueprintSessionInput], reference.CorpusBlueprintSession | null>", apiSource, StringComparison.Ordinal);
- Assert.Contains("emotion_arc?: CorpusBlueprintEmotionArcPoint[] | null", typeSource, StringComparison.Ordinal);
- Assert.Contains("orchestration_stages?: string[] | null", typeSource, StringComparison.Ordinal);
+        Assert.Contains("GenerateReferenceBlueprints: AppMethod<[reference.GenerateWritingBlueprintsInput], reference.WritingSession>", apiSource, StringComparison.Ordinal);
+        Assert.Contains("GetReferenceWritingSession: AppMethod<[reference.GetWritingSessionInput], reference.WritingSession | null>", apiSource, StringComparison.Ordinal);
+        Assert.Contains("SelectReferenceBlueprint: AppMethod<[reference.SelectWritingBlueprintInput], reference.WritingSession>", apiSource, StringComparison.Ordinal);
+        Assert.Contains("GenerateReferenceDraftCandidates: AppMethod<[reference.GenerateWritingDraftCandidatesInput], reference.WritingDraftCandidates>", apiSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("ReferenceCorpusBlueprintSession", bridgeAdapterSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("CorpusGovernance", bridgeAdapterSource, StringComparison.Ordinal);
         Assert.DoesNotContain("api.github.com/repos", bridgeAdapterSource, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("sigpanic/goink", bridgeAdapterSource, StringComparison.OrdinalIgnoreCase);
     }
