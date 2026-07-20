@@ -16,7 +16,7 @@ public static class ReferenceMaterialSearchBridgeHandlers
 
         dispatcher.Register("ListReferenceMaterials", async (context, cancellationToken) =>
         {
-            var input = ReadInput(context.Payload);
+            var input = ReadInput<ListReferenceMaterialsPayload>(context.Payload);
             try
             {
                 var result = await service.ListAsync(
@@ -39,10 +39,36 @@ public static class ReferenceMaterialSearchBridgeHandlers
             }
         });
 
+        dispatcher.Register("SearchReferenceMaterials", async (context, cancellationToken) =>
+        {
+            var input = ReadInput<SearchReferenceMaterialsPayload>(context.Payload);
+            try
+            {
+                var result = await service.SearchAsync(
+                    new ReferenceMaterialSearchRequest(
+                        input.Query,
+                        input.MaxResults,
+                        input.NovelId,
+                        input.SessionId,
+                        input.LibraryIds,
+                        input.AnchorIds),
+                    cancellationToken);
+                return result.Select(ToPayload).ToArray();
+            }
+            catch (ReferenceMaterializationException exception)
+            {
+                throw new BridgeRequestException(
+                    exception.ErrorCode,
+                    exception.Message,
+                    new { error_code = exception.ErrorCode },
+                    retryable: false);
+            }
+        });
+
         return dispatcher;
     }
 
-    private static ListReferenceMaterialsPayload ReadInput(JsonElement? payload)
+    private static T ReadInput<T>(JsonElement? payload)
     {
         if (payload is null ||
             payload.Value.ValueKind != JsonValueKind.Object ||
@@ -56,7 +82,7 @@ public static class ReferenceMaterialSearchBridgeHandlers
 
         try
         {
-            return JsonSerializer.Deserialize<ListReferenceMaterialsPayload>(
+            return JsonSerializer.Deserialize<T>(
                 args[0].GetRawText(),
                 BridgeJson.SerializerOptions) ?? throw InvalidInput();
         }
@@ -78,6 +104,20 @@ public static class ReferenceMaterialSearchBridgeHandlers
             item.Description,
             item.Tags,
             item.TextHash);
+
+    private static ReferenceMaterialSearchHitPayload ToPayload(ReferenceMaterialSearchHit item) =>
+        new(
+            item.MaterialId,
+            item.GenerationId,
+            item.AnchorId,
+            item.ChapterIndex,
+            item.Ordinal,
+            item.MaterialType,
+            item.Text,
+            item.Description,
+            item.Tags,
+            item.TextHash,
+            item.VectorDistance);
 
     private static BridgeValidationException InvalidInput() =>
         new(

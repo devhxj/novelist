@@ -31,6 +31,36 @@ public sealed class ReferenceMaterialSearchBridgeHandlerTests
     }
 
     [Fact]
+    public async Task SearchReferenceMaterialsRoutesScopeAndPreservesCompleteMultilineText()
+    {
+        const string materialText = "\u201c\u4f60\u8fd8\u8981\u8d70\uff1f\u201d\n\u5979\u6ca1\u6709\u56de\u7b54\u3002\n\n\u201c\u90a3\u6211\u7b49\u4f60\u3002\u201d";
+        var service = new RecordingReferenceMaterialSearch(materialText);
+        var dispatcher = new BridgeDispatcher().RegisterReferenceMaterialSearchHandlers(service);
+
+        var result = await dispatcher.DispatchAsync(Request(
+            "SearchReferenceMaterials",
+            new
+            {
+                query = "\u627f\u63a5\u7b49\u5f85\u7684\u5bf9\u8bdd",
+                max_results = 6,
+                novel_id = 42L,
+                session_id = "project:42:default",
+                library_ids = new[] { "library-1" },
+                anchor_ids = new[] { 99L }
+            }));
+        using var json = JsonDocument.Parse(
+            result.OutboundJson ?? throw new InvalidOperationException("Bridge returned no response."));
+
+        Assert.True(json.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal("search:\u627f\u63a5\u7b49\u5f85\u7684\u5bf9\u8bdd:6:42:project:42:default:library-1:99", service.Call);
+        var hit = json.RootElement.GetProperty("result")[0];
+        Assert.Equal("material-1", hit.GetProperty("material_id").GetString());
+        Assert.Equal("generation-1", hit.GetProperty("generation_id").GetString());
+        Assert.Equal(materialText, hit.GetProperty("text").GetString());
+        Assert.Equal(0.125, hit.GetProperty("vector_distance").GetDouble());
+    }
+
+    [Fact]
     public async Task ListReferenceMaterialsReturnsStableMaterializationErrors()
     {
         var service = new RecordingReferenceMaterialSearch("unused")
@@ -98,7 +128,29 @@ public sealed class ReferenceMaterialSearchBridgeHandlerTests
 
         public ValueTask<IReadOnlyList<ReferenceMaterialSearchHit>> SearchAsync(
             ReferenceMaterialSearchRequest input,
-            CancellationToken cancellationToken) =>
-            throw new NotSupportedException();
+            CancellationToken cancellationToken)
+        {
+            Call = $"search:{input.Query}:{input.MaxResults}:{input.NovelId}:{input.SessionId}:{string.Join(',', input.LibraryIds ?? [])}:{string.Join(',', input.AnchorIds ?? [])}";
+            if (Exception is not null)
+            {
+                throw Exception;
+            }
+
+            return ValueTask.FromResult<IReadOnlyList<ReferenceMaterialSearchHit>>(
+            [
+                new ReferenceMaterialSearchHit(
+                    "material-1",
+                    "generation-1",
+                    99,
+                    3,
+                    2,
+                    "dialogue_exchange",
+                    materialText,
+                    "\u7528\u4e8e\u627f\u63a5\u8de8\u6bb5\u5bf9\u8bdd\u3002",
+                    ["dialogue", "subtext"],
+                    "text-hash",
+                    0.125)
+            ]);
+        }
     }
 }
