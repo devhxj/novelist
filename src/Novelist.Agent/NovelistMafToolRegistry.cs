@@ -33,8 +33,6 @@ public sealed partial class NovelistMafToolRegistry
     private readonly IWebSearchService? _webSearch;
     private readonly IReferenceAnchorService? _referenceAnchors;
     private readonly IReferenceMaterialSearch? _referenceMaterials;
-    private readonly IReferenceAnchoredDraftService? _referenceDrafts;
-    private readonly IReferenceStyleProfileService? _referenceStyleProfiles;
     private readonly JsonSerializerOptions _serializerOptions;
 
     public NovelistMafToolRegistry(
@@ -53,9 +51,7 @@ public sealed partial class NovelistMafToolRegistry
             webSearch: null,
             referenceAnchors: null,
             referenceMaterials: null,
-            referenceDrafts: null,
-            serializerOptions: serializerOptions,
-            referenceStyleProfiles: null)
+            serializerOptions: serializerOptions)
     {
     }
 
@@ -72,9 +68,7 @@ public sealed partial class NovelistMafToolRegistry
         IWebSearchService? webSearch = null,
         IReferenceAnchorService? referenceAnchors = null,
         IReferenceMaterialSearch? referenceMaterials = null,
-        IReferenceAnchoredDraftService? referenceDrafts = null,
-        JsonSerializerOptions? serializerOptions = null,
-        IReferenceStyleProfileService? referenceStyleProfiles = null)
+        JsonSerializerOptions? serializerOptions = null)
     {
         _storyMemory = storyMemory ?? throw new ArgumentNullException(nameof(storyMemory));
         _chapterContent = chapterContent;
@@ -88,8 +82,6 @@ public sealed partial class NovelistMafToolRegistry
         _webSearch = webSearch;
         _referenceAnchors = referenceAnchors;
         _referenceMaterials = referenceMaterials;
-        _referenceDrafts = referenceDrafts;
-        _referenceStyleProfiles = referenceStyleProfiles;
         _serializerOptions = EnsureTypeInfoResolver(serializerOptions ?? DefaultSerializerOptions);
     }
 

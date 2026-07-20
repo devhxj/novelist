@@ -154,7 +154,7 @@ public sealed class NovelImportRecoveryServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ReconcileAsyncCleansPendingIndexAndReferenceStateOnlyForRecoveredImportNovel()
+    public async Task ReconcileAsyncCleansPendingIndexStateOnlyForRecoveredImportNovel()
     {
         var options = CreateOptions();
         await InitializeAsync(options);
@@ -164,7 +164,6 @@ public sealed class NovelImportRecoveryServiceTests : IDisposable
         var survivorNovel = await novelService.CreateNovelAsync(new CreateNovelPayload("保留小说", "existing user data", ""), CancellationToken.None);
 
         await CreatePendingRagStateAsync(options, partialNovel.Id, survivorNovel.Id);
-        await CreatePendingReferenceStateAsync(options, partialNovel.Id, survivorNovel.Id);
         await runService.StartRunAsync(ValidStartPayload("import-recover-side-effects"), CancellationToken.None);
         await runService.UpdateRunAsync(
             new NovelImportRunUpdate(
@@ -192,10 +191,6 @@ public sealed class NovelImportRecoveryServiceTests : IDisposable
         Assert.Equal(1, await CountRagChunkRowsAsync(options, survivorNovel.Id));
         Assert.True(await RagVectorTableExistsAsync(options, survivorNovel.Id));
 
-        Assert.Equal(0, await CountReferenceAnchorsAsync(options, partialNovel.Id));
-        Assert.Equal(0, await CountReferenceStyleBuildsAsync(options, partialNovel.Id));
-        Assert.Equal(1, await CountReferenceAnchorsAsync(options, survivorNovel.Id));
-        Assert.Equal(1, await CountReferenceStyleBuildsAsync(options, survivorNovel.Id));
     }
 
     [Theory]
@@ -289,8 +284,6 @@ public sealed class NovelImportRecoveryServiceTests : IDisposable
             if (fixtureKind == "metadata_with_side_effects")
             {
                 Assert.Equal(0, await CountRagIndexRowsAsync(options, createdNovelId));
-                Assert.Equal(0, await CountReferenceAnchorsAsync(options, createdNovelId));
-                Assert.Equal(0, await CountReferenceStyleBuildsAsync(options, createdNovelId));
             }
 
             return;
@@ -462,7 +455,6 @@ public sealed class NovelImportRecoveryServiceTests : IDisposable
         if (fixtureKind == "metadata_with_side_effects")
         {
             await CreatePendingRagStateAsync(options, novel.Id, survivorNovelId: 900_001);
-            await CreatePendingReferenceStateAsync(options, novel.Id, survivorNovelId: 900_001);
         }
 
         return novel.Id;
@@ -510,70 +502,6 @@ public sealed class NovelImportRecoveryServiceTests : IDisposable
         await ExecuteAsync(connection, $"""CREATE TABLE "vec_novel_{survivorNovelId}_3" (rowid INTEGER PRIMARY KEY, embedding TEXT NOT NULL);""");
     }
 
-    private static async ValueTask CreatePendingReferenceStateAsync(
-        AppInitializationOptions options,
-        long partialNovelId,
-        long survivorNovelId)
-    {
-        var databasePath = Path.Combine(options.DefaultDataDirectory, "reference-anchor", "index.sqlite");
-        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
-        await using var connection = await OpenSqliteAsync(databasePath);
-        await ExecuteAsync(
-            connection,
-            """
-            CREATE TABLE reference_anchors (
-              anchor_id INTEGER PRIMARY KEY,
-              novel_id INTEGER,
-              title TEXT NOT NULL,
-              author TEXT NOT NULL,
-              source_path TEXT NOT NULL,
-              source_kind TEXT NOT NULL,
-              license_status TEXT NOT NULL,
-              source_file_hash TEXT NOT NULL,
-              build_version TEXT NOT NULL,
-              status TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
-              corpus_visibility TEXT NOT NULL DEFAULT 'private',
-              source_trust TEXT NOT NULL DEFAULT 'user_verified',
-              user_tags_json TEXT NOT NULL DEFAULT '[]'
-            );
-            CREATE TABLE reference_anchor_build_state (
-              anchor_id INTEGER PRIMARY KEY,
-              status TEXT NOT NULL,
-              stage TEXT NOT NULL,
-              source_segment_count INTEGER NOT NULL,
-              material_count INTEGER NOT NULL,
-              slot_count INTEGER NOT NULL,
-              vector_count INTEGER NOT NULL,
-              last_error TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
-              FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
-            );
-            CREATE TABLE reference_style_profile_builds (
-              build_id TEXT PRIMARY KEY,
-              novel_id INTEGER NOT NULL,
-              profile_id INTEGER,
-              title TEXT NOT NULL,
-              status TEXT NOT NULL,
-              stage TEXT NOT NULL,
-              progress_completed INTEGER NOT NULL,
-              progress_total INTEGER NOT NULL,
-              anchor_ids_json TEXT NOT NULL,
-              source_hashes_json TEXT NOT NULL,
-              diagnostics_json TEXT NOT NULL,
-              error_code TEXT,
-              error_message TEXT,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
-              completed_at TEXT,
-              cancelled_at TEXT
-            );
-            """);
-        await InsertReferenceStateAsync(connection, anchorId: 1001, partialNovelId, "importing", "partial-style-build");
-        await InsertReferenceStateAsync(connection, anchorId: 1002, survivorNovelId, "embedding", "survivor-style-build");
-    }
-
     private static async ValueTask InsertRagStateAsync(SqliteConnection connection, long novelId, string status)
     {
         var now = DateTimeOffset.UtcNow.ToString("O");
@@ -595,43 +523,6 @@ public sealed class NovelImportRecoveryServiceTests : IDisposable
             ("$updated_at", now),
             ("$chunk_id", $"chunk-{novelId}"),
             ("$chunk_hash", $"hash-{novelId}"));
-    }
-
-    private static async ValueTask InsertReferenceStateAsync(
-        SqliteConnection connection,
-        long anchorId,
-        long novelId,
-        string status,
-        string buildId)
-    {
-        var now = DateTimeOffset.UtcNow.ToString("O");
-        await ExecuteAsync(
-            connection,
-            """
-            INSERT INTO reference_anchors
-              (anchor_id, novel_id, title, author, source_path, source_kind, license_status, source_file_hash,
-               build_version, status, created_at, updated_at, corpus_visibility, source_trust, user_tags_json)
-            VALUES
-              ($anchor_id, $novel_id, '导入残留参考', '', 'source.md', 'markdown', 'user_provided', $source_hash,
-               'reference-anchor-v1', $status, $updated_at, $updated_at, 'private', 'user_verified', '[]');
-            INSERT INTO reference_anchor_build_state
-              (anchor_id, status, stage, source_segment_count, material_count, slot_count, vector_count, last_error, updated_at)
-            VALUES
-              ($anchor_id, $status, $status, 0, 0, 0, 0, 'pending import state', $updated_at);
-            INSERT INTO reference_style_profile_builds
-              (build_id, novel_id, profile_id, title, status, stage, progress_completed, progress_total,
-               anchor_ids_json, source_hashes_json, diagnostics_json, error_code, error_message, created_at, updated_at,
-               completed_at, cancelled_at)
-            VALUES
-              ($build_id, $novel_id, NULL, '导入残留风格构建', 'running', 'queued', 0, 7,
-               '[]', '[]', '[]', NULL, NULL, $updated_at, $updated_at, NULL, NULL);
-            """,
-            ("$anchor_id", anchorId),
-            ("$novel_id", novelId),
-            ("$status", status),
-            ("$updated_at", now),
-            ("$source_hash", $"source-hash-{novelId}"),
-            ("$build_id", buildId));
     }
 
     private static async ValueTask<int> CountRagIndexRowsAsync(AppInitializationOptions options, long novelId)
@@ -662,22 +553,6 @@ public sealed class NovelImportRecoveryServiceTests : IDisposable
             """;
         command.Parameters.AddWithValue("$table_name", $"vec_novel_{novelId}_3");
         return await command.ExecuteScalarAsync() is not null;
-    }
-
-    private static async ValueTask<int> CountReferenceAnchorsAsync(AppInitializationOptions options, long novelId)
-    {
-        return await CountRowsAsync(
-            Path.Combine(options.DefaultDataDirectory, "reference-anchor", "index.sqlite"),
-            "SELECT COUNT(*) FROM reference_anchors WHERE novel_id = $novel_id;",
-            novelId);
-    }
-
-    private static async ValueTask<int> CountReferenceStyleBuildsAsync(AppInitializationOptions options, long novelId)
-    {
-        return await CountRowsAsync(
-            Path.Combine(options.DefaultDataDirectory, "reference-anchor", "index.sqlite"),
-            "SELECT COUNT(*) FROM reference_style_profile_builds WHERE novel_id = $novel_id;",
-            novelId);
     }
 
     private static async ValueTask<int> CountRowsAsync(string databasePath, string sql, long novelId)

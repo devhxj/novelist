@@ -67,26 +67,11 @@ public sealed partial class NovelistMafToolRegistry
         }
 
         [Description(GetAnchorsDescription)]
-        private async ValueTask<IReadOnlyList<ReferenceMaterialSourceSummaryPayload>> GetReferenceAnchorsAsync(
+        private async ValueTask<IReadOnlyList<ReferenceAnchorPayload>> GetReferenceAnchorsAsync(
             CancellationToken cancellationToken = default)
         {
             var anchors = await _anchors.GetAnchorsAsync(_context.NovelId, cancellationToken);
-            return anchors.Select(anchor => ReferencePayloadSanitizer.SanitizeSourceSummary(
-                new ReferenceMaterialSourceSummaryPayload(
-                    anchor.AnchorId,
-                    anchor.NovelId,
-                    anchor.Title,
-                    anchor.Author,
-                    anchor.SourceKind,
-                    anchor.LicenseStatus,
-                    anchor.SourceFileHash,
-                    anchor.BuildVersion,
-                    anchor.Status,
-                    anchor.Visibility,
-                    anchor.SourceTrust,
-                    anchor.UserTags,
-                    anchor.OwnerScope,
-                    anchor.OwnerNovelId))).ToArray();
+            return anchors.Select(ReferencePayloadSanitizer.SanitizeAnchor).ToArray();
         }
 
         [Description(SearchMaterialsDescription)]

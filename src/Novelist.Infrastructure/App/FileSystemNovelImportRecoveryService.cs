@@ -11,7 +11,6 @@ public sealed class FileSystemNovelImportRecoveryService : INovelImportRecoveryS
 {
     private const int MaxDiagnosticDetailLength = 4_000;
     private const string RagDatabaseRelativePath = "rag/index.sqlite";
-    private const string ReferenceDatabaseRelativePath = "reference-anchor/index.sqlite";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -29,21 +28,6 @@ public sealed class FileSystemNovelImportRecoveryService : INovelImportRecoveryS
         NovelImportRunStates.GitCommit,
         NovelImportRunStates.CleanupPending
     };
-
-    private static readonly string[] PendingReferenceAnchorStatuses =
-    [
-        ReferenceAnchorBuildStates.Created,
-        ReferenceAnchorBuildStates.Importing,
-        ReferenceAnchorBuildStates.SourceImported,
-        ReferenceAnchorBuildStates.Segmenting,
-        ReferenceAnchorBuildStates.SegmentsBuilt,
-        ReferenceAnchorBuildStates.ExtractingMaterials,
-        ReferenceAnchorBuildStates.MaterialsExtracted,
-        ReferenceAnchorBuildStates.DetectingSlots,
-        ReferenceAnchorBuildStates.SlotsDetected,
-        ReferenceAnchorBuildStates.Embedding,
-        ReferenceAnchorBuildStates.Stale
-    ];
 
     private readonly AppInitializationOptions _options;
     private readonly INovelService _novels;
@@ -246,7 +230,6 @@ public sealed class FileSystemNovelImportRecoveryService : INovelImportRecoveryS
         {
             var dataDirectory = Path.GetFullPath(await AppDataDirectoryResolver.ResolveAsync(_options, cancellationToken));
             await CleanupRagSideEffectsAsync(dataDirectory, novelId, cancellationToken);
-            await CleanupReferenceSideEffectsAsync(dataDirectory, novelId, cancellationToken);
             return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SqliteException or InvalidOperationException)
@@ -298,43 +281,6 @@ public sealed class FileSystemNovelImportRecoveryService : INovelImportRecoveryS
                 "DELETE FROM rag_index_state WHERE novel_id = $novel_id;",
                 cancellationToken,
                 ("$novel_id", novelId));
-        }
-    }
-
-    private static async ValueTask CleanupReferenceSideEffectsAsync(
-        string dataDirectory,
-        long novelId,
-        CancellationToken cancellationToken)
-    {
-        var databasePath = BuildSafeDataFilePath(dataDirectory, ReferenceDatabaseRelativePath);
-        if (!File.Exists(databasePath))
-        {
-            return;
-        }
-
-        await using var connection = await OpenSqliteAsync(databasePath, cancellationToken);
-        var hasReferenceAnchors = await TableExistsAsync(connection, "reference_anchors", cancellationToken);
-        if (hasReferenceAnchors)
-        {
-            var anchorIds = await ReadPendingReferenceAnchorIdsAsync(connection, novelId, cancellationToken);
-            if (anchorIds.Count > 0)
-            {
-                await DeletePendingReferenceAnchorsAsync(connection, anchorIds, cancellationToken);
-            }
-        }
-
-        if (await TableExistsAsync(connection, "reference_style_profile_builds", cancellationToken))
-        {
-            await ExecuteSqliteAsync(
-                connection,
-                """
-                DELETE FROM reference_style_profile_builds
-                WHERE novel_id = $novel_id
-                  AND status = $status;
-                """,
-                cancellationToken,
-                ("$novel_id", novelId),
-                ("$status", ReferenceStyleProfileBuildStatuses.Running));
         }
     }
 
@@ -413,77 +359,6 @@ public sealed class FileSystemNovelImportRecoveryService : INovelImportRecoveryS
             suffix.All(char.IsAsciiDigit) &&
             int.TryParse(suffix, NumberStyles.None, CultureInfo.InvariantCulture, out var dimensions) &&
             dimensions > 0;
-    }
-
-    private static async ValueTask<IReadOnlyList<long>> ReadPendingReferenceAnchorIdsAsync(
-        SqliteConnection connection,
-        long novelId,
-        CancellationToken cancellationToken)
-    {
-        var statuses = AddParameters(
-            connection.CreateCommand(),
-            "status",
-            PendingReferenceAnchorStatuses,
-            out var statusPlaceholders);
-
-        await using var command = statuses;
-        command.CommandText = $"""
-            SELECT anchor_id
-            FROM reference_anchors
-            WHERE novel_id = $novel_id
-              AND status IN ({statusPlaceholders});
-            """;
-        command.Parameters.AddWithValue("$novel_id", novelId);
-
-        var anchorIds = new List<long>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            anchorIds.Add(reader.GetInt64(0));
-        }
-
-        return anchorIds;
-    }
-
-    private static async ValueTask DeletePendingReferenceAnchorsAsync(
-        SqliteConnection connection,
-        IReadOnlyList<long> anchorIds,
-        CancellationToken cancellationToken)
-    {
-        var anchorCommand = AddParameters(connection.CreateCommand(), "anchor", anchorIds, out var placeholders);
-        await using (anchorCommand)
-        {
-            if (await TableExistsAsync(connection, "reference_anchor_build_state", cancellationToken))
-            {
-                anchorCommand.CommandText = $"DELETE FROM reference_anchor_build_state WHERE anchor_id IN ({placeholders});";
-                await anchorCommand.ExecuteNonQueryAsync(cancellationToken);
-            }
-        }
-
-        var deleteAnchors = AddParameters(connection.CreateCommand(), "anchor", anchorIds, out placeholders);
-        await using (deleteAnchors)
-        {
-            deleteAnchors.CommandText = $"DELETE FROM reference_anchors WHERE anchor_id IN ({placeholders});";
-            await deleteAnchors.ExecuteNonQueryAsync(cancellationToken);
-        }
-    }
-
-    private static SqliteCommand AddParameters<T>(
-        SqliteCommand command,
-        string prefix,
-        IReadOnlyList<T> values,
-        out string placeholders)
-    {
-        var names = new List<string>(values.Count);
-        for (var index = 0; index < values.Count; index++)
-        {
-            var name = $"${prefix}_{index.ToString(CultureInfo.InvariantCulture)}";
-            names.Add(name);
-            command.Parameters.AddWithValue(name, values[index] ?? throw new ArgumentException("SQLite parameter value cannot be null."));
-        }
-
-        placeholders = string.Join(", ", names);
-        return command;
     }
 
     private static async ValueTask ExecuteSqliteAsync(

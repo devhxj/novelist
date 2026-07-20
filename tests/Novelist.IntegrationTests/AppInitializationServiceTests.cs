@@ -220,7 +220,6 @@ public sealed class AppInitializationServiceTests : IDisposable
     public async Task UpdatingDataDirectoryInvalidatesCachedStartupRecoveryResult()
     {
         var recovery = new CountingImportRecoveryService();
-        var referenceRecovery = new CountingReferenceAnchorRecoveryService();
         var options = new AppInitializationOptions
         {
             ConfigDirectory = Path.Combine(_root, "cache-config"),
@@ -229,8 +228,7 @@ public sealed class AppInitializationServiceTests : IDisposable
         var service = new FileSystemAppInitializationService(
             options,
             legacyMigration: null,
-            importRecovery: recovery,
-            referenceAnchorRecovery: referenceRecovery);
+            importRecovery: recovery);
 
         await service.InitializeAsync(options.DefaultDataDirectory, CancellationToken.None);
         var first = await service.GetAppConfigAsync(CancellationToken.None);
@@ -241,7 +239,6 @@ public sealed class AppInitializationServiceTests : IDisposable
         Assert.Equal("startup-recovery-1", Assert.Single(first.ImportRecovery!.ReconciledRuns).TaskId);
         Assert.Equal("startup-recovery-2", Assert.Single(second.ImportRecovery!.ReconciledRuns).TaskId);
         Assert.Equal(2, recovery.CallCount);
-        Assert.Equal(2, referenceRecovery.CallCount);
     }
 
     public void Dispose()
@@ -325,15 +322,4 @@ public sealed class AppInitializationServiceTests : IDisposable
         }
     }
 
-    private sealed class CountingReferenceAnchorRecoveryService : IReferenceAnchorProcessingRecoveryService
-    {
-        public int CallCount { get; private set; }
-
-        public ValueTask ReconcileRecoverableProcessingAsync(CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            CallCount++;
-            return ValueTask.CompletedTask;
-        }
-    }
 }
