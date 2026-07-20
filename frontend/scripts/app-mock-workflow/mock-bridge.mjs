@@ -746,6 +746,7 @@ export function installConfigurableAppMockBridge(options = {}) {
     referenceBlueprints: {},
     nextReferenceBlueprintId: 701,
     referenceCorpusBlueprintSessions: options.referenceCorpusBlueprintSessions ?? {},
+    referenceWritingSessions: options.referenceWritingSessions ?? {},
     referenceCorpusFeatureAnalysisRuns: [],
     nextReferenceCorpusFeatureAnalysisRunId: 1,
 referenceCorpusTechniqueSpecimenAnalysisRuns: [],
@@ -1237,6 +1238,10 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'ReviewReferenceMaterializationCandidate': return reviewReferenceMaterializationCandidate(args[0])
       case 'ListActiveReferenceMaterializationMaterials': return listActiveReferenceMaterializationMaterials(args[0])
       case 'GenerateReferenceMaterializationBlueprintPreview': return generateReferenceMaterializationBlueprintPreview(args[0])
+      case 'GenerateReferenceBlueprints': return generateReferenceBlueprints(args[0])
+      case 'GetReferenceWritingSession': return getReferenceWritingSession(args[0])
+      case 'SelectReferenceBlueprint': return selectReferenceBlueprint(args[0])
+      case 'GenerateReferenceDraftCandidates': return generateReferenceDraftCandidates(args[0])
       case 'SearchReferenceMaterials': return searchReferenceMaterials(args[0])
       case 'GetReferenceMaterialCoverage': return getReferenceMaterialCoverage(args[0])
       case 'GetReferenceMaterialTagReviewQueue': return getReferenceMaterialTagReviewQueue(args[0])
@@ -6648,6 +6653,107 @@ function listReferenceCorpusTechniqueSpecimens(input = {}) {
     }
 
     return confidence
+  }
+
+  function referenceWritingSessionKey(input = {}) {
+    return [
+      Number(input.novel_id ?? 0),
+      Number(input.chapter_number ?? 0),
+      String(input.session_id ?? ''),
+    ].join(':')
+  }
+
+  function generateReferenceBlueprints(input = {}) {
+    const goal = String(input.goal ?? '').trim()
+    if (!goal) throw new Error('Reference writing goal is required.')
+
+    const blueprints = ['progressive', 'contrast', 'focused'].map((strategy, blueprintIndex) => ({
+      blueprint_id: `mock-writing-blueprint-${blueprintIndex + 1}`,
+      strategy,
+      beats: [0, 1].map((beatIndex) => ({
+        beat_id: `mock-writing-beat-${blueprintIndex + 1}-${beatIndex + 1}`,
+        beat_index: beatIndex,
+        intent: beatIndex === 0 ? '用追问压缩回避空间。' : '让回答暴露熟人线索并保留身份悬念。',
+        narrative_function: beatIndex === 0 ? 'raise_pressure' : 'withhold_answer',
+        materials: [0, 1].map((materialIndex) => ({
+          material_id: `mock-material-${blueprintIndex + 1}-${beatIndex + 1}-${materialIndex + 1}`,
+          generation_id: `mock-generation-${blueprintIndex + 1}`,
+        })),
+      })),
+    }))
+    const session = {
+      session_id: String(input.session_id ?? ''),
+      novel_id: Number(input.novel_id ?? 0),
+      chapter_number: Number(input.chapter_number ?? 0),
+      goal,
+      blueprints,
+      selected_blueprint_id: '',
+      updated_at: now,
+    }
+    state.referenceWritingSessions[referenceWritingSessionKey(input)] = session
+    return cloneJson(session)
+  }
+
+  function getReferenceWritingSession(input = {}) {
+    const session = state.referenceWritingSessions[referenceWritingSessionKey(input)]
+    return session ? cloneJson(session) : null
+  }
+
+  function selectReferenceBlueprint(input = {}) {
+    const key = referenceWritingSessionKey(input)
+    const session = state.referenceWritingSessions[key]
+    if (!session) throw new Error('Reference writing session does not exist.')
+    const blueprintId = String(input.blueprint_id ?? '')
+    if (!session.blueprints.some((blueprint) => blueprint.blueprint_id === blueprintId)) {
+      throw new Error('Selected reference blueprint does not belong to this session.')
+    }
+
+    const selected = {
+      ...session,
+      selected_blueprint_id: blueprintId,
+      updated_at: now,
+    }
+    state.referenceWritingSessions[key] = selected
+    return cloneJson(selected)
+  }
+
+  function generateReferenceDraftCandidates(input = {}) {
+    const session = state.referenceWritingSessions[referenceWritingSessionKey(input)]
+    const blueprintId = String(input.blueprint_id ?? '')
+    if (!session || session.selected_blueprint_id !== blueprintId) {
+      throw new Error('Select this reference blueprint before generating draft candidates.')
+    }
+
+    const blueprint = session.blueprints.find((candidate) => candidate.blueprint_id === blueprintId)
+    if (!blueprint) throw new Error('The selected reference blueprint no longer belongs to this session.')
+    const texts = [
+      '雨声在窗沿上连成一线，林岚没有催促，只把杯底的水痕推到灯下。\n\n“你认得留下它的人。”\n\n对面的人停了两息，答非所问地提起旧门的锁。那点迟疑已经足够。\n\n【候选一完整正文末尾】',
+      '林岚把话停在最窄的地方，让屋里的沉默自己往下压。\n\n“杯底朝向门口。只有熟人才会坐那个位置，对吗？”\n\n对方看向门外，却没有否认。她于是收起追问，把尚未露面的名字留在雨声里。\n\n【候选二完整正文末尾】',
+    ]
+    const currentDraft = String(input.current_draft_text ?? '')
+    const insertionOffset = Math.max(0, Math.min(currentDraft.length, Number(input.insertion_offset ?? 0)))
+    const sources = blueprint.beats.map((beat, beatIndex) => ({
+      beat_id: beat.beat_id,
+      material_id: beat.materials[0].material_id,
+      generation_id: beat.materials[0].generation_id,
+      anchor_id: 101 + beatIndex,
+      chapter_index: 1 + beatIndex,
+      text_hash: `mock-writing-hash-${beatIndex + 1}`,
+      license_state: 'authorized',
+      reuse_policy: 'verbatim_ok',
+    }))
+    return {
+      session_id: session.session_id,
+      blueprint_id: blueprintId,
+      candidates: texts.map((text, index) => ({
+        candidate_id: `mock-writing-draft-${index + 1}`,
+        blueprint_id: blueprintId,
+        text,
+        chapter_text_after_insertion: currentDraft.slice(0, insertionOffset) + text + currentDraft.slice(insertionOffset),
+        sources,
+        audit: { passed: true, errors: [] },
+      })),
+    }
   }
 
   function generateReferenceCorpusBlueprintCandidates(input = {}) {

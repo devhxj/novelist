@@ -25,7 +25,6 @@ const MONACO_THEME: Record<Theme, string> = { light: 'novelist-light', dark: 'vs
 type MonacoEditor = Parameters<OnMount>[0]
 type MonacoApi = Parameters<OnMount>[1]
 type SearchDecorations = ReturnType<MonacoEditor['createDecorationsCollection']>
-type ReferenceCandidateInsertMode = 'cursor' | 'append' | 'replace'
 type ReferenceEditorSnapshot = {
   currentDraftText: string
   insertionOffset: number
@@ -273,61 +272,6 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
       void doSave(s.id, s.path, s.content).catch(() => undefined)
     }, 500)
   }, [tabs, updateTab, doSave, onContentChange])
-
-  const insertReferenceCandidate = useCallback((text: string, mode: ReferenceCandidateInsertMode): boolean => {
-    if (!activeTab || activeTab.type !== 'file' || !isChapterPath(activeTab.path) || activeTab.viewMode === 'outline') {
-      return false
-    }
-
-    const editor = editorRef.current
-    const monaco = monacoRef.current
-    const model = editor?.getModel()
-    if (!editor || !monaco || !model || text.length === 0) {
-      return false
-    }
-
-    const selection = editor.getSelection()
-    let range: Parameters<MonacoEditor['executeEdits']>[1][number]['range']
-    let nextText = text
-
-    if (mode === 'cursor') {
-      const position = editor.getPosition()
-      if (!position) return false
-      range = new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column)
-    } else if (mode === 'append') {
-      const lastLine = model.getLineCount()
-      const lastColumn = model.getLineMaxColumn(lastLine)
-      const current = model.getValue()
-      const prefix = current.length === 0 ? '' : current.endsWith('\n') ? '\n' : '\n\n'
-      range = new monaco.Range(lastLine, lastColumn, lastLine, lastColumn)
-      nextText = `${prefix}${text}`
-    } else if (!selection || selection.isEmpty()) {
-      return false
-    } else {
-      range = selection
-    }
-
-    suppressAutosaveUntilRef.current = Date.now() + 5_000
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = null
-    }
-    savingRef.current = null
-
-    editor.focus()
-    editor.pushUndoStop()
-    editor.executeEdits('chapter-reference-candidate', [{
-      range,
-      text: nextText,
-      forceMoveMarkers: true,
-    }])
-    editor.pushUndoStop()
-
-    const content = model.getValue()
-    updateTab(activeTab.id, { content, isDirty: true })
-    onContentChange?.(content)
-    return true
-  }, [activeTab, onContentChange, updateTab])
 
   const getReferenceEditorSnapshot = useCallback((): ReferenceEditorSnapshot | null => {
     if (!activeTab || activeTab.type !== 'file' || !isChapterPath(activeTab.path) || activeTab.viewMode === 'outline') {
@@ -818,7 +762,6 @@ const ContentPanel = forwardRef<ContentPanelHandle, Props>(function ContentPanel
           <ChapterReferencePanel
             novelId={novelId}
             activeChapter={activeChapter}
-            onInsertCandidate={insertReferenceCandidate}
             getEditorSnapshot={getReferenceEditorSnapshot}
             onApplyChapterText={applyReferenceChapterText}
             onClose={() => {

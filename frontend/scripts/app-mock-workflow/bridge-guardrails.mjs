@@ -231,440 +231,83 @@ export async function verifyChapterReferenceBridgeCalls(page) {
     'GetNovels',
     'GetChapters',
     'GetContent',
-    'SearchReferenceMaterials',
-    'GetReferenceMaterialDetail',
-    'GetReferenceOrchestrationRuns',
-    'StartReferenceOrchestrationRun',
-    'ResumeReferenceOrchestrationRun',
-    'GetReferenceCorpusBlueprintSession',
-    'AdvanceReferenceCorpusBlueprintSession',
-    'GenerateReferenceCorpusInsertionDraftCandidates',
- 'RecordReferenceCorpusInsertionAudit',
-    'GetReferenceDraftCandidates',
-    'GetReferenceAnchoredDraftAudits',
-    'CancelReferenceOrchestrationRun',
+    'GetReferenceWritingSession',
+    'GenerateReferenceBlueprints',
+    'SelectReferenceBlueprint',
+    'GenerateReferenceDraftCandidates',
   ]
 
   for (const method of requiredMethods) {
-    assert(methods.includes(method), `Expected chapter reference bridge method ${method} to be called.`)
+    assert(methods.includes(method), 'Expected chapter reference bridge method ' + method + ' to be called.')
   }
 
-  const searchCall = calls.find((call) => call.method === 'SearchReferenceMaterials')
-  assert(searchCall, 'chapter reference drawer must search reference materials')
-  assert.deepEqual(searchCall.args?.[0]?.anchor_ids, [], 'chapter reference drawer must search without manual anchor binding')
-  const startCall = calls.find((call) => call.method === 'StartReferenceOrchestrationRun')
-  assert(startCall, 'chapter reference drawer must start orchestration from the chapter surface')
-  assert.equal(startCall.args?.[0]?.chapter_number, 1, 'chapter reference drawer must derive the active chapter number')
-  assert.equal(startCall.args?.[0]?.anchor_ids, null, 'chapter reference orchestration must not require manual anchor selection')
-  assert.equal(startCall.args?.[0]?.corpus_search_policy?.mode, 'story_context', 'chapter reference orchestration must use story-context corpus search')
-  assert.deepEqual(startCall.args?.[0]?.corpus_search_policy?.include_anchor_ids, [], 'chapter reference orchestration must search accessible corpus by default')
-  assert.equal(startCall.args?.[0]?.source_confirmed, false, 'chapter reference orchestration must preserve the source confirmation stop')
-
-  const resumeCall = calls.find((call) => call.method === 'ResumeReferenceOrchestrationRun')
-  assert(resumeCall, 'chapter reference drawer must resume the current orchestration decision in place')
-  assert.equal(resumeCall.args?.[0]?.decision_type, 'confirm_source_and_facts', 'chapter reference resume must use stable backend decision type')
-
-  assert(!methods.includes('GenerateReferenceCorpusBlueprintCandidates'), 'chapter reference default path must not bypass the persisted blueprint session')
-  const blueprintSessionReads = calls.filter((call) => call.method === 'GetReferenceCorpusBlueprintSession')
-  assert(blueprintSessionReads.length >= 1, 'chapter reference drawer must recover the persisted blueprint session before presenting the default flow')
-  assert.equal(blueprintSessionReads[0].args?.[0]?.novel_id, 42, 'chapter reference blueprint session recovery must bind the active novel')
-  assert.equal(blueprintSessionReads[0].args?.[0]?.chapter_number, 1, 'chapter reference blueprint session recovery must bind the active chapter')
-  assert.equal(blueprintSessionReads[0].args?.[0]?.session_id, 'chapter:42:1', 'chapter reference blueprint session recovery must use a stable chapter session id')
-
-  const blueprintSessionCalls = calls.filter((call) => call.method === 'AdvanceReferenceCorpusBlueprintSession')
-  assert(blueprintSessionCalls.length >= 6, 'chapter reference drawer must generate, select, revise, recover from blocked drafts, and persist each transition')
-  const firstBlueprintSessionCall = blueprintSessionCalls.find((call) => call.args?.[0]?.action === 'generate')
-  assert(firstBlueprintSessionCall, 'chapter reference drawer must create the first blueprint iteration through the persisted session')
-  const blueprintSelectionCalls = blueprintSessionCalls.filter((call) => call.args?.[0]?.action === 'select')
-  assert(blueprintSelectionCalls.length >= 3, 'chapter reference drawer must persist every blueprint selection')
-  const blueprintRevisionCalls = blueprintSessionCalls.filter((call) => call.args?.[0]?.action === 'revise')
-  assert(blueprintRevisionCalls.length >= 2, 'chapter reference drawer must persist both feedback and blocked-draft revisions')
-
-  for (const [index, call] of blueprintSessionCalls.filter((item) => ['generate', 'revise'].includes(item.args?.[0]?.action)).entries()) {
-    const payload = call.args?.[0]?.generation_input
-    const libraryIds = payload?.scope?.library_ids
-    assert(Array.isArray(libraryIds), `chapter reference blueprint session generation ${index + 1} must send scope.library_ids as an array`)
-    assert.deepEqual(
-      libraryIds,
-      [],
-      `chapter reference blueprint session generation ${index + 1} must let backend resolve default session libraries; got ${JSON.stringify(libraryIds)}`)
-    assert.equal(
-      payload?.scope?.session_id,
-      'project:42:default',
-      `chapter reference blueprint session generation ${index + 1} must send the current chapter default corpus session; got ${JSON.stringify(payload?.scope?.session_id)}`)
-  }
-
-  const firstBlueprintCandidates = firstBlueprintSessionCall.result?.candidates
-  assert(firstBlueprintCandidates?.candidates?.length >= 2, 'chapter reference blueprint session first round must return at least two candidates')
-  const firstSelectedBlueprintId = blueprintSelectionCalls[0].args?.[0]?.selected_blueprint_id
-  assert(firstSelectedBlueprintId, 'chapter reference first blueprint selection must identify the selected candidate')
-  assert.equal(blueprintSelectionCalls[0].result?.selected_blueprint_id, firstSelectedBlueprintId, 'chapter reference first blueprint selection must be persisted by the session')
-
-  const secondBlueprintSessionCall = blueprintRevisionCalls.find((call) =>
-    (call.args?.[0]?.checklist ?? []).some((item) =>
-      item?.decision === 'revise' && (item?.problem_tags ?? []).includes('source_repetition')))
-  assert(secondBlueprintSessionCall, 'chapter reference alternative-source action must revise the persisted blueprint session')
-  assert.equal(secondBlueprintSessionCall.args?.[0]?.selected_blueprint_id, firstSelectedBlueprintId, 'chapter reference feedback revision must target the selected blueprint')
-  assert(
-    (secondBlueprintSessionCall.args?.[0]?.checklist ?? []).some((item) =>
-      item?.decision === 'revise' && (item?.problem_tags ?? []).includes('source_repetition')),
-    'chapter reference blueprint second round must send source_repetition feedback through the persisted checklist',
-  )
-  const secondBlueprintCandidates = secondBlueprintSessionCall.result?.candidates
-  assert.equal(secondBlueprintCandidates?.feedback_applied, true, 'chapter reference blueprint session second round must report feedback_applied')
-  assert.match(
-    String(secondBlueprintCandidates?.feedback_summary ?? ''),
-    /rejected_blueprints:1/,
-    'chapter reference blueprint session second round must report feedback_summary',
-  )
-  assert.match(
-    String(secondBlueprintCandidates?.feedback_summary ?? ''),
-    /fallback:feedback_filters_no_matches,fallback_to_base_filters/,
-    'chapter reference blueprint session second round must report fallback diagnostics when feedback constraints are relaxed',
-  )
-  const firstRegeneratedCandidate = secondBlueprintCandidates?.candidates?.[0]
-  assert(
-    (firstRegeneratedCandidate?.feedback_reason ?? '').includes('fallback:feedback_filters_no_matches,fallback_to_base_filters'),
-    'chapter reference blueprint candidate feedback_reason must include fallback diagnostics',
-  )
-  assert(
-    (firstRegeneratedCandidate?.gap_reasons ?? []).includes('feedback_filters_no_matches') &&
-      (firstRegeneratedCandidate?.gap_reasons ?? []).includes('fallback_to_base_filters'),
-    'chapter reference blueprint candidate gap_reasons must expose fallback diagnostic codes',
-  )
-  assert(
-    (firstRegeneratedCandidate?.gap_positions ?? []).some((position) =>
-      (position?.gap_reasons ?? []).includes('missing_rhythm_evidence') &&
-      (position?.missing_dimensions ?? []).includes('rhythm')),
-    'chapter reference blueprint candidate gap_positions must expose beat-level missing dimension diagnostics',
-  )
-  const firstRegeneratedSources = secondBlueprintCandidates?.candidates?.[0]?.source_distribution ?? []
-  assert(
-    new Set(firstRegeneratedSources.map((source) => source.library_id)).size >= 2 ||
-      new Set(firstRegeneratedSources.map((source) => source.anchor_id)).size >= 2,
-    'chapter reference blueprint candidate source_repetition feedback must prioritize a cross-library or cross-anchor first regenerated candidate',
-  )
-  const firstStrategies = firstBlueprintCandidates?.candidates?.map((candidate) => candidate.blueprint?.strategy) ?? []
-  const secondStrategies = secondBlueprintCandidates?.candidates?.map((candidate) => candidate.blueprint?.strategy) ?? []
-  const firstSources = firstBlueprintCandidates?.candidates?.map((candidate) => candidate.source_distribution) ?? []
-  const secondSources = secondBlueprintCandidates?.candidates?.map((candidate) => candidate.source_distribution) ?? []
-  assert(
-    JSON.stringify(firstStrategies) !== JSON.stringify(secondStrategies) ||
-      JSON.stringify(firstSources) !== JSON.stringify(secondSources),
-    'chapter reference blueprint candidate feedback regeneration must visibly change strategy or source distribution',
-  )
-  const draftNextActionBlueprintCall = blueprintRevisionCalls.find((call) =>
-    (call.args?.[0]?.checklist ?? []).some((item) =>
-      item?.decision === 'revise' && (item?.problem_tags ?? []).includes('transition_replacement_required')))
-  assert(draftNextActionBlueprintCall, 'chapter reference draft next_action must trigger persisted blueprint revision with transition_replacement_required feedback')
-  assert(
-    (draftNextActionBlueprintCall.args?.[0]?.checklist ?? []).some((item) =>
-      item?.decision === 'revise' && (item?.problem_tags ?? []).includes('transition_replacement_outside_selected_blueprint')),
-    'chapter reference draft next_action revision must include the concrete transition replacement failure reason',
-  )
-  assert(
-    String(draftNextActionBlueprintCall.result?.candidates?.feedback_summary ?? '').includes('rejected_nodes:'),
-    'chapter reference draft next_action revision must let the persisted coordinator derive rejected nodes for backend reranking',
-  )
-  assert.equal(draftNextActionBlueprintCall.result?.candidates?.feedback_applied, true, 'chapter reference draft next_action blueprint revision must report feedback_applied')
-
-  const insertionDraftCall = calls.find((call) => call.method === 'GenerateReferenceCorpusInsertionDraftCandidates')
-  assert(insertionDraftCall, 'chapter reference drawer must generate corpus insertion draft candidates')
-  const insertionDraftPayload = insertionDraftCall.args?.[0]
-  const insertionSelectedBlueprint = insertionDraftPayload?.selected_blueprint
-  assert(insertionSelectedBlueprint && typeof insertionSelectedBlueprint === 'object', 'chapter reference insertion draft must send selected_blueprint')
-  assert(insertionSelectedBlueprint.blueprint_id, 'chapter reference insertion draft selected_blueprint must include blueprint_id')
-  const selectedSecondRoundBlueprint = (secondBlueprintCandidates?.candidates ?? [])
-    .map((candidate) => candidate.blueprint)
-    .find((blueprint) => blueprint?.blueprint_id === insertionSelectedBlueprint.blueprint_id)
-  assert(
-    selectedSecondRoundBlueprint,
-    `chapter reference insertion draft selected_blueprint must come from second-round blueprint candidates; got ${JSON.stringify(insertionSelectedBlueprint.blueprint_id)}`,
-  )
-  assert.deepEqual(
-    insertionSelectedBlueprint,
-    selectedSecondRoundBlueprint,
-    'chapter reference insertion draft selected_blueprint must match the selected second-round blueprint candidate',
-  )
-  const insertionDraftLibraryIds = insertionDraftPayload?.scope?.library_ids
-  assert(Array.isArray(insertionDraftLibraryIds), 'chapter reference insertion draft must send scope.library_ids as an array')
-  assert.deepEqual(
-    insertionDraftLibraryIds,
-    [],
-    `chapter reference insertion draft must let backend resolve default session libraries; got ${JSON.stringify(insertionDraftLibraryIds)}`)
-  assert.equal(
-    insertionDraftPayload?.scope?.session_id,
-    'project:42:default',
-    `chapter reference insertion draft must send the current chapter default corpus session; got ${JSON.stringify(insertionDraftPayload?.scope?.session_id)}`)
-  assert.equal(
-    typeof insertionDraftPayload?.chapter_context?.current_draft_text,
-    'string',
-    `chapter reference insertion draft chapter_context.current_draft_text must be a string; got ${typeof insertionDraftPayload?.chapter_context?.current_draft_text}`)
-  assert.equal(
-    typeof insertionDraftPayload?.chapter_context?.insertion_offset,
-    'number',
-    `chapter reference insertion draft chapter_context.insertion_offset must be a number; got ${typeof insertionDraftPayload?.chapter_context?.insertion_offset}`)
-  assert.equal(insertionDraftPayload?.requested_count, 3, 'chapter reference insertion draft must request multiple candidates')
-  assert(insertionDraftCall.result?.candidates?.length >= 2, 'chapter reference insertion draft result must include multiple candidates')
-  assert.deepEqual(
-    insertionDraftCall.result?.selected_blueprint,
-    selectedSecondRoundBlueprint,
-    'chapter reference insertion draft result selected_blueprint must match the selected second-round blueprint candidate',
-  )
-  let blockedAuditCandidateCount = 0
-  let blockedTransitionCandidateCount = 0
-  let readyCandidateCount = 0
-  let readyTransitionCandidateCount = 0
-  for (const candidate of insertionDraftCall.result?.candidates ?? []) {
-    assert(candidate.candidate_id, 'chapter reference insertion draft candidate must include candidate_id')
-    assert(candidate.draft?.assembled_text, 'chapter reference insertion draft candidate must include assembled_text')
-    assert(candidate.draft?.gate?.passed === true, 'chapter reference insertion draft candidate gate should pass in the mock workflow')
-    assert(Array.isArray(candidate.draft?.transitions), 'chapter reference insertion draft candidate must include transitions')
-    assert(Array.isArray(candidate.draft?.audit?.transitions), 'chapter reference insertion draft audit must include transitions')
-    const transitionAuditById = new Map((candidate.draft?.audit?.transitions ?? []).map((transition) => [transition.transition_id, transition]))
-    const hasTransitionAuditBlock = (candidate.draft?.audit?.transitions ?? []).some((transition) => transition.passed === false)
-    if (candidate.draft?.ready_for_insertion === true) {
-      readyCandidateCount++
-      assert(candidate.draft?.audit?.passed === true, 'ready chapter reference insertion draft candidate must pass draft audit')
-      assert.deepEqual(candidate.draft?.audit?.errors ?? [], [], 'ready chapter reference insertion draft audit must not report errors')
-      if ((candidate.draft?.transitions ?? []).some((transition) => String(transition.text ?? '').length > 0)) {
-        readyTransitionCandidateCount++
-      }
-    } else {
-      blockedAuditCandidateCount++
-      assert(candidate.draft?.audit?.passed === false, 'blocked chapter reference insertion draft candidate must fail draft audit')
-      assert((candidate.draft?.audit?.errors ?? []).length > 0, 'blocked chapter reference insertion draft audit must report errors')
-      if (hasTransitionAuditBlock) {
-        blockedTransitionCandidateCount++
-      }
-      assert.equal(
-        candidate.draft?.chapter_text_after_insertion,
-        insertionDraftPayload?.chapter_context?.current_draft_text,
-        'blocked chapter reference insertion draft must preserve the current editor text',
-      )
-    }
-    assertNoForbiddenProperties(candidate, ['source_text', 'raw_text', 'embedding'], 'chapter reference insertion draft candidate')
-    const pieces = candidate.draft?.pieces ?? []
-    assert(pieces.length > 0, 'chapter reference insertion draft candidate must include source-backed pieces')
-    const auditPiecesByPieceId = new Map((candidate.draft?.audit?.pieces ?? []).map((piece) => [piece.piece_id, piece]))
-    for (const piece of pieces) {
-      assert(Array.isArray(piece.preserved_spans), 'chapter reference insertion draft piece must include preserved_spans')
-      assert(piece.preserved_spans.length > 0, 'chapter reference insertion draft piece must include at least one preserved span')
-      assert(Array.isArray(piece.locked_spans), 'chapter reference insertion draft piece must include locked_spans')
-      const auditPiece = auditPiecesByPieceId.get(piece.piece_id)
-      assert(auditPiece, `chapter reference insertion draft audit must include piece ${piece.piece_id}`)
-      assert.equal(auditPiece.node_id, piece.node_id, 'chapter reference insertion draft audit piece must target the same node as the draft piece')
-      if (candidate.draft?.ready_for_insertion === true) {
-        assert.equal(auditPiece.passed, true, 'ready chapter reference insertion draft audit piece must pass')
-        assert.equal(auditPiece.mismatched_span_count, 0, 'ready chapter reference insertion draft audit piece must not report preserved span mismatch')
-        assert.deepEqual(auditPiece.violations, [], 'ready chapter reference insertion draft audit piece must not report violations')
-      } else if (hasTransitionAuditBlock) {
-        assert.equal(auditPiece.passed, true, 'transition-blocked chapter reference insertion draft should keep source piece audit passed')
-        assert.equal(auditPiece.mismatched_span_count, 0, 'transition-blocked chapter reference insertion draft source pieces must not report preserved span mismatch')
-      } else {
-        assert.equal(auditPiece.passed, false, 'blocked chapter reference insertion draft audit piece must fail')
-        assert(auditPiece.mismatched_span_count > 0, 'blocked chapter reference insertion draft audit piece must report a preserved span mismatch')
-        assert(
-          (auditPiece.violations ?? []).some((violation) => violation.code === 'preserved_text_hash_mismatch'),
-          'blocked chapter reference insertion draft audit piece must report preserved_text_hash_mismatch',
-        )
-      }
-      for (const span of piece.preserved_spans) {
-        assert(span.span_id, 'chapter reference insertion draft preserved span must include span_id')
-        assert(typeof span.source_text_hash === 'string' && span.source_text_hash.length > 0, 'chapter reference insertion draft preserved span must include source_text_hash')
-        assert(typeof span.output_text_hash === 'string' && span.output_text_hash.length > 0, 'chapter reference insertion draft preserved span must include output_text_hash')
-        if (candidate.draft?.ready_for_insertion === true) {
-          assert(span.matches === true, 'ready chapter reference insertion draft preserved span must match')
-        }
-      }
-    }
-    for (const transition of candidate.draft?.transitions ?? []) {
-      assert(transition.transition_id, 'chapter reference insertion draft transition must include transition_id')
-      assert(transition.gap_id, 'chapter reference insertion draft transition must include gap_id')
-      assert(transition.after_piece_id, 'chapter reference insertion draft transition must include after_piece_id')
-      assert(transition.before_piece_id, 'chapter reference insertion draft transition must include before_piece_id')
-      assert(transition.decision, 'chapter reference insertion draft transition must include decision')
-      assert(transition.strategy, 'chapter reference insertion draft transition must include strategy')
-      assert.equal(typeof transition.text, 'string', 'chapter reference insertion draft transition text must be a string')
-      assert.equal(typeof transition.text_hash, 'string', 'chapter reference insertion draft transition text_hash must be a string')
-      assert.equal(typeof transition.output_start, 'number', 'chapter reference insertion draft transition must include output_start')
-      assert.equal(typeof transition.output_end, 'number', 'chapter reference insertion draft transition must include output_end')
-      assert.equal(typeof transition.approved, 'boolean', 'chapter reference insertion draft transition must include approved')
-      assert.equal(typeof transition.reason, 'string', 'chapter reference insertion draft transition must include reason')
-      if (transition.decision === 'replace_piece') {
-        assert(transition.replacement_piece_id, 'chapter reference replace_piece transition must include replacement_piece_id')
-        assert(transition.replacement_node_id, 'chapter reference replace_piece transition must include replacement_node_id')
-        const nextAction = candidate.next_action
-        assert(nextAction, 'chapter reference replace_piece blocked draft must include next_action')
-        assert.equal(nextAction.action, 'regenerate_blueprint', 'chapter reference replace_piece next_action must return to blueprint regeneration')
-        assert.equal(
-          nextAction.reason_code,
-          'transition_replacement_outside_selected_blueprint',
-          'chapter reference replace_piece next_action must expose the concrete reason code',
-        )
-        assert.equal(
-          nextAction.rejected_piece_id,
-          transition.replacement_piece_id,
-          'chapter reference replace_piece next_action rejected_piece_id must match transition replacement_piece_id',
-        )
-        assert.equal(
-          nextAction.replacement_node_id,
-          transition.replacement_node_id,
-          'chapter reference replace_piece next_action replacement_node_id must match transition replacement_node_id',
-        )
-        assert(
-          (nextAction.feedback?.rejected_node_ids ?? []).includes(nextAction.rejected_node_id),
-          'chapter reference replace_piece next_action feedback must carry the rejected source node',
-        )
-        assert(
-          (nextAction.feedback?.problem_tags ?? []).includes('transition_replacement_required') &&
-            (nextAction.feedback?.problem_tags ?? []).includes('transition_replacement_outside_selected_blueprint'),
-          'chapter reference replace_piece next_action feedback must carry transition replacement problem tags',
-        )
-      }
-      assert.equal(
-        candidate.draft.assembled_text.slice(transition.output_start, transition.output_end),
-        transition.text,
-        'chapter reference insertion draft transition output range must match transition text',
-      )
-      const auditTransition = transitionAuditById.get(transition.transition_id)
-      assert(auditTransition, `chapter reference insertion draft audit must include transition ${transition.transition_id}`)
-      if (candidate.draft?.ready_for_insertion === true) {
-        assert.equal(transition.approved, true, 'ready chapter reference insertion draft transition must be approved')
-        assert.equal(auditTransition.passed, true, 'ready chapter reference insertion draft audit transition must pass')
-        assert.deepEqual(auditTransition.violations ?? [], [], 'ready chapter reference insertion draft audit transition must not report violations')
-      } else if (auditTransition.passed === false) {
-        assert(
-          (auditTransition.violations ?? []).some((violation) =>
-            violation.transition_id === transition.transition_id &&
-            [
-              'transition_not_approved',
-              'transition_text_unsafe',
-              'transition_text_hash_mismatch',
-              'transition_piece_replacement_required',
-            ].includes(violation.code)),
-          'blocked chapter reference insertion draft transition audit must report a transition-scoped violation',
-        )
-      }
-    }
-  }
-  assert(blockedAuditCandidateCount >= 1, 'chapter reference insertion draft mock must include an audit-blocked candidate')
-  assert(blockedTransitionCandidateCount >= 1, 'chapter reference insertion draft mock must include a transition-audit-blocked candidate')
-  assert(readyCandidateCount >= 1, 'chapter reference insertion draft mock must include a ready candidate')
-  assert(readyTransitionCandidateCount >= 1, 'chapter reference insertion draft mock must include a ready candidate with an audited transition')
-  const slotVariantDrafts = await page.evaluate(async () => window.novelist.invoke(
+  for (const retiredMethod of [
+    'SearchReferenceMaterials',
+    'GetReferenceMaterialDetail',
+    'GetReferenceCorpusBlueprintSession',
+    'AdvanceReferenceCorpusBlueprintSession',
+    'GenerateReferenceCorpusBlueprintCandidates',
+    'GenerateReferenceCorpusInsertionDraft',
     'GenerateReferenceCorpusInsertionDraftCandidates',
-    {
-      args: [{
-        natural_language_goal: '写门口对峙，秦砚压住怒意，没有立刻开口。',
-        chapter_context: {
-          novel_id: 42,
-          chapter_number: 1,
-          current_draft_text: '秦砚停在黑塔门前。',
-          insertion_offset: 8,
-          previous_chapter_summary: '黑塔门前，秦砚需要压住情绪。',
-          character_snapshots: [],
-        },
-        scope: {
-          library_ids: [],
-          reuse_policies: ['verbatim_ok', 'adapted_only'],
-          include_anchor_ids: [],
-          exclude_anchor_ids: [],
-          session_id: 'project:42:default',
-        },
-        slot_values: {},
-        selected_blueprint: {
-          blueprint_id: 'mock-slot-variant-blueprint',
-          query_context_hash: 'mock-slot-variant-query',
-          strategy: 'selected_slot_only_fixture',
-          beats: [{
-            beat_id: 'mock-slot-variant-beat',
-            beat_index: 0,
-            role_in_beat: 'source_sentence',
-            narrative_function: 'raise_pressure',
-            node_ids: ['mock-node-rain-001'],
-          }],
-        },
-        requested_count: 2,
-        slot_value_variants: [{
-          variant_id: 'strict-current-scene',
-          label: '黑塔队长铜令',
-          slot_values: {
-            'character:她': '秦砚',
-            'place:旧市集门口': '黑塔门前',
-            'honorific:师兄': '队长',
-            'plot_object:钥匙': '铜令',
-          },
-        }, {
-          variant_id: 'alternate-current-scene',
-          label: '废站组长门卡',
-          slot_values: {
-            'character:她': '秦砚',
-            'place:旧市集门口': '废站门前',
-            'honorific:师兄': '组长',
-            'plot_object:钥匙': '门卡',
-          },
-        }],
-      }],
-    }))
-  assert.equal(slotVariantDrafts?.candidates?.length, 2, 'slot_value_variants mock must return requested slot-only draft candidates')
-  assert.deepEqual(
-    slotVariantDrafts.candidates.map((candidate) => candidate.strategy),
-    ['slot_variant_1', 'slot_variant_2'],
-    'slot_value_variants mock must expose slot_variant strategies',
-  )
-  assert(
-    slotVariantDrafts.candidates.every((candidate) =>
-      candidate.draft?.ready_for_insertion === true &&
-      candidate.draft?.gate?.passed === true &&
-      candidate.draft?.audit?.passed === true),
-    'slot_value_variants mock candidates must pass gate and audit',
-  )
-  assert.deepEqual(
-    slotVariantDrafts.candidates.map((candidate) => candidate.draft?.pieces?.[0]?.node_id),
-    ['mock-node-rain-001', 'mock-node-rain-001'],
-    'slot_value_variants mock candidates must keep the same source node',
-  )
-  assert(slotVariantDrafts.candidates[0].draft?.assembled_text.includes('黑塔门前'), 'slot_value_variants first mock draft must apply place slot')
-  assert(slotVariantDrafts.candidates[1].draft?.assembled_text.includes('废站门前'), 'slot_value_variants second mock draft must apply alternate place slot')
-  assert(
-    slotVariantDrafts.candidates.every((candidate) =>
-      candidate.draft?.assembled_text.includes('《旧市集门口师兄钥匙案》')),
-    'slot_value_variants mock must preserve protected title text',
-  )
+    'RecordReferenceCorpusInsertionAudit',
+    'GetReferenceOrchestrationRuns',
+    'StartReferenceOrchestrationRun',
+    'ResumeReferenceOrchestrationRun',
+    'CancelReferenceOrchestrationRun',
+    'GetReferenceDraftCandidates',
+    'GetReferenceAnchoredDraftAudits',
+  ]) {
+    assert(!methods.includes(retiredMethod), 'chapter writing must not call retired bridge method ' + retiredMethod)
+  }
 
-  const saveContentCalls = calls.filter((call) => call.method === 'SaveContent')
-  assert.deepEqual(saveContentCalls, [], 'chapter reference drawer must not save chapter content directly')
+  const sessionReads = calls.filter((call) => call.method === 'GetReferenceWritingSession')
+  assert(sessionReads.length >= 2, 'chapter writing must read the persisted session on open and reopen')
+  for (const read of sessionReads) {
+    assert.equal(read.args?.[0]?.novel_id, 42, 'writing session read must bind the active novel')
+    assert.equal(read.args?.[0]?.chapter_number, 1, 'writing session read must bind the active chapter')
+    assert.equal(read.args?.[0]?.session_id, 'chapter:42:1', 'writing session read must use the stable chapter session id')
+  }
 
-  const forbiddenMethods = [
-    'CreateReferenceAnchor',
-    'CreateReferenceAnchors',
-    'CreateReferenceAnchorsWithResult',
-    'UpdateReferenceAnchor',
-    'UpdateReferenceAnchorMetadata',
-    'DeleteReferenceAnchor',
-    'DeleteReferenceAnchors',
-    'ArchiveReferenceAnchor',
-    'PromoteReferenceAnchorToWorkspaceCorpus',
-    'PromoteReferenceAnchorsToWorkspaceCorpus',
-    'RebuildReferenceAnchor',
-    'CorrectReferenceMaterialTags',
-    'BulkCorrectReferenceMaterialTags',
-    'UpdateReferenceMaterialTags',
-    'UpdateReferenceMaterialsTags',
-    'DeleteReferenceMaterials',
-    'RestoreReferenceMaterials',
-    'AdaptReferenceMaterial',
-    'GenerateReferenceChapterBlueprint',
-    'ReviewReferenceChapterBlueprint',
-    'ApproveReferenceChapterBlueprint',
-    'BindReferenceBlueprintMaterials',
-    'GenerateReferenceAnchoredDraft',
-    'AuditReferenceAnchoredDraft',
-  ]
-  const unexpected = methods.filter((method) => forbiddenMethods.includes(method))
-  assert.deepEqual(unexpected, [], `chapter reference drawer must not mutate materials or save content: ${unexpected.join(', ')}`)
-  assert(!methods.includes('runtime.shell.openExternal'), 'chapter reference drawer workflow must not open external URLs')
+  const generation = calls.find((call) => call.method === 'GenerateReferenceBlueprints')
+  assert(generation?.result?.blueprints?.length === 3, 'chapter writing must receive three material blueprints')
+  assert.equal(generation.args?.[0]?.novel_id, 42, 'blueprint generation must bind the active novel')
+  assert.equal(generation.args?.[0]?.chapter_number, 1, 'blueprint generation must bind the active chapter')
+  assert.equal(generation.args?.[0]?.session_id, 'chapter:42:1', 'blueprint generation must use the stable session')
+  assert.equal(generation.args?.[0]?.requested_count, 3, 'blueprint generation must request three candidates')
+  const generationJson = JSON.stringify(generation.result)
+  assert(generationJson.includes('"material_id"'), 'writing blueprints must reference material identities')
+  assert(generationJson.includes('"generation_id"'), 'writing blueprints must lock material generations')
+  assert(!generationJson.includes('"node_id"'), 'writing blueprints must not reference retired node identities')
+
+  const selection = calls.find((call) => call.method === 'SelectReferenceBlueprint')
+  assert(selection?.args?.[0]?.blueprint_id, 'chapter writing must persist an explicit blueprint selection')
+  assert.equal(selection.args?.[0]?.session_id, 'chapter:42:1', 'blueprint selection must target the stable session')
+  assert.equal(selection.result?.selected_blueprint_id, selection.args?.[0]?.blueprint_id, 'backend selection must be returned')
+
+  const draft = calls.find((call) => call.method === 'GenerateReferenceDraftCandidates')
+  assert(draft?.result?.candidates?.length === 2, 'chapter writing must return every distinct draft candidate')
+  assert.equal(draft.args?.[0]?.session_id, 'chapter:42:1', 'draft generation must target the stable session')
+  assert.equal(draft.args?.[0]?.blueprint_id, selection.args?.[0]?.blueprint_id, 'draft generation must lock the selected blueprint')
+  assert.equal(
+    draft.args?.[0]?.current_draft_text,
+    '林岚在雨夜旧宅门前停住。\n\n她看见桌上的水痕。',
+    'draft generation must send the complete editor draft',
+  )
+  assert.equal(typeof draft.args?.[0]?.insertion_offset, 'number', 'draft generation must include the insertion offset')
+  assert.deepEqual(draft.args?.[0]?.slot_values, {}, 'default writing must not synthesize slot values')
+  assert.equal(draft.args?.[0]?.requested_count, 3, 'draft generation must request three candidates')
+
+  for (const candidate of draft.result.candidates) {
+    assert(candidate.text.includes('\n\n'), 'draft candidates must preserve paragraph boundaries')
+    assert(candidate.audit?.passed === true, 'mock draft candidates must pass the server audit')
+    for (const source of candidate.sources ?? []) {
+      assert(source.material_id, 'draft provenance must include material_id')
+      assert(source.generation_id, 'draft provenance must include generation_id')
+      assert(!Object.hasOwn(source, 'node_id'), 'draft provenance must not include node_id')
+    }
+  }
+
+  assert(!methods.includes('SaveContent'), 'chapter reference flow must update only the editor buffer')
 }
 
 export async function verifyPatternBridgeCalls(page) {
