@@ -77,11 +77,16 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
         Assert.Equal(0, await CountActiveLeasesAsync(options));
         Assert.Equal(0, await CountDuplicateEmbeddingsAsync(options));
 
-        var materialization = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
+        var search = new SqliteReferenceMaterialSearch(
+            options,
+            resolver,
+            new ScaleEmbeddingConfiguration(),
+            new ScaleEmbeddingClient(),
+            vec);
         foreach (var source in sources)
         {
-            var results = await materialization.ListActiveMaterialsAsync(
-                new ListActiveReferenceMaterializationMaterialsPayload(
+            var results = await search.ListAsync(
+                new ReferenceMaterialListRequest(
                     source.Anchor.NovelId,
                     source.Anchor.AnchorId,
                     1,
@@ -160,8 +165,8 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             profileId,
             Guid.NewGuid().ToString("N"),
             "materialization-policy-v1",
-            "candidate-window-v1",
-            ReferenceMaterializationChatCompletionQualifier.SchemaVersion,
+            ReferenceChapterMaterialChatCompletionExtractor.SchemaVersion,
+            ReferenceChapterMaterialChatCompletionExtractor.SchemaVersion,
             new ReferenceMaterializationModelIdentityPayload("scale-llm", "scale-llm-model"),
             new ReferenceMaterializationModelIdentityPayload("scale-embedding", "scale-embedding-model", 8),
             batchSize,

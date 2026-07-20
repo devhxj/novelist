@@ -86,58 +86,11 @@ public static class ReferenceMaterializationErrorCodes
     public const string EmbeddingRequestFailed = "materialization_embedding_request_failed";
     public const string EmbeddingInvalid = "materialization_embedding_invalid";
     public const string VectorIndexFailed = "materialization_vector_index_failed";
-    public const string LexicalIndexFailed = "materialization_lexical_index_failed";
     public const string GenerationIncomplete = "materialization_generation_incomplete";
     public const string BlueprintMaterialNotReady = "materialization_blueprint_material_not_ready";
     public const string BlueprintNoRelevantMaterial = "materialization_blueprint_no_relevant_material";
     public const string ChapterSplitProfileStale = "materialization_chapter_split_profile_stale";
-    public const string CandidateWindowInvalid = "materialization_candidate_window_invalid";
     public const string RetryRequiresNewRun = "materialization_retry_requires_new_run";
-    public const string CandidateReviewConflict = "materialization_candidate_review_conflict";
-    public const string CandidateReviewInvalid = "materialization_candidate_review_invalid";
-}
-
-public static class ReferenceMaterializationCandidateTypes
-{
-    public const string Passage = "passage";
-    public const string DialogueExchange = "dialogue_exchange";
-    public const string ActionReaction = "action_reaction";
-    public const string Emotion = "emotion";
-    public const string Hook = "hook";
-    public const string Payoff = "payoff";
-    public const string Transition = "transition";
-    public const string QualifiedSentence = "qualified_sentence";
-
-    public static IReadOnlyList<string> All { get; } =
-    [
-        Passage,
-        DialogueExchange,
-        ActionReaction,
-        Emotion,
-        Hook,
-        Payoff,
-        Transition,
-        QualifiedSentence
-    ];
-}
-
-public static class ReferenceMaterializationCandidateDecisions
-{
-    public const string Pending = "pending";
-    public const string Accepted = "accepted";
-    public const string Rejected = "rejected";
-    public const string ReviewRequired = "review_required";
-
-    public static IReadOnlyList<string> All { get; } = [Pending, Accepted, Rejected, ReviewRequired];
-}
-
-public static class ReferenceMaterializationCandidateReviewActions
-{
-    public const string Confirm = "confirm";
-    public const string Reject = "reject";
-    public const string AdjustBoundary = "adjust_boundary";
-
-    public static IReadOnlyList<string> All { get; } = [Confirm, Reject, AdjustBoundary];
 }
 
 public sealed record AnalyzeReferenceChapterSplitPayload(
@@ -176,42 +129,6 @@ public sealed record ListReferenceMaterializationChapterProgressPayload(
     [property: JsonPropertyName("run_id")] string RunId,
     [property: JsonPropertyName("page")] int Page,
     [property: JsonPropertyName("size")] int Size);
-
-public sealed record ListReferenceMaterializationCandidatesPayload(
-    [property: JsonPropertyName("novel_id")] long NovelId,
-    [property: JsonPropertyName("anchor_id")] long AnchorId,
-    [property: JsonPropertyName("run_id")] string RunId,
-    [property: JsonPropertyName("decision")] string Decision = ReferenceMaterializationCandidateDecisions.ReviewRequired,
-    [property: JsonPropertyName("page")] int Page = 1,
-    [property: JsonPropertyName("size")] int Size = 20);
-
-public sealed record ReferenceMaterializationCandidateSourceSpanPayload(
-    [property: JsonPropertyName("node_id")] string NodeId,
-    [property: JsonPropertyName("start")] int Start,
-    [property: JsonPropertyName("end")] int End);
-
-public sealed record ReviewReferenceMaterializationCandidatePayload(
-    [property: JsonPropertyName("novel_id")] long NovelId,
-    [property: JsonPropertyName("anchor_id")] long AnchorId,
-    [property: JsonPropertyName("run_id")] string RunId,
-    [property: JsonPropertyName("candidate_id")] string CandidateId,
-    [property: JsonPropertyName("action")] string Action,
-    [property: JsonPropertyName("expected_version")] long ExpectedVersion,
-    [property: JsonPropertyName("source_spans")] IReadOnlyList<ReferenceMaterializationCandidateSourceSpanPayload>? SourceSpans = null);
-
-public sealed record ListActiveReferenceMaterializationMaterialsPayload(
-    [property: JsonPropertyName("novel_id")] long NovelId,
-    [property: JsonPropertyName("anchor_id")] long AnchorId,
-    [property: JsonPropertyName("page")] int Page,
-    [property: JsonPropertyName("size")] int Size,
-    [property: JsonPropertyName("query")]
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Query = null);
-
-public sealed record SearchActiveReferenceMaterializationMaterialsPayload(
-    [property: JsonPropertyName("novel_id")] long NovelId,
-    [property: JsonPropertyName("anchor_id")] long AnchorId,
-    [property: JsonPropertyName("query")] string Query,
-    [property: JsonPropertyName("max_results")] int MaxResults);
 
 public sealed record ReferenceChapterSplitBoundaryPayload(
     [property: JsonPropertyName("chapter_index")] int ChapterIndex,
@@ -314,63 +231,3 @@ public sealed record ReferenceMaterializationStatusPayload(
     DateTimeOffset? CompletedAt,
     [property: JsonPropertyName("vector_index_healthy")] bool VectorIndexHealthy,
     [property: JsonPropertyName("next_action")] string NextAction);
-
-public sealed record ReferenceMaterializationMaterialTagsPayload(
-    [property: JsonPropertyName("narrative_functions")] IReadOnlyList<string> NarrativeFunctions,
-    [property: JsonPropertyName("emotion_mechanics")] IReadOnlyList<string> EmotionMechanics,
-    [property: JsonPropertyName("pov")] IReadOnlyList<string> Pov,
-    [property: JsonPropertyName("techniques")] IReadOnlyList<string> Techniques)
-{
-    [JsonPropertyName("scene_beat_roles")]
-    public IReadOnlyList<string> SceneBeatRoles { get; init; } = [];
-
-    [JsonPropertyName("character_relations")]
-    public IReadOnlyList<string> CharacterRelations { get; init; } = [];
-
-    [JsonPropertyName("causal_information_roles")]
-    public IReadOnlyList<string> CausalInformationRoles { get; init; } = [];
-}
-
-public sealed record ReferenceMaterializationCandidatePayload(
-    [property: JsonPropertyName("candidate_id")] string CandidateId,
-    [property: JsonPropertyName("run_id")] string RunId,
-    [property: JsonPropertyName("anchor_id")] long AnchorId,
-    [property: JsonPropertyName("chapter_index")] int ChapterIndex,
-    [property: JsonPropertyName("candidate_type")] string CandidateType,
-    [property: JsonPropertyName("decision")] string Decision,
-    [property: JsonPropertyName("decision_origin")] string DecisionOrigin,
-    [property: JsonPropertyName("quality_score")]
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? QualityScore,
-    [property: JsonPropertyName("confidence")]
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? Confidence,
-    [property: JsonPropertyName("tags")] ReferenceMaterializationMaterialTagsPayload Tags,
-    [property: JsonPropertyName("reason_codes")] IReadOnlyList<string> ReasonCodes,
-    [property: JsonPropertyName("text_preview")] string TextPreview,
-    [property: JsonPropertyName("source_spans")] IReadOnlyList<ReferenceMaterializationCandidateSourceSpanPayload> SourceSpans,
-    [property: JsonPropertyName("source_node_count")] int SourceNodeCount,
-    [property: JsonPropertyName("row_version")] long RowVersion);
-
-public sealed record ReferenceMaterializationCandidateReviewResultPayload(
-    [property: JsonPropertyName("candidate_id")] string CandidateId,
-    [property: JsonPropertyName("decision")] string Decision,
-    [property: JsonPropertyName("row_version")] long RowVersion,
-    [property: JsonPropertyName("requalification_queued")] bool RequalificationQueued,
-    [property: JsonPropertyName("status")] ReferenceMaterializationStatusPayload Status);
-
-public sealed record ReferenceMaterializationMaterialPayload(
-    [property: JsonPropertyName("material_id")] string MaterialId,
-    [property: JsonPropertyName("anchor_id")] long AnchorId,
-    [property: JsonPropertyName("generation_id")] string GenerationId,
-    [property: JsonPropertyName("material_type")] string MaterialType,
-    [property: JsonPropertyName("text")] string Text,
-    [property: JsonPropertyName("quality_score")] double QualityScore,
-    [property: JsonPropertyName("confidence")] double Confidence,
-    [property: JsonPropertyName("tags")] ReferenceMaterializationMaterialTagsPayload Tags,
-    [property: JsonPropertyName("reason_codes")] IReadOnlyList<string> ReasonCodes);
-
-public sealed record ReferenceMaterializationSemanticSearchHitPayload(
-    [property: JsonPropertyName("material")] ReferenceMaterializationMaterialPayload Material,
-    [property: JsonPropertyName("vector_score")] double VectorScore,
-    [property: JsonPropertyName("score_components")]
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyDictionary<string, double>? ScoreComponents = null);

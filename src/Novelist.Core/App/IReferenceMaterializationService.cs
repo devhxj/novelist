@@ -31,20 +31,4 @@ public interface IReferenceMaterializationService
     ValueTask<PageResultPayload<ReferenceMaterializationChapterProgressPayload>> ListMaterializationChapterProgressAsync(
         ListReferenceMaterializationChapterProgressPayload input,
         CancellationToken cancellationToken);
-
-    ValueTask<PageResultPayload<ReferenceMaterializationCandidatePayload>> ListMaterializationCandidatesAsync(
-        ListReferenceMaterializationCandidatesPayload input,
-        CancellationToken cancellationToken);
-
-    ValueTask<ReferenceMaterializationCandidateReviewResultPayload> ReviewMaterializationCandidateAsync(
-        ReviewReferenceMaterializationCandidatePayload input,
-        CancellationToken cancellationToken);
-
-    ValueTask<PageResultPayload<ReferenceMaterializationMaterialPayload>> ListActiveMaterialsAsync(
-        ListActiveReferenceMaterializationMaterialsPayload input,
-        CancellationToken cancellationToken);
-
-    ValueTask<IReadOnlyList<ReferenceMaterializationSemanticSearchHitPayload>> SearchActiveMaterialsAsync(
-        SearchActiveReferenceMaterializationMaterialsPayload input,
-        CancellationToken cancellationToken);
 }

@@ -176,7 +176,7 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RetryRejectsAQualifierSchemaThatDoesNotMatchTheCurrentMaterializationSchema()
+    public async Task RetryRejectsAnExtractorSchemaThatDoesNotMatchTheCurrentMaterializationSchema()
     {
         var options = CreateOptions();
         var anchor = await CreateAnchorAsync(options);
@@ -199,8 +199,8 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
             profile.SplitProfileId,
             Guid.NewGuid().ToString("N"),
             "policy-v1",
-            "candidate-v1",
-            "material-qualifier-v1",
+            "legacy-extractor-v1",
+            "legacy-extractor-v1",
             new ReferenceMaterializationModelIdentityPayload("llm", "model"),
             new ReferenceMaterializationModelIdentityPayload("embedding", "model", 8),
             5,
@@ -219,54 +219,6 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
                 CancellationToken.None));
 
         Assert.Equal(ReferenceMaterializationErrorCodes.RetryRequiresNewRun, exception.ErrorCode);
-    }
-
-    [Fact]
-    public async Task CandidateListingReturnsOnlyTheRequestedRunAndDecisionWithBoundedPreviews()
-    {
-        var options = CreateOptions();
-        var anchor = await CreateAnchorAsync(options);
-        var service = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
-        var profile = await service.PreviewChapterSplitAsync(
-            new PreviewReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, "# {title}"),
-            CancellationToken.None);
-        await service.ConfirmChapterSplitAsync(
-            new ConfirmReferenceChapterSplitPayload(anchor.NovelId, anchor.AnchorId, profile.SplitProfileId),
-            CancellationToken.None);
-
-        var store = new SqliteReferenceMaterializationRunStore(new ReferenceCorpusDatabasePathResolver(options));
-        var run = await store.CreateAsync(CreateSeed(anchor.AnchorId, profile.SplitProfileId), CancellationToken.None);
-        var built = await store.BuildCandidatesForChapterAsync(run.RunId, chapterIndex: 1, CancellationToken.None);
-        var workItem = await store.ReadQualificationWorkItemAsync(run.RunId, built.ChapterIndex, CancellationToken.None);
-        var persisted = await store.PersistQualificationAsync(
-            run.RunId,
-            built.ChapterIndex,
-            new ReferenceMaterializationQualificationResult(
-                workItem.Request.Candidates.Select(ReviewRequiredDecision).ToArray()),
-            CancellationToken.None);
-
-        var listed = await service.ListMaterializationCandidatesAsync(
-            new ListReferenceMaterializationCandidatesPayload(
-                anchor.NovelId,
-                anchor.AnchorId,
-                run.RunId,
-                ReferenceMaterializationCandidateDecisions.ReviewRequired,
-                Page: 1,
-                Size: 20),
-            CancellationToken.None);
-
-        Assert.Equal(persisted.ReviewCount, listed.Total);
-        Assert.NotEmpty(listed.Items);
-        Assert.All(listed.Items, item =>
-        {
-            Assert.Equal(run.RunId, item.RunId);
-            Assert.Equal(anchor.AnchorId, item.AnchorId);
-            Assert.Equal(ReferenceMaterializationCandidateDecisions.ReviewRequired, item.Decision);
-            Assert.Equal("llm_qualifier", item.DecisionOrigin);
-            Assert.InRange(item.TextPreview.Length, 1, 515);
-            Assert.Equal(1, item.RowVersion);
-            Assert.NotEmpty(item.ReasonCodes);
-        });
     }
 
     public void Dispose()
@@ -323,34 +275,6 @@ public sealed class ReferenceMaterializationServiceTests : IDisposable
             EnableLegacyMigration = false
         };
     }
-
-    private static ReferenceMaterializationRunSeed CreateSeed(long anchorId, string splitProfileId) => new(
-        Guid.NewGuid().ToString("N"),
-        anchorId,
-        splitProfileId,
-        Guid.NewGuid().ToString("N"),
-        "materialization-policy-v1",
-        "candidate-window-v1",
-        ReferenceMaterializationChatCompletionQualifier.SchemaVersion,
-        new ReferenceMaterializationModelIdentityPayload("llm-provider", "llm-model"),
-        new ReferenceMaterializationModelIdentityPayload("embedding-provider", "embedding-model", 8),
-        ReferenceMaterializationBatchSizes.Default,
-        DateTimeOffset.UtcNow);
-
-    private static ReferenceMaterializationCandidateQualification ReviewRequiredDecision(
-        ReferenceMaterializationQualificationCandidate candidate) => new(
-        candidate.CandidateId,
-        ReferenceMaterializationCandidateDecisions.ReviewRequired,
-        candidate.SourceNodes.Select(node => new ReferenceMaterializationQualificationSpan(node.NodeId, 0, node.Text.Length)).ToArray(),
-        new ReferenceMaterializationQualityScores(0.8, 0.8, 0.6, 0.7, 0.5, 0.6),
-        new ReferenceMaterializationQualificationTags(["reveal"], ["suspense"], ["close_third"], ["subtext"])
-        {
-            SceneBeatRoles = ["turn_beat"],
-            CharacterRelations = ["mistrust"],
-            CausalInformationRoles = ["withheld_information"]
-        },
-        0.5,
-        ["needs_human_context"]);
 
     private sealed class EmptyChapterSplitAnalyzer : IReferenceChapterSplitAnalyzer
     {

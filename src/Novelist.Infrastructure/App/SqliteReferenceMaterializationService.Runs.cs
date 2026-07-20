@@ -29,8 +29,8 @@ public sealed partial class SqliteReferenceMaterializationService
                 splitProfileId,
                 Guid.NewGuid().ToString("N"),
                 "materialization-policy-v1",
-                ReferenceCandidateWindowBuilder.Version,
-                ReferenceMaterializationChatCompletionQualifier.SchemaVersion,
+                ReferenceChapterMaterialChatCompletionExtractor.SchemaVersion,
+                ReferenceChapterMaterialChatCompletionExtractor.SchemaVersion,
                 models.Llm,
                 models.Embedding,
                 input.ChapterBatchSize,
@@ -80,11 +80,11 @@ public sealed partial class SqliteReferenceMaterializationService
         }
 
         var qualifierVersion = await _runStore.GetQualifierVersionAsync(current.RunId, cancellationToken);
-        if (!string.Equals(qualifierVersion, ReferenceMaterializationChatCompletionQualifier.SchemaVersion, StringComparison.Ordinal))
+        if (!string.Equals(qualifierVersion, ReferenceChapterMaterialChatCompletionExtractor.SchemaVersion, StringComparison.Ordinal))
         {
             throw new ReferenceMaterializationException(
                 ReferenceMaterializationErrorCodes.RetryRequiresNewRun,
-                "The material qualification schema changed after this run started. Create a new run instead of retrying this generation.");
+                "The chapter material extraction schema changed after this run started. Create a new run instead of retrying this generation.");
         }
 
         return await _runStore.RetryCurrentBatchAsync(current.RunId, cancellationToken);
@@ -104,88 +104,6 @@ public sealed partial class SqliteReferenceMaterializationService
         }
 
         return await _runStore.ListChapterProgressAsync(input.RunId, input.Page, input.Size, cancellationToken);
-    }
-
-    public async ValueTask<PageResultPayload<ReferenceMaterializationCandidatePayload>> ListMaterializationCandidatesAsync(
-        ListReferenceMaterializationCandidatesPayload input,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(input);
-        ValidateReferenceInput(input.NovelId, input.AnchorId);
-        await EnsureAnchorAccessibleAsync(input.NovelId, input.AnchorId, cancellationToken);
-        var status = await _runStore.GetAsync(input.RunId, cancellationToken);
-        if (status is null || status.AnchorId != input.AnchorId)
-        {
-            throw new ArgumentException("Materialization run does not exist.", nameof(input));
-        }
-
-        return await _runStore.ListCandidatesAsync(
-            input.RunId,
-            input.Decision,
-            input.Page,
-            input.Size,
-            cancellationToken);
-    }
-
-    public async ValueTask<ReferenceMaterializationCandidateReviewResultPayload> ReviewMaterializationCandidateAsync(
-        ReviewReferenceMaterializationCandidatePayload input,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(input);
-        ValidateReferenceInput(input.NovelId, input.AnchorId);
-        await EnsureAnchorAccessibleAsync(input.NovelId, input.AnchorId, cancellationToken);
-        var status = await _runStore.GetAsync(input.RunId, cancellationToken);
-        if (status is null || status.AnchorId != input.AnchorId)
-        {
-            throw new ReferenceMaterializationException(
-                ReferenceMaterializationErrorCodes.CandidateReviewInvalid,
-                "Materialization run does not exist.");
-        }
-
-        var mutation = await _runStore.ReviewCandidateAsync(
-            input.RunId,
-            input.CandidateId,
-            input.Action,
-            input.ExpectedVersion,
-            input.SourceSpans,
-            cancellationToken);
-        var updatedStatus = await _runStore.GetAsync(input.RunId, cancellationToken)
-            ?? throw new InvalidOperationException("Materialization run disappeared after candidate review.");
-        return new ReferenceMaterializationCandidateReviewResultPayload(
-            mutation.CandidateId,
-            mutation.Decision,
-            mutation.RowVersion,
-            mutation.RequalificationQueued,
-            updatedStatus);
-    }
-
-    public async ValueTask<PageResultPayload<ReferenceMaterializationMaterialPayload>> ListActiveMaterialsAsync(
-        ListActiveReferenceMaterializationMaterialsPayload input,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(input);
-        ValidateReferenceInput(input.NovelId, input.AnchorId);
-        await EnsureAnchorAccessibleAsync(input.NovelId, input.AnchorId, cancellationToken);
-        return await _runStore.ListActiveMaterialsAsync(
-            input.AnchorId,
-            input.Page,
-            input.Size,
-            input.Query,
-            cancellationToken);
-    }
-
-    public async ValueTask<IReadOnlyList<ReferenceMaterializationSemanticSearchHitPayload>> SearchActiveMaterialsAsync(
-        SearchActiveReferenceMaterializationMaterialsPayload input,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(input);
-        ValidateReferenceInput(input.NovelId, input.AnchorId);
-        await EnsureAnchorAccessibleAsync(input.NovelId, input.AnchorId, cancellationToken);
-        return await _semanticSearch.SearchAsync(
-            input.AnchorId,
-            input.Query,
-            input.MaxResults,
-            cancellationToken);
     }
 
     private async ValueTask EnsureConfirmedProfileMatchesCurrentSourceAsync(

@@ -219,77 +219,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         await transaction.CommitAsync(cancellationToken);
     }
 
-    public async ValueTask CompleteEmptyQualificationAsync(
-        string runId,
-        int chapterIndex,
-        CancellationToken cancellationToken)
-    {
-        var normalizedRunId = NormalizeRunId(runId);
-        var databasePath = await EnsureSchemaAsync(cancellationToken);
-        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            UPDATE reference_materialization_chapter_progress
-            SET status = $embedding,
-                current_stage = $embedding,
-                decided_count = 0,
-                accepted_count = 0,
-                rejected_count = 0,
-                review_count = 0,
-                row_version = row_version + 1
-            WHERE run_id = $run_id
-              AND chapter_index = $chapter_index
-              AND status = $qualifying
-              AND candidate_count = 0;
-            """;
-        command.Parameters.AddWithValue("$embedding", ReferenceMaterializationChapterStates.Embedding);
-        command.Parameters.AddWithValue("$run_id", normalizedRunId);
-        command.Parameters.AddWithValue("$chapter_index", chapterIndex);
-        command.Parameters.AddWithValue("$qualifying", ReferenceMaterializationChapterStates.LlmQualifying);
-        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
-        {
-            throw new InvalidOperationException("Materialization chapter is not an empty qualification stage.");
-        }
-
-        await transaction.CommitAsync(cancellationToken);
-    }
-
-    public async ValueTask CompleteEmptyEmbeddingAsync(
-        string runId,
-        int chapterIndex,
-        CancellationToken cancellationToken)
-    {
-        var normalizedRunId = NormalizeRunId(runId);
-        var databasePath = await EnsureSchemaAsync(cancellationToken);
-        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            UPDATE reference_materialization_chapter_progress
-            SET status = $indexing,
-                current_stage = $indexing,
-                vector_count = 0,
-                row_version = row_version + 1
-            WHERE run_id = $run_id
-              AND chapter_index = $chapter_index
-              AND status = $embedding
-              AND accepted_count = 0;
-            """;
-        command.Parameters.AddWithValue("$indexing", ReferenceMaterializationChapterStates.Indexing);
-        command.Parameters.AddWithValue("$run_id", normalizedRunId);
-        command.Parameters.AddWithValue("$chapter_index", chapterIndex);
-        command.Parameters.AddWithValue("$embedding", ReferenceMaterializationChapterStates.Embedding);
-        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
-        {
-            throw new InvalidOperationException("Materialization chapter is not an empty embedding stage.");
-        }
-
-        await transaction.CommitAsync(cancellationToken);
-    }
-
     private static async ValueTask<BatchRun?> ReadBatchRunAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -433,44 +362,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             materials.Parameters.AddWithValue("$batch_index", batchIndex);
             materials.Parameters.AddWithValue("$completed", ReferenceMaterializationChapterStates.Completed);
             await materials.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        await using (var embeddings = connection.CreateCommand())
-        {
-            embeddings.Transaction = transaction;
-            embeddings.CommandText = $"""
-                DELETE FROM reference_materialization_candidate_embeddings
-                WHERE run_id = $run_id
-                  AND candidate_id IN ({CurrentBatchCandidateIdsSql});
-                """;
-            embeddings.Parameters.AddWithValue("$run_id", runId);
-            embeddings.Parameters.AddWithValue("$batch_index", batchIndex);
-            await embeddings.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        await using (var candidates = connection.CreateCommand())
-        {
-            candidates.Transaction = transaction;
-            candidates.CommandText = """
-                UPDATE reference_material_candidates
-                SET decision = $pending,
-                    decision_origin = 'candidate_window_builder',
-                    quality_score = NULL,
-                    confidence = NULL,
-                    scores_json = '{}',
-                    tags_json = '{}',
-                    reason_codes_json = '[]',
-                    reviewed_at = NULL,
-                    row_version = row_version + 1
-                WHERE run_id = $run_id
-                  AND decision_origin <> $deterministic_triage
-                  AND candidate_id IN (
-                """ + CurrentBatchCandidateIdsSql + ");";
-            candidates.Parameters.AddWithValue("$pending", ReferenceMaterializationCandidateDecisions.Pending);
-            candidates.Parameters.AddWithValue("$deterministic_triage", "deterministic_triage");
-            candidates.Parameters.AddWithValue("$run_id", runId);
-            candidates.Parameters.AddWithValue("$batch_index", batchIndex);
-            await candidates.ExecuteNonQueryAsync(cancellationToken);
         }
 
         await using (var chapters = connection.CreateCommand())
@@ -674,24 +565,6 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         command.Parameters.AddWithValue("$now", FormatTimestamp(DateTimeOffset.UtcNow));
         return await command.ExecuteScalarAsync(cancellationToken) is not null;
     }
-
-    private const string CurrentBatchCandidateIdsSql = """
-        SELECT DISTINCT candidate.candidate_id
-        FROM reference_material_candidates candidate
-        JOIN reference_material_candidate_nodes candidate_node ON candidate_node.candidate_id = candidate.candidate_id
-        JOIN reference_text_nodes node ON node.node_id = candidate_node.node_id
-        JOIN reference_materialization_runs run ON run.run_id = candidate.run_id
-        JOIN reference_materialization_chapter_progress progress
-          ON progress.run_id = run.run_id
-         AND progress.batch_index = $batch_index
-        JOIN reference_chapter_split_boundaries boundary
-          ON boundary.split_profile_id = run.split_profile_id
-         AND boundary.chapter_index = progress.chapter_index
-        WHERE candidate.run_id = $run_id
-          AND node.anchor_id = run.anchor_id
-          AND node.start_offset >= boundary.content_start
-          AND node.end_offset <= boundary.content_end
-        """;
 
     private sealed record BatchRun(string RunId, string Status, int? CurrentBatchIndex);
 

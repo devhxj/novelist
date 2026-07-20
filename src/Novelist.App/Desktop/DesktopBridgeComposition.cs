@@ -104,17 +104,10 @@ public static PhotinoWebMessageBridge CreateBridge(
             embeddingClient,
             sqliteVecProvider);
         var materializationDatabasePathResolver = new ReferenceCorpusDatabasePathResolver(options);
-        var referenceMaterializationSemanticSearch = new SqliteReferenceMaterializationSemanticSearch(
-            options,
-            materializationDatabasePathResolver,
-            embeddingService,
-            embeddingClient,
-            sqliteVecProvider);
         var referenceMaterializationService = new SqliteReferenceMaterializationService(
             options,
             new ReferenceChapterSplitChatCompletionAnalyzer(settingsService, chatCompletionClient),
-            materializationDatabasePathResolver,
-            semanticSearch: referenceMaterializationSemanticSearch);
+            materializationDatabasePathResolver);
         var referenceMaterialSearch = new SqliteReferenceMaterialSearch(
             options,
             materializationDatabasePathResolver,

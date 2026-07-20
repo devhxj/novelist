@@ -67,7 +67,7 @@ The 2,000,000-character workload is deliberately explicit and non-blocking. It i
 
 ## Materialization scale gate
 
-`run-materialization-scale-gate.ps1` is the independent 50K gate for the v2 reference materialization path. It uses schema-locked fake LLM and embedding providers, two reference sources, three complete runs with 5-chapter batches, and one complete run with 10-chapter batches. The gate verifies candidate/embedding/index count closure, active-generation semantic retrieval, no active lease, no duplicate embedding rows, and fake-provider throughput.
+`run-materialization-scale-gate.ps1` is the independent 50K gate for whole-chapter materialization. It uses schema-locked fake extractors and embedding providers, two reference sources, three complete runs with 5-chapter batches, and one complete run with 10-chapter batches. The gate verifies material/embedding/index count closure, active-generation listing, no active lease, no duplicate embedding rows, and fake-provider throughput.
 
 The 50K functional case runs in the normal integration suite. Run the wrapper directly when you need the isolated fake-provider throughput gate or an explicit diagnostic report:
 
@@ -80,34 +80,6 @@ A 2M materialization run remains an explicit diagnostic only:
 ```powershell
 ./scripts/corpus-driven-writing/run-materialization-scale-gate.ps1 -Configuration Release -ScaleCharacters 2000000
 ```
-
-## Materialization quality fixture contract
-
-`run-materialization-quality-fixture-contract.ps1` validates the v2 calibration and holdout annotations independently of throughput. It checks decision/type/reason-code enums, source hashes, exact evidence spans, duplicate identifiers, and the physical calibration/holdout split.
-
-```powershell
-./scripts/corpus-driven-writing/run-materialization-quality-fixture-contract.ps1 -Configuration Release
-```
-
-## Legacy materialization baseline
-
-`run-materialization-v1-baseline.ps1` runs the existing `BuildMaterials` projection against the same calibration and holdout fixture. It writes a deterministic, redacted JSON report with raw node, material, unique source-span, overlap, short-noise, short-valuable, and active-search fields. The report never includes source prose or local paths.
-
-```powershell
-./scripts/corpus-driven-writing/run-materialization-v1-baseline.ps1 -Configuration Release
-```
-
-The checked-in seed fixture establishes the measurement path and exposes v1's mechanical projection behavior; it is not the approximately 500-sentence human holdout required to pass the v2 materialization quality gate. Do not treat a successful baseline command as a v2 quality result.
-
-## V2 materialization quality evaluation
-
-`run-materialization-quality-evaluation.ps1` sends the fixture candidates to the currently selected LLM only after the selected LLM and embedding model both pass their health checks. It writes a redacted report with the qualification precision/recall, short-noise and short-valuable recall, and median evidence-span IoU. Model or validation failure exits with a stable error and does not write a partial report.
-
-```powershell
-./scripts/corpus-driven-writing/run-materialization-quality-evaluation.ps1 -Configuration Release
-```
-
-The checked-in fixtures have `dataset_kind: seed`, so their report is deliberately ineligible for the human quality gate. A passing gate requires physically separated `dataset_kind: human` calibration and holdout fixtures with at least 500 annotated source nodes in total; this qualification report does not replace the separate active-material overlap, provenance, retrieval, and full-pipeline gates.
 
 ## Writing-effect evaluation
 

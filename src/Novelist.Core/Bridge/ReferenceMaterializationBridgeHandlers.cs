@@ -49,26 +49,6 @@ public static class ReferenceMaterializationBridgeHandlers
                 ReadObjectArg<ListReferenceMaterializationChapterProgressPayload>(context.Payload, 0, "input"),
                 cancellationToken)));
 
-        dispatcher.Register("ListReferenceMaterializationCandidates", async (context, cancellationToken) =>
-            await ExecuteCandidatesAsync(() => service.ListMaterializationCandidatesAsync(
-                ReadObjectArg<ListReferenceMaterializationCandidatesPayload>(context.Payload, 0, "input"),
-                cancellationToken)));
-
-        dispatcher.Register("ReviewReferenceMaterializationCandidate", async (context, cancellationToken) =>
-            await ExecuteCandidateReviewAsync(() => service.ReviewMaterializationCandidateAsync(
-                ReadObjectArg<ReviewReferenceMaterializationCandidatePayload>(context.Payload, 0, "input"),
-                cancellationToken)));
-
-        dispatcher.Register("ListActiveReferenceMaterializationMaterials", async (context, cancellationToken) =>
-            await ExecuteMaterialsAsync(() => service.ListActiveMaterialsAsync(
-                ReadObjectArg<ListActiveReferenceMaterializationMaterialsPayload>(context.Payload, 0, "input"),
-                cancellationToken)));
-
-        dispatcher.Register("SearchActiveReferenceMaterializationMaterials", async (context, cancellationToken) =>
-            await ExecuteSemanticMaterialsAsync(() => service.SearchActiveMaterialsAsync(
-                ReadObjectArg<SearchActiveReferenceMaterializationMaterialsPayload>(context.Payload, 0, "input"),
-                cancellationToken)));
-
         return dispatcher;
     }
 
@@ -152,94 +132,6 @@ public static class ReferenceMaterializationBridgeHandlers
         }
     }
 
-    private static async ValueTask<PageResultPayload<ReferenceMaterializationMaterialPayload>> ExecuteMaterialsAsync(
-        Func<ValueTask<PageResultPayload<ReferenceMaterializationMaterialPayload>>> operation)
-    {
-        try
-        {
-            var result = await operation();
-            return new PageResultPayload<ReferenceMaterializationMaterialPayload>(
-                result.Items.Select(SanitizeMaterial).ToArray(),
-                result.Total,
-                result.Page,
-                result.Size,
-                result.TotalPages);
-        }
-        catch (ReferenceMaterializationException exception)
-        {
-            throw new BridgeRequestException(
-                exception.ErrorCode,
-                exception.Message,
-                new { error_code = exception.ErrorCode },
-                retryable: true);
-        }
-    }
-
-    private static async ValueTask<PageResultPayload<ReferenceMaterializationCandidatePayload>> ExecuteCandidatesAsync(
-        Func<ValueTask<PageResultPayload<ReferenceMaterializationCandidatePayload>>> operation)
-    {
-        try
-        {
-            var result = await operation();
-            return new PageResultPayload<ReferenceMaterializationCandidatePayload>(
-                result.Items.Select(SanitizeCandidate).ToArray(),
-                result.Total,
-                result.Page,
-                result.Size,
-                result.TotalPages);
-        }
-        catch (ReferenceMaterializationException exception)
-        {
-            throw new BridgeRequestException(
-                exception.ErrorCode,
-                exception.Message,
-                new { error_code = exception.ErrorCode },
-                retryable: true);
-        }
-    }
-
-    private static async ValueTask<ReferenceMaterializationCandidateReviewResultPayload> ExecuteCandidateReviewAsync(
-        Func<ValueTask<ReferenceMaterializationCandidateReviewResultPayload>> operation)
-    {
-        try
-        {
-            var result = await operation();
-            return result with
-            {
-                CandidateId = ReferencePayloadSanitizer.RedactAndBoundText(result.CandidateId, 128),
-                Decision = ReferencePayloadSanitizer.RedactAndBoundText(result.Decision, 32),
-                Status = SanitizeStatus(result.Status)
-            };
-        }
-        catch (ReferenceMaterializationException exception)
-        {
-            throw new BridgeRequestException(
-                exception.ErrorCode,
-                exception.Message,
-                new { error_code = exception.ErrorCode },
-                retryable: true);
-        }
-    }
-
-    private static async ValueTask<IReadOnlyList<ReferenceMaterializationSemanticSearchHitPayload>> ExecuteSemanticMaterialsAsync(
-        Func<ValueTask<IReadOnlyList<ReferenceMaterializationSemanticSearchHitPayload>>> operation)
-    {
-        try
-        {
-            return (await operation())
-                .Select(hit => hit with { Material = SanitizeMaterial(hit.Material) })
-                .ToArray();
-        }
-        catch (ReferenceMaterializationException exception)
-        {
-            throw new BridgeRequestException(
-                exception.ErrorCode,
-                exception.Message,
-                new { error_code = exception.ErrorCode },
-                retryable: true);
-        }
-    }
-
     private static ReferenceMaterializationStatusPayload SanitizeStatus(ReferenceMaterializationStatusPayload status)
     {
         return status with
@@ -276,69 +168,6 @@ public static class ReferenceMaterializationBridgeHandlers
             Provider = ReferencePayloadSanitizer.RedactAndBoundText(model.Provider, 128),
             ModelId = ReferencePayloadSanitizer.RedactAndBoundText(model.ModelId, 256)
         };
-    }
-
-    private static ReferenceMaterializationMaterialPayload SanitizeMaterial(
-        ReferenceMaterializationMaterialPayload material)
-    {
-        return material with
-        {
-            MaterialId = ReferencePayloadSanitizer.RedactAndBoundText(material.MaterialId, 128),
-            GenerationId = ReferencePayloadSanitizer.RedactAndBoundText(material.GenerationId, 128),
-            MaterialType = ReferencePayloadSanitizer.RedactAndBoundText(material.MaterialType, 64),
-            Text = ReferencePayloadSanitizer.RedactAndBoundText(material.Text, 1_400),
-            Tags = new ReferenceMaterializationMaterialTagsPayload(
-                SanitizeTags(material.Tags.NarrativeFunctions),
-                SanitizeTags(material.Tags.EmotionMechanics),
-                SanitizeTags(material.Tags.Pov),
-                SanitizeTags(material.Tags.Techniques))
-            {
-                SceneBeatRoles = SanitizeTags(material.Tags.SceneBeatRoles),
-                CharacterRelations = SanitizeTags(material.Tags.CharacterRelations),
-                CausalInformationRoles = SanitizeTags(material.Tags.CausalInformationRoles)
-            },
-            ReasonCodes = SanitizeTags(material.ReasonCodes)
-        };
-    }
-
-    private static ReferenceMaterializationCandidatePayload SanitizeCandidate(
-        ReferenceMaterializationCandidatePayload candidate)
-    {
-        return candidate with
-        {
-            CandidateId = ReferencePayloadSanitizer.RedactAndBoundText(candidate.CandidateId, 128),
-            RunId = ReferencePayloadSanitizer.RedactAndBoundText(candidate.RunId, 128),
-            CandidateType = ReferencePayloadSanitizer.RedactAndBoundText(candidate.CandidateType, 64),
-            Decision = ReferencePayloadSanitizer.RedactAndBoundText(candidate.Decision, 32),
-            DecisionOrigin = ReferencePayloadSanitizer.RedactAndBoundText(candidate.DecisionOrigin, 64),
-            TextPreview = ReferencePayloadSanitizer.RedactAndBoundText(candidate.TextPreview, 512),
-            SourceSpans = (candidate.SourceSpans ?? Array.Empty<ReferenceMaterializationCandidateSourceSpanPayload>())
-                .Take(12)
-                .Select(span => new ReferenceMaterializationCandidateSourceSpanPayload(
-                    ReferencePayloadSanitizer.RedactAndBoundText(span.NodeId, 128),
-                    Math.Max(0, span.Start),
-                    Math.Max(0, span.End)))
-                .ToArray(),
-            Tags = new ReferenceMaterializationMaterialTagsPayload(
-                SanitizeTags(candidate.Tags.NarrativeFunctions),
-                SanitizeTags(candidate.Tags.EmotionMechanics),
-                SanitizeTags(candidate.Tags.Pov),
-                SanitizeTags(candidate.Tags.Techniques))
-            {
-                SceneBeatRoles = SanitizeTags(candidate.Tags.SceneBeatRoles),
-                CharacterRelations = SanitizeTags(candidate.Tags.CharacterRelations),
-                CausalInformationRoles = SanitizeTags(candidate.Tags.CausalInformationRoles)
-            },
-            ReasonCodes = SanitizeTags(candidate.ReasonCodes)
-        };
-    }
-
-    private static IReadOnlyList<string> SanitizeTags(IReadOnlyList<string>? values)
-    {
-        return (values ?? Array.Empty<string>())
-            .Take(12)
-            .Select(value => ReferencePayloadSanitizer.RedactAndBoundText(value, 96))
-            .ToArray();
     }
 
     private static T ReadObjectArg<T>(JsonElement? payload, int index, string argumentName)

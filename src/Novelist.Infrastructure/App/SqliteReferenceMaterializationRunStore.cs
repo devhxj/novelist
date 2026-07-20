@@ -8,16 +8,13 @@ namespace Novelist.Infrastructure.App;
 internal sealed partial class SqliteReferenceMaterializationRunStore
 {
     private readonly IReferenceCorpusDatabasePathResolver _databasePathResolver;
-    private readonly ReferenceCandidateWindowBuilder _candidateWindowBuilder;
     private readonly object _schemaInitializationGate = new();
     private Task<string>? _schemaInitialization;
 
     public SqliteReferenceMaterializationRunStore(
-        IReferenceCorpusDatabasePathResolver databasePathResolver,
-        ReferenceCandidateWindowBuilder? candidateWindowBuilder = null)
+        IReferenceCorpusDatabasePathResolver databasePathResolver)
     {
         _databasePathResolver = databasePathResolver ?? throw new ArgumentNullException(nameof(databasePathResolver));
-        _candidateWindowBuilder = candidateWindowBuilder ?? new ReferenceCandidateWindowBuilder();
     }
 
     public async ValueTask<ReferenceMaterializationStatusPayload> CreateAsync(

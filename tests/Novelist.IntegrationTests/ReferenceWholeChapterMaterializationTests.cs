@@ -244,8 +244,8 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
                 first.Anchor.AnchorId,
                 replacement.RunId),
             CancellationToken.None);
-        var materials = await first.Service.ListActiveMaterialsAsync(
-            new ListActiveReferenceMaterializationMaterialsPayload(
+        var materials = await CreateSearch(first).ListAsync(
+            new ReferenceMaterialListRequest(
                 first.Anchor.NovelId,
                 first.Anchor.AnchorId,
                 1,

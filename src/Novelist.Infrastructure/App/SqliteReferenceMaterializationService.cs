@@ -26,15 +26,13 @@ public sealed partial class SqliteReferenceMaterializationService : IReferenceMa
     private readonly IReferenceCorpusDatabasePathResolver _databasePathResolver;
     private readonly IReferenceMaterializationModelPreflight _modelPreflight;
     private readonly SqliteReferenceMaterializationRunStore _runStore;
-    private readonly IReferenceMaterializationSemanticSearch _semanticSearch;
     private readonly SemaphoreSlim _mutex = new(1, 1);
 
     public SqliteReferenceMaterializationService(
         AppInitializationOptions? options = null,
         IReferenceChapterSplitAnalyzer? analyzer = null,
         IReferenceCorpusDatabasePathResolver? databasePathResolver = null,
-        IReferenceMaterializationModelPreflight? modelPreflight = null,
-        IReferenceMaterializationSemanticSearch? semanticSearch = null)
+        IReferenceMaterializationModelPreflight? modelPreflight = null)
     {
         _options = options ?? new AppInitializationOptions();
         _analyzer = analyzer ?? new ReferenceChapterSplitChatCompletionAnalyzer(
@@ -47,12 +45,6 @@ public sealed partial class SqliteReferenceMaterializationService : IReferenceMa
             new FileSystemEmbeddingSettingsService(_options),
             new HybridEmbeddingClient());
         _runStore = new SqliteReferenceMaterializationRunStore(_databasePathResolver);
-        _semanticSearch = semanticSearch ?? new SqliteReferenceMaterializationSemanticSearch(
-            _options,
-            _databasePathResolver,
-            new FileSystemEmbeddingSettingsService(_options),
-            new HybridEmbeddingClient(),
-            new SqliteVecTableProvisioner());
     }
 
     public async ValueTask<ReferenceChapterSplitProfilePayload> AnalyzeChapterSplitAsync(
