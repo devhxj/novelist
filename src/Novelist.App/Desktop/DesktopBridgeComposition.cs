@@ -131,26 +131,11 @@ public static PhotinoWebMessageBridge CreateBridge(
             embeddingClient,
             sqliteVecProvider,
             sqliteVecProvider);
-var referenceCorpusAnalysisService = new SqliteReferenceCorpusAnalysisService(
-options,
-settingsService,
-chatCompletion: chatCompletionClient);
-var referenceCorpusAnalysisScheduler = new SqliteReferenceCorpusAnalysisScheduler(
-new ReferenceCorpusDatabasePathResolver(options),
-settingsService);
-var referenceCorpusAnalysisWorker = new ReferenceCorpusAnalysisWorker(
-new ReferenceCorpusDatabasePathResolver(options),
-new ReferenceCorpusChatCompletionFeatureFamilyAnalyzer(settingsService, chatCompletionClient),
-new ReferenceCorpusChatCompletionTechniqueSpecimenAnalyzer(settingsService, chatCompletionClient));
-var referenceCorpusTechniqueVectorMaintenanceLoop = new ReferenceCorpusTechniqueVectorMaintenanceLoop(
-referenceCorpusService);
  var initializationService = new CoordinatedAppInitializationService(
  new FileSystemAppInitializationService(
  options,
  importRecovery: novelImportRecoveryService,
  referenceAnchorRecovery: referenceAnchorService),
- referenceCorpusAnalysisWorker,
- referenceCorpusTechniqueVectorMaintenanceLoop,
  referenceMaterializationWorker);
         var referenceStyleProfileService = new SqliteReferenceStyleProfileService(
             options,
@@ -232,48 +217,25 @@ referenceCorpusService);
             .RegisterReferenceMaterializationBlueprintPreviewHandlers(referenceMaterializationBlueprintPreviewService)
             .RegisterReferenceWritingHandlers(referenceWritingService)
             .RegisterReferenceCorpusHandlers(referenceCorpusService)
-.RegisterReferenceCorpusAnalysisHandlers(referenceCorpusAnalysisService)
-.RegisterReferenceCorpusAnalysisJobHandlers(referenceCorpusAnalysisScheduler)
             .RegisterReferenceStyleProfileHandlers(referenceStyleProfileService)
             .RegisterReferenceAnchoredDraftHandlers(referenceAnchoredDraftService)
             .RegisterApprovalHandlers(approvalCoordinator)
             .RegisterChatSessionHandlers(chatService);
 return new DesktopBridgeRuntime(
 new PhotinoWebMessageBridge(dispatcher, window),
- referenceCorpusAnalysisWorker,
- referenceCorpusTechniqueVectorMaintenanceLoop,
  referenceMaterializationWorker,
  initializationService);
 }
 
  internal sealed record DesktopBridgeRuntime(
 PhotinoWebMessageBridge Bridge,
- ReferenceCorpusAnalysisWorker AnalysisWorker,
- ReferenceCorpusTechniqueVectorMaintenanceLoop TechniqueVectorMaintenanceLoop,
  ReferenceMaterializationWorker MaterializationWorker,
  CoordinatedAppInitializationService InitializationService) : IAsyncDisposable
 {
 public ValueTask StartAsync(CancellationToken cancellationToken = default) =>
  InitializationService.StartBackgroundServicesIfInitializedAsync(cancellationToken);
 
- public async ValueTask DisposeAsync()
- {
- try
- {
- await TechniqueVectorMaintenanceLoop.DisposeAsync();
- }
- finally
- {
- try
- {
- await MaterializationWorker.DisposeAsync();
- }
- finally
- {
- await AnalysisWorker.DisposeAsync();
- }
- }
- }
+ public ValueTask DisposeAsync() => MaterializationWorker.DisposeAsync();
  }
 
     private sealed class DeferredRagIndexRefreshNotifier : IRagIndexRefreshNotifier

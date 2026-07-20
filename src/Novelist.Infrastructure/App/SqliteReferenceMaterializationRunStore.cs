@@ -183,7 +183,9 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
 
         try
         {
-            return await initialization.WaitAsync(cancellationToken);
+            var databasePath = await initialization;
+            cancellationToken.ThrowIfCancellationRequested();
+            return databasePath;
         }
         catch when (initialization.IsFaulted)
         {

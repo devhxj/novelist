@@ -41,30 +41,6 @@ public static class ReferenceCorpusBridgeHandlers
  }
         });
 
-dispatcher.Register("BackfillReferenceCorpusTechniqueVectorIndex", async (context, cancellationToken) =>
-{
-            var input = ReadObjectArg<BackfillReferenceCorpusTechniqueVectorIndexPayload>(context.Payload, 0, "input");
-return await service.BackfillTechniqueVectorIndexAsync(input, cancellationToken);
-});
-
-dispatcher.Register("ScheduleReferenceCorpusTechniqueVectorMaintenance", async (context, cancellationToken) =>
-{
- var input = ReadObjectArg<ScheduleReferenceCorpusTechniqueVectorMaintenancePayload>(context.Payload, 0, "input");
- return await service.ScheduleTechniqueVectorMaintenanceAsync(input, cancellationToken);
-});
-
-dispatcher.Register("PumpReferenceCorpusTechniqueVectorMaintenance", async (context, cancellationToken) =>
-{
- var input = ReadObjectArg<PumpReferenceCorpusTechniqueVectorMaintenancePayload>(context.Payload, 0, "input");
- return await service.PumpTechniqueVectorMaintenanceAsync(input, cancellationToken);
-});
-
-dispatcher.Register("InspectReferenceCorpusTechniqueVectorIndexes", async (context, cancellationToken) =>
-{
- var input = ReadObjectArg<InspectReferenceCorpusTechniqueVectorIndexesPayload>(context.Payload, 0, "input");
- return await service.InspectTechniqueVectorIndexesAsync(input, cancellationToken);
-});
-
 dispatcher.Register("GetReferenceCorpusNodeWindow", async (context, cancellationToken) =>
  {
  var input = ReadObjectArg<GetReferenceCorpusNodeWindowPayload>(context.Payload, 0, "input");

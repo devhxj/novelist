@@ -13,7 +13,7 @@ public sealed class PhotinoReferenceWorkflowSmokeTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "novelist-tests", Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public async Task DesktopCompositionStartsAndStopsTechniqueVectorMaintenanceWithInitialization()
+    public async Task DesktopCompositionStartsAndStopsMaterializationWorkerWithInitialization()
     {
         var options = CreateOptions();
         var window = new RecordingWindow();
@@ -22,17 +22,14 @@ public sealed class PhotinoReferenceWorkflowSmokeTests : IDisposable
 
         try
         {
-            Assert.False(runtime.TechniqueVectorMaintenanceLoop.IsRunning);
             Assert.False(runtime.MaterializationWorker.IsRunning);
 
             await SendAsync(runtime.Bridge, window, "Initialize", options.DefaultDataDirectory);
 
-            Assert.True(runtime.TechniqueVectorMaintenanceLoop.IsRunning);
             Assert.True(runtime.MaterializationWorker.IsRunning);
 
             await runtime.DisposeAsync();
             disposed = true;
-            Assert.False(runtime.TechniqueVectorMaintenanceLoop.IsRunning);
             Assert.False(runtime.MaterializationWorker.IsRunning);
         }
         finally

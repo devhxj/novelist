@@ -7,20 +7,14 @@ namespace Novelist.App.Desktop;
 internal sealed class CoordinatedAppInitializationService : IAppInitializationService
 {
  private readonly IAppInitializationService _inner;
- private readonly ReferenceCorpusAnalysisWorker _analysisWorker;
- private readonly ReferenceCorpusTechniqueVectorMaintenanceLoop _techniqueVectorMaintenanceLoop;
  private readonly ReferenceMaterializationWorker _materializationWorker;
  private readonly SemaphoreSlim _gate = new(1, 1);
 
  public CoordinatedAppInitializationService(
  IAppInitializationService inner,
- ReferenceCorpusAnalysisWorker analysisWorker,
- ReferenceCorpusTechniqueVectorMaintenanceLoop techniqueVectorMaintenanceLoop,
  ReferenceMaterializationWorker materializationWorker)
  {
  _inner = inner ?? throw new ArgumentNullException(nameof(inner));
- _analysisWorker = analysisWorker ?? throw new ArgumentNullException(nameof(analysisWorker));
- _techniqueVectorMaintenanceLoop = techniqueVectorMaintenanceLoop ?? throw new ArgumentNullException(nameof(techniqueVectorMaintenanceLoop));
  _materializationWorker = materializationWorker ?? throw new ArgumentNullException(nameof(materializationWorker));
  }
 
@@ -95,27 +89,9 @@ token => _inner.UpdateDataDirectoryAsync(dataDirectory, token),
 
  private async ValueTask StartBackgroundServicesAsync(CancellationToken cancellationToken)
  {
- await _analysisWorker.StartAsync(cancellationToken);
  await _materializationWorker.StartAsync(cancellationToken);
- await _techniqueVectorMaintenanceLoop.StartAsync(cancellationToken);
  }
 
- private async ValueTask StopBackgroundServicesAsync(CancellationToken cancellationToken)
- {
- try
- {
- await _techniqueVectorMaintenanceLoop.StopAsync(cancellationToken);
- }
- finally
- {
- try
- {
- await _materializationWorker.StopAsync(cancellationToken);
- }
- finally
- {
- await _analysisWorker.StopAsync(cancellationToken);
- }
- }
- }
+ private ValueTask StopBackgroundServicesAsync(CancellationToken cancellationToken) =>
+ _materializationWorker.StopAsync(cancellationToken);
 }

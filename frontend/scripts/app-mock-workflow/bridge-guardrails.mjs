@@ -163,8 +163,6 @@ export async function verifyCorpusLibraryBridgeCalls(page) {
     'GetNovels',
     'GetChapters',
     'GetReferenceAnchors',
-    'ListReferenceCorpusFeatureObservations',
-    'ListReferenceCorpusTechniqueSpecimens',
     'GetReferenceMaterialDetail',
     'GetReferenceMaterialTagReviewQueue',
     'GetReferenceSourceSegmentDetail',
