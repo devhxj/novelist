@@ -411,6 +411,11 @@ public sealed class ReferenceWritingServiceTests : IDisposable
     {
         public List<ReferenceMaterialSearchRequest> Requests { get; } = [];
 
+        public ValueTask<ReferenceMaterialListPage> ListAsync(
+            ReferenceMaterialListRequest input,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("This test search only supports vector queries.");
+
         public ValueTask<IReadOnlyList<ReferenceMaterialSearchHit>> SearchAsync(
             ReferenceMaterialSearchRequest input,
             CancellationToken cancellationToken)

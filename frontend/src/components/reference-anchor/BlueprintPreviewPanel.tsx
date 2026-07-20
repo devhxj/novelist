@@ -69,7 +69,7 @@ export default function BlueprintPreviewPanel({
 
       const checkSources = () => {
         void Promise.all(selectedAnchors.map(async (anchor) => {
-          const materials = await app.ListActiveReferenceMaterializationMaterials({
+          const materials = await app.ListReferenceMaterials({
             novel_id: novelId,
             anchor_id: anchor.anchor_id,
             page: 1,
@@ -192,7 +192,7 @@ export default function BlueprintPreviewPanel({
           <Sparkles className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           <h2 className="text-sm font-semibold text-foreground">AI 蓝图预演</h2>
         </div>
-        <p className="mt-1 text-xs text-muted-foreground">只使用已完成大模型准入和向量索引的当前材料。</p>
+        <p className="mt-1 text-xs text-muted-foreground">只使用已完成整章提取和向量索引的当前材料。</p>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -236,7 +236,7 @@ export default function BlueprintPreviewPanel({
           <EmptyState icon={<BookMarked className="h-7 w-7 text-muted-foreground/45" aria-hidden="true" />} title="先选择参考来源" description="从左侧选择一本已导入书籍，在中部完成材料化后即可预演。" />
         )}
         {!isCheckingSources && selectedAnchors.length > 0 && readyAnchors.length === 0 && !error && (
-          <EmptyState icon={<Layers3 className="h-7 w-7 text-muted-foreground/45" aria-hidden="true" />} title="等待可用材料" description="当前来源尚未完成大模型准入和向量索引；请在中部完成材料化。" />
+          <EmptyState icon={<Layers3 className="h-7 w-7 text-muted-foreground/45" aria-hidden="true" />} title="等待可用材料" description="当前来源尚未完成整章提取和向量索引；请在中部完成材料化。" />
         )}
         {isCheckingSources && (
           <div className="space-y-2 px-4 py-4" aria-label="正在检查来源材料状态">

@@ -1233,9 +1233,7 @@ referenceCorpusTechniqueSpecimenAnalysisRuns: [],
       case 'GetReferenceMaterializationStatus': return getReferenceMaterializationStatus(args[0])
       case 'RetryReferenceMaterialization': return retryReferenceMaterialization(args[0])
       case 'ListReferenceMaterializationChapterProgress': return listReferenceMaterializationChapterProgress(args[0])
-      case 'ListReferenceMaterializationCandidates': return listReferenceMaterializationCandidates(args[0])
-      case 'ReviewReferenceMaterializationCandidate': return reviewReferenceMaterializationCandidate(args[0])
-      case 'ListActiveReferenceMaterializationMaterials': return listActiveReferenceMaterializationMaterials(args[0])
+      case 'ListReferenceMaterials': return listReferenceMaterials(args[0])
       case 'GenerateReferenceMaterializationBlueprintPreview': return generateReferenceMaterializationBlueprintPreview(args[0])
       case 'GenerateReferenceBlueprints': return generateReferenceBlueprints(args[0])
       case 'GetReferenceWritingSession': return getReferenceWritingSession(args[0])
@@ -3761,28 +3759,19 @@ function referenceAnchors() {
     return { items, total: items.length, page: 1, size: Number(input?.size ?? 20), total_pages: 1, next_cursor: null, has_more: false, total_estimate: items.length }
   }
 
-  function listReferenceMaterializationCandidates(input = {}) {
-    return { items: [], total: 0, page: 1, size: Number(input?.size ?? 20), total_pages: 1, next_cursor: null, has_more: false, total_estimate: 0 }
-  }
-
-  function reviewReferenceMaterializationCandidate(input = {}) {
-    const status = getReferenceMaterializationStatus(input)
-    if (!status) throw new Error('Materialization run was not found.')
-    return { candidate_id: String(input?.candidate_id ?? ''), decision: input?.action === 'reject' ? 'rejected' : 'accepted', row_version: Number(input?.expected_version ?? 0) + 1, requalification_queued: true, status }
-  }
-
-  function listActiveReferenceMaterializationMaterials(input = {}) {
+  function listReferenceMaterials(input = {}) {
     const run = getReferenceMaterializationStatus({ anchor_id: input?.anchor_id })
     const items = run?.status === 'completed' && run.vector_index_healthy ? [{
       material_id: `mock-active-material-${run.anchor_id}`,
-      anchor_id: run.anchor_id,
       generation_id: run.generation_id,
+      anchor_id: run.anchor_id,
+      chapter_index: 1,
+      ordinal: 0,
       material_type: 'action_reaction',
-      text: '她把杯底半圈水痕压进记忆里，没有急着回头。',
-      quality_score: 0.91,
-      confidence: 0.88,
-      tags: { narrative_functions: ['reveal'], emotion_mechanics: ['restraint'], pov: ['close_third'], techniques: ['delayed_reaction'], scene_beat_roles: ['turn'], character_relations: [], causal_information_roles: ['clue'] },
-      reason_codes: ['complete_exchange'],
+      text: '她把杯底半圈水痕压进记忆里。\n\n她没有回答，目光越过他落在雨幕里。',
+      description: '用克制反应承接跨段对话并保留线索压力。',
+      tags: ['reveal', 'restraint', 'delayed_reaction'],
+      text_hash: `mock-text-hash-${run.anchor_id}`,
     }] : []
     return { items, total: items.length, page: 1, size: Number(input?.size ?? 20), total_pages: 1, next_cursor: null, has_more: false, total_estimate: items.length }
   }

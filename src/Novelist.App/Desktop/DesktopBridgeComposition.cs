@@ -235,6 +235,7 @@ referenceCorpusService);
             .RegisterGitHistoryHandlers(versionControl)
             .RegisterReferenceAnchorHandlers(referenceAnchorService)
             .RegisterReferenceMaterializationHandlers(referenceMaterializationService)
+            .RegisterReferenceMaterialSearchHandlers(referenceMaterialSearch)
             .RegisterReferenceMaterializationBlueprintPreviewHandlers(referenceMaterializationBlueprintPreviewService)
             .RegisterReferenceWritingHandlers(referenceWritingService)
             .RegisterReferenceCorpusHandlers(referenceCorpusService)

@@ -168,6 +168,11 @@ public sealed class ReferenceMaterializationBlueprintPreviewServiceTests : IDisp
     {
         public List<ReferenceMaterialSearchRequest> Requests { get; } = [];
 
+        public ValueTask<ReferenceMaterialListPage> ListAsync(
+            ReferenceMaterialListRequest input,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("This test search only supports vector queries.");
+
         public ValueTask<IReadOnlyList<ReferenceMaterialSearchHit>> SearchAsync(
             ReferenceMaterialSearchRequest input,
             CancellationToken cancellationToken)
@@ -181,6 +186,11 @@ public sealed class ReferenceMaterializationBlueprintPreviewServiceTests : IDisp
 
     private sealed class ThrowingSearch(Exception exception) : IReferenceMaterialSearch
     {
+        public ValueTask<ReferenceMaterialListPage> ListAsync(
+            ReferenceMaterialListRequest input,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromException<ReferenceMaterialListPage>(exception);
+
         public ValueTask<IReadOnlyList<ReferenceMaterialSearchHit>> SearchAsync(
             ReferenceMaterialSearchRequest input,
             CancellationToken cancellationToken) =>

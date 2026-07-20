@@ -135,7 +135,7 @@ public sealed class BridgeHandlerRegistrationTests
     [Fact]
     public void CompatibilityAppMethodListHasExpectedCoverage()
     {
-        Assert.Equal(202, BridgeCompatibilityAppMethods.MethodNames.Count);
+        Assert.Equal(199, BridgeCompatibilityAppMethods.MethodNames.Count);
         Assert.Equal(BridgeCompatibilityAppMethods.MethodNames.Count, BridgeCompatibilityAppMethods.MethodNames.Distinct(StringComparer.Ordinal).Count());
         Assert.Contains("Chat", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GetCover", BridgeCompatibilityAppMethods.MethodNames);
@@ -150,10 +150,11 @@ public sealed class BridgeHandlerRegistrationTests
         Assert.Contains("GetReferenceMaterializationStatus", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("RetryReferenceMaterialization", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("ListReferenceMaterializationChapterProgress", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("ListReferenceMaterializationCandidates", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("ReviewReferenceMaterializationCandidate", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("ListActiveReferenceMaterializationMaterials", BridgeCompatibilityAppMethods.MethodNames);
-        Assert.Contains("SearchActiveReferenceMaterializationMaterials", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.Contains("ListReferenceMaterials", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.DoesNotContain("ListReferenceMaterializationCandidates", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.DoesNotContain("ReviewReferenceMaterializationCandidate", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.DoesNotContain("ListActiveReferenceMaterializationMaterials", BridgeCompatibilityAppMethods.MethodNames);
+        Assert.DoesNotContain("SearchActiveReferenceMaterializationMaterials", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("GenerateReferenceMaterializationBlueprintPreview", BridgeCompatibilityAppMethods.MethodNames);
         Assert.DoesNotContain("GetReferenceMaterializationBlueprintPreview", BridgeCompatibilityAppMethods.MethodNames);
         Assert.Contains("RecordReferenceUserFeedback", BridgeCompatibilityAppMethods.MethodNames);

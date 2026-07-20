@@ -952,38 +952,11 @@ export namespace reference {
     size: number
   }
 
-  export interface ListMaterializationCandidatesInput extends GetMaterializationStatusInput {
-    decision?: 'pending' | 'accepted' | 'rejected' | 'review_required'
+  export interface ListReferenceMaterialsInput {
+    novel_id: number
+    anchor_id: number
     page?: number
     size?: number
-  }
-
-  export interface MaterializationCandidateSourceSpan {
-    node_id: string
-    start: number
-    end: number
-  }
-
-  export interface ReviewMaterializationCandidateInput extends GetMaterializationStatusInput {
-    candidate_id: string
-    action: 'confirm' | 'reject' | 'adjust_boundary'
-    expected_version: number
-    source_spans?: MaterializationCandidateSourceSpan[] | null
-  }
-
-  export interface ListActiveMaterializationMaterialsInput {
-    novel_id: number
-    anchor_id: number
-    page: number
-    size: number
-    query?: string | null
-  }
-
-  export interface SearchActiveMaterializationMaterialsInput {
-    novel_id: number
-    anchor_id: number
-    query: string
-    max_results: number
   }
 
   export interface MaterializationModelIdentity {
@@ -1040,58 +1013,17 @@ export namespace reference {
     next_action: string
   }
 
-  export interface MaterializationMaterialTags {
-    narrative_functions: string[]
-    emotion_mechanics: string[]
-    pov: string[]
-    techniques: string[]
-    scene_beat_roles: string[]
-    character_relations: string[]
-    causal_information_roles: string[]
-  }
-
-  export interface MaterializationMaterial {
+  export interface ReferenceMaterialListItem {
     material_id: string
-    anchor_id: number
     generation_id: string
-    material_type: string
-    text: string
-    quality_score: number
-    confidence: number
-    tags: MaterializationMaterialTags
-    reason_codes: string[]
-  }
-
-  export interface MaterializationCandidate {
-    candidate_id: string
-    run_id: string
     anchor_id: number
     chapter_index: number
-    candidate_type: string
-    decision: 'pending' | 'accepted' | 'rejected' | 'review_required'
-    decision_origin: string
-    quality_score?: number | null
-    confidence?: number | null
-    tags: MaterializationMaterialTags
-    reason_codes: string[]
-    text_preview: string
-    source_spans: MaterializationCandidateSourceSpan[]
-    source_node_count: number
-    row_version: number
-  }
-
-  export interface MaterializationCandidateReviewResult {
-    candidate_id: string
-    decision: 'pending' | 'accepted' | 'rejected' | 'review_required'
-    row_version: number
-    requalification_queued: boolean
-    status: MaterializationStatus
-  }
-
-  export interface MaterializationSemanticSearchHit {
-    material: MaterializationMaterial
-    vector_score: number
-    score_components?: Record<string, number> | null
+    ordinal: number
+    material_type: string
+    text: string
+    description: string
+    tags: string[]
+    text_hash: string
   }
 
   export interface GenerateMaterializationBlueprintPreviewInput {
@@ -2728,16 +2660,8 @@ export namespace storage {
     total_pages: number
   }
 
-  export interface PageResult_reference_MaterializationCandidate_ {
-    items: reference.MaterializationCandidate[]
-    total: number
-    page: number
-    size: number
-    total_pages: number
-  }
-
-  export interface PageResult_reference_MaterializationMaterial_ {
-    items: reference.MaterializationMaterial[]
+  export interface PageResult_reference_ReferenceMaterialListItem_ {
+    items: reference.ReferenceMaterialListItem[]
     total: number
     page: number
     size: number

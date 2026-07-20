@@ -9,6 +9,7 @@ public sealed class SqliteReferenceMaterialSearch : IReferenceMaterialSearch
 {
     private const int MaxQueryCharacters = 256;
     private const int MaxResults = 100;
+    private const int MaxPageSize = 100;
     private readonly IReferenceCorpusDatabasePathResolver _databasePathResolver;
     private readonly IEmbeddingConfigurationService _embeddingConfiguration;
     private readonly IEmbeddingClient _embeddings;
@@ -26,6 +27,75 @@ public sealed class SqliteReferenceMaterialSearch : IReferenceMaterialSearch
         _embeddingConfiguration = embeddingConfiguration ?? new FileSystemEmbeddingSettingsService(initializationOptions);
         _embeddings = embeddings ?? new HybridEmbeddingClient();
         _vectors = vectors ?? new SqliteVecTableProvisioner();
+    }
+
+    public async ValueTask<ReferenceMaterialListPage> ListAsync(
+        ReferenceMaterialListRequest input,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        if (input.NovelId <= 0 || input.AnchorId <= 0 || input.Page <= 0 || input.Size is <= 0 or > MaxPageSize)
+        {
+            throw new ArgumentException("Reference material list request is invalid.", nameof(input));
+        }
+
+        var databasePath = await _databasePathResolver.ResolveAsync(cancellationToken);
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        await using var connection = await OpenConnectionAsync(databasePath, cancellationToken);
+        await ReferenceCorpusSchemaProvisioner.EnsureCoreTablesAsync(connection, cancellationToken);
+        var generationId = await ReadListGenerationAsync(connection, input, cancellationToken)
+            ?? throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.GenerationIncomplete,
+                "The selected reference source does not have an active material generation.");
+        var total = await CountListMaterialsAsync(connection, input.AnchorId, generationId, cancellationToken);
+        if (total <= 0)
+        {
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.GenerationIncomplete,
+                "The selected active material generation is empty.");
+        }
+
+        var offset = ((long)input.Page - 1) * input.Size;
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT material_id, generation_id, anchor_id, chapter_index, ordinal,
+                   material_type, text, description, tags_json, text_hash
+            FROM reference_materialization_materials
+            WHERE anchor_id = $anchor_id
+              AND generation_id = $generation_id
+            ORDER BY chapter_index, ordinal
+            LIMIT $limit OFFSET $offset;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", input.AnchorId);
+        command.Parameters.AddWithValue("$generation_id", generationId);
+        command.Parameters.AddWithValue("$limit", input.Size);
+        command.Parameters.AddWithValue("$offset", offset);
+        var items = new List<ReferenceMaterialListItem>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                items.Add(new ReferenceMaterialListItem(
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.GetInt64(2),
+                    reader.GetInt32(3),
+                    reader.GetInt32(4),
+                    reader.GetString(5),
+                    reader.GetString(6),
+                    reader.GetString(7),
+                    ParseTags(reader.GetString(8)),
+                    reader.GetString(9)));
+            }
+        }
+
+        await EnsureListGenerationStillActiveAsync(connection, input.AnchorId, generationId, cancellationToken);
+        return new ReferenceMaterialListPage(
+            items,
+            total,
+            input.Page,
+            input.Size,
+            (int)Math.Ceiling(total / (double)input.Size));
     }
 
     public async ValueTask<IReadOnlyList<ReferenceMaterialSearchHit>> SearchAsync(
@@ -117,6 +187,80 @@ public sealed class SqliteReferenceMaterialSearch : IReferenceMaterialSearch
             (!string.IsNullOrWhiteSpace(input.SessionId) && !IsBoundedIdentifier(input.SessionId)))
         {
             throw new ArgumentException("Reference material search scope is invalid.", nameof(input));
+        }
+    }
+
+    private static async ValueTask<string?> ReadListGenerationAsync(
+        SqliteConnection connection,
+        ReferenceMaterialListRequest input,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT state.active_generation_id
+            FROM reference_anchor_materialization_state state
+            JOIN reference_anchors anchor ON anchor.anchor_id = state.anchor_id
+            JOIN reference_source_license license ON license.anchor_id = anchor.anchor_id
+            WHERE anchor.anchor_id = $anchor_id
+              AND (
+                anchor.novel_id = $novel_id OR
+                ((anchor.novel_id IS NULL OR anchor.novel_id = 0) AND anchor.corpus_visibility = 'workspace')
+              )
+              AND license.license_state IN ($public_domain, $creative_commons, $authorized)
+              AND license.reuse_policy <> $forbidden
+              AND EXISTS (
+                SELECT 1
+                FROM reference_library_members member
+                WHERE member.anchor_id = anchor.anchor_id
+                  AND member.enabled = 1
+              );
+            """;
+        command.Parameters.AddWithValue("$anchor_id", input.AnchorId);
+        command.Parameters.AddWithValue("$novel_id", input.NovelId);
+        command.Parameters.AddWithValue("$public_domain", ReferenceCorpusLicenseStates.PublicDomain);
+        command.Parameters.AddWithValue("$creative_commons", ReferenceCorpusLicenseStates.CreativeCommons);
+        command.Parameters.AddWithValue("$authorized", ReferenceCorpusLicenseStates.Authorized);
+        command.Parameters.AddWithValue("$forbidden", ReferenceCorpusReusePolicies.Forbidden);
+        return await command.ExecuteScalarAsync(cancellationToken) as string;
+    }
+
+    private static async ValueTask<long> CountListMaterialsAsync(
+        SqliteConnection connection,
+        long anchorId,
+        string generationId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM reference_materialization_materials
+            WHERE anchor_id = $anchor_id
+              AND generation_id = $generation_id;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        command.Parameters.AddWithValue("$generation_id", generationId);
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken));
+    }
+
+    private static async ValueTask EnsureListGenerationStillActiveAsync(
+        SqliteConnection connection,
+        long anchorId,
+        string generationId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT active_generation_id
+            FROM reference_anchor_materialization_state
+            WHERE anchor_id = $anchor_id;
+            """;
+        command.Parameters.AddWithValue("$anchor_id", anchorId);
+        var current = await command.ExecuteScalarAsync(cancellationToken);
+        if (current is not string value || !string.Equals(value, generationId, StringComparison.Ordinal))
+        {
+            throw new ReferenceMaterializationException(
+                ReferenceMaterializationErrorCodes.GenerationIncomplete,
+                "The active reference material generation changed while it was being listed.");
         }
     }
 

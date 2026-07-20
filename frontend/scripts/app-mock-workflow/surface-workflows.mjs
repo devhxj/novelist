@@ -793,6 +793,7 @@ export async function verifyReferenceWorkspaceWorkflow(page) {
   await corpusWorkspace.getByRole('button', { name: '启动材料化' }).click()
   await waitForBridgeCallCountAfter(page, 'EnqueueReferenceMaterialization', enqueueCount)
   await expectVisible(corpusWorkspace.getByText('向量索引完整'), 'completed materialization index state')
+  await expectVisible(corpusWorkspace.getByText('她没有回答，目光越过他落在雨幕里。'), 'complete multiline active material')
 
   await blueprintPreview.getByLabel('预演目标').fill('让林岚确认门口线索，并在结尾留下新的悬念。')
   await expectVisible(blueprintPreview.getByText('可预演 1 本'), 'active material source count')

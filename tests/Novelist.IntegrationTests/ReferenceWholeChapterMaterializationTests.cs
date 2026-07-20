@@ -71,15 +71,21 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         var completed = await service.GetMaterializationStatusAsync(
             new GetReferenceMaterializationStatusPayload(novel.Id, anchor.AnchorId, run.RunId),
             CancellationToken.None);
-        var materials = await service.ListActiveMaterialsAsync(
-            new ListActiveReferenceMaterializationMaterialsPayload(novel.Id, anchor.AnchorId, 1, 20),
-            CancellationToken.None);
         var search = new SqliteReferenceMaterialSearch(
             options,
             resolver,
             new FixedEmbeddingConfiguration(),
             new FixedEmbeddingClient(),
             vectors);
+        var materials = await search.ListAsync(
+            new ReferenceMaterialListRequest(novel.Id, anchor.AnchorId, 1, 20),
+            CancellationToken.None);
+        var firstMaterialPage = await search.ListAsync(
+            new ReferenceMaterialListRequest(novel.Id, anchor.AnchorId, 1, 1),
+            CancellationToken.None);
+        var secondMaterialPage = await search.ListAsync(
+            new ReferenceMaterialListRequest(novel.Id, anchor.AnchorId, 2, 1),
+            CancellationToken.None);
         var hits = await search.SearchAsync(
             new ReferenceMaterialSearchRequest(
                 "Find the waiting dialogue.",
@@ -109,6 +115,10 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         Assert.Equal(2, materials.Total);
         Assert.Contains(materials.Items, material => material.Text == MultiParagraphDialogue);
         Assert.All(materials.Items, material => Assert.Equal(run.GenerationId, material.GenerationId));
+        Assert.Equal(2, firstMaterialPage.TotalPages);
+        Assert.Equal(1, firstMaterialPage.Items.Single().ChapterIndex);
+        Assert.Equal(MultiParagraphDialogue, firstMaterialPage.Items.Single().Text);
+        Assert.Equal(2, secondMaterialPage.Items.Single().ChapterIndex);
         Assert.Contains(hits, hit => hit.Text == MultiParagraphDialogue);
         Assert.All(hits, hit => Assert.Equal(run.GenerationId, hit.GenerationId));
     }
@@ -292,6 +302,14 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         }
         var search = CreateSearch(scenario);
 
+        var listException = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
+            await search.ListAsync(
+                new ReferenceMaterialListRequest(
+                    scenario.Anchor.NovelId,
+                    scenario.Anchor.AnchorId,
+                    1,
+                    20),
+                CancellationToken.None));
         var hits = await search.SearchAsync(
             new ReferenceMaterialSearchRequest(
                 "Find chapter material.",
@@ -299,6 +317,7 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
                 AnchorIds: [scenario.Anchor.AnchorId]),
             CancellationToken.None);
 
+        Assert.Equal(ReferenceMaterializationErrorCodes.GenerationIncomplete, listException.ErrorCode);
         Assert.Empty(hits);
         Assert.Equal(0, scenario.Vectors.SearchCallCount);
     }

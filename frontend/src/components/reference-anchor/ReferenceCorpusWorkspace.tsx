@@ -25,7 +25,7 @@ type Props = {
   onMaterializationChange: () => void
 }
 
-type Action = 'analyze' | 'manual-preview' | 'confirm' | 'enqueue' | 'retry' | 'review' | null
+type Action = 'analyze' | 'manual-preview' | 'confirm' | 'enqueue' | 'retry' | null
 
 const numberFormatter = new Intl.NumberFormat('zh-CN')
 
@@ -49,8 +49,7 @@ function profileStateLabel(profile: reference.ChapterSplitProfile): string {
 function stageLabel(stage: string): string {
   const labels: Record<string, string> = {
     pending: '等待处理',
-    building_candidates: '构建语义窗口',
-    llm_qualifying: '大模型准入',
+    extracting: '提取材料',
     embedding: '生成向量',
     indexing: '建立索引',
     completed: '完成',
@@ -58,15 +57,6 @@ function stageLabel(stage: string): string {
     cancelled: '已取消',
   }
   return labels[stage] ?? stage.replaceAll('_', ' ')
-}
-
-function candidateTags(tags: reference.MaterializationMaterialTags): string[] {
-  return [
-    ...tags.narrative_functions,
-    ...tags.emotion_mechanics,
-    ...tags.techniques,
-    ...tags.scene_beat_roles,
-  ].filter(Boolean).slice(0, 5)
 }
 
 function chapterSplitErrorMessage(error: unknown): string {
@@ -87,7 +77,10 @@ export default function ReferenceCorpusWorkspace({
   const [profile, setProfile] = useState<reference.ChapterSplitProfile | null>(null)
   const [run, setRun] = useState<reference.MaterializationStatus | null>(null)
   const [progress, setProgress] = useState<reference.MaterializationChapterProgress[]>([])
-  const [candidates, setCandidates] = useState<reference.MaterializationCandidate[]>([])
+  const [materials, setMaterials] = useState<reference.ReferenceMaterialListItem[]>([])
+  const [materialPage, setMaterialPage] = useState(1)
+  const [materialTotal, setMaterialTotal] = useState(0)
+  const [materialTotalPages, setMaterialTotalPages] = useState(0)
   const [batchSize, setBatchSize] = useState<5 | 10>(5)
   const [manualTemplate, setManualTemplate] = useState('')
   const [action, setAction] = useState<Action>(null)
@@ -106,7 +99,9 @@ export default function ReferenceCorpusWorkspace({
     if (!anchor || !novelId) {
       setRun(null)
       setProgress([])
-      setCandidates([])
+      setMaterials([])
+      setMaterialTotal(0)
+      setMaterialTotalPages(0)
       return
     }
 
@@ -124,15 +119,17 @@ export default function ReferenceCorpusWorkspace({
     }
   }, [app, novelId])
 
-  const loadRunDetail = useCallback(async (status: reference.MaterializationStatus | null) => {
+  const loadRunDetail = useCallback(async (status: reference.MaterializationStatus | null, page: number) => {
     if (!status || !novelId) {
       setProgress([])
-      setCandidates([])
+      setMaterials([])
+      setMaterialTotal(0)
+      setMaterialTotalPages(0)
       return
     }
 
     try {
-      const [nextProgress, nextCandidates] = await Promise.all([
+      const [nextProgress, nextMaterials] = await Promise.all([
         app.ListReferenceMaterializationChapterProgress({
           novel_id: novelId,
           anchor_id: status.anchor_id,
@@ -140,19 +137,21 @@ export default function ReferenceCorpusWorkspace({
           page: 1,
           size: 30,
         }),
-        app.ListReferenceMaterializationCandidates({
-          novel_id: novelId,
-          anchor_id: status.anchor_id,
-          run_id: status.run_id,
-          decision: 'review_required',
-          page: 1,
-          size: 12,
-        }),
+        status.status === 'completed'
+          ? app.ListReferenceMaterials({
+              novel_id: novelId,
+              anchor_id: status.anchor_id,
+              page,
+              size: 10,
+            })
+          : Promise.resolve(null),
       ])
       setProgress(nextProgress.items ?? [])
-      setCandidates(nextCandidates.items ?? [])
+      setMaterials(nextMaterials?.items ?? [])
+      setMaterialTotal(nextMaterials?.total ?? 0)
+      setMaterialTotalPages(nextMaterials?.total_pages ?? 0)
     } catch {
-      setError('材料化进度或候选复核列表加载失败。请刷新后重试。')
+      setError('材料化进度或当前材料加载失败。请刷新后重试。')
     }
   }, [app, novelId])
 
@@ -161,15 +160,16 @@ export default function ReferenceCorpusWorkspace({
       setError(null)
       setProfile(null)
       setManualTemplate('')
+      setMaterialPage(1)
       void loadRun(selectedAnchor)
     }, 0)
     return () => window.clearTimeout(timer)
   }, [loadRun, refreshKey, selectedAnchor])
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void loadRunDetail(run) }, 0)
+    const timer = window.setTimeout(() => { void loadRunDetail(run, materialPage) }, 0)
     return () => window.clearTimeout(timer)
-  }, [loadRunDetail, run])
+  }, [loadRunDetail, materialPage, run])
 
   useEffect(() => {
     if (!run || run.status !== 'queued' && run.status !== 'running') return
@@ -275,27 +275,6 @@ export default function ReferenceCorpusWorkspace({
     }
   }
 
-  const reviewCandidate = async (candidate: reference.MaterializationCandidate, nextAction: 'confirm' | 'reject') => {
-    if (!run || !selectedAnchor) return
-    setAction('review')
-    setError(null)
-    try {
-      const result = await app.ReviewReferenceMaterializationCandidate({
-        novel_id: novelId,
-        anchor_id: selectedAnchor.anchor_id,
-        run_id: run.run_id,
-        candidate_id: candidate.candidate_id,
-        action: nextAction,
-        expected_version: candidate.row_version,
-      })
-      setRun(result.status)
-    } catch {
-      setError('候选复核未保存。列表已变更时请刷新后再次提交。')
-    } finally {
-      setAction(null)
-    }
-  }
-
   const activeProfile = profile ?? (run
     ? {
         split_profile_id: run.split_profile_id,
@@ -336,7 +315,7 @@ export default function ReferenceCorpusWorkspace({
               <span className="text-xs font-medium">素材库 / 材料化</span>
             </div>
             <h1 className="mt-1 truncate text-base font-semibold text-foreground">{selectedAnchor.title}</h1>
-            <p className="mt-1 text-xs text-muted-foreground">先冻结章节边界，再以大模型准入和向量索引生成可用材料。</p>
+            <p className="mt-1 text-xs text-muted-foreground">先冻结章节边界，再逐章提取并向量化可用材料。</p>
           </div>
           <button
             type="button"
@@ -489,10 +468,10 @@ export default function ReferenceCorpusWorkspace({
             <>
               <dl className="mt-3 grid grid-cols-2 divide-x divide-y divide-border border border-border sm:grid-cols-4" aria-label="材料化漏斗">
                 {[
-                  ['候选', run.candidate_count],
-                  ['已接纳', run.accepted_count],
-                  ['待复核', run.review_count],
-                  ['已向量化', run.vector_count],
+                  ['材料', run.accepted_count],
+                  ['向量', run.vector_count],
+                  ['已处理章节', run.processed_chapters],
+                  ['总章节', run.total_chapters],
                 ].map(([label, value]) => (
                   <div key={String(label)} className="px-3 py-2.5">
                     <dt className="text-[11px] text-muted-foreground">{label}</dt>
@@ -529,7 +508,7 @@ export default function ReferenceCorpusWorkspace({
                     <span className="text-muted-foreground">{item.chapter_index}</span>
                     <span className="min-w-0">
                       <span className="block truncate text-foreground">{stageLabel(item.current_stage)}</span>
-                      <span className="mt-0.5 block text-[11px] text-muted-foreground">候选 {formatCount(item.candidate_count)} · 接纳 {formatCount(item.accepted_count)} · 向量 {formatCount(item.vector_count)}</span>
+                      <span className="mt-0.5 block text-[11px] text-muted-foreground">材料 {formatCount(item.accepted_count)} · 向量 {formatCount(item.vector_count)}</span>
                     </span>
                     <span className={runTone(item.status)}>{item.status}</span>
                   </li>
@@ -539,34 +518,36 @@ export default function ReferenceCorpusWorkspace({
           </section>
         )}
 
-        {run && candidates.length > 0 && (
-          <section className="py-4" aria-labelledby="review-heading">
+        {run?.status === 'completed' && (
+          <section className="py-4" aria-labelledby="materials-heading">
             <div className="flex items-center gap-2">
               <ClipboardCheck className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
               <div>
-                <h2 id="review-heading" className="text-sm font-semibold text-foreground">候选复核</h2>
-                <p className="mt-1 text-xs text-muted-foreground">确认或拒绝后，候选会重新经过大模型准入与向量处理。</p>
+                <h2 id="materials-heading" className="text-sm font-semibold text-foreground">当前材料</h2>
+                <p className="mt-1 text-xs text-muted-foreground">共 {formatCount(materialTotal)} 条，按章节原文顺序浏览。</p>
               </div>
             </div>
-            <ol className="mt-3 space-y-2" aria-label="待复核候选">
-              {candidates.map((candidate) => (
-                <li key={candidate.candidate_id} className="border border-border px-3 py-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs leading-5 text-foreground">{candidate.text_preview}</p>
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {candidateTags(candidate.tags).map((tag) => <span key={tag} className="border border-border bg-muted/35 px-1.5 py-0.5 text-[11px] text-muted-foreground">{tag.replaceAll('_', ' ')}</span>)}
-                      </div>
-                      <p className="mt-2 text-[11px] text-muted-foreground">第 {candidate.chapter_index} 章 · {candidate.candidate_type.replaceAll('_', ' ')} · {candidate.reason_codes.join('；') || '需要人工判断'}</p>
+            <ol className="mt-3 divide-y divide-border border-y border-border" aria-label="当前材料">
+              {materials.map((material) => (
+                <li key={material.material_id} className="px-3 py-3">
+                  <p className="text-[11px] text-muted-foreground">第 {material.chapter_index} 章 · {material.material_type.replaceAll('_', ' ')}</p>
+                  <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-foreground">{material.text}</p>
+                  {material.description && <p className="mt-2 text-[11px] leading-4 text-muted-foreground">{material.description}</p>}
+                  {material.tags.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {material.tags.slice(0, 5).map((tag) => <span key={tag} className="border border-border bg-muted/35 px-1.5 py-0.5 text-[11px] text-muted-foreground">{tag.replaceAll('_', ' ')}</span>)}
                     </div>
-                    <div className="flex shrink-0 gap-1">
-                      <button type="button" onClick={() => { void reviewCandidate(candidate, 'confirm') }} disabled={isBusy} className="inline-flex h-7 items-center gap-1 rounded-md bg-primary px-2 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"><CheckCircle2 className="h-3 w-3" aria-hidden="true" />确认</button>
-                      <button type="button" onClick={() => { void reviewCandidate(candidate, 'reject') }} disabled={isBusy} className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"><XCircle className="h-3 w-3" aria-hidden="true" />拒绝</button>
-                    </div>
-                  </div>
+                  )}
                 </li>
               ))}
             </ol>
+            {materialTotalPages > 1 && (
+              <nav className="mt-3 flex items-center justify-end gap-2" aria-label="材料分页">
+                <button type="button" onClick={() => setMaterialPage((page) => Math.max(1, page - 1))} disabled={materialPage <= 1 || isBusy} className="h-8 rounded-md border border-border px-2.5 text-xs text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50">上一页</button>
+                <span className="text-[11px] text-muted-foreground">{materialPage} / {materialTotalPages}</span>
+                <button type="button" onClick={() => setMaterialPage((page) => Math.min(materialTotalPages, page + 1))} disabled={materialPage >= materialTotalPages || isBusy} className="h-8 rounded-md border border-border px-2.5 text-xs text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50">下一页</button>
+              </nav>
+            )}
           </section>
         )}
       </div>
