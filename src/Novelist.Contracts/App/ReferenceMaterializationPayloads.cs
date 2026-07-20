@@ -76,6 +76,8 @@ public static class ReferenceMaterializationErrorCodes
     public const string LlmHealthCheckFailed = "materialization_llm_health_check_failed";
     public const string LlmRequestFailed = "materialization_llm_request_failed";
     public const string LlmOutputInvalid = "materialization_llm_output_invalid";
+    public const string NoMaterials = "materialization_no_materials";
+    public const string SourceTextMismatch = "materialization_source_text_mismatch";
     public const string EmbeddingNotConfigured = "materialization_embedding_not_configured";
     public const string EmbeddingHealthCheckFailed = "materialization_embedding_health_check_failed";
     public const string EmbeddingRequestFailed = "materialization_embedding_request_failed";

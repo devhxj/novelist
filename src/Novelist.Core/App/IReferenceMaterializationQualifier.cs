@@ -7,11 +7,6 @@ public interface IReferenceMaterializationQualifier
         CancellationToken cancellationToken);
 }
 
-public sealed record ReferenceMaterializationLlmSelection(
-    string ProviderName,
-    string ModelId,
-    string ReasoningEffort);
-
 public sealed record ReferenceMaterializationQualificationRequest(
     ReferenceMaterializationLlmSelection Model,
     IReadOnlyList<ReferenceMaterializationQualificationCandidate> Candidates);
