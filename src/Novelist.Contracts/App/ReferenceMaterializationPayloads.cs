@@ -48,6 +48,7 @@ public static class ReferenceMaterializationRunStates
 public static class ReferenceMaterializationChapterStates
 {
     public const string Pending = "pending";
+    public const string Extracting = "extracting";
     public const string BuildingCandidates = "building_candidates";
     public const string LlmQualifying = "llm_qualifying";
     public const string Embedding = "embedding";
@@ -59,6 +60,7 @@ public static class ReferenceMaterializationChapterStates
     public static IReadOnlyList<string> All { get; } =
     [
         Pending,
+        Extracting,
         BuildingCandidates,
         LlmQualifying,
         Embedding,
@@ -71,6 +73,7 @@ public static class ReferenceMaterializationChapterStates
 
 public static class ReferenceMaterializationErrorCodes
 {
+    public const string SourceChanged = "materialization_source_changed";
     public const string ChapterSplitOutputInvalid = "materialization_chapter_split_output_invalid";
     public const string LlmNotConfigured = "materialization_llm_not_configured";
     public const string LlmHealthCheckFailed = "materialization_llm_health_check_failed";

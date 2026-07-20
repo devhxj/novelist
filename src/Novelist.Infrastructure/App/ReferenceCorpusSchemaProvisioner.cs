@@ -107,6 +107,7 @@ internal static class ReferenceCorpusSchemaProvisioner
               accepted_count INTEGER NOT NULL DEFAULT 0 CHECK(accepted_count >= 0),
               rejected_count INTEGER NOT NULL DEFAULT 0 CHECK(rejected_count >= 0),
               review_count INTEGER NOT NULL DEFAULT 0 CHECK(review_count >= 0),
+              material_count INTEGER NOT NULL DEFAULT 0 CHECK(material_count >= 0),
               vector_count INTEGER NOT NULL DEFAULT 0 CHECK(vector_count >= 0),
               tokens_spent INTEGER NOT NULL DEFAULT 0 CHECK(tokens_spent >= 0),
               last_error_code TEXT,
@@ -145,6 +146,7 @@ internal static class ReferenceCorpusSchemaProvisioner
               accepted_count INTEGER NOT NULL DEFAULT 0 CHECK(accepted_count >= 0),
               rejected_count INTEGER NOT NULL DEFAULT 0 CHECK(rejected_count >= 0),
               review_count INTEGER NOT NULL DEFAULT 0 CHECK(review_count >= 0),
+              material_count INTEGER NOT NULL DEFAULT 0 CHECK(material_count >= 0),
               vector_count INTEGER NOT NULL DEFAULT 0 CHECK(vector_count >= 0),
               model_call_count INTEGER NOT NULL DEFAULT 0 CHECK(model_call_count >= 0),
               started_at TEXT,
@@ -254,27 +256,42 @@ internal static class ReferenceCorpusSchemaProvisioner
               material_id TEXT PRIMARY KEY,
               generation_id TEXT NOT NULL,
               run_id TEXT NOT NULL,
-              candidate_id TEXT NOT NULL,
               anchor_id INTEGER NOT NULL,
+              chapter_index INTEGER NOT NULL CHECK(chapter_index > 0),
+              ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
               material_type TEXT NOT NULL,
               text TEXT NOT NULL,
-              text_hash TEXT NOT NULL,
-              quality_score REAL NOT NULL,
-              confidence REAL NOT NULL,
-              scores_json TEXT NOT NULL,
+              description TEXT NOT NULL,
               tags_json TEXT NOT NULL,
-              reason_codes_json TEXT NOT NULL,
+              text_hash TEXT NOT NULL,
               created_at TEXT NOT NULL,
               FOREIGN KEY(run_id) REFERENCES reference_materialization_runs(run_id) ON DELETE CASCADE,
-              FOREIGN KEY(candidate_id) REFERENCES reference_material_candidates(candidate_id) ON DELETE RESTRICT,
               FOREIGN KEY(anchor_id) REFERENCES reference_anchors(anchor_id) ON DELETE CASCADE
             );
 
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_materialization_materials_generation_candidate
-              ON reference_materialization_materials(generation_id, candidate_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_materialization_materials_generation_ordinal
+              ON reference_materialization_materials(generation_id, chapter_index, ordinal);
+
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_reference_materialization_materials_generation_text
+              ON reference_materialization_materials(generation_id, text_hash, text);
 
             CREATE INDEX IF NOT EXISTS idx_reference_materialization_materials_active_lookup
-              ON reference_materialization_materials(anchor_id, generation_id, material_type, material_id);
+              ON reference_materialization_materials(anchor_id, generation_id, chapter_index, ordinal);
+
+            CREATE TABLE IF NOT EXISTS reference_materialization_material_embeddings (
+              material_id TEXT PRIMARY KEY,
+              generation_id TEXT NOT NULL,
+              provider TEXT NOT NULL,
+              model_id TEXT NOT NULL,
+              dimensions INTEGER NOT NULL CHECK(dimensions > 0),
+              embedding_hash TEXT NOT NULL,
+              embedding_blob BLOB NOT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY(material_id) REFERENCES reference_materialization_materials(material_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_reference_materialization_material_embeddings_generation
+              ON reference_materialization_material_embeddings(generation_id, material_id);
 
             CREATE TABLE IF NOT EXISTS reference_materialization_material_nodes (
               material_id TEXT NOT NULL,

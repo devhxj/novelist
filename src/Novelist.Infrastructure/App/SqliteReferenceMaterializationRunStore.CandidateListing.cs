@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Novelist.Contracts.App;
 
@@ -73,6 +74,39 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         }
 
         return normalized;
+    }
+
+    private static ReferenceMaterializationMaterialTagsPayload ParseTags(string value)
+    {
+        using var document = JsonDocument.Parse(value);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException("Stored candidate tags are invalid.");
+        }
+
+        return new ReferenceMaterializationMaterialTagsPayload(
+            ReadTagArray(root, "narrative_functions"),
+            ReadTagArray(root, "emotion_mechanics"),
+            ReadTagArray(root, "pov"),
+            ReadTagArray(root, "techniques"))
+        {
+            SceneBeatRoles = ReadTagArray(root, "scene_beat_roles"),
+            CharacterRelations = ReadTagArray(root, "character_relations"),
+            CausalInformationRoles = ReadTagArray(root, "causal_information_roles")
+        };
+    }
+
+    private static IReadOnlyList<string> ReadTagArray(JsonElement root, string propertyName) =>
+        root.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.Array
+            ? property.EnumerateArray().Select(item => item.GetString() ?? string.Empty).ToArray()
+            : [];
+
+    private static IReadOnlyList<string> ParseStringArray(string value, int maximumCount)
+    {
+        var items = JsonSerializer.Deserialize<string[]>(value)
+            ?? throw new InvalidOperationException("Stored candidate values are invalid.");
+        return items.Take(maximumCount).ToArray();
     }
 
     private static async ValueTask<int> CountCandidatesAsync(

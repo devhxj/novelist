@@ -28,7 +28,7 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
         var vec = new ScaleVecProvider();
         var worker = new ReferenceMaterializationWorker(
             resolver,
-            new ScaleQualifier(),
+            new ScaleExtractor(),
             new ScaleEmbedder(),
             new ReferenceMaterializationVectorIndexer(resolver, vec),
             workerId: "materialization-50k-worker");
@@ -57,8 +57,8 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
         }
 
         stopwatch.Stop();
-        var processedCandidates = runs.Sum(run => run.CandidateCount);
-        var throughput = processedCandidates / Math.Max(stopwatch.Elapsed.TotalSeconds, 0.001);
+        var processedMaterials = runs.Sum(run => run.CandidateCount);
+        var throughput = processedMaterials / Math.Max(stopwatch.Elapsed.TotalSeconds, 0.001);
         Assert.Equal(4, runs.Count);
         Assert.Equal(3, runs.Count(run => run.ChapterBatchSize == 5));
         Assert.Equal(1, runs.Count(run => run.ChapterBatchSize == 10));
@@ -69,26 +69,27 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             Assert.True(run.VectorIndexHealthy);
             Assert.Equal(run.TotalChapters, run.ProcessedChapters);
         });
-        Assert.True(processedCandidates > 0);
+        Assert.True(processedMaterials > 0);
         if (ShouldEnforceThroughput())
         {
-            Assert.True(throughput >= 20, $"Fake materialization throughput was {throughput:F2} candidates/s.");
+            Assert.True(throughput >= 20, $"Fake materialization throughput was {throughput:F2} materials/s.");
         }
         Assert.Equal(0, await CountActiveLeasesAsync(options));
         Assert.Equal(0, await CountDuplicateEmbeddingsAsync(options));
 
-        var search = new SqliteReferenceMaterializationSemanticSearch(
-            options,
-            resolver,
-            new ScaleEmbeddingConfiguration(),
-            new ScaleEmbeddingClient(),
-            vec);
+        var materialization = new SqliteReferenceMaterializationService(options, new EmptyChapterSplitAnalyzer());
         foreach (var source in sources)
         {
-            var results = await search.SearchAsync(source.Anchor.AnchorId, "无字面重合的预演检索", 10, CancellationToken.None);
+            var results = await materialization.ListActiveMaterialsAsync(
+                new ListActiveReferenceMaterializationMaterialsPayload(
+                    source.Anchor.NovelId,
+                    source.Anchor.AnchorId,
+                    1,
+                    100),
+                CancellationToken.None);
             var activeGeneration = await ReadActiveGenerationAsync(options, source.Anchor.AnchorId);
-            Assert.NotEmpty(results);
-            Assert.All(results, result => Assert.Equal(activeGeneration, result.Material.GenerationId));
+            Assert.NotEmpty(results.Items);
+            Assert.All(results.Items, result => Assert.Equal(activeGeneration, result.GenerationId));
         }
     }
 
@@ -114,7 +115,7 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             var source = BuildMarkdownSource(characterCount / 2, index + 1);
             var sourcePath = Path.Combine(sourcesDirectory, $"materialization-scale-{index + 1}.md");
             await File.WriteAllTextAsync(sourcePath, source);
-            var anchor = await anchors.CreateAnchorAsync(
+            var anchor = await anchors.RegisterMaterializationSourceAsync(
                 new CreateReferenceAnchorPayload(
                     novel.Id,
                     $"规模来源 {index + 1}",
@@ -138,11 +139,11 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
 
     private static string BuildMarkdownSource(int minimumCharacters, int sourceNumber)
     {
-        var paragraph = $"人物{sourceNumber}望着窗外" + new string('叙', 820) + "。";
         var builder = new System.Text.StringBuilder();
         var chapter = 1;
         while (builder.Length < minimumCharacters)
         {
+            var paragraph = $"人物{sourceNumber}在第{chapter}章望着窗外" + new string('叙', 820) + "。";
             builder.Append("# 第").Append(chapter).Append("章\n\n");
             builder.Append(paragraph).Append("\n\n");
             builder.Append(paragraph).Append("\n\n");
@@ -202,9 +203,9 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
         command.CommandText = """
             SELECT COUNT(*)
             FROM (
-              SELECT candidate_id, provider, model_id, dimensions, COUNT(*) AS count
-              FROM reference_materialization_candidate_embeddings
-              GROUP BY candidate_id, provider, model_id, dimensions
+              SELECT material_id, provider, model_id, dimensions, COUNT(*) AS count
+              FROM reference_materialization_material_embeddings
+              GROUP BY material_id, provider, model_id, dimensions
               HAVING count > 1
             );
             """;
@@ -264,22 +265,21 @@ public sealed class ReferenceMaterializationScaleTests : IDisposable
             CancellationToken cancellationToken) => ValueTask.FromResult(ReferenceChapterSplitModelResult.Empty);
     }
 
-    private sealed class ScaleQualifier : IReferenceMaterializationQualifier
+    private sealed class ScaleExtractor : IReferenceChapterMaterialExtractor
     {
-        public ValueTask<ReferenceMaterializationQualificationResult> QualifyAsync(
-            ReferenceMaterializationQualificationRequest input,
+        public ValueTask<ReferenceChapterMaterialExtractionResult> ExtractAsync(
+            ReferenceChapterMaterialExtractionRequest input,
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ValueTask.FromResult(new ReferenceMaterializationQualificationResult(
-                input.Candidates.Select(candidate => new ReferenceMaterializationCandidateQualification(
-                    candidate.CandidateId,
-                    ReferenceMaterializationCandidateDecisions.Accepted,
-                    candidate.SourceNodes.Select(node => new ReferenceMaterializationQualificationSpan(node.NodeId, 0, node.Text.Length)).ToArray(),
-                    new ReferenceMaterializationQualityScores(0.9, 0.8, 0.8, 0.7, 0.7, 0.8),
-                    new ReferenceMaterializationQualificationTags(["reveal"], ["contained_tension"], ["close_third"], ["subtext"]),
-                    0.9,
-                    ["scale_complete"])).ToArray()));
+            return ValueTask.FromResult(new ReferenceChapterMaterialExtractionResult(
+            [
+                new ExtractedReferenceMaterial(
+                    "passage",
+                    input.ChapterText,
+                    "Reusable scale material.",
+                    ["scale"])
+            ]));
         }
     }
 

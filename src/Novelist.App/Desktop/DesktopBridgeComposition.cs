@@ -121,7 +121,7 @@ public static PhotinoWebMessageBridge CreateBridge(
             materializationDatabasePathResolver);
         var referenceMaterializationWorker = new ReferenceMaterializationWorker(
             materializationDatabasePathResolver,
-            new ReferenceMaterializationChatCompletionQualifier(chatCompletionClient),
+            new ReferenceChapterMaterialChatCompletionExtractor(chatCompletionClient),
             new ReferenceMaterializationEmbeddingProcessor(embeddingService, embeddingClient),
             new ReferenceMaterializationVectorIndexer(materializationDatabasePathResolver, sqliteVecProvider));
         var referenceCorpusService = new SqliteReferenceCorpusService(

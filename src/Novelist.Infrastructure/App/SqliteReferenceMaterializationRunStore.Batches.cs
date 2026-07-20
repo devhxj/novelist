@@ -75,7 +75,13 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         }
 
         var chapters = await ReadPendingBatchChaptersAsync(connection, transaction, normalizedRunId, run.CurrentBatchIndex.Value, cancellationToken);
-        if (chapters.Count == 0)
+        if (chapters.Count == 0 &&
+            !await IsBatchCompleteAsync(
+                connection,
+                transaction,
+                normalizedRunId,
+                run.CurrentBatchIndex.Value,
+                cancellationToken))
         {
             await DeleteLeaseAsync(connection, transaction, normalizedRunId, token, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -389,6 +395,46 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         int batchIndex,
         CancellationToken cancellationToken)
     {
+        await using (var materialEmbeddings = connection.CreateCommand())
+        {
+            materialEmbeddings.Transaction = transaction;
+            materialEmbeddings.CommandText = """
+                DELETE FROM reference_materialization_material_embeddings
+                WHERE material_id IN (
+                  SELECT material.material_id
+                  FROM reference_materialization_materials material
+                  JOIN reference_materialization_chapter_progress progress
+                    ON progress.run_id = material.run_id
+                   AND progress.chapter_index = material.chapter_index
+                  WHERE material.run_id = $run_id
+                    AND progress.batch_index = $batch_index
+                    AND progress.status <> $completed);
+                """;
+            materialEmbeddings.Parameters.AddWithValue("$run_id", runId);
+            materialEmbeddings.Parameters.AddWithValue("$batch_index", batchIndex);
+            materialEmbeddings.Parameters.AddWithValue("$completed", ReferenceMaterializationChapterStates.Completed);
+            await materialEmbeddings.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using (var materials = connection.CreateCommand())
+        {
+            materials.Transaction = transaction;
+            materials.CommandText = """
+                DELETE FROM reference_materialization_materials
+                WHERE run_id = $run_id
+                  AND chapter_index IN (
+                    SELECT chapter_index
+                    FROM reference_materialization_chapter_progress
+                    WHERE run_id = $run_id
+                      AND batch_index = $batch_index
+                      AND status <> $completed);
+                """;
+            materials.Parameters.AddWithValue("$run_id", runId);
+            materials.Parameters.AddWithValue("$batch_index", batchIndex);
+            materials.Parameters.AddWithValue("$completed", ReferenceMaterializationChapterStates.Completed);
+            await materials.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         await using (var embeddings = connection.CreateCommand())
         {
             embeddings.Transaction = transaction;
@@ -439,6 +485,7 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                     accepted_count = 0,
                     rejected_count = 0,
                     review_count = 0,
+                    material_count = 0,
                     vector_count = 0,
                     started_at = NULL,
                     completed_at = NULL,
@@ -496,6 +543,10 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
                     SELECT COALESCE(SUM(review_count), 0)
                     FROM reference_materialization_chapter_progress
                     WHERE run_id = $run_id),
+                material_count = (
+                    SELECT COALESCE(SUM(material_count), 0)
+                    FROM reference_materialization_chapter_progress
+                    WHERE run_id = $run_id),
                 vector_count = (
                     SELECT COALESCE(SUM(vector_count), 0)
                     FROM reference_materialization_chapter_progress
@@ -543,13 +594,12 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
             FROM reference_materialization_chapter_progress
             WHERE run_id = $run_id
               AND batch_index = $batch_index
-              AND status IN ($pending, $qualifying)
+              AND status = $pending
             ORDER BY chapter_index;
             """;
         command.Parameters.AddWithValue("$run_id", runId);
         command.Parameters.AddWithValue("$batch_index", batchIndex);
         command.Parameters.AddWithValue("$pending", ReferenceMaterializationChapterStates.Pending);
-        command.Parameters.AddWithValue("$qualifying", ReferenceMaterializationChapterStates.LlmQualifying);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var chapters = new List<int>();
         while (await reader.ReadAsync(cancellationToken))
@@ -558,6 +608,31 @@ internal sealed partial class SqliteReferenceMaterializationRunStore
         }
 
         return chapters;
+    }
+
+    private static async ValueTask<bool> IsBatchCompleteAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string runId,
+        int batchIndex,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT COUNT(*),
+                   COALESCE(SUM(CASE WHEN status = $completed THEN 1 ELSE 0 END), 0)
+            FROM reference_materialization_chapter_progress
+            WHERE run_id = $run_id
+              AND batch_index = $batch_index;
+            """;
+        command.Parameters.AddWithValue("$completed", ReferenceMaterializationChapterStates.Completed);
+        command.Parameters.AddWithValue("$run_id", runId);
+        command.Parameters.AddWithValue("$batch_index", batchIndex);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken) &&
+               reader.GetInt32(0) > 0 &&
+               reader.GetInt32(0) == reader.GetInt32(1);
     }
 
     private static async ValueTask DeleteLeaseAsync(
