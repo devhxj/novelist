@@ -19,11 +19,6 @@ public static class ReferenceMaterializationBlueprintPreviewBridgeHandlers
                 ReadObjectArg<GenerateReferenceMaterializationBlueprintPreviewPayload>(context.Payload, 0, "input"),
                 cancellationToken)));
 
-        dispatcher.Register("GetReferenceMaterializationBlueprintPreview", async (context, cancellationToken) =>
-            await ExecuteOptionalAsync(() => service.GetAsync(
-                ReadObjectArg<GetReferenceMaterializationBlueprintPreviewPayload>(context.Payload, 0, "input"),
-                cancellationToken)));
-
         return dispatcher;
     }
 
@@ -40,20 +35,6 @@ public static class ReferenceMaterializationBlueprintPreviewBridgeHandlers
         }
     }
 
-    private static async ValueTask<ReferenceMaterializationBlueprintPreviewPayload?> ExecuteOptionalAsync(
-        Func<ValueTask<ReferenceMaterializationBlueprintPreviewPayload?>> operation)
-    {
-        try
-        {
-            var preview = await operation();
-            return preview is null ? null : Sanitize(preview);
-        }
-        catch (ReferenceMaterializationException exception)
-        {
-            throw ToBridgeException(exception);
-        }
-    }
-
     private static BridgeRequestException ToBridgeException(ReferenceMaterializationException exception) => new(
         exception.ErrorCode,
         exception.Message,
@@ -63,9 +44,6 @@ public static class ReferenceMaterializationBlueprintPreviewBridgeHandlers
     private static ReferenceMaterializationBlueprintPreviewPayload Sanitize(
         ReferenceMaterializationBlueprintPreviewPayload preview) => preview with
     {
-        SessionId = ReferencePayloadSanitizer.RedactAndBoundText(preview.SessionId, 128),
-        Status = ReferencePayloadSanitizer.RedactAndBoundText(preview.Status, 32),
-        NextAction = ReferencePayloadSanitizer.RedactAndBoundText(preview.NextAction, 64),
         Goal = ReferencePayloadSanitizer.RedactAndBoundText(preview.Goal, 800),
         Sources = (preview.Sources ?? Array.Empty<ReferenceMaterializationBlueprintPreviewSourcePayload>())
             .Take(10)
@@ -94,18 +72,17 @@ public static class ReferenceMaterializationBlueprintPreviewBridgeHandlers
                                 MaterialId = ReferencePayloadSanitizer.RedactAndBoundText(link.MaterialId, 128),
                                 GenerationId = ReferencePayloadSanitizer.RedactAndBoundText(link.GenerationId, 128),
                                 MaterialType = ReferencePayloadSanitizer.RedactAndBoundText(link.MaterialType, 64),
-                                TextPreview = ReferencePayloadSanitizer.RedactAndBoundText(link.TextPreview, 360),
+                                Text = link.Text,
+                                Description = ReferencePayloadSanitizer.RedactAndBoundText(link.Description, 1_000),
+                                Tags = (link.Tags ?? []).Take(16)
+                                    .Select(tag => ReferencePayloadSanitizer.RedactAndBoundText(tag, 64))
+                                    .ToArray(),
                                 FitExplanation = ReferencePayloadSanitizer.RedactAndBoundText(link.FitExplanation, 360)
                             })
                             .ToArray()
                     })
                     .ToArray()
             })
-            .ToArray(),
-        StaleAnchorIds = (preview.StaleAnchorIds ?? Array.Empty<long>())
-            .Where(anchorId => anchorId > 0)
-            .Distinct()
-            .Take(10)
             .ToArray()
     };
 

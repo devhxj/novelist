@@ -58,11 +58,12 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
             CancellationToken.None);
         var extractor = new RecordingExtractor();
         var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var vectors = new RecordingVecProvisioner();
         await using var worker = new ReferenceMaterializationWorker(
             resolver,
             extractor,
             new FixedEmbedder(),
-            new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
+            new ReferenceMaterializationVectorIndexer(resolver, vectors),
             workerId: "whole-chapter-test-worker");
 
         Assert.True(await worker.ProcessRunOnceAsync(run.RunId, CancellationToken.None));
@@ -72,6 +73,18 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
             CancellationToken.None);
         var materials = await service.ListActiveMaterialsAsync(
             new ListActiveReferenceMaterializationMaterialsPayload(novel.Id, anchor.AnchorId, 1, 20),
+            CancellationToken.None);
+        var search = new SqliteReferenceMaterialSearch(
+            options,
+            resolver,
+            new FixedEmbeddingConfiguration(),
+            new FixedEmbeddingClient(),
+            vectors);
+        var hits = await search.SearchAsync(
+            new ReferenceMaterialSearchRequest(
+                "Find the waiting dialogue.",
+                10,
+                AnchorIds: [anchor.AnchorId]),
             CancellationToken.None);
 
         Assert.NotNull(completed);
@@ -96,6 +109,8 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         Assert.Equal(2, materials.Total);
         Assert.Contains(materials.Items, material => material.Text == MultiParagraphDialogue);
         Assert.All(materials.Items, material => Assert.Equal(run.GenerationId, material.GenerationId));
+        Assert.Contains(hits, hit => hit.Text == MultiParagraphDialogue);
+        Assert.All(hits, hit => Assert.Equal(run.GenerationId, hit.GenerationId));
     }
 
     [Fact]
@@ -232,6 +247,85 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         Assert.All(materials.Items, material => Assert.Equal(activeGeneration, material.GenerationId));
     }
 
+    [Fact]
+    public async Task MaterialSearchResolvesSessionLibraryScope()
+    {
+        var scenario = await CreateQueuedScenarioAsync(new RecordingExtractor(), new FixedEmbedder());
+        await using (scenario.Worker)
+        {
+            Assert.True(await scenario.Worker.ProcessRunOnceAsync(scenario.Run.RunId, CancellationToken.None));
+        }
+        var search = CreateSearch(scenario);
+
+        var hits = await search.SearchAsync(
+            new ReferenceMaterialSearchRequest(
+                "Find chapter material.",
+                10,
+                SessionId: $"project:{scenario.Anchor.NovelId}:default"),
+            CancellationToken.None);
+
+        Assert.NotEmpty(hits);
+        Assert.All(hits, hit => Assert.Equal(scenario.Anchor.AnchorId, hit.AnchorId));
+    }
+
+    [Fact]
+    public async Task MaterialSearchFiltersForbiddenSourcesBeforeVectorQuery()
+    {
+        var scenario = await CreateQueuedScenarioAsync(new RecordingExtractor(), new FixedEmbedder());
+        await using (scenario.Worker)
+        {
+            Assert.True(await scenario.Worker.ProcessRunOnceAsync(scenario.Run.RunId, CancellationToken.None));
+        }
+        await using (var connection = await OpenConnectionAsync())
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                UPDATE reference_source_license
+                SET license_state = $forbidden,
+                    reuse_policy = $policy
+                WHERE anchor_id = $anchor_id;
+                """;
+            command.Parameters.AddWithValue("$forbidden", ReferenceCorpusLicenseStates.Forbidden);
+            command.Parameters.AddWithValue("$policy", ReferenceCorpusReusePolicies.Forbidden);
+            command.Parameters.AddWithValue("$anchor_id", scenario.Anchor.AnchorId);
+            await command.ExecuteNonQueryAsync(CancellationToken.None);
+        }
+        var search = CreateSearch(scenario);
+
+        var hits = await search.SearchAsync(
+            new ReferenceMaterialSearchRequest(
+                "Find chapter material.",
+                10,
+                AnchorIds: [scenario.Anchor.AnchorId]),
+            CancellationToken.None);
+
+        Assert.Empty(hits);
+        Assert.Equal(0, scenario.Vectors.SearchCallCount);
+    }
+
+    [Fact]
+    public async Task MaterialSearchReportsVectorFailureWithoutFallback()
+    {
+        var scenario = await CreateQueuedScenarioAsync(new RecordingExtractor(), new FixedEmbedder());
+        await using (scenario.Worker)
+        {
+            Assert.True(await scenario.Worker.ProcessRunOnceAsync(scenario.Run.RunId, CancellationToken.None));
+        }
+        scenario.Vectors.SearchException = new InvalidOperationException("Injected vector failure.");
+        var search = CreateSearch(scenario);
+
+        var exception = await Assert.ThrowsAsync<ReferenceMaterializationException>(async () =>
+            await search.SearchAsync(
+                new ReferenceMaterialSearchRequest(
+                    "Find chapter material.",
+                    10,
+                    AnchorIds: [scenario.Anchor.AnchorId]),
+                CancellationToken.None));
+
+        Assert.Equal(ReferenceMaterializationErrorCodes.VectorIndexFailed, exception.ErrorCode);
+        Assert.Equal(1, scenario.Vectors.SearchCallCount);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))
@@ -291,14 +385,23 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
             new EnqueueReferenceMaterializationPayload(novel.Id, anchor.AnchorId, split.SplitProfileId),
             CancellationToken.None);
         var resolver = new ReferenceCorpusDatabasePathResolver(options);
+        var vectors = new RecordingVecProvisioner();
         var worker = new ReferenceMaterializationWorker(
             resolver,
             extractor,
             embedder,
-            new ReferenceMaterializationVectorIndexer(resolver, new RecordingVecProvisioner()),
+            new ReferenceMaterializationVectorIndexer(resolver, vectors),
             workerId: "whole-chapter-failure-worker");
-        return new QueuedScenario(options, anchor, service, run, worker, sourcePath);
+        return new QueuedScenario(options, anchor, service, run, worker, vectors, sourcePath);
     }
+
+    private static SqliteReferenceMaterialSearch CreateSearch(QueuedScenario scenario) =>
+        new(
+            scenario.Options,
+            new ReferenceCorpusDatabasePathResolver(scenario.Options),
+            new FixedEmbeddingConfiguration(),
+            new FixedEmbeddingClient(),
+            scenario.Vectors);
 
     private static async ValueTask<ReferenceMaterializationStatusPayload> ReadStatusAsync(QueuedScenario scenario) =>
         await scenario.Service.GetMaterializationStatusAsync(
@@ -493,8 +596,14 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         }
     }
 
-    private sealed class RecordingVecProvisioner : ISqliteVecTableProvisioner
+    private sealed class RecordingVecProvisioner : ISqliteVecTableProvisioner, ISqliteVecQueryProvider
     {
+        private readonly Dictionary<string, IReadOnlyList<SqliteVecVectorRecord>> _vectors = new(StringComparer.Ordinal);
+
+        public int SearchCallCount { get; private set; }
+
+        public Exception? SearchException { get; set; }
+
         public ValueTask ProvisionAsync(
             string databasePath,
             SqliteVecProvisionRequest request,
@@ -502,7 +611,59 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             Assert.NotEmpty(request.Vectors);
+            _vectors[request.TableName] = request.Vectors.ToArray();
             return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<IReadOnlyList<SqliteVecSearchRecord>> SearchAsync(
+            string databasePath,
+            SqliteVecSearchRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SearchCallCount++;
+            if (SearchException is not null)
+            {
+                throw SearchException;
+            }
+
+            var results = _vectors.TryGetValue(request.TableName, out var vectors)
+                ? vectors.Take(request.TopK)
+                    .Select((vector, index) => new SqliteVecSearchRecord(vector.RowId, index * 0.01))
+                    .ToArray()
+                : [];
+            return ValueTask.FromResult<IReadOnlyList<SqliteVecSearchRecord>>(results);
+        }
+    }
+
+    private sealed class FixedEmbeddingConfiguration : IEmbeddingConfigurationService
+    {
+        public ValueTask<EmbeddingRequestOptions?> GetActiveEmbeddingOptionsAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult<EmbeddingRequestOptions?>(new EmbeddingRequestOptions(
+                "test-embedding",
+                "https://example.invalid",
+                "key",
+                "embedding-model",
+                3,
+                null));
+        }
+    }
+
+    private sealed class FixedEmbeddingClient : IEmbeddingClient
+    {
+        public ValueTask<EmbeddingBatchResult> EmbedAsync(
+            IReadOnlyList<string> inputs,
+            EmbeddingRequestOptions options,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(new EmbeddingBatchResult(
+                options.ModelId,
+                3,
+                [new EmbeddingItemResult(0, [1f, 2f, 3f])],
+                new EmbeddingUsage(0, 0)));
         }
     }
 
@@ -512,5 +673,6 @@ public sealed class ReferenceWholeChapterMaterializationTests : IDisposable
         SqliteReferenceMaterializationService Service,
         ReferenceMaterializationStatusPayload Run,
         ReferenceMaterializationWorker Worker,
+        RecordingVecProvisioner Vectors,
         string SourcePath);
 }

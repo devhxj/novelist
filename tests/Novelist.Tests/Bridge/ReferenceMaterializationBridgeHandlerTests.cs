@@ -114,7 +114,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
     }
 
     [Fact]
-    public async Task BlueprintPreviewHandlersRouteGenerationAndLookupToTheV2PreviewService()
+    public async Task BlueprintPreviewHandlerRoutesTransientGeneration()
     {
         var service = new RecordingBlueprintPreviewService();
         var dispatcher = new BridgeDispatcher().RegisterReferenceMaterializationBlueprintPreviewHandlers(service);
@@ -123,14 +123,30 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
             dispatcher,
             "GenerateReferenceMaterializationBlueprintPreview",
             new GenerateReferenceMaterializationBlueprintPreviewPayload(42, [99, 101], "安排冲突升级", 2));
-        await AssertOkAsync(
-            dispatcher,
-            "GetReferenceMaterializationBlueprintPreview",
-            new GetReferenceMaterializationBlueprintPreviewPayload(42, "session-1"));
+        Assert.Equal(["generate:42:99,101:安排冲突升级:2"], service.Calls);
+    }
 
-        Assert.Equal(
-            ["generate:42:99,101:安排冲突升级:2", "get:42:session-1"],
-            service.Calls);
+    [Fact]
+    public async Task BlueprintPreviewHandlerPreservesCompleteMaterialText()
+    {
+        var materialText = "D:\\fiction\\chapter.txt\n\n" + new string('x', 5_000);
+        var service = new RecordingBlueprintPreviewService { MaterialText = materialText };
+        var dispatcher = new BridgeDispatcher().RegisterReferenceMaterializationBlueprintPreviewHandlers(service);
+
+        var result = await dispatcher.DispatchAsync(Request(
+            "GenerateReferenceMaterializationBlueprintPreview",
+            new GenerateReferenceMaterializationBlueprintPreviewPayload(42, [99], "安排冲突升级")));
+        using var json = JsonDocument.Parse(
+            result.OutboundJson ?? throw new InvalidOperationException("Bridge returned no response."));
+        var returnedText = json.RootElement
+            .GetProperty("result")
+            .GetProperty("candidates")[0]
+            .GetProperty("beats")[0]
+            .GetProperty("materials")[0]
+            .GetProperty("text")
+            .GetString();
+
+        Assert.Equal(materialText, returnedText);
     }
 
     [Fact]
@@ -394,6 +410,8 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
 
         public Exception? GenerateException { get; init; }
 
+        public string MaterialText { get; init; } = "A pressure point.";
+
         public ValueTask<ReferenceMaterializationBlueprintPreviewPayload> GenerateAsync(
             GenerateReferenceMaterializationBlueprintPreviewPayload input,
             CancellationToken cancellationToken)
@@ -407,18 +425,7 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
             return ValueTask.FromResult(CreatePreview());
         }
 
-        public ValueTask<ReferenceMaterializationBlueprintPreviewPayload?> GetAsync(
-            GetReferenceMaterializationBlueprintPreviewPayload input,
-            CancellationToken cancellationToken)
-        {
-            Calls.Add($"get:{input.NovelId}:{input.SessionId}");
-            return ValueTask.FromResult<ReferenceMaterializationBlueprintPreviewPayload?>(CreatePreview());
-        }
-
-        private static ReferenceMaterializationBlueprintPreviewPayload CreatePreview() => new(
-            "session-1",
-            ReferenceMaterializationBlueprintPreviewStatuses.Active,
-            ReferenceMaterializationBlueprintPreviewNextActions.None,
+        private ReferenceMaterializationBlueprintPreviewPayload CreatePreview() => new(
             "安排冲突升级",
             [new ReferenceMaterializationBlueprintPreviewSourcePayload(99, "generation-1", 2)],
             [new ReferenceMaterializationBlueprintPreviewCandidatePayload(
@@ -434,12 +441,10 @@ public sealed class ReferenceMaterializationBridgeHandlerTests
                         99,
                         "generation-1",
                         "passage",
-                        "A pressure point.",
-                        0.9,
-                        0.8,
-                        "Semantic match.")])])],
-            [],
-            DateTimeOffset.UtcNow,
-            DateTimeOffset.UtcNow);
+                        MaterialText,
+                        "Reusable pressure.",
+                        ["conflict"],
+                        0.2,
+                        "Semantic match.")])])]);
     }
 }

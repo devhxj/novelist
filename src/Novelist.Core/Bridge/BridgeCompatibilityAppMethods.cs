@@ -111,7 +111,6 @@ public static class BridgeCompatibilityAppMethods
         "GetReferenceMaterialDetail",
         "GetReferenceMaterialCoverage",
         "GetReferenceMaterializationStatus",
-        "GetReferenceMaterializationBlueprintPreview",
         "RetryReferenceMaterialization",
         "GetReferenceMaterialTagReviewQueue",
         "GetReferenceSourceSegmentDetail",
